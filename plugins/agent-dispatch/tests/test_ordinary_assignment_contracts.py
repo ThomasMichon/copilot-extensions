@@ -1,5 +1,8 @@
 """Producer compatibility and historical reservation boundaries."""
 
+from __future__ import annotations
+
+from typing import Any
 from dataclasses import asdict
 
 import pytest
@@ -17,7 +20,7 @@ pytestmark = pytest.mark.contract("agent_dispatch.ordinary_bridge")
 @pytest.mark.parametrize("change", [
     "missing-attribution", "missing-opacity", "opaque", "invalid-task", "invalid-opacity",
 ])
-def test_ordinary_assignment_attribution_capability_is_required(assigned, change):
+def test_ordinary_assignment_attribution_capability_is_required(assigned: Any, change: Any) -> None:
     queue, task, _, record, _, calls = assigned
     if change == "missing-attribution":
         record.pop("dispatch_attempt")
@@ -37,7 +40,7 @@ def test_ordinary_assignment_attribution_capability_is_required(assigned, change
 
 @pytest.mark.parametrize("driver", ["cli", "fleet"])
 @pytest.mark.parametrize("head", ["native-a", "native-b", None])
-def test_ordinary_assignment_retry_keeps_unreceipted_historical_handle(assigned, driver, head):
+def test_ordinary_assignment_retry_keeps_unreceipted_historical_handle(assigned: Any, driver: Any, head: Any) -> None:
     queue, task, _, record, _, calls = assigned
     old_key = task["spawn_reservation_key"]
     with queue._connect() as conn:
@@ -64,7 +67,7 @@ def test_ordinary_assignment_retry_keeps_unreceipted_historical_handle(assigned,
 
 
 @pytest.mark.parametrize("resumed", [False, True])
-def test_ordinary_assignment_null_stored_path_still_fences_actual_workspace(assigned, resumed):
+def test_ordinary_assignment_null_stored_path_still_fences_actual_workspace(assigned: Any, resumed: Any) -> None:
     queue, task, _, record, response, _ = assigned
     key = task["spawn_reservation_key"]
     with queue._connect() as conn:
@@ -92,8 +95,8 @@ def test_ordinary_assignment_null_stored_path_still_fences_actual_workspace(assi
 @pytest.mark.parametrize("missing", ["project", "path", "both"])
 @pytest.mark.parametrize("retired", [False, True])
 def test_ordinary_assignment_supervisor_defers_missing_metadata_without_native_effects(
-    assigned, missing, retired,
-):
+    assigned: Any, missing: Any, retired: Any,
+) -> None:
     queue, task, _, record, _, calls = assigned
     key = task["spawn_reservation_key"]
     with queue._connect() as conn:
@@ -104,8 +107,9 @@ def test_ordinary_assignment_supervisor_defers_missing_metadata_without_native_e
              None if missing in {"path", "both"} else record["path"], int(retired), key),
         )
     before = queue.get_reservation(key)
+    client: Any = QueueBackedClient(queue)
     supervisor = Supervisor(
-        QueueBackedClient(queue), spawn_fn=lambda _: pytest.fail("recovery must not spawn"),
+        client, spawn_fn=lambda _: pytest.fail("recovery must not spawn"),
         repo="queue-lane", supervisor_id="supervisor", reserving_timeout=0,
         local_body_verdict_fn=lambda _: pytest.fail("no native probe authority"),
     )
@@ -125,7 +129,7 @@ def test_ordinary_assignment_supervisor_defers_missing_metadata_without_native_e
 
 
 @pytest.mark.parametrize("head", ["native-a", "native-b", "native-c", None])
-def test_ordinary_assignment_inherited_retirement_checks_actual_current_head(assigned, head):
+def test_ordinary_assignment_inherited_retirement_checks_actual_current_head(assigned: Any, head: Any) -> None:
     queue, task, _, record, response, calls = assigned
     _legacy(queue, task)
     old_key = task["spawn_reservation_key"]
@@ -155,7 +159,7 @@ def test_ordinary_assignment_inherited_retirement_checks_actual_current_head(ass
     assert "create" not in calls
 
 
-def test_ordinary_assignment_unknown_retired_bridge_native_stays_fenced(assigned):
+def test_ordinary_assignment_unknown_retired_bridge_native_stays_fenced(assigned: Any) -> None:
     queue, task, _, record, _, calls = assigned
     old_key = task["spawn_reservation_key"]
     with queue._connect() as conn:
@@ -172,7 +176,7 @@ def test_ordinary_assignment_unknown_retired_bridge_native_stays_fenced(assigned
     assert not calls
 
 
-def test_ordinary_assignment_created_route_requires_record_for_unrecorded_target(assigned):
+def test_ordinary_assignment_created_route_requires_record_for_unrecorded_target(assigned: Any) -> None:
     queue, task, _, record, _, _ = assigned
     _legacy(queue, task)
     key = task["spawn_reservation_key"]
@@ -197,7 +201,7 @@ def test_ordinary_assignment_created_route_requires_record_for_unrecorded_target
 
 
 @pytest.mark.parametrize("head", ["native-a", "native-b"])
-def test_ordinary_assignment_retirement_resolves_carried_cli_producer_first(assigned, head):
+def test_ordinary_assignment_retirement_resolves_carried_cli_producer_first(assigned: Any, head: Any) -> None:
     queue, task, _, record, response, calls = assigned
     old_key = task["spawn_reservation_key"]
     with queue._connect() as conn:
@@ -229,7 +233,7 @@ def test_ordinary_assignment_retirement_resolves_carried_cli_producer_first(assi
 
 
 @pytest.mark.parametrize("head", ["native-a", "native-b", None])
-def test_ordinary_assignment_receipt_before_handle_keeps_terminal_retirement(assigned, head):
+def test_ordinary_assignment_receipt_before_handle_keeps_terminal_retirement(assigned: Any, head: Any) -> None:
     queue, task, _, record, response, calls = assigned
     _legacy(queue, task)
     old_key = task["spawn_reservation_key"]
@@ -255,7 +259,7 @@ def test_ordinary_assignment_receipt_before_handle_keeps_terminal_retirement(ass
     assert "create" not in calls
 
 
-def test_ordinary_assignment_handleless_release_without_native_stays_unknown(assigned):
+def test_ordinary_assignment_handleless_release_without_native_stays_unknown(assigned: Any) -> None:
     queue, task, _, record, _, calls = assigned
     queue.fail_spawn(task["spawn_reservation_key"], detail="unproven release", release_requested=True)
     current, admitted = queue.reserve_spawn(task["id"], driver="ordinary-bridge")
@@ -271,8 +275,8 @@ def test_ordinary_assignment_handleless_release_without_native_stays_unknown(ass
 @pytest.mark.parametrize("tagged_owner", [False, True])
 @pytest.mark.parametrize("transfers", [1, 2])
 def test_ordinary_assignment_cross_task_handleless_retirement_keeps_exact_origin(
-    assigned, head, tagged_owner, transfers,
-):
+    assigned: Any, head: Any, tagged_owner: Any, transfers: Any,
+) -> None:
     queue, task, _, record, response, calls = assigned
     _legacy(queue, task)
     original = queue.get_reservation(task["spawn_reservation_key"])
@@ -315,12 +319,17 @@ def test_ordinary_assignment_cross_task_handleless_retirement_keeps_exact_origin
 
 
 @pytest.mark.parametrize("origin", [None, "self", "missing-predecessor"])
-def test_ordinary_assignment_legacy_handleless_inheritance_without_origin_refuses(assigned, origin):
+def test_ordinary_assignment_legacy_handleless_inheritance_without_origin_refuses(assigned: Any, origin: Any, monkeypatch: Any) -> None:
+    from agent_dispatch import queue_assignment_cohort
+
     queue, task, _, record, _, calls = assigned
     original = queue.get_reservation(task["spawn_reservation_key"])
     queue.defer_spawn(original.key, detail="handleless inherited workspace")
     next_task = queue.create("different work", repo="queue-lane", exclusive_key="review-slot")
-    current, admitted = queue.reserve_spawn(next_task.id, driver="ordinary-bridge")
+    with monkeypatch.context() as legacy:
+        legacy.setattr(queue_assignment_cohort, "retain_allocation_cohort", lambda *a, **k: None)
+        current, admitted = queue.reserve_spawn(next_task.id, driver="ordinary-bridge")
+    assert current.allocation_cohort is None
     assert admitted and current.session_handle is None
     with queue._connect() as conn:
         conn.execute("UPDATE spawn_reservations SET allocation_reservation_key=? WHERE key=?",
@@ -333,7 +342,7 @@ def test_ordinary_assignment_legacy_handleless_inheritance_without_origin_refuse
     assert not calls
 
 
-def test_ordinary_assignment_unproven_intermediate_legacy_origin_refuses(assigned):
+def test_ordinary_assignment_unproven_intermediate_legacy_origin_refuses(assigned: Any) -> None:
     queue, task, _, record, _, calls = assigned
     _legacy(queue, task)
     original = queue.get_reservation(task["spawn_reservation_key"])
@@ -356,7 +365,7 @@ def test_ordinary_assignment_unproven_intermediate_legacy_origin_refuses(assigne
 
 
 @pytest.mark.parametrize("head", ["native-a", "native-b"])
-def test_ordinary_assignment_exclusive_carry_keeps_original_handle_native(assigned, head):
+def test_ordinary_assignment_exclusive_carry_keeps_original_handle_native(assigned: Any, head: Any) -> None:
     queue, task, _, record, _, calls = assigned
     _legacy(queue, task)
     first = queue.get_reservation(task["spawn_reservation_key"])
@@ -383,7 +392,7 @@ def test_ordinary_assignment_exclusive_carry_keeps_original_handle_native(assign
 
 @pytest.mark.parametrize("assigned", [{"dedup_key": "logical-work"}], indirect=True)
 @pytest.mark.parametrize("foreign", [False, True])
-def test_ordinary_assignment_dedup_reemission_preserves_original_owner(assigned, foreign):
+def test_ordinary_assignment_dedup_reemission_preserves_original_owner(assigned: Any, foreign: Any) -> None:
     queue, task, _, record, _, calls = assigned
     first = queue.get_reservation(task["spawn_reservation_key"])
     queue.defer_spawn(first.key, detail="retained ground allocation")

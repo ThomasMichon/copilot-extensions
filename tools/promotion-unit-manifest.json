@@ -5256,7 +5256,15 @@
         "tools/promotion_unit_tests/test_vault_export_consumer.py::test_require_running_without_exclusive_refuses_before_ordinary_activation",
         "tools/promotion_unit_tests/test_vault_export_consumer.py::test_ordinary_export_keeps_existing_activation_write_and_mode_behavior",
         "tools/promotion_unit_tests/test_capture_progress.py::test_progress_summary_retains_last_complete_record_after_interrupted_write",
-        "tools/promotion_unit_tests/test_capture_progress.py::test_progress_summary_keeps_slow_phase_separate_from_completion"
+        "tools/promotion_unit_tests/test_capture_progress.py::test_progress_summary_keeps_slow_phase_separate_from_completion",
+        "tools/promotion_unit_tests/test_ordinary_control_adoption.py::test_control_epoch_retains_unknown_and_excluded_history_without_rewriting_birth",
+        "tools/promotion_unit_tests/test_ordinary_control_adoption.py::test_control_epoch_refuses_unqualified_lineage_without_partial_history[native]",
+        "tools/promotion_unit_tests/test_ordinary_control_adoption.py::test_control_epoch_refuses_unqualified_lineage_without_partial_history[epoch]",
+        "tools/promotion_unit_tests/test_ordinary_control_adoption.py::test_control_epoch_refuses_unqualified_lineage_without_partial_history[nonce]",
+        "tools/promotion_unit_tests/test_ordinary_control_adoption.py::test_control_epoch_refuses_unqualified_lineage_without_partial_history[key]",
+        "tools/promotion_unit_tests/test_ordinary_control_adoption.py::test_control_epoch_refuses_unqualified_lineage_without_partial_history[predecessor]",
+        "tools/promotion_unit_tests/test_ordinary_control_adoption.py::test_control_epoch_refuses_unqualified_lineage_without_partial_history[holder]",
+        "tools/promotion_unit_tests/test_ordinary_control_adoption.py::test_control_epoch_refuses_unqualified_lineage_without_partial_history[version]"
     ],
     "coverage_targets": [
         "plugins/agent-vault/src/agent_vault/config.py",
@@ -5599,7 +5607,8 @@
         "plugins/agent-vault/src/agent_vault/attachment_export_files.py",
         "plugins/agent-vault/src/agent_vault/attachment_export_cli.py",
         "tools/typecheck_programs.py",
-        "tools/bridge_capture_progress.py"
+        "tools/bridge_capture_progress.py",
+        "plugins/agent-dispatch/src/agent_dispatch/ordinary_control_adoption.py"
     ],
     "sources": {
         "tools/promotion_unit_tests/test_source_witness.py": "b31fd450a32577aee9a5dca22606c02506a84da1d6d0ceb2e9486ee32af9ff3b",
@@ -6422,6 +6431,8 @@
         "libs/configuration-layers/src/configuration_context/readiness.py": "320ba0529c016c5a2733c55ced1ff3d4a575a2273adb89f615f42742411771bc",
         "tools/typecheck_programs.py": "448f0dd5d0ed4a8596a6d44e1dd71d97efea8e12d73dbd0431e1ec769cc6d491",
         "tools/bridge_capture_progress.py": "70eb1d041b7594e81249f7233f208ebea634cb4eb64e3cc58225a06e4c30f6d3",
-        "tools/promotion_unit_tests/test_capture_progress.py": "6b38d8cf02b468d07e29ee94382097d3fc54e5b895f0b447a0b801c22c501637"
+        "tools/promotion_unit_tests/test_capture_progress.py": "6b38d8cf02b468d07e29ee94382097d3fc54e5b895f0b447a0b801c22c501637",
+        "plugins/agent-dispatch/src/agent_dispatch/ordinary_control_adoption.py": "2aaac4df3b81accdef8a28148e86ca4b886271e30f60fe1b771f97ebe35d9c3e",
+        "tools/promotion_unit_tests/test_ordinary_control_adoption.py": "03492bbacca2e6be98395ce37dee932a3818ca92b983e2085bd3592e7853f2d7"
     }
 }

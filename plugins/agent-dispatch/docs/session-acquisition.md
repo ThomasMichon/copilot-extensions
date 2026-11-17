@@ -44,6 +44,31 @@ A handleless inherited retirement marker permits only current-head inspection
 when all known retired identities are attributable. Exact resumed-agent storage
 can atomically clear that current derived marker for a different unretired
 head; historical retirement evidence is unchanged. It never permits creation.
+
+The existing resumed-agent recorder also advertises
+`ordinary_control_adoption_versions: [1]` through the pool-placement contract.
+A compatible supervisor may supply Bridge's `retained_metadata_adoption` and
+executing `worktree_writer_observation` in actual resumed `SessionInfo`.
+This is a provider-first storage adapter, not an enabled automatic recovery
+caller. It permits a different **managed control ID** only for the same original
+native, workspace, project, path, creation key and retained writer incarnation.
+The current task generation, reservation admission, pool, exclusivity and
+ground-owner checks remain unchanged. Older coordinators are rejected before
+the client posts adoption-bearing facts.
+
+The reservation atomically records `retained_control_history`, containing the
+entire predecessor agent record and the explicit unavailable-history boundary.
+Original invocation, receipts, unknown outcomes and excluded operations remain
+historical; they are not successful sends in the adopted epoch. Refreshes cannot
+erase or replace that evidence, and a competing different adoption refuses.
+Legacy startup receipt/send composition is explicitly refused after adoption:
+the original key and turn position must not be replayed into the new stream.
+Any later work-bearing prompt uses its current owner's separately admitted,
+fenced same-native continuation and existing retry budget. Recording these
+facts neither advances the task to `STARTED` nor resets policy clocks or startup
+revisions. Ordinary supervisor migration, native execution and installed rollout
+remain separate qualification steps.
+
 Assigned keyed reservations missing project/path metadata defer through normal
 supervisor retry without probing or launching a native session.
 Reconciliation preserves explicit prior workspace ownership;

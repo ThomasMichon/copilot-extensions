@@ -6,7 +6,8 @@ at the retained-task boundary of
 [#6934](https://github.com/ThomasMichon/copilot-extensions/issues/6934).
 **Status: plan reviewed in #12929; metadata owner accepted in #12953;
 ordinary worktree-resume and target-inventory provider accepted in #13007.
-CLI/Dispatch consumer integration and runtime qualification remain open.**
+Typed-union CLI consumer accepted in #13043; Dispatch integration and runtime
+qualification remain open.**
 Source acceptance is not runtime recovery authority.
 
 ## Existing boundary
