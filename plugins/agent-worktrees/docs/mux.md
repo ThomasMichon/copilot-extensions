@@ -238,7 +238,7 @@ and attached-client counts for the pass; it does not probe each worktree with
 mapping absent from the current batch does not authorize a status write.
 
 Each presentation batch reads each project's passive current-roster snapshot
-once. Current canonical closure descriptors take precedence over completed
+once. Current content-disposition closure descriptors take precedence over completed
 segment-cache values. Otherwise the monitor retains a completed segment or
 marks advisory/pending state explicitly; projection never invokes the
 compute-on-miss segment getter, Git classification or a refresh request.
@@ -250,6 +250,16 @@ even without a Picker, list request or runtime demand. Projection itself does
 not enroll demand or request refreshes. Path lookup uses one per-project index
 and refuses ambiguous paths; current CONVO descriptors retain their computed
 conversation turn count, while advisory counts stay suppressed.
+Path identity follows the segment cache's normalized real-path rule, including
+trailing separators and symlink aliases.
+
+Roster `ACTIVE` is a liveness disposition, not a content status. For observed
+mux worktrees in that state, the scheduled computation owner also refreshes the
+separate content-segment cache after releasing the roster observation ticket.
+The cache retains its existing TTL, invalidation and cleanup ownership.
+Presentation reads only completed fresh content bytes and never substitutes
+`ACTIVE` for DIRTY, WIP or CONVO; unavailable content remains pending rather
+than triggering Git work in the projection path.
 
 Native presentation runs before bulk roster collection. During that same
 owner's roster pass, moderated cooperative progress between record observations

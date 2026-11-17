@@ -68,12 +68,14 @@ def api(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
          _StatusMonitorGovernanceDeferred=type("GovernanceDeferred", (Exception,), {}))
     scope = load("observation_progress")
     load("monitor_projection_cache")
+    content = load("status_monitor_content")
     formatter = load("mux_state_projection")
     projects = load("status_monitor_roster_demand")
     presentation = load("status_monitor_presentation")
     return SimpleNamespace(
         scope=scope, presentation=presentation, formatter=formatter, package=package,
         projects=projects,
+        content=content,
     )
 
 
@@ -105,6 +107,26 @@ def test_native_projection_precedes_roster_and_reuses_completed_inventory(api: S
         return {"context_published": True}
 
     api.package.mux_status_link.publish_managed_session_status = publish
+    content_values: list[str] = []
+
+    class ProducingSegments(CompletedSegments):
+        may_compute = True
+        completed: str | None = None
+
+        def get(self, path: str) -> str:
+            assert self.may_compute
+            content_values.append(path)
+            self.completed = "completed"
+            return self.completed
+
+        def get_cached(self, path: str) -> str | None:
+            return self.completed
+
+    segments = ProducingSegments()
+    api.content.refresh_content_segments(
+        "project", {"/synthetic/one"}, segments, governance_deferred=RuntimeError,
+    )
+    segments.may_compute = False
 
     def sweep(*args: Any, **options: Any) -> int:
         assert options["picker_projects"] == {"project"}
@@ -116,17 +138,23 @@ def test_native_projection_precedes_roster_and_reuses_completed_inventory(api: S
 
     def snapshot(project: str) -> dict[str, Any]:
         snapshots.append(project)
-        return {}
+        return {
+            "ok": True, "projection": {"quality": "current"}, "worktrees": [{
+                "id": "one", "path": "/synthetic/one", "state": "active",
+                "closure": {"supported": True, "style": "active", "compact": "ACTIVE"},
+            }],
+        }
 
     assert api.presentation.run_monitor_sweep(
         sweep, "psmux.exe", "monitor", "fixture", set(),
-        managed_mux_cache=object(), segment_cache=CompletedSegments(),
+        managed_mux_cache=object(), segment_cache=segments,
         catalog_observer=lambda names: events.append("catalog"),
         state_snapshot=snapshot,
         picker_projects=api.projects.managed_roster_projects(object()),
     ) == 1
     assert events == ["catalog", "write:wt-one", "roster"]
     assert inventories == ["psmux.exe"] and snapshots == ["project"]
+    assert content_values == ["/synthetic/one"]
 
 
 def test_tmux_uses_read_only_view_of_the_original_owner(api: SimpleNamespace) -> None:
@@ -161,13 +189,15 @@ def test_tmux_uses_read_only_view_of_the_original_owner(api: SimpleNamespace) ->
             "ok": True, "projection": {"quality": "current"}, "worktrees": [
                 Row(id="one", path="/synthetic/one", title="unique"),
                 Row(id="two", path="/synthetic/two", title="ambiguous"),
-                Row(id="alias", path="/synthetic/two", title="alias"),
+                Row(id="alias", path="/synthetic/two/", title="alias"),
             ],
         }
 
     def indexed_sweep(*args: Any, **options: Any) -> int:
         view = options["segment_cache"]
         assert view.get("/synthetic/one").startswith("unique ")
+        assert view.get("/synthetic/one/").startswith("unique ")
+        assert view.get("/synthetic/./one").startswith("unique ")
         assert not view.get("/synthetic/two").startswith(("ambiguous ", "alias "))
         assert not view.get("/synthetic/missing").startswith("unique ")
         assert view.get("/synthetic/one").startswith("unique ")
@@ -178,6 +208,42 @@ def test_tmux_uses_read_only_view_of_the_original_owner(api: SimpleNamespace) ->
         segment_cache=Unrendered(), state_snapshot=snapshot,
     ) == 1
     assert snapshots == ["project"] and path_reads == ["one", "two", "alias"]
+
+
+def test_content_producer_retains_cleanup_and_propagates_governance(api: SimpleNamespace) -> None:
+    attempted: list[str] = []
+    retained: list[tuple[str, str | None, Any]] = []
+    error = api.package.push_timeout.ObservationCleanupError("held")
+    error.try_settle = lambda: pytest.fail("not the cleanup owner")
+    governance = api.package.__main__._StatusMonitorGovernanceDeferred
+
+    class ProducingSegments(CompletedSegments):
+        def get(self, path: str) -> str:
+            attempted.append(path)
+            if path == "cleanup":
+                raise error
+            if path == "pending":
+                raise api.package.push_timeout.ObservationCleanupPending("pending")
+            if path == "governance":
+                raise governance("held")
+            return "completed"
+
+        def retain_unclaimed_cleanup(
+            self, project: str, path: str | None, failure: Any,
+        ) -> None:
+            retained.append((project, path, failure))
+
+    owner = ProducingSegments()
+    api.content.refresh_content_segments(
+        "project", {"cleanup", "pending", "ready"}, owner, governance_deferred=governance,
+    )
+    assert attempted == ["cleanup", "pending", "ready"]
+    assert retained == [("project", "cleanup", error)]
+    with pytest.raises(governance):
+        api.content.refresh_content_segments(
+            "project", {"governance", "later"}, owner, governance_deferred=governance,
+        )
+    assert attempted == ["cleanup", "pending", "ready", "governance"]
 
 
 def test_cooperative_progress_uses_completion_based_cadence_and_no_reentry(api: SimpleNamespace) -> None:

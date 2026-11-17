@@ -888,6 +888,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                         worktrees_runtime, observe_records=allocation_linker.observe,
                         managed_mux_cache=managed_mux_runtime.cache,
                         on_progress=presentation_progress,
+                        content_cache=segment_cache,
                         **({"cleanup_owner": segment_cache} if core.git_ops._windows_observation() else {}),
                     ),
                     roster_failure=worktrees_runtime.producer_failed,

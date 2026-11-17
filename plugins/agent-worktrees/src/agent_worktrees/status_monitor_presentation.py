@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
+import os
 import time
 from typing import Any
 
@@ -124,6 +125,7 @@ def run_monitor_sweep(
             for indexed in by_id.values():
                 indexed_path = indexed.get("path")
                 if isinstance(indexed_path, str):
+                    indexed_path = os.path.normcase(os.path.realpath(indexed_path))
                     by_path[indexed_path] = None if indexed_path in by_path else indexed
             snapshots[project] = _ComputedProject(by_id, by_path, (
                 reply.get("ok") is True
@@ -135,14 +137,19 @@ def run_monitor_sweep(
         if worktree_id is not None:
             row = snapshot.by_id.get(worktree_id)
         else:
-            row = snapshot.by_path.get(path)
-        if row is not None and snapshot.current:
+            path_key = os.path.normcase(os.path.realpath(path))
+            row = snapshot.by_path.get(path_key)
+            if row is None and path_key in snapshot.by_path:
+                return render_projected_segment(None, current=False)
+        if row is not None and snapshot.current and row.get("state") != "active":
             return render_projected_segment(row, current=True)
         cached = segments.get_cached(path) if segments is not None else None
         if isinstance(cached, str):
             return cached
         if segments is not None and segments.observation_blocked(project, path):
             return segments.pending_segment_for_path(path)
+        if row is not None and row.get("state") == "active":
+            return render_projected_segment({"title": row.get("title")}, current=False)
         return render_projected_segment(row, current=snapshot.current)
 
     if not is_psmux(mux_bin) or cache is None:

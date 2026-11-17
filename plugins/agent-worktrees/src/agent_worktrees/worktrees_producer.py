@@ -12,6 +12,7 @@ from . import config as cfg
 from . import config_cache, reclaim, sessions, tracking, push_timeout, git_ops
 from .monitor_projection_cache import SegmentOwner
 from .observation_progress import progress_scope
+from .status_monitor_content import ContentOwner, refresh_content_segments
 from machine_transport import detect_platform
 from .worktrees_current_rows import materialize, selection_row
 from .mux_list_result import MuxObservationUnavailable
@@ -68,32 +69,38 @@ def publish_active_project(
     runtime: WorktreesRuntime, *,
     observe_records: Callable[[str, list[tracking.WorktreeRecord]], object] | None = None,
     cleanup_owner: ObservationOwner | None = None, managed_mux_cache: Any = None,
-    on_progress: Callable[[], None] | None = None,
+    on_progress: Callable[[], None] | None = None, content_cache: ContentOwner | None = None,
 ) -> int:
     """Publish existing facts, yielding between records when requested."""
+    from . import __main__ as core
+
     project = cfg.project_name()
-    if cleanup_owner is not None and git_ops._windows_observation():
-        try:
+    content_paths: set[str] | None = set() if content_cache is not None else None
+
+    def publish() -> int:
+        return _publish_active_project(
+            runtime, project, observe_records=observe_records, managed_mux_cache=managed_mux_cache,
+            on_progress=on_progress, content_paths=content_paths,
+        )
+
+    try:
+        if cleanup_owner is not None and git_ops._windows_observation():
             if cleanup_owner.observation_blocked(project):
                 raise push_timeout.ObservationCleanupPending("project cleanup pending")
             repo = cfg.load_config(
                 cfg.project_dir(project) / "config.yaml", project=project,
             ).default_repo
-            return cleanup_owner.run_observation(
-                project, repo.anchor, None,
-                lambda: publish_active_project(
-                    runtime, observe_records=observe_records, managed_mux_cache=managed_mux_cache,
-                    on_progress=on_progress,
-                ),
+            count = cleanup_owner.run_observation(project, repo.anchor, None, publish)
+        else:
+            count = publish()
+        # Content observations retain their own TTL and cleanup tickets.
+        if content_cache is not None and content_paths is not None:
+            refresh_content_segments(
+                project, content_paths, content_cache,
+                governance_deferred=core._StatusMonitorGovernanceDeferred,
+                on_progress=on_progress,
             )
-        except push_timeout.ObservationCleanupPending as error:
-            runtime.publication_failed(project, error)
-            raise
-    try:
-        return _publish_active_project(
-            runtime, project, observe_records=observe_records, managed_mux_cache=managed_mux_cache,
-            on_progress=on_progress,
-        )
+        return count
     except Exception as exc:
         runtime.publication_failed(project, exc)
         raise
@@ -103,6 +110,7 @@ def _publish_active_project(
     runtime: WorktreesRuntime, project: str, *,
     observe_records: Callable[[str, list[tracking.WorktreeRecord]], object] | None = None,
     managed_mux_cache: Any = None, on_progress: Callable[[], None] | None = None,
+    content_paths: set[str] | None = None,
 ) -> int:
     from . import __main__ as core, worktrees_reporting
 
@@ -198,6 +206,15 @@ def _publish_active_project(
     repo = cfg.load_config(cfg.project_dir(project) / "config.yaml", project=project).default_repo
     with progress_scope(on_progress):
         state_map = core._classify_records_live(records, session_ctx, repo=repo)
+    if content_paths is not None:
+        for record in records:
+            info = state_map.get(record.worktree_id)
+            mux = mux_map.get(record.worktree_id)
+            if (
+                info is not None and info.state == git_ops.WorktreeState.ACTIVE
+                and mux is not None and mux.exists and record.worktree_path
+            ):
+                content_paths.add(record.worktree_path)
     bare_orphan_wts = reclaim.bare_orphan_worktree_ids()
     bridge_live_wts = reclaim.live_bridge_worktrees()
     observed_at = time.time()
