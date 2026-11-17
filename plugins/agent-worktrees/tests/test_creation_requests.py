@@ -1,6 +1,7 @@
 """Caller creation identity is independent of transport and attempt identity."""
 
 from concurrent.futures import ThreadPoolExecutor
+from collections.abc import Callable
 import json
 import os
 import sqlite3
@@ -10,24 +11,33 @@ import sys
 from threading import Event
 import time
 from types import SimpleNamespace
+from typing import Any, NoReturn, cast
 
 import pytest
 from agent_procutil import no_window_kwargs
+from machine_transport import detect_platform
 
 from agent_worktrees import creation_requests as requests
-from agent_worktrees import tracking
+from agent_worktrees import config as cfg, git_ops, tracking, worktree_creation
+from agent_worktrees.codename_config import CodenameConfig
+
+Reserve = Callable[[dict[str, Any]], None]
+Allocator = Callable[[Reserve], dict[str, Any]]
+Allocation = tuple[cfg.Config, dict[str, Any], Allocator, list[dict[str, str]], Path]
 
 
 @pytest.fixture
-def allocation(tmp_path, monkeypatch):
+def allocation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Allocation:
     records = tmp_path / "state" / "worktrees"
     records.mkdir(parents=True)
-    monkeypatch.setattr(requests.cfg, "tracking_dir", lambda _name=None: records)
-    config = SimpleNamespace(repo_name="worker")
-    facts = {"project": "worker", "anchor": str(tmp_path / "anchor")}
-    calls = []
+    monkeypatch.setattr(cfg, "tracking_dir", lambda _name=None: records)
+    config = cfg.Config(
+        srcroot=str(tmp_path), machine="test", platform=detect_platform(), repo_name="worker",
+    )
+    facts: dict[str, Any] = {"project": "worker", "anchor": str(tmp_path / "anchor")}
+    calls: list[dict[str, str]] = []
 
-    def allocate(reserve):
+    def allocate(reserve: Reserve) -> dict[str, Any]:
         worktree = {
             "id": f"generated-{len(calls)}", "repo": "worker",
             "path": str(tmp_path / f"checkout-{len(calls)}"),
@@ -47,7 +57,7 @@ def allocation(tmp_path, monkeypatch):
 
 
 @pytest.mark.guard
-def test_completed_creation_replays_original_generated_identity(allocation):
+def test_completed_creation_replays_original_generated_identity(allocation: Allocation) -> None:
     config, facts, allocate, calls, _ = allocation
     first = requests.create(config, "logical:1", facts, allocate)
     second = requests.create(config, "logical:1", facts, allocate)
@@ -61,7 +71,9 @@ def test_completed_creation_replays_original_generated_identity(allocation):
 
 
 @pytest.mark.guard
-def test_distinct_creation_key_preserves_finalized_predecessor_and_replays_replacement(allocation):
+def test_distinct_creation_key_preserves_finalized_predecessor_and_replays_replacement(
+    allocation: Allocation,
+) -> None:
     config, facts, allocate, calls, records = allocation
     first = requests.create(config, "logical:1", facts, allocate)
     path = records / f"{first['worktree']['id']}.yaml"
@@ -80,11 +92,11 @@ def test_distinct_creation_key_preserves_finalized_predecessor_and_replays_repla
 
 
 @pytest.mark.guard
-def test_concurrent_creation_reports_pending_without_another_effect(allocation):
+def test_concurrent_creation_reports_pending_without_another_effect(allocation: Allocation) -> None:
     config, facts, allocate, calls, _ = allocation
     entered, finish = Event(), Event()
 
-    def slow(reserve):
+    def slow(reserve: Reserve) -> dict[str, Any]:
         entered.set()
         assert finish.wait(5)
         return allocate(reserve)
@@ -104,10 +116,10 @@ def test_concurrent_creation_reports_pending_without_another_effect(allocation):
 
 
 @pytest.mark.guard
-def test_interrupted_effect_preserves_original_recovery_identity(allocation):
+def test_interrupted_effect_preserves_original_recovery_identity(allocation: Allocation) -> None:
     config, facts, allocate, calls, _ = allocation
 
-    def interrupted(reserve):
+    def interrupted(reserve: Reserve) -> NoReturn:
         allocate(reserve)
         raise OSError("lost allocation completion")
 
@@ -122,10 +134,12 @@ def test_interrupted_effect_preserves_original_recovery_identity(allocation):
 
 @pytest.mark.parametrize("failure", [RuntimeError, ValueError, OSError])
 @pytest.mark.guard
-def test_refused_pre_effect_creation_can_retry_only_the_same_facts(allocation, failure):
+def test_refused_pre_effect_creation_can_retry_only_the_same_facts(
+    allocation: Allocation, failure: type[Exception],
+) -> None:
     config, facts, allocate, calls, _ = allocation
 
-    def refused(_reserve):
+    def refused(_reserve: Reserve) -> NoReturn:
         raise failure("pre-effect validation refused")
 
     with pytest.raises(failure, match="pre-effect validation"):
@@ -141,11 +155,11 @@ def test_refused_pre_effect_creation_can_retry_only_the_same_facts(allocation, f
     assert len(calls) == 1
 
 @pytest.mark.guard
-def test_failure_after_allocation_reservation_never_resets_the_key(allocation):
+def test_failure_after_allocation_reservation_never_resets_the_key(allocation: Allocation) -> None:
     config, facts, allocate, calls, _ = allocation
     original = {"id": "original", "repo": "worker", "path": "original-path", "branch": "worktree/original"}
 
-    def failed(reserve):
+    def failed(reserve: Reserve) -> NoReturn:
         reserve(original)
         raise RuntimeError("after the effects boundary")
 
@@ -158,7 +172,7 @@ def test_failure_after_allocation_reservation_never_resets_the_key(allocation):
 
 
 @pytest.mark.guard
-def test_changed_facts_conflict_before_allocating(allocation):
+def test_changed_facts_conflict_before_allocating(allocation: Allocation) -> None:
     config, facts, allocate, calls, _ = allocation
     requests.create(config, "logical", facts, allocate)
     with pytest.raises(requests.CreationRequestFailure) as caught:
@@ -170,12 +184,12 @@ def test_changed_facts_conflict_before_allocating(allocation):
 @pytest.mark.parametrize("legacy", [False, True])
 @pytest.mark.parametrize("caller", ["caller-a", "caller-b", None])
 def test_bridge_replay_retains_caller_facts_and_refuses_unrecorded_legacy_caller(
-    allocation, legacy, caller,
-):
+    allocation: Allocation, legacy: bool, caller: str | None,
+) -> None:
     config, facts, allocate, calls, records = allocation
     facts = {**facts, "kind": "bridge", "caller_worktree": "caller-a"}
 
-    def bridge(reserve):
+    def bridge(reserve: Reserve) -> dict[str, Any]:
         result = allocate(reserve)
         path = records / f"{result['worktree']['id']}.yaml"
         record = json.loads(path.read_text())
@@ -202,7 +216,7 @@ def test_bridge_replay_retains_caller_facts_and_refuses_unrecorded_legacy_caller
     assert len(calls) == 1
 
 
-def test_legacy_bridge_journal_without_caller_remains_replayable(allocation):
+def test_legacy_bridge_journal_without_caller_remains_replayable(allocation: Allocation) -> None:
     config, facts, allocate, calls, _ = allocation
     facts = {**facts, "kind": "bridge"}
     first = requests.create(config, "logical", facts, allocate)
@@ -211,7 +225,7 @@ def test_legacy_bridge_journal_without_caller_remains_replayable(allocation):
 
 
 @pytest.mark.parametrize("terminal", ["finalized", "archived", "missing"])
-def test_terminal_key_never_allocates_replacement(allocation, terminal):
+def test_terminal_key_never_allocates_replacement(allocation: Allocation, terminal: str) -> None:
     config, facts, allocate, calls, records = allocation
     result = requests.create(config, "logical", facts, allocate)
     path = records / f"{result['worktree']['id']}.yaml"
@@ -227,7 +241,7 @@ def test_terminal_key_never_allocates_replacement(allocation, terminal):
     assert len(calls) == 1
 
 
-def test_terminal_history_survives_reappearance_of_original_record(allocation):
+def test_terminal_history_survives_reappearance_of_original_record(allocation: Allocation) -> None:
     config, facts, allocate, calls, records = allocation
     result = requests.create(config, "logical", facts, allocate)
     path = records / f"{result['worktree']['id']}.yaml"
@@ -242,7 +256,7 @@ def test_terminal_history_survives_reappearance_of_original_record(allocation):
     assert len(calls) == 1
 
 
-def test_owner_record_drift_refuses_replay(allocation):
+def test_owner_record_drift_refuses_replay(allocation: Allocation) -> None:
     config, facts, allocate, calls, records = allocation
     result = requests.create(config, "logical", facts, allocate)
     path = records / f"{result['worktree']['id']}.yaml"
@@ -255,7 +269,7 @@ def test_owner_record_drift_refuses_replay(allocation):
     assert len(calls) == 1
 
 
-def test_reused_record_identity_does_not_revive_terminal_creation(allocation):
+def test_reused_record_identity_does_not_revive_terminal_creation(allocation: Allocation) -> None:
     config, facts, allocate, calls, records = allocation
     result = requests.create(config, "logical", facts, allocate)
     path = records / f"{result['worktree']['id']}.yaml"
@@ -268,15 +282,15 @@ def test_reused_record_identity_does_not_revive_terminal_creation(allocation):
     assert len(calls) == 1
 
 
-def test_attempt_changes_do_not_change_allocation_facts(tmp_path):
-    config = SimpleNamespace(
-        repo_name="worker",
-        default_repo=SimpleNamespace(
+def test_attempt_changes_do_not_change_allocation_facts(tmp_path: Path) -> None:
+    config = cfg.Config(
+        srcroot=str(tmp_path), machine="test", platform=detect_platform(), repo_name="worker",
+        repos={"worker": cfg.RepoConfig(
             anchor=str(tmp_path), worktree_root=str(tmp_path / "worktrees"),
             remote="origin", default_branch="main",
-        ),
+        )},
     )
-    options = dict(
+    options: dict[str, Any] = dict(
         kind="session", interface="acp", origin="delegate", owner=None, owner_ref=None,
         name=None, bound_agent="worker", no_pair=True, pending_seed=None,
         dispatch_attempt={"task_id": "task", "attempt": 1, "reservation_key": "first"},
@@ -293,7 +307,7 @@ def test_attempt_changes_do_not_change_allocation_facts(tmp_path):
 
 
 @pytest.mark.parametrize("key", ["", " ", "x" * 1025])
-def test_invalid_key_has_no_allocation_effect(allocation, key):
+def test_invalid_key_has_no_allocation_effect(allocation: Allocation, key: str) -> None:
     config, facts, allocate, calls, _ = allocation
     with pytest.raises(requests.CreationRequestFailure) as caught:
         requests.create(config, key, facts, allocate)
@@ -301,105 +315,119 @@ def test_invalid_key_has_no_allocation_effect(allocation, key):
     assert calls == []
 
 
-def test_core_keyed_creation_replays_without_running_create_again(tmp_path, monkeypatch):
-    import agent_worktrees.__main__ as main
+def test_core_keyed_creation_replays_without_running_create_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from test_worktree_creation_seed import (
         _create_config, _stub_create_worktree_core_internals,
     )
 
     config = _create_config(tmp_path)
-    records = tmp_path / "tracking"
-    monkeypatch.setattr(main.cfg, "tracking_dir", lambda _name=None: records)
+    records = cfg.project_dir(config.repo_name) / "worktrees"
+    monkeypatch.setattr(cfg, "tracking_dir", lambda _name=None: records)
     _stub_create_worktree_core_internals(monkeypatch, tmp_path, config)
-    created = []
+    created: list[str] = []
 
-    def create(_anchor, path, *_args):
+    def create(_anchor: str, path: str, *_args: str) -> None:
         created.append(path)
         Path(path).mkdir()
 
-    monkeypatch.setattr(main.git_ops, "create_worktree", create)
-    first = main._create_worktree_core(config, creation_key="caller", no_pair=True)
-    second = main._create_worktree_core(config, creation_key="caller", no_pair=True)
+    monkeypatch.setattr(git_ops, "create_worktree", create)
+    first = worktree_creation._create_worktree_core(config, creation_key="caller", no_pair=True)
+    second = worktree_creation._create_worktree_core(config, creation_key="caller", no_pair=True)
     assert first["worktree"] == second["worktree"]
     assert len(created) == len(tracking.list_records(records)) == 1
 
 @pytest.mark.guard
-def test_core_profile_refusal_does_not_reserve_a_phantom_allocation(tmp_path, monkeypatch):
+def test_core_profile_refusal_does_not_reserve_a_phantom_allocation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import sqlite3
     import agent_worktrees.__main__ as main
     from test_worktree_creation_seed import _create_config, _stub_create_worktree_core_internals
 
     config = _create_config(tmp_path)
-    records = tmp_path / "tracking"
-    monkeypatch.setattr(main.cfg, "tracking_dir", lambda _name=None: records)
+    records = cfg.project_dir(config.repo_name) / "worktrees"
+    monkeypatch.setattr(cfg, "tracking_dir", lambda _name=None: records)
     _stub_create_worktree_core_internals(monkeypatch, tmp_path, config)
-    created = []
-    monkeypatch.setattr(main.git_ops, "create_worktree",
-        lambda _anchor, path, *_args: created.append(path) or Path(path).mkdir())
+    created: list[str] = []
 
-    def invalid_profile(_config):
+    def create(_anchor: str, path: str, *_args: str) -> None:
+        created.append(path)
+        Path(path).mkdir()
+
+    monkeypatch.setattr(git_ops, "create_worktree", create)
+
+    def invalid_profile(_config: cfg.Config) -> None:
         raise RuntimeError("invalid profile")
 
     monkeypatch.setattr(main, "_validate_profile_assignment_config", invalid_profile)
     with pytest.raises(RuntimeError, match="invalid profile"):
-        main._create_worktree_core(config, creation_key="caller", no_pair=True)
+        worktree_creation._create_worktree_core(config, creation_key="caller", no_pair=True)
     with sqlite3.connect(records.parent / "workspace-creation.sqlite3") as db:
         assert db.execute("SELECT status,worktree FROM creations").fetchall() == [("refused", None)]
     assert created == [] and tracking.list_records(records) == []
     monkeypatch.setattr(main, "_validate_profile_assignment_config", lambda _config: None)
-    first = main._create_worktree_core(config, creation_key="caller", no_pair=True)
-    second = main._create_worktree_core(config, creation_key="caller", no_pair=True)
+    first = worktree_creation._create_worktree_core(config, creation_key="caller", no_pair=True)
+    second = worktree_creation._create_worktree_core(config, creation_key="caller", no_pair=True)
     assert first["worktree"] == second["worktree"]
     assert len(created) == len(tracking.list_records(records)) == 1
 
 @pytest.mark.guard
-def test_core_codename_policy_refusal_does_not_reserve_a_phantom_allocation(tmp_path, monkeypatch):
+def test_core_codename_policy_refusal_does_not_reserve_a_phantom_allocation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import sqlite3
     from dataclasses import replace
-    import agent_worktrees.__main__ as main
     from agent_worktrees import codename_tracking
     from test_worktree_creation_seed import _create_config, _stub_create_worktree_core_internals
 
     config = _create_config(tmp_path)
-    records = tmp_path / "tracking"
-    monkeypatch.setattr(main.cfg, "tracking_dir", lambda _name=None: records)
+    records = cfg.project_dir(config.repo_name) / "worktrees"
+    monkeypatch.setattr(cfg, "tracking_dir", lambda _name=None: records)
     _stub_create_worktree_core_internals(monkeypatch, tmp_path, config)
     config = replace(config, repos={
         config.repo_name: replace(
             config.default_repo,
             pr=replace(config.default_repo.pr, enabled=True, source_attribution_configured=False),
-            codename=main.cfg.CodenameConfig(
+            codename=CodenameConfig(
                 wordlist_path=str(tmp_path / "custom-wordlist.json"), wordlist_path_configured=True,
             ),
         ),
     })
-    monkeypatch.setattr(main.cfg, "load_config", lambda *a, **k: config)
-    created = []
-    monkeypatch.setattr(main.git_ops, "create_worktree",
-        lambda _anchor, path, *_args: created.append(path) or Path(path).mkdir())
+    monkeypatch.setattr(cfg, "load_config", lambda *a, **k: config)
+    created: list[str] = []
+
+    def create(_anchor: str, path: str, *_args: str) -> None:
+        created.append(path)
+        Path(path).mkdir()
+
+    monkeypatch.setattr(git_ops, "create_worktree", create)
     with pytest.raises(codename_tracking.CodenameAttributionPolicyError):
-        main._create_worktree_core(config, creation_key="caller", no_pair=True)
+        worktree_creation._create_worktree_core(config, creation_key="caller", no_pair=True)
     with sqlite3.connect(records.parent / "workspace-creation.sqlite3") as db:
         assert db.execute("SELECT status,worktree FROM creations").fetchall() == [("refused", None)]
     assert created == [] and tracking.list_records(records) == []
     config = replace(config, repos={
-        config.repo_name: replace(config.default_repo, codename=main.cfg.CodenameConfig()),
+        config.repo_name: replace(config.default_repo, codename=CodenameConfig()),
     })
-    first = main._create_worktree_core(config, creation_key="caller", no_pair=True)
-    second = main._create_worktree_core(config, creation_key="caller", no_pair=True)
+    first = worktree_creation._create_worktree_core(config, creation_key="caller", no_pair=True)
+    second = worktree_creation._create_worktree_core(config, creation_key="caller", no_pair=True)
     assert first["worktree"] == second["worktree"]
     assert len(created) == len(tracking.list_records(records)) == 1
 
 
-def test_cli_creation_key_and_pending_response(monkeypatch, capfd):
+def test_cli_creation_key_and_pending_response(
+    monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str],
+) -> None:
     import agent_worktrees.__main__ as main
     from agent_worktrees import worktree_ops_cli
 
     args = main.build_parser().parse_args(["create", "--creation-key", "logical", "--json", "--no-owner"])
-    captured = {}
-    monkeypatch.setattr(main.cfg, "load_config", lambda: SimpleNamespace())
+    captured: dict[str, Any] = {}
+    monkeypatch.setattr(cfg, "load_config", lambda: SimpleNamespace())
 
-    def pending(_config, **options):
+    def pending(_config: cfg.Config, **options: Any) -> None:
         captured.update(options)
         raise requests.CreationRequestFailure(
             "pending", "reconcile original", {"id": "original", "repo": "worker"},
@@ -420,7 +448,7 @@ def test_cli_creation_key_and_pending_response(monkeypatch, capfd):
 )
 @pytest.mark.timeout(120)
 @pytest.mark.parametrize("refusal", ["profile", "codename"])
-def test_native_pre_effect_refusal_then_same_key_repair(tmp_path, refusal):
+def test_native_pre_effect_refusal_then_same_key_repair(tmp_path: Path, refusal: str) -> None:
     import sqlite3
 
     anchor = tmp_path / "anchor"
@@ -460,16 +488,17 @@ def test_native_pre_effect_refusal_then_same_key_repair(tmp_path, refusal):
     reason="opt-in native fresh-owner creation boundary",
 )
 @pytest.mark.timeout(120)
-def test_native_fresh_owner_cli_replay_survives_process_restart(tmp_path):
+def test_native_fresh_owner_cli_replay_survives_process_restart(tmp_path: Path) -> None:
     """Real parser/handler, Git allocation, tracking, and durable key journal."""
     anchor = tmp_path / "anchor"
     anchor.mkdir()
 
-    def git(*args):
-        return subprocess.run(
+    def git(*args: str) -> str:
+        result: subprocess.CompletedProcess[str] = subprocess.run(
             ["git", "-C", str(anchor), *args], check=True,
             capture_output=True, text=True, timeout=15, **no_window_kwargs(),
-        ).stdout
+        )
+        return result.stdout
 
     git("init", "-q", "--initial-branch=main")
     git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
@@ -483,14 +512,14 @@ def test_native_fresh_owner_cli_replay_survives_process_restart(tmp_path):
     ]
     env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
 
-    def invoke(expected_exit=0):
+    def invoke(expected_exit: int = 0) -> dict[str, Any]:
         result = subprocess.run(
             argv,
             capture_output=True, text=True, env=env, timeout=40,
             **no_window_kwargs(),
         )
         assert result.returncode == expected_exit, result.stderr
-        return json.loads(result.stdout)
+        return cast(dict[str, Any], json.loads(result.stdout))
 
     leader = subprocess.Popen(
         argv,
