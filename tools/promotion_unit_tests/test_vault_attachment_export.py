@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from test_vault_attachment_import import owner as import_owner  # noqa: F401
+from tools.promotion_unit_tests.test_vault_attachment_import import owner as import_owner  # noqa: F401
 
 SOURCE = Path(__file__).resolve().parents[2] / "plugins/agent-vault/src/agent_vault"
 

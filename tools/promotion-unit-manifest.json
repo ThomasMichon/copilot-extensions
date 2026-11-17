@@ -6365,6 +6365,6 @@
         "plugins/agent-vault/src/agent_vault/config.py": "5cf6389c6d3d13a0e76e94485b30ce382320e4a676544ce0e7ce4325ad44b65e",
         "plugins/agent-vault/src/agent_vault/command_transport.py": "9653da567eb71a2da198785e41384ceaa7636baefd1684c753003a7b69fcf3c4",
         "plugins/agent-vault/src/agent_vault/attachment_export.py": "852e40cb73c70106b668f37b8562554b0fb701f152be5201c5a69b23d39d511a",
-        "tools/promotion_unit_tests/test_vault_attachment_export.py": "f22c70396480503bf46f1736aeeb10b7d5e120ca94adf998e259aecc8f33970e"
+        "tools/promotion_unit_tests/test_vault_attachment_export.py": "55c0dc06ab4d123de5f945cbb0bca23e85c693f7885aa5b9f72ec97ab291c33e"
     }
 }
