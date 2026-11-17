@@ -40,6 +40,9 @@ time and a finite freshness selection. It returns per-field statuses for
 head/base, state, merge flag, draft, author and mergeability, plus a separate
 action status/reason. Outcomes are `agree`, `different`, `unavailable` and
 `stale`. There is no repository-wide all-clear or automatic remedy.
+Author and action-actor logins compare case-insensitively, consistently with
+the reviewer projection. A different actor remains a difference; service,
+account, consumer and requested-reviewer scope bindings remain exact.
 
 Missing members/facts, incomplete inventory, mixed cache generations, unknown
 reference history, expired/buffered evidence and mismatched candidates never

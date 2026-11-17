@@ -155,3 +155,15 @@ def test_terminal_continuation_cannot_establish_absence_of_an_earlier_action(
         consumer="consumer", reviewer="reviewer", number=7, now=1000, after=1,
     )
     assert result.action == "unavailable" and "incomplete" in result.reason
+
+
+@pytest.mark.parametrize(("cached", "direct"), [("Author", "author"), ("author", "Author")])
+def test_case_only_author_login_changes_do_not_change_rebase_ownership(
+    tmp_path: Path, cached: str, direct: str,
+) -> None:
+    selected = fixtures.setup(tmp_path)
+    fixtures.observe(selected, author=cached, mergeable=False)
+    result = compare(selected, reference(selected, author=direct, mergeable=False))
+    assert result.facts["author"] == "agree" and result.action == "agree"
+    other = compare(selected, reference(selected, author="other-author", mergeable=False))
+    assert other.facts["author"] == "different" and other.action == "different"

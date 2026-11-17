@@ -32,6 +32,14 @@ class Comparison:
     reason: str
 
 
+def _same_login(left: object, right: object) -> bool:
+    return (
+        isinstance(left, str) and isinstance(right, str)
+        and bool(left.strip()) and bool(right.strip())
+        and left.casefold() == right.casefold()
+    )
+
+
 def compare(
     pulls: dict[str, Any], feed: dict[str, Any], reference: Reference, *,
     identity: RepositoryIdentity, consumer: str, reviewer: str, number: int,
@@ -72,10 +80,15 @@ def compare(
     facts: dict[str, Status] = {}
     for field in FIELDS:
         cached, direct = row["facts"].get(field), native.get(field)
-        if cached is None or direct is None or cached == "" or direct == "":
+        unknown_author = field == "author" and (
+            not isinstance(cached, str) or not cached.strip()
+            or not isinstance(direct, str) or not direct.strip()
+        )
+        if cached is None or direct is None or cached == "" or direct == "" or unknown_author:
             facts[field] = "unavailable"
         else:
-            facts[field] = "agree" if cached == direct else "different"
+            matches = _same_login(cached, direct) if field == "author" else cached == direct
+            facts[field] = "agree" if matches else "different"
     if any(item["pr"] == number for item in feed["unavailable"]):
         return Comparison(number, facts, "unavailable", "feed declares unavailable evidence")
     if any(facts[field] != "agree" for field in ("head_sha", "base_sha")):
@@ -108,7 +121,8 @@ def compare(
             return Comparison(number, facts, "unavailable", "reference mergeability unavailable")
         matches = (
             native["mergeable"] is False and actions[0]["actor_role"] == "author"
-            and actions[0]["actor"] == author and actions[0]["reason"] == "stale_branch"
+            and _same_login(actions[0]["actor"], author)
+            and actions[0]["reason"] == "stale_branch"
         )
         return Comparison(number, facts, "agree" if matches else "different",
                           "author-owned conflict comparison")
@@ -124,8 +138,10 @@ def compare(
     if not submitted:
         matches = len(actions) == 1 and (
             actions[0]["action"], actions[0]["reason"],
-            actions[0]["actor_role"], actions[0]["actor"],
-        ) == ("initial_verdict", "author_create", "reviewer", reviewer)
+            actions[0]["actor_role"],
+        ) == ("initial_verdict", "author_create", "reviewer") and _same_login(
+            actions[0]["actor"], reviewer,
+        )
         return Comparison(number, facts, "agree" if matches else "different",
                           "initial-review comparison")
     if actions and actions[0]["action"] == "initial_verdict":
