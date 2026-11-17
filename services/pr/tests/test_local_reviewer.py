@@ -152,7 +152,7 @@ def test_actual_local_profile_adopts_and_queries_without_query_triggered_provide
                 assert result["next_actions"][0]["candidate"]["base"] == "b" * 40
             code = await asyncio.to_thread(main, [
                 "next-actions", "--socket", str(selected.repositories.socket_path),
-                "--namespace", "test", "--target", "repo-github", "--reviewer", "reviewer",
+                "--namespace", "test", "--target", "repo-github", "--reviewer", "review-app[bot]",
                 "--limit", "1",
             ])
             first = json.loads(capsys.readouterr().out)
@@ -160,7 +160,7 @@ def test_actual_local_profile_adopts_and_queries_without_query_triggered_provide
             assert first["more"] and isinstance(first["cursor"], str)
             code = await asyncio.to_thread(main, [
                 "next-actions", "--socket", str(selected.repositories.socket_path),
-                "--namespace", "test", "--target", "repo-github", "--reviewer", "reviewer",
+                "--namespace", "test", "--target", "repo-github", "--reviewer", "review-app[bot]",
                 "--limit", "1", "--after", "1", "--cursor", first["cursor"],
             ])
             second = json.loads(capsys.readouterr().out)

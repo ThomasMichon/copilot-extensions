@@ -35,7 +35,9 @@ The corresponding HTTP operation is
 `POST /v1/repositories/TARGET/next-actions` under the existing cache request
 envelope and OS-admitted principal/target/consumer binding. Its request requires
 `reviewer`; optional fields are `after`, `limit`, `cursor` and
-`max_age_seconds`. `after` is an action-list offset, not a PR number. Pages
+`max_age_seconds`. Select the actual acquired actor login, including a GitHub
+App's `[bot]` suffix; aliases are not substituted. `after` is an action-list
+offset, not a PR number. Pages
 contain at most 16 actions; the freshness default is 1,800 seconds, selectable
 in 1..86,400. A nonzero `after` requires the returned `cursor`, a fingerprint
 of the actual ranked view and its scope/options. Eligibility changes from

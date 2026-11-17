@@ -63,7 +63,10 @@ def page(
     after: int = 0, limit: int = 16, cursor: str | None = None,
 ) -> dict[str, Any]:
     """Rank one admitted scope; never acquire a provider, claim work or write handled state."""
-    if not isinstance(reviewer, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", reviewer):
+    suffix = r"(?:\[bot\])?" if identity.provider == "github" else ""
+    if not isinstance(reviewer, str) or len(reviewer) > 128 or not re.fullmatch(
+        r"[A-Za-z0-9][A-Za-z0-9_.-]*" + suffix, reviewer,
+    ):
         raise ValueError("explicit reviewer identity required")
     _integer(max_age_seconds, 1, 86400)
     _integer(after, 0, 800)

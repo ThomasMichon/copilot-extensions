@@ -20,14 +20,14 @@ Selection = tuple[
 ]
 
 
-def setup(tmp_path: Path, *, activity: bool = True) -> Selection:
+def setup(tmp_path: Path, *, activity: bool = True, provider: str = "gitea") -> Selection:
     now = [1000.0]
     store = ReplayStore(
         tmp_path, "test", clock=lambda: now[0], repository_cache=True,
         repository_continuing=True, repository_activity=activity,
     )
     store.provision()
-    identity = RepositoryIdentity("test", "gitea", "https://forge.example", "reader", "owner/repo")
+    identity = RepositoryIdentity("test", provider, "https://forge.example", "reader", "owner/repo")
     projection = RepositoryProjection(store, (identity,))
     return now, store, identity, projection, RepositorySubscriptions(projection)
 
@@ -90,6 +90,25 @@ def test_activity_selection_cannot_reinterpret_filtered_storage(tmp_path: Path) 
     with pytest.raises(ReplayStoreInvalid):
         unfiltered.adopt_repository_activity(lifecycle_checkpoint=lambda: None, expires_at=2**52)
     assert filtered.path.read_bytes() == before
+
+
+def test_github_app_reviewer_identity_matches_the_actual_cached_actor(tmp_path: Path) -> None:
+    selected = setup(tmp_path, provider="github")
+    reviewer = "review-app[bot]"
+    observe(selected, reviews=[verdict(user=reviewer, commit_id=HEAD)])
+    result = request(selected, reviewer=reviewer)
+    assert not result["next_actions"]
+    assert result["unavailable"] == [{"pr": 7, "reason": "reviewed-base-unknown"}]
+    assert request(selected, reviewer="review-app")["next_actions"][0]["action"] == "initial_verdict"
+    observe(selected, reviews=[])
+    assert request(selected, reviewer=reviewer)["next_actions"][0]["action"] == "initial_verdict"
+
+
+@pytest.mark.parametrize("reviewer", ["[bot]", "review-app[other]", "a" * 124 + "[bot]"])
+def test_github_app_reviewer_still_requires_a_bounded_identity(tmp_path: Path, reviewer: str) -> None:
+    selected = setup(tmp_path, provider="github")
+    with pytest.raises(ValueError, match="reviewer identity"):
+        request(selected, reviewer=reviewer)
 
 
 def test_adoption_retains_complete_envelope_and_original_unacknowledged_delivery(tmp_path: Path) -> None:
