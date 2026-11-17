@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Literal
 
 Sender = Callable[[dict[str, Any], float | None], dict[str, Any] | None]
 
@@ -11,7 +11,9 @@ Sender = Callable[[dict[str, Any], float | None], dict[str, Any] | None]
 class MutationBinding:
     """Keep a health-selected connector; never rediscover after a mutation."""
 
-    def __init__(self) -> None:
+    def __init__(self, operation: Literal["import", "export"] = "import") -> None:
+        self._owner_field = "key_attachment_" + operation + "_owner"
+        self._expected_field = "expected_" + operation + "_owner"
         self._sender: Sender | None = None
         self._owner: str | None = None
         self._used = False
@@ -36,7 +38,7 @@ class MutationBinding:
             self._defaults = dict(defaults)
 
     def accept_health(self, response: dict[str, Any]) -> None:
-        owner = response.get("key_attachment_import_owner")
+        owner = response.get(self._owner_field)
         if isinstance(owner, str) and owner and self._sender is not None:
             self._owner = owner
 
@@ -57,11 +59,11 @@ class MutationBinding:
         self._used = True
         outgoing = dict(self._defaults)
         outgoing.update(request)
-        outgoing["expected_import_owner"] = self._owner
+        outgoing[self._expected_field] = self._owner
         try:
             result = self._sender(outgoing, timeout)
         except Exception:
             return None
-        if not isinstance(result, dict) or result.get("key_attachment_import_owner") != self._owner:
+        if not isinstance(result, dict) or result.get(self._owner_field) != self._owner:
             return None
         return result

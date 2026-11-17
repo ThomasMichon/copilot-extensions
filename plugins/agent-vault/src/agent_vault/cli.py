@@ -1085,6 +1085,14 @@ def cmd_import_key(args: Any) -> int:
 
 
 def cmd_export_key(args: Any) -> int:
+    if getattr(args, "exclusive", False):
+        from .attachment_export_cli import command
+
+        return command(args)
+    if getattr(args, "require_running", False):
+        print("Error: --require-running requires --exclusive for export-key", file=sys.stderr)
+        return 1
+
     import base64
 
     dest_dir = Path(args.dest_dir)
@@ -1590,6 +1598,10 @@ def _main(argv: list[str] | None = None) -> int | None:
     p.add_argument("entry", help="Entry path")
     p.add_argument("dest_dir", help="Destination directory")
     p.add_argument("key_name", help="Key filename (e.g. id_ed25519)")
+    p.add_argument("--exclusive", action="store_true",
+                   help="Create both files exclusively in an absolute same-owner private directory")
+    p.add_argument("--require-running", action="store_true",
+                   help="With --exclusive, require the selected service already running and unlocked")
     p.set_defaults(func=cmd_export_key)
 
     p = sub.add_parser("seal",

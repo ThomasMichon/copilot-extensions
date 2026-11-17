@@ -379,8 +379,8 @@ existing activation and overwrite behavior.
 The running service's health reply advertises `key_attachment_export_versions`
 containing integer `1` when its existing backend supports bounded attachment
 reads. `key_attachment_export_owner` identifies the same service incarnation
-as the import owner. This is provider expansion only: no exclusive-file CLI
-mode or executing-CLI capability is enabled yet.
+as the import owner. The exclusive-file consumer below binds this owner;
+advertisement alone does not establish destination or privileged custody.
 
 The additive `export-key-nonactivating` action takes `entry`, `key_name`,
 the selected database/group context and `expected_export_owner`. A mismatched
@@ -399,13 +399,58 @@ base64 `key_data` and `pub_data`, without key generation or pair validation.
 This bounds returned material and read allocation, not KeePass's temporary
 file size while its existing ten-second export subprocess runs.
 
-Future consumers must discover this contract from their selected running
+Consumers must discover this contract from their selected running
 owner, bind its context and incarnation, and refuse missing/withdrawn support
 without falling back to ordinary export. New destination creation and
 privileged temporary-file/materializer custody remain separate contracts;
 this provider does not qualify them. Ordinary `export-key` and backend
 `export_attachment` defaults retain their activation/overwrite and cleanup
 behavior. No existing form is deprecated or removed.
+
+## Exclusive attachment export
+
+The opt-in POSIX form creates a new pair without activating or unlocking a
+service:
+
+```bash
+agent-vault export-key Example/item /absolute/private-directory example.key --exclusive --require-running
+```
+
+The executing CLI advertises `key-attachment-exclusive-export-v1` on POSIX.
+The selected running owner must advertise the export provider above, accept
+work and match the selected database/group context. The health-selected,
+single-attempt connector and service incarnation are retained for the private
+read; missing support, owner changes, lost replies and legacy transports cannot
+fall back to ordinary export, another endpoint or another read attempt.
+
+The destination must already be an absolute directory owned by the executing
+UID with mode `0700`. Symlink traversal, `..`, foreign-owned ancestors and
+group/world-writable ancestors refuse; a root-owned sticky ancestor such as
+the system temporary directory is allowed. The directory chain is opened
+component-by-component without following links and verified through retained
+descriptors. Both destination names must be absent before the private read.
+Any existing file, directory, symlink or hard link refuses without overwrite.
+
+Both returned opaque attachments are validated and bounded before creation.
+Both files are then opened with exclusive, no-follow creation **before either
+attachment is written**. Both start and remain at mode `0600`, including the
+public companion; no post-write chmod is used to establish private custody.
+Identity, owner, mode, size, link count and the pinned namespace are checked
+through completion. Success follows both file syncs, directory sync, final
+namespace checks and successful descriptor closure. This is same-owner file
+materialization, not key generation, pair validation, root execution or a
+privileged installation boundary.
+
+Success prints only `{"version": 1, "status": "created"}`. Errors contain closed,
+secret-free codes. `effect_status` is conservatively `unknown` after an attempted
+private read or file creation; `file_effect_status` separately reports whether
+destination-file creation may have begun. A racing second-file collision can
+leave an empty first file. Write, sync, interruption, substitution and close
+failures retain created files and never report success, retry, unlink or choose
+alternate names. Inspect retained owner/destination custody before a new attempt.
+Unsupported platforms refuse before a private read or destination creation.
+Ordinary export keeps its existing behavior; `--require-running` without
+`--exclusive` refuses rather than silently using that ordinary path.
 
 ## Batch reads
 

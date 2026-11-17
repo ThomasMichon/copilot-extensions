@@ -77,6 +77,7 @@ def invocation_contract() -> dict[str, Any]:
             "windows-machine-cache-v1",
             CACHE_TARGET_CAPABILITY,
             *(["key-attachment-create-only-v1"] if os.name != "nt" else []),
+            *(["key-attachment-exclusive-export-v1"] if os.name == "posix" else []),
             "service-cache-maintenance-v1",
         ],
     }
