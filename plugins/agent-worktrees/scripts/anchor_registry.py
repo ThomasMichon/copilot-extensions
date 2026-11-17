@@ -1,5 +1,7 @@
 """Original standalone-anchor registry acquisition and optional observations."""
 
+from __future__ import annotations
+
 from pathlib import Path
 from typing import Any
 

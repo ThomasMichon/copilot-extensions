@@ -6119,7 +6119,7 @@
         "plugins/agent-mcp/src/agent_mcp/home.py": "62c504a90b38853728e6cc5371ca28ffd77668c23abdae61e32b913e191ed108",
         "plugins/agent-worktrees/scripts/anchor_shell_parser.py": "503f15d7f67ccea54b69e474214fff2c262fdb6c0e989bba423e8e45af1c3763",
         "plugins/agent-worktrees/scripts/anchor_write_guard.py": "a9d3289ecb16edf65ad8fb3d1445f437231cbc5a1f86ebe042033ea586bc0b08",
-        "plugins/agent-worktrees/scripts/anchor_registry.py": "8226ba24a49e2a7e236fb19fd6d00230a91c3090e99d14255801a0d8868e108f",
+        "plugins/agent-worktrees/scripts/anchor_registry.py": "8f1ff8ee8914503e283cb1fbd31a858bb6044608e3c9cc96ecf5ba0e7c4eb72b",
         "plugins/agent-worktrees/scripts/statelessness_guard.py": "b126e1ef0fc96d93476b8b25ae471b3e14034d0a31184f88ef958b0f1255f02b",
         "plugins/agent-worktrees/scripts/tool_call_forms.py": "faa348d246fe91676f26e097d9cc00e2356be6af7cc852d2e3eacbebced14d21",
         "plugins/agent-worktrees/scripts/registry_root.py": "ae0cf831dba7c2c47e45d5f6b33ed82c9a81db0e249f2d541d3a740d17c897b1",
