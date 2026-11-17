@@ -146,7 +146,9 @@ async def test_worktree_resume_recovers_original_keyed_native_without_a_repair_c
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("fault", ["unknown-operation", "head-changed", "not-ready", "cli"])
+@pytest.mark.parametrize("fault", [
+    "unknown-operation", "head-changed", "not-ready", "cli", "foreign-transport",
+])
 async def test_ordinary_retained_resume_preserves_held_custody(
     writer_creation: Any, monkeypatch: pytest.MonkeyPatch, fault: str,  # noqa: F811
 ) -> None:
@@ -168,6 +170,8 @@ async def test_ordinary_retained_resume_preserves_held_custody(
         bound.fixture.rig.head["id"] = "different-native"
     elif fault == "not-ready":
         bound.request.app.state.ready = False
+    elif fault == "foreign-transport":
+        bound.request.app.state.resolver.agents["task-worker"].host = "different-host"
     mode: Literal["acp", "cli"] = "cli" if fault == "cli" else "acp"
     before = dict(manager.db.execute_read("SELECT * FROM workspace_embodiments")[0])
     launches = len(bound.fixture.starts)

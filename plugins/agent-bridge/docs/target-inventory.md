@@ -17,6 +17,8 @@ head or managed row remains visible. Different owner/project/machine/path
 observations are retained, not collapsed by a friendly name or native ID.
 Consistent Host and managed observations of the same control record share one
 entry without converting a live extension transport into an ACP controller.
+Workspace linkage requires the managed controller's owner, project, exact path
+and local/SSH transport to match; a bare shared handle never supplies that proof.
 
 Listing starts no native process, sends no prompt and hydrates no metadata.
 Workspace discovery uses the existing app-owned cache and cold-crawl behavior;
@@ -36,6 +38,11 @@ keyed journal instead uses its
 [retained metadata-adoption owner](retained-acquisition-writer.md#metadata-loss-without-native-conversation-loss).
 The original native conversation, keyed exclusions and explicit history gap
 remain intact.
+New imports require the exact record's `execution_leg_live` to be explicitly
+false. Active, unknown or omitted custody evidence refuses. The exact record's
+validated `bound_agent`, not its cached discovery value, supplies the launch
+profile. A member repository's name may differ from the owning project label;
+the existing exact-record owner and path qualification retain that boundary.
 
 The response contains the real SessionInfo plus
 `metadata_hydration: {version: 1, native_execution: false}`. A new control record

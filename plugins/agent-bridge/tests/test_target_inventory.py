@@ -13,6 +13,7 @@ from agent_bridge import worktree_native_resume
 from agent_bridge.session_status import SessionStatus
 from agent_bridge.routes import worktrees
 from agent_bridge.session_host.host_index import HostRecord
+from agent_bridge.session_manager import Session
 from test_worktree_metadata import metadata_boundary as metadata_boundary  # noqa: F401
 from test_worktree_native_resume import boundary as boundary  # noqa: F401
 
@@ -72,6 +73,44 @@ async def test_same_control_host_and_managed_registration_share_one_representati
     assert len(represented) == 1
     assert represented[0]["sources"] == ["managed", "session_host"]
     assert any(item["kind"] == "worktree" for item in result["targets"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mismatch", [None, "owner", "project", "path", "transport"])
+async def test_duplicate_handle_linkage_requires_the_complete_workspace_scope(
+    metadata_boundary: Any, mismatch: str | None,
+) -> None:
+    bound = metadata_boundary
+    cache = worktrees.WorktreeDiscoveryCache()
+    other = replace(
+        bound.entry, agent_name="other", machine="other-machine", path=bound.entry.path + "-other",
+    )
+    cache._cache = {"example": [bound.entry], "other": [other]}
+    bound.request.app.state.worktree_discovery_cache = cache
+    resolver = bound.request.app.state.resolver
+    resolver.agents["other"] = SimpleNamespace(project="other-project", host="other-host")
+    target = replace(resolver.resolve("example"), worktree_id=bound.entry.id)
+    if mismatch == "project":
+        target = replace(target, project="different-project")
+    elif mismatch == "path":
+        target = replace(target, cwd=bound.entry.path + "-different")
+    elif mismatch == "transport":
+        target = replace(target, type="ssh", host="different-host")
+    agent = "foreign-owner" if mismatch == "owner" else "example"
+    session = Session("managed-linkage", "existing controller", target, agent_name=agent)
+    session.acp_session_id = "native-original"
+    session.status = SessionStatus.IDLE
+    bound.db.create_session(
+        session_id=session.session_id, name=session.name, agent_name=agent, caller_id=None,
+        target_dir=target.cwd, target_type=target.type, status=session.status.value,
+        now=time.time(), target_json=target.to_json(), acp_session_id=session.acp_session_id,
+    )
+    bound.manager._sessions[session.session_id] = session
+    result = await worktree_native_resume.list_targets(bound.request)
+    rows = {item["owner"]: item["worktree"] for item in result["targets"] if item["kind"] == "worktree"}
+    assert rows["other"]["session_id"] is None
+    assert rows["other"]["acp_session_id"] is None and rows["other"]["session_live"] is False
+    assert rows["example"]["session_id"] == (session.session_id if mismatch is None else None)
 
 
 @pytest.mark.asyncio

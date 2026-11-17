@@ -748,20 +748,29 @@ async def list_worktrees(
     metadata = cache.render_snapshot() if render and not refresh else cache._refresh.metadata()
     groups = cache.get_all()
 
-    # Build worktree_id -> latest bridge session map for linkage. A worktree
-    # may have had several sessions over its life; list_sessions() is
-    # already sorted newest-first, so the first match per worktree wins.
-    latest_by_wt: dict[str, Any] = {}
+    sessions_by_wt: dict[str, list[Any]] = {}
     mgr = getattr(request.app.state, "session_manager", None)
+    resolver = getattr(request.app.state, "resolver", None)
     if mgr is not None:
         for session in mgr.list_sessions():
             wt_id = getattr(session.target, "worktree_id", None)
-            if wt_id and wt_id not in latest_by_wt:
-                latest_by_wt[wt_id] = session
+            if wt_id:
+                sessions_by_wt.setdefault(wt_id, []).append(session)
 
-    def _decorate(wt: _WorktreeEntry) -> dict[str, Any]:
+    def _decorate(owner: str, wt: _WorktreeEntry) -> dict[str, Any]:
         entry = wt.to_dict()
-        session = latest_by_wt.get(wt.id)
+        config = getattr(resolver, "agents", {}).get(owner)
+        session = next((
+            candidate for candidate in sessions_by_wt.get(wt.id, [])
+            if config is not None and isinstance(config.project, str)
+            and candidate.agent_name == owner
+            and candidate.target.project == config.project and candidate.target.cwd == wt.path
+            and (
+                candidate.target.type == "local" and not config.host and not candidate.target.host
+                or candidate.target.type == "ssh" and config.host
+                and candidate.target.host == config.host
+            )
+        ), None)
         if session is not None:
             public_status, at_rest, _liveness = session.public_state()
             status = public_status.value
@@ -784,7 +793,7 @@ async def list_worktrees(
 
     return {
         "groups": {
-            name: [_decorate(wt) for wt in worktrees]
+            name: [_decorate(name, wt) for wt in worktrees]
             for name, worktrees in groups.items()
         },
         "discovery": metadata,

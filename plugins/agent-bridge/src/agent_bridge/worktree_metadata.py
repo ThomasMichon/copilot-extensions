@@ -95,8 +95,10 @@ async def _hydrate(worktree_id: str, request: Any) -> JSONResponse:
         record = await read_worktree_record(worktree_id, config.project, command=command)
         head = await command(["head-session", "--worktree-id", worktree_id, "--json"], config.project)
         if (
-            record["path"] != entry.path or record["repo"] != config.project
+            record["path"] != entry.path
             or record["status"] not in {"active", "pushed"}
+            or "bound_agent" not in record
+            or record["bound_agent"] is not None and not isinstance(record["bound_agent"], str)
             or not isinstance(record.get("creation_nonce"), str) or not record["creation_nonce"]
             or head.get("tracked") is not True or head.get("worktree_id") != worktree_id
             or head.get("state") != "active" or head.get("pending_handoffs")
@@ -113,6 +115,11 @@ async def _hydrate(worktree_id: str, request: Any) -> JSONResponse:
         session for session in manager.list_sessions()
         if session.target.worktree_id == worktree_id and session.acp_session_id == native
         and session.target.cwd == entry.path and session.target.project == config.project
+        and session.agent_name == owner
+        and (
+            session.target.type == "local" and not config.host and not session.target.host
+            or session.target.type == "ssh" and config.host and session.target.host == config.host
+        )
     ]
     if len(matches) > 1:
         raise _refuse("ambiguous_metadata", "Multiple managed records claim this native workspace")
@@ -135,8 +142,7 @@ async def _hydrate(worktree_id: str, request: Any) -> JSONResponse:
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='acquisition_launch_gates'",
         )
         if (
-            record.get("session_live") is True
-            or record.get("native_liveness") not in {None, "stopped", "gone"}
+            record.get("execution_leg_live") is not False
             or record.get("execution_leg_opaque") is not False
             or record.get("session_backend_opaque") is not False
             or manager.db.list_fresh_live_sessions(worktree_id, now=time.time())
@@ -160,6 +166,7 @@ async def _hydrate(worktree_id: str, request: Any) -> JSONResponse:
         target = replace(
             resolver.resolve(owner), cwd=entry.path, worktree_id=worktree_id, explicit_cwd=True,
         )
+        entry = replace(entry, bound_agent=record["bound_agent"])
         target = _apply_bound_charter(target, resolver, entry, worktree_id)
         if await observe() != (record, head):
             raise _refuse("head_changed", "The native workspace changed during metadata hydration")

@@ -68,7 +68,7 @@ async def resume(
     config = resolver.agents.get(owner)
     if (
         entry is None or config is None or entry.path != scope.worktree_path
-        or config.project != scope.project
+        or config.project != scope.project or getattr(config, "host", None) is not None
     ):
         raise _held("The discovered workspace does not match its original keyed owner")
     def ready() -> bool:
