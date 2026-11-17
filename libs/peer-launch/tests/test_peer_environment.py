@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -268,3 +270,91 @@ def test_peer_primitive_loader_does_not_convert_nested_unknown_to_configuration_
     )
     with pytest.raises(ProbeContractError, match="nested contract gap"):
         peer_launch._load_primitive(path, "_probe_nested_primitive")
+
+
+@pytest.mark.parametrize("qualification", ["qualified", "payload-missing", "runtime-missing", "unsupported"])
+def test_isolated_peer_child_uses_validated_caller_readiness_support(
+    tmp_path: Path, qualification: str,
+) -> None:
+    caller = tmp_path / "caller"
+    caller_scripts = caller / "scripts"
+    caller_scripts.mkdir(parents=True)
+    shutil.copyfile(
+        ROOT / "libs/configuration-layers/src/configuration_context/readiness.py",
+        caller_scripts / "versioned_runtime_probe.py",
+    )
+    payload = tmp_path / "peer"
+    primitive = payload / "scripts/installation-context/installation_context.py"
+    primitive.parent.mkdir(parents=True)
+    imported = tmp_path / "peer-imported"
+    primitive.write_text(
+        f"from pathlib import Path\nPath({str(imported)!r}).touch()\n", encoding="utf-8",
+    )
+    runtime = tmp_path / "marketplaces/cell/plugins/agent-worktrees/versions/selected/bin/python"
+    runtime.parent.mkdir(parents=True)
+    runtime.touch()
+    descriptor = json.dumps({
+        "schema": "copilot-extensions.readiness-isolation", "version": 1,
+        "plugin": "agent-worktrees", "module": "agent_worktrees",
+    })
+    if qualification != "payload-missing":
+        (payload / CONTRACT_FILE).write_text(descriptor, encoding="utf-8")
+    if qualification == "qualified":
+        contract = runtime.parent.parent / runtime_contract_path("agent_worktrees")
+        contract.parent.mkdir(parents=True)
+        contract.write_text(descriptor, encoding="utf-8")
+    shadow = tmp_path / "configuration_context"
+    shadow.mkdir()
+    (shadow / "__init__.py").write_text("raise AssertionError('checkout import')", encoding="utf-8")
+    script = """
+import importlib.util, json, os, sys
+from pathlib import Path
+source, caller, payload, runtime, qualification = sys.argv[1:]
+assert importlib.util.find_spec("configuration_context") is None
+spec = importlib.util.spec_from_file_location("isolated_peer", source)
+peer = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(peer)
+runtime = Path(runtime)
+own = {"cellRoot": str(runtime.parents[5]), "payloadRoot": caller}
+context = {
+    "pluginId": "agent-worktrees", "payloadRoot": payload,
+    "pluginRoot": str(runtime.parents[3]), "versionsRoot": str(runtime.parents[2]),
+    "installReceipt": "receipt", "stateRoot": "state",
+}
+peer.validate_owner = lambda *args: own
+peer._packaged_primitive = lambda: None
+peer._active_context = lambda *args: context
+peer._governance = lambda *args: {}
+peer._peer_python_inprocess = lambda *args: runtime
+os.environ["COPILOT_EXTENSIONS_READONLY_PROBE"] = (
+    "unsupported" if qualification == "unsupported" else "isolated-imports-v1"
+)
+try:
+    _, environment, selected = peer._resolve_peer(
+        "agent-index", Path(caller), "receipt", "agent-worktrees", allow_native=False,
+    )
+except Exception as error:
+    peer.launch = lambda *args, **kwargs: (_ for _ in ()).throw(error)
+    sys.argv = ["peer", "owner", "root", "receipt", "peer"]
+    raise SystemExit(peer.main())
+assert selected == runtime
+support = sys.modules["configuration_context.readiness"]
+assert Path(support.__file__) == Path(caller) / "scripts/versioned_runtime_probe.py"
+print(json.dumps({"selected": str(selected), "probe": environment["COPILOT_EXTENSIONS_READONLY_PROBE"]}))
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-S", "-B", "-X", "utf8", "-c", script,
+         str(ROOT / "libs/peer-launch/peer_launch.py"), str(caller), str(payload),
+         str(runtime), qualification],
+        cwd=tmp_path, capture_output=True, text=True, timeout=20,
+        **peer_launch.no_window_kwargs(),
+    )
+    if qualification == "qualified":
+        assert result.returncode == 0, result.stderr
+        assert json.loads(result.stdout)["selected"] == str(runtime)
+    else:
+        assert result.returncode == 126, result.stderr
+        assert unqualified_output(result.stdout.encode()), result.stderr
+        assert "ModuleNotFoundError" not in result.stderr
+    assert imported.exists() == (qualification in {"qualified", "runtime-missing"})
+    assert not list(tmp_path.rglob("*.pyc"))

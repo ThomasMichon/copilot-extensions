@@ -161,6 +161,15 @@ def _packaged_primitive() -> ModuleType:
         return module
 
 
+def _readiness_support(own: dict[str, Any]) -> ModuleType:
+    with _primitive_lock:
+        support = sys.modules.get("configuration_context.readiness")
+        if support is None:
+            path = Path(own["payloadRoot"]) / "scripts" / "versioned_runtime_probe.py"
+            support = _load_primitive(path, "configuration_context.readiness")
+        return support
+
+
 def _active_context(
     primitive: ModuleType, receipt: Path, durable: Path, plugin: str,
     cell: Path, environment: dict[str, str],
@@ -499,9 +508,7 @@ def _resolve_peer(
     environment = peer_environment(peer, dict(os.environ))
     support: ModuleType | None = None
     if "COPILOT_EXTENSIONS_READONLY_PROBE" in environment:
-        from configuration_context import readiness
-
-        support = readiness
+        support = _readiness_support(own)
         if support.required(environment):
             payload = support.payload_contract(Path(peer["payloadRoot"]), plugin)
             if payload.module != PEERS[plugin]:

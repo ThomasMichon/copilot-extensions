@@ -3925,3 +3925,36 @@ the new exact-base strict pass; the initial unprepared invocation is not a pass.
 After preparation, the complete 172-file, 24-owner strict ratchet passes every
 declared target again. All 56 cases in the overlapping checker-test file pass
 in 120.03 seconds within the unchanged 180-second contained packet limit.
+
+### November 17: repair the isolated peer-reader review finding
+
+CI run `44056500810` passes the complete required PR gate at `e47e5f6f44`,
+including actual exact-input units and guards. Current-head Copilot review
+`5936052552` confirms all seven prior findings resolved and carries one genuine
+Medium finding: an early-reader child launched with isolated ambient Python
+cannot inherit its parent's bundled `configuration_context` import path.
+That failure occurs before peer qualification and loses the typed refusal.
+
+The canonical peer boundary now reuses already-loaded caller readiness support
+or explicitly loads the dependency-free helper from the validated caller
+payload. It never searches the checkout or ambient packages. Registering the
+helper under its canonical module identity preserves nested typed exceptions.
+Ordinary calls do not load readiness support. All twelve vendors are synchronized;
+the MCP producer digest is refreshed without changing its uninstall contract.
+
+Four actual isolated, site-free child cases cover qualified, missing-payload,
+missing-runtime and unsupported-contract behavior with a hostile checkout
+package present. Qualified selection succeeds, refusals retain typed unknown,
+unqualified payload code is not imported and no bytecode is written. The
+complete peer-library, packaging and existing actor-free adapter packet passes
+all 47 cases in 3.96 seconds within the unchanged contained limit. An initial
+combined collection had a same-basename import collision; importlib collection
+resolves it without changing assertions or deleting caches.
+
+All fourteen repaired physical files across thirteen owners pass strict checking
+on both declared platforms. The 5,255 unit nodes, 341 coverage targets and
+300-second packet budget are unchanged; only the three affected source bindings
+are refreshed, and all 821 hashes pass admission. The library README documents
+standalone helper discovery. This source/real-child correction does not claim
+new full installed Manager, mixed-runtime baseline, Bash or release qualification.
+Its new published head still requires passing CI and actual re-review.

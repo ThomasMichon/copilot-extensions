@@ -48,6 +48,13 @@ use that peer-owned Python resolver for both execution and child-free
 the native resolver's different selection. Native-only peers retain execution
 but return unknown from observation.
 
+Read-only probes reuse readiness support already loaded by the qualified
+caller. A standalone isolated child without that module loads the dependency-free
+helper from its validated caller payload's `scripts/versioned_runtime_probe.py`,
+not ambient package discovery. The canonical module identity preserves typed
+compatibility refusal across nested primitive initialization. Ordinary calls
+do not load this helper.
+
 `pinned_launch_prefix(owner, own_root, raw_context, peer)` is an opt-in
 compatibility path returning `(prefix, selected_python)`. Keep that same prefix
 for capability qualification and subsequent calls; creating a new prefix for
