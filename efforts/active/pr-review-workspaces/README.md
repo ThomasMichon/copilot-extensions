@@ -228,6 +228,22 @@ contract.
 
 ## Journal
 
+### 2026-11-17 - Refresh observer source and isolate worker imports
+
+- Refreshed the source candidate against current `dev`, preserving upstream
+  contracts and regenerating lifecycle archives and producer metadata from
+  their canonical owners rather than selecting a conflicted binary.
+- The optional observer worker now uses isolated Python mode in its selected
+  application interpreter. The installed-wheel control covers both a
+  checkout-controlled package and `PYTHONPATH` shadowing without source finders.
+- The 36 observer controls, one fresh installed-wheel control and 13 selected
+  borrowed-stream/logfile controls pass within their existing bounds. Native
+  ConPTY success and blocked-input timeout are automated consumer evidence;
+  desktop/window/focus observation was not performed or inferred.
+- Current required CI and renewed review remain separate source gates.
+  Configuration adoption, SDK qualification, live observation and rollout
+  remain open with their existing owners; the parent is not complete.
+
 ### 2026-11-06 - Qualify the bounded CLI observer source candidate
 - The optional read-only profile reader, existing authenticated client/facade
   composition and one-shot CLI path are implemented without a profile writer,

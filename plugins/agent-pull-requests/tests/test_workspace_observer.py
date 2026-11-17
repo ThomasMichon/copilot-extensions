@@ -277,7 +277,7 @@ def test_profile_invocation_carries_one_absolute_deadline_and_borrowed_streams(m
     )) == 7
     argv, options = calls[0]
     assert started < options["budget"].deadline <= time.monotonic() + 60
-    assert float(argv[3]) == options["budget"].execution_deadline
+    assert float(argv[-2]) == options["budget"].execution_deadline
     assert options["stdin_stream"] is observer.sys.stdin.buffer
     assert options["stdout_stream"] is observer.sys.stdout.buffer
     assert options["capture"] is False

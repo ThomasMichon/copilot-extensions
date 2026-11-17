@@ -314,6 +314,11 @@ Missing dependencies report unavailable; a read never installs them, starts a
 service or borrows the watch runtime. Standalone Python applications need no
 Copilot installation or marketplace.
 
+The finite worker uses isolated Python mode in the selected application
+interpreter. The current directory, `PYTHONPATH` and user-site packages cannot
+replace its module or dependencies. Install the optional dependency closure in
+that application runtime rather than injecting source paths.
+
 ```text
 agent-pull-requests workspace --client-profile selected capabilities
 agent-pull-requests workspace --client-profile selected load --request request.json

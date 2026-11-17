@@ -194,9 +194,19 @@ first-party wheel composition exercises the installed console command without
 editable source finders; it reuses prepared external dependencies and does not
 qualify fresh third-party acquisition or a real host installer.
 
-Focused borrowed-stream controls, the enforced Linux/Windows type projects,
+The refreshed source also isolates the nested worker's Python imports.
+Installed-wheel controls reject checkout and `PYTHONPATH` shadowing while
+retaining structured profile refusal. The 36 observer controls, one packaging
+control and 13 selected borrowed-stream/logfile controls pass under their
+existing item, group and aggregate bounds. Headless ConPTY success and blocked
+input cover actual console-handle forwarding and finite cleanup. Desktop
+window/focus diagnostics were not observed; this is not a zero-window claim.
+Current unattended-validation policy treats those diagnostics as supplemental,
+not an operator-attendance prerequisite for source publication.
+
+Earlier baseline checks covered the enforced Linux/Windows type projects,
 dependency-age, install-contract, documentation and touched Python lint checks
-pass. The PR plugin and Procutil remain in their existing pending type
+successfully. The PR plugin and Procutil remain in their existing pending type
 inventory, not newly certified strict projects. These are local source and
 contained-consumer results, not review acceptance, required CI, release,
 profile adoption or live-provider qualification. The two remaining Plan items
