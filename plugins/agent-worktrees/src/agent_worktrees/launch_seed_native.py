@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable, Iterator
 from contextlib import ExitStack, contextmanager, nullcontext
 from dataclasses import asdict
 import json
@@ -10,6 +11,7 @@ import os
 from pathlib import Path
 import secrets
 import sys
+from typing import Any, cast
 from uuid import uuid4
 
 from . import agent_policy, config as cfg, launch_attempt, launch_execution, locks
@@ -19,7 +21,7 @@ _ERRORS = (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutco
 NUL_REPLY_SCHEMA = "agent-worktrees.native-seed-reply.v1"
 
 
-def nul_reply(prepared: dict) -> bytes:
+def nul_reply(prepared: dict[str, Any]) -> bytes:
     """Literal UTF-8 fields for a finite Bash reader, never shell source."""
     environment = prepared["environment"]
     fields = [
@@ -63,7 +65,7 @@ def prepare(
     native_resume_session: str | None = None, pid: int | None = None,
     process_start_time: str | None = None,
     headed: bool = False,
-) -> dict:
+) -> dict[str, Any]:
     """Claim once before native spawn; only argv crosses the in-memory pipe."""
     from . import launch_admission, launch_seed_exec
 
@@ -119,8 +121,13 @@ def prepare(
         except (*_ERRORS, KeyboardInterrupt):
             execution.observed("unknown")
             raise
-    result = {
-        "version": 1, "argv": prepared.argv, "environment": prepared.environment,
+    # Native exec needs correlation even when admission cannot claim a prompt.
+    environment = {
+        **(prepared.environment or {}),
+        launch_execution.NATIVE_HINT_ENV: execution.environment(invoke=True)[launch_execution.NATIVE_HINT_ENV],
+    }
+    result: dict[str, Any] = {
+        "version": 1, "argv": prepared.argv, "environment": environment,
         "attempt_id": execution.subject["attempt_id"],
         "resolution_id": execution.subject["resolution_id"],
         "operation_id": execution.subject["operation_id"],
@@ -229,7 +236,7 @@ def _planned_status_path(record_path: Path, attempt_id: str, operation_id: str) 
 def _retain_planned_status(record_path: Path, execution: launch_execution.Execution) -> None:
     """Persist the preparation-time status for separate native admission callbacks."""
     path = _planned_status_path(
-        record_path, execution.subject["attempt_id"], execution.subject["operation_id"],
+        record_path, cast(str, execution.subject["attempt_id"]), cast(str, execution.subject["operation_id"]),
     )
     launch_attempt._mkdir(path.parent)
     launch_attempt._write(path, {"version": 1, "status": execution.planned_status})
@@ -265,7 +272,7 @@ def admission(
     native_resume_session: str | None = None, require_cold_stop: bool = True,
     planned_status: str | None = None,
     head_fence: ExitStack | None = None,
-):
+) -> Iterator[Callable[[], None]]:
     """Keep the original creation fence until the exec or retained owner releases it."""
     from . import launch_admission, tracking
 
@@ -292,7 +299,7 @@ def _admission_check(
     *, admission_only: bool = False, preserve_seed_id: str | None = None,
     native_resume_session: str | None = None, require_cold_stop: bool = True,
     planned_status: str | None = None,
-):
+) -> Callable[[], None]:
     from . import launch_seed_exec, launch_seed_state, tracking
 
     if not require_cold_stop and (not admission_only or native_resume_session is not None):
@@ -344,7 +351,7 @@ def _require_process(pid: int | None, process_start_time: str | None) -> None:
 
 def _load(
     record_path: Path, correlation: launch_execution.Correlation, operation_id: str,
-) -> tuple[launch_execution.Execution, dict]:
+) -> tuple[launch_execution.Execution, dict[str, Any]]:
     agent_policy.require_record(record_path)
     execution = launch_execution.Execution(record_path, correlation)
     saved = launch_execution.read(record_path.parent, correlation.attempt_id, operation_id)
@@ -357,7 +364,7 @@ def _load(
     return execution, saved
 
 
-def _receipt(record_path: Path, saved: dict) -> dict | None:
+def _receipt(record_path: Path, saved: dict[str, Any]) -> dict[str, Any] | None:
     claims = [event["details"] for event in saved["events"] if event["phase"] == "seed-claimed"]
     if not claims:
         return None
