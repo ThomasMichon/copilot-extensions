@@ -77,6 +77,9 @@ _RETAINED_AFFECTED = (
         "creation_worktree_writer.py", "creation_writer_schema.py",
         "creation_writer_inspection.py",
         "retained_session_recovery.py", "routes/session_resume.py",
+        "retained_metadata_contract.py", "retained_metadata_import.py",
+        "retained_metadata_lineage.py", "retained_metadata_recovery.py",
+        "client_retained_metadata.py", "routes/retained_metadata.py",
         "session_host_launch_custody.py", "session_host/local_spawner.py",
         "cold_outages.py", "session_host/launcher.py", "session_host_connection.py",
         "session_manager.py", "startup_progress.py",
@@ -149,6 +152,7 @@ EXTRA_PATHS = (
     "plugins/agent-bridge/tests/test_creation_worktree_writer.py",
     "plugins/agent-bridge/tests/test_retained_writer_transport.py",
     "plugins/agent-bridge/tests/test_retained_host_recovery.py",
+    "plugins/agent-bridge/tests/test_retained_metadata_recovery.py",
     "plugins/agent-bridge/tests/test_gc.py",
     "plugins/agent-bridge/tests/test_creation_writer_resume.py",
     "plugins/agent-bridge/tests/test_full_session_status_cli.py",
@@ -417,6 +421,9 @@ PROBES = {
     "test_retention_query_work_scales_with_history": 4,
     "test_malformed_terminal_recovery_retains_original_and_successor": 8,
     "test_existing_v44_database_prepares_retained_recovery_without_rewriting_guards": 1,
+    "test_missing_metadata_adopts_distinct_control_epoch_once": 1,
+    "test_actual_http_negotiation_and_lost_response_keep_old_send_and_cursor_namespaces_closed": 1,
+    "test_prior_passive_receiver_refuses_adopted_schema_before_writable_cutover": 1,
 }
 TEST = "plugins/agent-bridge/tests/test_http52_capture_probes.py"
 CAPABILITY_VERSIONS = {
@@ -435,6 +442,7 @@ CAPABILITY_VERSIONS = {
     "retained_workspace_creation_writer_inspection": 1,
     "retained_workspace_creation_writer_resume": 1,
     "retained_native_session_recovery": 1,
+    "retained_native_metadata_adoption": 1,
     "live_question_answers": 1,
     "live_delivery_observation": 1,
     "mux_question_answers": 1,
