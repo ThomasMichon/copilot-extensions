@@ -1,0 +1,9 @@
+{
+  "comment": "Require independent lifetime for Bridge watchdog replacements and daemon ensures; propagate durable launch refusal without caller-owned fallback.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

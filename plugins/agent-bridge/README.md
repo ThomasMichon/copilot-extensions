@@ -150,6 +150,15 @@ existing default, and never installs a broker as a spawn fallback. This source
 integration does not establish full cold-construction, desktop or rollout
 qualification.
 
+Persistent Bridge service starts, command-triggered ensures and watchdog
+replacements require an independently owned daemon lifetime. If the canonical
+Windows durable launch refuses, they propagate that failure rather than retrying
+inside the caller's cleanup Job. A failed watchdog launch records
+`replacement-failed`, not `replacement-scheduled`; the wedged frontend still
+exits to release its singleton lock. Direct starts and passive generations
+retain the same strict policy. Contained test mode remains deliberately
+contained and does not qualify production caller-exit survival.
+
 Source-qualified application startup resolves an unset installation-root override
 from its installed physical slot. Before selection/publication it hydrates
 session metadata without restart or open-turn mutations and registers HTTP
