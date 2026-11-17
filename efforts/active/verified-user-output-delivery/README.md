@@ -12,7 +12,7 @@ responsibility with a bounded historical receipt.
 **Finalization criterion:** source delivery is merged, all scoped validation is
 resolved and the source workspace's obligations are settled. This does not
 require deleting user output or retained history.
-**Now:** qualify the implemented source flow on Windows and Linux.
+**Now:** deliver the qualified source through review and required CI.
 **Return:** finish source checks and PR delivery; preserve the broader lifecycle,
 installed and operational owners.
 
@@ -105,7 +105,7 @@ eviction and other owners' resources.
 
 ### U2 - Qualify the source consumers
 
-- [ ] Prove the controls in UV1-UV5 using private synthetic Windows/Linux roots
+- [x] Prove the controls in UV1-UV5 using private synthetic Windows/Linux roots
   and the normal contained test owners. Record actual platform coverage.
 
 ### U3 - Deliver and close the bounded source work
@@ -117,20 +117,20 @@ eviction and other owners' resources.
 
 ## Validation Plan
 
-- [ ] UV1. Prove precedence, portable organization templates, exact machine
+- [x] UV1. Prove precedence, portable organization templates, exact machine
   roots and explicit destination behavior. Missing or invalid required
   OneDrive selection never silently becomes Downloads, scratch or source.
-- [ ] UV2. Prove exclusive folder creation, portable topic/member names,
+- [x] UV2. Prove exclusive folder creation, portable topic/member names,
   collision handling, no link/reparse traversal, protected-home refusal and
   reserve-before-writable ordering through the real allocator.
-- [ ] UV3. Prove success and actual finalization with a retained deliverable;
+- [x] UV3. Prove success and actual finalization with a retained deliverable;
   also prove incomplete, changed, unreadable and over-budget content cannot
   close the producing obligation.
-- [ ] UV4. Fault the allocation, provider verification and ledger-publication
+- [x] UV4. Fault the allocation, provider verification and ledger-publication
   boundaries. Preserve the same identity and responsibility across unknown
   replies; exact completed retries must not require a destination to remain
   present or recreate a user-moved folder.
-- [ ] UV5. Prove old/new capability refusal and unchanged disposable/retained
+- [x] UV5. Prove old/new capability refusal and unchanged disposable/retained
   scratch semantics. Use focused unit controls and opt-in real-process/native
   qualification rather than enlarging required CI into an exhaustive matrix.
 
@@ -199,6 +199,32 @@ Source tests use newly created private fixture roots only; installed and actual
 user-storage adoption remain outside this finite effort.
 
 ## Journal
+
+### 2026-11-17 - Windows and Linux source qualification
+
+The rebased source `33e7dc699679cfff29c504adcc996fe9821d2bdf` passed
+426 Linux controls across 14 files. Six Windows-only cases skipped there;
+they are not Linux evidence. The
+[source-pinned hosted Windows run](https://github.com/ThomasMichon/copilot-extensions/actions/runs/44080296833)
+qualified all 323 selected cases on Windows Server 2025, AMD64, Python 3.12.10.
+Its selection excludes only three explicitly POSIX-only root cases, which
+passed in the Linux packet. The Windows flow covers actual CLI execution,
+exclusive allocation, file integrity, native access checks, timestamp semantics,
+unknown replies, retained receipts and finalization. Neither platform result
+qualifies actual user storage or installed adoption.
+
+The initial Windows file check compared two different meanings of `st_ctime`.
+The correction compares creation time across APIs and keeps change-time
+stability checks within the held descriptor. Identity, size, modification-time
+and content checks remain required. Positive collision fixtures now use the
+existing private-directory owner.
+
+The complete admitted packet passed 5,272 actor-free units with coverage and
+effect checks in 125.119 seconds. Nine new proof-decision cases reuse its
+existing reference-owner fixture; native and filesystem cases remain outside
+required unit CI. Whole-file strict MyPy passed 21 changed Python files on
+both analysis platforms. Review, required CI, source merge and closure remain
+open; this effort is not Done.
 
 ### 2026-11-17 - First complete source flow
 
