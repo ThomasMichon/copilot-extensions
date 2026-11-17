@@ -2,10 +2,18 @@
 
 from __future__ import annotations
 
+import importlib
+import importlib.util
+import json
 import os
 import shutil
 import subprocess
+import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 
@@ -153,3 +161,181 @@ def test_runtime_only_rejects_incomplete_or_incompatible_requests_before_effects
     assert result.returncode != 0
     assert "requires complete closed wheels" in result.stdout + result.stderr
     assert not root.exists()
+
+
+def _reentry(
+    tmp_path: Path, shell: str, boundary: str, action: str,
+    monkeypatch: pytest.MonkeyPatch, *, lose_hold: bool = False,
+) -> tuple[int, dict[str, object]]:
+    environment = installer._env(tmp_path)
+    assert environment.get("COPILOT_EXTENSIONS_TEST_CONTAINED") == "1"
+    home = Path(environment["USERPROFILE"])
+    home.mkdir(parents=True, exist_ok=True)
+    payload = (
+        home / ".copilot" / "installed-plugins" / "fixture" / "agent-codespaces"
+        if boundary == "self-stage" else tmp_path / "payload"
+    )
+    scripts = payload / "scripts"
+    scripts.mkdir(parents=True)
+    (payload / "plugin.json").write_text('{"name":"agent-codespaces"}', encoding="utf-8")
+    source = (installer.PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
+    parameters = source.split("[CmdletBinding()]", 1)[1].split("Set-StrictMode", 1)[0]
+    stage_marker = "# === install-contract:v4 self-stage"
+    staging = stage_marker + source.split(stage_marker, 1)[1].split(
+        "# === end install-contract:v4 self-stage ===", 1,
+    )[0]
+    if lose_hold and boundary == "self-stage":
+        forwarding = "foreach ($__selfStageK in $PSBoundParameters.Keys) {"
+        assert forwarding in staging
+        staging = staging.replace(
+            forwarding, forwarding + "\nif ($__selfStageK -eq 'NoService') { continue }",
+        )
+    functions = "\n".join(installer._function("ps1", name) for name in (
+        "Invoke-Install", "Invoke-Update", "Sync-ConnectionOwnerService",
+    ))
+    entry = scripts / "install.ps1"
+    entry.write_text(
+        "[CmdletBinding()]" + parameters
+        + "\n$ErrorActionPreference='Stop'\nSet-StrictMode -Version Latest\n"
+        + installer._function("ps1", "Copy-InstallerStageDirectory")
+        + staging + "\n" + functions + r"""
+$script:events=[Collections.Generic.List[string]]::new()
+$ServiceName='fixture'
+$LocalBin=Join-Path $InstallDir 'commands'
+$VenvPython='Invoke-FixturePython'
+$LinkPython=$VenvPython
+function Write-Step {}
+function Write-ServiceOk {}
+function Write-ServiceWarn {}
+function Write-ServiceErr { throw $args[0] }
+function Select-InstallRuntimeGeneration { $script:events.Add('select') }
+function Deploy-Venv { $script:events.Add('venv'); return $true }
+function Deploy-Package { $script:events.Add('package'); return $true }
+function Invoke-VersionedActivate { $script:events.Add('activate'); return $true }
+function Deploy-VersionedRuntimeHelper { $script:events.Add('helpers') }
+function Deploy-SelfProvisioningBinstub { $script:events.Add('bindings') }
+function Invoke-FixturePython { $script:events.Add('migrate'); $global:LASTEXITCODE=0 }
+function Write-CodespacesDeployManifest { $script:events.Add('manifest') }
+function Test-CodespacesRuntime { $script:events.Add('verify'); return $true }
+function Get-WindowsScheduledTaskPolicy {
+    $script:events.Add('service-policy')
+    throw 'Unexpected service/task effect'
+}
+function Get-ConnectionOwnerConfig { throw 'Unexpected Owner query' }
+try {
+    if ($Action -eq 'install') { Invoke-Install } else { Invoke-Update }
+} finally {
+    @{
+        action=$Action; no_service=[bool]$NoService
+        staged_from=$env:COPILOT_PLUGIN_STAGED_FROM
+        script_root=$PSScriptRoot; events=@($script:events)
+        wheels=@($WheelProfile,$WheelDirectory,$WheelPython,$WheelUv)
+    } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $env:USERPROFILE 'reentry.json')
+}
+""",
+        encoding="utf-8",
+    )
+    runtime = tmp_path / "runtime"
+    if action == "update":
+        runtime.mkdir()
+    wheels = [str(tmp_path / "profile"), str(tmp_path / "wheels"),
+              sys.executable, str(tmp_path / "uv.exe")]
+    if boundary == "self-stage":
+        arguments = {
+            "Action": action, "InstallDir": str(runtime), "WheelProfile": wheels[0],
+            "WheelDirectory": wheels[1], "WheelPython": wheels[2], "WheelUv": wheels[3],
+        }
+        invocation = "\n".join(
+            f"${name}='{value.replace(chr(39), chr(39) * 2)}'"
+            for name, value in {"entry": str(entry), **arguments}.items()
+        ) + "\n& $entry -Action $Action -InstallDir $InstallDir -NoService " \
+            "-WheelProfile $WheelProfile -WheelDirectory $WheelDirectory " \
+            "-WheelPython $WheelPython -WheelUv $WheelUv\nexit $LASTEXITCODE\n"
+        result = installer._run("ps1", invocation, tmp_path, environment)
+        code = result.returncode
+    else:
+        monkeypatch.syspath_prepend(str(installer.PLUGIN / "scripts"))
+        spec = importlib.util.spec_from_file_location(
+            "_codespaces_reentry_driver", installer.PLUGIN / "scripts" / "installer_driver.py",
+        )
+        assert spec is not None and spec.loader is not None
+        driver = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(driver)
+        owner = importlib.import_module("update_driver.core")
+        witness = importlib.import_module("update_driver.participant")
+        inputs = importlib.import_module("install_source")
+
+        @contextmanager
+        def closed_inputs(*_args: object) -> Iterator[object]:
+            yield object()
+
+        monkeypatch.setattr(inputs, "wheel_inputs", closed_inputs)
+        monkeypatch.setattr(inputs, "wheel_selection", lambda *_args: {"fixture": True})
+        execution = tmp_path / "execution"
+        monkeypatch.setattr(owner, "default_root", lambda: execution)
+        args = SimpleNamespace(
+            payload=payload, root=runtime, plugin="agent-codespaces", shell=Path(shell),
+            action=action, options=["NoService"], check_native=False, remove_broker=False,
+            wheel_profile=Path(wheels[0]), wheel_directory=Path(wheels[1]),
+            wheel_python=Path(wheels[2]), wheel_uv=Path(wheels[3]),
+        )
+        if lose_hold:
+            native_arguments = driver.native_arguments
+            monkeypatch.setattr(
+                driver, "native_arguments",
+                lambda value: [arg for arg in native_arguments(value) if arg != "-NoService"],
+            )
+        with patch.dict(os.environ, environment, clear=True):
+            request = owner.enqueue(
+                owner.RequestSpec("engine"),
+                runner=owner.TrustedRunner((sys.executable, "-c", "pass"), str(tmp_path)),
+            )
+
+            def execute(transaction: object) -> int:
+                context = getattr(transaction, "participant_env")()
+                with patch.dict(os.environ, context):
+                    outcome: int = driver.execute(args)
+                    return outcome
+
+            assert owner.drain(executor=execute) == 0
+            status = owner.status(request.id)
+            assert status.state == "completed" and isinstance(status.exit_code, int)
+            code = status.exit_code
+            assert witness.ENVIRONMENT_KEY not in os.environ
+    report: dict[str, object] = json.loads(
+        (home / "reentry.json").read_text(encoding="utf-8-sig"),
+    )
+    assert report["action"] == action and report["wheels"] == wheels
+    staged_from = report["staged_from"]
+    if boundary == "self-stage":
+        assert staged_from == str(payload)
+        assert report["script_root"] != str(scripts)
+    else:
+        assert not staged_from
+    return code, report
+
+
+@pytest.mark.parametrize("boundary", ["participant", "self-stage"])
+@pytest.mark.parametrize("action", ["install", "update"])
+def test_runtime_only_reentry(
+    tmp_path: Path, native_shell: str, boundary: str, action: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    code, report = _reentry(tmp_path, native_shell, boundary, action, monkeypatch)
+    assert code == 0, report
+    assert report["no_service"] is True
+    expected = ["select", "venv", "package", "activate", "helpers", "bindings", "migrate", "manifest"]
+    assert report["events"] == expected + (["verify"] if action == "install" else [])
+
+
+@pytest.mark.parametrize("boundary", ["participant", "self-stage"])
+def test_reentry_detects_a_lost_runtime_only_flag(
+    tmp_path: Path, native_shell: str, boundary: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    code, report = _reentry(
+        tmp_path, native_shell, boundary, "update", monkeypatch, lose_hold=True,
+    )
+    assert code != 0
+    assert report["no_service"] is False
+    events = report["events"]
+    assert isinstance(events, list) and "service-policy" in events
