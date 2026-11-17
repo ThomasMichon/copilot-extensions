@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 from pathlib import Path
 import re
 import shutil
@@ -37,9 +38,9 @@ def running_payload_dir() -> Path:
 
 
 def preparer() -> Path:
-    directory = _runtime_scripts() / "runtime-source-tools"
-    for relative in ("tools/prepare_runtime_source.py", "prepare_runtime_source.py"):
-        packaged = directory / relative
+    scripts = _runtime_scripts()
+    for directory in ("runtime-source-tools/tools", "runtime-input-provider/tools", "runtime-source-tools"):
+        packaged = scripts / directory / "prepare_runtime_source.py"
         if packaged.is_file():
             return packaged
     # Source development uses this checkout's canonical tools, never fetched code.
@@ -49,6 +50,51 @@ def preparer() -> Path:
         if canonical.is_file():
             return canonical
     raise ValueError("Manager source preparation assets are unavailable; repair the Manager payload")
+
+
+def prepare_footprint(
+    tool: Path, resolved: ResolvedSource, output: Path, *,
+    deadline: float, environment: dict[str, str] | None = None,
+) -> Path:
+    """Export a complete Manager footprint with the running payload's producer."""
+    from .engine_environment import _engine_environment
+
+    remaining = deadline - time.monotonic()
+    if not math.isfinite(remaining) or not 0 < remaining <= 7200:
+        raise ValueError("Application footprint preparation requires a live finite deadline")
+    provider = tool.parent / "application_footprint.py"
+    if not provider.is_file() or resolved.main_head is None or not output.is_absolute():
+        raise ValueError("Manager application footprint preparation assets or Main seed are unavailable")
+    engine = _runtime_installer().engine
+    native: Callable[[Path], str] = engine._native_retained_path
+    command = [
+        native(Path(sys.executable)), "-I", "-B", "-X", "utf8", native(provider),
+        "--source-checkout", str(resolved.checkout), "--source-commit", resolved.commit,
+        "--main-head", resolved.main_head, "--branch", resolved.selection.branch,
+        "--output", native(output), "--timeout", str(remaining),
+    ]
+    if Path(resolved.selection.repo).is_absolute():
+        command.extend(["--source-descriptor", json.dumps({
+            "source": "directory", "path": resolved.selection.repo,
+        }, sort_keys=True)])
+    result = engine.run_owned(
+        command, cwd=Path(provider.anchor) if os.name == "nt" else provider.parent,
+        env=_engine_environment(environment),
+        timeout=remaining, deadline=deadline, procutil=agent_procutil, construction_fd=None,
+    )
+    if (
+        not isinstance(result.stdout, str) or len(result.stdout.encode("utf-8")) > 65536
+        or time.monotonic() >= deadline
+    ):
+        raise ValueError("Application footprint preparation returned an over-budget receipt")
+    record = json.loads(result.stdout)
+    if (
+        not isinstance(record, dict) or set(record) != {"footprint"}
+        or not isinstance(record["footprint"], str)
+        or Path(native(Path(record["footprint"]))) != Path(native(output / "footprint"))
+    ):
+        raise ValueError("Application footprint preparer returned a different output")
+    return output / "footprint"
 
 
 def prepare(tool: Path, resolved: ResolvedSource, name: str, output: Path) -> dict[str, Any]:

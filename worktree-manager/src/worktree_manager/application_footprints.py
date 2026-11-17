@@ -4,9 +4,10 @@ from __future__ import annotations
 import argparse
 from collections.abc import Callable
 from contextlib import ExitStack
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from graphlib import CycleError, TopologicalSorter
 import hashlib
+import importlib
 import json
 import math
 import os
@@ -19,6 +20,7 @@ import sys
 import time
 from typing import Any
 from typing import cast
+import uuid
 
 import agent_procutil
 
@@ -77,6 +79,38 @@ def _unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return result
 
 
+def _validate_declaration(app: Any) -> None:
+    if (
+        not isinstance(app, dict)
+        or not isinstance(app.get("name"), str) or not _NAME.fullmatch(app["name"])
+        or not isinstance(app.get("construction"), dict)
+        or not isinstance(app["construction"].get("runtime_version"), str)
+        or not _VERSION.fullmatch(app["construction"]["runtime_version"])
+        or app["construction"]["runtime_version"].endswith(".")
+        or not isinstance(app.get("root_environment"), str)
+        or not re.fullmatch(r"[A-Z][A-Z0-9_]*(?:_ROOT|_HOME|_INSTALL_DIR)", app["root_environment"])
+        or "default_directory" in app and (
+            not isinstance(app["default_directory"], str)
+            or not re.fullmatch(
+                r"\.[a-z0-9][a-z0-9-]*(?:/[a-z0-9][a-z0-9-]*)*", app["default_directory"],
+            )
+        )
+        or not isinstance(app.get("commands"), list) or not app["commands"]
+        or any(not isinstance(command, str) or not _NAME.fullmatch(command)
+               for command in app["commands"])
+        or app["name"] not in app["commands"]
+        or len(set(app["commands"])) != len(app["commands"])
+    ):
+        raise ValueError("invalid application footprint declaration")
+
+
+def _verify_setup(directory: Path) -> None:
+    for required in ("pyproject.toml", "uv.lock", "bin/setup.ps1", "bin/setup.sh"):
+        path = _ordinary(directory / required)
+        if not path.is_file():
+            raise ValueError(f"application setup input is unavailable: {path}")
+
+
 def plan(
     footprint: Path, apps_root: Path, *, selected: tuple[str, ...] = (),
 ) -> tuple[Application, ...]:
@@ -116,17 +150,10 @@ def plan(
             raise ValueError("application footprint must not contain a prepared environment or runtime state")
         declaration = _read(source / "application.json")
         app = json.loads(declaration, object_pairs_hook=_unique)
+        _validate_declaration(app)
         if (
-            not isinstance(app, dict) or app.get("name") != name
-            or not isinstance(app.get("construction"), dict)
+            app.get("name") != name
             or app["construction"].get("runtime_version") != version
-            or not isinstance(app.get("root_environment"), str)
-            or not re.fullmatch(r"[A-Z][A-Z0-9_]*(?:_ROOT|_HOME|_INSTALL_DIR)", app["root_environment"])
-            or not isinstance(app.get("commands"), list) or not app["commands"]
-            or any(not isinstance(command, str) or not _NAME.fullmatch(command)
-                   for command in app["commands"])
-            or name not in app["commands"]
-            or len(set(app["commands"])) != len(app["commands"])
         ):
             raise ValueError(f"application differs from its footprint entry: {name}")
         if app["root_environment"] in environments:
@@ -136,10 +163,7 @@ def plan(
             if command in commands:
                 raise ValueError(f"application command has multiple owners: {command}")
             commands[command] = name
-        for required in ("pyproject.toml", "uv.lock", "bin/setup.ps1", "bin/setup.sh"):
-            path = _ordinary(source / required)
-            if not path.is_file():
-                raise ValueError(f"application setup input is unavailable: {path}")
+        _verify_setup(source)
         applications[name] = Application(
             name, version, source, root, app["root_environment"],
             declaration, tuple(row["dependencies"]),
@@ -160,19 +184,88 @@ def plan(
     return tuple(applications[name] for name in ordered if name in wanted)
 
 
-def _verify_copy(path: Path, application: Application) -> None:
+def _verify_copy(path: Path, application: Application) -> set[tuple[Path, bool]]:
     if _read(path / "application.json") != application.declaration:
         raise ValueError(f"application declaration changed before setup: {application.name}")
+    _verify_setup(path)
+    return _verify_tree(path, application)
+
+
+def _verify_tree(path: Path, application: Application) -> set[tuple[Path, bool]]:
     def unreadable(error: OSError) -> None:
         raise error
+    inputs: set[tuple[Path, bool]] = set()
     for directory, children, files in os.walk(path, followlinks=False, onerror=unreadable):
         for name in (*children, *files):
             member = _ordinary(Path(directory) / name)
             mode = member.lstat().st_mode
             if not (stat.S_ISDIR(mode) if name in children else stat.S_ISREG(mode)):
                 raise ValueError(f"application input is not an ordinary file or directory: {member}")
+            inputs.add((member.relative_to(path), name in children))
         if Path(directory) == path and path == application.slot:
             children[:] = [name for name in children if name not in {".venv", "state"}]
+    return inputs
+
+
+def select_generation(
+    application: Application, current: str | None, *,
+    qualify: Callable[[Path], object] | None = None,
+    deadline: float | None = None,
+) -> Application:
+    """Reuse a qualified selection or allocate a distinct slot for damaged inputs."""
+    from .self_install import _runtime_installer
+    from .runtime_application_inputs import provider_root
+
+    incoming_inputs = _verify_copy(application.source, application)
+    installer = _runtime_installer()
+    owner = importlib.import_module("runtime_application_install")._load(
+        provider_root() / "libs" / "installer-engine" / "runtime_application_install.py",
+        "_manager_application_construction",
+    )
+    deadline = time.monotonic() + 180 if deadline is None else deadline
+
+    def validate(record: dict[str, Any]) -> None:
+        owner._validate_application(record)
+        _validate_declaration(record)
+        owner._construction_metadata(record, installer.runtime, installer.engine, deadline)
+
+    validate(json.loads(application.declaration, object_pairs_hook=_unique))
+    if qualify is not None:
+        try:
+            qualify(application.source)
+        except Exception as error:
+            raise ValueError("incoming application launchers are unavailable") from error
+    base = application.version
+    if current and re.fullmatch(re.escape(base) + r"\.repair\.[0-9a-f]{32}", current):
+        application = replace(application, version=current)
+    _ordinary(application.slot)
+    if not os.path.lexists(application.slot):
+        return application
+    installed_inputs = _verify_tree(application.slot, application)
+    try:
+        installed = _read(application.slot / "application.json")
+    except (OSError, ValueError):
+        installed = None
+    if installed == application.declaration:
+        try:
+            if not incoming_inputs <= installed_inputs:
+                raise ValueError("selected application snapshot is incomplete")
+            _verify_setup(application.slot)
+            if qualify is not None:
+                qualify(application.slot)
+        except Exception:
+            pass
+        else:
+            return application
+    elif installed is not None:
+        try:
+            record = json.loads(installed, object_pairs_hook=_unique)
+            validate(record)
+        except (ValueError, UnicodeError):
+            pass
+        else:
+            raise ValueError("application declaration conflicts with its existing generation")
+    return replace(application, version=base + ".repair." + uuid.uuid4().hex)
 
 
 def _selection_key(footprint: Path, applications: tuple[Application, ...]) -> str:
@@ -206,6 +299,8 @@ def install(
     prepared: tuple[Any, str] | None = None,
 ) -> None:
     """App setup owns environment construction, selection and actual readiness."""
+    from update_driver import participant_environment
+
     installer, shell = prepared if prepared is not None else _preflight(applications)
     runtime = installer.runtime
     construction = runtime._runtime_component("versioned_runtime_construction")
@@ -254,8 +349,10 @@ def install(
                     }
                 }
                 environment.update(roots)
+                environment.update(participant_environment())
                 result = process.run_owned(
-                    command, cwd=application.slot, env=environment, timeout=remaining(),
+                    command, cwd=Path(application.slot.anchor) if os.name == "nt" else application.slot,
+                    env=environment, timeout=remaining(),
                     deadline=deadline, procutil=agent_procutil,
                     construction_fd=descriptors[application.name],
                     runtime_root=application.root, runtime_version=application.version,
