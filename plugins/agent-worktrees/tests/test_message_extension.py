@@ -8,7 +8,7 @@ import subprocess
 from agent_procutil import no_window_kwargs
 
 
-def test_root_messages_persist_without_intent_and_ignore_usage_or_delegate_activity(tmp_path):
+def test_root_messages_persist_without_intent_and_ignore_usage_or_delegate_activity(tmp_path: Path) -> None:
     node = shutil.which("node")
     assert node, "message extension fixture requires Node"
     session = tmp_path / ".copilot" / "session-state" / "fixture-session"

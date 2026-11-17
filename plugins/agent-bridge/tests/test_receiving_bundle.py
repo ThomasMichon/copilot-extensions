@@ -8,6 +8,9 @@ import posixpath
 import re
 import shutil
 import sys
+import time
+from types import ModuleType
+from typing import Any
 import zipfile
 
 import pytest
@@ -15,11 +18,12 @@ import pytest
 from agent_bridge import receiving_bundle
 
 
-def _materializer():
+def _materializer() -> ModuleType:
     tools = Path(__file__).resolve().parents[3] / "tools"
     sys.path.insert(0, str(tools))
     try:
         spec = importlib.util.spec_from_file_location("materialize_receiving_assets", tools / "materialize_launch_wrapper_assets.py")
+        assert spec is not None and spec.loader is not None
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         return module
@@ -27,7 +31,7 @@ def _materializer():
         sys.path.remove(str(tools))
 
 
-def test_all_extension_entrypoints_link_with_microsoft_only_sdk_resolution():
+def test_all_extension_entrypoints_link_with_microsoft_only_sdk_resolution() -> None:
     from agent_procutil.owned_process import run_caller_owned
 
     node = shutil.which("node")
@@ -42,7 +46,9 @@ def test_all_extension_entrypoints_link_with_microsoft_only_sdk_resolution():
     assert "Microsoft-only SDK resolution" in result.stdout
 
 
-def test_selected_extensions_and_canonical_pane_shell_survive_materialization(tmp_path, monkeypatch):
+def test_selected_extensions_and_canonical_pane_shell_survive_materialization(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     root = Path(__file__).resolve().parents[3]
     bridge = root / "plugins" / "agent-bridge"
     source_bytes, source_identity = receiving_bundle.build_mux_support()
@@ -82,7 +88,9 @@ def test_selected_extensions_and_canonical_pane_shell_survive_materialization(tm
     assert receiving_bundle.build_mux_support()[1] != source_identity
 
 
-def test_partial_runtime_support_never_falls_back_to_another_payload(tmp_path, monkeypatch):
+def test_partial_runtime_support_never_falls_back_to_another_payload(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     package = tmp_path / "agent_bridge"
     (package / "receiving_assets").mkdir(parents=True)
     monkeypatch.setattr(receiving_bundle, "_package_root", lambda: package)
@@ -90,7 +98,9 @@ def test_partial_runtime_support_never_falls_back_to_another_payload(tmp_path, m
         receiving_bundle.build_mux_support()
 
 
-def test_mux_support_never_reads_the_shared_core_cache(tmp_path, monkeypatch):
+def test_mux_support_never_reads_the_shared_core_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import tempfile
 
     from agent_remote_driver.session_host import bundle
@@ -109,28 +119,28 @@ def test_mux_support_never_reads_the_shared_core_cache(tmp_path, monkeypatch):
     assert set(tmp_path.iterdir()) == existing
 
 
-def test_mux_launch_retry_preserves_exact_payload_after_core_rebuild(monkeypatch):
+def test_mux_launch_retry_preserves_exact_payload_after_core_rebuild(monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_bridge import portable_policy
 
     monkeypatch.setattr(portable_policy, "selected_context", lambda: '{"selected":"fixture"}')
-    options = {
+    options: dict[str, Any] = {
         "state_root": "/home/operator/.agent-bridge/mux", "scope_id": "workspace",
         "attempt": "11111111-1111-4111-8111-111111111111",
         "session_id": "22222222-2222-4222-8222-222222222222",
     }
-    monkeypatch.setattr(zipfile.time, "localtime", lambda _: (2001, 1, 1, 0, 0, 0, 0, 1, -1))
+    monkeypatch.setattr(time, "localtime", lambda _: (2001, 1, 1, 0, 0, 0, 0, 1, -1))
     first = receiving_bundle.build_mux_launch("/workspace/project", **options)
-    monkeypatch.setattr(zipfile.time, "localtime", lambda _: (2026, 1, 1, 0, 0, 0, 0, 1, -1))
+    monkeypatch.setattr(time, "localtime", lambda _: (2026, 1, 1, 0, 0, 0, 0, 1, -1))
     assert receiving_bundle.build_mux_launch("/workspace/project", **options) == first
 
 
 @pytest.mark.parametrize("value", ["../outside", "/absolute", "C:/outside", "a\\b", "a//b"])
-def test_receiving_assets_do_not_escape_the_declared_source(tmp_path, value):
+def test_receiving_assets_do_not_escape_the_declared_source(tmp_path: Path, value: str) -> None:
     with pytest.raises(ValueError, match="safe relative"):
         receiving_bundle._read(tmp_path, value)
 
 
-def test_provider_command_carries_selected_policy_and_exact_support(monkeypatch):
+def test_provider_command_carries_selected_policy_and_exact_support(monkeypatch: pytest.MonkeyPatch) -> None:
     import base64
     import hashlib
     import shlex
@@ -162,7 +172,7 @@ def test_provider_command_carries_selected_policy_and_exact_support(monkeypatch)
 
 
 @pytest.mark.parametrize("layout", ["source", "payload", "copied-core", "wheel", "partial-payload"])
-def test_actual_sdk_facade_loads_the_core_without_suite_services(tmp_path, layout):
+def test_actual_sdk_facade_loads_the_core_without_suite_services(tmp_path: Path, layout: str) -> None:
     from agent_procutil.owned_process import run_caller_owned
     from agent_remote_driver.bridge_extension import extension_sources
     from agent_remote_driver.session_host.bundle import build_session_host_bundle
@@ -282,10 +292,12 @@ console.log("one Core registration/delivery activation; no suite service");
     ) in result.stdout
 
 
-def test_provider_cli_advertises_support_without_touching_a_daemon(capsys, monkeypatch):
+def test_provider_cli_advertises_support_without_touching_a_daemon(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_bridge import __main__
 
-    def forbidden(*args, **kwargs):
+    def forbidden(*args: object, **kwargs: object) -> None:
         raise AssertionError("support packaging must not start a daemon")
 
     monkeypatch.setattr(__main__, "_get_client", forbidden)
@@ -299,20 +311,22 @@ def test_provider_cli_advertises_support_without_touching_a_daemon(capsys, monke
 
 
 @pytest.mark.parametrize("capability", [None, 0, True, 2])
-def test_provider_owner_check_refuses_an_unqualified_running_daemon(monkeypatch, capability):
+def test_provider_owner_check_refuses_an_unqualified_running_daemon(
+    monkeypatch: pytest.MonkeyPatch, capability: object,
+) -> None:
     from agent_bridge import __main__, receiving_cli
 
     class Client:
-        def __enter__(self):
+        def __enter__(self) -> "Client":
             return self
 
-        def __exit__(self, *args):
+        def __exit__(self, *args: object) -> None:
             pass
 
-        def health(self):
+        def health(self) -> dict[str, Any]:
             return {"ready": True, "draining": False, "capabilities": {"portable_mux": capability}}
 
-    def selected(*, ensure):
+    def selected(*, ensure: bool) -> Client:
         assert ensure is False
         return Client()
 
@@ -321,20 +335,22 @@ def test_provider_owner_check_refuses_an_unqualified_running_daemon(monkeypatch,
         receiving_cli._owner()
 
 
-def test_provider_owner_capability_never_exposes_registration_credentials(monkeypatch, capsys):
+def test_provider_owner_capability_never_exposes_registration_credentials(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     from agent_bridge import __main__
 
     class Client:
         _base = "http://127.0.0.1:12345"
         _token = "synthetic-registration-value"
 
-        def __enter__(self):
+        def __enter__(self) -> "Client":
             return self
 
-        def __exit__(self, *args):
+        def __exit__(self, *args: object) -> None:
             pass
 
-        def health(self):
+        def health(self) -> dict[str, Any]:
             return {"ready": True, "draining": False, "capabilities": {
                 "portable_mux": 1, "portable_inbox": 1, "readonly_plugin_controls": 1,
             }}
@@ -347,14 +363,16 @@ def test_provider_owner_capability_never_exposes_registration_credentials(monkey
     assert "synthetic-registration-value" not in output
 
 
-def test_provider_owner_uses_the_actual_client_interface(monkeypatch, capsys):
+def test_provider_owner_uses_the_actual_client_interface(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     from agent_bridge import __main__
     from agent_bridge.client import BridgeClient
 
     client = BridgeClient("http://127.0.0.1:12345", "synthetic-registration-value")
-    requests = []
+    requests: list[tuple[str, str]] = []
 
-    def request(method, path, *args, **kwargs):
+    def request(method: str, path: str, *args: object, **kwargs: object) -> dict[str, Any]:
         requests.append((method, path))
         return {"ready": True, "draining": False, "capabilities": {
             "portable_mux": 1, "portable_inbox": 1, "readonly_plugin_controls": 1,

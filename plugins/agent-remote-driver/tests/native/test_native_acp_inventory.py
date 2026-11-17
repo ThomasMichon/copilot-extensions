@@ -8,19 +8,22 @@ from pathlib import Path
 import subprocess
 import threading
 import time
+from typing import Any
 
 import pytest
 
 from agent_procutil import no_window_kwargs
 from agent_procutil.owned_process import run_caller_owned
 from agent_remote_driver.session_host.osutil import pid_alive, process_start_time
-from test_headed_extension import _logs, offline_cli as offline_cli
+from test_headed_extension import _OfflineCli, _logs, offline_cli as offline_cli
 
 pytestmark = pytest.mark.portfolio_tier("T3")
 
 
 @pytest.mark.asyncio
-async def test_native_acp_missing_inventory_is_not_an_empty_snapshot(tmp_path, offline_cli):
+async def test_native_acp_missing_inventory_is_not_an_empty_snapshot(
+    tmp_path: Path, offline_cli: _OfflineCli,
+) -> None:
     plugin = tmp_path / "acp-inventory-plugin"
     extension = plugin / "extensions" / "acp-inventory-fixture"
     extension.mkdir(parents=True)
@@ -52,21 +55,25 @@ writeFileSync(process.env.DRIVER_FIXTURE_OUTPUT, JSON.stringify({
         stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE, **no_window_kwargs(),
     )
+    assert process.stdin is not None and process.stdout is not None and process.stderr is not None
+    stdin, stdout = process.stdin, process.stdout
     stderr_task = asyncio.create_task(process.stderr.read())
     identities = []
 
-    def retain(pid):
+    def retain(pid: int) -> None:
         birth = process_start_time(pid)
         assert birth and pid_alive(pid)
         identities.append((pid, birth))
 
-    async def rpc(identifier, method, params, *, allow_error=False):
-        process.stdin.write((json.dumps({
+    async def rpc(
+        identifier: int, method: str, params: dict[str, Any], *, allow_error: bool = False,
+    ) -> Any:
+        stdin.write((json.dumps({
             "jsonrpc": "2.0", "id": identifier, "method": method, "params": params,
         }) + "\n").encode())
-        await process.stdin.drain()
+        await stdin.drain()
         while True:
-            line = await asyncio.wait_for(process.stdout.readline(), 30)
+            line = await asyncio.wait_for(stdout.readline(), 30)
             assert line, (await asyncio.wait_for(stderr_task, 5)).decode("utf-8", "replace")
             message = json.loads(line)
             if message.get("id") == identifier and "method" not in message:
@@ -129,7 +136,9 @@ writeFileSync(process.env.DRIVER_FIXTURE_OUTPUT, JSON.stringify({
     ("shell-sync", False), ("shell-background", False),
     ("agent-sync", False), ("agent-background", False),
 ])
-def test_native_public_sdk_headless_inventory(tmp_path, offline_cli, mode, timeout_helper):
+def test_native_public_sdk_headless_inventory(
+    tmp_path: Path, offline_cli: _OfflineCli, mode: str, timeout_helper: bool,
+) -> None:
     kind = mode.split("-")[0] if mode.startswith(("shell-", "agent-")) else None
     if kind == "shell" and os.name != "nt":
         pytest.skip("Native PowerShell tool control requires Windows")
@@ -383,7 +392,9 @@ def test_native_public_sdk_headless_inventory(tmp_path, offline_cli, mode, timeo
     assert not (offline_cli.home / "permissions-config.json").exists()
 
 
-def test_native_prompt_mode_loads_the_same_inventory_plugin(tmp_path, offline_cli):
+def test_native_prompt_mode_loads_the_same_inventory_plugin(
+    tmp_path: Path, offline_cli: _OfflineCli,
+) -> None:
     plugin = tmp_path / "inventory-plugin"
     extension = plugin / "extensions" / "inventory-fixture"
     extension.mkdir(parents=True)

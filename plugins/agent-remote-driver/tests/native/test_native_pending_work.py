@@ -1,5 +1,7 @@
 """Opt-in native pending-work transitions through public joined-session APIs."""
 
+from collections.abc import Callable
+import importlib
 import json
 import os
 from pathlib import Path
@@ -8,13 +10,14 @@ import shutil
 import subprocess
 import threading
 import time
+from typing import Any
 from uuid import uuid4
 
 import pytest
 
 from agent_procutil import no_window_kwargs
 from agent_remote_driver.session_host.osutil import pid_alive, process_start_time
-from test_headed_extension import _logs, offline_cli as offline_cli
+from test_headed_extension import _OfflineCli, _logs, offline_cli as offline_cli
 
 pytestmark = pytest.mark.portfolio_tier("T3")
 
@@ -22,7 +25,9 @@ pytestmark = pytest.mark.portfolio_tier("T3")
 @pytest.mark.parametrize("kind", ["shell", "agent"])
 @pytest.mark.parametrize("execution", ["sync", "background"])
 @pytest.mark.skipif(os.name != "nt", reason="Native PowerShell tool control requires Windows")
-def test_native_joined_pending_work_observes_real_tool(tmp_path, offline_cli, kind, execution):
+def test_native_joined_pending_work_observes_real_tool(
+    tmp_path: Path, offline_cli: _OfflineCli, kind: str, execution: str,
+) -> None:
     plugin = tmp_path / "native-task-plugin"
     extension = plugin / "extensions" / "native-task-fixture"
     extension.mkdir(parents=True)
@@ -125,7 +130,7 @@ session.on("session.idle", () => { clearInterval(timer); });
     })
     initial_response, settled_response = threading.Event(), threading.Event()
 
-    def gate_response(request):
+    def gate_response(request: dict[str, Any]) -> threading.Event:
         if any(
             message["role"] == "user" and "ISOLATED_AGENT_SETTLED" in str(message.get("content", ""))
             for message in request["messages"]
@@ -154,7 +159,7 @@ session.on("session.idle", () => { clearInterval(timer); });
         **no_window_kwargs(),
     )
 
-    def retain(pid):
+    def retain(pid: int) -> None:
         birth = process_start_time(pid)
         assert birth and pid_alive(pid)
         identities.append((pid, birth))
@@ -266,7 +271,7 @@ session.on("session.idle", () => { clearInterval(timer); });
     events = [json.loads(line) for line in session_files[0].read_text(encoding="utf-8").splitlines()]
     expected_users = ["ISOLATED_NATIVE_PENDING_FIXTURE"]
     if kind == "agent":
-        expected_users.append(arguments["prompt"])
+        expected_users.append(str(arguments["prompt"]))
     assert [
         event["data"]["content"] for event in events if event["type"] == "user.message"
     ] == expected_users
@@ -277,7 +282,9 @@ session.on("session.idle", () => { clearInterval(timer); });
     assert not (offline_cli.home / "permissions-config.json").exists()
 
 
-def test_native_joined_client_task_transitions_remain_visible_until_removed(tmp_path, offline_cli):
+def test_native_joined_client_task_transitions_remain_visible_until_removed(
+    tmp_path: Path, offline_cli: _OfflineCli,
+) -> None:
     plugin = tmp_path / "pending-work-plugin"
     extension = plugin / "extensions" / "pending-work-fixture"
     extension.mkdir(parents=True)
@@ -350,12 +357,12 @@ writeFileSync(process.env.DRIVER_FIXTURE_OUTPUT, JSON.stringify({
 
 
 def test_native_joined_schedule_list_and_exact_stop_observe_real_command(
-    tmp_path, offline_cli, monkeypatch,
-):
+    tmp_path: Path, offline_cli: _OfflineCli, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     if os.name != "nt" or os.environ.get("COPILOT_DRIVER_HEADED_MUX_E2E") != "1":
         pytest.skip("Explicitly select the isolated native Windows terminal lane")
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1]))
-    from headed_mux_fixture import FixtureMux
+    FixtureMux = importlib.import_module("headed_mux_fixture").FixtureMux
 
     binary = os.environ.get("PSMUX_TEST_BIN") or shutil.which("psmux.exe")
     assert binary, "Select an existing native PSMux"
@@ -414,7 +421,7 @@ const timer = setInterval(async () => {
     identities = []
     incarnation = None
 
-    def until(check, label):
+    def until(check: Callable[[], Any], label: str) -> Any:
         deadline = time.monotonic() + 30
         while time.monotonic() < deadline:
             try:
@@ -429,7 +436,7 @@ const timer = setInterval(async () => {
             + mux.query("capture-pane", "-p", "-t", mux.target).stdout[-8192:],
         )
 
-    def events():
+    def events() -> list[dict[str, Any]]:
         return [json.loads(line) for line in history.read_text(encoding="utf-8").splitlines()]
 
     try:

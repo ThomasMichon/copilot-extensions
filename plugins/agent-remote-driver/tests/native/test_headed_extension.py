@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import http.server
 import asyncio
-from collections.abc import AsyncIterator, Callable, Iterator
+from collections.abc import Callable, Iterator
 import contextlib
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
@@ -224,7 +224,7 @@ def test_native_private_mux_executes_the_requested_pane(
     if os.name != "nt" or os.environ.get("COPILOT_DRIVER_HEADED_MUX_E2E") != "1":
         pytest.skip("Explicitly select the isolated Windows PSMux lane")
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1]))
-    from headed_mux_fixture import FixtureMux
+    FixtureMux = importlib.import_module("headed_mux_fixture").FixtureMux
     binary = os.environ.get("PSMUX_TEST_BIN") or shutil.which("psmux.exe")
     assert binary
     pane_python = physical_executable(getattr(sys, "_base_executable", sys.executable))
@@ -634,7 +634,7 @@ async def test_native_headed_sdk_uses_common_ws_tcp_broker_and_preserves_identit
                 "params": {"sessionId": native, "prompt": [{"type": "text", "text": prompts[2]}]},
             }) + "\n").encode())
             while True:
-                frames = cast(Callable[[], AsyncIterator[tuple[int, bytes]]], client.frames)
+                frames = client.frames
                 cursor, frame = await asyncio.wait_for(anext(frames()), 30)
                 message = json.loads(frame)
                 await client.ack(cursor)
@@ -1074,7 +1074,7 @@ async def _native_coordinator_flow(
                         "jsonrpc": "2.0", "id": request_id, "method": method, "params": params,
                     }) + "\n").encode())
                     while True:
-                        frames = cast(Callable[[], AsyncIterator[tuple[int, bytes]]], client.frames)
+                        frames = client.frames
                         cursor, frame = await asyncio.wait_for(anext(frames()), 30)
                         response = json.loads(frame)
                         await client.ack(cursor)
