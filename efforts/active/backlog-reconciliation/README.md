@@ -3424,6 +3424,9 @@ sources, transferring owners or turning partial/planning gains into completion.
   The [auth-lifetime and twelve-contract checkpoint](journal/2026/11.17-auth-lifetime-and-contract-discriminators.md)
   records reviewed complete #3442 receiving through venue-parity and its
   separate redundant-tracking retirement, not technical completion.
+  Its subsequent #3444/#3556 receiving checks retain the full independent
+  contracts: existing recovery and worker-handoff plans are partial homes,
+  not accepted whole-contract transfers.
   The [cleanup and unchanged-source discriminator](journal/2026/11.17-cleanup-and-unchanged-source-discriminator.md)
   credits #3179's finite checkpoint/guard changes while retaining its whole
   incident and stops #1742/#3115 at unchanged decisive sources.
