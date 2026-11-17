@@ -5467,7 +5467,9 @@
         "tools/promotion_unit_tests/test_typecheck_new_code.py::test_new_code_copied_fragment_selects_its_complete_owned_program[fragment-installation_context.py]",
         "tools/promotion_unit_tests/test_typecheck_new_code.py::test_new_code_copied_fragment_selects_its_complete_owned_program[fragment-_installation_context.py]",
         "tools/promotion_unit_tests/test_typecheck_new_code.py::test_independent_setup_view_refuses_changed_bound_program[source]",
-        "tools/promotion_unit_tests/test_typecheck_new_code.py::test_independent_setup_view_refuses_changed_bound_program[output]"
+        "tools/promotion_unit_tests/test_typecheck_new_code.py::test_independent_setup_view_refuses_changed_bound_program[output]",
+        "tools/promotion_unit_tests/test_typecheck_new_code.py::test_checker_composes_canonical_and_copied_installation_programs_once[installation_context.py]",
+        "tools/promotion_unit_tests/test_typecheck_new_code.py::test_checker_composes_canonical_and_copied_installation_programs_once[_installation_context.py]"
     ],
     "coverage_targets": [
         "plugins/agent-worktrees/src/agent_worktrees/resource_delivery.py",
