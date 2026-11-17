@@ -17,20 +17,34 @@ from ..test_procutil import (
 pytestmark = pytest.mark.skipif(os.name != "nt", reason="native Windows executable paths")
 
 
+def _supplementary_home(home: Path, relative_python: Path) -> Path | None:
+    units = len(str(home / relative_python).encode("utf-16-le", errors="surrogatepass")) // 2
+    selected = home / ("\U0001f600" * max(1, (260 - units) // 2))
+    return selected if len(str(selected / relative_python)) < 260 else None
+
+
 @pytest.mark.parametrize("pinned", [False, True])
 @pytest.mark.parametrize("supplementary", [False, True], ids=["ascii", "supplementary"])
+@pytest.mark.parametrize("deep_named_tmp", [False, True], ids=["default-temp", "deep-temp"])
 def test_selected_long_path_peer_preserves_arguments_and_stdio(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, pinned: bool, supplementary: bool,
+    tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch,
+    pinned: bool, supplementary: bool, deep_named_tmp: bool,
 ) -> None:
+    if deep_named_tmp:
+        tmp_path /= "deep-caller-" + "x" * 120
     version = "1.0.0+" + "x" * 150
     if supplementary:
         version = "1.0.0"
-        selected = (
-            tmp_path / "marketplaces" / FIRST_MARKETPLACE_ID / "plugins"
+        relative_python = (
+            Path("marketplaces") / FIRST_MARKETPLACE_ID / "plugins"
             / "agent-worktrees" / "versions" / version / ".venv" / "Scripts" / "python.exe"
         )
-        units = len(str(selected).encode("utf-16-le")) // 2
-        tmp_path /= "\U0001f600" * max(1, (260 - units) // 2 + 1)
+        selected = _supplementary_home(tmp_path, relative_python)
+        if selected is None:
+            selected = _supplementary_home(tmp_path_factory.mktemp("peer"), relative_python)
+        if selected is None:
+            pytest.skip("fixture-owned temporary base cannot fit a sub-260-code-point interpreter")
+        tmp_path = selected
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.setattr(Path, "home", lambda: tmp_path)

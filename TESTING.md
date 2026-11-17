@@ -8134,7 +8134,10 @@ The separate explicit Dispatch `tests/native/test_peer_long_paths.py` uses the
 existing real-venv peer fixtures for both routes. It requires actual Windows
 execution beyond `MAX_PATH`, including paths below 260 Python code points that
 exceed the UTF-16-unit limit, and checks exact argv, inherited streams and exit
-status; it is not part of the actor-free promotion packet.
+status with both default and deliberately deep temporary names. The Unicode
+boundary uses a distinct short fixture-owned leaf when the per-test name cannot
+fit; an incompatible framework base is reported as unqualified rather than
+mistaken for a launch failure. This is not part of the actor-free promotion packet.
 The eleven separate packaging tests remain unqualified; this cohort does not
 prove native peer launch, vendor synchronization or the complete library census.
 
