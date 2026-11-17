@@ -7,11 +7,14 @@ import subprocess
 import time
 from collections.abc import Iterator
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
-from agent_worktrees import git_ops, inrepo_config_source, worktree_creation
+from agent_worktrees import (
+    git_ops, git_repository_environment, inrepo_config_source, worktree_creation,
+)
 
 
 def _git(*args: str, cwd: Path) -> str:
@@ -782,3 +785,33 @@ def test_preparation_retains_credentials_but_not_selectors_at_native_fetch(
     assert _git("rev-parse", prepared.start_point, cwd=anchor) == new_base
     assert _git("rev-parse", "HEAD", cwd=foreign) == old_foreign
     assert not (foreign / "new-base.txt").exists()
+
+
+@pytest.mark.parametrize("environment_os", ["nt", "posix"])
+def test_preparation_credential_config_keeps_native_environment_key_case(
+    local_repositories: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch,
+    environment_os: str,
+) -> None:
+    _, anchor = local_repositories
+    environment = git_repository_environment.repository_identity_env()
+    environment.update({
+        "git_config_count": "1",
+        "git_config_key_0": "http.extraHeader",
+        "git_config_value_0": "X-Fixture-Auth: native-case",
+    })
+    monkeypatch.setattr(
+        git_repository_environment, "os",
+        SimpleNamespace(name=environment_os, environ={}),
+    )
+    child_env = git_repository_environment.repository_identity_env(
+        environment, preserve_credentials=True,
+    )
+    result = subprocess.run(
+        ["git", "config", "--get", "http.extraHeader"], cwd=anchor, env=child_env,
+        capture_output=True, text=True, timeout=10,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert result.returncode == (0 if environment_os == "nt" else 1)
+    assert result.stdout.strip() == (
+        "X-Fixture-Auth: native-case" if environment_os == "nt" else ""
+    )

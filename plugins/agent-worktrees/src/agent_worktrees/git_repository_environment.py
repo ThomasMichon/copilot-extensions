@@ -86,7 +86,10 @@ def _credential_parameters(value: str) -> str:
 
 
 def _credential_configuration(environment: dict[str, str]) -> dict[str, str]:
-    original = {key.upper(): value for key, value in environment.items()}
+    original = (
+        {key.upper(): value for key, value in environment.items()}
+        if os.name == "nt" else environment
+    )
     preserved: dict[str, str] = {}
     try:
         count = int(original.get("GIT_CONFIG_COUNT", "0"))
