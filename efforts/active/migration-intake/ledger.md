@@ -347,3 +347,31 @@ provider/acting-identity/landing authority, idempotency and separate
 fixture/contract/native evidence tiers. Finite #2899 repair need not await
 independent #2887 capabilities or whole-parent completion. This receipt creates
 no issue, executor, live post, source change or claim transfer.
+
+## Finite both-provider auth-lifetime intake (2026-11-17 UTC)
+
+This appends a proposed route. It becomes effective only through normal
+reviewed delivery of the accompanying complete direct domain Plan amendment.
+Ledger publication alone is not domain acceptance. Prior rows and unresolved
+residuals remain unchanged.
+
+| Candidate | Source | Disposition | Primary canonical owner | Tracker outcome |
+|-----------|--------|-------------|-------------------------|-----------------|
+| Explicit both-provider unattended-auth modes, independent inference identity, effective lifetime/readiness, provider-policy decision and real disconnected authenticated-work acceptance | Public #3442, complete original and all four eligible refinements | routed (proposed; effective after reviewed direct Plan acceptance) | [venue-parity](../venue-parity/README.md), WS-B P3442-1..8/V3442-1..8/G3442 only | Retain #3442 pending reviewed delivery, complete current ROOT/source readback and separate source-specific judgment; no new issue, executor or credential/resource effect |
+
+The existing domain intake contract remains the deduplication and acceptance
+route, not another primary implementation programme. Launch-time credential
+consumption alone is not the whole auth-lifetime contract. Preserve the
+explicit durable-auth request and provider-policy/vision conflict decision
+without selecting a credential design, bottling borrowed secrets, copying
+host stores, baking credentials into images or broadening grants.
+
+All seventeen technical rows remain unchecked. Both providers retain actual
+long-duration driver-disconnected authenticated work and negative controls;
+source, fixture, relay/controller survival and sleep are not substitutes.
+The existing implementation claimant remains unidentified, not absent or
+released. No generic claimant ACK is added to documentary review.
+Incumbent P0/P2 order, #954's whole-programme/P3 reservation, #3507's actual
+native-OR-complete-accepted-transfer condition, credential/relay and other
+source/resource custody remain. Planned intake is neither implementation
+nor issue disposition.
