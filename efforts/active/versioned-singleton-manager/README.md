@@ -28,6 +28,35 @@ before declaring the capability delivered.
 
 ## Coordination
 
+The proposed finite #5655 mechanism retention below stays with the existing
+implementation driver and Linux/systemd and native Windows validation
+custodians. The original implementation owner's serial continuation remains
+the ownership record; the later inquiry about an accepting independent
+manager/adopter custodian is not vacancy, an accepted handoff or appointment
+of this document's author. Preserve actual process/source/resource custody
+and every incumbent row and checked Linux credit. Normal reviewed documentary
+delivery and whole-current readback precede any separate tracking judgment;
+they neither transfer custody nor require implementation/native completion
+before planned receiving. No generic ACK gate or new execution authority is
+created, and this proposal changes no source-tracker disposition.
+
+Prospectively distinguish historical OPEN retention from administrative
+tracking judgment. The 2026-10-08 implementation-resumption entry records
+the then-open umbrella and incomplete technical delivery; the later campaign
+retention preserves that unfinished work and its actual custodians. Neither
+establishes an additional live-issue-token requirement for same-custodian
+planned receiving. After actual reviewed COMPLETE planned receiving and
+current WHOLE source/receiver/claims/custody readback, the coordinator may
+make a SEPARATE administrative tracking judgment without first completing
+Windows, native, consumer, release or whole-effort technical acceptance.
+Those gates remain fully binding for their technical outcomes. Preserve
+the historical OPEN entry, umbrella references and adjacent #4022/#876/#5574
+clauses; this clarification is not their silent deletion or a present issue
+disposition. The serial implementation owner remains unchanged, the custody
+inquiry remains unanswered, and actual custody transfer still requires its
+legitimate accepting custodian. No transfer is proposed, no actual hold is
+waived and no generic ACK prerequisite is added.
+
 The agent-recommended finite #5319 webhook-adopter proposal below retains
 the existing webhook-producer, shared-cutover and applicable validation
 custodians. It explicitly adds the shared webhook listener to this ROOT's
@@ -165,6 +194,50 @@ are complete, rather than stopping after the design PR.
 - [ ] Re-run the registered task after successful intentional retirement;
   account for `IgnoreNew`, native task-state lag, and repeated updates without
   consuming crash-restart accounting.
+- [ ] **P5655-W:** Retain #5655's original Windows mechanisms within this
+  shared manager and its adopter-owned passive-spawn contract, not every
+  suite spawn site. Keep one durable, well-known manager registration pipe,
+  deterministically named from `manager_state_dir`, listening throughout
+  the manager's lifetime across supervised daemon generations; preserve the
+  existing authenticated peer/rights checks. Capture the suspended candidate's
+  trusted process handle with `DuplicateHandle`, deliver its registration
+  over IPC, and acknowledge registration and Job assignment before resume.
+  Preserve that legitimately held handle through the short-lived bridge and
+  successor-manager relay; neither Toolhelp/PPID ancestry nor an independently
+  re-derived `OpenProcess` handle plus PID/token is substitute trust.
+  Where the existing Windows deploy path uses `CREATE_BREAKAWAY_FROM_JOB`,
+  retain the required `JOB_OBJECT_LIMIT_BREAKAWAY_OK` pairing and actual
+  re-capture/containment; flags, Job membership and a successful spawn alone
+  prove neither lifetime nor identity/custody. For Windows manager self-update,
+  retain the bridge's independently held named Job, named rendezvous and own
+  durable handoff record before acknowledged intentional manager retirement
+  with normal success status. After confirmed old-manager exit, poll the
+  existing registered task until non-Running, request its run and require the
+  new manager's handshake; retry that sequence within the existing overall
+  adoption deadline rather than trust fire-and-forget success or consume
+  crash-restart slots. Preserve this ROOT's synchronized handoff/failure
+  cleanup, compatible handoff AND bounded cold takeover/recovery, and separate
+  Linux exit42/no-pre-spawn contract. Align the pattern's adjacent-cleanup
+  description with this ROOT's existing kernel-synchronization requirement:
+  the absence of a cooperative yield does not make adjacent cleanup operations
+  cross-process atomic. Retain the actual synchronization guard rather than
+  assume that record transition and Job-handle cleanup cannot interleave. No
+  replacement lifecycle architecture, task registration, privilege change or
+  resource action is selected here.
+
+#### Local Validation - retained #5655 Windows mechanisms
+
+- [ ] **V5655-W:** Through the existing Windows validation owner and original
+  real Windows-host process-boundary gate, qualify P5655-W's lifetime pipe,
+  repeated-generation registration, suspended handle/IPC acknowledgment
+  ordering, trusted bridge/successor relay, breakaway pairing and actual Job
+  containment. Cover manager death and self-update, interrupted/failed or
+  partial adoption, `IgnoreNew`/task-state lag, handshake and bounded retry/
+  deadline outcomes without duplicate or indefinitely untracked daemons.
+  Preserve the existing failure controls, identity/resource boundaries and
+  distinct source, native, release and installed evidence tiers. Flags,
+  mocks or code review alone do not establish native production-readiness;
+  that original product gate is not prerequisite to documentary receiving.
 
 ### Phase C - Consumer integration
 
@@ -505,6 +578,17 @@ _(Agent-recommended direct tracking under existing Phase C; all rows unchecked.)
 
 ## Validation Plan
 
+- [ ] **G5655-W:** Resolve the complete P5655-W/V5655-W retention and continuing
+  same-custodian Coordination at the original Windows manager/adopter scope.
+  Include P5655-W's tracked pattern-alignment correction; preserve the
+  existing synchronized cleanup requirement without a new native programme.
+  Preserve every incumbent Plan/global Validation item, checked Linux credit,
+  accepted handoff/cold-recovery alternatives and original real-Windows gate.
+  Keep Linux/systemd, Windows, both consumer integrations, release and
+  authorized installed acceptance distinct. Documentary delivery/readback
+  is not technical completion, source disposition or custody transfer;
+  no every-host programme or unrelated whole-parent prerequisite is added.
+
 - [ ] **G5319:** Resolve the complete P5319/V5319 webhook contract and
   continuing Coordination at its original scope. General manager
   implementation or another adopter's proof is not webhook acceptance.
@@ -647,6 +731,21 @@ above are **agent-recommended implementation hardening**, not new operator
 requirements or permission to weaken the existing vision.
 
 ## Journal
+
+### 2026-11-17 - Proposed finite #5655 Windows mechanism retention
+
+Added unchecked P5655-W/V5655-W/G5655-W and same-custodian Coordination for
+the original manager-pipe, trusted-handle, breakaway and bounded task-handoff
+mechanisms. All incumbent bytes, checked Linux credit and acceptance tiers
+remain. This records a documentary proposal, not reviewed delivery,
+implementation/native proof, source disposition or resource handoff.
+Prospectively clarified the historical/campaign OPEN retention without
+changing the serial owner, unanswered custody inquiry or actual handoff
+requirements. Separate administrative judgment follows reviewed complete
+planned receiving and whole-current source/receiver/claims/custody readback;
+technical acceptance remains separately binding. P5655-W also tracks the
+pattern's adjacent-cleanup atomicity mismatch against the existing kernel
+guard, preventing the known documentation defect from losing its owner/home.
 
 ### 2026-11-17 - Proposed finite webhook-adopter receiving
 
