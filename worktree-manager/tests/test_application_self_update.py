@@ -184,11 +184,11 @@ def test_prepared_update_uses_real_plan_outside_installation_and_holds_inputs_th
 
 @pytest.mark.parametrize("damage", [
     "missing", "truncated", "utf8", "shape", "commands", "oversized",
-    "command-name", "environment-name", "runtime-version",
+    "command-name", "environment-name", "runtime-version", "default-directory",
     "unreadable", "helper-syntax", "helper-import", "helper-api", "helper-runtime",
     "frontdoors", "conflict", "incoming", "incoming-module", "incoming-helper",
     "incoming-unreadable", "incoming-command-name", "incoming-environment-name",
-    "incoming-runtime-version", "indirect",
+    "incoming-runtime-version", "incoming-default-directory", "indirect",
 ])
 def test_same_source_update_repairs_in_a_distinct_slot_and_reuses_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, damage: str,
@@ -245,11 +245,14 @@ def test_same_source_update_repairs_in_a_distinct_slot_and_reuses_it(
         metadata.write_bytes(b"[]")
     elif damage == "commands":
         metadata.write_text(json.dumps({**declaration, "commands": []}), encoding="utf-8")
-    elif damage.removeprefix("incoming-") in {"command-name", "environment-name", "runtime-version"}:
+    elif damage.removeprefix("incoming-") in {
+        "command-name", "environment-name", "runtime-version", "default-directory",
+    }:
         corruptions: dict[str, dict[str, Any]] = {
             "command-name": {"commands": ["worktree-manager", "../broken"]},
             "environment-name": {"root_environment": "../broken"},
             "runtime-version": {"construction": {"runtime_version": "../broken"}},
+            "default-directory": {"default_directory": "../broken"},
         }
         invalid = corruptions[damage.removeprefix("incoming-")]
         target = app / "application.json" if damage.startswith("incoming-") else metadata
@@ -317,6 +320,7 @@ def test_same_source_update_repairs_in_a_distinct_slot_and_reuses_it(
     if damage in {
         "conflict", "incoming", "incoming-module", "incoming-helper", "incoming-unreadable", "indirect",
         "incoming-command-name", "incoming-environment-name", "incoming-runtime-version",
+        "incoming-default-directory",
     }:
         assert result.action == "error"
         assert (root / "current-version").read_text(encoding="utf-8").strip() == "2"

@@ -89,6 +89,12 @@ def _validate_declaration(app: Any) -> None:
         or app["construction"]["runtime_version"].endswith(".")
         or not isinstance(app.get("root_environment"), str)
         or not re.fullmatch(r"[A-Z][A-Z0-9_]*(?:_ROOT|_HOME|_INSTALL_DIR)", app["root_environment"])
+        or "default_directory" in app and (
+            not isinstance(app["default_directory"], str)
+            or not re.fullmatch(
+                r"\.[a-z0-9][a-z0-9-]*(?:/[a-z0-9][a-z0-9-]*)*", app["default_directory"],
+            )
+        )
         or not isinstance(app.get("commands"), list) or not app["commands"]
         or any(not isinstance(command, str) or not _NAME.fullmatch(command)
                for command in app["commands"])
