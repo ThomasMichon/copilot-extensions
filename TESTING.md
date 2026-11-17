@@ -8194,9 +8194,10 @@ SSH case is skipped when no `ssh` client is on `PATH`.
 The manual `Installation context full` workflow's `codespaces-installer`
 portfolio runs this complete packet on hosted Linux and Windows: materializer
 and runner integration controls, snapshot-copy/support contracts, the full
-canonical installer module, normal committed-HEAD materialization, and the full
-materialized installer module. Windows retains all six disjoint installer
-partitions. It records exact source identity, profile, outcomes and cleanup
+canonical installer and runtime-only PowerShell modules, normal committed-HEAD
+materialization, and both materialized modules. Windows retains all six
+disjoint installer partitions and exercises the runtime-only hold and re-entry
+controls in PowerShell 5 and 7. It records exact source identity, profile, outcomes and cleanup
 inside one 7200-second functional envelope; required PR CI is unchanged.
 
 For sustained host contention, explicitly select the test-only
@@ -8205,7 +8206,8 @@ For sustained host contention, explicitly select the test-only
 ```bash
 python tools/run-plugin-tests.py agent-codespaces \
   --test-profile busy-host-functional \
-  --test-file tests/test_installer_engine_adoption.py
+  --test-file tests/test_installer_engine_adoption.py \
+  --test-file tests/test_install_runtime_only_ps1.py
 python tools/run-plugin-tests.py agent-codespaces \
   --test-profile busy-host-functional \
   --test-file tests/test_snapshot_copy_contract.py \
@@ -10695,6 +10697,11 @@ PATH or other persistent environment state. It deliberately does not roll the
 key back because another process may have made a legitimate concurrent edit.
 Installer subprocesses launched by a direct pytest invocation receive the same
 prevention through pytest's inherited `PYTEST_CURRENT_TEST` marker.
+The runtime-only PowerShell re-entry cases additionally require the runner's
+`COPILOT_EXTENSIONS_TEST_CONTAINED=1` prerequisite and explicitly skip before
+fixture effects when it is absent. Use the
+[optional Codespaces qualification](#optional-busy-host-codespaces-functional-qualification)
+runner command to execute those cases; the fixture never fabricates containment.
 
 Codespaces PowerShell installer regressions additionally use a fixture-only
 executable search path and explicit batch exit-code forwarding. Temporary

@@ -229,6 +229,8 @@ def _reentry(
     tmp_path: Path, shell: str, boundary: str, action: str,
     monkeypatch: pytest.MonkeyPatch, *, requested: bool = True, lose_hold: bool = False,
 ) -> tuple[int, dict[str, object]]:
+    if os.environ.get("COPILOT_EXTENSIONS_TEST_CONTAINED") != "1":
+        pytest.skip("Runtime-only re-entry requires containment from tools/run-plugin-tests.py")
     environment = _environment(tmp_path)
     assert environment.get("COPILOT_EXTENSIONS_TEST_CONTAINED") == "1"
     home = Path(environment["USERPROFILE"])
