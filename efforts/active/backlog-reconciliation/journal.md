@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-17 - Cleanup delta and unchanged-source discriminators](journal/2026/11.17-cleanup-and-unchanged-source-discriminator.md)
+
 - [2026-11-17 - Generic-review intake receipt and parked acceptance](journal/2026/11.17-generic-review-intake-receipt.md)
 
 - [2026-11-17 - Conditional cadence guidance and the idle-wake discriminator](journal/2026/11.17-cadence-guidance-and-idle-wake-discriminator.md)
