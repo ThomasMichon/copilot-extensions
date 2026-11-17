@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from agent_remote_driver import mux_creation
+from agent_remote_driver import mux_creation, windows_mux_version
 from agent_worktrees import activity, pane_lifecycle, sessions
 
 
@@ -34,7 +34,7 @@ def test_mux_creation_keeps_process_home_separate_from_pane(
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
     monkeypatch.setattr(platform, "system", lambda: system)
     monkeypatch.setattr(mux_creation, "has_session", lambda *args: False)
-    monkeypatch.setattr(mux_creation, "require_creation_binary", lambda binary: binary)
+    monkeypatch.setattr(windows_mux_version, "require_creation_binary", lambda binary: binary)
     monkeypatch.setattr(
         mux_creation, "run_session", lambda argv, *args: mux_creation.run(argv),
     )
