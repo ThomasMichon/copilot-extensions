@@ -14,6 +14,10 @@ action view `event_cursor` must agree; otherwise the example reports unavailable
 and the caller can perform another bounded coherent read. A current SSE sample
 already supplies those views atomically, but its bounded first pages may omit
 the selected PR.
+Retain the action request's actual offset in `after`. A terminal continuation
+page with `more: false` proves no later actions, not absence of earlier ones;
+an absent action is unavailable unless complete coverage starting at zero is
+established.
 
 Obtain the independent snapshot through the existing
 [native observation owner](../../plugins/agent-worktrees/docs/pr-observation.md),

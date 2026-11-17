@@ -35,7 +35,7 @@ class Comparison:
 def compare(
     pulls: dict[str, Any], feed: dict[str, Any], reference: Reference, *,
     identity: RepositoryIdentity, consumer: str, reviewer: str, number: int,
-    now: int, max_age_seconds: int = 1800,
+    now: int, max_age_seconds: int = 1800, after: int = 0,
 ) -> Comparison:
     """Compare one selected PR, never fetch a provider or declare repository-wide agreement."""
     if (
@@ -45,6 +45,7 @@ def compare(
         or type(number) is not int or number < 1
         or type(now) is not int or now < 0 or type(max_age_seconds) is not int
         or not 1 <= max_age_seconds <= 86400
+        or type(after) is not int or not 0 <= after <= 800
     ):
         raise ValueError("comparison scope differs")
     native = validate_identity(reference.snapshot, identity, number)
@@ -82,7 +83,7 @@ def compare(
     actions = [item for item in feed["next_actions"] if item["pr"] == number]
     if len(actions) > 1:
         return Comparison(number, facts, "unavailable", "ambiguous action selection")
-    if not actions and feed["more"]:
+    if not actions and (after != 0 or feed["more"]):
         return Comparison(number, facts, "unavailable", "action page incomplete")
     if actions and (
         actions[0]["candidate"] != {

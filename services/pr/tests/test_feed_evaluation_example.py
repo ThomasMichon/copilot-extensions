@@ -136,3 +136,22 @@ def test_reference_and_cached_scope_are_fenced_before_comparison(tmp_path: Path)
         compare(selected, reference(selected, api_base="https://other.example"))
     with pytest.raises(ValueError, match="scope"):
         compare(selected, direct, consumer="other")
+
+
+@pytest.mark.parametrize("state", ["open", "closed"])
+def test_terminal_continuation_cannot_establish_absence_of_an_earlier_action(
+    tmp_path: Path, state: str,
+) -> None:
+    selected = fixtures.setup(tmp_path)
+    fixtures.observe(selected, number=7, members=(7, 8))
+    fixtures.observe(selected, number=8, members=(7, 8))
+    first = fixtures.request(selected, limit=1)
+    assert first["next_actions"][0]["pr"] == 7
+    terminal = fixtures.request(selected, after=1, limit=1, cursor=first["cursor"])
+    assert not terminal["more"] and terminal["next_actions"][0]["pr"] == 8
+    result = example.compare(
+        fixtures.request(selected, "query", number=7), terminal,
+        reference(selected, pr_state=state), identity=selected[2],
+        consumer="consumer", reviewer="reviewer", number=7, now=1000, after=1,
+    )
+    assert result.action == "unavailable" and "incomplete" in result.reason
