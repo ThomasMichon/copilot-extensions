@@ -345,7 +345,15 @@ def _expected_binstub_contents(*, application_slot: Path | None = None) -> dict[
         launchers = _application_launchers(application_slot)
         declaration = application_slot / "application.json"
         record = json.loads(declaration.read_text(encoding="utf-8")) if declaration.exists() else {}
+        if not isinstance(record, dict):
+            raise ValueError("Manager application declaration must be an object")
         commands = record.get("commands", ["worktree-manager"])
+        if (
+            not isinstance(commands, list) or not commands
+            or any(not isinstance(command, str) for command in commands)
+            or "worktree-manager" not in commands or len(set(commands)) != len(commands)
+        ):
+            raise ValueError("Manager application commands must be unique and include Manager")
         contents: dict[str, str] = {}
         for command in commands:
             contents.update(launchers.global_binstubs(

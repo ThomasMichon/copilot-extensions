@@ -64,7 +64,12 @@ def test_selected_older_launcher_api_is_a_replacement_gap_not_a_status_error(
     assert install._binstubs_are_stale(application_slot=slot)
 
 
-@pytest.mark.parametrize("corrupt", [b'{"commands": [', b"\xff"])
+@pytest.mark.parametrize("corrupt", [
+    b'{"commands": [', b"\xff", b"[]",
+    b'{"commands":[]}', b'{"commands":"worktree-manager"}',
+    b'{"commands":[null]}', b'{"commands":["other"]}',
+    b'{"commands":["worktree-manager","worktree-manager"]}',
+])
 def test_corrupt_selected_declaration_needs_replacement_but_cannot_be_published(
     application: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch, corrupt: bytes,
 ) -> None:
