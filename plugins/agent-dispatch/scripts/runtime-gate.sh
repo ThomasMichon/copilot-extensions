@@ -4,6 +4,7 @@ set -euo pipefail
 export PYTHONUTF8=1
 unset PYTHONPATH PYTHONHOME
 CONFIGURATION_ONLY=0
+READINESS_PROBE=0
 SKIP_VALUE=0
 for ARGUMENT in "$@"; do
     if [[ "$SKIP_VALUE" == 1 ]]; then SKIP_VALUE=0; continue; fi
@@ -11,6 +12,7 @@ for ARGUMENT in "$@"; do
         --url|--token|--control-token|--task-token|--task-token-file|--task-scope|--task-url|--task-worker) SKIP_VALUE=1 ;;
         --url=*|--token=*|--control-token=*|--task-token=*|--task-token-file=*|--task-scope=*|--task-url=*|--task-worker=*|--shared|--local) ;;
         telemetry) CONFIGURATION_ONLY=1; break ;;
+        installer-readiness|invocation-contract) READINESS_PROBE=1; break ;;
         *) break ;;
     esac
 done
@@ -129,9 +131,9 @@ run_runtime() {
     else
         unset COPILOT_EXTENSIONS_CONTEXT
     fi
-    case "${1:-}" in
-        installer-readiness|invocation-contract) exec "$AGENT_RT_PY" -I -B -X utf8 "$PAYLOAD_ROOT/scripts/versioned_runtime_probe.py" --plugin agent-dispatch --module "$MODULE" -- "$@" ;;
-    esac
+    if [[ "$READINESS_PROBE" == 1 ]]; then
+        exec "$AGENT_RT_PY" -I -B -X utf8 "$PAYLOAD_ROOT/scripts/versioned_runtime_probe.py" --plugin agent-dispatch --module "$MODULE" -- "$@"
+    fi
     exec "$AGENT_RT_PY" -m "$MODULE" "$@"
 }
 if [[ "$CONFIGURATION_ONLY" == 1 ]]; then

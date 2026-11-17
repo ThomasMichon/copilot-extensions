@@ -23,22 +23,35 @@ binding_fixture = _binding_fixture
     for plugin, prefix in [
         *((name, ()) for name in (
             "agent-machines", "agent-worktrees", "agent-bridge", "agent-dispatch", "agent-mcp",
+            "agent-codespaces", "agent-containers",
         )),
         ("agent-worktrees", ("--project", "example")),
         ("agent-worktrees", ("worktrees",)),
         ("agent-worktrees", ("agent-worktrees", "-p", "example", "worktree", "--project=example")),
+        ("agent-bridge", ("--json", "--project", "example")),
+        ("agent-bridge", ("-pexample", "--j")),
+        ("agent-codespaces", ("--verbose", "--project", "example")),
+        ("agent-codespaces", ("--pro=example", "-v")),
+        ("agent-codespaces", ("-vvpinstaller-readiness",)),
+        ("agent-containers", ("--verbose",)),
+        ("agent-containers", ("-v",)),
+        ("agent-containers", ("-vv",)),
+        ("agent-dispatch", ("--local", "--url", "http://localhost:1")),
+        ("agent-dispatch", ("--url=http://localhost:1", "--shared")),
+        ("agent-mcp", ("--log-level", "debug")),
+        ("agent-mcp", ("--log-l=debug",)),
     ]
     for qualified in (False, True)
 ])
 @pytest.mark.parametrize("command", ("installer-readiness", "invocation-contract"))
-@pytest.mark.parametrize("shell", ("bash", "powershell", "pwsh"))
+@pytest.mark.parametrize("shell", ("bash", "powershell", "pwsh", "pwsh-legacy"))
 def test_readiness_dispatcher_preserves_project_without_importing_it(
     binding_fixture: dict[str, Any], plugin: str, qualified: bool, prefix: tuple[str, ...],
     command: str, shell: str,
 ) -> None:
     if shell == "bash" and os.name == "nt":
         pytest.skip("POSIX dispatcher requires native POSIX Python")
-    host = shutil.which(shell)
+    host = shutil.which("pwsh" if shell == "pwsh-legacy" else shell)
     if not host:
         pytest.skip(f"{shell} is unavailable")
     environment = _adopter(binding_fixture, plugin)
@@ -50,8 +63,8 @@ def test_readiness_dispatcher_preserves_project_without_importing_it(
     marker = home / "checkout-import"
     package = plugin.replace("-", "_")
     (project / f"{package}.py").write_text(
-        f"from pathlib import Path\nPath({str(marker)!r}).touch()\n"
-        "raise RuntimeError('checkout module ran')\n", encoding="utf-8",
+        f"from pathlib import Path\nimport sys\nPath({str(marker)!r}).touch()\n"
+        "raise RuntimeError(f'checkout module ran: {sys.argv[1:]!r}')\n", encoding="utf-8",
     )
     python = _completed_slot(binding_fixture)
     declaration = json.dumps({
@@ -106,8 +119,13 @@ def test_readiness_dispatcher_preserves_project_without_importing_it(
             "$AgentRtPy=$env:TEST_RUNTIME_PYTHON\n", encoding="utf-8",
         )
         entry = "invoke-payload-runtime" if plugin in {"agent-machines", "agent-worktrees"} else "runtime-gate"
-        argv = [host, "-NoProfile", "-NonInteractive", "-File",
-                str(scripts / f"{entry}.ps1"), *prefix, command]
+        quoted = " ".join(
+            "'" + value.replace("'", "''") + "'"
+            for value in (str(scripts / f"{entry}.ps1"), *prefix, command)
+        )
+        argv = [host, "-NoProfile", "-NonInteractive", "-Command",
+                ("$PSNativeCommandArgumentPassing='Legacy'; " if shell == "pwsh-legacy" else "")
+                + f"& {quoted}; exit $LASTEXITCODE"]
     before = {str(p.relative_to(payload)): p.read_bytes() for p in payload.rglob("*") if p.is_file()}
     result = subprocess.run(
         argv, env=environment, cwd=project, capture_output=True, text=True,

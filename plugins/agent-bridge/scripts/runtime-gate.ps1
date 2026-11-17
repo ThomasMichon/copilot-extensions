@@ -8,6 +8,7 @@ $OutputEncoding = [Console]::OutputEncoding = New-Object Text.UTF8Encoding($fals
 $forwardArgs = @($args)
 $passiveObservation = $false
 $configurationOnly = $false
+$readinessProbe = $false
 $skipProject = $false
 $firstArgument = $true
 $projectOptions = @('--p', '--pr', '--pro', '--proj', '--proje', '--projec', '--project')
@@ -33,6 +34,9 @@ foreach ($argument in $forwardArgs) {
         break
     } elseif ($argument -ceq 'telemetry') {
         $configurationOnly = $true
+        break
+    } elseif ($argument -cin @('installer-readiness', 'invocation-contract')) {
+        $readinessProbe = $true
         break
     } else {
         break
@@ -247,7 +251,7 @@ function Invoke-Runtime {
     Set-RuntimeEnvironment
     $pythonOptions = @()
     $nativeArgs = @('-m', 'agent_bridge') + $forwardArgs
-    if ($forwardArgs.Count -gt 0 -and $forwardArgs[0] -in @('installer-readiness', 'invocation-contract')) {
+    if ($readinessProbe) {
         $pythonOptions = @('-I', '-B', '-X', 'utf8')
         $nativeArgs = @(
             (Join-Path $payloadRoot 'scripts\versioned_runtime_probe.py'),

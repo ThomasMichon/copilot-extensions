@@ -5,6 +5,25 @@ Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
 $OutputEncoding = [Console]::OutputEncoding = New-Object Text.UTF8Encoding($false)
 
 $forwardArgs = [string[]]@($args)
+$readinessProbe = $false
+$skipProject = $false
+$projectOptions = @('--p', '--pr', '--pro', '--proj', '--proje', '--projec', '--project')
+foreach ($argument in $forwardArgs) {
+    if ($skipProject) { $skipProject = $false; continue }
+    $optionName = ([string]$argument -split '=', 2)[0]
+    if ($argument -ceq '-p' -or $argument -cin $projectOptions) {
+        $skipProject = $true
+    } elseif ($argument -cmatch '^-v+p(.*)$') {
+        $skipProject = $Matches[1] -ceq ''
+    } elseif ($optionName -cin $projectOptions -or $argument -clike '-p?*' -or
+              $argument -cmatch '^-v+$' -or
+              $argument -cin @('--v', '--ve', '--ver', '--verb', '--verbo', '--verbos', '--verbose')) {
+        continue
+    } elseif ($argument -cin @('installer-readiness', 'invocation-contract')) {
+        $readinessProbe = $true
+        break
+    } else { break }
+}
 $payloadRoot = [Environment]::GetEnvironmentVariable('AGENT_CODESPACES_PAYLOAD_ROOT', 'Process')
 if (-not $payloadRoot -or -not (Test-Path -LiteralPath $payloadRoot -PathType Container)) {
     [Console]::Error.WriteLine('[agent-codespaces] owning payload root is unavailable.')
@@ -263,7 +282,7 @@ function Invoke-Runtime {
     try {
         $pythonOptions = @()
         $probeEntry = ''
-        if ($forwardArgs.Count -gt 0 -and $forwardArgs[0] -in @('installer-readiness', 'invocation-contract')) {
+        if ($readinessProbe) {
             $pythonOptions = @('-I', '-B', '-X', 'utf8')
             $probeEntry = Join-Path $payloadRoot 'scripts\versioned_runtime_probe.py'
         }

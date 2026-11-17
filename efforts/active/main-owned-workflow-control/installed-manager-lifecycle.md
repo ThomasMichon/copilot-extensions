@@ -3491,3 +3491,53 @@ the prefixed Worktrees finding resolved, but that is not a waiver of the
 remaining qualification gates. Authentic-baseline upgrade, frozen-candidate
 enforcement, independent Main adoption and all original authority limits remain
 unchanged.
+
+### November 17 - Fresh Dev review remediation and independent checker programs
+
+The existing PR is rebased onto Dev
+`98daada7a07f2eb2771afaab255a96060e81f45a`, retaining Dev's Vault cache-policy
+behavior and its declaring-directory regression. The five new high-priority
+review findings concern accepted global options before readiness in Bridge,
+Codespaces, Containers, Dispatch and MCP. Their Bash and PowerShell launchers
+now classify the command without rewriting argv; Bridge and Dispatch reuse
+their existing global-option scans.
+
+All 204 actual Windows shadow-import controls pass in completed bounded groups:
+68 each for Windows PowerShell, modern PowerShell 7 and forced Legacy argument
+passing. Qualified providers execute only the installed module with isolation,
+UTF-8 and no bytecode; unqualified providers refuse before either module runs.
+Payload bytes and caller cwd remain unchanged. The earlier combined/grouped
+timeouts remain failed runs; smaller residual selections retain the original
+180-second group/aggregate and 30-second item limits. PowerShell 7 diagnostics
+also identified fixture argv rewriting by the native `-File` host; quoted
+script calls now preserve the declared arguments. Windows Bash skips are not
+native POSIX evidence.
+
+The operator-approved checker change retains the physical Worktrees owner but
+checks its ordinary files and independently loaded admission toolkit as distinct
+MyPy programs. The toolkit's explicit import roots match its actual runtime
+inventory. All selected files retain strict analysis, requirements and every
+configured Python/platform target; failures aggregate without exemptions,
+stubs, suppressions or admission changes. Selected source bytes and identities
+remain in custody across programs. The complete current-source ratchet passes
+160 physical files in 24 projects on all declared targets. The checker controls
+include real duplicate modules, different per-program import contracts,
+strict failures in either program on both targets, and source replacement.
+Pure partition controls belong to the existing actor-free unit packet; real
+MyPy/process controls stay in their separate contained lane.
+
+The canonical Worktrees producer refreshes the retained toolkit, including its
+typed installer configuration/arguments and current Dev native support. The
+rebased Vault configuration packet passes all 69 tests. Ruff and the
+13-plugin installer contract pass after the canonical MCP producer-digest
+refresh, without changing its footprint revision.
+
+The prior Index packet remains a failed cleanup result, not acceptance. Its two
+exact retained instance records identify completed, unprotected test daemons
+with no registered artifacts, but the canonical instance owner deliberately
+holds reused process identities even for finished records. No record, process
+or sandbox is released or signalled by this classification. Current-head CI,
+native POSIX proof, existing-owner hosted Windows qualification, the capture
+failure diagnosis and all parent baseline/frozen-candidate/Main obligations
+remain open. This source progress neither completes the effort nor authorizes
+rollout, broader retries or finalization.

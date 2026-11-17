@@ -5,6 +5,7 @@ Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
 $OutputEncoding = [Console]::OutputEncoding = New-Object Text.UTF8Encoding($false)
 $forwardArgs = @($args)
 $configurationOnly = $false
+$readinessProbe = $false
 $skipValue = $false
 $valueOptions = @('--url', '--token', '--control-token',
     '--task-token', '--task-token-file', '--task-scope', '--task-url', '--task-worker')
@@ -17,6 +18,9 @@ foreach ($argument in $forwardArgs) {
         continue
     } elseif ($argument -ceq 'telemetry') {
         $configurationOnly = $true
+        break
+    } elseif ($argument -cin @('installer-readiness', 'invocation-contract')) {
+        $readinessProbe = $true
         break
     } else { break }
 }
@@ -130,7 +134,7 @@ function Invoke-Runtime([string]$Python) {
     }
     $pythonOptions = @()
     $nativeArgs = @('-m', $module) + $forwardArgs
-    if ($forwardArgs.Count -gt 0 -and $forwardArgs[0] -in @('installer-readiness', 'invocation-contract')) {
+    if ($readinessProbe) {
         $pythonOptions = @('-I', '-B', '-X', 'utf8')
         $nativeArgs = @(
             (Join-Path $payloadRoot 'scripts\versioned_runtime_probe.py'),

@@ -4,6 +4,16 @@ set -euo pipefail
 export PYTHONUTF8=1
 unset PYTHONPATH PYTHONHOME
 
+READINESS_PROBE=0
+for ARGUMENT in "$@"; do
+    case "$ARGUMENT" in
+        --v|--ve|--ver|--verb|--verbo|--verbos|--verbose) ;;
+        -v*) [[ "$ARGUMENT" =~ ^-v+$ ]] || break ;;
+        installer-readiness|invocation-contract) READINESS_PROBE=1; break ;;
+        *) break ;;
+    esac
+done
+
 PAYLOAD_ROOT="${AGENT_CONTAINERS_PAYLOAD_ROOT:-}"
 [[ "$PAYLOAD_ROOT" == /* && -d "$PAYLOAD_ROOT" ]] || {
     printf '[agent-containers] owning payload root is unavailable.\n' >&2
@@ -68,11 +78,10 @@ run_runtime() {
     else
         unset COPILOT_EXTENSIONS_CONTEXT
     fi
-    case "${1:-}" in
-        installer-readiness|invocation-contract)
-            exec "$AGENT_RT_PY" -I -B -X utf8 "$SCRIPT_DIR/versioned_runtime_probe.py" \
-                --plugin agent-containers --module agent_containers -- "$@" ;;
-    esac
+    if [[ "$READINESS_PROBE" == 1 ]]; then
+        exec "$AGENT_RT_PY" -I -B -X utf8 "$SCRIPT_DIR/versioned_runtime_probe.py" \
+            --plugin agent-containers --module agent_containers -- "$@"
+    fi
     exec "$AGENT_RT_PY" -m agent_containers "$@"
 }
 

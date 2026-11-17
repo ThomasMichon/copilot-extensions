@@ -151,6 +151,12 @@ and combined compatibility prefixes for both probe commands, qualifying or
 refusing the selected provider before import while preserving the original argv.
 Run its Windows PowerShell and PowerShell 7 selections as separate bounded
 groups on slower hosts; a combined wall-limit failure is not a pass.
+Bridge, Codespaces, Containers, Dispatch and MCP also exercise their accepted
+global-option prefixes, including value options, abbreviations and applicable
+clustered short flags. The `pwsh-legacy` selection forces Legacy native argument
+passing. PowerShell script calls use quoted argument literals so the host's
+`-File` colon parsing cannot rewrite fixture argv before dispatch. Split large
+selections by shell and owner without increasing the existing packet budgets.
 Index's
 `tests/test_runtime_gate.py -k posix_readiness_parser_never`
 separately exercises its inline JSON parser from a checkout containing

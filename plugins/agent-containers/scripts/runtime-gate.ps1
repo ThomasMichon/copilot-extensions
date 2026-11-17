@@ -5,6 +5,16 @@ Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
 $OutputEncoding = [Console]::OutputEncoding = New-Object Text.UTF8Encoding($false)
 
 $forwardArgs = [string[]]@($args)
+$readinessProbe = $false
+foreach ($argument in $forwardArgs) {
+    if ($argument -cmatch '^-v+$' -or
+        $argument -cin @('--v', '--ve', '--ver', '--verb', '--verbo', '--verbos', '--verbose')) {
+        continue
+    } elseif ($argument -cin @('installer-readiness', 'invocation-contract')) {
+        $readinessProbe = $true
+        break
+    } else { break }
+}
 $payloadRoot = [Environment]::GetEnvironmentVariable('AGENT_CONTAINERS_PAYLOAD_ROOT', 'Process')
 if (-not $payloadRoot -or -not (Test-Path -LiteralPath $payloadRoot -PathType Container)) {
     [Console]::Error.WriteLine('[agent-containers] owning payload root is unavailable.')
@@ -254,7 +264,7 @@ function Invoke-Runtime {
     try {
         $pythonOptions = @()
         $probeEntry = ''
-        if ($forwardArgs.Count -gt 0 -and $forwardArgs[0] -in @('installer-readiness', 'invocation-contract')) {
+        if ($readinessProbe) {
             $pythonOptions = @('-I', '-B', '-X', 'utf8')
             $probeEntry = Join-Path $scriptDir 'versioned_runtime_probe.py'
         }
