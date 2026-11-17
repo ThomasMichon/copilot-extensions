@@ -18,12 +18,32 @@ import os
 import re
 import shutil
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Literal, Protocol, TypedDict, cast, runtime_checkable
 
 if TYPE_CHECKING:
     from ..pr_bar import Snapshot
-    from ..pr_contract import PRDiff, PRSnapshot, ReviewNudgeResult, ThreadsResult
+    from ..pr_contract import PRDiff, PRSnapshot, RepoPolicy, ReviewNudgeResult, ThreadsResult
+
+
+class _BinaryCapture(TypedDict):
+    input: bytes | None
+
+
+class _TextCapture(TypedDict):
+    text: Literal[True]
+    encoding: str
+    errors: str
+    input: str | None
+
+
+class _RunBounded(Protocol):
+    def __call__(
+        self, argv: list[str], sanitized: list[str], *, env: dict[str, str],
+        input_text: str | None, timeout: float, max_stdout_bytes: int,
+        max_stderr_bytes: int,
+    ) -> subprocess.CompletedProcess[str]: ...
 
 
 #: Canonical review-verdict vocabulary a caller passes to
@@ -337,7 +357,7 @@ class PRProvider(Protocol):
     def get_repo_policy(
         self, repo: str, *, default_branch: str = "", api_base: str = "",
         token: str | None = None,
-    ):
+    ) -> RepoPolicy:
         """Read a repo's live PR-relevant settings (#225) as a ``RepoPolicy``.
 
         The adopt-time research primitive: inspect the provider's ACTUAL settings
@@ -596,7 +616,7 @@ def _unsupported_auto_merge(name: str) -> str:
     )
 
 
-def _unsupported_repo_policy(name: str):
+def _unsupported_repo_policy(name: str) -> RepoPolicy:
     """The default ``get_repo_policy`` for a provider that can't read settings."""
     from ..pr_contract import RepoPolicy
 
@@ -644,10 +664,11 @@ def actor_viewer_permission(
         return ""
     if not getattr(policy, "supported", False):
         return ""
-    return getattr(policy, "viewer_permission", "") or ""
+    permission: str = getattr(policy, "viewer_permission", "") or ""
+    return permission
 
 
-def resolve_token(prcfg) -> str | None:
+def resolve_token(prcfg: object) -> str | None:
     """Resolve a provider token from config.
 
     Order: ``token_command`` (shell, stdout = token) > ``token_env`` (env-var
@@ -673,7 +694,7 @@ def resolve_token(prcfg) -> str | None:
     return None
 
 
-def account_token_for_slug(slug: str | None, prcfg) -> str | None:
+def account_token_for_slug(slug: str | None, prcfg: object) -> str | None:
     """Resolve the provider token for a repo, honoring its repo-scoped account.
 
     The gh-ops half of the repo-scoped identity layer.  Order:
@@ -733,7 +754,7 @@ def run_cli(
     *,
     env: dict[str, str] | None = None,
     input_text: str | None = None,
-    timeout: int = 120,
+    timeout: float = 120,
     preserve_line_endings: bool = False,
     max_stdout_bytes: int | None = None,
     max_stderr_bytes: int = 8192,
@@ -766,16 +787,22 @@ def run_cli(
     sanitized = _sanitize_cli_args(resolved)
     if max_stdout_bytes is not None:
         from .bounded_read_cli import run_bounded
-        return run_bounded(
+        return cast(_RunBounded, run_bounded)(
             resolved, sanitized, env=full_env, input_text=input_text, timeout=timeout,
             max_stdout_bytes=max_stdout_bytes, max_stderr_bytes=max_stderr_bytes,
         )
     try:
-        capture = (
-            {"input": input_text.encode("utf-8") if input_text is not None else None}
-            if preserve_line_endings else
-            {"text": True, "encoding": "utf-8", "errors": "replace", "input": input_text}
-        )
+        capture: _BinaryCapture | _TextCapture
+        if preserve_line_endings:
+            binary_capture: _BinaryCapture = {
+                "input": input_text.encode("utf-8") if input_text is not None else None,
+            }
+            capture = binary_capture
+        else:
+            text_capture: _TextCapture = {
+                "text": True, "encoding": "utf-8", "errors": "replace", "input": input_text,
+            }
+            capture = text_capture
         result = subprocess.run(
             resolved,
             capture_output=True,
@@ -787,8 +814,14 @@ def run_cli(
         return subprocess.CompletedProcess(
             args=sanitized,
             returncode=result.returncode,
-            stdout=result.stdout.decode("utf-8") if preserve_line_endings else result.stdout,
-            stderr=result.stderr.decode("utf-8", errors="replace") if preserve_line_endings else result.stderr,
+            stdout=(
+                cast(bytes, result.stdout).decode("utf-8") if preserve_line_endings
+                else result.stdout
+            ),
+            stderr=(
+                cast(bytes, result.stderr).decode("utf-8", errors="replace")
+                if preserve_line_endings else result.stderr
+            ),
         )
     except UnicodeError:
         return subprocess.CompletedProcess(
@@ -861,15 +894,16 @@ def get_provider(name: str) -> PRProvider:
         module = importlib.import_module(module_name)
     except ImportError as e:  # pragma: no cover - defensive
         raise ProviderError(f"Provider '{name}' is not available: {e}") from e
-    return getattr(module, cls_name)()
+    provider_type = cast(Callable[[], PRProvider], getattr(module, cls_name))
+    return provider_type()
 
 
 def scope_from_create_result(
-    result: dict,
+    result: dict[str, Any],
     *,
     title: str,
     body: str,
-    prcfg,
+    prcfg: object,
     machine: str = "",
 ) -> PRScope:
     """Build a :class:`PRScope` from create_pr's result dict + config.

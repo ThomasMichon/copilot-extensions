@@ -54,6 +54,8 @@ Read [setup and adapters](references/setup-and-adapters.md),
 [throughput and loop discipline](references/throughput-and-loops.md) when
 performing the corresponding steps below. These references specialize this procedure, not the owners'
 ambient policies.
+Use the [synthetic failure scenarios](assets/scenarios.json) for the charter's
+offline walkthrough; they do not qualify model behavior or live adapters.
 
 ## 1. Capture scope and original authority
 

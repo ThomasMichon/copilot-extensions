@@ -38,7 +38,7 @@ def _registrations(
 ) -> dict[str, tuple[int, str, tuple[int, str] | None]]:
     if not servers:
         return {}
-    entries = []
+    entries: list[str] = []
     try:
         with os.scandir(root) as iterator:
             for entry in iterator:

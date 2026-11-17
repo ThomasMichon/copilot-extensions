@@ -104,8 +104,8 @@ retirement or persistent-collection deletion occurs.
 
 This is an explicit source-library operation, not automatic collection or a new
 command/service. Ordinary sync defaults, accounting and scheduled ticks are
-unchanged. Real-data collection and installed/native qualification remain
-separate effect and validation gates.
+unchanged. Real-data collection and installed qualification remain separate
+effect and validation gates; synthetic native qualification is described below.
 
 ## Existing sync tick: explicit machine opt-in
 
@@ -125,7 +125,8 @@ and transfer. It loads the actual filesystem aggregate inputs once, compiles
 that same snapshot, and retains each typed admission's authoritative checkout.
 The opt-in is not a collection grant: enforce-mode aggregate admission, privacy,
 exact repository/target policy and provider capability checks still apply before
-inventory or export staging. Native Windows and unsupported targets refuse.
+inventory or export staging. Unsupported targets and native filesystem/access
+policies that cannot supply the required private publication barriers refuse.
 
 The typed leg shares a 120-second caller-owned budget, including a five-second
 cleanup reserve, across policy Git observations, inventory, export, verification
@@ -168,9 +169,11 @@ plan for the executing machine's complete name/platform/role identity, using the
 same normalization as plan selection. A valid diagnostic/observe plan is not
 permission. Exactly one collection claim must cover the canonical source
 repository and bind the actual active target's filesystem root. The supplied
-target must also match the current configured target. Native path equality
-preserves case; the compiler's conservative case-folded collision identity alone
-cannot grant access to a distinct case-sensitive path.
+target must also match the current configured target. Collection requires the
+same absolute native path spelling, including case, for supplied, configured
+and claimed roots on both platforms. This conservatively refuses differently
+spelled aliases; the compiler's case-folded collision identity and Windows
+path-object equality alone cannot grant access to a distinct case-sensitive path.
 
 The selected sync configuration remains authoritative. Secret redaction or
 essential-session-only publication blocks this lossless database collection;
@@ -180,10 +183,20 @@ therefore refuse this boundary. Claims with content profiles, landing,
 retention or mutation policies also refuse until those semantics are actually
 implemented here.
 
-The initial adapter requires POSIX directory-relative publication and directory
-barriers. Native Windows collection is explicitly unsupported, not inferred
-from the existing owner's separate export support. The isolated Linux packet
-does not qualify Windows or hardware power-loss behavior.
+POSIX uses directory-relative publication and directory barriers. Native
+Windows pins no-redirect directory ancestry, creates private files and new
+collection/staging directories with protected DACLs at creation, and requires
+native directory flush barriers. Existing private staging is checked, never
+repaired by changing its ACL. Member creation is exclusive on both platforms;
+partial or conflicting evidence is retained. Unsupported filesystems/access
+refuse rather than downgrading a barrier. These controls are not hardware
+power-loss or remote-filesystem durability proof.
+
+Native Windows collection/staging uses its explicit configured owner root.
+That root's parent must already exist and permit a native directory barrier;
+collection does not allocate missing ancestors outside that boundary.
+Every directory entry inside it is reflushed on retries too. An interrupted
+parent barrier cannot become success merely because the child now exists.
 
 Collection roots must also be outside the reserved `session-state`,
 `provenance`, `archived` and `.session-sync-*` payload/replacement components.
@@ -237,7 +250,20 @@ not truncate the protected path.
 
 Only the verified `agenda.sqlite3` and original `manifest.json` are collected.
 Every new database, metadata and reference file requests mode `0600` in the
-initial POSIX creation syscall, not a later permission change.
+initial POSIX creation syscall, or a protected current-user/SYSTEM/Administrators
+DACL in the initial Windows creation call, not a later permission change.
+Windows typed reads also check each database, metadata and reused reference
+file's current owner and DACL while its no-redirect read handle is held.
+The owner may be the current token's user or its native default owner, including
+the Administrators owner used by an elevated process. The private access rules
+are checked independently; that owner match never admits an Everyone grant.
+Restoring byte-identical content with a broad explicit access rule refuses;
+private parent directories alone are not proof of member privacy. These checks
+never repair the existing permissions.
+The protected database handle is also held through contributor verification.
+Fresh readback keeps database and manifest handles until its complete receipt
+decision, so a byte-identical restore cannot replace a checked member between
+the owner's verification and contributor calls.
 The owner's optional prepared manifest is not needed in a transported export.
 Copying checks the exact declared byte count and SHA-256, with bounded chunks
 and a complete-copy deadline. The selected owner then verifies the destination's
@@ -357,8 +383,18 @@ The opt-in `tests/test_worktree_state_exporter.py` and
 export/readback from a retired managed placement, unchanged source bytes, exact
 temporary cleanup, retained failure evidence, changed-owner refusal and
 revision-pinned lossless provenance. A Linux pidfd witness checks that an export
-timeout settles its console descendant. These are isolated synthetic fixtures,
-not native Windows visibility, installed collection or remote durability proof.
+timeout settles its console descendant. The native Windows
+`tests/test_worktree_state_windows.py` packet covers protected creation beneath
+a deliberately broad synthetic parent, existing-broad-staging refusal without
+ACL repair, pinned ancestry, failed barriers, exact retry, immutable readback
+and exact staging cleanup/retention. The pipeline packet runs the real selected
+owner processes on Windows as well as POSIX, including both existing-tick
+passes and collection after actual synthetic checkout retirement while no
+archive destination exists. Its explicit native process cases retain bounded
+test clocks; each production pass still has its original 120-second budget.
+These are private synthetic filesystem/process fixtures, not desktop/window
+visibility, installed collection, actual user-data collection, macOS execution
+or remote durability proof.
 The existing-tick cases use real filesystem policy loading and selected owners
 to collect both retained stores across successive passes with no ordinary session
 source, while preserving every source byte. `tests/test_worktree_state_tick.py`

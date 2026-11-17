@@ -32,6 +32,7 @@ new behavior, nor permission to resume held implementation or deployment.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Windows Machine-Protected Cache](active/windows-machine-cache/README.md) | Draft; opt-in redundant-cache proposal before implementation | #13009; preserves user-cache custody, Vault service and installer owners; no live migration or rollout |
 | [Retained Inbox Message Evolution](active/retained-inbox-message-evolution/README.md) | Draft; versioned migration and nonblocking enrollment proposal before implementation | Bounded #1460 retained-message slice; existing receiver, receipt and broader contract owners preserved; no rollout |
 | [Reliable Git and Daemon Environments](active/reliable-git-environments/README.md) | Draft; reviewed shared discovery, per-child environment and mapping-contract plan before implementation | #12939; preserves #12427/#12433 registration-policy and #10212 membership owners; no rollout |
 | [Bridge Queued Steering](active/bridge-queued-steering/README.md) | Draft; notification, exact submission receipt and nonduplicating timed fallback before implementation | Bounded #6394 follow-up; preserves #12487/#11448/#11445 and #10765 owners; no rollout or container-auth takeover |

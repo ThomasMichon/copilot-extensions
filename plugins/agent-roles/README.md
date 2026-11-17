@@ -114,6 +114,10 @@ Its loop discipline measures success as zero eligible PRs awaiting reviewer
 action, starts rounds only on new input, never reposts an identical verdict on
 an unchanged head, backs off unchanged watches, hands PRs back explicitly and
 tells and releases a superseded reviewer.
+Failure walkthroughs distinguish stalled intake from provider errors and healthy
+empty results, preserve partial-review credit and accepted-result revisions, and
+settle only the role's owned flows on sunset. These remain guidance contracts,
+not runtime health, transaction or cleanup enforcement.
 The fleet monitor's watchdog checks inspect each agent's open questions,
 obligations, prerequisite growth, budgets, validation weight, delivery state
 and handoff fidelity, classify every wait as required, productive or waste,

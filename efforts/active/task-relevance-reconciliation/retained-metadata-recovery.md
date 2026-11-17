@@ -219,3 +219,65 @@ This is the next source integration and qualification slice of the existing
 plan. It grants no installed Bridge mutation, prompt, deployment, task reset,
 termination, deletion or production activation. Actual original-flow recovery
 and authorized rollout remain separately reported.
+
+### Complete target inventory and lazy head hydration
+
+The target-discovery amendment expands the same consumer boundary. Available
+Bridge targets are the **union**, not the intersection, of active Session Host
+or extension registrations and every workspace returned by Worktrees.
+Registration-only targets remain visible without a workspace row; a listed
+workspace remains addressable without a managed Bridge session. A database
+cache miss must not turn either into an unknown target or a fresh conversation.
+
+Current code exposes these facts separately: `/api/v1/sessions` lists managed
+records, `/api/v1/live-sessions` lists registrations, and `/api/v1/worktrees`
+decorates workspace inventory only when a managed record already exists.
+Ordinary send/read matching also searches that managed-session list before
+falling through to profile matching. Worktree resume reads the authoritative
+head, but still refuses a missing keyed managed record. Fix those joins through
+their existing owners, rather than adding a second durable target registry.
+
+Implementation proposal:
+
+1. Compose a shared target projection from the existing managed/session-host,
+   extension-registration and Worktrees inventory owners. Preserve exact
+   workspace owner/project/machine identity and registration-only targets.
+   Deduplicate proven representations of the same target, not unrelated
+   resources that happen to share a name or native identifier.
+2. Keep target identity distinct from managed control identity. A worktree
+   handle is a valid target before a managed row exists; never fabricate a
+   session ID, active registration, native head, turn count or historical
+   receipt to make an inventory row satisfy a managed-session schema.
+   Workspaces without a usable head remain visible with their actual reason;
+   visibility is not evidence that native execution is currently admissible.
+3. Use the same owner-qualified resolver for normal target operations. On a
+   missing managed row, read the exact workspace's current authoritative head
+   and incarnation, then hydrate metadata through the existing native-import
+   or keyed metadata-adoption owner. Metadata hydration must not load a native
+   process, drain prompts or accept a task. Resume and delivery follow only
+   when requested, through their existing admission boundaries. Ordinary raw
+   messaging to a dormant target still refuses with an explicit resume
+   requirement; hydration does not silently start or resume its receiver.
+4. Preserve keyed predecessor exclusions and explicit history gaps. Live
+   Session Host/extension registrations remain owned by their current
+   transport, not silently converted to an ACP controller. Conflicting heads,
+   incomplete discovery, pending handoffs and ambiguous custody retain their
+   inspectable states; do not relabel an unavailable source as an empty set.
+5. Carry the union through existing HTTP/Python/CLI listing and target
+   resolution surfaces with negotiated additive support. Preserve the legacy
+   managed-session response and callers' assumptions; new inventory consumers
+   must distinguish a target projection from a real managed record. Unsupported
+   receivers report the missing hydration contract before effects, rather
+   than falling through to fresh profile creation.
+
+Validation adds registration-only, workspace-only and overlapping inventory
+cases; multiple machines/projects with colliding names; every listed workspace
+including one without a head; stale or failed source observations; real
+send/read/resume target selection with no Bridge row; exactly-once concurrent
+hydration and response loss; and zero native launch/prompt/task-transition
+effects during listing or hydration. Exercise keyed and unassociated native
+heads, live transports, head movement, old callers and unsupported providers.
+The existing reservation recorder and affirmative worker `STARTED` composition
+remain required; this inventory work does not replace them.
+
+This source proposal adds no installed rollout or live recovery authority.

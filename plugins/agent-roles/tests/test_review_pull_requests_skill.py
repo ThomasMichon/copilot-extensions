@@ -418,7 +418,7 @@ def test_loop_discipline_stops_repetition_and_hands_back_explicitly() -> None:
         "Any qualifying trigger prompts reassessment of a standing change request",
         "Review only an overlapping delta",
         "report it once to the scope owner",
-        "diagnose the cause once, retry once",
+        "classify the failed boundary before any retry",
         "normal **no-change** result",
         "back off toward the charter's backstop cadence",
         "the reviewer never authors the fix",
@@ -462,6 +462,23 @@ def test_effect_ids_and_receipt_timing_are_not_fabricated_prerequisites() -> Non
 def test_synthetic_example_is_unobserved_not_authority() -> None:
     example = json.loads(_read(SKILL / "assets" / "ledger.example.json"))
     _validate_unobserved_example(example)
+
+
+SCENARIOS = json.loads(_read(SKILL / "assets" / "scenarios.json"))
+
+
+@pytest.mark.parametrize("case", SCENARIOS["cases"], ids=lambda case: case["id"])
+def test_failure_walkthrough_retains_its_controlling_contract(
+    case: dict[str, Any],
+) -> None:
+    """Offline scenario coverage, not execution of an adapter or model."""
+    assert SCENARIOS["example_only"] is True
+    assert case["given"] and case["expected"] and case["required_guidance"]
+    for relative, clauses in case["required_guidance"].items():
+        text = " ".join(_read(SKILL / relative).split())
+        assert clauses
+        for clause in clauses:
+            assert " ".join(clause.split()) in text, (case["id"], relative, clause)
 
 
 @pytest.mark.parametrize("limit", [True, False, 0, -1, 1.5, "2", None])

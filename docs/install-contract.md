@@ -4558,6 +4558,24 @@ and package markers must apply to the selected environment. The unique
 best-ranked compatible file is retained; ties refuse. This is not a second
 resolver or permission to acquire from any recorded URL.
 
+`retain_source_wheel_lock` may instead receive an explicit positive
+`max_diagnostic_bytes`. This opt-in captures `pylock.toml` and verbose selection
+diagnostics from the same held native compile, with caller-supplied finite
+stream limits and the shared deadline. Each final exact package/version must
+name one compatible selected wheel whose SHA-256 appears exactly once in its
+pylock package; missing, ambiguous or unsupported output refuses rather than
+ranking alternatives or running another resolver. Retained first-party
+metadata must be static. The existing single-file and target-tag paths retain
+their defaults.
+
+The fixed stdlib capture worker keeps UV in the existing installer's
+Job/process group and settles all descendants before retained input cleanup,
+including on stream overflow or timeout. Private control files live only in
+the invocation-owned retained root. Normalized source records exclude raw
+diagnostics and URLs, and downstream source-profile assembly enforces exact
+file records when present. None of these facts authenticates a source, admits
+a file or enables a production caller.
+
 Retain complete admitted projects before merging their declared build-resource
 directories. A resource may be a package subdirectory of another admitted
 project; its presence must not make that parent look fully copied while its

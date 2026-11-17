@@ -32,7 +32,7 @@ def validate_retirement_options(
 def adopt_relay(
     self: CutoverOrchestrator, new_port: int, result: CutoverResult, *,
     make_client: Callable[[str], _Client] | None = None,
-    adopt_relay: Callable[[], dict] | None = None,
+    adopt_relay: Callable[[], dict[str, Any]] | None = None,
 ) -> None:
     from .cutover import CutoverError
 
@@ -63,7 +63,7 @@ def _drain_old(
             conditional=conditional, on_drain=on_drain,
         )
     except Exception as exc:
-        if conditional is not None or self.retire_failed_predecessor is None:
+        if conditional is not None or getattr(self, "retire_failed_predecessor", None) is None:
             raise
         result.predecessor_cleanup = {
             "exit_confirmed": False, "attempted": False, "reason": type(exc).__name__,
@@ -137,7 +137,10 @@ def _retire_failed_predecessor(self: CutoverOrchestrator, old: Endpoint, result:
     """Cleanup failure cannot reverse a healthy incoming generation."""
     result.retirement_requested = True
     try:
-        cleanup = self.retire_failed_predecessor(old)
+        retire = self.retire_failed_predecessor
+        if retire is None:
+            raise ValueError("predecessor retirement owner is unavailable")
+        cleanup = retire(old)
         if not isinstance(cleanup, dict):
             raise ValueError("predecessor cleanup returned no outcome")
     except Exception as exc:
@@ -150,7 +153,9 @@ def _retire_failed_predecessor(self: CutoverOrchestrator, old: Endpoint, result:
     )
 
 
-def shutdown_predecessor(self: CutoverOrchestrator, old: Endpoint, client, result: CutoverResult) -> None:
+def shutdown_predecessor(
+    self: CutoverOrchestrator, old: Endpoint, client: _Client, result: CutoverResult,
+) -> None:
     from .cutover import CutoverError
 
     if not self.drain_predecessor or result.predecessor_cleanup is not None:

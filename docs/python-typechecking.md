@@ -17,9 +17,10 @@ Other projects are explicitly pending. Source CI and the
 exact-candidate release gate enforce this cohort. A passing admitted cohort is
 not repository-wide type safety.
 
-Bridge remains pending as a project. Its whole-file changed-code checks reuse
-the existing hash-locked service-index checker environment, which includes
-Pydantic's typed models. This supplies validation dependencies without claiming
+Bridge remains pending as a project. Its whole-file changed-code checks use
+a hash-locked extension of the service-index checker environment, adding
+Cryptography for its HTTPS certificate fixtures alongside Pydantic's typed
+models. This supplies validation dependencies without claiming
 that the complete Bridge source or test tree is strict.
 
 Materialized library copies under the strict services' `libs/` directories are
@@ -78,8 +79,13 @@ python tools/typecheck.py --inventory --json
 owners. Every selected file must pass strict checking; existing diagnostics are
 not grandfathered or filtered to changed lines. Staged, unstaged and untracked
 files are included, even when `--head` pins the comparison. Deleted files are
-not checked. PR CI compares its base with the checked-out merge commit, not
-the unmerged feature tip, so unrelated base-only files are not treated as
+not checked. PR CI selects changes between the actual PR head and its merge
+base with the target branch, rather than comparing an older base with the
+synthetic merge commit. The selected files are checked in the integration
+checkout; unrelated upstream changes must not enter this PR's ratchet cohort.
+For a busy shared local clone,
+pin the synchronization/merge-base commit instead of a moving `origin/dev`
+reference while checking a fixed feature tip, so unrelated base-only files are not treated as
 developer drift. Known Installation Context, Harness and Payload Invocation
 compositions expand to their existing complete checker programs and declared
 analysis targets; changed shell/template inputs cannot omit those views.
@@ -90,11 +96,11 @@ these files only, without admitting their unchanged project or certifying
 unmodeled emitted programs. `--enforced` remains the independent admitted-cohort
 gate; exact-candidate enforcement of the ratchet is not yet activated.
 
-Bridge's pending project reuses the existing hash-locked service-index checker
-profile for FastAPI, Pydantic and HTTPX declarations. This makes its selected
+Bridge's pending project uses the hash-locked Bridge checker
+profile for FastAPI, Pydantic, HTTPX and Cryptography declarations. This makes its selected
 route and consumer-contract files checkable without admitting the full plugin
 or changing its runtime dependencies.
-Dispatch's pending project uses that same profile for its selected recovery
+Dispatch's pending project uses the service-index profile for its selected recovery
 route, client and test files; the remaining project is not thereby admitted.
 
 `--prepare` explicitly installs the checked-in hash-locked checker dependencies
