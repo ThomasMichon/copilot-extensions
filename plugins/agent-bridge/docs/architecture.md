@@ -937,6 +937,13 @@ attempt or an incoming readiness gate. A later exit reaches the same
 ownership-checked relay-adoption path; route reselection cancels that continuation.
 Neither path restarts or reloads the surviving sessions.
 
+Relay activation snapshots the frontend's exact active route before credential
+source preparation. After that awaited work, the native routing lease revalidates
+the same owner and spans listener activation plus relay-port publication.
+Reselection or shutdown discards the prepared activation; failed publication
+closes the newly started listener before releasing the lease. Source discovery
+does not hold the routing lease.
+
 Any failure **before** the commit point rolls back: re-publish the old endpoint
 as active, undrain the old daemon, and terminate the freshly spawned passive. If
 the route was already flipped and the old daemon is gone, the orchestrator
