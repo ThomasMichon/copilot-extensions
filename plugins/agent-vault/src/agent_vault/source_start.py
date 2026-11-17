@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import importlib.util
 import os
 from pathlib import Path
@@ -50,11 +51,13 @@ def require_selected_slot() -> None:
         raise ValueError("application startup requires canonical complete construction")
 
 
-def command(_args) -> int:
-    from .service_generation import ensure_selected
-
+def command(args: argparse.Namespace) -> int:
     try:
         require_selected_slot()
+        if args.no_service:
+            return 0
+        from .service_generation import ensure_selected
+
         if not configuration.runtime_enabled():
             print("Agent Vault is inactive; runtime activation requires enabled=true.", file=sys.stderr)
             return 2

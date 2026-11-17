@@ -5300,7 +5300,11 @@
         "tools/promotion_unit_tests/test_retained_admission_work.py::test_keyed_admission_qualifies_only_fresh_resumed_work[resumed-fresh]",
         "tools/promotion_unit_tests/test_retained_admission_work.py::test_keyed_admission_qualifies_only_fresh_resumed_work[receipt-miss]",
         "tools/promotion_unit_tests/test_retained_admission_work.py::test_keyed_admission_qualifies_only_fresh_resumed_work[receipt-present]",
-        "tools/promotion_unit_tests/test_retained_admission_work.py::test_keyed_admission_qualifies_only_fresh_resumed_work[cached-admission]"
+        "tools/promotion_unit_tests/test_retained_admission_work.py::test_keyed_admission_qualifies_only_fresh_resumed_work[cached-admission]",
+        "tools/promotion_unit_tests/test_vault_client_install.py::test_client_only_checks_selection_without_service_or_activation[False]",
+        "tools/promotion_unit_tests/test_vault_client_install.py::test_client_only_checks_selection_without_service_or_activation[True]",
+        "tools/promotion_unit_tests/test_vault_client_install.py::test_default_start_still_ensures_the_selected_service[False]",
+        "tools/promotion_unit_tests/test_vault_client_install.py::test_default_start_still_ensures_the_selected_service[True]"
     ],
     "coverage_targets": [
         "plugins/agent-worktrees/src/agent_worktrees/resource_delivery.py",
@@ -5656,7 +5660,8 @@
         "plugins/agent-dispatch/src/agent_dispatch/ordinary_control_adoption.py",
         "plugins/agent-dispatch/src/agent_dispatch/ordinary_control_invocation.py",
         "plugins/agent-dispatch/src/agent_dispatch/ordinary_invocation.py",
-        "plugins/agent-bridge/src/agent_bridge/native_keyed_admission.py"
+        "plugins/agent-bridge/src/agent_bridge/native_keyed_admission.py",
+        "plugins/agent-vault/src/agent_vault/source_start.py"
     ],
     "sources": {
         "tools/promotion_unit_tests/test_source_witness.py": "b31fd450a32577aee9a5dca22606c02506a84da1d6d0ceb2e9486ee32af9ff3b",
@@ -5666,7 +5671,7 @@
         "plugins/agent-vault/src/agent_vault/keepassxc.py": "91e7de57a2d7741382e0f022eea5cf2ee8b90fab0b46422ef70f632411cf5620",
         "plugins/agent-vault/src/agent_vault/service.py": "66c41bf1a459c2ae27a7cea9c77d2eb60a26bfc08d55e6a4b4b9cfc179bdeb30",
         "tools/promotion_unit_tests/test_vault_attachment_import.py": "bcf7e9c4a50b41913a8b3859e6d03356825767cc98a61b09e8e968aa1e0eca34",
-        "plugins/agent-vault/src/agent_vault/cli.py": "da28bc1fda4052e2b3d8dd432296ecc9b5a8fd462567fbfa6936ad0ea952f86c",
+        "plugins/agent-vault/src/agent_vault/cli.py": "1b3af6cde8c1a16ec4392e4e0fe76903bbc5505f324c08361078feeeb032c7f8",
         "plugins/agent-vault/src/agent_vault/credential_reads.py": "337ecef76fa999ee649807a3ee3259bf2971cfba5a5d0f00ce51faa2e486579b",
         "tools/promotion_unit_tests/test_vault_transport_order.py": "2afbf9703e5244e71df06ef5ed0f09573cb199637276b3a5521897bc35036344",
         "tools/application_footprint.py": "ba95c8a5443ef25acfff97a423f250f84e75a937840983e657c03e8214aaf951",
@@ -5708,7 +5713,7 @@
         "plugins/agent-dispatch/src/agent_dispatch/procutil.py": "62eb1c8e321ab56e888dc155d9c4ecf9d175bc83ba633b4fc03ea7e0c6416150",
         "tools/promotion_unit_tests/test_dispatch_runtime_resolution.py": "cd20ca0f3b49aff562300673ee6d6ef5352f6fb9630eebd17658ef78049accea",
         "plugins/agent-vault/src/agent_vault/config.py": "1432329b4a7725464b15618064fecc644983ae1e5a2f75559f5b1a6538dc461e",
-        "plugins/agent-vault/src/agent_vault/invocation.py": "5264be071d9fd1c70c088aed1a33d5c1c7f3f7a60f3aa185aa6e4fe4ae561afb",
+        "plugins/agent-vault/src/agent_vault/invocation.py": "f8aa30c2822b1ec4dddbbef2f6ae0c08a10c5dd294f5c51522f2b2eb53dcc6c2",
         "libs/configuration-layers/src/configuration_layers/__init__.py": "732fc63c27d758595d79312ad286c1ec97a9012b6780d81e5e4cdee446153258",
         "libs/configuration-layers/src/configuration_context/__init__.py": "fd8dffd6148f7fa7ea1fc0de41c00aa4628c21a203bb1166fe1994055f2bb4f3",
         "libs/configuration-layers/src/configuration_context/runtime.py": "1a9631914735a2285f226fea0e768e52fe7ff6c0dd0313f45345dafe8b598095",
@@ -6503,6 +6508,8 @@
         "plugins/agent-dispatch/src/agent_dispatch/ordinary_control_invocation.py": "18bf1ff704db6aefb593947f1b46c669f564d002669a2df4e816524df2ad57d9",
         "plugins/agent-dispatch/src/agent_dispatch/ordinary_invocation.py": "f8180ab97c95b608991360ad33dc5a1d0678ba713bcbbc2cd80ab222b526f13e",
         "tools/promotion_unit_tests/test_retained_admission_work.py": "bdde7bac4e96079165d6b1bdf94735a8e7ddc9c43e2566fe51e9420d9bc9515e",
-        "plugins/agent-bridge/src/agent_bridge/native_keyed_admission.py": "ebeaf8c036abd606a867f35a1772dcb727985e1a48a0eb37d9d46177c45cc7ba"
+        "plugins/agent-bridge/src/agent_bridge/native_keyed_admission.py": "ebeaf8c036abd606a867f35a1772dcb727985e1a48a0eb37d9d46177c45cc7ba",
+        "tools/promotion_unit_tests/test_vault_client_install.py": "566d53f41e7510169bccb286d0830ef24b2d7b208c8253433df1fbc38d77c7e0",
+        "plugins/agent-vault/src/agent_vault/source_start.py": "9c023d7099a6aa762e82f91539018cbbd4f75ebd76e9061fe8bc10d9c6e74970"
     }
 }

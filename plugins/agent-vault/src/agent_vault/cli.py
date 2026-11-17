@@ -1522,6 +1522,7 @@ def _main(argv: list[str] | None = None) -> int | None:
     p.set_defaults(func=cmd_start)
 
     p = sub.add_parser("__source-start", help=argparse.SUPPRESS, allow_abbrev=False)
+    p.add_argument("--no-service", action="store_true")
     p.set_defaults(func=cmd_source_start)
 
     p = sub.add_parser("stop", help="Stop the vault service")
