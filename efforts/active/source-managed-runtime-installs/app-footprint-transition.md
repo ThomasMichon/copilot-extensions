@@ -163,8 +163,8 @@ existing installation identity, package/feed policy and process custody.
 
 - [x] Initial request capture and governing visions cleared normal review in
   #12908; #12905 remains open for implementation, not closed by that capture.
-- [ ] Subsequent Manager reference/layout/state amendments clear normal review
-  before their runtime realization.
+- [x] Subsequent Manager reference/layout/state amendments cleared normal review
+  before runtime realization in #12923.
 - [ ] Main and local pinned-Dev/WIP promotion produce complete copyable app
   directories with correct vendored imports and distinguishable local versions.
   Source files remain unchanged; local outputs do not claim public release.

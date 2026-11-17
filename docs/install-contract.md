@@ -36,6 +36,16 @@ retain pending conversion/qualification. Current native installers, generated
 adoption for this boundary; this documentation does not change their code or
 weaken their independent safety and durable-state contracts.
 
+Manager's separate `worktree-manager-install` frontdoor consumes an already
+prepared explicit application set, copies whole version slots, stages the
+complete selected dependency closure and then invokes full setup in dependency
+order. It uses the canonical finite Update Driver and source-snapshot/process
+owners, not a Worktrees installation. Its
+[command and footprint contract](../worktree-manager/README.md#prepared-application-installation)
+records the read-only default, new app-root selection and failure boundaries.
+This initial consumer is not complete promotion/Manager-reference adoption;
+the receiving effort retains those pending gates.
+
 The canonical intent is
 [authoritative runtime replacement](../visions/installer/README.md#authoritative-runtime-replacement).
 This section is its normative installer contract, not a declaration that all
