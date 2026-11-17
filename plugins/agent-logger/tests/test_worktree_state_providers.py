@@ -7,16 +7,17 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 import venv
 from copy import deepcopy
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from agent_procutil.owned_budget import OwnedExecutionBudget
-from agent_procutil.owned_process import OwnedCleanupError
+from agent_procutil.owned_process import OwnedCleanupError, run_caller_owned
 
-from agent_logger import configuration_layers
+from agent_logger import configuration_layers, repo_trust
 from agent_logger.aggregate import Admission
 from agent_logger.sync import worktree_state_providers as providers
 from agent_logger.sync.worktree_state import WorktreeStateError
@@ -26,6 +27,24 @@ from .conftest import init_git_repo
 SOURCE = Path(__file__).resolve().parents[3]
 CAPABILITY = "worktree-data-project-inventory-v1"
 REPOSITORY = "example.test/owner/source"
+
+
+@pytest.mark.no_autotrust
+def test_readonly_logger_resolver_refuses_before_import(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from configuration_context.readiness import PROBE_CONTRACT, PROBE_ENV, ProbeContractError
+
+    payload = tmp_path / "payload"
+    resolver = payload / "scripts" / "versioned_runtime.py"
+    resolver.parent.mkdir(parents=True)
+    resolver.write_text("raise AssertionError('unqualified resolver imported')\n", encoding="utf-8")
+    (payload / "plugin.json").write_text('{"name":"agent-logger"}', encoding="utf-8")
+    monkeypatch.setattr(configuration_layers, "__file__", str(payload / "src" / "agent_logger" / "configuration_layers.py"))
+    monkeypatch.setattr(sys, "prefix", str(tmp_path / "non-retained"))
+    monkeypatch.setenv(PROBE_ENV, PROBE_CONTRACT)
+    with pytest.raises(ProbeContractError, match="unqualified"):
+        configuration_layers._legacy_owner_prefix()
 
 
 def admission(tmp_path: Path) -> Admission:
@@ -83,7 +102,7 @@ def inventory(tmp_path: Path) -> dict[str, Any]:
 
 def transport(monkeypatch: pytest.MonkeyPatch, reply: dict[str, Any]) -> list[list[str]]:
     calls = []
-    native_run = providers.run_caller_owned
+    native_run = run_caller_owned
     prefix, environment = [sys.executable, "-m", "agent_worktrees"], {"selected": "owner"}
     monkeypatch.setattr(
         configuration_layers,
@@ -128,22 +147,22 @@ def test_origin_probe_uses_the_same_execution_budget_and_preserves_git_isolation
 ) -> None:
     original = providers._checkout_repository_identity
     transport(monkeypatch, inventory(tmp_path))
-    owner_run = providers.run_caller_owned
+    owner_run = providers.__dict__["run_caller_owned"]
     monkeypatch.setattr(providers, "_checkout_repository_identity", original)
     budget = OwnedExecutionBudget.from_timeout(30, cleanup_reserve=5)
     uncertain = OwnedCleanupError(None)
     probes = []
-    for key in providers.repo_trust._AMBIENT_GIT_ENV_VARS:
+    for key in repo_trust._AMBIENT_GIT_ENV_VARS:
         monkeypatch.setenv(key, "foreign-git-routing")
 
     def run(argv: list[str], **options: Any) -> subprocess.CompletedProcess[bytes]:
         if argv[0] != "git":
             assert options["budget"] is budget
-            return owner_run(argv, **options)
+            return cast(subprocess.CompletedProcess[bytes], owner_run(argv, **options))
         probes.append(argv)
         assert options["budget"] is budget
         assert options["max_stdout_bytes"] == 65536 and options["max_stderr_bytes"] == 4096
-        assert all(key not in options["env"] for key in providers.repo_trust._AMBIENT_GIT_ENV_VARS)
+        assert all(key not in options["env"] for key in repo_trust._AMBIENT_GIT_ENV_VARS)
         if cleanup:
             raise uncertain
         return subprocess.CompletedProcess(
@@ -173,7 +192,7 @@ def test_complete_inventory_cannot_succeed_after_its_execution_cutoff(
 ) -> None:
     transport(monkeypatch, inventory(tmp_path))
     budget = OwnedExecutionBudget.from_timeout(30, cleanup_reserve=5)
-    monkeypatch.setattr(providers.time, "monotonic", lambda: budget.execution_deadline + 1)
+    monkeypatch.setattr(time, "monotonic", lambda: budget.execution_deadline + 1)
     with pytest.raises(WorktreeStateError, match="shared time budget"):
         providers.read_project_inventory(admission(tmp_path), tmp_path / "logger", budget=budget)
 

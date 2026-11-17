@@ -38,13 +38,14 @@ tomllib = importlib.import_module("tomllib" if sys.version_info >= (3, 11) else 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from manager_suite_artifacts import (
     _DELIVERY, _MATERIALIZE, _command, _configuration as _configuration, _env as _env,
-    _runtime_process_inventory_script, _task_inventory_script, _write,
+    _runtime_process_inventory_script, _task_inventory_script, _write as _write,
 )
 from manager_suite_artifacts import _runtime_process_trace_script as _runtime_process_trace_script
 from manager_suite_diagnostics import (
-    MARKERS, _consumer_demand, _engine_probe, _record as _record, _resident_probe, _snapshot, _snapshot_difference,
+    MARKERS as MARKERS, _consumer_demand, _engine_probe, _record as _record,
+    _resident_probe, _snapshot, _snapshot_difference,
     activation_probe,
-    retain_driver_logs,
+    retain_driver_logs as retain_driver_logs,
     retain_resident_logs,
 )
 
@@ -81,10 +82,19 @@ def _run(
 
     # Same native owner as run_installation_owned, with explicit cwd/env so
     # concurrent read-only observation cannot race process-global HOME changes.
+    project = case / "project"
+    setup = case / "setup.json"
+    if setup.is_file() and "project_root" in (configuration := _read(setup)):
+        project = Path(configuration["project_root"])
+        if (
+            not project.is_absolute() or not project.is_dir() or project.is_symlink()
+            or project.resolve().parent != case.resolve()
+        ):
+            raise ValueError("Suite commands require a direct fixture-owned project root")
     started_at_ns = time.time_ns()
     result = run(
         list(map(str, argv)), timeout=timeout, input_text=None, capture=True,
-        cwd=case / "project", env={**_env(case), **(extra_env or {})},
+        cwd=project, env={**_env(case), **(extra_env or {})},
         allow_daemon_breakaway=True,
         max_stdout_bytes=4 * 1024 * 1024, max_stderr_bytes=max_stderr_bytes,
     )
@@ -662,7 +672,7 @@ def _cleanup(case: Path) -> list[str]:
 def _case(directory: Path, mode: str) -> tuple[Path, dict[str, Any]]:
     require_venue()
     directory = directory.resolve()
-    if mode not in {"normal", "repair"} or directory == REPO or not directory.is_relative_to(REPO):
+    if mode not in {"normal", "repair", "fresh"} or directory == REPO or not directory.is_relative_to(REPO):
         raise ValueError("Native stage must name a prepared mode below this checkout")
     case = directory / mode
     setup = _read(case / "setup.json")

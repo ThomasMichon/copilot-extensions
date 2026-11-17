@@ -431,7 +431,8 @@
         "plugins/agent-containers"
       ],
       "exclude": [],
-      "level": "pending"
+      "level": "pending",
+      "requirements": "tools/typecheck-yaml-requirements.txt"
     },
     {
       "name": "agent-dispatch",
@@ -466,7 +467,8 @@
         "plugins/agent-machines"
       ],
       "exclude": [],
-      "level": "pending"
+      "level": "pending",
+      "requirements": "tools/typecheck-yaml-requirements.txt"
     },
     {
       "name": "agent-mcp",
@@ -474,7 +476,8 @@
         "plugins/agent-mcp"
       ],
       "exclude": [],
-      "level": "pending"
+      "level": "pending",
+      "requirements": "tools/typecheck-yaml-requirements.txt"
     },
     {
       "name": "agent-pull-requests",
@@ -511,7 +514,8 @@
         "plugins/agent-ssh"
       ],
       "exclude": [],
-      "level": "pending"
+      "level": "pending",
+      "requirements": "tools/typecheck-runner-requirements.txt"
     },
     {
       "name": "agent-vault",
@@ -520,7 +524,7 @@
       ],
       "import_roots": [
         "fleet-manager/tests",
-        "plugins/agent-vault/tests"
+        "plugins/agent-vault"
       ],
       "exclude": [],
       "level": "pending",
@@ -713,7 +717,14 @@
       ],
       "exclude": [],
       "level": "pending",
-      "requirements": "tools/typecheck-toml-requirements.txt"
+      "import_roots": [
+        "tools",
+        "libs/installer-engine",
+        "libs/versioned-runtime",
+        "worktree-manager/tests",
+        "worktree-manager/tests/native"
+      ],
+      "requirements": "tools/typecheck-runner-requirements.txt"
     }
   ]
 }

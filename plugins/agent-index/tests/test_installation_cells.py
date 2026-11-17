@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import base64
+import argparse
+from collections.abc import Callable, Mapping
 import importlib.util
 import io
 import json
@@ -15,6 +17,10 @@ import urllib.request
 import venv
 from pathlib import Path
 from types import SimpleNamespace
+from typing import TYPE_CHECKING, BinaryIO, NoReturn, ParamSpec, TypeVar, TypedDict, cast
+
+if TYPE_CHECKING:
+    from typing_extensions import Unpack
 
 import pytest
 
@@ -32,7 +38,76 @@ CELL = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(CELL)
 
 
-def _roots(tmp_path: Path) -> dict[str, object]:
+class CellRoots(TypedDict):
+    pluginRoot: str
+    versionsRoot: str
+    snapshotsRoot: str
+    stateRoot: str
+    runRoot: str
+    logsRoot: str
+    cacheRoot: str
+    namespaceGeneration: int
+    generation: int
+
+
+class _PopenOptions(TypedDict, total=False):
+    cwd: str | Path
+    env: dict[str, str]
+    stdin: int
+    stdout: int
+    stderr: int
+    creationflags: int
+    start_new_session: bool
+    close_fds: bool
+
+
+class _SpawnObservation(TypedDict, total=False):
+    command: list[str]
+    process: subprocess.Popen[bytes]
+
+
+class _UndrainObservation(TypedDict):
+    active: dict[str, object]
+    installation: str
+
+
+class _Selection(TypedDict, total=False):
+    manifest: dict[str, object]
+    instances: list[dict[str, object]]
+    activeService: dict[str, object]
+    artifacts: object
+
+
+class _SelectionTransaction(TypedDict):
+    id: str
+    prior: _Selection
+    target: _Selection
+
+
+class _SelectionManifest(TypedDict):
+    source: dict[str, object]
+    runtime: dict[str, object]
+
+
+class _InstanceRecord(TypedDict, total=False):
+    pid: int
+    runtimeVersion: str
+    instanceToken: str
+
+
+_Item = TypeVar("_Item")
+_Result = TypeVar("_Result")
+_Parameters = ParamSpec("_Parameters")
+
+
+def _after_append(
+    items: list[_Item], value: _Item, result: Callable[[], _Result],
+) -> _Result:
+    items.append(value)
+    return result()
+
+
+def _roots(tmp_path: Path) -> CellRoots:
     plugin_root = tmp_path / "marketplaces" / "example" / "plugins" / "agent-index"
     return {
         "pluginRoot": str(plugin_root),
@@ -121,7 +196,7 @@ def test_cell_environment_qualifies_every_mutable_root(tmp_path: Path) -> None:
 
 
 def test_runtime_config_honors_cell_local_state_and_routing(
-    monkeypatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setenv("AGENT_INDEX_HOME", str(tmp_path / "plugin"))
     monkeypatch.delenv("AGENT_INDEX_DATA_DIR", raising=False)
@@ -137,7 +212,7 @@ def test_runtime_config_honors_cell_local_state_and_routing(
     assert config.routing_dir() == tmp_path / "run" / "zdd"
 
 
-def test_backup_paths_are_qualified_by_cell_home(monkeypatch, tmp_path: Path) -> None:
+def test_backup_paths_are_qualified_by_cell_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     paths = []
     for name in ("one", "two"):
         root = tmp_path / name
@@ -220,12 +295,12 @@ def _selection_fixture(
     prior_version: str,
     target_version: str,
 ) -> tuple[
-    dict[str, object],
+    CellRoots,
     Path,
     Path,
     Path,
-    dict[str, object],
-    dict[str, object],
+    _SelectionManifest,
+    _SelectionTransaction,
 ]:
     validated = _roots(tmp_path)
     plugin_root = Path(validated["pluginRoot"])
@@ -286,7 +361,7 @@ def _selection_fixture(
 
 
 def _patch_selection_runtime(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     plugin_root: Path,
     *,
     governance: list[tuple[bool, dict[str, object]]] | None = None,
@@ -302,7 +377,7 @@ def _patch_selection_runtime(
         "_validate_recorded_selection",
         lambda *_args, **_kwargs: plugin_root / "python",
     )
-    states = list(
+    states: list[tuple[bool, dict[str, object]]] = list(
         governance
         or [
             (True, {"status": "ready"}),
@@ -311,7 +386,7 @@ def _patch_selection_runtime(
         ]
     )
 
-    def next_governance(*_args):
+    def next_governance(*_args: object) -> tuple[bool, dict[str, object]]:
         if len(states) > 1:
             return states.pop(0)
         return states[0]
@@ -319,18 +394,18 @@ def _patch_selection_runtime(
     monkeypatch.setattr(CELL, "_selection_governance", next_governance)
 
     def slot_cutover(
-        _management,
-        _target_payload,
-        _context,
-        _marketplace,
-        _durable,
-        _payload_version,
-        _snapshot,
-        runtime_version,
-        _namespace_generation,
-        _install_generation,
-        expected_current,
-    ):
+        _management: Path,
+        _target_payload: Path,
+        _context: Path,
+        _marketplace: str,
+        _durable: Path,
+        _payload_version: str,
+        _snapshot: str,
+        runtime_version: str,
+        _namespace_generation: str,
+        _install_generation: str,
+        expected_current: str,
+    ) -> dict[str, str]:
         assert CELL._marker_version(plugin_root) == expected_current
         for name in ("current-version", "last-known-good"):
             (plugin_root / name).write_text(
@@ -353,14 +428,15 @@ def _patch_selection_runtime(
             plugin_root / "command",
         ),
     )
-    monkeypatch.setattr(
-        CELL,
-        "_reconcile_service",
-        lambda _validated, _service, _command, version, _env, _token: (
-            (reconciled.append(version) if reconciled is not None else None)
-            or {"version": version}
-        ),
-    )
+    def reconcile(
+        _validated: object, _service: Path, _command: Path, version: str,
+        _env: Mapping[str, str], _token: str,
+    ) -> dict[str, str]:
+        if reconciled is not None:
+            reconciled.append(version)
+        return {"version": version}
+
+    monkeypatch.setattr(CELL, "_reconcile_service", reconcile)
 
 
 @pytest.mark.parametrize(
@@ -368,7 +444,7 @@ def _patch_selection_runtime(
     ["after-marker", "before-manifest", "after-manifest"],
 )
 def test_selection_transaction_recovers_marker_manifest_interruptions(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     failure_phase: str,
 ) -> None:
@@ -441,7 +517,7 @@ def test_selection_transaction_recovers_marker_manifest_interruptions(
 
 
 def test_interrupted_historical_rollback_is_idempotently_recovered(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     validated, plugin_root, context, _target, prior_manifest, transaction = (
@@ -495,7 +571,7 @@ def test_interrupted_historical_rollback_is_idempotently_recovered(
 
 
 def test_pending_transaction_resumes_from_current_upgraded_management_payload(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     validated, plugin_root, context, _target, _prior, transaction = (
@@ -518,18 +594,18 @@ def test_pending_transaction_resumes_from_current_upgraded_management_payload(
     calls: list[tuple[str, str]] = []
 
     def cutover(
-        _management,
-        _target_payload,
-        _context,
-        _marketplace,
-        _durable,
-        _payload_version,
-        _snapshot,
-        runtime_version,
-        namespace_generation,
-        install_generation,
-        expected_current,
-    ):
+        _management: Path,
+        _target_payload: Path,
+        _context: Path,
+        _marketplace: str,
+        _durable: Path,
+        _payload_version: str,
+        _snapshot: str,
+        runtime_version: str,
+        namespace_generation: str,
+        install_generation: str,
+        expected_current: str,
+    ) -> dict[str, str]:
         calls.append((namespace_generation, install_generation))
         assert expected_current == "1.0.0"
         for name in ("current-version", "last-known-good"):
@@ -567,7 +643,7 @@ def test_pending_transaction_resumes_from_current_upgraded_management_payload(
 
 
 def test_pending_transaction_revalidates_advanced_generation_without_wedging(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     validated, plugin_root, context, _target, _prior, transaction = (
@@ -581,18 +657,18 @@ def test_pending_transaction_revalidates_advanced_generation_without_wedging(
     calls: list[tuple[str, str]] = []
 
     def cutover(
-        _management,
-        _target_payload,
-        _context,
-        _marketplace,
-        _durable,
-        _payload_version,
-        _snapshot,
-        runtime_version,
-        namespace_generation,
-        install_generation,
-        expected_current,
-    ):
+        _management: Path,
+        _target_payload: Path,
+        _context: Path,
+        _marketplace: str,
+        _durable: Path,
+        _payload_version: str,
+        _snapshot: str,
+        runtime_version: str,
+        namespace_generation: str,
+        install_generation: str,
+        expected_current: str,
+    ) -> dict[str, str | int]:
         calls.append((namespace_generation, install_generation))
         if len(calls) == 1:
             return {
@@ -635,7 +711,7 @@ def test_pending_transaction_revalidates_advanced_generation_without_wedging(
     ids=["health-timeout", "drain-refusal"],
 )
 def test_service_reconciliation_failure_restores_prior_runtime_and_artifacts(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     failure: str,
 ) -> None:
@@ -653,8 +729,8 @@ def test_service_reconciliation_failure_restores_prior_runtime_and_artifacts(
         content = f"prior-{index}\n".encode()
         path.write_bytes(content)
         prior_artifacts[path] = content
-    transaction = dict(transaction)
-    transaction["prior"] = dict(transaction["prior"])
+    transaction = cast(_SelectionTransaction, dict(transaction))
+    transaction["prior"] = cast(_Selection, dict(transaction["prior"]))
     transaction["prior"]["artifacts"] = CELL._capture_transaction_artifacts(
         plugin_root
     )
@@ -663,12 +739,12 @@ def test_service_reconciliation_failure_restores_prior_runtime_and_artifacts(
     interpreter = plugin_root / "python"
     interpreter.write_text("", encoding="utf-8")
 
-    def write_target_launchers(*_args, **_kwargs):
+    def write_target_launchers(*_args: object, **_kwargs: object) -> tuple[Path, Path]:
         paths = CELL._transaction_artifact_paths(plugin_root)
         for index, path in enumerate(paths):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(f"target-{index}\n".encode())
-        return paths[0], paths[1]
+        return cast(Path, paths[0]), cast(Path, paths[1])
 
     monkeypatch.setattr(CELL, "_write_launchers", write_target_launchers)
     monkeypatch.setattr(
@@ -716,7 +792,7 @@ def test_service_reconciliation_failure_restores_prior_runtime_and_artifacts(
 
 
 def test_launch_validate_blocks_pending_target_selection(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     validated, plugin_root, context, _target, _prior, transaction = (
@@ -762,7 +838,7 @@ def test_launch_validate_blocks_pending_target_selection(
 
 
 def test_pending_transaction_can_commit_valid_target_when_prior_slot_is_unusable(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     validated, plugin_root, context, _target, _prior, transaction = (
@@ -799,7 +875,7 @@ def test_pending_transaction_can_commit_valid_target_when_prior_slot_is_unusable
 
 
 def test_governance_restore_uses_current_management_source_provenance(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     validated, plugin_root, context, _target, _prior, transaction = (
@@ -855,7 +931,7 @@ def test_governance_restore_uses_current_management_source_provenance(
 
 
 def test_governance_rechecked_before_marker_and_service(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     validated, plugin_root, context, _target, prior_manifest, transaction = (
@@ -922,7 +998,7 @@ def test_governance_rechecked_before_marker_and_service(
     ],
 )
 def test_governance_block_during_passive_prepare_restores_selection_untouched(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     blocked: dict[str, object],
 ) -> None:
@@ -986,19 +1062,19 @@ def test_governance_block_during_passive_prepare_restores_selection_untouched(
         ],
     )
 
-    def write_launchers(*_args, **_kwargs):
+    def write_launchers(*_args: object, **_kwargs: object) -> tuple[Path, Path]:
         for index, path in enumerate(artifact_paths):
             path.write_bytes(f"target-{index}".encode())
         return artifact_paths[0], artifact_paths[1]
 
-    def reconcile(*_args, **_kwargs):
+    def reconcile(*_args: object, **_kwargs: object) -> NoReturn:
         CELL._atomic_json(instances / "202.json", target_record)
         raise CELL.CellGovernanceBlocked(
             "governance blocked before service commit",
             blocked,
         )
 
-    def status(port: int):
+    def status(port: int) -> dict[str, str | int] | None:
         if port == 4101 and 101 in live:
             return {
                 "status": "ok",
@@ -1011,7 +1087,7 @@ def test_governance_block_during_passive_prepare_restores_selection_untouched(
 
     class Routing:
         @staticmethod
-        def publish_active(_root, **kwargs):
+        def publish_active(_root: Path, **kwargs: str | int) -> None:
             published.append(int(kwargs["pid"]))
 
     monkeypatch.setattr(CELL, "_write_launchers", write_launchers)
@@ -1036,14 +1112,12 @@ def test_governance_block_during_passive_prepare_restores_selection_untouched(
         "_undrain_owned_instance",
         lambda active, _installation: {**active, "draining": False},
     )
-    monkeypatch.setattr(
-        CELL,
-        "_shutdown_owned_instance",
-        lambda record, _installation: (
-            stopped.append(int(record["pid"])),
-            live.discard(int(record["pid"])),
-        ),
-    )
+    def shutdown(record: _InstanceRecord, _installation: str) -> tuple[None, None]:
+        stopped.append(int(record["pid"]))
+        live.discard(int(record["pid"]))
+        return None, None
+
+    monkeypatch.setattr(CELL, "_shutdown_owned_instance", shutdown)
     monkeypatch.setattr(
         CELL,
         "_clear_owned_service_evidence",
@@ -1083,7 +1157,7 @@ def test_governance_block_during_passive_prepare_restores_selection_untouched(
 
 
 def test_governance_block_after_committed_crash_restores_prior_service_evidence(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     validated, plugin_root, context, _target, prior_manifest, transaction = (
@@ -1211,7 +1285,7 @@ def test_governance_block_after_committed_crash_restores_prior_service_evidence(
         ],
     )
 
-    def status(port: int):
+    def status(port: int) -> dict[str, object] | None:
         record = prior_record if port == 4101 else target_record
         pid = int(record["pid"])
         if pid not in live:
@@ -1226,11 +1300,11 @@ def test_governance_block_after_committed_crash_restores_prior_service_evidence(
             "promoted": True,
         }
 
-    def undrain(active, _installation):
+    def undrain(active: _InstanceRecord, _installation: str) -> dict[str, object]:
         draining.discard(int(active["pid"]))
         return {**active, "draining": False}
 
-    def shutdown(record, _installation):
+    def shutdown(record: _InstanceRecord, _installation: str) -> None:
         pid = int(record["pid"])
         stopped.append(pid)
         live.discard(pid)
@@ -1280,7 +1354,7 @@ def test_governance_block_after_committed_crash_restores_prior_service_evidence(
 
 
 def test_governance_block_before_marker_keeps_completed_target_inert(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     validated, plugin_root, context, _target, prior_manifest, transaction = (
@@ -1410,14 +1484,15 @@ def test_parent_lock_reenters_through_generated_launcher_for_recovery(
         '[project]\nname = "agent-index"\nversion = "9.9.9"\n',
         encoding="utf-8",
     )
+    for name in (
+        "resolve_effective_config.py", "config_commands.py", "resolve-activation-role.py",
+        "config_schema.py",
+    ):
+        shutil.copy2(PLUGIN / "scripts" / name, scripts / name)
     if os.name == "nt":
         shutil.copy2(
             PLUGIN / "scripts" / "runtime-gate.ps1",
             scripts / "runtime-gate.ps1",
-        )
-        shutil.copy2(
-            PLUGIN / "scripts" / "resolve_effective_config.py",
-            scripts / "resolve_effective_config.py",
         )
         (scripts / "resolve-runtime.ps1").write_text(
             "$AgentRtPy = $null\n",
@@ -1447,10 +1522,6 @@ def test_parent_lock_reenters_through_generated_launcher_for_recovery(
         shutil.copy2(
             PLUGIN / "scripts" / "runtime-gate.sh",
             scripts / "runtime-gate.sh",
-        )
-        shutil.copy2(
-            PLUGIN / "scripts" / "resolve_effective_config.py",
-            scripts / "resolve_effective_config.py",
         )
         shutil.copy2(
             PLUGIN / "scripts" / "installation-context" / "json-query.awk",
@@ -1608,6 +1679,7 @@ def test_parent_lock_reenters_through_generated_launcher_for_recovery(
             "HOME": str(profile),
             "USERPROFILE": str(profile),
             "AGENT_INDEX_ROLE": "host",
+            "AGENT_INDEX_MACHINE": "test-host",
             "AGENT_INDEX_CONFIG_DATA_B64": inline_config,
             "TEST_CAPTURE": str(capture),
             "TEST_CELL_ROOT": str(plugin_root),
@@ -1640,6 +1712,8 @@ def test_parent_lock_reenters_through_generated_launcher_for_recovery(
         environment["PATH"] = (
             f"{fake_bin}{os.pathsep}{environment.get('PATH', '')}"
         )
+    else:
+        environment["PATH"] = str(Path(sys.executable).parent) + os.pathsep + environment.get("PATH", "")
 
     with CELL._installation_lock(plugin_root) as lock_token:
         environment[CELL.LOCK_TOKEN_ENV] = lock_token
@@ -1742,7 +1816,7 @@ def test_reentrant_lock_propagates_body_cell_error(tmp_path: Path) -> None:
 
 
 def test_internal_start_lock_reentry_requires_explicit_start_authority(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     plugin_root = tmp_path / "plugin"
@@ -1789,7 +1863,7 @@ def test_internal_start_lock_reentry_requires_explicit_start_authority(
 
 
 def test_lock_publication_never_exposes_ownerless_destination(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     plugin_root = tmp_path / "plugin"
@@ -1815,7 +1889,7 @@ def test_lock_publication_never_exposes_ownerless_destination(
 
 
 def test_lock_publication_stages_complete_private_owner(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     plugin_root = tmp_path / "plugin"
@@ -1871,7 +1945,7 @@ def test_lock_restoration_is_atomic_no_replace(tmp_path: Path) -> None:
 
 
 def test_stale_lock_reclamation_cannot_delete_new_owner(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     plugin_root = tmp_path / "plugin"
@@ -1896,11 +1970,11 @@ def test_stale_lock_reclamation_cannot_delete_new_owner(
     errors: list[BaseException] = []
     original_rmtree = CELL.shutil.rmtree
 
-    def blocking_rmtree(path, *args, **kwargs):
+    def blocking_rmtree(path: str | Path, *args: object, **kwargs: object) -> None:
         if ".payload-provision.lock.stale." in Path(path).name:
             renamed.set()
             assert allow_delete.wait(timeout=5)
-        return original_rmtree(path, *args, **kwargs)
+        original_rmtree(path, *args, **kwargs)
 
     monkeypatch.setattr(CELL.shutil, "rmtree", blocking_rmtree)
 
@@ -1940,7 +2014,7 @@ def test_stale_lock_reclamation_cannot_delete_new_owner(
 
 
 def test_stale_lock_reclamation_rechecks_owner_after_atomic_rename(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     plugin_root = tmp_path / "plugin"
@@ -1956,7 +2030,7 @@ def test_stale_lock_reclamation_rechecks_owner_after_atomic_rename(
     original_rmtree = CELL.shutil.rmtree
     injected = False
 
-    def rename(source, destination):
+    def rename(source: str | Path, destination: str | Path) -> None:
         nonlocal injected
         if Path(source) == lock and not injected:
             injected = True
@@ -1966,7 +2040,7 @@ def test_stale_lock_reclamation_rechecks_owner_after_atomic_rename(
                 json.dumps({"pid": os.getpid(), "token": "new-live-owner"}),
                 encoding="utf-8",
             )
-        return original_rename(source, destination)
+        original_rename(source, destination)
 
     monkeypatch.setattr(CELL.os, "rename", rename)
     monkeypatch.setattr(CELL, "LOCK_TIMEOUT_SECONDS", 0.01)
@@ -1981,7 +2055,7 @@ def test_stale_lock_reclamation_rechecks_owner_after_atomic_rename(
 
 
 def test_service_ensure_reloads_selected_runtime_after_lock(
-    monkeypatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     validated = _roots(tmp_path)
     plugin_root = Path(validated["pluginRoot"])
@@ -1992,11 +2066,11 @@ def test_service_ensure_reloads_selected_runtime_after_lock(
     selected = {"version": "2.0.0"}
     reconciled: list[str] = []
 
-    def validate(*_args, **_kwargs):
+    def validate(*_args: object, **_kwargs: object) -> CellRoots:
         observed_initial_validation.set()
         return validated
 
-    def selected_runtime(*_args, **_kwargs):
+    def selected_runtime(*_args: object, **_kwargs: object) -> tuple[dict[str, object], Path]:
         return (
             {
                 "runtime": {
@@ -2036,7 +2110,7 @@ def test_service_ensure_reloads_selected_runtime_after_lock(
         CELL,
         "_reconcile_service",
         lambda _validated, _service, _command, version, _env, _token: (
-            reconciled.append(version) or {"version": version}
+            _after_append(reconciled, version, lambda: {"version": version})
         ),
     )
     args = SimpleNamespace(
@@ -2062,7 +2136,7 @@ def test_service_ensure_reloads_selected_runtime_after_lock(
 
 
 def test_bootstrap_does_not_reverse_rollback_published_while_waiting(
-    monkeypatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     validated = _roots(tmp_path)
     plugin_root = Path(validated["pluginRoot"])
@@ -2076,7 +2150,7 @@ def test_bootstrap_does_not_reverse_rollback_published_while_waiting(
     }
     reconciled: list[str] = []
 
-    def validate(*_args, **_kwargs):
+    def validate(*_args: object, **_kwargs: object) -> CellRoots:
         observed_initial_validation.set()
         return validated
 
@@ -2113,7 +2187,7 @@ def test_bootstrap_does_not_reverse_rollback_published_while_waiting(
         CELL,
         "_reconcile_service",
         lambda _validated, _service, _command, version, _env, _token: (
-            reconciled.append(version) or {"version": version}
+            _after_append(reconciled, version, lambda: {"version": version})
         ),
     )
     monkeypatch.setattr(
@@ -2151,7 +2225,7 @@ def test_bootstrap_does_not_reverse_rollback_published_while_waiting(
 
 
 def test_real_cold_start_uses_exact_wait_and_prior_instance_signature(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     validated = _roots(tmp_path)
@@ -2188,7 +2262,7 @@ def test_real_cold_start_uses_exact_wait_and_prior_instance_signature(
         pid = 222
 
         @staticmethod
-        def poll():
+        def poll() -> None:
             return None
 
     if os.name == "nt":
@@ -2250,7 +2324,7 @@ def test_real_cold_start_uses_exact_wait_and_prior_instance_signature(
 
 
 def test_transaction_cold_start_prepares_passive_before_route_commit(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     validated = _roots(tmp_path)
@@ -2309,7 +2383,7 @@ def test_transaction_cold_start_prepares_passive_before_route_commit(
 
 
 def test_detached_service_start_is_not_ready_without_owned_health(
-    monkeypatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     validated = _roots(tmp_path)
     Path(validated["pluginRoot"]).mkdir(parents=True)
@@ -2329,29 +2403,29 @@ def test_detached_service_start_is_not_ready_without_owned_health(
     monkeypatch.setattr(
         CELL,
         "_retire_owned_instances",
-        lambda *_args: events.append("reconcile-before-launch") or 0,
+        lambda *_args: _after_append(events, "reconcile-before-launch", lambda: 0),
     )
     if os.name == "nt":
         monkeypatch.setattr(
             CELL,
             "_spawn_windows_owned_process",
-            lambda *_args, **_kwargs: events.append("spawn") or process,
+            lambda *_args, **_kwargs: _after_append(events, "spawn", lambda: process),
         )
     else:
         monkeypatch.setattr(
             CELL.subprocess,
             "Popen",
-            lambda *_args, **_kwargs: events.append("spawn") or process,
+            lambda *_args, **_kwargs: _after_append(events, "spawn", lambda: process),
         )
     retired: list[object] = []
 
     def exact_retire(
-        value,
-        actual_validated,
-        installation_id,
-        runtime_version,
-        prior_instances,
-    ):
+        value: dict[str, object],
+        actual_validated: CellRoots,
+        installation_id: str,
+        runtime_version: str,
+        prior_instances: set[int],
+    ) -> None:
         assert actual_validated is validated
         assert installation_id == "example--1234/agent-index"
         assert runtime_version == "2.0.0"
@@ -2383,7 +2457,7 @@ def test_detached_service_start_is_not_ready_without_owned_health(
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows direct-child ownership")
 def test_windows_readiness_failure_terminates_direct_python_before_receipt(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     validated = _roots(tmp_path)
@@ -2431,10 +2505,10 @@ def test_windows_readiness_failure_terminates_direct_python_before_receipt(
     )
     environment["AGENT_INDEX_ROLE"] = "host"
     environment["AGENT_INDEX_TEST_CHILD_MARKER"] = str(marker)
-    observed: dict[str, object] = {}
-    real_popen = CELL.subprocess.Popen
+    observed: _SpawnObservation = {}
+    real_popen = cast(Callable[..., subprocess.Popen[bytes]], CELL.subprocess.Popen)
 
-    def popen(command, **kwargs):
+    def popen(command: list[str], **kwargs: Unpack[_PopenOptions]) -> subprocess.Popen[bytes]:
         process = real_popen(command, **kwargs)
         observed.update(
             {
@@ -2444,7 +2518,7 @@ def test_windows_readiness_failure_terminates_direct_python_before_receipt(
         )
         return process
 
-    def fail_before_receipt(*_args, **_kwargs):
+    def fail_before_receipt(*_args: object, **_kwargs: object) -> NoReturn:
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline and not marker.exists():
             time.sleep(0.02)
@@ -2487,7 +2561,7 @@ def test_windows_readiness_failure_terminates_direct_python_before_receipt(
 
 
 def test_readiness_failure_retires_spawned_child_receipt_not_wrapper_pid(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     validated = _roots(tmp_path)
@@ -2519,7 +2593,7 @@ def test_readiness_failure_retires_spawned_child_receipt_not_wrapper_pid(
     monkeypatch.setattr(CELL, "_service_status", lambda _port: None)
     stopped: list[int] = []
 
-    def shutdown(record, expected_installation):
+    def shutdown(record: _InstanceRecord, expected_installation: str) -> None:
         assert expected_installation == installation_id
         stopped.append(int(record["pid"]))
         live.remove(int(record["pid"]))
@@ -2530,15 +2604,15 @@ def test_readiness_failure_retires_spawned_child_receipt_not_wrapper_pid(
         pid = wrapper_pid
 
         @staticmethod
-        def poll():
+        def poll() -> int | None:
             return None if wrapper_pid in live else 0
 
         @staticmethod
-        def terminate():
+        def terminate() -> None:
             live.remove(wrapper_pid)
 
         @staticmethod
-        def wait(timeout):
+        def wait(timeout: float) -> int:
             assert timeout == 5
             return 0
 
@@ -2556,7 +2630,7 @@ def test_readiness_failure_retires_spawned_child_receipt_not_wrapper_pid(
 
 
 def test_readiness_cleanup_preserves_live_receipt_when_shutdown_fails(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     validated = _roots(tmp_path)
@@ -2599,15 +2673,15 @@ def test_readiness_cleanup_preserves_live_receipt_when_shutdown_fails(
         pid = wrapper_pid
 
         @staticmethod
-        def poll():
+        def poll() -> int | None:
             return None if wrapper_pid in live else 0
 
         @staticmethod
-        def terminate():
+        def terminate() -> None:
             live.remove(wrapper_pid)
 
         @staticmethod
-        def wait(timeout):
+        def wait(timeout: float) -> int:
             assert timeout == 5
             return 0
 
@@ -2626,7 +2700,7 @@ def test_readiness_cleanup_preserves_live_receipt_when_shutdown_fails(
 
 
 def test_matching_draining_service_is_not_a_ready_fast_path(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     validated = _roots(tmp_path)
@@ -2664,7 +2738,7 @@ def test_matching_draining_service_is_not_a_ready_fast_path(
 
 
 def test_transaction_recovery_may_exactly_undrain_matching_service(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     validated = _roots(tmp_path)
@@ -2686,15 +2760,13 @@ def test_transaction_recovery_may_exactly_undrain_matching_service(
     monkeypatch.setattr(CELL, "_configured_role", lambda _environment: "host")
     monkeypatch.setattr(CELL, "_active_service", lambda *_args: dict(active))
     monkeypatch.setattr(CELL, "_run_cell_deploy", lambda *_args, **_kwargs: None)
-    undrained: list[dict[str, object]] = []
-    monkeypatch.setattr(
-        CELL,
-        "_undrain_owned_instance",
-        lambda value, installation: (
-            undrained.append({"active": value, "installation": installation})
-            or {**value, "draining": False}
-        ),
-    )
+    undrained: list[_UndrainObservation] = []
+
+    def undrain(value: dict[str, object], installation: str) -> dict[str, object]:
+        undrained.append({"active": value, "installation": installation})
+        return {**value, "draining": False}
+
+    monkeypatch.setattr(CELL, "_undrain_owned_instance", undrain)
     monkeypatch.setattr(CELL, "_reconcile_owned_instances", lambda *_args: None)
 
     result = CELL._reconcile_service(
@@ -2713,7 +2785,7 @@ def test_transaction_recovery_may_exactly_undrain_matching_service(
 
 
 def test_client_demotion_retires_owned_instances_and_evidence(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     validated = _roots(tmp_path)
@@ -2789,7 +2861,7 @@ def test_client_demotion_retires_owned_instances_and_evidence(
 
 
 def test_client_demotion_fails_when_active_instance_has_no_owned_receipt(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     validated = _roots(tmp_path)
@@ -2826,7 +2898,7 @@ def test_client_demotion_fails_when_active_instance_has_no_owned_receipt(
 
 
 def test_demotion_preserves_evidence_replaced_by_another_instance(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     validated = _roots(tmp_path)
@@ -2885,7 +2957,7 @@ def test_demotion_preserves_evidence_replaced_by_another_instance(
 
 
 def test_service_ensure_kick_is_nonblocking_and_coalesced(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     validated = _roots(tmp_path)
@@ -2908,10 +2980,10 @@ def test_service_ensure_kick_is_nonblocking_and_coalesced(
         pid = 4321
 
         @staticmethod
-        def poll():
+        def poll() -> None:
             return None
 
-    def popen(command, **_kwargs):
+    def popen(command: list[str], **_kwargs: object) -> Process:
         spawned.append(command)
         return Process()
 
@@ -2949,7 +3021,7 @@ def test_service_ensure_kick_is_nonblocking_and_coalesced(
 
 
 def test_service_ensure_kick_rejects_worker_exit_before_owned_receipt(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     validated = _roots(tmp_path)
@@ -2965,7 +3037,7 @@ def test_service_ensure_kick_rejects_worker_exit_before_owned_receipt(
         pid = 4321
 
         @staticmethod
-        def poll():
+        def poll() -> int:
             return 1
 
     monkeypatch.setattr(
@@ -2988,7 +3060,7 @@ def test_service_ensure_kick_rejects_worker_exit_before_owned_receipt(
 
 
 def test_service_ensure_kick_rejects_reused_pid_receipt(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     validated = _roots(tmp_path)
@@ -3023,14 +3095,14 @@ def test_service_ensure_kick_rejects_reused_pid_receipt(
         pid = 4321
 
         @staticmethod
-        def poll():
+        def poll() -> None:
             return None
 
     spawned: list[list[str]] = []
     monkeypatch.setattr(
         CELL.subprocess,
         "Popen",
-        lambda command, **_kwargs: spawned.append(command) or Process(),
+        lambda command, **_kwargs: _after_append(spawned, command, Process),
     )
 
     result = CELL.service_ensure_kick(
@@ -3051,7 +3123,7 @@ def test_service_ensure_kick_rejects_reused_pid_receipt(
 
 
 def test_service_ensure_worker_clears_only_its_exact_receipt(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     validated = _roots(tmp_path)
@@ -3104,7 +3176,7 @@ def test_service_ensure_worker_clears_only_its_exact_receipt(
 
 
 def test_service_ensure_kick_returns_immediately_when_install_lock_busy(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     validated = _roots(tmp_path)
@@ -3133,7 +3205,7 @@ def test_service_ensure_kick_returns_immediately_when_install_lock_busy(
 
 
 def test_owned_instance_reconciliation_reaps_only_attested_orphans(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     validated = _roots(tmp_path)
@@ -3167,7 +3239,7 @@ def test_owned_instance_reconciliation_reaps_only_attested_orphans(
         )
     monkeypatch.setattr(CELL, "_pid_alive", lambda pid: pid in live)
 
-    def status(port: int):
+    def status(port: int) -> dict[str, str | bool | int]:
         pid = next(pid for pid, value in records.items() if value[2] == port)
         version, token, _port, state = records[pid]
         return {
@@ -3180,7 +3252,7 @@ def test_owned_instance_reconciliation_reaps_only_attested_orphans(
 
     stopped: list[int] = []
 
-    def shutdown(record, expected_installation):
+    def shutdown(record: _InstanceRecord, expected_installation: str) -> None:
         assert expected_installation == installation_id
         stopped.append(int(record["pid"]))
         live.remove(int(record["pid"]))
@@ -3205,7 +3277,7 @@ def test_owned_instance_reconciliation_reaps_only_attested_orphans(
 
 
 def test_reconcile_owned_instances_allows_already_stopping_service_to_exit(
-    monkeypatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     validated = _roots(tmp_path)
     instances = Path(validated["runRoot"]) / "instances"
@@ -3238,7 +3310,7 @@ def test_reconcile_owned_instances_allows_already_stopping_service_to_exit(
     def alive(pid: int) -> bool:
         return True if pid == 101 else next(old_checks, False)
 
-    def status(port: int):
+    def status(port: int) -> dict[str, str | int | bool] | None:
         if port == 4101:
             return {
                 "installationId": installation_id,
@@ -3273,7 +3345,7 @@ def test_reconcile_owned_instances_allows_already_stopping_service_to_exit(
 
 
 def test_deactivation_required_never_restarts_or_provisions(
-    monkeypatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     validated = _roots(tmp_path)
     plugin_root = Path(validated["pluginRoot"])
@@ -3401,7 +3473,7 @@ def test_manifest_does_not_accept_link_resolved_runtime_path(
 
 @pytest.mark.parametrize("artifact", ["manifest", "marker", "interpreter"])
 def test_operational_runtime_rejects_linked_artifacts(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     artifact: str,
 ) -> None:
@@ -3470,7 +3542,7 @@ def test_operational_runtime_rejects_linked_artifacts(
 
 
 def test_selected_completed_runtime_requires_successful_import(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     validated = _roots(tmp_path)
@@ -3538,7 +3610,7 @@ def test_selected_completed_runtime_requires_successful_import(
     ],
 )
 def test_runtime_dependency_profile_never_installs_host_store(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     role: str | None,
     expected_target: str,
@@ -3624,7 +3696,7 @@ def test_dynamic_context_loader_registers_real_completion_validator(
 
 
 def test_build_completion_marker_keeps_canonical_exact_fields(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     snapshot = tmp_path / "snapshot"
@@ -3694,7 +3766,7 @@ def test_runtime_profile_receipt_is_strict_and_owned(tmp_path: Path) -> None:
     [("client", "host"), ("host", "client")],
 )
 def test_same_payload_version_uses_distinct_immutable_profile_slot(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     prior_role: str,
     target_role: str,
@@ -3723,7 +3795,7 @@ def test_same_payload_version_uses_distinct_immutable_profile_slot(
         lambda _environment: target_role,
     )
 
-    def run_context(_payload, action, *arguments):
+    def run_context(_payload: Path, action: str, *arguments: str) -> dict[str, object]:
         if action == "slot-provision":
             observed["slot_arguments"] = list(arguments)
             _write_runtime_slot_evidence(
@@ -3733,18 +3805,18 @@ def test_same_payload_version_uses_distinct_immutable_profile_slot(
         return {}
 
     def complete_slot(
-        _management,
-        _origin,
-        _snapshot,
-        _context,
-        _marketplace,
-        _durable,
-        actual_payload_version,
-        actual_runtime_version,
-        slot,
-        _validated,
-        role,
-    ):
+        _management: Path,
+        _origin: Path,
+        _snapshot: Path,
+        _context: Path,
+        _marketplace: str,
+        _durable: Path,
+        actual_payload_version: str,
+        actual_runtime_version: str,
+        slot: Path,
+        _validated: CellRoots,
+        role: str | None,
+    ) -> Path:
         observed.update(
             {
                 "payload_version": actual_payload_version,
@@ -3753,9 +3825,9 @@ def test_same_payload_version_uses_distinct_immutable_profile_slot(
                 "role": role,
             }
         )
-        return CELL._venv_python(slot)
+        return cast(Path, CELL._venv_python(slot))
 
-    def prepare(*args, **_kwargs):
+    def prepare(*args: object, **_kwargs: object) -> dict[str, str]:
         observed["transaction_runtime"] = args[8]
         return {"id": "transaction"}
 
@@ -3798,7 +3870,7 @@ def test_same_payload_version_uses_distinct_immutable_profile_slot(
     [("client", "host"), ("host", "client")],
 )
 def test_bootstrap_profile_change_provisions_before_service_reconciliation(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     prior_role: str,
     target_role: str,
@@ -3848,7 +3920,7 @@ def test_bootstrap_profile_change_provisions_before_service_reconciliation(
     )
     provisioned: list[str] = []
 
-    def provision(*_args, **_kwargs):
+    def provision(*_args: object, **_kwargs: object) -> dict[str, str]:
         provisioned.append(target_runtime)
         return {"status": "ready", "runtimeVersion": target_runtime}
 
@@ -3935,7 +4007,7 @@ def test_uv_posix_venv_interpreter_symlink_is_accepted(
 
 
 def test_runtime_import_probe_ignores_repo_shadow_and_checks_slot_origin(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     validated = _roots(tmp_path)
@@ -3995,7 +4067,7 @@ def test_runtime_import_probe_ignores_repo_shadow_and_checks_slot_origin(
 
 
 def test_completed_slot_corruption_is_not_silently_overwritten(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     validated = _roots(tmp_path)
@@ -4126,7 +4198,7 @@ def test_invalid_context_fails_without_legacy_or_global_mutation(
 
 
 def _authorize_private_cell_start(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     root: Path,
     *,
     role: str = "host",
@@ -4161,7 +4233,7 @@ def _authorize_private_cell_start(
 
 
 def test_private_cell_start_requires_host_and_live_lifecycle_lock(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     root = tmp_path / "cell"
@@ -4174,16 +4246,16 @@ def test_private_cell_start_requires_host_and_live_lifecycle_lock(
     )
     args = SimpleNamespace(host=None, port=None, passive=False)
 
-    assert agent_main.cmd_cell_start(args) == 0
+    assert agent_main.cmd_cell_start(cast(argparse.Namespace, args)) == 0
     assert started == [False]
 
     monkeypatch.setenv("AGENT_INDEX_ROLE", "client")
-    assert agent_main.cmd_cell_start(args) == 2
+    assert agent_main.cmd_cell_start(cast(argparse.Namespace, args)) == 2
     assert started == [False]
 
 
 def test_private_passive_cell_start_requires_selection_transaction(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     root = tmp_path / "cell"
@@ -4198,16 +4270,16 @@ def test_private_passive_cell_start_requires_selection_transaction(
 
     assert (
         agent_main.cmd_cell_start(
-            SimpleNamespace(host=None, port=None, passive=True)
+            cast(argparse.Namespace, SimpleNamespace(host=None, port=None, passive=True))
         )
         == 2
     )
 
 
 def test_private_cell_start_requires_reconciling_transaction_state(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-    capsys,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     root = tmp_path / "cell"
     _authorize_private_cell_start(monkeypatch, root)
@@ -4261,7 +4333,7 @@ def test_private_cell_start_requires_reconciling_transaction_state(
 
     assert (
         agent_main.cmd_cell_start(
-            SimpleNamespace(host=None, port=None, passive=False)
+            cast(argparse.Namespace, SimpleNamespace(host=None, port=None, passive=False))
         )
         == 2
     )
@@ -4426,9 +4498,9 @@ def test_passive_process_publishes_no_shared_active_evidence(
 
 
 def test_two_cell_local_services_bind_distinct_os_assigned_ports(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-    capsys,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     processes: list[subprocess.Popen[bytes]] = []
     endpoints: list[tuple[Path, int]] = []
@@ -4533,7 +4605,7 @@ def test_two_cell_local_services_bind_distinct_os_assigned_ports(
         )["endpoint"]
         monkeypatch.setenv("AGENT_INDEX_INSTALLATION_ID", "one/agent-index")
         monkeypatch.setattr(agent_main, "client_url", lambda: f"http://{second_endpoint}")
-        assert agent_main.cmd_stop(SimpleNamespace()) == 0
+        assert agent_main.cmd_stop(cast(argparse.Namespace, SimpleNamespace())) == 0
         refused = json.loads(capsys.readouterr().out)
         assert refused["stopped"] is False
         assert refused["reason"] == "ownership-mismatch"
@@ -4631,44 +4703,53 @@ def test_two_cell_local_services_bind_distinct_os_assigned_ports(
     ],
 )
 def test_two_cell_shutdown_reports_failures(
-    monkeypatch, tmp_path: Path, capsys, fault: str, message: str
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str], fault: str, message: str
 ) -> None:
     real_popen = subprocess.Popen
     real_urlopen = urllib.request.urlopen
     observed: list[subprocess.Popen[bytes]] = []
 
-    def start(*args, **kwargs):
-        process = real_popen(*args, **kwargs)
+    def start(arguments: list[str], **kwargs: Unpack[_PopenOptions]) -> subprocess.Popen[bytes]:
+        process = real_popen(arguments, **kwargs)
         observed.append(process)
         if len(observed) == 2:
             real_wait = process.wait
 
-            def wait(timeout=None):
+            def wait(timeout: float | None = None) -> int:
                 returncode = real_wait(timeout=timeout)
                 if fault == "nonzero-exit":
                     return 37
                 if fault == "wait-timeout":
+                    assert timeout is not None
                     raise subprocess.TimeoutExpired(process.args, timeout)
                 return returncode
 
             monkeypatch.setattr(process, "wait", wait)
         return process
 
-    def open_url(request, *args, **kwargs):
-        response = real_urlopen(request, *args, **kwargs)
-        if (
-            isinstance(request, urllib.request.Request)
-            and request.full_url.endswith("/shutdown")
-            and request.get_header("X-agent-index-installation-id") == "two/agent-index"
-            and fault in ("shutdown-ack", "shutdown-transport")
-        ):
-            response.read()
-            response.close()
-            if fault == "shutdown-ack":
-                return io.BytesIO(b'{"shutdown":false}')
-            if fault == "shutdown-transport":
-                raise OSError("injected shutdown response failure")
-        return response
+    def instrument_urlopen(
+        original: Callable[_Parameters, BinaryIO],
+    ) -> Callable[_Parameters, BinaryIO]:
+        def open_url(*args: _Parameters.args, **kwargs: _Parameters.kwargs) -> BinaryIO:
+            request = args[0]
+            response = original(*args, **kwargs)
+            if (
+                isinstance(request, urllib.request.Request)
+                and request.full_url.endswith("/shutdown")
+                and request.get_header("X-agent-index-installation-id") == "two/agent-index"
+                and fault in ("shutdown-ack", "shutdown-transport")
+            ):
+                response.read()
+                response.close()
+                if fault == "shutdown-ack":
+                    return io.BytesIO(b'{"shutdown":false}')
+                if fault == "shutdown-transport":
+                    raise OSError("injected shutdown response failure")
+            return response
+
+        return open_url
+
+    open_url = instrument_urlopen(real_urlopen)
 
     monkeypatch.setattr(subprocess, "Popen", start)
     monkeypatch.setattr(urllib.request, "urlopen", open_url)
@@ -4727,7 +4808,7 @@ def test_cross_platform_sources_keep_legacy_and_cell_lifecycle_separate() -> Non
     assert 'encoding="utf-8-sig"' in coordinator
 
 
-def test_posix_zombie_is_not_treated_as_alive(monkeypatch) -> None:
+def test_posix_zombie_is_not_treated_as_alive(monkeypatch: pytest.MonkeyPatch) -> None:
     if os.name == "nt":
         pytest.skip("POSIX process-state test")
 
@@ -4745,7 +4826,7 @@ def test_posix_zombie_is_not_treated_as_alive(monkeypatch) -> None:
     assert CELL._pid_alive(123) is False
 
 
-def test_posix_zombie_has_no_process_birth_identity(monkeypatch) -> None:
+def test_posix_zombie_has_no_process_birth_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     if os.name == "nt":
         pytest.skip("POSIX process-state test")
 
@@ -4967,7 +5048,7 @@ def test_cell_installers_preserve_reserved_coordinator_exit(
 
 @pytest.mark.parametrize("exit_code", [86, 87, 88, 89])
 def test_cell_deploy_preserves_reserved_crash_exit(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     exit_code: int,
 ) -> None:

@@ -86,6 +86,9 @@ agent-dispatch = "agent_dispatch.__main__:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.data-files]
+"share/copilot-extensions/agent_dispatch" = ["readiness-isolation.json"]
+
 [tool.setuptools.package-data]
 # Built-in named worker identities (agent_dispatch.worker_identities); must be
 # shipped in the wheel, not just present in an editable/dev checkout.

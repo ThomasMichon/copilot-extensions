@@ -128,16 +128,24 @@ function Invoke-Runtime([string]$Python) {
     if ($context) { $env:COPILOT_EXTENSIONS_CONTEXT = $context } else {
         Remove-Item Env:COPILOT_EXTENSIONS_CONTEXT -ErrorAction SilentlyContinue
     }
-    $nativeArgs = $forwardArgs
+    $pythonOptions = @()
+    $nativeArgs = @('-m', $module) + $forwardArgs
+    if ($forwardArgs.Count -gt 0 -and $forwardArgs[0] -in @('installer-readiness', 'invocation-contract')) {
+        $pythonOptions = @('-I', '-B', '-X', 'utf8')
+        $nativeArgs = @(
+            (Join-Path $payloadRoot 'scripts\versioned_runtime_probe.py'),
+            '--plugin', 'agent-dispatch', '--module', $module, '--'
+        ) + $forwardArgs
+    }
     $argumentMode = Get-Variable PSNativeCommandArgumentPassing -ValueOnly -ErrorAction SilentlyContinue
     if (-not $argumentMode -or $argumentMode -eq 'Legacy') {
-        $nativeArgs = @($forwardArgs | ForEach-Object {
+        $nativeArgs = @($nativeArgs | ForEach-Object {
             '"' + [regex]::Replace([regex]::Replace([string]$_, '(\\*)"', '$1$1\"'), '(\\+)$', '$1$1') + '"'
         })
     }
     $previous = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    try { & $Python -m $module @nativeArgs } finally { $ErrorActionPreference = $previous }
+    try { & $Python @pythonOptions @nativeArgs } finally { $ErrorActionPreference = $previous }
     exit $LASTEXITCODE
 }
 $python = if ($configurationOnly) { Resolve-Runtime read-only } else { Resolve-Runtime }

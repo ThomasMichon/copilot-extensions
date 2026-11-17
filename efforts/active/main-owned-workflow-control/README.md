@@ -20,7 +20,17 @@ The November 9 priority extends installed release qualification through the
 [Manager Create/Resume/Open lifecycle](installed-manager-lifecycle.md), reusing
 the existing #11377 native and #3336/#7529 release owners.
 
-## Guiding Intent
+## Goal
+
+**Kind:** completion; a finite campaign under the operator's assignment in
+[Request](#request).
+
+**Root goal (operator-defined, verbatim; source: Request):**
+
+> Ultimately, your goal is consolidation and elimination of redundant status
+> checks, to produce fewer overall pipeline runs so that Copilot reviews can
+> run more often without getting throttled. The main-owned-workflow-control
+> is a means to an end, but not the highest priority.
 
 Reduce redundant status checks and overall pipeline executions so Copilot review
 can run more often without unnecessary throttling. Preserve validation assurance
@@ -44,6 +54,69 @@ dev-backed-deployment consideration.
 The November 9 request explicitly adds the bounded installed-Manager lifecycle
 exception to that portfolio policy. It does not restore unrelated integration
 suites to fast PR CI or transfer the promotion writer.
+
+The November 12 readiness-compatibility amendment selects
+`refuse-unqualified-probes`: return unknown before executing an unqualified
+older probe, with the owning updater as recovery. Preserve ordinary commands,
+separately authorized installer actions and the older-baseline qualification
+requirement. The exact decision and its limits are recorded in the
+[installed-lifecycle scope approval](installed-manager-lifecycle.md#november-12-readiness-compatibility-approval).
+This adds no rollout, shared-repair or Main-activation authority.
+
+The subsequent census-budget decision selects `allow-query-five-seconds`:
+change only the process-census per-query limit from one to five seconds,
+add focused controls and require new native proof. Session creation, overall
+job/stage deadlines, cadence, caps and fatal-error policy stay unchanged.
+The [scope approval](installed-manager-lifecycle.md#november-12-census-query-budget-approval)
+preserves the exact prompt and response; it grants no rollout or failure waiver.
+
+The November 16 implementation-strategy decision selects
+`migrate-in-current-pr`: complete the newly required strict typing migration
+within the current PR, preserving its fixes and review history rather than
+splitting typing prerequisites into separate PRs. The
+[scope approval](installed-manager-lifecycle.md#november-16-strict-migration-strategy)
+retains the exact decision. All validation gates, capture limits and rollout
+holds remain unchanged.
+
+The subsequent `fix-grouping-in-current-pr` decision permits the narrow
+strict-checker correction for independent standalone programs with same-named
+modules. Its [scope approval](installed-manager-lifecycle.md#november-16-strict-checker-program-grouping-approval)
+preserves every selected physical file, owner, strict flag, Python/platform
+target and fail-closed aggregate. It does not release the Index cleanup hold or
+authorize a new qualification profile.
+
+**Acceptance:** the Plan and Validation Plan below establish fewer redundant
+executions while preserving validation assurance and contribution gates.
+Installed-suite qualification must prove the real Manager Create/Open/Resume
+flows and the required candidate-bound refusal and publication behavior, not
+only source tests or installation success. Every remaining item must be
+verified and resolved, or explicitly transferred to a named tracked objective
+with accepted ownership; no ownerless remainder is completion.
+
+**Finalization criterion:** this whole effort is explicitly Done, all Plan and
+Validation Plan items meet that disposition, required publication/review/merge
+gates have passed, and the effort is archived and released through the normal
+repository flow. Retained custody follows its existing owners. Finishing a
+typing pass, native run, PR or session does not permit premature finalization.
+
+**Now:** finish the approved in-PR strict migration and independent-program
+checker correction for installed-suite qualification (#12013). Twenty-two
+selected owners pass locally; Worktrees' generated-module identity collision,
+the retained Index cleanup hold, current required CI and bounded controlled
+capture still block current-head acceptance. No validation limit or original
+hold changes.
+
+**Return:** after the refresh, re-read this Goal and the linked scope approvals,
+reconcile retained implementation/checker custody, and finish that slice under
+the unchanged gates. Earn current required CI before new installed Windows
+acceptance; then return to the remaining portfolio audit and consolidation
+outcome rather than treating the latest child milestone as the root goal.
+
+## Guiding Intent
+
+The former Guiding Intent is retained verbatim in Goal above. The
+[Request](#request) preserves the originating operator wording and subsequent
+campaign amendments.
 
 ## Participants
 
@@ -529,6 +602,11 @@ authorizes critical main-path acceptance or a bounded administrative change.
   evidence must block promotion, not merely report an informational check.
   Installed-core action/continuity proof merged in #11864 at `fa93ea37c2`,
   backed by exact-source native run 42892225611 and current-head approval.
+  Complete frozen-payload acquisition merged in #11972 at `0286b3f715`,
+  backed by exact-source native run 42933306312: the actual CLI installed all
+  24 private payloads and every selected manifest matched the frozen artifact.
+  The separate installed-core lifecycle passed on that same source; the payload
+  receipt explicitly leaves runtime installation unobserved.
   Complete-suite construction/actual Machines readiness is now the active slice;
   authentic-baseline update, mandatory enforcement and Main adoption remain open.
 - [ ] Complete the [test validation burndown](test-validation-burndown.md):

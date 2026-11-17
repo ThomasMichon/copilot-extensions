@@ -8,12 +8,15 @@ command protocol), so every verb crosses an actual subprocess boundary.
 from __future__ import annotations
 
 import asyncio
+import argparse
 import json
 import os
 import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from collections.abc import Callable, Iterator, Sequence
+from typing import TypedDict, cast
 
 import pytest
 import yaml
@@ -23,6 +26,8 @@ from agent_containers import external_driver, fleet, lifecycle, resolver, runtim
 from agent_containers.config import ContainersConfig, FleetConfig, load_config
 from agent_containers.external_driver import ExternalDriver, find_driver, scan_drivers
 from agent_containers.runtime_drivers import DockerDriver, DriverError
+from agent_containers.routed_exec import run_routed, stream_routed
+from agent_containers import hosting_policy
 
 FAKE = Path(__file__).with_name("fake_runtime_driver.py")
 _REAL_DOCKER = lifecycle._docker
@@ -31,15 +36,47 @@ _REAL_DOCKER = lifecycle._docker
 posix_only = pytest.mark.skipif(os.name == "nt", reason="needs POSIX shell/exec semantics")
 
 
+class FleetOptions(TypedDict, total=False):
+    driver: str | None
+    driver_options: dict[str, object]
+    size: int
+    workspace_folder: str | None
+    exec_user: str | None
+    relay_enabled: bool | None
+    environment: dict[str, str]
+    name_prefix: str | None
+    image: str | None
+    devcontainer_path: str | None
+    devcontainer_config: str | None
+    repo: str
+    host_workspace_path: str | None
+    systemd_capable: bool
+    cpus: float | None
+    security_profile: str
+    lifecycle_owner: str
+
+
+class LaunchCapture(TypedDict, total=False):
+    argv: list[str]
+    env: dict[str, str]
+    staged: dict[str, str]
+
+
+def _route(name: str) -> runtime_drivers.Route:
+    route = runtime_drivers.owner_of(name)
+    assert route is not None
+    return route
+
+
 @pytest.fixture(autouse=True)
-def _isolated_bindings():
+def _isolated_bindings() -> Iterator[None]:
     runtime_drivers.clear_bindings()
     yield
     runtime_drivers.clear_bindings()
 
 
 @pytest.fixture
-def fake(tmp_path, monkeypatch):
+def fake(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     """Register the fake driver as ``example-driver`` and return its state."""
     root = tmp_path / "fake-runtime"
     root.mkdir()
@@ -55,23 +92,25 @@ def fake(tmp_path, monkeypatch):
     monkeypatch.delenv("FAKE_DRIVER_CAPS", raising=False)
     monkeypatch.delenv("FAKE_DRIVER_FAIL", raising=False)
 
-    def state():
+    def state() -> dict[str, object]:
         path = root / "state.json"
-        return json.loads(path.read_text()) if path.exists() else {"members": {}, "calls": []}
+        return cast(
+            dict[str, object], json.loads(path.read_text()),
+        ) if path.exists() else {"members": {}, "calls": []}
 
     return SimpleNamespace(root=root, drivers=drivers, state=state)
 
 
 @pytest.fixture
-def no_docker(monkeypatch):
+def no_docker(monkeypatch: pytest.MonkeyPatch) -> None:
     """Any Docker CLI use fails, as on a host without Docker."""
-    def refuse(args, timeout=30.0):
+    def refuse(args: list[str], timeout: float = 30.0) -> None:
         raise RuntimeError("docker CLI not found on PATH")
 
     monkeypatch.setattr(lifecycle, "_docker", refuse)
 
 
-def driver_fleet(**overrides) -> FleetConfig:
+def driver_fleet(**overrides: object) -> FleetConfig:
     values = {
         "driver": "example-driver",
         "driver_options": {"profile": "default", "nested": {"cpus": 2}},
@@ -81,17 +120,17 @@ def driver_fleet(**overrides) -> FleetConfig:
         "relay_enabled": False,
     }
     values.update(overrides)
-    return FleetConfig(**values)
+    return FleetConfig(**cast(FleetOptions, values))
 
 
-def driver_config(**overrides) -> ContainersConfig:
+def driver_config(**overrides: object) -> ContainersConfig:
     return ContainersConfig(fleets={"example": driver_fleet(**overrides)})
 
 
 # -- configuration ---------------------------------------------------------
 
 
-def test_config_loads_driver_keys(tmp_path, monkeypatch):
+def test_config_loads_driver_keys(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     path = tmp_path / "containers.yaml"
     path.write_text(yaml.safe_dump({"fleets": {"example": {
         "driver": "example-driver",
@@ -105,7 +144,7 @@ def test_config_loads_driver_keys(tmp_path, monkeypatch):
     assert selected.driver_options == {"profile": "default"}
 
 
-def test_docker_default_is_unchanged():
+def test_docker_default_is_unchanged() -> None:
     plain = FleetConfig(image="example/image:1")
     plain.validate_restricted()
     assert plain.driver is None and plain.driver_options == {}
@@ -123,7 +162,7 @@ def test_docker_default_is_unchanged():
     ("systemd_capable", True),
     ("cpus", 0.0),
 ])
-def test_driver_rejects_docker_provisioning_keys(key, value):
+def test_driver_rejects_docker_provisioning_keys(key: str, value: object) -> None:
     with pytest.raises(RuntimeError, match=f"driver fleets cannot set {key}"):
         driver_fleet(**{key: value}).validate_restricted()
 
@@ -136,12 +175,12 @@ def test_driver_rejects_docker_provisioning_keys(key, value):
     ({"driver_options": ["not", "a", "map"]}, "key/value mapping"),
     ({"driver_options": {"when": object()}}, "JSON-serializable"),
 ])
-def test_driver_validation_errors(overrides, message):
+def test_driver_validation_errors(overrides: dict[str, object], message: str) -> None:
     with pytest.raises(RuntimeError, match=message):
         driver_fleet(**overrides).validate_restricted()
 
 
-def test_driver_options_require_driver():
+def test_driver_options_require_driver() -> None:
     with pytest.raises(RuntimeError, match="requires 'driver'"):
         FleetConfig(image="example/image:1", driver_options={"a": 1}).validate_restricted()
 
@@ -149,7 +188,7 @@ def test_driver_options_require_driver():
 # -- discovery -------------------------------------------------------------
 
 
-def test_manifest_discovery_and_invalid_entry_finding(fake):
+def test_manifest_discovery_and_invalid_entry_finding(fake: SimpleNamespace) -> None:
     (fake.drivers / "broken.json").write_text("{not json")
     (fake.drivers / "renamed.json").write_text(json.dumps(
         {"schema_version": 1, "name": "other", "command": [sys.executable]},
@@ -163,7 +202,9 @@ def test_manifest_discovery_and_invalid_entry_finding(fake):
 
 
 @posix_only
-def test_path_fallback_and_missing_driver(fake, tmp_path, monkeypatch):
+def test_path_fallback_and_missing_driver(
+    fake: SimpleNamespace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     exe = bin_dir / "agent-containers-driver-onpath"
@@ -175,17 +216,20 @@ def test_path_fallback_and_missing_driver(fake, tmp_path, monkeypatch):
         find_driver("absent")
 
 
-def test_drivers_cli_lists_manifests(fake, capsys):
+def test_drivers_cli_lists_manifests(fake: SimpleNamespace, capsys: pytest.CaptureFixture[str]) -> None:
     assert cli.main(["drivers", "--json"]) == 0
     listed = json.loads(capsys.readouterr().out)
     assert [d["name"] for d in listed["drivers"]] == ["example-driver"]
     assert listed["findings"] == []
 
 
-def test_podman_bundled_fallback_preserves_explicit_drivers(fake, monkeypatch):
+def test_podman_bundled_fallback_preserves_explicit_drivers(
+    fake: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(external_driver.shutil, "which", lambda _: None)
     spec = find_driver("podman")
-    assert spec.command == (sys.executable, "-m", "agent_containers.podman_driver")
+    assert spec.command == (sys.executable, "-I", "-B", "-X", "utf8", "-m",
+                            "agent_containers.podman_driver")
     assert spec.source == "bundled"
     monkeypatch.setattr(external_driver.shutil, "which", lambda _: "/tools/custom-podman")
     assert find_driver("podman").source == "PATH"
@@ -195,15 +239,76 @@ def test_podman_bundled_fallback_preserves_explicit_drivers(fake, monkeypatch):
     assert find_driver("podman").command == (sys.executable, "custom.py")
 
 
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.parametrize("shadow_location", ("checkout", "pythonpath"))
+def test_bundled_podman_imports_installed_driver_not_checkout(
+    fake: SimpleNamespace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shadow_location: str,
+) -> None:
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    shadow = checkout if shadow_location == "checkout" else tmp_path / "injected"
+    package = shadow / "agent_containers"
+    package.mkdir(parents=True)
+    marker = tmp_path / "checkout-imported"
+    (package / "__init__.py").write_text(
+        f"from pathlib import Path\nPath({str(marker)!r}).touch()\nraise SystemExit(0)\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(checkout)
+    monkeypatch.setenv("PYTHONPATH", str(shadow))
+    monkeypatch.setattr(external_driver.shutil, "which", lambda _: None)
+    driver = ExternalDriver(
+        find_driver("podman"), "example",
+        FleetConfig(driver="podman", driver_options={"image": "example"}),
+    )
+    original = driver._request
+    monkeypatch.setattr(driver, "_request", lambda payload: {**original(payload), "protocolVersion": 2})
+    with pytest.raises(DriverError) as raised:
+        driver.call("capabilities")
+    assert raised.value.code == "unsupported_protocol"
+    assert not marker.exists()
+
+
+@pytest.mark.parametrize("component", ("engine", "driver"))
+def test_readiness_podman_lookup_excludes_checkout(
+    fake: SimpleNamespace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, component: str,
+) -> None:
+    from agent_containers.podman_driver import PodmanDriver
+
+    tools = tmp_path / "host-tools"
+    tools.mkdir()
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    name = "podman" if component == "engine" else "agent-containers-driver-podman"
+    filename = name + (".exe" if os.name == "nt" else "")
+    approved = tools / filename
+    for candidate in (approved, checkout / filename):
+        candidate.write_bytes(b"fixture executable")
+        candidate.chmod(0o755)
+    monkeypatch.chdir(checkout)
+    monkeypatch.setenv("PATH", "." + os.pathsep + str(tools))
+    monkeypatch.setenv("NoDefaultCurrentDirectoryInExePath", "1")
+    command = (
+        PodmanDriver({
+            "protocolVersion": 1, "driver": "podman", "fleet": "example",
+            "driverOptions": {"image": "example"},
+        }).command if component == "engine" else find_driver("podman").command
+    )
+    assert Path(command[0]) == approved
+
+
 @pytest.mark.parametrize("filename", ["podman.json", "PODMAN.json", "podman.JSON", "PODMAN.JSON"])
-def test_invalid_explicit_podman_does_not_fall_back(fake, monkeypatch, filename):
+def test_invalid_explicit_podman_does_not_fall_back(
+    fake: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, filename: str,
+) -> None:
     (fake.drivers / filename).write_text("{broken")
     monkeypatch.setattr(external_driver.shutil, "which", lambda _: "/tools/custom-podman")
     with pytest.raises(RuntimeError, match="unreadable manifest"):
         find_driver("podman")
 
 
-def test_non_podman_suffix_preserves_platform_glob_behavior(fake):
+def test_non_podman_suffix_preserves_platform_glob_behavior(fake: SimpleNamespace) -> None:
     original = fake.drivers / "example-driver.json"
     original.rename(fake.drivers / "example-driver.JSON")
     specs, findings = scan_drivers()
@@ -211,19 +316,22 @@ def test_non_podman_suffix_preserves_platform_glob_behavior(fake):
     assert findings == []
 
 
-def test_podman_directory_scan_failure_refuses_fallback(fake, monkeypatch):
+def test_podman_directory_scan_failure_refuses_fallback(
+    fake: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     original_iterdir = Path.iterdir
 
-    def unreadable(path):
+    def unreadable(path: Path) -> Iterator[Path]:
         if path == fake.drivers:
             raise PermissionError("fixture directory unavailable")
         return original_iterdir(path)
 
     monkeypatch.setattr(Path, "iterdir", unreadable)
-    lookups = []
-    monkeypatch.setattr(external_driver.shutil, "which", lambda name: (
-        lookups.append(name) or "/tools/custom-podman"
-    ))
+    lookups: list[str] = []
+    def lookup(name: str) -> str:
+        lookups.append(name)
+        return "/tools/custom-podman"
+    monkeypatch.setattr(external_driver.shutil, "which", lookup)
     with pytest.raises(RuntimeError, match="cannot enumerate"):
         find_driver("podman")
     assert lookups == []
@@ -232,7 +340,7 @@ def test_podman_directory_scan_failure_refuses_fallback(fake, monkeypatch):
 # -- protocol and lifecycle ----------------------------------------------
 
 
-def test_up_provisions_through_driver_without_docker(fake, no_docker):
+def test_up_provisions_through_driver_without_docker(fake: SimpleNamespace, no_docker: None) -> None:
     config = driver_config(environment={"EXAMPLE": "1"})
     result = fleet.reconcile_up(config, "example")
     assert result.created == ["example-1", "example-2"]
@@ -249,7 +357,7 @@ def test_up_provisions_through_driver_without_docker(fake, no_docker):
     assert first["environment"] == {"EXAMPLE": "1"}
 
 
-def test_enumerate_inspect_start_stop_remove(fake, no_docker):
+def test_enumerate_inspect_start_stop_remove(fake: SimpleNamespace, no_docker: None) -> None:
     config = driver_config(size=1)
     fleet.reconcile_up(config, "example")
 
@@ -279,7 +387,9 @@ def test_enumerate_inspect_start_stop_remove(fake, no_docker):
     assert lifecycle.list_containers(config) == []
 
 
-def test_typed_errors_and_protocol_version(fake, monkeypatch):
+def test_typed_errors_and_protocol_version(
+    fake: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     driver = runtime_drivers.driver_for_fleet(driver_config(), "example", driver_fleet())
     monkeypatch.setenv("FAKE_DRIVER_FAIL", "list:runtime_unavailable")
     with pytest.raises(DriverError) as raised:
@@ -294,7 +404,9 @@ def test_typed_errors_and_protocol_version(fake, monkeypatch):
     assert raised.value.code == "unsupported_protocol"
 
 
-def test_unavailable_driver_does_not_hide_docker_fleets(fake, monkeypatch):
+def test_unavailable_driver_does_not_hide_docker_fleets(
+    fake: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     config = ContainersConfig(fleets={
         "example": driver_fleet(),
         "plain": FleetConfig(image="example/image:1"),
@@ -312,7 +424,7 @@ def test_unavailable_driver_does_not_hide_docker_fleets(fake, monkeypatch):
         fleet.down_fleet(config, "example")
 
 
-def test_docker_failure_still_raises_with_docker_fleets(fake, no_docker):
+def test_docker_failure_still_raises_with_docker_fleets(fake: SimpleNamespace, no_docker: None) -> None:
     config = ContainersConfig(fleets={
         "example": driver_fleet(), "plain": FleetConfig(image="example/image:1"),
     })
@@ -323,21 +435,24 @@ def test_docker_failure_still_raises_with_docker_fleets(fake, no_docker):
 # -- exec, streaming exec and copy ---------------------------------------
 
 
-def _provisioned(config):
+def _provisioned(config: ContainersConfig) -> lifecycle.DockerContainerInfo:
     fleet.reconcile_up(config, "example")
     return {c.name: c for c in lifecycle.list_containers(config)}["example-1"]
 
 
 @posix_only
-def test_captured_exec_and_copy_route_through_driver(fake, no_docker, tmp_path, monkeypatch):
+def test_captured_exec_and_copy_route_through_driver(
+    fake: SimpleNamespace, no_docker: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     member = _provisioned(driver_config(size=1))
     monkeypatch.setenv("EXAMPLE_SECRET", "from-host")
-    done = runtime_drivers.run_routed([
+    done = run_routed([
         "docker", "exec", "-i", "-u", "vscode", "-e", "GREETING=hello",
         "-e", "EXAMPLE_SECRET", "-w", "/work", member.container_id,
         "sh", "-c", 'printf "%s %s %s %s " "$GREETING" "$EXAMPLE_SECRET" '
         '"$FAKE_MEMBER_USER" "$(basename "$PWD")"; cat',
     ], input_text="from-stdin")
+    assert done is not None
     assert done.returncode == 0
     assert done.stdout == "hello from-host vscode work from-stdin"
     exec_call = [c for c in fake.state()["calls"] if c["verb"] == "exec"][-1]
@@ -345,23 +460,26 @@ def test_captured_exec_and_copy_route_through_driver(fake, no_docker, tmp_path, 
 
     source = tmp_path / "payload.txt"
     source.write_text("payload")
-    copied = runtime_drivers.run_routed(
+    copied = run_routed(
         ["docker", "cp", str(source), "example-1:/opt/payload.txt"],
     )
+    assert copied is not None
     assert copied.returncode == 0
     assert (fake.root / "members/example-1/opt/payload.txt").read_text() == "payload"
 
     # Unowned targets keep the Docker path untouched.
-    assert runtime_drivers.run_routed(["docker", "exec", "plain-1", "true"]) is None
+    assert run_routed(["docker", "exec", "plain-1", "true"]) is None
     argv = ["docker", "exec", "-i", "-u", "root", "plain-1", "sshd"]
-    assert runtime_drivers.stream_routed(argv) is argv
+    assert stream_routed(argv) is argv
 
 
 @posix_only
-def test_streaming_exec_passes_stdio_through(fake, no_docker, monkeypatch):
+def test_streaming_exec_passes_stdio_through(
+    fake: SimpleNamespace, no_docker: None, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _provisioned(driver_config(size=1))
     monkeypatch.setenv("EXAMPLE_SECRET", "s3cret")
-    argv = runtime_drivers.stream_routed([
+    argv = stream_routed([
         "docker", "exec", "-i", "-e", "EXAMPLE_SECRET", "-u", "vscode", "example-1",
         "sh", "-c", 'printf "%s:" "$EXAMPLE_SECRET"; cat',
     ])
@@ -384,7 +502,10 @@ def test_streaming_exec_passes_stdio_through(fake, no_docker, monkeypatch):
     ({"ssh_transport": True}, True, (True, True)),
     ({"owns_relay": True, "ssh_transport": True}, True, (True, False)),
 ])
-def test_launch_plan_capabilities(fake, no_docker, monkeypatch, caps, relay, expected):
+def test_launch_plan_capabilities(
+    fake: SimpleNamespace, no_docker: None, monkeypatch: pytest.MonkeyPatch,
+    caps: dict[str, bool], relay: bool, expected: tuple[bool, bool],
+) -> None:
     monkeypatch.setenv("FAKE_DRIVER_CAPS", json.dumps(caps))
     config = driver_config(size=1, relay_enabled=relay)
     _provisioned(config)
@@ -392,15 +513,17 @@ def test_launch_plan_capabilities(fake, no_docker, monkeypatch, caps, relay, exp
     assert (plan.ssh, plan.agent_relay) == expected
 
 
-def test_relay_without_capability_fails_closed(fake, no_docker):
+def test_relay_without_capability_fails_closed(fake: SimpleNamespace, no_docker: None) -> None:
     config = driver_config(size=1, relay_enabled=True)
     _provisioned(config)
     with pytest.raises(RuntimeError, match="neither owns the relay"):
         runtime_drivers.launch_plan(config.fleets["example"], "example-1", True)
 
 
-def _write_config(tmp_path, monkeypatch, **overrides):
-    raw = {"driver": "example-driver", "size": 1,
+def _write_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, **overrides: object,
+) -> ContainersConfig:
+    raw: dict[str, object] = {"driver": "example-driver", "size": 1,
            "workspace_folder": "/workspaces/example", "exec_user": "vscode",
            "copilot_auth_mode": "legacy"}
     raw.update(overrides)
@@ -410,7 +533,9 @@ def _write_config(tmp_path, monkeypatch, **overrides):
     return load_config(strict=True)
 
 
-def test_resolver_routes_driver_member_through_exec_wrapper(fake, no_docker, tmp_path, monkeypatch):
+def test_resolver_routes_driver_member_through_exec_wrapper(
+    fake: SimpleNamespace, no_docker: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("FAKE_DRIVER_CAPS", json.dumps({"owns_relay": True}))
     config = _write_config(tmp_path, monkeypatch, relay_enabled=True)
     fleet.reconcile_up(config, "example")
@@ -428,19 +553,23 @@ def test_resolver_routes_driver_member_through_exec_wrapper(fake, no_docker, tmp
     asyncio.run(resolver.ContainerResolver().ensure_ready("example-1"))
 
 
-def test_resolver_fails_closed_on_missing_relay_capability(fake, no_docker, tmp_path, monkeypatch):
+def test_resolver_fails_closed_on_missing_relay_capability(
+    fake: SimpleNamespace, no_docker: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     config = _write_config(tmp_path, monkeypatch, relay_enabled=True)
     fleet.reconcile_up(config, "example")
     with pytest.raises(RuntimeError, match="neither owns the relay"):
         asyncio.run(resolver.ContainerResolver().resolve_spec("example-1"))
 
 
-def test_exec_launches_acp_through_driver_stream(fake, no_docker, tmp_path, monkeypatch):
+def test_exec_launches_acp_through_driver_stream(
+    fake: SimpleNamespace, no_docker: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("FAKE_DRIVER_CAPS", json.dumps({"owns_relay": True}))
     config = _write_config(tmp_path, monkeypatch, relay_enabled=True)
     fleet.reconcile_up(config, "example")
-    seen = {}
-    monkeypatch.setattr(cli.hosting_policy, "require_container_hosting", lambda *a, **k: None)
+    seen: LaunchCapture = {}
+    monkeypatch.setattr(hosting_policy, "require_container_hosting", lambda *a, **k: None)
     monkeypatch.setattr(cli, "host_gh_token", lambda: "gh-token")
     monkeypatch.setattr(cli, "prepare_ssh_config", lambda *a: pytest.fail("no SSH"))
     monkeypatch.setattr(cli, "_require_live_relay_port", lambda: pytest.fail("no relay"))
@@ -448,10 +577,14 @@ def test_exec_launches_acp_through_driver_stream(fake, no_docker, tmp_path, monk
                         seen.setdefault("staged", dict(values)) and "/launch/1.env")
     monkeypatch.setattr(cli, "cleanup_remote_env", lambda *a: None)
     monkeypatch.setattr(cli, "container_environment", lambda *a: {"PATH": "/usr/bin"})
-    monkeypatch.setattr(cli, "_exec_stdio", lambda argv, env:
-                        seen.update(argv=argv, env=env) or 0)
+    def execute(argv: list[str], env: dict[str, str]) -> int:
+        seen["argv"] = argv
+        seen["env"] = env
+        return 0
 
-    args = SimpleNamespace(name="example-1", stdio=True, force=False, copilot_args=None)
+    monkeypatch.setattr(cli, "_exec_stdio", execute)
+
+    args = argparse.Namespace(name="example-1", stdio=True, force=False, copilot_args=None)
     assert cli._cmd_exec(args) == 0
 
     argv = seen["argv"]
@@ -467,14 +600,19 @@ def test_exec_launches_acp_through_driver_stream(fake, no_docker, tmp_path, monk
     assert not any(name.startswith("LC_GIT_CREDENTIAL_RELAY") for name in seen["env"])
 
 
-def test_copilot_verb_requires_ssh_capability(fake, no_docker, tmp_path, monkeypatch):
+def test_copilot_verb_requires_ssh_capability(
+    fake: SimpleNamespace, no_docker: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     config = _write_config(tmp_path, monkeypatch, relay_enabled=False)
     fleet.reconcile_up(config, "example")
     with pytest.raises(RuntimeError, match="needs the trusted SSH transport"):
         runtime_drivers.require_ssh_transport(config, "example-1", "The `copilot` verb")
 
 
-def test_lease_borrow_and_fleet_listing_cover_driver_members(fake, no_docker, tmp_path, monkeypatch, capsys):
+def test_lease_borrow_and_fleet_listing_cover_driver_members(
+    fake: SimpleNamespace, no_docker: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     config = _write_config(tmp_path, monkeypatch, size=2)
     fleet.reconcile_up(config, "example")
     from agent_containers.lease import borrow, release
@@ -490,7 +628,7 @@ def test_lease_borrow_and_fleet_listing_cover_driver_members(fake, no_docker, tm
     }
 
 
-def test_external_driver_rejects_foreign_member_reports(fake):
+def test_external_driver_rejects_foreign_member_reports(fake: SimpleNamespace) -> None:
     driver = ExternalDriver(find_driver("example-driver"), "example", driver_fleet())
     for bad in (
         {"name": "x-1", "id": "0123456789ab", "fleet": "other", "state": "running"},
@@ -505,7 +643,7 @@ def test_external_driver_rejects_foreign_member_reports(fake):
 # -- incarnation pinning and routing handles ---------------------------------
 
 
-def test_stale_incarnation_is_refused_after_recreation(fake, no_docker):
+def test_stale_incarnation_is_refused_after_recreation(fake: SimpleNamespace, no_docker: None) -> None:
     config = driver_config(size=1)
     old = _provisioned(config)
     lifecycle.remove_container("example-1", force=True)
@@ -517,10 +655,10 @@ def test_stale_incarnation_is_refused_after_recreation(fake, no_docker):
         lifecycle.remove_container(old.container_id, force=True)
     assert raised.value.code == "conflict"
     with pytest.raises(DriverError):
-        runtime_drivers.run_routed(["docker", "exec", old.container_id, "true"])
+        run_routed(["docker", "exec", old.container_id, "true"])
     with pytest.raises(lifecycle.ContainerNotFoundError):
         lifecycle.inspect_container(old.container_id)
-    stale_stream = runtime_drivers.stream_routed(
+    stale_stream = stream_routed(
         ["docker", "exec", "-i", old.container_id, "true"],
     )
     assert json.loads(stale_stream[stale_stream.index("--request") + 1])["id"] == old.container_id
@@ -530,7 +668,7 @@ def test_stale_incarnation_is_refused_after_recreation(fake, no_docker):
     assert lifecycle.inspect_container(new.container_id)["Id"] == new.container_id
 
 
-def test_handles_reported_by_two_runtimes_are_refused(fake, no_docker):
+def test_handles_reported_by_two_runtimes_are_refused(fake: SimpleNamespace, no_docker: None) -> None:
     config = ContainersConfig(fleets={
         "example": driver_fleet(size=1),
         "other": driver_fleet(size=1, name_prefix="other"),
@@ -543,7 +681,7 @@ def test_handles_reported_by_two_runtimes_are_refused(fake, no_docker):
         name="other-1", container_id=members["example-1"].container_id,
         image="", state="running", status="", fleet="other",
     )
-    other_driver = runtime_drivers.owner_of("other-1").driver
+    other_driver = _route("other-1").driver
     runtime_drivers.bind_member(other_driver, clash)
     with pytest.raises(RuntimeError, match="more than one runtime driver"):
         lifecycle.remove_container(members["example-1"].container_id, force=True)
@@ -551,7 +689,9 @@ def test_handles_reported_by_two_runtimes_are_refused(fake, no_docker):
 
 
 @posix_only
-def test_shared_docker_executor_routes_driver_members(fake, tmp_path, monkeypatch):
+def test_shared_docker_executor_routes_driver_members(
+    fake: SimpleNamespace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     empty = tmp_path / "no-docker-bin"
     empty.mkdir()
     monkeypatch.setenv("PATH", str(empty))  # no Docker CLI on this host
@@ -563,8 +703,9 @@ def test_shared_docker_executor_routes_driver_members(fake, tmp_path, monkeypatc
 
 
 def test_standalone_session_host_state_discovers_driver_members(
-    fake, no_docker, tmp_path, monkeypatch, capsys,
-):
+    fake: SimpleNamespace, no_docker: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     config = _write_config(tmp_path, monkeypatch)
     fleet.reconcile_up(config, "example")
     member_id = {c.name: c for c in lifecycle.list_containers(config)}["example-1"].container_id
@@ -576,7 +717,9 @@ def test_standalone_session_host_state_discovers_driver_members(
     assert (state["state"], state["container_id"]) == ("running", member_id)
 
 
-def test_ssh_only_launches_require_ssh_capability(fake, no_docker, monkeypatch):
+def test_ssh_only_launches_require_ssh_capability(
+    fake: SimpleNamespace, no_docker: None, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     config = driver_config(size=1, relay_enabled=True)
     monkeypatch.setenv("FAKE_DRIVER_CAPS", json.dumps({"owns_relay": True}))
     _provisioned(config)
@@ -584,18 +727,20 @@ def test_ssh_only_launches_require_ssh_capability(fake, no_docker, monkeypatch):
         runtime_drivers.launch_plan(config.fleets["example"], "example-1", True, require_ssh=True)
 
 
-def _docker_rows(monkeypatch, *rows):
+def _docker_rows(monkeypatch: pytest.MonkeyPatch, *rows: Sequence[str]) -> None:
     text = "".join("\t".join(row) + "\n" for row in rows)
     monkeypatch.setattr(lifecycle, "_docker", lambda args, timeout=30.0:
                         subprocess.CompletedProcess(args, 0, text, ""))
 
 
-def _row(name, container_id, fleet_label):
+def _row(name: str, container_id: str, fleet_label: str) -> list[str]:
     return [name, container_id, "example/image:1", "running", "Up",
             f"agent-containers.fleet={fleet_label}", "trusted", "", ""]
 
 
-def test_docker_rows_claiming_a_driver_fleet_are_never_managed_around_it(fake, monkeypatch):
+def test_docker_rows_claiming_a_driver_fleet_are_never_managed_around_it(
+    fake: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_containers.lifecycle_ownership import DRIVER_REASON, lifecycle_blocker
 
     config = ContainersConfig(fleets={
@@ -610,7 +755,9 @@ def test_docker_rows_claiming_a_driver_fleet_are_never_managed_around_it(fake, m
     assert lifecycle_blocker(config, "plain-1", {"agent-containers.fleet": "plain"}) is None
 
 
-def test_docker_and_driver_handle_collisions(fake, monkeypatch):
+def test_docker_and_driver_handle_collisions(
+    fake: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     config = ContainersConfig(fleets={
         "example": driver_fleet(size=2), "plain": FleetConfig(image="example/image:1"),
     })
@@ -633,7 +780,7 @@ def test_docker_and_driver_handle_collisions(fake, monkeypatch):
 
 
 @posix_only
-def test_unlaunchable_driver_is_a_typed_error_and_skipped(fake, no_docker):
+def test_unlaunchable_driver_is_a_typed_error_and_skipped(fake: SimpleNamespace, no_docker: None) -> None:
     script = fake.root / "not-a-program"
     script.write_text("this is not a program\n")
     script.chmod(0o755)
@@ -652,7 +799,9 @@ def test_unlaunchable_driver_is_a_typed_error_and_skipped(fake, no_docker):
 
 
 @pytest.mark.parametrize("caps, failing", [({"ssh_transport": True}, True), ({}, False)])
-def test_readiness_requires_ssh_only_for_ssh_capable_drivers(fake, monkeypatch, caps, failing):
+def test_readiness_requires_ssh_only_for_ssh_capable_drivers(
+    fake: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, caps: dict[str, bool], failing: bool,
+) -> None:
     from agent_containers.installer_readiness import inspect_toolchain
 
     monkeypatch.setattr("agent_containers.installer_readiness._is_windows", lambda: False)
@@ -665,7 +814,7 @@ def test_readiness_requires_ssh_only_for_ssh_capable_drivers(fake, monkeypatch, 
 
 
 @posix_only
-def test_readiness_reports_unlaunchable_driver_even_with_openssh(fake):
+def test_readiness_reports_unlaunchable_driver_even_with_openssh(fake: SimpleNamespace) -> None:
     from agent_containers.installer_readiness import inspect_toolchain
 
     script = fake.root / "not-a-program"
@@ -681,7 +830,10 @@ def test_readiness_reports_unlaunchable_driver_even_with_openssh(fake):
 
 
 @posix_only
-def test_runtime_proxy_serves_bridge_hosting_checks(fake, no_docker, tmp_path, monkeypatch, capsys):
+def test_runtime_proxy_serves_bridge_hosting_checks(
+    fake: SimpleNamespace, no_docker: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     config = _write_config(tmp_path, monkeypatch)
     fleet.reconcile_up(config, "example")
     member_id = {c.name: c for c in lifecycle.list_containers(config)}["example-1"].container_id
@@ -698,8 +850,9 @@ def test_runtime_proxy_serves_bridge_hosting_checks(fake, no_docker, tmp_path, m
 
 @pytest.mark.parametrize("denied", [False, True])
 def test_runtime_proxy_delivers_portable_policy_archive_to_real_driver_process(
-    fake, no_docker, tmp_path, monkeypatch, capsys, denied,
-):
+    fake: SimpleNamespace, no_docker: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], denied: bool,
+) -> None:
     import base64
     import io
 
@@ -735,8 +888,9 @@ def test_runtime_proxy_delivers_portable_policy_archive_to_real_driver_process(
 
 
 def test_session_host_state_reports_recreated_incarnation_missing(
-    fake, no_docker, tmp_path, monkeypatch, capsys,
-):
+    fake: SimpleNamespace, no_docker: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     config = _write_config(tmp_path, monkeypatch)
     fleet.reconcile_up(config, "example")
     old = {c.name: c for c in lifecycle.list_containers(config)}["example-1"].container_id
@@ -748,7 +902,9 @@ def test_session_host_state_reports_recreated_incarnation_missing(
 
 
 @posix_only
-def test_copilot_login_operations_route_through_driver(fake, no_docker, monkeypatch):
+def test_copilot_login_operations_route_through_driver(
+    fake: SimpleNamespace, no_docker: None, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_containers import copilot_login
 
     member = _provisioned(driver_config(size=1))
@@ -757,9 +913,11 @@ def test_copilot_login_operations_route_through_driver(fake, no_docker, monkeypa
         capture_output=True, text=True, timeout=30,
     )
     assert (read.returncode, read.stdout) == (0, "config\n")
-    seen = []
-    monkeypatch.setattr(copilot_login.subprocess, "run", lambda argv, **kw: seen.append(argv)
-                        or subprocess.CompletedProcess(argv, 0))
+    seen: list[list[str]] = []
+    def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        seen.append(argv)
+        return subprocess.CompletedProcess(argv, 0)
+    monkeypatch.setattr(subprocess, "run", run)
     copilot_login._run(
         ["docker", "exec", "-it", "-u", "vscode", member.container_id, "copilot", "login"],
         interactive=True,
@@ -769,7 +927,10 @@ def test_copilot_login_operations_route_through_driver(fake, no_docker, monkeypa
     assert (request["id"], request["argv"]) == (member.container_id, ["copilot", "login"])
 
 
-def _two_driver_config(tmp_path, monkeypatch, fake, slow_command):
+def _two_driver_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake: SimpleNamespace,
+    slow_command: list[str],
+) -> ContainersConfig:
     (fake.drivers / "other-driver.json").write_text(json.dumps({
         "schema_version": 1, "name": "other-driver",
         "command": [sys.executable, str(FAKE), *slow_command],
@@ -791,7 +952,10 @@ def _alive(pid: int) -> bool:
     return True
 
 
-def test_hung_driver_does_not_stall_a_healthy_member(fake, no_docker, tmp_path, monkeypatch, capsys):
+def test_hung_driver_does_not_stall_a_healthy_member(
+    fake: SimpleNamespace, no_docker: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     import time
 
     slow_root = tmp_path / "slow-runtime"
@@ -799,7 +963,7 @@ def test_hung_driver_does_not_stall_a_healthy_member(fake, no_docker, tmp_path, 
         tmp_path, monkeypatch, fake, ["--root", str(slow_root), "--hang", "list"],
     )
     fleet.reconcile_up(config, "example")
-    member_id = runtime_drivers.owner_of("example-1").driver.list_members()[0].container_id
+    member_id = _route("example-1").driver.list_members()[0].container_id
 
     # A fresh runtime-proxy process (agent-bridge allows it 30s and passes the
     # venue's fleet) asks only the member's own driver.
@@ -826,7 +990,10 @@ def test_hung_driver_does_not_stall_a_healthy_member(fake, no_docker, tmp_path, 
     assert not _alive(descendant)
 
 
-def test_delayed_duplicate_id_is_ambiguous_without_a_fleet(fake, no_docker, tmp_path, monkeypatch, capsys):
+def test_delayed_duplicate_id_is_ambiguous_without_a_fleet(
+    fake: SimpleNamespace, no_docker: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     slow_root = tmp_path / "slow-runtime"
     config = _two_driver_config(
         tmp_path, monkeypatch, fake, ["--root", str(slow_root), "--delay", "list", "1"],
@@ -845,7 +1012,9 @@ def test_delayed_duplicate_id_is_ambiguous_without_a_fleet(fake, no_docker, tmp_
     assert document["Config"]["Labels"]["agent-containers.fleet"] == "slow"
 
 
-def test_discovery_deadline_never_cancels_other_calls_on_a_driver(fake, no_docker, tmp_path, monkeypatch):
+def test_discovery_deadline_never_cancels_other_calls_on_a_driver(
+    fake: SimpleNamespace, no_docker: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import threading
 
     slow_root = tmp_path / "slow-runtime"
@@ -853,10 +1022,10 @@ def test_discovery_deadline_never_cancels_other_calls_on_a_driver(fake, no_docke
         tmp_path, monkeypatch, fake, ["--root", str(slow_root), "--hang", "list"],
     )
     fleet.reconcile_up(config, "example")
-    driver = runtime_drivers.owner_of("example-1").driver
-    outcome = {}
+    driver = _route("example-1").driver
+    outcome: dict[str, runtime_drivers.ExecResult] = {}
 
-    def long_exec():
+    def long_exec() -> None:
         outcome["result"] = driver.exec("example-1", [sys.executable, "-c",
                                         "import time; time.sleep(2); print('finished')"],
                                         timeout=30)
@@ -869,7 +1038,9 @@ def test_discovery_deadline_never_cancels_other_calls_on_a_driver(fake, no_docke
     assert outcome["result"].stdout.strip() == "finished"
 
 
-def test_labelled_row_of_unavailable_driver_is_never_managed_by_docker(fake, monkeypatch):
+def test_labelled_row_of_unavailable_driver_is_never_managed_by_docker(
+    fake: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_containers.lifecycle_ownership import DRIVER_REASON, lifecycle_blocker
 
     config = ContainersConfig(fleets={"example": driver_fleet()})
@@ -887,7 +1058,9 @@ def test_labelled_row_of_unavailable_driver_is_never_managed_by_docker(fake, mon
 
 
 @posix_only
-def test_named_launch_with_duplicate_ids_keeps_its_fleet_route(fake, no_docker, tmp_path, monkeypatch):
+def test_named_launch_with_duplicate_ids_keeps_its_fleet_route(
+    fake: SimpleNamespace, no_docker: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_containers import hosting_policy
 
     slow_root = tmp_path / "slow-runtime"
@@ -895,14 +1068,14 @@ def test_named_launch_with_duplicate_ids_keeps_its_fleet_route(fake, no_docker, 
     fleet.reconcile_up(config, "example")
     fleet.reconcile_up(config, "slow")
     target = resolver.resolve_live_exec_target("example-1", config=config)
-    raw_id = runtime_drivers.owner_of("example-1").driver.inspect("example-1")["Id"]
+    raw_id = _route("example-1").driver.inspect("example-1")["Id"]
     with pytest.raises(RuntimeError, match="more than one runtime driver"):
         runtime_drivers.owner_of(raw_id)  # the bare id is shared by both runtimes
     assert target.container_id == f"example-1.{raw_id}"
 
     # The hosting check (and every other exec addressed by the target) reaches
     # the selected member, pinned to its incarnation.
-    done = hosting_policy._run(target, "echo hosted")
+    done = hosting_policy._run(cast(hosting_policy.ExecutionCheckout, target), "echo hosted")
     assert done.stdout == "hosted\n"
     example_exec = [c for c in fake.state()["calls"] if c["verb"] == "exec"][-1]["request"]
     assert (example_exec["name"], example_exec["id"], example_exec["fleet"]) == (
@@ -912,7 +1085,10 @@ def test_named_launch_with_duplicate_ids_keeps_its_fleet_route(fake, no_docker, 
     assert not any(c["verb"] == "exec" for c in slow_calls)
 
 
-def test_pinned_session_host_prepare_with_duplicate_ids(fake, no_docker, tmp_path, monkeypatch, capsys):
+def test_pinned_session_host_prepare_with_duplicate_ids(
+    fake: SimpleNamespace, no_docker: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     from ssh_manager import SSHConfig
 
     from agent_containers import hosting_policy
@@ -934,10 +1110,10 @@ def test_pinned_session_host_prepare_with_duplicate_ids(fake, no_docker, tmp_pat
     config = load_config(strict=True)
     fleet.reconcile_up(config, "example")
     fleet.reconcile_up(config, "slow")
-    raw_id = runtime_drivers.owner_of("example-1").driver.inspect("example-1")["Id"]
+    raw_id = _route("example-1").driver.inspect("example-1")["Id"]
     handle = f"example-1.{raw_id}"
 
-    seen = {}
+    seen: dict[str, str] = {}
     monkeypatch.setattr(hosting_policy, "require_container_checkout",
                         lambda target, user, workspace: seen.setdefault("checkout", target))
     monkeypatch.setattr(cli, "prepare_ssh_config",
@@ -962,11 +1138,13 @@ def test_pinned_session_host_prepare_with_duplicate_ids(fake, no_docker, tmp_pat
         cleanup_user(raw_id, "vscode")
 
 
-def _capture_docker(monkeypatch, documents):
+def _capture_docker(
+    monkeypatch: pytest.MonkeyPatch, documents: dict[str, dict[str, object]],
+) -> list[list[str]]:
     """Answer docker inspect from ``documents``; record every other argv unexecuted."""
-    issued = []
+    issued: list[list[str]] = []
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         assert argv[0] == "docker"
         if argv[1] == "inspect":
             document = documents.get(argv[-1])
@@ -976,7 +1154,7 @@ def _capture_docker(monkeypatch, documents):
         issued.append(argv)
         return subprocess.CompletedProcess(argv, 0, "", "")
 
-    monkeypatch.setattr(lifecycle.subprocess, "run", run)
+    monkeypatch.setattr(subprocess, "run", run)
     return issued
 
 
@@ -987,8 +1165,8 @@ def _capture_docker(monkeypatch, documents):
     {"agent-containers.fleet": "plain"},                  # only the name collides
 ])
 def test_same_name_docker_incarnation_is_never_managed_through_docker(
-    fake, tmp_path, monkeypatch, labels,
-):
+    fake: SimpleNamespace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, labels: dict[str, str],
+) -> None:
     path = tmp_path / "containers.yaml"
     path.write_text(yaml.safe_dump({"fleets": {
         "example": {"driver": "example-driver", "size": 1, "relay_enabled": False},
@@ -1011,11 +1189,12 @@ def test_same_name_docker_incarnation_is_never_managed_through_docker(
                    "State": {"Status": "running"}},
     })
 
-    for operation in (
+    operations: tuple[Callable[[], object], ...] = (
         lambda: lifecycle.remove_container(docker_id, force=True),
         lambda: lifecycle.stop_container(docker_id),
         lambda: lifecycle.start_container(docker_id),
-    ):
+    )
+    for operation in operations:
         with pytest.raises(RuntimeError, match="only its driver may manage it"):
             operation()
     assert issued == []  # no docker rm/stop/start was ever issued for B
@@ -1026,7 +1205,9 @@ def test_same_name_docker_incarnation_is_never_managed_through_docker(
     assert issued == [["docker", "rm", "-f", plain_id]]
 
 
-def test_targeted_recreation_with_ids_shared_across_driver_fleets(fake, no_docker, tmp_path, monkeypatch):
+def test_targeted_recreation_with_ids_shared_across_driver_fleets(
+    fake: SimpleNamespace, no_docker: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     slow_root = tmp_path / "slow-runtime"
     config = _two_driver_config(tmp_path, monkeypatch, fake, ["--root", str(slow_root)])
     fleet.reconcile_up(config, "example")
@@ -1042,38 +1223,51 @@ def test_targeted_recreation_with_ids_shared_across_driver_fleets(fake, no_docke
     assert removed == [{**removed[0], "name": "example-1", "id": shared, "force": True}]
     slow_calls = json.loads((slow_root / "state.json").read_text())["calls"]
     assert not any(c["verb"] == "remove" for c in slow_calls)
-    assert runtime_drivers.owner_of("slow-1").driver.state("slow-1") == "running"
+    assert _route("slow-1").driver.state("slow-1") == "running"
 
 
-def test_acp_launch_refuses_a_member_recreated_after_validation(fake, no_docker, tmp_path, monkeypatch):
+def test_acp_launch_refuses_a_member_recreated_after_validation(
+    fake: SimpleNamespace, no_docker: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("FAKE_DRIVER_CAPS", json.dumps({"owns_relay": True}))
     config = _write_config(tmp_path, monkeypatch, relay_enabled=True)
     fleet.reconcile_up(config, "example")
-    real_resolve = cli.resolve_live_exec_target
+    real_resolve = resolver.resolve_live_exec_target
 
-    def resolve_then_recreate(name, **kwargs):
-        target = real_resolve(name, **kwargs)  # validated incarnation A
+    def resolve_then_recreate(
+        name: str, *, config: ContainersConfig | None = None,
+        dispatch_binding_id: str | None = None, dispatch_management: bool = False,
+    ) -> resolver.LiveExecTarget:
+        target = real_resolve(
+            name, config=config, dispatch_binding_id=dispatch_binding_id,
+            dispatch_management=dispatch_management,
+        )  # validated incarnation A
         lifecycle.remove_container(name, force=True)
         fleet.reconcile_up(load_config(strict=True), "example")  # replacement B
         return target
 
-    launched = []
+    launched: list[list[str]] = []
     monkeypatch.setattr(cli, "resolve_live_exec_target", resolve_then_recreate)
-    monkeypatch.setattr(cli.hosting_policy, "require_container_hosting", lambda *a, **k: None)
+    monkeypatch.setattr(hosting_policy, "require_container_hosting", lambda *a, **k: None)
     monkeypatch.setattr(cli, "host_gh_token", lambda: "gh-token")
-    monkeypatch.setattr(cli, "_exec_stdio", lambda argv, env: launched.append(argv) or 0)
-    args = SimpleNamespace(name="example-1", stdio=True, force=False, copilot_args=None)
+    def launch(argv: list[str], env: dict[str, str]) -> int:
+        launched.append(argv)
+        return 0
+    monkeypatch.setattr(cli, "_exec_stdio", launch)
+    args = argparse.Namespace(name="example-1", stdio=True, force=False, copilot_args=None)
     with pytest.raises(DriverError) as raised:
         cli._cmd_exec(args)
     assert raised.value.code == "conflict"  # the replacement never receives the launch
     assert launched == []
     staged = [c for c in fake.state()["calls"] if c["verb"] == "exec"]
-    assert staged and all(c["request"]["id"] != runtime_drivers.owner_of("example-1").driver
+    assert staged and all(c["request"]["id"] != _route("example-1").driver
                           .inspect("example-1")["Id"] for c in staged)
 
 
 @pytest.mark.parametrize("stream", ["stdout", "stderr"])
-def test_invalid_utf8_driver_output_is_a_typed_error(fake, no_docker, tmp_path, monkeypatch, stream):
+def test_invalid_utf8_driver_output_is_a_typed_error(
+    fake: SimpleNamespace, no_docker: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stream: str,
+) -> None:
     import time
 
     config = _two_driver_config(tmp_path, monkeypatch, fake,
@@ -1090,7 +1284,9 @@ def test_invalid_utf8_driver_output_is_a_typed_error(fake, no_docker, tmp_path, 
     assert [m.name for m in listed] == ["example-1"]
 
 
-def test_rejected_listing_commits_no_routing(fake, no_docker, tmp_path, monkeypatch):
+def test_rejected_listing_commits_no_routing(
+    fake: SimpleNamespace, no_docker: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     slow_root = tmp_path / "slow"
     config = _two_driver_config(tmp_path, monkeypatch, fake, ["--root", str(slow_root)])
     fleet.reconcile_up(config, "example")
@@ -1104,10 +1300,13 @@ def test_rejected_listing_commits_no_routing(fake, no_docker, tmp_path, monkeypa
     assert [m.name for m in listed] == ["example-1"]
     assert runtime_drivers.owner_of("slow-1") is None  # valid row of the rejected listing
     shared = listed[0].container_id
-    assert runtime_drivers.owner_of(shared).name == "example-1"  # not made ambiguous
+    assert _route(shared).name == "example-1"  # not made ambiguous
 
 
-def test_installer_readiness_reports_a_driver_that_cannot_list(fake, no_docker, tmp_path, monkeypatch, capsys):
+def test_installer_readiness_reports_a_driver_that_cannot_list(
+    fake: SimpleNamespace, no_docker: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     _write_config(tmp_path, monkeypatch)
     monkeypatch.setenv("FAKE_DRIVER_FAIL", "list:runtime_unavailable")
     monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
@@ -1118,8 +1317,9 @@ def test_installer_readiness_reports_a_driver_that_cannot_list(fake, no_docker, 
 
 
 def test_session_host_prepare_ignores_an_unrelated_hung_driver(
-    fake, no_docker, tmp_path, monkeypatch, capsys,
-):
+    fake: SimpleNamespace, no_docker: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     import time
 
     from ssh_manager import SSHConfig
@@ -1151,20 +1351,23 @@ def test_session_host_prepare_ignores_an_unrelated_hung_driver(
     assert json.loads(capsys.readouterr().out)["name"] == "example-1"
 
 
-def test_fresh_scoped_lookup_refuses_a_docker_name_collision(fake, tmp_path, monkeypatch, capsys):
+def test_fresh_scoped_lookup_refuses_a_docker_name_collision(
+    fake: SimpleNamespace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     config = _write_config(tmp_path, monkeypatch)
     real_docker = lifecycle._docker
     _docker_rows(monkeypatch)
     fleet.reconcile_up(config, "example")
-    driver_id = runtime_drivers.owner_of("example-1").driver.inspect("example-1")["Id"]
+    driver_id = _route("example-1").driver.inspect("example-1")["Id"]
     monkeypatch.setattr(lifecycle, "_docker", real_docker)
     docker_answers = {"id": "d" * 64}
 
-    def docker_run(argv, **kwargs):
+    def docker_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         assert argv[:2] == ["docker", "inspect"], argv  # the only, bounded Docker probe
         return subprocess.CompletedProcess(argv, 0, docker_answers["id"] + "\n", "")
 
-    monkeypatch.setattr(lifecycle.subprocess, "run", docker_run)
+    monkeypatch.setattr(subprocess, "run", docker_run)
     monkeypatch.setattr(lifecycle, "list_containers", lambda *a, **k: pytest.fail("full inventory"))
 
     runtime_drivers.clear_bindings()  # a fresh exec / Session Host process
@@ -1190,7 +1393,10 @@ def test_fresh_scoped_lookup_refuses_a_docker_name_collision(fake, tmp_path, mon
     assert target.container_id == f"example-1.{driver_id}"
 
 
-def test_hung_selected_driver_fails_within_the_targeted_budget(fake, no_docker, tmp_path, monkeypatch, capsys):
+def test_hung_selected_driver_fails_within_the_targeted_budget(
+    fake: SimpleNamespace, no_docker: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     import time
 
     config = _write_config(tmp_path, monkeypatch)
@@ -1199,7 +1405,9 @@ def test_hung_selected_driver_fails_within_the_targeted_budget(fake, no_docker, 
         "schema_version": 1, "name": "example-driver",
         "command": [sys.executable, str(FAKE), "--hang", "list"],
     }))
-    monkeypatch.setitem(runtime_drivers.scoped_member.__kwdefaults__, "timeout", 2.0)
+    defaults = runtime_drivers.scoped_member.__kwdefaults__
+    assert defaults is not None
+    monkeypatch.setitem(defaults, "timeout", 2.0)
     monkeypatch.setattr(lifecycle, "list_containers", lambda *a, **k: pytest.fail("full inventory"))
     runtime_drivers.clear_bindings()
     started = time.monotonic()
@@ -1224,7 +1432,9 @@ fleets:
 
 
 @pytest.fixture
-def shipped_driver_fleet(fake, tmp_path, monkeypatch):
+def shipped_driver_fleet(
+    fake: SimpleNamespace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> Callable[[str], ContainersConfig]:
     """A plugin fragment ships ``example``; returns an operator-config writer."""
     from agent_containers import config as config_mod
     from agent_containers import plugin_config
@@ -1241,7 +1451,7 @@ def shipped_driver_fleet(fake, tmp_path, monkeypatch):
     monkeypatch.setattr(plugin_config, "_active_plugin_roots",
                         lambda *_: [("example-harness@example", [root])])
 
-    def operator(body: str):
+    def operator(body: str) -> ContainersConfig:
         path = tmp_path / "operator" / "containers.yaml"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(body, encoding="utf-8")
@@ -1252,8 +1462,8 @@ def shipped_driver_fleet(fake, tmp_path, monkeypatch):
 
 
 def test_shipped_driver_fleet_with_operator_override_routes_through_its_driver(
-    fake, no_docker, shipped_driver_fleet,
-):
+    fake: SimpleNamespace, no_docker: None, shipped_driver_fleet: Callable[[str], ContainersConfig],
+) -> None:
     config = shipped_driver_fleet(
         "schema_version: 2\nfleets:\n  example:\n    driver_options:\n      profile: operator\n"
     )
@@ -1268,10 +1478,12 @@ def test_shipped_driver_fleet_with_operator_override_routes_through_its_driver(
     runtime_drivers.clear_bindings()
     [member] = lifecycle.list_containers(config)
     assert (member.name, member.driver) == ("example-1", "example-driver")
-    assert runtime_drivers.owner_of("example-1").driver.name == "example-driver"
+    assert _route("example-1").driver.name == "example-driver"
 
 
-def test_operator_docker_key_on_a_shipped_driver_fleet_is_refused(shipped_driver_fleet):
+def test_operator_docker_key_on_a_shipped_driver_fleet_is_refused(
+    shipped_driver_fleet: Callable[[str], ContainersConfig],
+) -> None:
     with pytest.raises(RuntimeError, match="driver fleets cannot set image"):
         shipped_driver_fleet(
             "schema_version: 2\nfleets:\n  example:\n    image: example/image:1\n"
@@ -1280,8 +1492,9 @@ def test_operator_docker_key_on_a_shipped_driver_fleet_is_refused(shipped_driver
 
 @pytest.mark.parametrize("entry", ["example:\n", "example: {}\n", "example: null\n"])
 def test_empty_operator_entry_removes_shipped_driver_routing(
-    fake, no_docker, shipped_driver_fleet, entry,
-):
+    fake: SimpleNamespace, no_docker: None, shipped_driver_fleet: Callable[[str], ContainersConfig],
+    entry: str,
+) -> None:
     config = shipped_driver_fleet("schema_version: 2\nfleets:\n  " + entry)
     assert "example" not in config.fleets
     assert runtime_drivers.list_driver_members(config) == []
@@ -1291,22 +1504,24 @@ def test_empty_operator_entry_removes_shipped_driver_routing(
         fleet.reconcile_up(config, "example")
 
 
-def _docker_recorder(monkeypatch):
+def _docker_recorder(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
     """Real Docker path with an empty runtime; records every docker argv."""
-    issued = []
+    issued: list[list[str]] = []
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         issued.append(argv)
         if argv[1] == "inspect":
             return subprocess.CompletedProcess(argv, 1, "", f"Error: No such object: {argv[-1]}")
         return subprocess.CompletedProcess(argv, 0, "", "")
 
     monkeypatch.setattr(lifecycle, "_docker", _REAL_DOCKER)
-    monkeypatch.setattr(lifecycle.subprocess, "run", run)
+    monkeypatch.setattr(subprocess, "run", run)
     return issued
 
 
-def _assert_retired(issued, handles, fake):
+def _assert_retired(
+    issued: list[list[str]], handles: list[str], fake: SimpleNamespace,
+) -> None:
     driver_calls = len(fake.state()["calls"])
     for handle in handles:
         assert runtime_drivers.owner_of(handle) is None
@@ -1319,13 +1534,13 @@ def _assert_retired(issued, handles, fake):
 
 
 def test_configuration_reload_reconciles_driver_routing_without_clearing(
-    fake, no_docker, tmp_path, monkeypatch,
-):
+    fake: SimpleNamespace, no_docker: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     # One process, no clear_bindings(): reloads must reconcile routing.
     config = _write_config(tmp_path, monkeypatch)
     fleet.reconcile_up(config, "example")
     lifecycle.list_containers(config)
-    old_id = runtime_drivers.owner_of("example-1").driver.inspect("example-1")["Id"]
+    old_id = _route("example-1").driver.inspect("example-1")["Id"]
 
     # The fleet is removed: normal inventory after the reload retires its
     # name, raw id and qualified handle, and later commands reach Docker only.
@@ -1337,7 +1552,7 @@ def test_configuration_reload_reconciles_driver_routing_without_clearing(
     assert lifecycle.list_containers(reloaded) == []
     _assert_retired(issued, ["example-1", old_id, f"example-1.{old_id}"], fake)
     monkeypatch.setattr(lifecycle, "_docker", refuse)
-    monkeypatch.setattr(lifecycle.subprocess, "run", subprocess.run)
+    monkeypatch.setattr(subprocess, "run", subprocess.run)
 
     # The fleet returns on a replacement driver: names are not ambiguous.
     (fake.drivers / "replacement-driver.json").write_text(json.dumps({
@@ -1350,6 +1565,7 @@ def test_configuration_reload_reconciles_driver_routing_without_clearing(
     replaced = load_config(strict=True)
     lifecycle.list_containers(replaced)
     route = runtime_drivers.owner_of("example-1")
+    assert route is not None
     assert route.driver.name == "replacement-driver"
 
     # A member the driver stops reporting stops routing by name, while its
@@ -1364,7 +1580,9 @@ def test_configuration_reload_reconciles_driver_routing_without_clearing(
 
 
 @pytest.fixture
-def recreated_after_validation(fake, no_docker, tmp_path, monkeypatch):
+def recreated_after_validation(
+    fake: SimpleNamespace, no_docker: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> SimpleNamespace:
     """A launch validated incarnation A; the member is then recreated as B."""
     monkeypatch.setenv("FAKE_DRIVER_CAPS", json.dumps({"ssh_transport": True}))
     config = _write_config(tmp_path, monkeypatch, relay_enabled=False)
@@ -1383,34 +1601,35 @@ def recreated_after_validation(fake, no_docker, tmp_path, monkeypatch):
                            new=replacement.container_id)
 
 
-def _assert_pinned_to_validated(state, seen):
+def _assert_pinned_to_validated(state: SimpleNamespace, seen: list[str | None]) -> None:
     route = runtime_drivers.owner_of("example-1")
+    assert route is not None
     seen.append(route.instance_id)
     # Credential staging / SSH preparation by name reach only incarnation A,
     # which the driver refuses rather than serving replacement B.
     with pytest.raises(runtime_drivers.DriverError):
-        runtime_drivers.run_routed(["docker", "exec", "-i", "example-1", "true"])
-    proxy = runtime_drivers.stream_routed(["docker", "exec", "-i", "example-1", "sshd"])
+        run_routed(["docker", "exec", "-i", "example-1", "true"])
+    proxy = stream_routed(["docker", "exec", "-i", "example-1", "sshd"])
     assert state.old in " ".join(proxy) and state.new not in " ".join(proxy)
 
 
 def test_attached_copilot_launch_stays_on_the_validated_incarnation(
-    recreated_after_validation, monkeypatch,
-):
+    recreated_after_validation: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import ssh_manager
     import venue_copilot
     from agent_containers import config as config_mod, copilot_venue, hosting_policy
     from agent_containers import ssh_transport
 
     state = recreated_after_validation
-    seen = []
+    seen: list[str | None] = []
 
     class Lock:
-        def __init__(self, *a, **k): pass
-        def acquire(self, force=False): pass
-        def release(self): pass
+        def __init__(self, *a: object, **k: object) -> None: pass
+        def acquire(self, force: bool = False) -> None: pass
+        def release(self) -> None: pass
 
-    def prepare(name, user):
+    def prepare(name: str, user: str) -> None:
         _assert_pinned_to_validated(state, seen)
         raise RuntimeError("stop after preparation")
 
@@ -1421,7 +1640,7 @@ def test_attached_copilot_launch_stays_on_the_validated_incarnation(
     monkeypatch.setattr(hosting_policy, "require_container_hosting", lambda *a, **k: None)
     monkeypatch.setattr(ssh_manager, "TargetLock", Lock)
     monkeypatch.setattr(ssh_transport, "prepare_ssh_config", prepare)
-    args = SimpleNamespace(name="example-1", worktree_id=None, no_relay=True, force=False,
+    args = argparse.Namespace(name="example-1", worktree_id=None, no_relay=True, force=False,
                            ref_files=None, ttl_seconds=None, stop=False, detach=False)
     with pytest.raises(RuntimeError, match="stop after preparation"):
         copilot_venue.cmd_copilot(
@@ -1429,25 +1648,26 @@ def test_attached_copilot_launch_stays_on_the_validated_incarnation(
             busy_exit=75, creation_flags=lambda: 0,
         )
     assert seen == [state.old]
-    assert runtime_drivers.owner_of("example-1").instance_id is None  # unpinned
+    assert _route("example-1").instance_id is None  # unpinned
 
 
 def test_detached_copilot_launch_stays_on_the_validated_incarnation(
-    recreated_after_validation, monkeypatch, capsys,
-):
+    recreated_after_validation: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     import ssh_manager
     import venue_copilot
     from agent_containers import copilot_detach, forward_keeper, hosting_policy
 
     state = recreated_after_validation
-    seen = []
+    seen: list[str | None] = []
 
     class Lock:
-        def __init__(self, *a, **k): pass
-        def acquire(self, force=False): pass
-        def release(self): pass
+        def __init__(self, *a: object, **k: object) -> None: pass
+        def acquire(self, force: bool = False) -> None: pass
+        def release(self) -> None: pass
 
-    def launch_env(args, target, **kwargs):
+    def launch_env(args: argparse.Namespace, target: object, **kwargs: object) -> None:
         _assert_pinned_to_validated(state, seen)
         raise RuntimeError("stop after preparation")
 
@@ -1462,18 +1682,19 @@ def test_detached_copilot_launch_stays_on_the_validated_incarnation(
     monkeypatch.setattr(forward_keeper, "read_state", lambda name: {})
     monkeypatch.setattr(hosting_policy, "require_container_hosting", lambda *a, **k: None)
     monkeypatch.setattr(ssh_manager, "TargetLock", Lock)
-    args = SimpleNamespace(name="example-1", worktree_id=None, force=False, dry_run=False)
+    args = argparse.Namespace(name="example-1", worktree_id=None, force=False, dry_run=False)
     assert copilot_detach.cmd_detach(
         args, require_live_relay_port=lambda: 0, relay_healthy=lambda port: True,
     ) != 0
     assert "stop after preparation" in capsys.readouterr().out
     assert seen == [state.old]
-    assert runtime_drivers.owner_of("example-1").instance_id is None  # unpinned
+    assert _route("example-1").instance_id is None  # unpinned
 
 
 def test_clearing_the_last_shipped_driver_fleet_retires_its_routes_on_inventory(
-    fake, no_docker, shipped_driver_fleet, monkeypatch,
-):
+    fake: SimpleNamespace, no_docker: None, shipped_driver_fleet: Callable[[str], ContainersConfig],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     config = shipped_driver_fleet("schema_version: 2\nfleets: {}\n")
     fleet.reconcile_up(config, "example")
     [member] = lifecycle.list_containers(config)
@@ -1488,8 +1709,8 @@ def test_clearing_the_last_shipped_driver_fleet_retires_its_routes_on_inventory(
 
 
 def test_namespace_resolve_of_absent_driver_member_never_queries_other_fleets(
-    fake, no_docker, tmp_path, monkeypatch,
-):
+    fake: SimpleNamespace, no_docker: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import time
 
     slow_root = tmp_path / "slow-runtime"
@@ -1499,7 +1720,7 @@ def test_namespace_resolve_of_absent_driver_member_never_queries_other_fleets(
     fleet.reconcile_up(config, "example")
     runtime_drivers.clear_bindings()
 
-    def no_full_inventory(*args, **kwargs):
+    def no_full_inventory(*args: object, **kwargs: object) -> None:
         raise AssertionError("full inventory consulted after a scoped absence")
 
     monkeypatch.setattr(resolver, "list_containers", no_full_inventory)
@@ -1514,8 +1735,9 @@ def test_namespace_resolve_of_absent_driver_member_never_queries_other_fleets(
 
 @pytest.mark.parametrize("retained_runtime", [True, False])
 def test_session_host_cleanup_after_fleet_removal_never_reaches_a_same_id_member(
-    fake, no_docker, tmp_path, monkeypatch, capsys, retained_runtime,
-):
+    fake: SimpleNamespace, no_docker: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], retained_runtime: bool,
+) -> None:
     other_root = tmp_path / "other-runtime"
     config = _two_driver_config(tmp_path, monkeypatch, fake, ["--root", str(other_root)])
     fleet.reconcile_up(config, "example")
@@ -1534,8 +1756,10 @@ def test_session_host_cleanup_after_fleet_removal_never_reaches_a_same_id_member
     }}))
     runtime_drivers.clear_bindings()
 
-    def other_calls():
-        return json.loads((other_root / "state.json").read_text())["calls"]
+    def other_calls() -> list[dict[str, object]]:
+        return cast(
+            list[dict[str, object]], json.loads((other_root / "state.json").read_text())["calls"],
+        )
 
     before = len(other_calls())
     expected = ["--expected-runtime", runtime] if retained_runtime else []
@@ -1551,21 +1775,22 @@ def test_session_host_cleanup_after_fleet_removal_never_reaches_a_same_id_member
     assert [c["verb"] for c in other_calls()[before:] if c["verb"] != "list"] == []
 
 
-def _register(fake, name, *extra):
+def _register(fake: SimpleNamespace, name: str, *extra: str) -> None:
     (fake.drivers / f"{name}.json").write_text(json.dumps({
         "schema_version": 1, "name": name, "command": [sys.executable, str(FAKE), *extra],
     }))
 
 
-def _calls(root):
+def _calls(root: Path) -> list[dict[str, object]]:
     path = root / "state.json"
-    return json.loads(path.read_text())["calls"] if path.exists() else []
+    return cast(list[dict[str, object]], json.loads(path.read_text())["calls"]) if path.exists() else []
 
 
 @pytest.mark.parametrize("retained_runtime", [True, False])
 def test_session_host_cleanup_refuses_a_fleet_redriven_to_a_same_name_same_id_member(
-    fake, no_docker, tmp_path, monkeypatch, capsys, retained_runtime,
-):
+    fake: SimpleNamespace, no_docker: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], retained_runtime: bool,
+) -> None:
     config = _write_config(tmp_path, monkeypatch)
     fleet.reconcile_up(config, "example")
     [prepared] = lifecycle.list_containers(config)
@@ -1598,8 +1823,8 @@ def test_session_host_cleanup_refuses_a_fleet_redriven_to_a_same_name_same_id_me
 
 @pytest.mark.parametrize("ssh_capable, refused", [(True, True), (False, False)])
 def test_windows_readiness_refuses_driver_ssh_but_accepts_direct_exec(
-    fake, monkeypatch, ssh_capable, refused,
-):
+    fake: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, ssh_capable: bool, refused: bool,
+) -> None:
     from agent_containers import installer_readiness
 
     monkeypatch.setenv("FAKE_DRIVER_CAPS", json.dumps({"ssh_transport": ssh_capable}))
@@ -1614,8 +1839,8 @@ def test_windows_readiness_refuses_driver_ssh_but_accepts_direct_exec(
 
 
 def test_replaced_driver_registration_is_never_invoked_again(
-    fake, no_docker, tmp_path, monkeypatch,
-):
+    fake: SimpleNamespace, no_docker: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     config = _write_config(tmp_path, monkeypatch)
     fleet.reconcile_up(config, "example")
     lifecycle.list_containers(config)
@@ -1626,15 +1851,15 @@ def test_replaced_driver_registration_is_never_invoked_again(
     lifecycle.list_containers(config)  # same process, same config, no clear_bindings()
     assert _calls(replacement_root)  # the current registration answered
     route = runtime_drivers.owner_of("example-1")
-    assert route is None or "--root" in route.driver.spec.command
+    assert route is None or "--root" in cast(ExternalDriver, route.driver).spec.command
     with pytest.raises(RuntimeError, match="docker CLI not found"):
         lifecycle.inspect_container("example-1")  # unreported by the new runtime: not routed
     assert len(fake.state()["calls"]) == old_calls  # the old executable is retired
 
 
 def test_removed_driver_registration_retires_its_routes(
-    fake, no_docker, tmp_path, monkeypatch,
-):
+    fake: SimpleNamespace, no_docker: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     config = _write_config(tmp_path, monkeypatch)
     fleet.reconcile_up(config, "example")
     [member] = lifecycle.list_containers(config)
@@ -1651,8 +1876,8 @@ def test_removed_driver_registration_retires_its_routes(
 
 
 def test_delayed_listing_from_a_replaced_registration_never_rebinds(
-    fake, no_docker, tmp_path, monkeypatch,
-):
+    fake: SimpleNamespace, no_docker: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     config = _write_config(tmp_path, monkeypatch)
     fleet.reconcile_up(config, "example")
     retired = runtime_drivers.driver_for_fleet(config, "example", config.fleets["example"])
@@ -1661,22 +1886,25 @@ def test_delayed_listing_from_a_replaced_registration_never_rebinds(
     _register(fake, "example-driver", "--root", str(replacement_root))
     fleet.reconcile_up(config, "example")  # B provisions its own example-1
     lifecycle.list_containers(config)
-    current = runtime_drivers.owner_of("example-1").driver
-    assert current is not retired and "--root" in current.spec.command
+    current = _route("example-1").driver
+    assert current is not retired and "--root" in cast(ExternalDriver, current).spec.command
 
     retired.list_members()  # A's slow listing completes after B's
-    assert runtime_drivers.owner_of("example-1").driver is current
+    assert _route("example-1").driver is current
     old_calls = len(fake.state()["calls"])
-    assert runtime_drivers.run_routed([
+    done = run_routed([
         "docker", "exec", "example-1", sys.executable, "-c", "pass",
-    ]).returncode == 0
+    ])
+    assert done is not None
+    assert done.returncode == 0
     assert len(fake.state()["calls"]) == old_calls  # never the retired executable
     assert [c["verb"] for c in _calls(replacement_root)][-1] == "exec"
 
 
 def test_changed_driver_options_change_the_prepared_runtime_identity(
-    fake, no_docker, tmp_path, monkeypatch, capsys,
-):
+    fake: SimpleNamespace, no_docker: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     config = _write_config(tmp_path, monkeypatch, driver_options={"profile": "first"})
     fleet.reconcile_up(config, "example")
     [prepared] = lifecycle.list_containers(config)
@@ -1699,8 +1927,9 @@ def test_changed_driver_options_change_the_prepared_runtime_identity(
 
 @pytest.mark.parametrize("retire_by", ["registration", "configuration"])
 def test_in_flight_listing_after_retirement_restores_no_routes(
-    fake, no_docker, tmp_path, monkeypatch, retire_by,
-):
+    fake: SimpleNamespace, no_docker: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    retire_by: str,
+) -> None:
     import threading
     import time
 
@@ -1709,7 +1938,7 @@ def test_in_flight_listing_after_retirement_restores_no_routes(
     fleet.reconcile_up(config, "example")
     [member] = lifecycle.list_containers(config)
     handles = ["example-1", member.container_id, runtime_drivers.route_handle(member)]
-    driver_a = runtime_drivers.owner_of("example-1").driver
+    driver_a = _route("example-1").driver
 
     listing = threading.Thread(target=driver_a.list_members)  # A's listing is blocked
     listing.start()
@@ -1726,13 +1955,14 @@ def test_in_flight_listing_after_retirement_restores_no_routes(
 
     assert all(runtime_drivers.owner_of(h) is None for h in handles)
     calls = len(fake.state()["calls"])
-    assert all(runtime_drivers.run_routed(["docker", "exec", h, "true"]) is None for h in handles)
+    assert all(run_routed(["docker", "exec", h, "true"]) is None for h in handles)
     assert len(fake.state()["calls"]) == calls  # nothing reaches A
 
 
 def test_session_host_state_reports_an_unavailable_driver_not_a_missing_member(
-    fake, no_docker, tmp_path, monkeypatch, capsys,
-):
+    fake: SimpleNamespace, no_docker: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     config = _write_config(tmp_path, monkeypatch)
     fleet.reconcile_up(config, "example")
     [member] = lifecycle.list_containers(config)
@@ -1747,7 +1977,9 @@ def test_session_host_state_reports_an_unavailable_driver_not_a_missing_member(
     assert "unavailable" in captured.err
 
 
-def test_ssh_precheck_asks_only_the_owning_fleet(fake, no_docker, tmp_path, monkeypatch):
+def test_ssh_precheck_asks_only_the_owning_fleet(
+    fake: SimpleNamespace, no_docker: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import time
 
     monkeypatch.setenv("FAKE_DRIVER_CAPS", json.dumps({"ssh_transport": True}))

@@ -67,7 +67,7 @@ def _producer_argv(root: Path) -> list[str] | None:
     return [shell, str(script)] if shell and script.is_file() else None
 
 
-def _run_producer(root: Path, payload: dict) -> str:
+def _run_producer(root: Path, payload: dict[str, object]) -> str:
     """Run the command-catalog producer script.
 
     Does NOT pipe the session payload as this subprocess's stdin -- the
@@ -102,11 +102,11 @@ def _run_producer(root: Path, payload: dict) -> str:
     return _producer_context(completed.stdout) if completed.returncode == 0 else ""
 
 
-def _scope_binding_context(root: Path, payload: dict) -> str:
+def _scope_binding_context(root: Path, payload: dict[str, object]) -> str:
     script = root / "scripts" / "emit_scope_binding.py"
     if not script.is_file():
         return ""
-    argv = [sys.executable, "-E", "-X", "utf8", str(script)]
+    argv = [sys.executable, "-B", "-E", "-X", "utf8", str(script)]
     cwd = payload.get("cwd")
     if isinstance(cwd, str) and cwd and os.path.isabs(cwd) and os.path.isdir(cwd):
         argv.extend(["--cwd", cwd])
@@ -128,7 +128,7 @@ def _scope_binding_context(root: Path, payload: dict) -> str:
     return context.strip() if isinstance(context, str) else ""
 
 
-def _run_both_producers(root: Path, payload: dict) -> tuple[str, str]:
+def _run_both_producers(root: Path, payload: dict[str, object]) -> tuple[str, str]:
     """Run the two guidance producers CONCURRENTLY, not sequentially.
 
     Each does its own blocking ``subprocess.run`` (which releases the GIL
@@ -157,7 +157,7 @@ def _is_link_or_reparse(path: Path) -> bool:
     )
 
 
-def write_session_guidance(payload: dict, *, home: Path | None = None) -> bool:
+def write_session_guidance(payload: dict[str, object], *, home: Path | None = None) -> bool:
     home = home or Path.home()
     session_id = payload.get("sessionId")
     if not isinstance(session_id, str) or not _SESSION_IDENTIFIER.fullmatch(session_id):

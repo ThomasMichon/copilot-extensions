@@ -119,6 +119,9 @@ agent-codespaces = "agent_codespaces.__main__:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.data-files]
+"share/copilot-extensions/agent_codespaces" = ["readiness-isolation.json"]
+
 [tool.setuptools.package-data]
 agent_codespaces = [
     "codespace_assets/ado-auth-helper-relay",
