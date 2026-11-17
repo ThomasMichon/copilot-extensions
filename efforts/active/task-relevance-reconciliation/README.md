@@ -150,6 +150,12 @@ merged plan does not establish running adoption.
       Already-missing managed metadata additionally follows the reviewed
       [retained metadata recovery slice](retained-metadata-recovery.md);
       preserving source cleanup is not recovery of deleted history.
+- [ ] Qualify hosted ACP activation separately from CLI in-use holds and finish
+      an accepted-load registration failure through its original owner without
+      another native load or prompt. The
+      [hosted activation amendment](hosted-native-activation.md) proposes the
+      receiver-first contract and original-operation reconciliation; #12700's
+      synthetic hold proof does not qualify hosted ACP continuation.
 
 ### Phase 3 - Source and periodic evaluation integration
 

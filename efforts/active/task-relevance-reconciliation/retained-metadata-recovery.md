@@ -11,6 +11,12 @@ storage provider accepted in #13084. Ordinary supervisor integration and runtime
 qualification remain open.**
 Source acceptance is not runtime recovery authority.
 
+The [hosted activation amendment](hosted-native-activation.md) addresses a
+measured remaining qualification gap: a successful ACP load does not imply
+the CLI in-use hold required by the existing fresh-activation guard. Preserve
+the accepted load and original Host while its lineage registration is pending;
+the amendment proposes owner-mediated completion without another native load.
+
 ## Existing boundary
 
 The [writer adapter](retained-writer-compatibility.md) can read an original

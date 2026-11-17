@@ -607,3 +607,27 @@ and #5555's whole four-pivot/venue outcome beyond Worktrees-local receiving.
 Neither is closed or reassigned. All twelve new product/coordination rows
 remain unchecked; ledger publication alone is not receiving acceptance,
 technical completion, native authority or a source-specific disposition.
+
+## Complete authentication/baseline receiving and next proposals (2026-11-17 UTC)
+
+#13153 merged complete #5452/#5518 receiving and the #5549 domain clarification
+after current-head Copilot approval and required CI. Entire current ROOT/
+source/custody readback and independent complete metadata/roster/document
+checks preceded separate audited `NOT_PLANNED` tracking retirements of all
+three originals. Prior authored content remains exact; every unfinished
+technical obligation and actual custodian remains.
+
+The coordinator explicitly accepted the #5518-specific same-PR dated route.
+Only C5518-1 records that completed documentary coordination fact; no product
+checkbox is completed, guard/native result asserted or resource transferred.
+
+| Whole contract | Original provenance | Proposed route | Direct receiving | Retained conditions |
+|---|---|---|---|---|
+| Transient knowledge-overlay-only resolution/omission/misleading-setup chain across four client operations | Public #5616 original and both discussions | routed (proposed; effective after reviewed complete domain acceptance) | [agent-index-standalone-service](../agent-index-standalone-service/README.md), I5616-P1/local I5616-LV/actual I5616-G and Coordination/Journal | Three unchecked rows; ONE OR MORE retry OR timeout change/config OR distinct resolution error OR cause logging; selected-remedy validation only; partial credit, existing custodians and #1941-specific token condition retained without generic ACK or operational prerequisites |
+| Existing complete operator-optional process-registry contract | Public #5559 whole original/discussions and recorded planning milestones | administrative clarification proposed; source remains OPEN | [agent-process-self-report-registry](../agent-process-self-report-registry/README.md), existing complete Plan/global Validation and prospective Coordination/Journal distinction | Historical parent-OPEN decisions retained; separate judgment only after actual reviewed complete receiving/current whole readback; all technical states, pending design/measured acceptance and actual custody unchanged |
+| Complete launcher-depth/lifecycle/diagnostic contract, including #102 | Public #5579 whole original and fourteen discussions | administrative clarification proposed; source remains OPEN | [lean-session-lifecycle](../lean-session-lifecycle/README.md) and its canonical mini-effort, existing LS5579 Plan/global Validation and prospective Coordination/Journal distinction | Current bounded owners, actual live-token/operator/resource conditions, installed/update/retained-session/shared-module/#8669 custody, literal alternatives and consumed native limits retained; no engineering-first gate invented for administrative judgment |
+
+The [dated receipt and complete proposals](../backlog-reconciliation/journal/2026/11.17-auth-baseline-receipt-and-overlay-proposals.md)
+retain #13154's bounded verifier/consumer claimant and the 884-open census.
+No #5559/#5579/#5616 disposition, implementation appointment, technical proof
+or source/resource release follows from publishing these proposed rows.
