@@ -5,9 +5,9 @@ index lists dated checkpoints newest-first.
 
 - [2026-11-17 - Ordinary Windows test custody and retained compatibility work](journal/2026/11.17-ordinary-windows-test-custody.md)
 
-- [2026-11-17 - Filtered-population source completion](journal/2026/11.17-filtered-population-source-completion.md)
-
 - [2026-11-17 - Delivery, presentation and native-failure contracts](journal/2026/11.17-delivery-presentation-and-native-failure-contracts.md)
+
+- [2026-11-17 - Filtered-population source completion](journal/2026/11.17-filtered-population-source-completion.md)
 
 - [2026-11-16 - Resident readiness receiving and current-owner boundaries](journal/2026/11.16-resident-readiness-receiving.md)
 
