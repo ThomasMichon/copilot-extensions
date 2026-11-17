@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import asyncio
 import json
 import sqlite3
+import time
 from types import SimpleNamespace
 from typing import Any, Literal
 from unittest.mock import AsyncMock
 
 import pytest
+from fastapi.responses import JSONResponse
 
 from agent_bridge.acquisition_contract import AcquisitionRefused
 from agent_bridge import retained_metadata_recovery as metadata
@@ -20,6 +23,263 @@ from test_workspace_creation import creation_rig, rig as _rig  # noqa: F401
 
 rig = _rig
 pytestmark = pytest.mark.contract("agent_bridge.retained_metadata_recovery")
+
+
+async def ordinary_resume_fixture(fixture: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
+    from agent_bridge.routes import worktrees
+    from agent_bridge.routes.worktree_entry import WorktreeEntry
+
+    monkeypatch.delenv("AGENT_BRIDGE_INSTALL_DIR", raising=False)
+    manager = fixture.rig.manager
+    connect = manager._connect_via_session_host
+    old, recovery = await missing_record(fixture, monkeypatch)
+    monkeypatch.setattr(manager, "_connect_via_session_host", connect)
+    row = fixture.rig.row
+    entry = WorktreeEntry(
+        id=row["id"], agent_name="task-worker", machine="local",
+        path=row["path"], branch="worktree/test", status="active",
+    )
+    resolver = SimpleNamespace(
+        agents={"task-worker": SimpleNamespace(project=old.target.project, host=None)},
+        resolve=lambda _owner: old.target,
+    )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(
+        db=manager.db, session_manager=manager, resolver=resolver, ready=True,
+    )))
+    monkeypatch.setattr(worktrees, "_find_cached_worktree_entry", AsyncMock(
+        return_value=("task-worker", entry),
+    ))
+    command = fixture.command
+
+    async def owner(_owner: Any, _config: Any, _resolver: Any, args: Any) -> str:
+        if args[0] == "list-sessions":
+            value = {"head_session": old.acp_session_id, "sessions": []}
+        elif args[0] == "embody":
+            value = {
+                "ok": True, "dry_run": True, "native_admission_version": 1,
+                "worktree_id": row["id"], "work_dir": row["path"],
+                "resume_session": old.acp_session_id,
+            }
+        else:
+            value = await command(
+                args, old.target.project, owner_prefix=("retained-owner", "original-build"),
+            )
+            if args[0] == "head-session":
+                value.update(
+                    worktree_id=row["id"], head_revision=recovery.head_revision,
+                    pending_handoffs=[],
+                )
+            elif args[0] == "record":
+                value["worktree"]["bound_agent"] = None
+        return json.dumps(value)
+
+    monkeypatch.setattr(worktrees, "_run_for_agent", owner)
+    return SimpleNamespace(
+        fixture=fixture, manager=manager, row=row, request=request, old=old, recovery=recovery,
+    )
+
+
+@pytest.mark.asyncio
+async def test_worktree_head_hydration_adopts_metadata_without_native_execution(
+    writer_creation: Any, monkeypatch: pytest.MonkeyPatch,  # noqa: F811
+) -> None:
+    from agent_bridge import worktree_native_resume
+
+    bound = await ordinary_resume_fixture(writer_creation, monkeypatch)
+    launches = len(bound.fixture.starts)
+    results = await asyncio.gather(*(
+        worktree_native_resume.hydrate_worktree(bound.row["id"], bound.request)
+        for _ in range(2)
+    ))
+    values = [json.loads(bytes(result.body)) for result in results]
+    assert values[0] == values[1]
+    assert values[0]["session_id"] != bound.old.session_id
+    assert values[0]["acp_session_id"] == bound.old.acp_session_id
+    assert values[0]["status"] == SessionStatus.STOPPED.value
+    assert values[0]["retained_metadata_adoption"]["predecessor_id"] == bound.old.session_id
+    assert len(bound.fixture.starts) == launches
+    assert len(bound.manager.list_sessions()) == 1
+    assert not bound.manager.db.execute_read("SELECT * FROM turns")
+    assert not bound.manager.db.execute_read("SELECT * FROM acquisition_launch_gates")
+    assert bound.manager.db.execute_read(
+        "SELECT creation_recoveries_json FROM workspace_embodiments",
+    )[0][0] is None
+
+
+@pytest.mark.asyncio
+async def test_worktree_resume_recovers_original_keyed_native_without_a_repair_caller(
+    writer_creation: Any, monkeypatch: pytest.MonkeyPatch,  # noqa: F811
+) -> None:
+    from agent_bridge import worktree_native_resume
+
+    bound = await ordinary_resume_fixture(writer_creation, monkeypatch)
+    fixture, manager, row = bound.fixture, bound.manager, bound.row
+    request, old, recovery = bound.request, bound.old, bound.recovery
+    result = await worktree_native_resume.resume_native_worktree(row["id"], request, "acp", strict=True)
+    assert isinstance(result, JSONResponse)
+    first = json.loads(bytes(result.body))
+    assert first["session_id"] != old.session_id
+    assert first["acp_session_id"] == first["durable_session_id"] == old.acp_session_id
+    assert first["status"] == SessionStatus.IDLE.value
+    assert manager.get_session(old.session_id) is None
+    assert manager.db.get_session(old.session_id) is None
+    assert len(manager.list_sessions()) == 1
+    assert not manager.db.execute_read("SELECT * FROM turns")
+    resumed = manager.get_session(first["session_id"])
+    assert resumed.target.venue[creation.JOURNAL_KEY] == recovery.journal_key
+    boundary = metadata.adoption(dict(manager.db.execute_read(
+        "SELECT * FROM workspace_embodiments",
+    )[0]))
+    assert boundary is not None
+    assert boundary["history"]["predecessor_id"] == old.session_id
+    assert first["retained_recovery"]["state"] == "complete"
+    assert first["retained_metadata_adoption"] == boundary
+    assert first["worktree_writer_observation"]["native_session_id"] == old.acp_session_id
+    before = dict(manager.db.execute_read("SELECT * FROM workspace_embodiments")[0])
+    launches = len(fixture.starts)
+    repeated = await worktree_native_resume.resume_native_worktree(row["id"], request, "acp", strict=True)
+    assert isinstance(repeated, JSONResponse)
+    assert json.loads(bytes(repeated.body))["session_id"] == first["session_id"]
+    assert len(fixture.starts) == launches
+    assert dict(manager.db.execute_read("SELECT * FROM workspace_embodiments")[0]) == before
+    assert manager._active_acquisitions == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fault", [
+    "unknown-operation", "head-changed", "not-ready", "cli", "foreign-transport",
+])
+async def test_ordinary_retained_resume_preserves_held_custody(
+    writer_creation: Any, monkeypatch: pytest.MonkeyPatch, fault: str,  # noqa: F811
+) -> None:
+    from fastapi import HTTPException
+    from agent_bridge import worktree_native_resume
+
+    bound = await ordinary_resume_fixture(writer_creation, monkeypatch)
+    manager, old, recovery = bound.manager, bound.old, bound.recovery
+    adopted, _boundary = await metadata.prepare(
+        manager, old.session_id, recovery, bound.fixture.requirement, lambda: True,
+    )
+    if fault == "unknown-operation":
+        manager.db.execute_write(
+            "UPDATE workspace_embodiments SET creation_recoveries_json=? WHERE key_digest=?",
+            (json.dumps({recovery.operation_id: {"request": recovery.model_dump(), "state": "unknown"}}),
+             recovery.journal_key),
+        )
+    elif fault == "head-changed":
+        bound.fixture.rig.head["id"] = "different-native"
+    elif fault == "not-ready":
+        bound.request.app.state.ready = False
+    elif fault == "foreign-transport":
+        bound.request.app.state.resolver.agents["task-worker"].host = "different-host"
+    mode: Literal["acp", "cli"] = "cli" if fault == "cli" else "acp"
+    before = dict(manager.db.execute_read("SELECT * FROM workspace_embodiments")[0])
+    launches = len(bound.fixture.starts)
+    with pytest.raises(HTTPException):
+        await worktree_native_resume.resume_native_worktree(bound.row["id"], bound.request, mode, strict=True)
+    assert dict(manager.db.execute_read("SELECT * FROM workspace_embodiments")[0]) == before
+    assert manager.get_session(adopted.session_id) is adopted
+    assert adopted.status == SessionStatus.STOPPED and adopted.client is None
+    assert len(bound.fixture.starts) == launches
+    assert not manager.db.execute_read("SELECT * FROM turns")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ready", [False, True])
+async def test_ordinary_resume_refuses_changed_workspace_incarnation(
+    writer_creation: Any, monkeypatch: pytest.MonkeyPatch, ready: bool,  # noqa: F811
+) -> None:
+    from fastapi import HTTPException
+    from agent_bridge import worktree_native_resume
+
+    bound = await ordinary_resume_fixture(writer_creation, monkeypatch)
+    if ready:
+        result = await worktree_native_resume.resume_native_worktree(
+            bound.row["id"], bound.request, "acp", strict=True,
+        )
+        assert isinstance(result, JSONResponse)
+    bound.row["creation_nonce"] = "replacement-allocation"
+    before = dict(bound.manager.db.execute_read("SELECT * FROM workspace_embodiments")[0])
+    launches = len(bound.fixture.starts)
+    with pytest.raises(HTTPException):
+        await worktree_native_resume.resume_native_worktree(
+            bound.row["id"], bound.request, "acp", strict=True,
+        )
+    assert dict(bound.manager.db.execute_read("SELECT * FROM workspace_embodiments")[0]) == before
+    assert len(bound.fixture.starts) == launches
+    assert not bound.manager.db.execute_read("SELECT * FROM turns")
+
+
+@pytest.mark.asyncio
+async def test_concurrent_worktree_resume_recovers_a_lost_reply_without_another_native_load(
+    writer_creation: Any, monkeypatch: pytest.MonkeyPatch,  # noqa: F811
+) -> None:
+    from fastapi import HTTPException
+    from agent_bridge import worktree_native_resume
+    from agent_bridge.routes import sessions
+
+    bound = await ordinary_resume_fixture(writer_creation, monkeypatch)
+    render = sessions._session_info
+
+    def lost_reply(*_args: Any, **_kwargs: Any) -> Any:
+        raise RuntimeError("controlled response loss after native completion")
+
+    monkeypatch.setattr(sessions, "_session_info", lost_reply)
+    with pytest.raises(HTTPException, match="controlled response loss"):
+        await worktree_native_resume.resume_native_worktree(
+            bound.row["id"], bound.request, "acp", strict=True,
+        )
+    launches = len(bound.fixture.starts)
+    assert launches == 2  # Initial creation and the one retained native load.
+    before = dict(bound.manager.db.execute_read("SELECT * FROM workspace_embodiments")[0])
+    monkeypatch.setattr(sessions, "_session_info", render)
+    responses = await asyncio.gather(*(
+        worktree_native_resume.resume_native_worktree(bound.row["id"], bound.request, "acp", strict=True)
+        for _ in range(2)
+    ))
+    assert all(isinstance(item, JSONResponse) for item in responses)
+    identities = {
+        json.loads(bytes(item.body))["session_id"]
+        for item in responses if isinstance(item, JSONResponse)
+    }
+    assert len(identities) == 1
+    assert len(bound.fixture.starts) == launches
+    assert dict(bound.manager.db.execute_read("SELECT * FROM workspace_embodiments")[0]) == before
+    assert not bound.manager.db.execute_read("SELECT * FROM acquisition_launch_gates")
+
+
+@pytest.mark.asyncio
+async def test_later_stopped_activation_does_not_reuse_a_historical_native_completion(
+    writer_creation: Any, monkeypatch: pytest.MonkeyPatch,  # noqa: F811
+) -> None:
+    from agent_bridge import worktree_native_resume
+
+    bound = await ordinary_resume_fixture(writer_creation, monkeypatch)
+    first = await worktree_native_resume.resume_native_worktree(
+        bound.row["id"], bound.request, "acp", strict=True,
+    )
+    assert isinstance(first, JSONResponse)
+    original = json.loads(bytes(first.body))
+    session = bound.manager.get_session(original["session_id"])
+    session.status, session.client = SessionStatus.STOPPED, None
+    bound.manager.db.update_session_status(session.session_id, SessionStatus.STOPPED.value, time.time())
+    second = await worktree_native_resume.resume_native_worktree(
+        bound.row["id"], bound.request, "acp", strict=True,
+    )
+    assert isinstance(second, JSONResponse)
+    current = json.loads(bytes(second.body))
+    assert current["session_id"] == original["session_id"]
+    assert current["acp_session_id"] == original["acp_session_id"] == bound.old.acp_session_id
+    assert current["retained_metadata_adoption"] == original["retained_metadata_adoption"]
+    assert current["retained_recovery"]["operation_id"] != original["retained_recovery"]["operation_id"]
+    assert current["retained_recovery"]["state"] == "complete"
+    operations = json.loads(bound.manager.db.execute_read(
+        "SELECT creation_recoveries_json FROM workspace_embodiments",
+    )[0][0])
+    assert len(operations) == 2 and all(item["state"] == "complete" for item in operations.values())
+    assert {item["request"]["head_revision"] for item in operations.values()} == {bound.recovery.head_revision}
+    assert len(bound.fixture.starts) == 3
+    assert not bound.manager.db.execute_read("SELECT * FROM turns")
 
 
 async def missing_record(fixture: Any, monkeypatch: pytest.MonkeyPatch) -> tuple[Any, Any]:
@@ -288,7 +548,9 @@ async def test_generic_worktree_resume_cannot_claim_a_gate_before_metadata_recov
     ))})
     with pytest.raises(HTTPException) as held:
         await worktree_native_resume.resume_native_worktree(target.worktree_id, http, mode)
-    assert held.value.status_code == 409 and "owner-qualified" in str(held.value.detail)
+    assert held.value.status_code == 409
+    detail: Any = held.value.detail
+    assert detail["reason"] == "retained_metadata_held"
     assert not manager.db.execute_read("SELECT * FROM acquisition_launch_gates")
     assert not manager.db.get_cli_mode_reservation(target.worktree_id)
     launch.assert_not_awaited()

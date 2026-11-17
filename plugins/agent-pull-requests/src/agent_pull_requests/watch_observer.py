@@ -108,7 +108,7 @@ class ReplayObserver:
     ) -> None:
         if not isinstance(bindings, tuple):
             raise ValueError("native observation bindings must be immutable")
-        selected = {}
+        selected: dict[tuple[str, str], NativeObservationBinding] = {}
         for binding in bindings:
             if type(binding) is not NativeObservationBinding:
                 raise ValueError("invalid native observation binding")
@@ -193,8 +193,9 @@ class ReplayObserver:
         def capture(target: ObservationTarget, snapshot: PRSnapshot | None) -> None:
             key = (target.account, target.repo, target.number)
             try:
-                prepared[key] = cast(Callable[[PRSnapshot, RepositoryIdentity, int], Document], normalized)(
+                prepared[key] = normalized(
                     snapshot, repositories.identities[key[0]], target.number,
+                    activity=self.store.repository_activity,
                 ) if snapshot is not None else None
             except (ValueError, TypeError):
                 prepared[key] = None

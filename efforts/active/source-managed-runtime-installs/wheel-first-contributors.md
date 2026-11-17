@@ -4,16 +4,23 @@
 [Application support/runbook](../../../docs/patterns/fast-application-install-and-cutover.md) |
 [Reviewed transition](wheel-first-transition.md)
 
-**Evidence refresh: 2026-11-06. The parent effort remains Active.**
+**Evidence refresh: 2026-11-17. The parent effort remains Active.**
 This is the shared implementation map, not a deployment approval or a second
 effort. Keep progress here and contracts in the linked guide. Update a row when
 claiming work, after qualification, after merge and after release; do not mark
 an app converted from wheel production or a callback declaration alone.
-This refresh records bounded Linux Bridge frontend and MCP startup, CodeSpaces,
+This refresh adds the failed Worktrees Linux first-install witness below,
+without qualifying the new Manager-owned footprint model. The earlier records
+cover bounded Linux Bridge frontend and MCP startup, CodeSpaces,
 base-profile Containers/SSH CLI and separate Dispatch plugin/standalone controls, and
-credits the previously recorded Windows releases and CLI qualification.
+credit the previously recorded Windows releases and CLI qualification.
 Evidence remains source-, profile- and platform-specific; it does not requalify later binaries
 or establish whole-app acceptance.
+
+The current [Manager-owned footprint reference](app-footprint-transition.md)
+requires complete Manager install/update through the new path before broader
+app conversion. #12905 retains that implementation and qualification;
+the historical app rows below do not replace its gate.
 
 ## Request capture
 
@@ -151,7 +158,7 @@ whole-toolset atomicity or the complete stage contract.
 | App / source owner | Fast-flow evidence and current gap | Next bounded acceptance / coordination |
 |--------------------|------------------------------------|---------------------------------------|
 | [worktree-manager](../../../worktree-manager/README.md) (`copilot-extensions-worktree-manager`) | Bounded app-project/UV path released in #9990/#10024; Windows cold/repeat/update, real command/readiness, retained state and caller-Job lifetime qualified. Full stage-readiness, native POSIX and rollout remain open. | Preserve released behavior; complete only an agreed remaining platform/integration gap under #7028. |
-| [agent-worktrees](../../../plugins/agent-worktrees/README.md) | Same bounded released pair; historical command-owner restoration and installed-wheel consumer admission included. Full adopted-system/status-monitor transition remains separate. | Verify actual worktree/registry operations and monitor continuity for the claimed integration/platform; do not rebuild the first pair to begin another app. |
+| [agent-worktrees](../../../plugins/agent-worktrees/README.md) | Same bounded released pair; historical command-owner restoration and installed-wheel consumer admission included. The separate Linux x86_64 copied-application witness on Main `01f0566fecac17d68ade614966345a207873592d` passes environment staging but fails first installation on missing original command-owner context, as recorded below. No new installed-command or monitor acceptance follows. Full adopted-system/status-monitor transition remains separate. | Resolve the supported first-install entry with #11121's publication owner and the #12905 Manager reference; #10570 retains prepared updates. Keep the failed witness and unreached reuse/resource/lifetime checks open. Do not synthesize a plugin identity or ticket to bypass ownership, or infer that the registered original-owner update flow fails. |
 | [agent-bridge](../../../plugins/agent-bridge/README.md) | Independent wheel-application startup #10054 merged on 2026-11-03. Its historical Windows staging, first touch/reuse, pre-publication failure, Host/ACP upgrade/rollback, retained data, caller-Job closure and native exits remain credited. The separate Linux x86_64 frontend witness below uses explicit Main `7f48209d25c3b90499e20afcfa79ae60136ca4e0`: actual stage/cold/reuse, authenticated installed readiness, retained stopped work and source-concealed reads. Neither record qualifies subsequent binaries, an installed Copilot agent or the whole app. | Existing owners retain POSIX Host/ACP continuity, full credential-relay/provider, source-change/reverse/recovery, fresh-OS and broader legacy-adoption acceptance. Coordinate through #10054/#7028 and their follow-ups; do not repeat completed bounded witnesses or open competing repair PRs. |
 | [agent-mcp](../../../plugins/agent-mcp/README.md) | Independent wheel-application startup #10054 merged on 2026-11-03. All 15 bounded Windows phases passed, including three-shell first touch, same-generation reuse, denied publication with exact recovery/retry, forward/reverse replacement, caller-Job survival and native exits. The separate Linux x86_64 witness below uses explicit Main `9007b0ef321d2be24088cd42279564005d39289e`: stage, inactive cold installation, configured startup/readiness, same-native-owner reuse and source-concealed reads. Neither record qualifies subsequent binaries or completes authoritative-replacement/whole-app acceptance. | #10742 retains the prepared/mixed-source matrix; incoming publication #10754 excludes that matrix, with #10652 yielding to it. Existing owners retain #6389 fresh serving convergence, #10653 protected retirement and the affected-installation mutation hold, plus #10486 full reattachment as required separate work, not an incoming gate. #10810 POSIX helpers, #10797 metadata and #10764 Darwin remain separate owned work. Preserve #10054/#7028/#9716/#10377 coordination, broader platform/fresh-OS/legacy acceptance and the distinction between synthetic fixture upstreams and product DBs. This refresh adds bounded evidence, not a runtime fix or full namespace/handover qualification. |
 | [agent-dispatch](../../../plugins/agent-dispatch/README.md) | Bounded modern user-mode application slice #10345 released on Main `a48e41419190fe43ef006a8ef6dfa08e134785b6`. Historical Windows cold/restart/handoff and held-state/native cleanup remain credited. The separate Linux x86_64 witness below uses explicit Main `0dbbdd374e1af0b6443c84cead45102333855da3`: actual stage/cold/reuse, authenticated coordinator readiness, logical work preservation and source-concealed reads. Neither record establishes whole-SDK, later-binary or whole-app qualification. | Existing owners retain configured-supervisor, flat/nonprofile and native-service-owned transitions, distinct-source/reverse/recovery and complete authoritative-replacement acceptance. Preserve candidate admission and unfinished-work custody; #9026 fixed first-use recipes and #9673 guarded conversation replacement remain separate work. |
@@ -196,6 +203,56 @@ consumer's connection/forward continuity.
 Rows marked open mean **not qualified/released by this campaign**, not proof
 that no source or other contributor implementation exists. Existing app-specific
 efforts, open PRs, retained WIP and resource reservations remain authoritative.
+
+### Worktrees Linux copied-application first-install failure
+
+The validation-only witness uses promoted Main
+`01f0566fecac17d68ade614966345a207873592d`, tree
+`98225f1a8120c31c2c3d7d24622e6f92750c941a`, on Linux x86_64 with
+CPython 3.12.11 in a fresh container from a pinned, preprovisioned image.
+It is not a pristine operating system, a cold dependency cache or the new
+Manager-owned application hierarchy. The dependency cache was populated before
+the application calls.
+
+Canonical source/wheel/profile preparation completed in 58.49 seconds.
+The generated `install --stage` passed in 0.37 seconds without changing the
+protected synthetic home/state. Normal `install` in a separate, genuinely
+unstaged application slot failed in 6.20 seconds within the unchanged
+300-second bound. Networking was disconnected for those application calls;
+configured-feed, ordinary TLS and seven-day seasoning remained unchanged
+during preparation.
+
+The real installed `__source-start` callback enters
+`runtime_deployment.start_published_application()`. Its
+`application_publication()` reads `COPILOT_PLUGIN_STAGED_FROM` unconditionally;
+this source-only copied-application entry had no original marketplace command
+owner. The callback raised `KeyError: 'COPILOT_PLUGIN_STAGED_FROM'` before
+monitor startup. The installer reported `ApplicationStartupUncertain` and
+retained selection and launchers rather than publishing successful completion.
+
+The failed result was preserved and reconciled without replay. Selection
+remained, installation completion and the monitor routing directory were
+absent, and a process-namespace read found no remaining runtime process.
+Synthetic registry/state bytes and inode/metadata, plus the foreign command,
+were unchanged. The evidence archive passed independent digest/member/result
+checks before the exact disposable container was removed. No process signal
+or production change was needed.
+
+The [parent outcome](https://github.com/ThomasMichon/copilot-extensions/issues/7028#issuecomment-6936935582)
+and [source-owner return](https://github.com/ThomasMichon/copilot-extensions/pull/11121#issuecomment-6936965363)
+retain the first-install contract question. Existing native source-update
+witnesses provide a retained original command owner; this different result
+does not show that their registered update path fails. No plugin identity,
+publication receipt or lifecycle ticket was fabricated, no callback was
+replaced, and no competing updater correction was opened.
+
+The owner must establish the supported canonical first-install entry, or its
+legitimate prerequisite context, before a fresh witness can qualify it.
+Returning evidence is not an accepted ownership transfer. Healthy reuse,
+installed commands/resources, source-unavailable reads and authenticated
+monitor lifetime were not reached. Manager, managed-Python acquisition,
+mixed-generation updates, recovery, adoption and rollout remain unqualified
+by this result. The parent remains Active.
 
 ### Bounded CodeSpaces Linux CLI/provider record
 
