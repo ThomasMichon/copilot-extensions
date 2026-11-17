@@ -17,6 +17,7 @@ from typing import Protocol, TypedDict, cast
 from uuid import uuid4
 
 import pytest
+from agent_remote_driver.windows_mux_version import file_version
 from _manager_process_fixture import boundary_runtime
 from _native_python_owner import native_python_owner
 from test_launch_admission_ordering import _fixture
@@ -183,7 +184,7 @@ def _native_observation_diagnostics(launches: Sequence[_DiagnosticLaunch]) -> st
 def _private_psmux(
     root: Path, binary: str, namespace: str, env: dict[str, str],
 ) -> None:
-    """Keep the original launcher on a real executable with private mux routing."""
+    """Keep private mux routing and the selected provider's passive version."""
     compiler = next((
         Path(os.environ["SystemRoot"]) / "Microsoft.NET" / framework / "v4.0.30319/csc.exe"
         for framework in ("Framework64", "Framework")
@@ -191,6 +192,11 @@ def _private_psmux(
             / "v4.0.30319/csc.exe").is_file()
     ), None)
     assert compiler, "The Windows .NET Framework compiler is required for the native mux fixture"
+    version = file_version(binary)
+    metadata = "" if version is None else (
+        '[assembly: System.Reflection.AssemblyFileVersion("'
+        + ".".join(map(str, version)) + '")]\n'
+    )
     root.mkdir()
     source = root / "mux.cs"
     source.write_text(r'''
@@ -200,6 +206,7 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 
+VERSION_METADATA
 class PrivateMux {
     [DllImport("kernel32.dll")]
     static extern uint GetConsoleCP();
@@ -225,7 +232,8 @@ class PrivateMux {
         }
     }
 }
-'''.replace("BINARY", '@"' + str(binary).replace('"', '""') + '"')
+'''.replace("VERSION_METADATA", metadata)
+   .replace("BINARY", '@"' + str(binary).replace('"', '""') + '"')
    .replace("ORIGINAL_PATH", '@"' + env["PATH"].replace('"', '""') + '"')
    .replace("NAMESPACE", '@"' + namespace.replace('"', '""') + '"'), encoding="utf-8")
     shim = root / "psmux.exe"
@@ -235,6 +243,8 @@ class PrivateMux {
         creationflags=_NO_WINDOW,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+    if version is not None:
+        assert file_version(str(shim)) == version, "Private mux adapter lost provider file metadata"
     env["PATH"] = str(root) + os.pathsep + env["PATH"]
     env["COPILOT_DRIVER_PSMUX_NAMESPACE"] = namespace
 
