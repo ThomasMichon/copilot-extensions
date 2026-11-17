@@ -31,11 +31,14 @@ from pathlib import Path
 args = sys.argv[1:]
 if (
     len(args) == 6 and args[:4] == ["-I", "-X", "utf8", "-m"]
-    and args[4] in {"agent_remote_driver.mux_creation", "agent_remote_driver.mux_observation"}
-    and args[5] == "--describe-contract"
+    and (args[4], args[5]) in {
+        ("agent_remote_driver.mux_creation", "--describe-contract"),
+        ("agent_remote_driver.mux_observation", "--describe-contract"),
+        ("agent_remote_driver.mux_observation", "--observe"),
+    }
 ):
     result = subprocess.run(
-        [sys.executable, *args], stdin=subprocess.DEVNULL, timeout=25,
+        [sys.executable, *args], input=sys.stdin.buffer.read(), timeout=25,
         creationflags=subprocess.CREATE_NO_WINDOW,
     )
     raise SystemExit(result.returncode)
@@ -357,6 +360,19 @@ def test_resume_fixture_native_owner_preserves_python_argv_and_stdin(tmp_path):
     assert "windows-psmux-create-or-join" in contract["operations"]
     assert Path(contract["python"]).resolve() == Path(sys.executable).resolve()
     assert Path(contract["entrypoint"]).is_file()
+    observed = subprocess.run(
+        [str(launch["root"] / "owner.exe"), "-I", "-X", "utf8", "-m",
+         "agent_remote_driver.mux_observation", "--observe"],
+        input=json.dumps({"version": 1, "session": "wt-" + uuid4().hex}),
+        cwd=launch["target"], env=launch["env"],
+        capture_output=True, text=True, timeout=20, check=False,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert observed.returncode == 0, observed.stdout + observed.stderr
+    observation = json.loads(observed.stdout)
+    assert observation["contract"] == "copilot-driver.mux-observation"
+    assert observation["version"] == 1
+    assert observation["status"] == "absent"
     script = launch["root"] / "pipeline.ps1"
     script.write_text(
         "$VenvPython = '" + str(launch["root"] / "owner.exe").replace("'", "''") + "'\n"

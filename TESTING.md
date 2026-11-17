@@ -670,7 +670,12 @@ The manual `installation-context-full.yml` portfolio `mux-continuity` runs the
 native Resume consumer packet on disposable hosted Windows with digest-pinned
 PSMux 3.4.0. It covers cold Open, reattachment to the same pane/child,
 independent attachment preservation and fresh Driver/Worktrees/Manager
-listings. JUnit retains consumer timing properties. `resume-pane` retains its
+listings. The synthetic native runtime forwards the real finite observation
+request and its stdin, not just the provider's contract-description probe.
+Actor-free routing/exit-status controls live in
+`tools/promotion_unit_tests/test_resume_fixture_contract.py`; the native packet
+also checks an actual absent-session observation through that executable.
+JUnit retains consumer timing properties. `resume-pane` retains its
 PSMux 3.3.8 compatibility packet; neither lane authorizes shared-host probes
 or installation. Dispatch at the exact published candidate ref and retain
 the run's source SHA, not merely its green name.
