@@ -69,7 +69,7 @@ def _run(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def _load_checker():
+def _load_checker() -> Any:
     spec = importlib.util.spec_from_file_location("check_agent_bridge_contracts", SCRIPT)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
@@ -243,7 +243,7 @@ def repo(tmp_path: Path) -> Path:
         {"name": "agent-bridge", "version": "1.0.0"},
     )
     _write(root, HOST_SOURCE, "PROTOCOL_VERSION = 1\n")
-    fixture = {
+    fixture: dict[str, Any] = {
         "captured_from": {
             "commit": "pending",
             "plugin_version": "1.0.0",
@@ -252,7 +252,7 @@ def repo(tmp_path: Path) -> Path:
         "response": {"status_code": 200},
     }
     _write(root, FIXTURE, fixture)
-    host_fixture = {
+    host_fixture: dict[str, Any] = {
         "captured_from": {
             "commit": "pending",
             "plugin_version": "1.0.0",
@@ -324,10 +324,10 @@ def test_provenance_batch_preserves_exact_blobs_and_metadata_without_per_commit_
     evidence = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(evidence)
     monkeypatch.setattr(evidence, "REPO", repo)
-    calls = []
+    calls: list[list[str]] = []
     run = subprocess.run
 
-    def recorded(argv, **kwargs):
+    def recorded(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[Any]:
         calls.append(argv)
         assert kwargs["env"]["GIT_NO_LAZY_FETCH"] == "1"
         return run(argv, **kwargs)
@@ -577,7 +577,7 @@ def test_provenance_commit_validation_is_local_only(
     commit = "a" * 40
     calls: list[tuple[str, ...]] = []
 
-    def fake_git(*args: str):
+    def fake_git(*args: str) -> subprocess.CompletedProcess[str]:
         calls.append(args)
         if args[:2] == ("cat-file", "-e"):
             return subprocess.CompletedProcess(args, 0 if available else 1, "", "")
@@ -595,9 +595,9 @@ def test_local_git_probe_is_bounded_headless_and_fail_closed(
     checker = _load_checker()
     checker._eg.git.cache_clear()
     monkeypatch.setattr(checker._eg, "require_local_object_reads", lambda: None)
-    observed = {}
+    observed: dict[str, Any] = {}
 
-    def timed_out(args, **kwargs):
+    def timed_out(args: list[str], **kwargs: Any) -> None:
         observed.update(kwargs)
         raise subprocess.TimeoutExpired(args, kwargs["timeout"])
 
@@ -607,7 +607,7 @@ def test_local_git_probe_is_bounded_headless_and_fail_closed(
     assert observed["timeout"] == 10
     assert observed["env"]["GIT_NO_LAZY_FETCH"] == "1"
     assert observed["creationflags"] == (
-        subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+        getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
     )
 
 
@@ -617,9 +617,9 @@ def test_repeated_local_evidence_is_read_once_per_validation(
     checker = _load_checker()
     checker._eg.git.cache_clear()
     monkeypatch.setattr(checker._eg, "require_local_object_reads", lambda: None)
-    calls = []
+    calls: list[list[str]] = []
 
-    def read(args, **kwargs):
+    def read(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         calls.append(args)
         return subprocess.CompletedProcess(args, 0, "", "")
 
@@ -637,9 +637,9 @@ def test_local_only_guard_refuses_unsupported_git_before_object_reads(
     checker = _load_checker()
     checker._eg.require_local_object_reads.cache_clear()
     checker._eg.git.cache_clear()
-    calls = []
+    calls: list[list[str]] = []
 
-    def read(args, **kwargs):
+    def read(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         calls.append(args)
         return subprocess.CompletedProcess(args, 0, f"git version {version}\n", "")
 
@@ -688,10 +688,12 @@ def test_ci_preserves_orphan_blob_validation_outside_fast_pre_push(
         if corrupt_hash and relative == FIXTURE:
             fixture["captured_from"]["source_sha256"] = "0" * 64
         _write(repo, relative, fixture)
-    _mutate_registry(repo, lambda data: [
-        entry.update(sha256=_sha256(repo, entry["path"]))
-        for contract in data["contracts"] for entry in contract["fixtures"]
-    ])
+    def refresh_fixture_hashes(data: dict[str, Any]) -> None:
+        for contract in data["contracts"]:
+            for entry in contract["fixtures"]:
+                entry.update(sha256=_sha256(repo, entry["path"]))
+
+    _mutate_registry(repo, refresh_fixture_hashes)
     remote = repo.parent / "remote.git"
     _git(repo, "init", "--bare", "-q", str(remote))
     _git(repo, "--git-dir", str(remote), "config", "core.longpaths", "true")
@@ -708,20 +710,20 @@ def test_ci_preserves_orphan_blob_validation_outside_fast_pre_push(
         ["git", "push", "origin", "HEAD:refs/heads/validated"],
         cwd=repo, capture_output=True, text=True, timeout=30,
         env={**os.environ, **{"GIT_TERMINAL_PROMPT": "0"}},
-        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0,
     )
     assert result.returncode == 0, result.stderr
     assert subprocess.run(
         ["git", "show-ref", "--verify", "refs/remotes/origin/main"],
         cwd=repo, capture_output=True, timeout=5,
-        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0,
     ).returncode != 0
     if corrupt_hash:
         assert "direct blob" in validation.stderr
         assert subprocess.run(
             ["git", "--git-dir", str(remote), "show-ref", "--verify",
              "refs/heads/validated"], capture_output=True, timeout=5,
-            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0,
         ).returncode == 0
     else:
         assert "OK (2 contracts, 2 fixtures)" in validation.stdout
