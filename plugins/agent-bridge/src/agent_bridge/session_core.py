@@ -8,7 +8,7 @@ import json
 import os
 import time
 from dataclasses import replace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from .cold_store import ColdStoreSession, fetch_cold_store_session
 from .db import Database
@@ -18,10 +18,10 @@ from .models import (
     ContextThresholds,
     PhasedTimeouts,
     RetentionConfig,
-    SessionStatus,
 )
+from .session_status import SessionStatus
+from .spawn_target import REQUEST_OVERRIDES_KEY as _REQUEST_OVERRIDES_KEY
 from .session_manager import (
-    _REQUEST_OVERRIDES_KEY,
     _format_optional_hours,
     _parse_progress_markers,
     ProviderTargetRefreshError,
@@ -32,6 +32,7 @@ from .transport import SpawnTarget
 from .session_drain_gate import _SessionDrainGateMixin
 
 if TYPE_CHECKING:
+    from .session_manager import SessionManager
     from .session_snapshot import SessionSnapshot
 
 
@@ -67,7 +68,7 @@ class _SessionCoreMixin(_SessionDrainGateMixin):
         live_stall_interrupt_after_s: float = 900.0,
         session_host_unexpected_reap_seconds: float = 60.0,
         session_host_active_reap_seconds: float = 0.0,
-        remote_acp_targets: dict | None = None,
+        remote_acp_targets: dict[str, Any] | None = None,
         read_only_rehydrate: bool = False,
         captured_sessions: SessionSnapshot | None = None,
     ) -> None:
@@ -222,7 +223,7 @@ class _SessionCoreMixin(_SessionDrainGateMixin):
         if captured_sessions is not None:
             from .session_snapshot import hydrate_sessions
 
-            hydrate_sessions(self, captured_sessions)
+            hydrate_sessions(cast("SessionManager", self), captured_sessions)
         else:
             self._rehydrate(read_only=read_only_rehydrate)
 
@@ -238,6 +239,7 @@ class _SessionCoreMixin(_SessionDrainGateMixin):
             resolver.remote_acp_catalog = self._remote_acp_catalog
 
     def _route_acp_event(self, session: Session, event_type: str, data: dict[str, Any]) -> None:
+        self = cast("SessionManager", self)
         if session.event_log:
             session.event_log.append(event_type, data)
         if event_type == "preference_selected":
@@ -385,6 +387,7 @@ class _SessionCoreMixin(_SessionDrainGateMixin):
         frontend restart. Surfaced on /health and in the drain result so a
         drain/cutover never looks "clean" while live hosts it must preserve go
         unaccounted for (dotfiles#1656)."""
+        self = cast("SessionManager", self)
         return len(self._live_host_records())
 
     def busy_sessions(self) -> list[str]:
@@ -402,14 +405,15 @@ class _SessionCoreMixin(_SessionDrainGateMixin):
         session is *at-rest* ``IDLE`` (which a cutover preserves via host
         reattach, so it need not block drain; the idle reaper is likewise
         remote-aware). This is the signal drain() waits on."""
+        self = cast("SessionManager", self)
         busy: set[str] = set()
         for sid, session in self._sessions.items():
             if session.status in (SessionStatus.RUNNING, SessionStatus.STARTING) \
                     or session.has_active_background_tasks:
                 busy.add(sid)
         for sid in self._live_remote_host_sessions():
-            session = self._sessions.get(sid)
-            if session is not None and session.status == SessionStatus.IDLE:
+            retained = self._sessions.get(sid)
+            if retained is not None and retained.status == SessionStatus.IDLE:
                 # At-rest remote host -> preserved across a cutover by host
                 # reattach; does not need to block drain.
                 continue
@@ -441,6 +445,7 @@ class _SessionCoreMixin(_SessionDrainGateMixin):
 
         Returns a summary (``mode`` is ``"detach-only"`` or ``"cancel"``).
         """
+        self = cast("SessionManager", self)
         import asyncio as _asyncio
 
         targets = [
@@ -533,6 +538,7 @@ class _SessionCoreMixin(_SessionDrainGateMixin):
         Teardown (stop/end) stays permitted throughout -- it is what lets the
         busy sessions this loop waits on settle (#1755).
         """
+        self = cast("SessionManager", self)
         import asyncio as _asyncio
 
         if getattr(self, "_cold_drain_entered", False):
@@ -564,7 +570,7 @@ class _SessionCoreMixin(_SessionDrainGateMixin):
             if preserved else "",
             timeout, " (force)" if force else "",
         )
-        while (busy or getattr(self, "_active_acquisitions", 0)) and time.monotonic() < deadline:
+        while (bool(busy) or bool(getattr(self, "_active_acquisitions", 0))) and time.monotonic() < deadline:
             await _asyncio.sleep(poll)
             busy = [s for s in self.busy_sessions()
                     if s != exclude_session_id and s not in preserved]
@@ -632,7 +638,7 @@ class _SessionCoreMixin(_SessionDrainGateMixin):
             )
 
     @staticmethod
-    def _capture_progress(session: Session, event_type: str, data: dict) -> None:
+    def _capture_progress(session: Session, event_type: str, data: dict[str, Any]) -> None:
         """Update a session's structured progress from a captured event (#46.3)."""
         if data.get("history_replay") is True:
             return
@@ -885,7 +891,7 @@ class _SessionCoreMixin(_SessionDrainGateMixin):
         now = now if now is not None else time.time()
         cutoff = now - ret.max_age_hours * 3600.0
         retained = self._db.gc_status_summary(ret.statuses)
-        result["terminal_count"] = int(retained["count"])
+        result["terminal_count"] = cast(int, retained["count"])
         oldest_terminal = retained["oldest_updated_at"]
         if oldest_terminal is not None:
             result["oldest_terminal_age_hours"] = (
@@ -960,6 +966,7 @@ class _SessionCoreMixin(_SessionDrainGateMixin):
         matches = [
             sid for sid, session in self._sessions.items()
             if session.acp_session_id == ref
+            and not (session.target.venue or {}).get("_agent_bridge_metadata_epoch")
         ]
         if len(matches) > 1 and any(
             self._sessions[sid].target.type == "remote-acp" for sid in matches

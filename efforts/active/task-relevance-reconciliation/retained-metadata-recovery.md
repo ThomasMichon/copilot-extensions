@@ -4,7 +4,9 @@ Part of [Task Relevance Reconciliation](README.md), continuing
 [#9532](https://github.com/ThomasMichon/copilot-extensions/issues/9532)
 at the retained-task boundary of
 [#6934](https://github.com/ThomasMichon/copilot-extensions/issues/6934).
-**Status: proposed implementation slice; not runtime recovery authority.**
+**Status: plan reviewed in #12929; provider implementation passes bounded source
+controls, with publication and runtime qualification still open.** Source
+acceptance is not runtime recovery authority.
 
 ## Existing boundary
 
@@ -118,3 +120,36 @@ owners, process races and native lifecycle controls belong in the existing
 selected integration portfolio, not an exhaustive required-CI expansion.
 This plan grants no live metadata mutation, prompt, deployment, termination,
 deletion, credential change or policy reset.
+
+## Provider implementation checkpoint
+
+The existing keyed creation journal now carries an additive immutable metadata
+adoption. The native-import transaction commits its new managed record and
+history boundary together, under the existing creation/workspace/recovery
+exclusions. The original managed ID stays excluded, the original native ID
+does not alias the new stream, and prior recovery IDs cannot become new-epoch
+execution receipts. Original launch preferences, tool configuration and task
+origin are retained from creation facts. Missing or unsupported facts hold.
+
+The receiver advertises `retained_native_metadata_adoption: 1` through actual
+health. Negotiated Python helpers prepare or inspect the version-1 outcome;
+there is no new CLI carrier or ordinary caller migration in this slice.
+Malformed or mismatched outcomes refuse without replay. The
+[owner guide](../../../plugins/agent-bridge/docs/retained-acquisition-writer.md#metadata-loss-without-native-conversation-loss)
+documents the HTTP shape, retention, schema-49 preparation and the supported
+passive-cutover rollback limitation.
+
+All 275 selected Bridge controls pass in the isolated process portfolio,
+including actual HTTP old-provider refusal, lost and malformed responses,
+atomic rollback/restart and independent-process competing preparation. All
+5,055 pre-existing required unit nodes are retained; 13 actor-free lineage and
+import controls extend that packet to 5,068 passing nodes within the original
+300-second budget. Data-only lineage is separate from the metadata receiver's
+process-capable preparation dependencies. The legacy continuation controls now
+require reverse lookup of both birth and adopted managed IDs.
+
+These are source controls, not evidence that native execution reached a new
+turn or closeout. The validation checkboxes intentionally retain their broader
+runtime and mixed-owner acceptance gates. Actual installation, provider
+cutover, native continuation, task attachment and production activation remain
+unqualified and separately owned.

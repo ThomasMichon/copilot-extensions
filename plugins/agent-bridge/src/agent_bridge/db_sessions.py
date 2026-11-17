@@ -2,32 +2,39 @@
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Callable
+import sqlite3
+from typing import TYPE_CHECKING, Any, cast
 import uuid
 
 from .runtime_custody import RuntimeAdmission, admission_document
-from .creation_writer_schema import RETAINED_RECOVERY_HELD
+from .creation_writer_schema import METADATA_RECOVERY_HELD, RETAINED_RECOVERY_HELD
+
+if TYPE_CHECKING:
+    from .db import Database
 
 
 class _SessionsMixin:
     """Bridge-owned session lifecycle helpers."""
 
     def retained_recovery_held(self, session_id: str) -> bool:
+        self = cast("Database", self)
         return bool(self.execute_read(
             "SELECT 1 FROM sessions WHERE id=? AND "
             f"({self._retained_recovery_held_predicate()})", (session_id,),
         ))
 
-    def _retained_recovery_held_predicate(self, conn=None) -> str:
+    def _retained_recovery_held_predicate(self, conn: sqlite3.Connection | None = None) -> str:
+        self = cast("Database", self)
         conn = self._get_conn() if conn is None else conn
         if conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='acquisition_launch_gates'"
         ).fetchone() is None:
-            return RETAINED_RECOVERY_HELD
+            return f"({METADATA_RECOVERY_HELD}) OR ({RETAINED_RECOVERY_HELD})"
         return (
             "sessions.id IN (SELECT session_id FROM acquisition_launch_gates "
             "WHERE driver='retained-recovery' AND session_id IS NOT NULL) OR "
-            + RETAINED_RECOVERY_HELD
+            f"({METADATA_RECOVERY_HELD}) OR ({RETAINED_RECOVERY_HELD})"
         )
 
     def create_session(
@@ -46,26 +53,37 @@ class _SessionsMixin:
         acp_session_id: str | None = None,
         background_recovery_enabled: bool = True,
         runtime_admission: RuntimeAdmission | None = None,
+        _on_create: Callable[[sqlite3.Connection], None] | None = None,
     ) -> None:
-        self._execute_runtime_admitted_write(
+        self = cast("Database", self)
+        statement = (
             "INSERT INTO sessions (id, name, agent_name, caller_id, "
             "caller_session_id, target_dir, "
             "target_type, status, config_json, target_json, "
             "background_recovery_enabled, created_at, updated_at, acp_session_id, "
             "runtime_custody_json) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (session_id, name, agent_name, caller_id, caller_session_id,
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        )
+        parameters = (session_id, name, agent_name, caller_id, caller_session_id,
              target_dir, target_type,
              status, config_json, target_json,
              int(background_recovery_enabled and runtime_admission is None),
-             now, now, acp_session_id, admission_document(runtime_admission)),
-            runtime_admission,
-            membership=True,
+             now, now, acp_session_id, admission_document(runtime_admission))
+        if _on_create is not None:
+            if runtime_admission is not None:
+                raise ValueError("Ordinary native import cannot borrow runtime admission")
+            with self._runtime_transaction(write=True, full_sync=True, membership=True) as conn:
+                conn.execute(statement, parameters)
+                _on_create(conn)
+            return
+        self._execute_runtime_admitted_write(
+            statement, parameters, runtime_admission, membership=True,
         )
 
     def update_session_status(
         self, session_id: str, status: str, now: float, pid: int | None = None
     ) -> None:
+        self = cast("Database", self)
         if pid is not None:
             self.execute_write(
                 "UPDATE sessions SET status=?, pid=?, updated_at=? WHERE id=?",
@@ -89,6 +107,7 @@ class _SessionsMixin:
         interrupted between them -- an interrupted stop must stay
         conservatively dormant (review of #3058).
         """
+        self = cast("Database", self)
         if self.read_only:
             raise PermissionError("Read-only database cannot execute writes")
         conn = self._get_conn()
@@ -116,6 +135,7 @@ class _SessionsMixin:
 
     def update_session_acp_id(self, session_id: str, acp_session_id: str) -> None:
         """Persist the ACP session ID for resume support."""
+        self = cast("Database", self)
         self.execute_write(
             "UPDATE sessions SET acp_session_id=? WHERE id=?",
             (acp_session_id, session_id),
@@ -126,6 +146,7 @@ class _SessionsMixin:
         self, session_id: str, enabled: bool, *, expected_stop_token: str | None = None,
     ) -> bool:
         """Persist recovery permission only if no newer durable stop forbids it."""
+        self = cast("Database", self)
         cursor = self.execute_write(
             "UPDATE sessions SET background_recovery_enabled=? WHERE id=? "
             "AND (?=0 OR (cold_recovery_stop_token IS ? AND runtime_custody_json IS NULL))",
@@ -135,6 +156,7 @@ class _SessionsMixin:
 
     def request_cold_recovery_stop(self, session_id: str) -> str:
         """Persist fresh stop intent before teardown can yield to recovery."""
+        self = cast("Database", self)
         token = uuid.uuid4().hex
         cursor = self.execute_write(
             "UPDATE sessions SET cold_recovery_stop_token=?, "
@@ -147,6 +169,7 @@ class _SessionsMixin:
 
     def clear_cold_recovery_stop(self, session_id: str, expected_token: str | None) -> bool:
         """Clear only the stop intent observed by an admitted manual resume."""
+        self = cast("Database", self)
         cursor = self.execute_write(
             "UPDATE sessions SET cold_recovery_stop_token=NULL "
             "WHERE id=? AND cold_recovery_stop_token IS ?",
@@ -158,6 +181,7 @@ class _SessionsMixin:
         self, session_id: str, target_json: str, target_dir: str | None = None,
     ) -> None:
         """Persist updated target (e.g. after spawn resolves worktree_id/cwd)."""
+        self = cast("Database", self)
         self.execute_write(
             "UPDATE sessions SET target_json=?, target_dir=? WHERE id=?",
             (target_json, target_dir, session_id),
@@ -174,6 +198,7 @@ class _SessionsMixin:
         now: float,
     ) -> None:
         """Persist the latest context window usage for a session."""
+        self = cast("Database", self)
         self.execute_write(
             "UPDATE sessions SET context_size=?, context_used=?, "
             "usage_model=?, last_usage_at=?, updated_at=? WHERE id=?",
@@ -190,6 +215,7 @@ class _SessionsMixin:
         lineage is traversable in either direction after the changeover (and
         survives a daemon restart).
         """
+        self = cast("Database", self)
         self.execute_write(
             "UPDATE sessions SET successor_id=?, handoff_at=?, updated_at=? "
             "WHERE id=?",
@@ -201,12 +227,14 @@ class _SessionsMixin:
         )
 
     def get_session(self, session_id: str) -> dict[str, Any] | None:
+        self = cast("Database", self)
         rows = self.execute_read("SELECT * FROM sessions WHERE id=?", (session_id,))
         if rows:
             return dict(rows[0])
         return None
 
     def list_sessions(self, status: str | None = None) -> list[dict[str, Any]]:
+        self = cast("Database", self)
         if status:
             rows = self.execute_read(
                 "SELECT * FROM sessions WHERE status=? ORDER BY updated_at DESC",
@@ -219,6 +247,7 @@ class _SessionsMixin:
         return [dict(r) for r in rows]
 
     def delete_session(self, session_id: str) -> None:
+        self = cast("Database", self)
         self.flush()
         with self._write_lock:
             conn = self._get_conn()

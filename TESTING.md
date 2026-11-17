@@ -7486,6 +7486,13 @@ test bytes, the expected parameter nodes, production coverage targets and a
 whole-packet budget. Any missing, duplicate, unexpected, failed or skipped node
 or phase rejects the result. One pytest directory collector visits only admitted
 files, once each in manifest order, without repeated sibling-directory scans.
+Thirteen retained-metadata epoch controls in `test_retained_metadata_epoch.py`
+exercise same-native adoption, excluded predecessor namespaces and historical
+recovery receipts, corrupt lineage refusal, unchanged birth/handoff resolution
+and qualified import inputs. They load the data-only lineage/import owners
+without process, database or native actors. Real HTTP, database commit/restart
+and independent-process controls remain in the selected Bridge integration
+portfolio; unit success does not qualify native execution or installed adoption.
 The catalog correspondence controls also bind the canonical catalog declaration
 and eleven templates as exact, hashed data inputs. These registered data paths
 cannot be selected as test nodes or Python coverage targets; an unregistered

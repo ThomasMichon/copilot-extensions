@@ -19,7 +19,8 @@ from .acquisition_contract import AcquisitionRefused
 from .acquisition_gates import AcquisitionGateHeld
 from .acquisition_executor import executor
 from .acquisition_store import AcquisitionStore
-from .models import SessionInfo, SessionStatus
+from .models import SessionInfo
+from .session_status import SessionStatus
 from .session_manager import DaemonDrainingError, ProviderTargetRefreshError
 from .singleton_anchor import repo_name_from_anchor_key
 from .worktree_charter import _apply_bound_charter
@@ -94,7 +95,7 @@ async def _resume(
     from .routes import worktrees as wt
     from .routes.sessions import _session_info
 
-    owner, entry = await wt._find_cached_worktree_entry(
+    owner, entry = await getattr(wt, "_find_cached_worktree_entry")(
         worktree_id, resolver, cache=wt.cache_for_app(request.app),
     )
     if owner is None or entry is None or not entry.path:
@@ -168,7 +169,7 @@ async def _resume(
     ]
     for session in owned:
         if session.status not in {SessionStatus.STOPPED, SessionStatus.ENDED, SessionStatus.FAILED}:
-            already_live = await wt._resolve_already_live(manager, worktree_id, session)
+            already_live = await getattr(wt, "_resolve_already_live")(manager, worktree_id, session)
             if (
                 mode == "acp" and session.acp_session_id == native
                 and session.target.cwd == entry.path and session.target.project == config.project
@@ -241,6 +242,15 @@ async def _resume(
 
     await require_owner_hosting(owner, resolver, entry.path, operation="native resume")
     session = None
+    if db.execute_read(
+        "SELECT 1 FROM workspace_embodiments WHERE creation_writer_json IS NOT NULL "
+        "AND (native_session_id=? OR json_extract(worktree_json,'$.id')=?) LIMIT 1",
+        (native, worktree_id),
+    ) and not any(session.acp_session_id == native for session in owned):
+        raise _refuse(
+            "retained_metadata_held",
+            "The original keyed conversation requires retained metadata recovery, not generic native import",
+        )
     if mode == "acp":
         target = replace(
             resolver.resolve(owner), cwd=entry.path, worktree_id=worktree_id,

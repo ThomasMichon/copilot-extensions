@@ -6,7 +6,10 @@ import sqlite3
 
 from .runtime_custody import RuntimeCustodyError, _normalized_schema
 
-COLUMNS = ("creation_writer_json", "creation_handoffs_json", "creation_recoveries_json")
+COLUMNS = (
+    "creation_writer_json", "creation_handoffs_json", "creation_recoveries_json",
+    "creation_adoption_json",
+)
 ORIGINAL_RECOVERY_HELD = """
 EXISTS (
     SELECT 1 FROM workspace_embodiments AS embodiment
@@ -72,7 +75,54 @@ RETAINED_RECOVERY_HELD = LEGACY_RETAINED_RECOVERY_HELD.replace(
     f"WHEN ({_valid_recovery_request()}) IS NOT 1 THEN 1 "
     "ELSE COALESCE(json_extract(recovery.value,'$.state'),'unknown')",
 )
+METADATA_RECOVERY_HELD = """
+EXISTS (
+    SELECT 1 FROM workspace_embodiments AS embodiment
+    WHERE embodiment.creation_adoption_json IS NOT NULL AND embodiment.state!='terminal'
+    AND json_extract(embodiment.creation_adoption_json,'$.session_id')=sessions.id
+    AND NOT EXISTS (
+        SELECT 1 FROM json_each(embodiment.creation_recoveries_json) AS recovery
+        WHERE recovery.type='object' AND (%s)
+        AND json_extract(recovery.value,'$.state')='complete'
+        AND recovery.key NOT IN (
+            SELECT value FROM json_each(embodiment.creation_adoption_json,'$.prior_operations')
+        )
+    )
+)
+""" % _valid_recovery_request()
 TRIGGERS = {
+    "metadata_adoption_retained": (
+        "BEFORE UPDATE OF creation_adoption_json ON workspace_embodiments "
+        "WHEN OLD.creation_adoption_json IS NOT NULL "
+        "AND NEW.creation_adoption_json IS NOT OLD.creation_adoption_json"
+    ),
+    "metadata_session_namespace_retained": (
+        "BEFORE INSERT ON sessions WHEN EXISTS ("
+        "SELECT 1 FROM workspace_embodiments WHERE creation_adoption_json IS NOT NULL "
+        "AND (session_id=NEW.id "
+        "OR json_extract(creation_adoption_json,'$.session_id')=NEW.id "
+        "OR (state!='terminal' AND json_valid(NEW.target_json) "
+        "AND json_extract(worktree_json,'$.id')=json_extract(NEW.target_json,'$.worktree_id') "
+        "AND json_extract(worktree_json,'$.repo')=json_extract(NEW.target_json,'$.project'))))"
+    ),
+    "metadata_session_control_retained": (
+        "BEFORE DELETE ON sessions WHEN " + METADATA_RECOVERY_HELD.replace("sessions.", "OLD.")
+    ),
+    "metadata_session_identity_retained": (
+        "BEFORE UPDATE OF id,acp_session_id,target_json,config_json ON sessions WHEN EXISTS ("
+        "SELECT 1 FROM workspace_embodiments WHERE creation_adoption_json IS NOT NULL "
+        "AND json_extract(creation_adoption_json,'$.session_id')=OLD.id AND ("
+        "NEW.id IS NOT OLD.id OR NEW.acp_session_id IS NOT native_session_id "
+        "OR json_valid(NEW.target_json) IS NOT 1 OR json_valid(NEW.config_json) IS NOT 1 "
+        "OR json_extract(NEW.target_json,'$.venue._agent_bridge_metadata_epoch') IS NOT OLD.id "
+        "OR json_extract(NEW.target_json,'$.venue._agent_bridge_creation_writer') IS NOT key_digest "
+        "OR json_extract(NEW.target_json,'$.worktree_id') IS NOT json_extract(worktree_json,'$.id') "
+        "OR json_extract(NEW.target_json,'$.project') IS NOT json_extract(worktree_json,'$.repo') "
+        "OR json_extract(NEW.config_json,'$.retained_metadata_adoption') "
+        "IS NOT json_extract(OLD.config_json,'$.retained_metadata_adoption') "
+        "OR json_extract(NEW.config_json,'$.dispatch_origin') "
+        "IS NOT json_extract(OLD.config_json,'$.dispatch_origin')))"
+    ),
     "creation_recovery_session_retained": (
         "BEFORE DELETE ON sessions WHEN " + ORIGINAL_RECOVERY_HELD.replace("sessions.", "OLD.")
     ),
@@ -110,11 +160,14 @@ TRIGGERS = {
 
 
 def statements() -> dict[str, str]:
-    return {
-        name: f"CREATE TRIGGER IF NOT EXISTS {name} {body} "
-        "BEGIN SELECT RAISE(ABORT,'bridge_creation_writer_retained'); END"
-        for name, body in TRIGGERS.items()
-    }
+    result = {}
+    for name, body in TRIGGERS.items():
+        reason = "bridge_metadata_adoption_retained" if name.startswith("metadata_") else "bridge_creation_writer_retained"
+        result[name] = (
+            f"CREATE TRIGGER IF NOT EXISTS {name} {body} "
+            f"BEGIN SELECT RAISE(ABORT,'{reason}'); END"
+        )
+    return result
 
 
 def ensure_schema(conn: sqlite3.Connection) -> None:
@@ -126,16 +179,29 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         conn.execute(statement)
 
 
-def validate_schema(conn: sqlite3.Connection, *, require_recovery: bool = True) -> None:
+def migrate_metadata(conn: sqlite3.Connection) -> None:
+    conn.execute("BEGIN IMMEDIATE")
+    with conn:
+        ensure_schema(conn)
+        validate_schema(conn)
+        conn.execute("UPDATE schema_version SET version=?", (49,))
+
+
+def validate_schema(
+    conn: sqlite3.Connection, *, require_recovery: bool = True, require_metadata: bool = True,
+) -> None:
     columns = {row[1]: row for row in conn.execute("PRAGMA table_info(workspace_embodiments)")}
-    for column in COLUMNS if require_recovery else COLUMNS[:2]:
+    required = COLUMNS if require_metadata else COLUMNS[:3] if require_recovery else COLUMNS[:2]
+    for column in required:
         row = columns.get(column)
         if row is None or row[2].upper() != "TEXT" or row[3] != 0 or row[5] != 0:
             raise RuntimeCustodyError(f"Creation writer requires writable preparation: {column}")
     for name, statement in statements().items():
+        if not require_metadata and name.startswith("metadata_"):
+            continue
         if not require_recovery and name.startswith("creation_recovery_"):
             continue
-        table = "sessions" if name in {
+        table = "sessions" if name.startswith("metadata_session_") or name in {
             "creation_recovery_session_retained", "creation_recovery_lineage_retained",
             "creation_recovery_integrity_retained",
         } else "workspace_embodiments"

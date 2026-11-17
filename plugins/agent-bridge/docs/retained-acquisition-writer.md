@@ -308,6 +308,76 @@ ready permit, native-liveness assertion or admission of every other writer
 of the shared workspace. The ordinary Dispatch writer remains independently
 gated.
 
+### Metadata loss without native conversation loss
+
+The optional `retained_native_metadata_adoption: 1` health capability adds
+metadata preparation to the same original keyed-creation owner:
+
+- `POST /api/v1/sessions/{predecessor-id}/retained-metadata` takes
+  `{"recovery": <version-1 retained recovery request>, "worktree_writer":
+  <original requirement>}`.
+- `GET /api/v1/sessions/{predecessor-id}/retained-metadata/{journal-key}`
+  inspects a committed adoption without native effects.
+
+The separately negotiated `client_retained_metadata.prepare` and `inspect`
+helpers use these routes within HTTP generation 52. This provider-first
+expansion adds no CLI option or automatic caller migration. Each attempt
+checks the actual receiving daemon's capability; older receivers return an
+unsupported-contract result before mutation, not a generic resume fallback.
+The client validates the returned version, original key/request, predecessor,
+new control ID and history boundary. An unconfirmed reply is not replayable.
+
+Preparation requires a complete original creation journal and unchanged native
+head/workspace incarnation, a compatible current Worktrees writer, no old
+managed record or conflicting holder, complete Host inventory and no unresolved
+launch, recovery, handoff or stop custody. Original agent, model, effort, tools
+and task origin come from immutable creation facts; unsupported or incomplete
+configuration refuses. The native owner is observed before and after its
+dormant-conversation admission preview. Preparation starts no native process,
+sends no prompt, drains no queue and attaches no task.
+
+When prior managed history is missing, the existing native-import transaction
+commits one **new managed control ID** and its immutable adoption in the original
+creation journal together. The original key, birth ID, native ID, writer,
+handoffs and recovery operations remain unchanged. Version-1 outcomes contain
+`request`, `predecessor_id`, `session_id`, `prior_operations` and
+`history: {status: "unavailable", predecessor_id, event_epoch, turn_epoch}`.
+The new event and turn epochs equal the new managed ID. No old events, turns,
+cursors or delivery receipts are synthesized. The predecessor and native-ID
+aliases do not address this new stream; use its explicit managed ID.
+
+A lost response, restart or repeated identical preparation discovers that same
+committed epoch. A missing adopted record remains held rather than allocating
+another epoch. Absence of an observable adoption is not negative evidence about
+an earlier uncertain request. Old-epoch recovery operation IDs cannot be
+reinterpreted against the new record.
+
+The adopted record stays stopped with background recovery disabled. Its first
+native execution must use the existing qualified retained-recovery operation,
+with a new operation ID and current head evidence. Generic resume/import cannot
+drop this custody; permission requests remain held for explicit resolution.
+After a new qualified native recovery completes, ordinary lifecycle closeout
+can proceed. Historical completed operations alone do not release retention.
+This preparation does not prove a new turn, native acceptance, original-task
+attachment or installed-provider qualification.
+
+Writable migration adds nullable `creation_adoption_json` and the exclusion,
+identity, pointer and configuration-retention guards at schema 49. Passive
+cutover validates the current schema before writes; a prior schema-48 receiver
+refuses it. Supported rollback must retain these semantics or remain unable to
+open this store: do not downgrade its schema stamp, erase adoption or restore
+an empty old namespace. Arbitrary legacy writable bootstrap is not a qualified
+rollback path. This operation-level compatibility limit is not an installer
+replacement veto or a requirement to keep the original executable.
+
+The actor-free promotion controls exercise birth/handoff/adopted lineage,
+old-namespace and old-receipt exclusion, corrupt boundaries and qualified import
+inputs. Selected plugin controls separately exercise actual HTTP negotiation
+and malformed/lost replies, atomic database rollback/restart, independent-process
+serialization, configuration retention and prior-schema passive refusal.
+Native same-conversation execution, a new turn and installed rollback remain
+independent qualification gates.
+
 ## Qualification boundary
 
 The optional `retained_acquisition_writer_inspection: 1` health capability

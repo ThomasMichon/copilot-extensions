@@ -7,12 +7,22 @@ import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 from .session_manager import log
 
+if TYPE_CHECKING:
+    from .session_manager import SessionManager
+
 
 class _SessionDrainGateMixin:
+    _draining: bool
+    _draining_since: float | None
+    _drain_watchdog: asyncio.Task[None] | None
+    _drain_private: bool
+    _drain_auto_release_s: float
+    _drain_warn_interval_s: float
+
     @contextmanager
     def start_admission(self) -> Iterator[None]:
         """Count request-owned preparation before a session exists."""
@@ -90,6 +100,7 @@ class _SessionDrainGateMixin:
 
     def drain_status(self) -> dict[str, Any]:
         """Snapshot gate provenance and the ordinary watchdog's auto-release."""
+        self = cast("SessionManager", self)
         now = time.time()
         since = self._draining_since
         held = (now - since) if since is not None else None
