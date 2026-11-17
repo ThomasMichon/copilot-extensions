@@ -294,6 +294,9 @@ enrollment authority/holds remain unchanged.
 - [x] Qualify isolated Windows scheduler execution, results, launch mechanism,
   overlap, deadlines, Unicode paths and exact cleanup; merge the reviewed source.
   Keep installed-runtime retention/replacement and production enrollment separate.
+- [ ] Review the [installed Linux enrollment amendment](local-collection.md#installed-linux-job-enrollment),
+  then prove its retained runtime and native pair lifecycle before any separately
+  authorized Linux adoption; mocked adapter checks do not qualify systemd.
 - [ ] Qualify the selected carrier's delayed delivery, weekly slot reuse,
   conflicts, offline catch-up and reader-side outage reporting.
 - [ ] Obtain activation authority for the selected cohort, prove actual hourly
@@ -335,6 +338,22 @@ semantics; Manager renders cached reports; Worktrees contributes observations.
 The [owner comparison](architecture.md#owner-decision) explains this choice.
 
 ## Journal
+
+### 2026-11-17 - Completion charter made explicit
+- #12948 merged after current-head Copilot approval with no findings and green
+  required CI. The Goal now preserves the original operator wording and names
+  the completion kind, acceptance, finalization criterion, current slice and
+  return to unmet parent outcomes.
+- This documentation change does not complete an implementation or validation
+  item, change an owner, activate a carrier or release a receiving-selection
+  hold. Continue from the existing Plan and Validation Plan under unchanged
+  authority rather than treating charter maintenance as the delivery outcome.
+- Selected the existing Linux platform gap as the next source-side slice.
+  Inert definitions exist, but installed selection, account/schema validation
+  and resource convergence are Windows-only. Proposed reuse of the enrollment
+  transaction and runtime-reference owners with a Linux native adapter; the
+  amendment must clear review before implementation. No Linux registration,
+  runtime installation, carrier write or receiving change was performed.
 
 ### 2026-11-05 - Inception and source inventory
 - Claimed #10873 after deduplicating heartbeat/capture work.
