@@ -257,7 +257,11 @@ fi
 if [[ -z "${AGENT_VAULT_PINNED_CONTEXT+x}" ]]; then
     . "$SCRIPT_DIR/runtime-activation.sh"
     activation_code=0
-    activation="$(vault_runtime_activation "$PROJECT_ROOT" "$AGENT_RT_PY" "--runtime-root=$RUNTIME_ROOT" "--context=$CONTEXT" "--invocation-cwd=$INVOCATION_DIRECTORY" --retain-native-selector)" || activation_code=$?
+    activation_scope=()
+    if [[ "$has_configuration_root" == true ]]; then
+        activation_scope+=(--explicit-configuration-root)
+    fi
+    activation="$(vault_runtime_activation "$PROJECT_ROOT" "$AGENT_RT_PY" "--runtime-root=$RUNTIME_ROOT" "--context=$CONTEXT" "--invocation-cwd=$INVOCATION_DIRECTORY" --retain-native-selector "${activation_scope[@]}")" || activation_code=$?
     if [[ "$activation_code" == 2 ]]; then
         if [[ "${command_arguments[0]:-}" == installer-readiness ]]; then
             printf '%s\n' "$activation"
@@ -344,7 +348,14 @@ if [[ -n "$NATIVE_SELECTOR" ]]; then
 fi
 printf '[agent-vault] submitting first-use provisioning to the installation driver: %s\n' "$EXECUTION_ROOT" >&2
 apply_runtime_env "$RUNTIME_ROOT" "$CONTEXT" "$INSTALLATION_ID" "$SERVICE_SUFFIX"
-bash "$FIRST_USE" "$EXECUTION_ROOT" "$PAYLOAD_ROOT" "$RUNTIME_ROOT" "$PROJECT_ROOT" --wait || exit "$?"
+(
+    if [[ "$has_configuration_root" == true ]]; then
+        export _AGENT_VAULT_FIRST_USE_ROOT="$PROJECT_ROOT"
+    else
+        unset _AGENT_VAULT_FIRST_USE_ROOT
+    fi
+    bash "$FIRST_USE" "$EXECUTION_ROOT" "$PAYLOAD_ROOT" "$RUNTIME_ROOT" "$PROJECT_ROOT" --wait
+) || exit "$?"
 resolve_runtime
 if [[ -n "$AGENT_RT_PY" ]]; then
     run_runtime "$@"

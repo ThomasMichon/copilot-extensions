@@ -901,11 +901,20 @@ _install_service() {
     fi
 
     service_configuration="$("$LINK_PYTHON" -I -B -X utf8 -c \
-        'import sys; from agent_vault.configuration import service_configuration_snapshot; value=service_configuration_snapshot(sys.argv[1]); print(value["root"]); print(value["config"])' \
+        'import sys; from agent_vault.configuration import service_configuration_snapshot; value=service_configuration_snapshot(sys.argv[1]); print(value.get("native_default_owner","0")); print(value["root"]); print(value["config"])' \
         "${COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT:-$PWD}")" || {
             _fail 'Vault service configuration context could not be captured'
             return 1
         }
+    service_default_owner="${service_configuration%%$'\n'*}"
+    service_configuration="${service_configuration#*$'\n'}"
+    service_default_argument=''
+    if [[ "$service_default_owner" == 1 ]]; then
+        service_default_argument=' --native-default-owner'
+    elif [[ "$service_default_owner" != 0 ]]; then
+        _fail 'Vault service configuration provenance is invalid'
+        return 1
+    fi
     service_configuration_root="${service_configuration%%$'\n'*}"
     service_configuration_path="${service_configuration#*$'\n'}"
     service_configuration_path="${service_configuration_path//\\/\\\\}"
@@ -936,7 +945,7 @@ Environment=AGENT_VAULT_TASK_NAME=AgentVault${SERVICE_SUFFIX:+-$SERVICE_SUFFIX}
 Environment=AGENT_VAULT_INSTALLATION_ID=$INSTALLATION_ID
 Environment="AGENT_VAULT_CONFIG=$service_configuration_path"
 $PORT_ENV_LINE
-ExecStart=/bin/sh "$INSTALL_DIR/bin/vault-service.sh" "$LINK_PYTHON" "$INSTALL_DIR" --foreground --persistent --handoff-stdin --configuration-root "$service_configuration_root"
+ExecStart=/bin/sh "$INSTALL_DIR/bin/vault-service.sh" "$LINK_PYTHON" "$INSTALL_DIR" --foreground --persistent --handoff-stdin --configuration-root "$service_configuration_root"$service_default_argument
 Restart=on-failure
 RestartSec=5
 WorkingDirectory=$INSTALL_DIR

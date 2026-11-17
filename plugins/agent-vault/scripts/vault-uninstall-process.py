@@ -37,6 +37,8 @@ def _path(value: str) -> Path:
 
 
 def _member(value: str, root: Path) -> Path:
+    if sys.platform != "win32":
+        raise ValueError("native identity members require Windows")
     path = _path(value)
     path.relative_to(root)
     for member in (path, *path.parents):
@@ -74,6 +76,8 @@ def _contracts() -> tuple[str, str]:
 
 
 def _arguments(command: str) -> list[str]:
+    if sys.platform != "win32":
+        raise ValueError("native command-line parsing requires Windows")
     if not isinstance(command, str) or not command or len(command) > 32767 or "\0" in command:
         raise ValueError("invalid Windows command line")
     shell = ctypes.WinDLL("shell32", use_last_error=True)
@@ -93,7 +97,7 @@ def _arguments(command: str) -> list[str]:
         free(result)
 
 
-def admits(request: dict) -> bool:
+def admits(request: object) -> bool:
     if not isinstance(request, dict) or set(request) != {"root", "image", "command"}:
         return False
     try:
@@ -105,6 +109,8 @@ def admits(request: dict) -> bool:
             invocation = arguments[3:]
         else:
             return False
+        if invocation[-1:] == ["--native-default-owner"]:
+            invocation = invocation[:-1]
         if len(invocation) not in (7, 10):
             return False
         bootstrap_package = None

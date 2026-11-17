@@ -217,6 +217,10 @@ access can reach independently granted children below a private directory,
 the provider additionally checks existing bytecode descendants' ownership and
 DACLs. This metadata-only admission stops at 256 entries or 50 ms between
 filesystem/security calls; exhaustion selects `-B` without changing the cache.
+Cache roots and metadata retain exact user ownership. Interpreter-created
+bytecode descendants may also use the current process's TokenOwner when that
+SID is already a trusted privileged writer; this handles elevated Windows
+launchers without admitting a foreign owner or relaxing any DACL check.
 Large Windows caches therefore currently lose reuse rather than bypass
 protection. POSIX private traversal needs no descendant walk.
 macOS additionally reads extended
