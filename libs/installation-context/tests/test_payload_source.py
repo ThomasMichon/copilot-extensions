@@ -189,9 +189,10 @@ def test_isolated_copilot_home_retains_installed_source(
     copilot, payload = _installed(
         tmp_path, {"source": "github", "repo": "example/marketplace"},
     )
+    environment = {"HOME": str(tmp_path / "account"), "COPILOT_HOME": str(copilot)}
     arguments = {
         "payload_root": payload, "plugin_id": "agent-worktrees",
-        "environment": {"HOME": str(tmp_path / "account"), "COPILOT_HOME": str(copilot)},
+        "environment": environment,
     }
     if operation == "resolve_context":
         arguments["durable_home"] = tmp_path / "durable"
@@ -204,7 +205,7 @@ def test_isolated_copilot_home_retains_installed_source(
 
     # Explicit management selection wins over an unrelated or invalid ambient home.
     arguments["copilot_home"] = copilot
-    arguments["environment"]["COPILOT_HOME"] = "relative/foreign"
+    environment["COPILOT_HOME"] = "relative/foreign"
     assert resolve(**arguments) == source
     del arguments["copilot_home"]
     with pytest.raises(context_module.InstallationContextError, match="must be absolute"):
