@@ -226,3 +226,28 @@ def test_missing_comparison_core_does_not_break_existing_queries_or_fetch_fallba
         "--number", "7", "--reference", str(path),
     ]) == 2
     assert not capsys.readouterr().out and calls == ["query"]
+
+
+@pytest.mark.parametrize("field", ["endpoint", "namespace", "provider", "account", "repo"])
+def test_nonstring_identity_refuses_without_traceback_or_local_requests(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    field: str,
+) -> None:
+    selected = fixtures.setup(tmp_path / "cache")
+    path = input_file(tmp_path, selected)
+    value = json.loads(path.read_text())
+    value["identity"][field] = 123
+    path.write_text(json.dumps(value))
+
+    def forbidden(*_args: Any, **_kwargs: Any) -> Any:
+        pytest.fail("malformed identity reached local transport")
+
+    monkeypatch.setattr(LocalClient, "request", forbidden)
+    assert main([
+        "compare", "--socket", str(tmp_path / "absent.sock"), "--namespace", "test",
+        "--target", "repository", "--consumer", "consumer", "--reviewer", "reviewer",
+        "--number", "7", "--reference", str(path),
+    ]) == 2
+    output = capsys.readouterr()
+    assert not output.out
+    assert output.err == "local comparison unavailable; reference and original identities retained\n"

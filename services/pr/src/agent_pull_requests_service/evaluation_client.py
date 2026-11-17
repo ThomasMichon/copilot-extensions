@@ -47,7 +47,12 @@ def load_reference(path: Path, number: int) -> Reference:
         or type(value["observed_at"]) is not int or value["observed_at"] < 0
     ):
         raise ValueError("unsupported comparison reference")
-    identity = RepositoryIdentity.parse(value["identity"])
+    identity_value = value["identity"]
+    if not isinstance(identity_value, dict) or any(
+        not isinstance(field, str) for field in identity_value.values()
+    ):
+        raise ValueError("invalid comparison identity")
+    identity = RepositoryIdentity.parse(identity_value)
     snapshot = decode_snapshot(value["snapshot"], identity.repo, number)
     validate_identity(snapshot, identity, number)
     return Reference(identity, snapshot, value["observed_at"])

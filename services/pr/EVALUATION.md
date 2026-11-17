@@ -23,6 +23,9 @@ fields:
 | `observed_at` | Acquisition owner's integer Unix timestamp |
 | `snapshot` | Original `agent-worktrees.pr-snapshot` version-1 native envelope for the selected PR |
 
+All five identity fields must be strings. Malformed field types refuse before
+URL parsing or local transport, without a traceback or provider fallback.
+
 The acquisition owner supplies that file through the admitted path below.
 Reference metadata is not authenticated acquisition evidence or permission to
 fetch a provider. The CLI validates its bounded input and selected identity,
