@@ -9,9 +9,9 @@ candidates from the resolution helpers in sibling ``_*`` modules
 strategies, ``_project_roots`` for registered-project verification, and
 ``_remote_identity`` for Git-remote normalization).
 
-The small ``_git`` subprocess helper (plus ``_clean_git_env`` and its
-module-level ``_GIT_WHICH_CACHE``) stays resident **here**, in this module,
-rather than moving out with ``_verified_project_roots`` to ``_project_roots``:
+The small ``_git`` subprocess helper (plus ``_clean_git_env``) stays resident here,
+rather than moving out with its callers. Executable discovery uses the shared
+positive-only ``plugin_resolve.git`` cache. The subprocess seam stays here:
 this repo's own test suite monkeypatches it directly on this module object
 (``monkeypatch.setattr(resolver, "_git", ...)``, plus ``resolver.shutil`` and
 ``resolver.subprocess``) to simulate Git failures. Moving the function itself
@@ -142,15 +142,13 @@ def _clean_git_env() -> dict[str, str]:
     return env
 
 
-_GIT_WHICH_CACHE: dict[str, str | None] = {}
-
-
 def _git_executable() -> str | None:
-    # picker-performance-and-responsiveness Phase 4: cached -- PATH can't
-    # change mid-process, but a cold boot calls this ~17-18 times.
-    if "git" not in _GIT_WHICH_CACHE:
-        _GIT_WHICH_CACHE["git"] = shutil.which("git")
-    return _GIT_WHICH_CACHE["git"]
+    from plugin_resolve.git import resolve_git
+
+    try:
+        return resolve_git()
+    except OSError:
+        return None
 
 
 def _git(root: Path, *args: str) -> str:

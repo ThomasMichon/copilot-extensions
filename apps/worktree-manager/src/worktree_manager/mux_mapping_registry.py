@@ -1,0 +1,730 @@
+"""Worktree Manager mux-mapping registry (Phase 3b Slice 2 Sub-slice 3 Step 2
+-- ``worktree-manager-control-plane`` effort).
+
+Split out of ``mux_daemon.py`` (which now owns the daemon lifecycle/wire
+server) purely to stay under this repo's per-module line cap -- see that
+module's own docstring for the full Step 2 rationale and the process-
+boundary rule this package follows (Worktree Manager never imports
+``agent_worktrees`` in-process).
+
+The mapping registry (:class:`MuxMappingRegistry`) is deliberately **not**
+owned in-memory by one long-lived daemon process the way
+``agent_worktrees.mux_link.ManagedMuxCache`` owns its cache: register/remove
+calls come from short-lived CLI invocations (eventually the launch scripts
+themselves), not from a process that stays alive for the mapping's whole
+lifetime. The registry is therefore always disk-backed, with the same
+cross-process advisory lock + read-reconcile-write pattern
+``ManagedMuxCache.apply_observation`` uses, so any process (a register/remove
+CLI call, or the resident daemon's own request handler) sees a consistent
+view. "Recovery-on-restart" is therefore automatic: there is no separate
+warm-load step because there is no separate in-memory state to warm.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import json
+import os
+import shutil
+import sys
+import tempfile
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+from .source_config import default_root
+from .mux_file_lock import _try_lock_file_once as _try_lock_file_once, _unlock_file
+
+_REQUIRED_MAPPING_STR_FIELDS = ("project", "worktree_id", "mux_session", "mux_bin")
+
+
+def _same_worktree_path(first: str | None, second: str | None) -> bool:
+    if first == second:
+        return True
+    if not first or not second:
+        return False
+    return os.path.normcase(os.path.realpath(first)) == os.path.normcase(os.path.realpath(second))
+
+
+def _same_mux_executable(first: str, second: str) -> bool:
+    if first == second:
+        return True
+    first_path = shutil.which(first) or (first if os.path.isabs(first) else None)
+    second_path = shutil.which(second) or (second if os.path.isabs(second) else None)
+    if first_path is None or second_path is None:
+        return False
+    return os.path.normcase(os.path.realpath(first_path)) == (
+        os.path.normcase(os.path.realpath(second_path))
+    )
+
+# ---------------------------------------------------------------------------
+# Cross-process advisory file lock (mirrors agent_worktrees.mux_link's own
+# copy exactly -- duplicated, not imported, per the process-boundary rule
+# this package follows). Shared by the registry's own interprocess lock AND
+# (via import) mux_daemon.py's single-instance daemon lease.
+# ---------------------------------------------------------------------------
+
+_LOCK_ACQUIRE_TIMEOUT_S = 30.0
+_LOCK_RETRY_INTERVAL_S = 0.2
+
+if sys.platform == "win32":
+    import msvcrt
+
+    def _lock_file(fh) -> None:
+        fh.seek(0, os.SEEK_END)
+        if fh.tell() == 0:
+            fh.write(b"\0")
+            fh.flush()
+        deadline = time.time() + _LOCK_ACQUIRE_TIMEOUT_S
+        while True:
+            fh.seek(0)
+            try:
+                msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+                return
+            except OSError:
+                if time.time() >= deadline:
+                    raise
+                time.sleep(_LOCK_RETRY_INTERVAL_S)
+
+else:
+    import fcntl
+
+    def _lock_file(fh) -> None:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+
+_UNCONDITIONAL = object()
+
+
+def registry_path(root: Path | None = None) -> Path:
+    """The Manager-owned per-worktree mapping registry snapshot."""
+    return (root if root is not None else default_root()) / "mux-mapping.json"
+
+
+def _normalize_mapping_entry(payload: dict) -> dict:
+    """Validate + normalize one mapping-registration payload. Raises
+    ``ValueError`` for anything structurally malformed. Shape mirrors the
+    documented ``mux-live-v1`` payload plus ``mux_bin`` -- the one field
+    that is Manager-internal (the launcher already resolved and used a
+    specific mux binary; recording it here means the daemon's own status-
+    apply logic never needs a second, possibly-divergent resolution)."""
+    for field in _REQUIRED_MAPPING_STR_FIELDS:
+        value = payload.get(field)
+        if not isinstance(value, str) or not value:
+            raise ValueError(f"mux mapping entry missing '{field}'")
+    revision_raw = payload.get("mapping_revision")
+    if isinstance(revision_raw, bool) or not isinstance(revision_raw, int):
+        raise ValueError("mux mapping entry requires an integer mapping_revision")
+    if revision_raw < 0:
+        raise ValueError("mux mapping entry mapping_revision must be non-negative")
+    live_raw = payload.get("live", True)
+    if not isinstance(live_raw, bool):
+        raise ValueError("mux mapping entry 'live' must be a boolean")
+    worktree_path = payload.get("worktree_path")
+    session_incarnation = payload.get("session_incarnation")
+    if not isinstance(session_incarnation, str):
+        session_incarnation = ""
+    attached_clients = payload.get("attached_clients")
+    if isinstance(attached_clients, bool) or not isinstance(attached_clients, int):
+        attached_clients = 0
+    panes = _normalize_panes(payload.get("panes"))
+    observed_at = payload.get("observed_at")
+    if not isinstance(observed_at, str) or not observed_at:
+        observed_at = datetime.now(timezone.utc).isoformat()
+    entry = {
+        "project": payload["project"],
+        "worktree_id": payload["worktree_id"],
+        "worktree_path": worktree_path if isinstance(worktree_path, str) else None,
+        "mux_session": payload["mux_session"],
+        "mux_bin": payload["mux_bin"],
+        "session_incarnation": session_incarnation,
+        "native_session_incarnation": payload.get("native_session_incarnation"),
+        "panes": panes,
+        "attached_clients": attached_clients,
+        "mapping_revision": revision_raw,
+        "live": live_raw,
+        "observed_at": observed_at,
+        # Durable last-write-wins fence for mux-status-v1 applies (Copilot
+        # review finding): an in-memory-only high-water mark does not
+        # survive a daemon restart, so a delayed render older than what was
+        # already applied before the restart could otherwise pass the
+        # ordering check. Preserved across register()/remove() round-trips
+        # since neither of those calls concerns status-render ordering.
+        "last_status_rendered_at": (
+            payload.get("last_status_rendered_at")
+            if isinstance(payload.get("last_status_rendered_at"), str)
+            else None
+        ),
+    }
+    observed_end = payload.get("observed_end")
+    if isinstance(observed_end, dict) and (
+        set(observed_end) == {"pane_id", "session_incarnation", "exit_code", "observed_at"}
+        and all(isinstance(observed_end.get(key), str) and observed_end[key]
+                for key in ("pane_id", "session_incarnation", "observed_at"))
+        and type(observed_end.get("exit_code")) is int
+    ):
+        entry["observed_end"] = dict(observed_end)
+    return entry
+
+
+def _normalize_panes(raw) -> list[dict]:
+    if not isinstance(raw, list):
+        return []
+    normalized = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        pane_id = item.get("pane_id")
+        if not isinstance(pane_id, str) or not pane_id:
+            continue
+        role = item.get("role")
+        if not isinstance(role, str):
+            role = ""
+        pane_live = item.get("live")
+        if not isinstance(pane_live, bool):
+            pane_live = True
+        normalized.append({"pane_id": pane_id, "role": role, "live": pane_live})
+    return normalized
+
+
+class MuxMappingRegistry:
+    """The Manager-owned ``worktree_id ⇄ mux session/pane(s)`` mapping,
+    always disk-backed (see this module's own docstring for why -- no
+    long-lived in-memory owner). Keyed by ``(project, worktree_id)``, with
+    the same monotonic-``mapping_revision`` guard
+    ``agent_worktrees.mux_link.ManagedMuxCache`` uses so an out-of-order
+    register/remove can never regress a newer mapping."""
+
+    def __init__(self, path: Path) -> None:
+        self._path = path
+
+    def _lock_file_path(self) -> Path:
+        return self._path.with_suffix(self._path.suffix + ".lock")
+
+    def _interprocess_lock(self):
+        @contextlib.contextmanager
+        def _cm():
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            with open(self._lock_file_path(), "a+b") as fh:
+                _lock_file(fh)
+                try:
+                    yield
+                finally:
+                    _unlock_file(fh)
+
+        return _cm()
+
+    def _read_all(self, *, strict: bool = False) -> dict[tuple[str, str], dict]:
+        try:
+            raw = self._path.read_text(encoding="utf-8")
+            data = json.loads(raw)
+        except FileNotFoundError:
+            return {}
+        except (OSError, ValueError):
+            if strict:
+                raise
+            return {}
+        if not isinstance(data, list):
+            if strict:
+                raise ValueError("mux registry is not a mapping list")
+            return {}
+        entries: dict[tuple[str, str], dict] = {}
+        for entry in data:
+            if not isinstance(entry, dict):
+                if strict:
+                    raise ValueError("mux registry contains an invalid mapping")
+                continue
+            try:
+                normalized = _normalize_mapping_entry(entry)
+            except ValueError:
+                if strict:
+                    raise
+                continue
+            key = (normalized["project"], normalized["worktree_id"])
+            existing = entries.get(key)
+            if existing is None or normalized["mapping_revision"] >= existing["mapping_revision"]:
+                entries[key] = normalized
+        return entries
+
+    def _write_all(self, entries: dict[tuple[str, str], dict]) -> None:
+        payload = list(entries.values())
+        tmp_fd, tmp_path = tempfile.mkstemp(
+            prefix=self._path.name + ".", suffix=".tmp", dir=str(self._path.parent)
+        )
+        try:
+            with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
+                json.dump(payload, f)
+            os.replace(tmp_path, str(self._path))
+        except OSError:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
+
+    def _register_locked(self, payload: dict, entries: dict[tuple[str, str], dict]) -> dict:
+        entry = _normalize_mapping_entry(payload)
+        key = (entry["project"], entry["worktree_id"])
+        current = entries.get(key)
+        if current is not None:
+            if entry["mapping_revision"] < current["mapping_revision"]:
+                return {
+                    "applied": False,
+                    "reason": "stale_revision",
+                    "current_revision": current["mapping_revision"],
+                }
+            if (
+                entry["mapping_revision"] == current["mapping_revision"]
+                and not current["live"]
+                and entry["live"]
+            ):
+                return {
+                    "applied": False,
+                    "reason": "stale_revision",
+                    "current_revision": current["mapping_revision"],
+                }
+        if (
+            current is not None
+            and entry["mapping_revision"] == current["mapping_revision"]
+            and entry["last_status_rendered_at"] is None
+        ):
+            entry["last_status_rendered_at"] = current["last_status_rendered_at"]
+        entries[key] = entry
+        self._write_all(entries)
+        return {"applied": True, "revision": entry["mapping_revision"]}
+
+    def register(self, payload: dict) -> dict:
+        """Validate, apply the monotonic-revision guard, and persist one
+        mapping entry. Returns ``{"applied": bool, ...}``."""
+        with self._interprocess_lock():
+            entries = self._read_all()
+            return self._register_locked(payload, entries)
+
+    def register_next(self, payload: dict, *, expected: object = _UNCONDITIONAL) -> dict:
+        """Like :meth:`register`, but allocate ``mapping_revision`` under the
+        registry lock. Explicit ``expected`` fences the reconciled snapshot;
+        ``None`` fences absence. Omission preserves unconditional registration."""
+        with self._interprocess_lock():
+            try:
+                entries = (
+                    self._read_all() if expected is _UNCONDITIONAL else self._read_all(strict=True)
+                )
+            except (OSError, ValueError):
+                if expected is _UNCONDITIONAL:
+                    raise
+                return {"applied": False, "reason": "registry-unavailable"}
+            raw_project = payload.get("project")
+            raw_worktree_id = payload.get("worktree_id")
+            current = (
+                entries.get((raw_project, raw_worktree_id))
+                if isinstance(raw_project, str) and isinstance(raw_worktree_id, str) else None
+            )
+            if expected is not _UNCONDITIONAL:
+                identity = (
+                    "mapping_revision", "project", "worktree_id", "live", "mux_session",
+                    "mux_bin", "session_incarnation", "worktree_path", "native_session_incarnation", "panes",
+                )
+                if (
+                    (current is None) != (expected is None)
+                    or (current is not None and (
+                        not isinstance(expected, dict)
+                        or any(current.get(field) != expected.get(field) for field in identity)
+                    ))
+                ):
+                    return {"applied": False, "reason": "mapping-changed"}
+            if (
+                "mapping_revision" not in payload
+                and isinstance(raw_project, str)
+                and raw_project
+                and isinstance(raw_worktree_id, str)
+                and raw_worktree_id
+            ):
+                current = entries.get((raw_project, raw_worktree_id))
+                next_revision = (
+                    current["mapping_revision"] + 1
+                    if current is not None
+                    else 1
+                )
+                payload = dict(payload)
+                payload["mapping_revision"] = next_revision
+            return self._register_locked(payload, entries)
+
+    def discover(self, payload: dict, *, expected: dict | None = None) -> dict:
+        """CAS admission after native proof, retaining same-incarnation tombstones."""
+        entry = _normalize_mapping_entry(dict(
+            payload, mapping_revision=1,
+            native_session_incarnation=payload["session_incarnation"],
+        ))
+        key = (entry["project"], entry["worktree_id"])
+        with self._interprocess_lock():
+            try:
+                entries = self._read_all(strict=True)
+            except (OSError, ValueError):
+                return {"applied": False, "reason": "registry-unavailable"}
+            current = entries.get(key)
+            identity = (
+                "mapping_revision", "live", "mux_session", "mux_bin",
+                "session_incarnation", "worktree_path", "native_session_incarnation",
+            )
+            if (
+                (current is None) != (expected is None)
+                or (current is not None and any(
+                    current.get(field) != expected.get(field) for field in identity
+                ))
+            ):
+                return {"applied": False, "reason": "mapping-changed"}
+            if current is not None:
+                if (
+                    current["mux_session"] != entry["mux_session"]
+                    or not _same_worktree_path(current["worktree_path"], entry["worktree_path"])
+                    or not _same_mux_executable(current["mux_bin"], entry["mux_bin"])
+                ):
+                    return {"applied": False, "reason": "incumbent-mapping"}
+                if current["session_incarnation"] == entry["session_incarnation"]:
+                    if not current["live"]:
+                        return {"applied": False, "reason": "incumbent-mapping"}
+                    current = dict(current, attached_clients=entry["attached_clients"])
+                else:
+                    session_id, separator, created = current["session_incarnation"].partition(":")
+                    if not (
+                        separator and session_id.startswith("$")
+                        and session_id[1:].isdecimal() and created.isdecimal()
+                    ):
+                        return {"applied": False, "reason": "incumbent-mapping"}
+                    current = dict(entry, mapping_revision=current["mapping_revision"] + 1)
+                entries[key] = current
+            else:
+                current = entry
+                entries[key] = entry
+            self._write_all(entries)
+            return {"applied": True, "entry": dict(current)}
+
+    def remove(
+        self,
+        project: str,
+        worktree_id: str,
+        *,
+        mapping_revision: int | None = None,
+        mux_session: str | None = None,
+        session_incarnation: str | None = None,
+        pane_id: str | None = None,
+        exit_code: int | None = None,
+    ) -> dict:
+        """Tombstone (``live: false``) rather than delete a mapping entry
+        (Copilot review finding): deleting it outright loses the
+        monotonic-revision high-water mark the wire contract depends on --
+        register revision 5, remove at revision 6, then a delayed register
+        at revision 5 arrives: with the entry gone, ``register()`` would
+        see no current entry and accept the stale mapping, resurrecting it.
+        Persisting a tombstone at the removal's own revision keeps the
+        guard intact. If ``mapping_revision`` is given, a stored entry at a
+        *newer* revision is left in place rather than tombstoned (an
+        out-of-order remove arriving after a newer register must not
+        clobber it).
+
+        Two further fencing cases (Copilot review findings):
+
+        * A *revisioned* remove for a key with no current entry still
+          persists a durable tombstone at that revision -- otherwise a
+          remove(6) racing ahead of (or following snapshot loss of) an
+          eventual register(5) would leave nothing behind to reject that
+          now-stale register against.
+        * An *unversioned* remove (``mapping_revision=None``, the CLI's own
+          default) bumps the tombstone's revision one past the current
+          entry's, rather than keeping it unchanged -- ``register()``'s own
+          guard only rejects a revision strictly *less than* current, so a
+          delayed ``live: true`` update at the SAME (unbumped) revision
+          would otherwise still be accepted, resurrecting the mapping this
+          call just removed.
+
+        ``mux_session``/``session_incarnation``, when given, guard against a
+        *stale teardown race* (#3838): an old launcher's teardown for
+        session A can race behind a newer launcher's activation for session
+        B on the same ``(project, worktree_id)`` -- neither necessarily
+        carries a revision the other knows to fence against. A mismatch
+        against a *currently live* entry is treated as a stale no-op rather
+        than tombstoned: unconditionally tombstoning whatever is currently
+        mapped would silently kill B's live status updates even though B is
+        the session that should still be live.
+
+        ``mux_session`` (the display session name) is NOT unique per launch
+        incarnation -- both launchers derive the same deterministic
+        ``wt-<worktree_id>``-shaped name for the same worktree, so a session
+        recreated for the same worktree reuses the exact string and an
+        old/new pair compares equal by name alone (a Copilot review
+        finding). ``session_incarnation`` (a per-launch-attempt token the
+        launcher generates and threads through both its own register call
+        and the paired teardown call) is therefore the authoritative check
+        when both the caller and the current entry carry one; ``mux_session``
+        is only a fallback for callers that don't (older callers, or a
+        generic CLI invocation with no incarnation token available). Missing
+        both (``mux_session=None`` and ``session_incarnation=None``)
+        preserves the prior, fully unguarded behavior -- these parameters
+        are additive and optional.
+
+        A pane-owned exit additionally supplies ``pane_id`` and the native
+        session incarnation. It retires only that registered live CLI pane;
+        other CLI panes keep the mapping live. Tombstones retain these fences,
+        so a delayed predecessor cannot replace a successor's exit evidence.
+        """
+        if pane_id is not None and (
+            not isinstance(pane_id, str) or not pane_id.startswith("%")
+            or not pane_id[1:].isdecimal() or not session_incarnation
+        ):
+            raise ValueError("Pane-owned removal requires native pane and session identities")
+        if exit_code is not None and (pane_id is None or type(exit_code) is not int):
+            raise ValueError("Observed exit requires a pane-owned integer exit code")
+        key = (project, worktree_id)
+        with self._interprocess_lock():
+            try:
+                entries = self._read_all(strict=pane_id is not None)
+            except (OSError, ValueError):
+                return {"applied": False, "reason": "registry-unavailable"}
+            current = entries.get(key)
+            if current is not None and (current["live"] or pane_id is not None):
+                current_incarnation = current.get("session_incarnation") or None
+                if pane_id is not None:
+                    mismatch = current_incarnation != session_incarnation
+                elif session_incarnation is not None and current_incarnation is not None:
+                    mismatch = current_incarnation != session_incarnation
+                elif mux_session is not None:
+                    mismatch = current["mux_session"] != mux_session
+                else:
+                    mismatch = False
+                if mismatch:
+                    return {
+                        "applied": False,
+                        "reason": "session_mismatch",
+                        "current_revision": current["mapping_revision"],
+                    }
+                if pane_id is not None:
+                    live_cli = {
+                        pane["pane_id"] for pane in current["panes"]
+                        if pane["role"] == "cli" and pane["live"]
+                    }
+                    if pane_id not in live_cli:
+                        observed = current.get("observed_end") or {}
+                        if (
+                            observed.get("pane_id") == pane_id
+                            and observed.get("session_incarnation") == session_incarnation
+                            and exit_code is not None and observed.get("exit_code") == exit_code
+                        ):
+                            return {"applied": True, "reason": "already-observed"}
+                        return {
+                            "applied": False,
+                            "reason": "pane_mismatch",
+                            "current_revision": current["mapping_revision"],
+                        }
+            if current is None:
+                if pane_id is not None:
+                    return {"applied": False, "reason": "unconfirmed-absence"}
+                if mapping_revision is None:
+                    return {"applied": True, "reason": "absent"}
+                tombstone = _normalize_mapping_entry(
+                    {
+                        "project": project,
+                        "worktree_id": worktree_id,
+                        "mux_session": "(tombstone)",
+                        "mux_bin": "(tombstone)",
+                        "mapping_revision": mapping_revision,
+                        "live": False,
+                    }
+                )
+                entries[key] = tombstone
+                self._write_all(entries)
+                return {"applied": True}
+            if mapping_revision is not None and mapping_revision < current["mapping_revision"]:
+                return {
+                    "applied": False,
+                    "reason": "stale_revision",
+                    "current_revision": current["mapping_revision"],
+                }
+            tombstone = dict(current)
+            tombstone["live"] = False
+            if pane_id is not None:
+                tombstone["panes"] = [
+                    dict(pane, live=False) if pane["pane_id"] == pane_id else dict(pane)
+                    for pane in current["panes"]
+                ]
+                tombstone["live"] = current["live"] and any(
+                    pane["role"] == "cli" and pane["live"] for pane in tombstone["panes"]
+                )
+            if exit_code is not None:
+                tombstone["observed_end"] = {
+                    "pane_id": pane_id, "session_incarnation": session_incarnation,
+                    "exit_code": exit_code, "observed_at": datetime.now(timezone.utc).isoformat(),
+                }
+            tombstone["mapping_revision"] = (
+                mapping_revision if mapping_revision is not None else current["mapping_revision"] + 1
+            )
+            entries[key] = tombstone
+            self._write_all(entries)
+        return {"applied": True}
+
+    def update_attached_clients(
+        self,
+        project: str,
+        worktree_id: str,
+        attached_clients: int,
+        *,
+        mapping_revision: int,
+        mux_session: str,
+        session_incarnation: str | None = None,
+    ) -> dict:
+        """Atomically update just the ``attached_clients`` field on an
+        existing mapping entry, under this registry's own interprocess lock
+        -- guarded by identity (``mapping_revision`` + ``mux_session`` +
+        ``session_incarnation``) the same way :meth:`remove` is guarded:
+        a caller that read a
+        mapping snapshot before a slow probe (``list-clients`` can block up
+        to several seconds) must not then write that stale whole-entry
+        snapshot back and silently clobber a concurrent ``register()``'s
+        newer session identity -- ``register()``'s own monotonic-revision
+        guard only rejects a strictly *older* revision, and deliberately
+        permits a same-revision live refresh (e.g. a cutover to a new
+        ``mux_session`` at the same revision), so it cannot be relied on
+        alone here. Performing the identity check AND the write under one
+        lock acquisition (rather than a separate read-then-write pair)
+        closes the race entirely, rather than merely narrowing it.
+
+        Returns ``{"applied": bool, ...}``; ``applied: False`` means the
+        mapping was superseded (or removed) in the meantime and the refresh
+        was correctly abandoned rather than overwriting anything."""
+        key = (project, worktree_id)
+        with self._interprocess_lock():
+            entries = self._read_all()
+            current = entries.get(key)
+            if (
+                current is None
+                or not current["live"]
+                or current["mapping_revision"] != mapping_revision
+                or current["mux_session"] != mux_session
+                or current.get("session_incarnation") != (session_incarnation or "")
+            ):
+                return {"applied": False, "reason": "superseded"}
+            if current["attached_clients"] == attached_clients:
+                return {"applied": True, "changed": False}
+            updated = dict(current)
+            updated["attached_clients"] = attached_clients
+            entries[key] = updated
+            self._write_all(entries)
+            return {"applied": True, "changed": True}
+
+    def get(self, project: str, worktree_id: str, *, strict: bool = False) -> dict | None:
+        with self._interprocess_lock():
+            entries = self._read_all(strict=strict)
+        entry = entries.get((project, worktree_id))
+        return dict(entry) if entry is not None else None
+
+    def record_applied_render(
+        self, project: str, worktree_id: str, rendered_at: str, *, mapping_revision: int
+    ) -> None:
+        """Persist the ``rendered_at`` of the last mux-status-v1 render
+        actually applied for this mapping (Copilot review finding): a
+        purely in-memory last-applied high-water mark does not survive a
+        daemon restart, so a delayed render older than what was already
+        applied before the restart could otherwise pass the ordering check
+        and violate last-write-wins. Best-effort and silently a no-op if
+        the mapping has since been superseded (a different
+        ``mapping_revision`` than the one this render was actually applied
+        against) or removed -- never regresses the fence for a NEWER
+        mapping incarnation."""
+        key = (project, worktree_id)
+        with self._interprocess_lock():
+            entries = self._read_all()
+            current = entries.get(key)
+            if current is None or current["mapping_revision"] != mapping_revision:
+                return
+            current["last_status_rendered_at"] = rendered_at
+            entries[key] = current
+            self._write_all(entries)
+
+    def snapshot(self) -> dict[tuple[str, str], dict]:
+        with self._interprocess_lock():
+            entries = self._read_all()
+        return {key: dict(entry) for key, entry in entries.items()}
+
+    def has_any_live(self) -> bool:
+        with self._interprocess_lock():
+            entries = self._read_all()
+        return any(e["live"] for e in entries.values())
+
+
+# ---------------------------------------------------------------------------
+# Register/remove mapping helpers (the "internal commands/helpers" Step 2
+# calls for -- not yet wired to any real launch/join/restore/remux caller)
+# ---------------------------------------------------------------------------
+
+
+def register_mapping(payload: dict, root: Path | None = None) -> dict:
+    """Register or update one worktree's mux mapping. Pure disk operation
+    (see the module docstring for why this never talks to the resident
+    daemon process) -- safe to call whether or not a daemon is currently
+    running; the daemon reads the same file on its next lookup."""
+    registry = MuxMappingRegistry(registry_path(root))
+    return registry.register(payload)
+
+
+def register_next_mapping(
+    payload: dict, root: Path | None = None, *, expected: object = _UNCONDITIONAL,
+) -> dict:
+    """Register with an optional lookup-snapshot fence; omitted means unconditional."""
+    registry = MuxMappingRegistry(registry_path(root))
+    return registry.register_next(payload, expected=expected)
+
+
+def remove_mapping(
+    project: str,
+    worktree_id: str,
+    *,
+    mapping_revision: int | None = None,
+    mux_session: str | None = None,
+    session_incarnation: str | None = None,
+    pane_id: str | None = None,
+    exit_code: int | None = None,
+    root: Path | None = None,
+) -> dict:
+    """Remove one worktree's mux mapping (see :meth:`MuxMappingRegistry.remove`)."""
+    registry = MuxMappingRegistry(registry_path(root))
+    return registry.remove(
+        project,
+        worktree_id,
+        mapping_revision=mapping_revision,
+        mux_session=mux_session,
+        session_incarnation=session_incarnation,
+        pane_id=pane_id,
+        exit_code=exit_code,
+    )
+
+
+def get_mapping(
+    project: str, worktree_id: str, root: Path | None = None, *, strict: bool = False,
+) -> dict | None:
+    registry = MuxMappingRegistry(registry_path(root))
+    return registry.get(project, worktree_id, strict=strict)
+
+
+#: Live-mapping keep-alive cadence: republish was restart-only (generation
+#: change), aging a mapping out of the monitor's 45s-stale cache forever
+#: absent a restart. Kept well under (no in-process import -- see
+#: mux_daemon's own docstring) ``mux_link.MAPPING_STALE_AFTER_SECONDS`` (45.0).
+LIVE_MAPPING_BACKSTOP_INTERVAL_S = 20.0
+
+
+def live_mapping_republish_due(
+    status_monitor_generation: str | None,
+    published_monitor_generation: str | None,
+    last_live_republish_at: float | None,
+    now: float,
+    backstop_interval_s: float = LIVE_MAPPING_BACKSTOP_INTERVAL_S,
+) -> bool:
+    """Whether the resident daemon should republish every live mapping now:
+    on a status-monitor generation change (restart recovery), or -- since
+    that alone once left a mapping stale forever between restarts -- on
+    this keep-alive backstop cadence. ``now``/``last_live_republish_at`` are
+    ``time.monotonic()`` readings (elapsed-duration math only), never
+    wall-clock timestamps."""
+    return status_monitor_generation is not None and (
+        status_monitor_generation != published_monitor_generation
+        or last_live_republish_at is None
+        or now - last_live_republish_at >= backstop_interval_s
+    )

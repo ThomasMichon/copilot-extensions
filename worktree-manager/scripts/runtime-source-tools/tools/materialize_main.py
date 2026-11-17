@@ -117,7 +117,7 @@ def _pointer_prefix_candidates(root: Path) -> set[Path] | None:
             ["git", "--no-pager", "grep", "--no-index", "--no-textconv",
              "--no-exclude-standard", "--threads=8", "-a", "-l", "-z", "-e", "^<", "--", "."],
             cwd=root, capture_output=True, timeout=30,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
         )
         if result.returncode not in (0, 1):
             return None
@@ -703,7 +703,10 @@ def materialize(
         }
         log.extend(materialize_uv_editable_ref_into(**arguments))
         log.extend(materialize_installer_engine_ref_into(**arguments))
-        log.extend(materialize_launch_wrapper_assets_into(**arguments))
+        log.extend(materialize_launch_wrapper_assets_into(
+            source_consumer_dir=source_consumer, dest_consumer_dir=consumer,
+            canonical_root=canonical_root, dest_root=dest,
+        ))
         log.extend(materialize_payload_invocation_into(
             source_consumer_dir=source_consumer, dest_consumer_dir=consumer,
             canonical_root=canonical_root,
@@ -724,6 +727,10 @@ def materialize(
                 f"SKIP {problem}"
                 for problem in uer.materialized_local_source_problems(consumer)
             )
+    if not any(line.startswith("SKIP") for line in log):
+        from materialize_source_applications import materialize as materialize_applications
+
+        log.extend(materialize_applications(dest))
     return log
 
 
@@ -824,6 +831,9 @@ def materialize_file_pointers(
             )
             continue
         source_rel = _file_pointer_source(pointer_path)
+        if source_rel is None:
+            log.append(f"SKIP {pointer_path}: file pointer changed during materialization")
+            continue
         if not Path(source_rel).is_absolute():
             unresolved_candidate = canonical_root / source_rel
             bad_ancestor = _find_symlinked_ancestor(unresolved_candidate, canonical_root)

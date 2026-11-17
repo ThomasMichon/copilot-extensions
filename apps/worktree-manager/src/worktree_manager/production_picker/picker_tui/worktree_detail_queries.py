@@ -1,0 +1,131 @@
+"""Explicit worktree-detail reads through the selected provider, never paint."""
+
+from __future__ import annotations
+
+from .source_identity import local_key
+
+
+def published_locality(rec, engine=None) -> bool:
+    """Read published locality without evaluating a cold source's LOCAL."""
+    if rec.get("source_kind", "machine-ssh") != "machine-ssh":
+        return False
+    explicit = rec.get("is_local")
+    if explicit is not None:
+        return bool(explicit)
+    if engine is None:
+        return True
+    local = getattr(engine, "_source_local", None)
+    return local is not None and (rec.get("machine"), rec.get("env")) == local
+
+
+def verify_liveness(rec, source, project):
+    """Worker-only eligibility and liveness refinement."""
+    try:
+        from .. import project_config, engine_group_c
+
+        wt_id = rec["raw"]["id"]
+        local_check = getattr(source, "is_local", None)
+        if callable(local_check):
+            is_local = bool(local_check(rec.get("machine"), rec.get("env")))
+        else:
+            local = local_key(source)
+            is_local = local is not None and (rec.get("machine"), rec.get("env")) == local
+        if not is_local or not (project_config.tracking_dir(project) / f"{wt_id}.yaml").exists():
+            return None, is_local
+        batch = engine_group_c.picker_reconcile_local(project, worktree_ids=[wt_id])
+        for row in batch.rows:
+            if isinstance(row, dict) and row.get("id") == wt_id:
+                return {
+                    **row,
+                    "mux_observation_unavailable": not bool(batch.summary.get("mux_scan_ok", True)),
+                }, is_local
+        return None, is_local
+    except Exception:
+        return None, None
+
+
+def claims_argv(machine, env, worktree_id, *, transitive=False, **source_identity):
+    """Explicit full claim inspection through the selected remote source."""
+    return remote_argv(
+        machine, env, worktree_id, command="claims transitive" if transitive else "claims",
+        capability="claims", **source_identity,
+    )
+
+
+def remote_argv(
+    machine, env, worktree_id, *, command, capability, source_id=None,
+    expected_instance_id=None, expected_assignment=None, expected_transport_fingerprint=None,
+):
+    from . import data_ssh as transport
+
+    project = transport._project()
+    source = transport._find_source(machine, env, source_id=source_id)
+    if source is None:
+        return None
+    if source.source_kind == transport.SOURCE_KIND_PROVIDER_EXEC:
+        if (
+            not expected_transport_fingerprint
+            or transport._provider_transport_fingerprint(source) != expected_transport_fingerprint
+        ):
+            return None
+        try:
+            transport._resolve_provider_source(source, transport._run)
+        except (OSError, RuntimeError, ValueError):
+            return None
+        if (
+            not expected_instance_id
+            or source.instance_id != expected_instance_id
+            or not isinstance(expected_assignment, dict)
+            or source.venue.get("assignment") != expected_assignment
+        ):
+            return None
+    if (
+        source.local or not source.ready or not source.alias
+        or not source.capabilities.get(
+            capability, source.source_kind == transport.SOURCE_KIND_MACHINE_SSH,
+        )
+    ):
+        return None
+    inner = f"{project} {command} {transport._remote_arg(source.shell, worktree_id)} --json"
+    if source.source_kind == transport.SOURCE_KIND_PROVIDER_EXEC:
+        return transport._provider_remote_argv(
+            source, inner, expected_instance_id=expected_instance_id,
+            expected_assignment=expected_assignment,
+        )
+    return transport._wrap_remote(source.shell, source.alias, inner)
+
+
+def load_claims(engine, rec):
+    from worktree_manager import engine_client
+
+    from .. import context
+    from . import data_ssh, maintenance
+    from .worktree_assets import claim_details, descendant_details, needs_descendant_details
+
+    wid = (rec.get("raw") or {}).get("id")
+    if not isinstance(wid, str) or not wid:
+        raise ValueError("no worktree id for claim inspection")
+    machine, env = rec.get("machine"), rec.get("env")
+
+    def query(*, transitive: bool = False) -> dict:
+        if (machine, env) == local_key(engine.src):
+            args = ["claims", *(["transitive"] if transitive else []), wid, "--json"]
+            return engine_client.run_json(
+                context.project(), args, runner=engine._provider_runner(),
+            )
+        source = rec.get("source") or {}
+        argv = data_ssh.claims_argv(
+            machine, env, wid, source_id=rec.get("source_id"),
+            **({"transitive": True} if transitive else {}),
+            expected_instance_id=source.get("instance_id"),
+            expected_assignment=source.get("venue", {}).get("assignment"),
+            expected_transport_fingerprint=source.get("transport_fingerprint"),
+        )
+        if argv is None:
+            raise ValueError(f"no claim-inspection route to {machine} {env}")
+        return maintenance._ssh_json(argv)
+
+    details = claim_details(query())
+    if needs_descendant_details(rec.get("raw") or rec):
+        details.extend(descendant_details(query(transitive=True)))
+    return details

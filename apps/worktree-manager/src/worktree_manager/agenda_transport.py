@@ -1,0 +1,565 @@
+"""Optional held CLI read, with caller-owned processes and bounded pipe delivery."""
+
+from __future__ import annotations
+
+from contextlib import contextmanager
+from collections.abc import Callable
+import json
+import os
+from pathlib import Path
+from queue import Empty, Full, Queue
+import select
+import signal
+import subprocess
+import sys
+from threading import Event, Lock, Thread
+import time
+
+from agent_procutil import contained_test_mode, detached_kwargs, spawn_sync_in_kill_on_close_job
+
+from . import engine_client as ec
+from .companion_client import cancellable_read_runner
+from .engine_process import EngineCleanupError, cleanup_phase
+from .engine_environment import _engine_environment
+from .engine_posix_process import _OWNER, read_completion_receipt, output_pipe, close_descriptor, close_stream
+from .agenda_contract import (
+    AgendaUnavailable, CONTRACT_VERSIONS, GRAPH_CAPABILITY, GRAPH_VERSIONS, MAX_FRAME_BYTES,
+    _TRANSIENT_ERRORS, bounded_json,
+)
+
+STARTUP_TIMEOUT = 5.0
+IDLE_TIMEOUT = 5.0
+EXIT_GRACE_SECONDS = 1.0
+_HEALTH_PROBE = """
+import errno,json,sys
+try:
+    from agent_worktrees.worktrees_client import read_health
+    health = read_health()
+    versions = (1,)
+    graphs = ()
+    if (isinstance(health,dict) and isinstance(health.get("worktrees"),dict)
+        and health["worktrees"].get("status") == "ready"
+        and isinstance(health.get("capabilities"),list)
+        and any(cap in health["capabilities"] for cap in ("worktree-agendas-v1","worktree-agendas-v2"))):
+        try:
+            from agent_worktrees import agenda_contract
+        except ImportError:
+            print(json.dumps({"ok":False,"error":{"code":"unsupported",
+                "message":"selected CLI has no agenda command contract"}}),flush=True)
+            sys.exit(0)
+        versions = getattr(agenda_contract,"CONTRACT_VERSIONS",None)
+        if versions is None:
+            if getattr(agenda_contract,"CAPABILITY",None) != "worktree-agendas-v1":
+                raise ValueError("selected CLI has no supported agenda contract declaration")
+            versions = (1,)
+        graphs = getattr(agenda_contract,"GRAPH_VERSIONS",None) or ()
+    result = {"ok": True, "health": health, "cli_contract_versions": list(versions)}
+    if graphs:
+        result["cli_graph_versions"] = list(graphs)
+    raw = json.dumps(result, ensure_ascii=False, separators=(",", ":"))
+    if len(raw.encode("utf-8")) > 35 * 1024:
+        raise ValueError("resident health exceeds its response bound")
+except ImportError:
+    raw = json.dumps({"ok": False, "error": {
+        "code": "unsupported", "message": "owned resident health API is unsupported"}})
+except (OSError, ValueError, RuntimeError, RecursionError) as error:
+    if isinstance(error, PermissionError):
+        code = "permission"
+    elif isinstance(error, FileNotFoundError):
+        code = "authentication"
+    elif isinstance(error, TimeoutError):
+        code = "timeout"
+    elif isinstance(error, ConnectionError) or getattr(error,"errno",None) in {
+        errno.ECONNREFUSED,errno.ECONNRESET,errno.ECONNABORTED,errno.ENETUNREACH,
+        errno.ENETDOWN,errno.EHOSTUNREACH,errno.ETIMEDOUT,errno.EPIPE,
+    }:
+        code = "disconnected"
+    elif isinstance(getattr(error,"code",None),str):
+        code = error.code
+    elif isinstance(error,(ValueError,RecursionError)):
+        code = "malformed"
+    else:
+        code = "probe-failed"
+    raw = json.dumps({"ok": False, "error": {
+        "code": code, "message": str(error)[:1024] or type(error).__name__}})
+sys.stdout.write(raw + "\\n")
+sys.stdout.flush()
+"""
+
+
+def _object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("agenda frame contains a duplicate JSON member")
+        result[key] = value
+    return result
+
+
+def _resolved_engine() -> list[str]:
+    base = ec.engine_base_command()
+    if not base or not Path(base[0]).is_absolute():
+        raise AgendaUnavailable("no resolved absolute engine command is available")
+    return base
+
+
+def validate_agenda_entry(base: list[str]) -> None:
+    """Admit executable module entries, not helper modules defining console callables."""
+    if "-m" in base[1:]:
+        index = base.index("-m", 1)
+        if index != len(base) - 2 or base[index + 1] not in {
+            "agent_worktrees", "agent_worktrees.__main__",
+        }:
+            raise AgendaUnavailable("unsupported owned agenda module entry", code="unsupported-entry")
+
+
+def health_argv(base: list[str]) -> list[str]:
+    """Read in the owned runtime, never dispatch an unknown CLI verb."""
+    validate_agenda_entry(base)
+    if len(base) < 3 or base[-2] != "-m" or base[-1] not in {
+        "agent_worktrees", "agent_worktrees.__main__",
+    }:
+        raise AgendaUnavailable("resolved engine has no admitted read-only resident health probe")
+    return [*base[:-2], "-I", "-c", _HEALTH_PROBE]
+
+
+def require_capability(
+    base: list[str], *, cancelled: Event, cwd: str,
+    on_supported: Callable[[], None] | None = None,
+    on_graph: Callable[[int | None], None] | None = None,
+) -> int:
+    """Select the agenda contract; report the optional display-graph version via on_graph."""
+    argv = health_argv(base)
+    try:
+        result = cancellable_read_runner(cancelled, cwd=cwd)(argv, STARTUP_TIMEOUT)
+    except (TimeoutError, subprocess.TimeoutExpired) as exc:
+        raise AgendaUnavailable(f"resident health probe timed out: {exc}", retry=True, code="timeout") from exc
+    except ConnectionError as exc:
+        raise AgendaUnavailable(f"resident health probe disconnected: {exc}", retry=True, code="disconnected") from exc
+    except OSError as exc:
+        raise AgendaUnavailable(f"resident health probe failed: {exc}", code="probe-failed") from exc
+    if cancelled.is_set():
+        raise InterruptedError("agenda health probe cancelled")
+    if (
+        result.returncode != 0
+        or len(result.stdout.encode("utf-8")) > MAX_FRAME_BYTES
+        or len(result.stderr.encode("utf-8")) > 8192
+    ):
+        raise AgendaUnavailable("resident health probe failed or exceeded its response bound")
+    value = json.loads(result.stdout, object_pairs_hook=_object)
+    bounded_json(value)
+    if not isinstance(value, dict):
+        raise AgendaUnavailable("resident health probe returned a non-object response", code="malformed")
+    if value.get("ok") is False:
+        error = value.get("error")
+        if (
+            set(value) != {"ok", "error"} or not isinstance(error, dict)
+            or set(error) != {"code", "message"}
+            or not all(isinstance(error.get(key), str) and error[key] for key in ("code", "message"))
+        ):
+            raise AgendaUnavailable("resident health probe returned a malformed error", code="malformed")
+        raise AgendaUnavailable(
+            f"resident health is unavailable: {error['code']}: {error['message']}",
+            retry=error["code"] in _TRANSIENT_ERRORS | {"timeout"}, code=error["code"],
+        )
+    if value.get("ok") is not True or set(value) not in (
+        {"ok", "health"}, {"ok", "health", "cli_contract_versions"},
+        {"ok", "health", "cli_contract_versions", "cli_graph_versions"},
+    ):
+        raise AgendaUnavailable("resident health probe returned invalid fields", code="malformed")
+    versions = value.get("cli_contract_versions", [1])
+    if (
+        not isinstance(versions, list) or not versions
+        or any(type(version) is not int or version < 1 for version in versions)
+        or len(set(versions)) != len(versions)
+    ):
+        raise AgendaUnavailable("selected CLI supplied invalid agenda contracts", code="malformed")
+    graphs = value.get("cli_graph_versions", [])
+    if (
+        not isinstance(graphs, list)
+        or any(type(graph) is not int or graph < 1 for graph in graphs)
+        or len(set(graphs)) != len(graphs)
+    ):
+        raise AgendaUnavailable("selected CLI supplied invalid agenda graph versions", code="malformed")
+    health = value.get("health")
+    if (
+        not isinstance(health, dict) or not isinstance(health.get("capabilities"), list)
+        or any(not isinstance(item, str) for item in health["capabilities"])
+    ):
+        raise AgendaUnavailable("resident health supplied invalid agenda capabilities", code="malformed")
+    if 2 in versions and "worktree-agendas-v2" in health["capabilities"]:
+        version = 2
+    elif 1 in versions and "worktree-agendas-v1" in health["capabilities"]:
+        version = 1
+    else:
+        raise AgendaUnavailable(
+            "resident lacks worktree-agendas-v1/v2; agenda command was not invoked",
+            code="unsupported",
+        )
+    state = health.get("worktrees")
+    if not isinstance(state, dict) or not isinstance(state.get("status"), str):
+        raise AgendaUnavailable("resident health supplied an invalid authority state", code="malformed")
+    generation = state.get("generation")
+    if (
+        not isinstance(generation, str) or len(generation) != 32
+        or any(character not in "0123456789abcdef" for character in generation)
+    ):
+        raise AgendaUnavailable("resident health supplied an invalid generation")
+    status = state["status"]
+    if status != "ready" and status not in {
+        "draining", "unready", "unavailable", "superseded", "closed", "shutdown",
+    }:
+        raise AgendaUnavailable("resident health supplied an unknown authority state", code="malformed")
+    if on_supported is not None:
+        on_supported()
+    if status != "ready":
+        raise AgendaUnavailable(
+            f"resident agenda authority is {status}; no resident was started",
+            retry=status in _TRANSIENT_ERRORS, code=status,
+        )
+    if on_graph is not None:
+        supported = [graph for graph in GRAPH_VERSIONS if graph in graphs]
+        on_graph(
+            max(supported) if supported and version == 2
+            and GRAPH_CAPABILITY in health["capabilities"] else None
+        )
+    return version
+
+
+def feed_argv(
+    project: str, worktree: str, session: str, *, engine_command: list[str] | None = None,
+    contract_version: int = 1, graph: int | None = None,
+) -> list[str]:
+    base = _resolved_engine() if engine_command is None else engine_command
+    validate_agenda_entry(base)
+    if type(contract_version) is not int or contract_version not in CONTRACT_VERSIONS:
+        raise AgendaUnavailable("unsupported agenda contract selection", code="unsupported")
+    if graph is not None and (
+        type(graph) is not int or graph not in GRAPH_VERSIONS or contract_version != 2
+    ):
+        raise AgendaUnavailable("unsupported agenda graph selection", code="unsupported")
+    return [
+        *base, "agenda-feed", "--project", project, "--worktree", worktree,
+        "--session", session, "--json",
+        *(["--contract-version", "2"] if contract_version == 2 else []),
+        *(["--agenda-graph", str(graph)] if graph is not None else []),
+    ]
+
+
+@contextmanager
+def _owned_process(argv: list[str], cwd: str, *, environment: dict[str, str] | None = None):
+    env = _engine_environment()
+    if environment is not None:
+        env.update(environment)
+    # Reuse Manager's unreaped POSIX group-owner protocol; only its stdout
+    # destination differs. This reserves the group identity through cleanup.
+    if os.name != "nt" and not contained_test_mode():
+        output, write_fd = output_pipe()
+        try:
+            owner = subprocess.Popen(
+                [sys.executable, "-B", "-c", _OWNER, json.dumps(argv), str(write_fd)],
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                env=env, cwd=cwd, start_new_session=True, pass_fds=(write_fd,),
+            )
+        except BaseException:
+            close_stream(output)
+            raise
+        finally:
+            close_descriptor(write_fd)
+        try:
+            yield output, owner.stderr, lambda stopped: read_completion_receipt(
+                owner.stdout, argv=argv, timeout=None, cancelled=stopped,
+            )
+        finally:
+            with cleanup_phase():
+                try:
+                    os.killpg(owner.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                owner.wait(timeout=5)
+                owner.stdin.close()
+                owner.stdout.close()
+                owner.stderr.close()
+                output.close()
+    else:
+        process, job = spawn_sync_in_kill_on_close_job(
+            argv, require_job=os.name == "nt", allow_breakaway=False,
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            env=env, cwd=cwd,
+            **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt"
+               else detached_kwargs()),
+        )
+        try:
+            def completion(stopped):
+                while not stopped.is_set():
+                    try:
+                        return {"returncode": process.wait(timeout=0.1)}
+                    except subprocess.TimeoutExpired:
+                        continue
+                raise InterruptedError("owned agenda completion read cancelled")
+
+            yield process.stdout, process.stderr, completion
+        finally:
+            with cleanup_phase():
+                if job is not None:
+                    job.close()
+                elif process.poll() is None:
+                    process.kill()
+                process.wait(timeout=5)
+                process.stdout.close()
+                process.stderr.close()
+
+
+def frames(
+    project: str, worktree: str, session: str, *, cancelled: Event, cwd: str,
+    on_supported: Callable[[], None] | None = None,
+    on_contract: Callable[[int], None] | None = None,
+):
+    """No route, token, filesystem-agenda scan, autostart or plugin imports."""
+    if cancelled.is_set():
+        return
+    base = _resolved_engine()
+    validate_agenda_entry(base)
+    graph: list[int | None] = [None]
+    version = require_capability(
+        base, cancelled=cancelled, cwd=cwd, on_supported=on_supported,
+        on_graph=lambda selected: graph.__setitem__(0, selected),
+    )
+    if cancelled.is_set():
+        return
+    if on_contract is not None:
+        on_contract(version)
+    argv = feed_argv(
+        project, worktree, session, engine_command=base, contract_version=version, graph=graph[0],
+    )
+    yield from command_frames(
+        argv, cancelled=cancelled, cwd=cwd,
+        startup_timeout=STARTUP_TIMEOUT, idle_timeout=IDLE_TIMEOUT,
+    )
+
+
+def command_frames(
+    argv: list[str], *, cancelled: Event, cwd: str,
+    environment: dict[str, str] | None = None,
+    startup_timeout: float = STARTUP_TIMEOUT, idle_timeout: float = IDLE_TIMEOUT,
+    json_document: bool = False,
+):
+    """Bounded JSONL or one finite JSON document from an admitted owned command."""
+    if cancelled.is_set():
+        return
+    queue: Queue = Queue(maxsize=2)
+    stopped = Event()
+    errors = bytearray()
+    completed, stderr_drained = Event(), Event()
+    receipt, receipt_error = [], []
+    stderr_error = []
+    stdout_drained = Event()
+    pending_lock = Lock()
+    stdout_pending = [None]
+    not_ready = object()
+    document = bytearray()
+
+    def take_ready():
+        with pending_lock:
+            try:
+                return queue.get_nowait()
+            except Empty:
+                if stdout_pending[0] is not None:
+                    value, stdout_pending[0] = stdout_pending[0], None
+                    return value
+        return not_ready
+
+    def deliver(value):
+        while not stopped.is_set():
+            try:
+                queue.put(value, timeout=0.1)
+                return
+            except Full:
+                continue
+
+    def read_lines(output):
+        try:
+            while not stopped.is_set():
+                line = output.readline(MAX_FRAME_BYTES + 1)
+                with pending_lock:
+                    stdout_pending[0] = line
+                while not stopped.is_set():
+                    with pending_lock:
+                        if stdout_pending[0] is None:
+                            break
+                        try:
+                            queue.put_nowait(stdout_pending[0])
+                        except Full:
+                            pass
+                        else:
+                            stdout_pending[0] = None
+                            break
+                    stopped.wait(0.01)
+                if not line or len(line) > MAX_FRAME_BYTES or not line.endswith(b"\n"):
+                    return
+        except (OSError, ValueError) as exc:
+            if not stopped.is_set():
+                deliver(OSError(str(exc)))
+        finally:
+            stdout_drained.set()
+
+    def read_errors(output):
+        try:
+            while not stopped.is_set():
+                if os.name != "nt":
+                    ready, _, _ = select.select([output], [], [], 0.1)
+                    if not ready:
+                        if completed.is_set():
+                            stderr_drained.set()
+                            return
+                        continue
+                chunk = os.read(output.fileno(), 4096)
+                if not chunk:
+                    stderr_drained.set()
+                    return
+                errors.extend(chunk)
+                del errors[:-8192]
+        except (OSError, ValueError) as exc:
+            if not stopped.is_set():
+                stderr_error.append(OSError(str(exc)))
+                stderr_drained.set()
+                deliver(stderr_error[0])
+
+    def read_completion(read):
+        try:
+            receipt.append(read(stopped))
+        except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
+            if not stopped.is_set():
+                receipt_error.append(exc)
+        finally:
+            completed.set()
+
+    def ended():
+        deadline = time.monotonic() + EXIT_GRACE_SECONDS
+        while not completed.is_set():
+            if cancelled.is_set():
+                return None
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return AgendaUnavailable(
+                    "agenda group owner completion receipt is missing or truncated",
+                    code="invalid-receipt",
+                )
+            completed.wait(min(remaining, 0.05))
+        if cancelled.is_set():
+            return None
+        if receipt_error:
+            return receipt_error[0]
+        if not receipt:
+            return AgendaUnavailable("agenda group owner omitted its completion receipt", code="invalid-receipt")
+        value = receipt[0]
+        if "error" in value:
+            return AgendaUnavailable(f"could not start the owned agenda command: {value['error']}", code="spawn-failed")
+        while not stderr_drained.is_set():
+            if cancelled.is_set():
+                return None
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return AgendaUnavailable("agenda stderr did not settle after child completion", code="read-failed")
+            stderr_drained.wait(min(remaining, 0.05))
+        detail = bytes(errors).decode("utf-8", errors="replace").strip()
+        if stderr_error:
+            return stderr_error[0]
+        if value["returncode"] != 0:
+            return AgendaUnavailable(
+                f"agenda command exited {value['returncode']}: {detail or 'no diagnostic'}",
+                code="exit-failed",
+            )
+        if json_document:
+            return None
+        return AgendaUnavailable(
+            "agenda feed disconnected without a going-away notice" + (f": {detail}" if detail else ""),
+            retry=True, code="disconnected",
+        )
+
+    def finish():
+        failure = ended()
+        if failure is not None:
+            raise failure
+        if json_document and not cancelled.is_set():
+            try:
+                frame = json.loads(document, object_pairs_hook=_object)
+                bounded_json(frame)
+            except (UnicodeError, RecursionError) as exc:
+                raise ValueError("owned command emitted an invalid bounded document") from exc
+            if not isinstance(frame, dict):
+                raise ValueError("owned command emitted a non-object document")
+            yield frame
+
+    readers = []
+    try:
+        process = (
+            _owned_process(argv, cwd) if environment is None
+            else _owned_process(argv, cwd, environment=environment)
+        )
+        with process as (stdout, stderr, completion):
+            readers = [
+                Thread(target=read_lines, args=(stdout,), name="agenda-feed-stdout", daemon=True),
+                Thread(target=read_errors, args=(stderr,), name="agenda-feed-stderr", daemon=True),
+                Thread(target=read_completion, args=(completion,), name="agenda-feed-completion", daemon=True),
+            ]
+            for reader in readers:
+                reader.start()
+            deadline = time.monotonic() + startup_timeout
+            reader_deadline = None
+            try:
+                while not cancelled.is_set():
+                    line = take_ready()
+                    if line is not_ready:
+                        if completed.is_set() and reader_deadline is None:
+                            reader_deadline = time.monotonic() + EXIT_GRACE_SECONDS
+                        remaining = (
+                            reader_deadline if reader_deadline is not None else deadline
+                        ) - time.monotonic()
+                        if stdout_drained.is_set() or remaining <= 0:
+                            # A completed line may have arrived while checking
+                            # settlement; it always precedes completion fallback.
+                            line = take_ready()
+                            if line is not_ready and (completed.is_set() or stdout_drained.is_set()):
+                                yield from finish()
+                                return
+                            if line is not_ready:
+                                raise AgendaUnavailable("agenda feed missed its frame deadline", retry=True)
+                        if line is not_ready:
+                            try:
+                                line = queue.get(timeout=min(remaining, 0.1))
+                            except Empty:
+                                continue
+                    reader_deadline = None
+                    if cancelled.is_set():
+                        return
+                    if isinstance(line, OSError):
+                        raise line
+                    if not line:
+                        yield from finish()
+                        return
+                    if len(line) > MAX_FRAME_BYTES or not line.endswith(b"\n"):
+                        raise ValueError("agenda feed exceeded its atomic frame bound")
+                    if json_document:
+                        if len(document) + len(line) > MAX_FRAME_BYTES:
+                            raise ValueError("owned command exceeded its document bound")
+                        document.extend(line)
+                        continue
+                    frame = json.loads(line, object_pairs_hook=_object)
+                    if not isinstance(frame, dict):
+                        raise ValueError("agenda feed emitted a non-object frame")
+                    yield frame
+                    deadline = time.monotonic() + idle_timeout
+            finally:
+                stopped.set()
+    except OSError as exc:
+        if cancelled.is_set():
+            return
+        raise AgendaUnavailable(f"could not read the owned agenda command: {exc}") from exc
+    finally:
+        stopped.set()
+        with cleanup_phase():
+            for reader in readers:
+                reader.join(timeout=1)
+            if any(reader.is_alive() for reader in readers):
+                raise EngineCleanupError("agenda pipe reader did not retire")

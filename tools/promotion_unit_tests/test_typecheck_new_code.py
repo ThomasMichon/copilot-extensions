@@ -7,9 +7,53 @@ from pathlib import Path
 import pytest
 
 from tools import typecheck
+from tools import typecheck_source_views as views
 from tools.typecheck_new_code import select_new_code
 from tools.typecheck_source_views import SourceViewError
 from tools.typecheck_programs import ProgramError, independent_programs
+
+
+def test_candidate_manager_application_has_an_owner_without_waiving_the_strict_ratchet(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    projects = typecheck.load_projects()
+    files = (
+        "apps/worktree-manager/_standalone_runtime_build.py",
+        "apps/worktree-manager/setup.py",
+        "apps/worktree-manager/src/worktree_manager/cli.py",
+        "apps/worktree-manager/src/agent_procutil/owned_process.py",
+        "apps/worktree-manager/src/worktree_manager/_runtime_assets/scripts/install.py",
+    )
+    for relative in files:
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("value: int = 1\n", encoding="utf-8")
+    owners = typecheck.inventory(files, projects)
+    owner = owners[files[0]]
+    assert owner.name == "worktree-manager-application"
+    assert owner.level == "pending"
+    assert all(project is owner for project in owners.values())
+    with pytest.raises(typecheck.TypecheckError, match="unclassified"):
+        typecheck.inventory(("apps/unregistered/program.py",), projects)
+    with pytest.raises(typecheck.TypecheckError, match="unclassified"):
+        typecheck.inventory(("apps/worktree-manager-other/program.py",), projects)
+    calls: list[tuple[str, tuple[str, ...], bool]] = []
+
+    def check(
+        root: Path, project: typecheck.Project, selected: tuple[str, ...], *,
+        all_paths: tuple[str, ...], strict: bool,
+    ) -> int:
+        assert root == tmp_path and all_paths == files
+        calls.append((project.name, selected, strict))
+        return 1
+
+    monkeypatch.setattr(typecheck, "ROOT", tmp_path)
+    monkeypatch.setattr(typecheck, "load_projects", lambda: projects)
+    monkeypatch.setattr(typecheck, "python_paths", lambda: files)
+    monkeypatch.setattr(typecheck, "new_code_changes", lambda *_args: files)
+    monkeypatch.setattr(typecheck, "check_project", check)
+    assert typecheck.main(["--new-code", "--base", "unchanged-base"]) == 1
+    assert calls == [(owner.name, files, True)]
 
 
 def test_independent_programs_preserve_complete_owner_selection() -> None:
@@ -110,6 +154,59 @@ def test_new_code_selection_preserves_complete_composed_bindings(
     assert select_new_code(tmp_path, {first: project, second: project}, (change,)) == {
         owner: (first, second),
     }
+
+
+@pytest.mark.parametrize("entry_name", ["installation_context.py", "_installation_context.py"])
+def test_vendored_installation_change_selects_its_complete_namespace(
+    tmp_path: Path, entry_name: str,
+) -> None:
+    prefix = "plugins/example/src/example/"
+    files = tuple(prefix + name for name in (
+        entry_name, "_installation_context_a.py",
+        "_installation_context_b.py", "_installation_context_worker.py", "unrelated.py",
+    ))
+    project = typecheck.Project(
+        "example", ("plugins/example",), (), "pending", "3.10", ("linux",), "requirements.txt",
+    )
+    for path in files:
+        destination = tmp_path / path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(b"value: int = 1\n")
+    assert select_new_code(tmp_path, dict.fromkeys(files, project), (files[1],)) == {
+        "example": files[:3],
+    }
+
+
+@pytest.mark.parametrize("entry_name", ["installation_context.py", "_installation_context.py"])
+def test_vendored_installation_view_preserves_local_custody(
+    tmp_path: Path, entry_name: str,
+) -> None:
+    prefix = "plugins/example/src/example/"
+    entry = prefix + entry_name
+    fragment = prefix + "_installation_context_a.py"
+    loader = views._WRAPPER.replace(
+        "_FRAGMENT_FILES = ()", '_FRAGMENT_FILES = ("_installation_context_a.py",)',
+    ).encode()
+    (tmp_path / entry).parent.mkdir(parents=True)
+    (tmp_path / entry).write_bytes(loader)
+    (tmp_path / fragment).write_bytes(b"raise RuntimeError('must never execute')\n")
+    output = tmp_path / "view.py"
+    view = views.installation_view(tmp_path, (entry, fragment), output, entry_path=entry)
+    view.verify(tmp_path)
+    line = next(index for index, item in enumerate(view.lines, 1) if item.path == fragment)
+    assert view.diagnostics(f"{output}:{line}: error: sample\n", tmp_path) == (
+        f"{fragment}:1: error: sample\n"
+    )
+    (tmp_path / fragment).write_bytes(b"changed: int = 1\n")
+    with pytest.raises(SourceViewError, match="source changed"):
+        view.verify(tmp_path)
+    (tmp_path / fragment).write_bytes(view.inputs[1][1])
+    extra = prefix + "_installation_context_extra.py"
+    (tmp_path / extra).write_bytes(b"extra: int = 1\n")
+    with pytest.raises(SourceViewError, match="membership"):
+        view.verify(tmp_path)
+    with pytest.raises(SourceViewError, match="membership"):
+        views.installation_view(tmp_path, (entry, fragment, extra), output, entry_path=entry)
 
 
 @pytest.mark.parametrize(

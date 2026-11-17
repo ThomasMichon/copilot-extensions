@@ -49,6 +49,16 @@ bus/cgroup lifetime and authoritative cleanup. Their separate
 
 ## Select the evidence first
 
+The focused Worktrees credential-isolation regression is
+`tests/test_git_credential_isolation.py`, selected through the canonical
+runner with `--test-file` and `--allow-explicit-tiers`. It runs actual nested
+pytest consumers through `isolated_environment` and `run_contained`, with
+private home/config/project roots, a synthetic inner-repository credential
+pin and a byte-preserved external sentinel configuration. The negative
+non-repository unit always substitutes the Git probe: a caller placing
+basetemp beneath a checkout must never redirect its credential writes there.
+Do not use inline fixture adapters or a live checkout/config as test state.
+
 The opt-in native receiving relocation case
 `tests/native/test_checkout_relocation_staging.py::test_live_cross_volume_receiving_uses_existing_native_owners`
 uses the canonical Worktrees runner with `--allow-explicit-tiers`. Explicit
@@ -118,6 +128,16 @@ CI and review remain unchanged; a shared native quiet window still needs its
 affected owners' agreement.
 
 ### Selected read-only readiness execution
+
+Worktrees' Manager admission packet selects `tests/test_manager_recovery.py`
+and `tests/test_manager_application_identity.py`. It covers legacy and canonical
+application layouts, actual wheel/package/version and source associations,
+configured source precedence and unchanged admission evidence. The separately
+selected `tests/native/test_manager_application_reader.py` with
+`--allow-explicit-tiers` reads a fresh synthetic application through the real
+controller-selection reader in an isolated, no-bytecode Python child. It never
+installs, repairs or starts Manager or a service. That first-touch reader proof
+is not a successful ordinary suite update or a live installation qualification.
 
 Machines' `tests/test_installation_repair.py -k readonly_environment` runs the
 actual platform-native Index gate from a Git checkout with marker-writing local

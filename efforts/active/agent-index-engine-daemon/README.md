@@ -44,11 +44,40 @@ or native execution is authorized here. Historical direct-push references
 below do not replace the repository's current review/PR policy.
 
 The finite #5549 clarification retains the same daemon-manager, engine,
-configuration, installer/runtime and platform custodians. #5549 remains OPEN
-with unresolved product acceptance unchecked. Separate #5686 tracking has its
-own full direct-parent-receipt/readback condition; this documentary intake
-neither performs nor establishes that disposition. It adds no generic ACK or
-universal implementer requirement and transfers no process, config or service.
+configuration, installer/runtime and platform custodians. The earlier complete
+#5686 intake and retirement deliberately kept parent #5549 OPEN; the later
+#12727 documentary intake retained that campaign tracking decision. Preserve
+that history, its original receipt/readback condition and unchanged custody.
+Neither retirement nor planned receiving established technical acceptance.
+
+Agent-recommended prospective clarification: a SEPARATE, source-specific
+NOT_PLANNED judgment may retire redundant #5549 tracking after the complete
+planned receiving has actually merged through normal review and current WHOLE
+eligible source/discussion and receiver readback confirms every original and
+refined obligation, including the complete #5686 union, in the existing owning
+Plan, local AND actual global Validation, Coordination and Journal. Reconcile
+current source/receiver state, eligibility, claims, custody and actual holds;
+a proposal, link, partial receipt or campaign/index/ledger-only merge is not
+proof that a missing domain receipt or clarification was delivered.
+
+Once that reviewed clarification and complete receiving/readback are established,
+this prospectively supersedes ONLY the campaign's administrative requirement to
+keep #5549 OPEN as a tracking token, including the corresponding DE-V-TRACKING
+wording in its preserved intake. It does not erase the historical parent-OPEN
+decision after #5686 retirement or replay that child's disposition.
+
+The separate administrative judgment does NOT require implementation of
+DE5549-PID/ENV/VPID/VENV, source/native execution, the independent rollback
+qualification or whole-effort completion. Preserve all four DE checks and every
+incumbent checkbox exactly as recorded, with unresolved acceptance unchecked.
+Existing technical Plan/global Validation, Active status and rollback/archival
+requirements retain their technical meaning; none becomes an additional
+prerequisite for that administrative judgment. NOT_PLANNED is not COMPLETED,
+native proof, effort completion or release of an implementation obligation.
+
+This supersedes no operator/resource hold, author exclusion or actual custody
+condition. It adds no generic ACK or universal implementer requirement and
+transfers no process, configuration, service, source or resource ownership.
 
 ## Context
 
@@ -365,6 +394,18 @@ unchecked rollback acceptance remain unchanged._
 
 ## Journal
 
+### 2026-11-17 - Administrative versus technical #5549 clarification proposed
+
+Proposed explicit reconciliation of the campaign-only parent-OPEN decision
+retained after #5686's complete intake and tracking retirement. A separate
+#5549-specific administrative judgment may follow actual reviewed complete
+planned receiving and the whole current source/receiver/custody readback
+specified in Coordination; it need not wait for technical implementation or
+the independent rollback programme. Historical receipt conditions, all four DE
+checks, every incumbent checkbox and existing technical completion gates remain
+unchanged. This proposal establishes no receiving merge, tracker disposition,
+technical/native proof, implementation assignment or custody transfer.
+
 ### 2026-11-15 - PID and saved-environment acceptance proposed
 
 Added four unchecked #5549 Plan/Validation clauses for the selected one-or-more
@@ -373,8 +414,11 @@ startup paths. Positive engine identity, negative controls, precedence,
 spawned-child environment and caller restoration are direct acceptance rather
 than inferred from endpoint health or a launcher string. Existing lifecycle
 separation credit and the independent rollback gate remain unchanged.
-#5549 stays OPEN; #5686's distinct full parent-receipt condition is preserved,
-not exercised. No implementation, config/process operation, source/native
+At that checkpoint #5549 stayed OPEN; #5686's distinct full parent-receipt
+condition was preserved, not re-exercised by this ROOT intake. That historical
+campaign decision is prospectively distinguished from separate administrative
+judgment by Coordination above, not converted into an implementation prerequisite.
+No implementation, config/process operation, source/native
 proof, resource transfer or issue disposition occurred.
 
 ### 2026-11-15 - First-use and assigned-engine-endpoint clarification proposed

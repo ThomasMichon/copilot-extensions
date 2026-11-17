@@ -8,6 +8,7 @@ import re
 import time
 
 import promote_release as promotion
+from materialize_source_applications import retain_outputs
 from promotion_source_archive import composition_budget, git_timeout_options
 
 
@@ -58,7 +59,7 @@ def _compose(
             tree = promotion.build_promotion_tree(
                 scratch, control=summary.get("control_preserved"),
             )
-            paths = select_inputs(scratch) if select_inputs is not None else None
+            paths = retain_outputs(scratch, select_inputs(scratch)) if select_inputs is not None else None
             git_timeout_options()
             return LocalComposition(source_commit, main_seed, tree, paths)
     finally:

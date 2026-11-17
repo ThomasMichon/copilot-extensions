@@ -7,13 +7,20 @@ import re
 import socket
 import stat
 import time
+from collections.abc import Callable
 from pathlib import Path
+from typing import TypeVar
 
 from . import windows_mux_processes
 from .mux_observation_types import ObservationUnavailable as MuxObservationUnavailable
 
 _QUERY = b"display-message -p '#{session_name}:#{session_attached}:#{pid}'\n"
+_MEMBERSHIP_QUERY = (
+    b"display-message -p '#{session_name}:#{session_attached}:#{pid}:#{session_id}:#{session_created}'\n"
+)
+_CLIENT_QUERY = b'list-clients -F "C\t#{session_name}"\n'
 _LIMIT = 4096
+_T = TypeVar("_T")
 
 
 def _remaining(deadline: float) -> float:
@@ -77,11 +84,11 @@ def _registrations(
     return result
 
 
-def _query(port: int, key: str, deadline: float) -> tuple[str, int, int]:
+def _reply(port: int, key: str, deadline: float, query: bytes) -> str:
     with socket.create_connection(("127.0.0.1", port), timeout=_remaining(deadline)) as connection:
         connection.settimeout(_remaining(deadline))
         scheme = b"AU" + b"TH "
-        connection.sendall(scheme + key.encode("ascii") + b"\n" + _QUERY)
+        connection.sendall(scheme + key.encode("ascii") + b"\n" + query)
         connection.shutdown(socket.SHUT_WR)
         output = bytearray()
         while True:
@@ -96,27 +103,50 @@ def _query(port: int, key: str, deadline: float) -> tuple[str, int, int]:
         lines = output.decode("utf-8").splitlines()
     except UnicodeDecodeError as exc:
         raise MuxObservationUnavailable("Native mux reply is not UTF-8") from exc
-    if len(lines) != 2 or lines[0] != "OK":
+    if not output.startswith((b"OK\n", b"OK\r\n")) or not lines or lines[0] != "OK":
         raise MuxObservationUnavailable("Native mux authentication or reply is unconfirmed")
-    name, separator, identity = lines[1].rpartition(":")
+    return "\n".join(lines[1:])
+
+
+def _query(port: int, key: str, deadline: float) -> tuple[str, int, int]:
+    reply = _reply(port, key, deadline, _QUERY)
+    name, separator, identity = reply.rpartition(":")
     name, count_separator, count = name.rpartition(":")
-    if not separator or not count_separator or not name or not count.isdecimal() or not identity.isdecimal():
+    if (
+        "\n" in reply or not separator or not count_separator or not name
+        or not count.isdecimal() or not identity.isdecimal()
+    ):
         raise MuxObservationUnavailable("Native mux reply is malformed")
     return name, int(count), int(identity)
 
 
-def observe_registrations(
-    *, timeout: float = 5, data_dir: Path | None = None,
-) -> dict[str, tuple[str, int]]:
-    """Keep registration basenames and authenticated logical names together.
+def _query_membership(port: int, key: str, deadline: float) -> tuple[str, int, int, str]:
+    initial_identity = _reply(port, key, deadline, _MEMBERSHIP_QUERY)
+    client_reply = _reply(port, key, deadline, _CLIENT_QUERY)
+    identity_reply = _reply(port, key, deadline, _MEMBERSHIP_QUERY)
+    if sum(
+        len(reply.encode("utf-8")) for reply in (initial_identity, client_reply, identity_reply)
+    ) > _LIMIT:
+        raise MuxObservationUnavailable("Native mux membership exceeds its byte budget")
+    clients = client_reply.splitlines()
+    fields = identity_reply.rsplit(":", 4)
+    if len(fields) != 5:
+        raise MuxObservationUnavailable("Native mux membership is malformed")
+    name, attached, pid, session, created = fields
+    if (
+        initial_identity != identity_reply or not name or not attached.isdecimal() or not pid.isdecimal()
+        or re.fullmatch(r"\$[0-9]+", session) is None or not created.isdecimal()
+        or any(line.split("\t") != ["C", name] for line in clients)
+        or bool(int(attached)) != bool(clients)
+    ):
+        raise MuxObservationUnavailable("Native mux membership is unconfirmed")
+    return name, len(clients), int(pid), f"{session}:{created}"
 
-    Legacy servers publish no PID sentinel. Authenticate their port/key pairs
-    and match the reported PID to the native census instead. Existing sentinels
-    remain additional identity fences. Query every enumerated server, including
-    warm servers, then recheck coverage, registrations and process births.
-    No CLI, registry repair, pane command or cache is involved.
-    ``timeout`` may shorten, but never expand, the five-second total budget.
-    """
+
+def _observe(
+    query: Callable[[int, str, float], tuple[str, int, int, _T]], *,
+    timeout: float, data_dir: Path | None, parallel: bool = False,
+) -> dict[str, tuple[str, int, _T]]:
     deadline = time.monotonic() + min(timeout, 5)
     root = data_dir if data_dir is not None else (
         Path(os.environ["PSMUX_DATA_DIR"]) if os.environ.get("PSMUX_DATA_DIR") else Path.home() / ".psmux"
@@ -128,15 +158,32 @@ def observe_registrations(
         registrations = _registrations(root, servers, deadline)
         result = {}
         covered = set()
-        for base, (port, key, identity) in registrations.items():
+
+        def read(
+            item: tuple[str, tuple[int, str, tuple[int, str] | None]],
+        ) -> tuple[str, tuple[str, int, int, _T] | None]:
+            base, (port, key, identity) = item
             try:
-                name, clients, reported_pid = _query(port, key, deadline)
+                return base, query(port, key, deadline)
             except (OSError, MuxObservationUnavailable):
                 if identity is not None:
                     raise
-                # Legacy hints can outlive a server. The coverage check below
-                # still requires an authenticated reply from every live PID.
+                # Stale legacy hints cannot hide an uncovered live server below.
+                return base, None
+
+        items = list(registrations.items())
+        if parallel and items:
+            from concurrent.futures import ThreadPoolExecutor
+
+            with ThreadPoolExecutor(max_workers=min(8, len(items))) as pool:
+                replies = list(pool.map(read, items))
+        else:
+            replies = list(map(read, items))
+        for base, reply in replies:
+            if reply is None:
                 continue
+            name, clients, reported_pid, detail = reply
+            identity = registrations[base][2]
             if (
                 reported_pid not in servers
                 or identity is not None and identity != (reported_pid, servers[reported_pid])
@@ -146,7 +193,7 @@ def observe_registrations(
             if reported_pid in covered:
                 raise MuxObservationUnavailable("Native mux registration identity is ambiguous")
             covered.add(reported_pid)
-            result[base] = (name, clients)
+            result[base] = (name, clients, detail)
         if covered != servers.keys():
             raise MuxObservationUnavailable("A live mux server is missing its registration")
         if (
@@ -158,6 +205,31 @@ def observe_registrations(
         return result
     except (OSError, ValueError) as exc:
         raise MuxObservationUnavailable("Native mux observation is unavailable") from exc
+
+
+def observe_registrations(
+    *, timeout: float = 5, data_dir: Path | None = None,
+) -> dict[str, tuple[str, int]]:
+    """Keep legacy name/count reads and complete native coverage unchanged."""
+    def query(port: int, key: str, deadline: float) -> tuple[str, int, int, None]:
+        name, clients, pid = _query(port, key, deadline)
+        return name, clients, pid, None
+
+    return {
+        base: (name, clients)
+        for base, (name, clients, _) in _observe(
+            query, timeout=timeout, data_dir=data_dir,
+        ).items()
+    }
+
+
+def observe_memberships(
+    *, timeout: float = 1, data_dir: Path | None = None,
+) -> dict[str, tuple[str, int, str]]:
+    """Fence real client rows with one covered finite batch of identity reads."""
+    return _observe(
+        _query_membership, timeout=timeout, data_dir=data_dir, parallel=True,
+    )
 
 
 def observe(

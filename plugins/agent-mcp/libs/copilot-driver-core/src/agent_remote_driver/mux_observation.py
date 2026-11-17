@@ -245,35 +245,20 @@ def observe_psmux_many(sessions: list[str], *, timeout: float = 1.0) -> dict[str
 
 
 def list_psmux() -> dict[str, Observation] | None:
-    """Observe the default native namespace; partial enumeration stays unknown."""
+    """List membership and real client counts; use point reads for pane details."""
     deadline = time.monotonic() + 1
     try:
         root = _data_dir()
         namespace = _namespace()
         prefix = namespace + "__" if namespace else ""
-        names = set()
-        try:
-            for index, path in enumerate(root.iterdir()):
-                if index >= 4096:
-                    return None
-                if path.suffix not in {".port", ".key", ".sid", ".pid"}:
-                    continue
-                names.add(path.stem)
-        except FileNotFoundError:
-            pass
         from agent_remote_driver import mux_inventory
 
-        inventory = mux_inventory.observe_registrations(timeout=_remaining(deadline), data_dir=root)
-        selected = set()
-        for name in names - inventory.keys():
-            if prefix and name.startswith(prefix):
-                selected.add(name[len(prefix):])
-            elif not prefix and "__" not in name:
-                selected.add(name)
-        for base, (name, _clients) in inventory.items():
-            if base == prefix + name:
-                selected.add(name)
-        return observe_psmux_many(sorted(selected), timeout=_remaining(deadline))
+        inventory = mux_inventory.observe_memberships(timeout=_remaining(deadline), data_dir=root)
+        return {
+            name: Observation("present", clients=clients, incarnation=incarnation)
+            for base, (name, clients, incarnation) in inventory.items()
+            if base == prefix + name
+        }
     except (OSError, ValueError, ObservationUnavailable):
         return None
 

@@ -684,6 +684,19 @@ def test_resolves_installed_payload_and_only_computes_target_paths(
 
 
 @pytest.mark.skipif(POWERSHELL is None, reason="PowerShell is not installed")
+def test_powershell_resolves_inherited_isolated_copilot_home(tmp_path: Path) -> None:
+    copilot, payload, durable = _installed_layout(
+        tmp_path, {"source": "github", "repo": "example-org/example-marketplace.git"},
+    )
+    result = _run_ps(
+        "-Action", "resolve", "-PayloadRoot", payload, "-PluginId", "agent-example",
+        "-DurableHome", durable, env={"COPILOT_HOME": str(copilot)},
+    )
+    assert json.loads(result.stdout)["locator"]["copilotHome"] == str(copilot.resolve())
+    assert not durable.exists()
+
+
+@pytest.mark.skipif(POWERSHELL is None, reason="PowerShell is not installed")
 def test_conflicting_same_key_declarations_fail_closed(tmp_path: Path) -> None:
     copilot, payload, durable = _installed_layout(
         tmp_path,

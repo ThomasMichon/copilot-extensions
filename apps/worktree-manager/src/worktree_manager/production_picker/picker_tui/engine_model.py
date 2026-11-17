@@ -1,0 +1,659 @@
+#!/usr/bin/env python3
+"""PickerScreen mixin extracted from ``engine.py``."""
+from __future__ import annotations
+
+import time
+
+from . import derive
+from .engine_configuration import knowledge_configuration_needed
+from .engine_helpers import ACTIVE_SPECS, BUTTON_SETS, C_DIM, C_READY, C_WARN, DISPO_MARK, LIST_SPECS, SPINNER
+from .source_read_notices import worktree_reload_pending, worktree_row_identity, worktree_setup_failed, worktree_source_instance
+
+class PickerScreenModelMixin:
+    def button_set(self):
+        kind = self._kind()
+        if kind == "config_section":
+            return ["ConfigEdit"]
+        if kind == "profiles":
+            return ["PA", "PReset"] if self.grid_dirty() else ["PA"]
+        if kind == "worktrees":
+            # New worktree always; the bulk Clean / Sync buttons (which replaced
+            # the standalone Maintenance view, #1427) whenever there are
+            # worktrees in scope to act on; Toggle-hidden only when there's
+            # something to reveal (or it's already revealing) so it never
+            # clutters (#1422).
+            bset = []
+            if self._tab_supports("create"):
+                bset.append("N")
+            if knowledge_configuration_needed(getattr(self, "_knowledge_readiness", None)):
+                if callable(getattr(self.src, "knowledge_readiness", None)):
+                    bset.append("KB")
+            scoped = self._scope_data()
+            if any(self._record_supports(rec, "cleanup") for rec in scoped):
+                bset.append("K")
+            if any(self._record_supports(rec, "sync") for rec in scoped):
+                bset.append("SY")
+            if self.show_hidden or self._hidden_count() > 0:
+                bset.append("TH")
+            return bset
+        if kind == "registered":
+            # A registered pivot's data-driven "New …" affordance (Phase B,
+            # picker-new-session-prompt-and-composer): only present when the
+            # manifest declares a pivot-level `create_action` (most pivots
+            # don't -- their rows are read-only, discovered state).
+            reg = self._reg_pivot()
+            return (
+                (["NC"] if reg is not None and reg.create_action is not None else [])
+                + [f"VA:{index}" for index, _action in enumerate(self._pivot_view_actions())]
+                + (["TM"] if self._has_task_category_filter() else [])
+            )
+        return BUTTON_SETS.get(kind, [])
+    def _has_task_category_filter(self):
+        from .task_category_filter import dispatch_category
+        return dispatch_category(self._reg_pivot()) is not None
+    def _registered_button_labels(self, reg):
+        return (
+            ([f"+ {reg.create_action.label}"] if reg.create_action else [])
+            + [action.label for action in self._pivot_view_actions()]
+            + ([f"{'☑' if getattr(self, 'include_maintenance', False) else '☐'} Include maintenance"]
+               if self._has_task_category_filter() else [])
+        )
+    def active_button(self):
+        bset = self.button_set()
+        if not bset:
+            return None
+        return bset[self.btn_idx % len(bset)]
+    def _pivot_view_actions(self):
+        from .pivot_actions import entry_matches
+        from .registered_scopes import actions_ready, request_scopes
+
+        reg = self._reg_pivot()
+        if reg is None or not getattr(reg, "view_actions", ()):
+            return []
+        ready = actions_ready(self._pivot_runtime(reg), request_scopes(self, reg))
+        summary = self._task_summary()
+        return [
+            action for action in getattr(reg, "view_actions", ())
+            if (getattr(action, "card", None) is not None
+                or getattr(action, "internal", None) == "recover-forms" or ready)
+            and entry_matches(action.when, summary)
+        ]
+    def grid_dirty(self):
+        return self.profiles_view.grid_dirty()
+    def pending_count(self):
+        return self.profiles_view.pending_count()
+    def cell_locked(self, ti, hi):
+        return self.profiles_view.cell_locked(ti, hi)
+    def machine_state(self, i):
+        label, m, e, ok = self.machines[i]
+        if label == "All":
+            return "ready"
+        if not ok:
+            return "disabled"
+        if self.live:
+            if worktree_reload_pending(self):
+                return "loading"
+            if worktree_setup_failed(self):
+                return "failed"
+            loader = self.loader
+            if loader is None:
+                return "loading"
+            source_id = self.source_tabs[i].get("source_id")
+            if source_id and hasattr(loader, "state_for_source"):
+                return loader.state_for_source(source_id)
+            return loader.state(m, e)
+        if (m, e) == self._src_local():
+            return "ready"
+        return "ready" if (time.monotonic() - self.t0) >= self.load_delay[i] else "loading"
+    def ready_envs(self):
+        from .source_read_notices import has_worktree_snapshot
+
+        out = set()
+        for i, (label, m, e, ok) in enumerate(self.machines):
+            tab = self.source_tabs[i] if self.source_tabs else {}
+            if (
+                label != "All"
+                and tab.get("source_kind") in (None, "machine-ssh")
+                and (
+                    self.machine_state(i) == "ready"
+                    or has_worktree_snapshot(self, i, self.machine_state(i))
+                )
+            ):
+                out.add((m, e))
+        return out
+    def _source_read_connected(self, index):
+        tab = self.source_tabs[index] if self.source_tabs else {}
+        status = getattr(self.loader, "read_status_for_source", None)
+        if not tab.get("source_id") or not callable(status):
+            return False
+        evidence = status(tab["source_id"])
+        return bool(evidence.get("error")) and evidence.get("failure_kind") == "content"
+    def _source_read_error(self, index):
+        if not self.live or self.loader is None:
+            return None
+        tab = self.source_tabs[index] if self.source_tabs else {}
+        if tab.get("source_id") and callable(getattr(self.loader, "error_for_source", None)):
+            return self.loader.error_for_source(tab["source_id"])
+        if callable(getattr(self.loader, "error", None)):
+            return self.loader.error(*self.machines[index][1:3])
+        return None
+    def _source_failure_marker(self, index):
+        from .source_read_notices import has_worktree_snapshot
+
+        if has_worktree_snapshot(self, index, "failed"):
+            return "~", C_DIM
+        return ("✓", C_READY) if self._source_read_connected(index) else ("✗", C_WARN)
+    def ready_source_ids(self):
+        from .source_read_notices import has_worktree_snapshot
+
+        return {
+            tab.get("source_id")
+            for i, tab in enumerate(self.source_tabs)
+            if i and tab.get("source_id") and (
+                self.machine_state(i) == "ready"
+                or has_worktree_snapshot(self, i, self.machine_state(i))
+            )
+        }
+    def spin(self):
+        return SPINNER[self.frame % len(SPINNER)]
+    def _src_local(self):
+        """Cached local identity; rendering never resolves source/config I/O."""
+        if self._source_local is not None:
+            return self._source_local
+        return (None, None)
+    def _src_repo_branch(self):
+        """Cached repo/branch labels; rendering never resolves source/config I/O."""
+        return self._source_repo_branch
+    def local_index(self):
+        if not getattr(self, "_roster_ready", True) or not self.machines:
+            return 1 if len(self.machines) > 1 else 0
+        for i, (label, m, e, ok) in enumerate(self.machines):
+            if (m, e) == self._src_local():
+                return i
+        return 1 if len(self.machines) > 1 else 0
+    def is_all(self):
+        return self.machine_idx == 0
+    def _task_state(self):
+        """(state, rows, error) for the current registered pivot at the current
+        machine. ``state`` is idle|loading|ready|error. Triggers a background
+        fetch of the pivot's ``list`` CLI on first view of a machine."""
+        reg = self._reg_pivot()
+        if reg is None:
+            return ("idle", [], "")
+        from .registered_scopes import snapshot
+        from .task_category_filter import visible_tasks
+        state, rows, error, _summary = snapshot(self, reg)
+        return state, visible_tasks(
+            reg, rows, getattr(self, "include_maintenance", False),
+        ), error
+    def _task_rows(self):
+        """The flat, selectable list of task entries (dicts) for the current
+        registered pivot -- the ('T', i) stops index into this."""
+        rows = self._task_state()[1]
+        rows = rows if isinstance(rows, list) else []
+        reg = self._reg_pivot()
+        if reg is not None:
+            cache = getattr(self, "_config_row_ids", None)
+            if cache is None:
+                cache = self._config_row_ids = {}
+            key = (reg.name, self._pivot_scope_key())
+            ids = tuple(row.get("_manager_row_key", row.get(reg.id_field)) for row in rows)
+            previous = cache.get(key, ())
+            if key in cache and previous != ids and self.sel and self.sel[0] == "T":
+                index = self.sel[1]
+                identity = previous[index] if index < len(previous) else None
+                self.sel = ("T", ids.index(identity)) if identity in ids else ("M", 0)
+            cache[key] = ids
+        return rows
+    def _task_summary(self):
+        """The current registered pivot's summary dict (D1) for the current
+        machine -- the substitution source for its ``summary`` header line.
+        ``{}`` for a built-in pivot or a provider that emitted a bare array.
+        Defensive: a runtime without ``get_summary`` (an older/fixture runtime)
+        degrades to ``{}`` rather than raising."""
+        reg = self._reg_pivot()
+        if reg is None:
+            return {}
+        from .registered_scopes import summary
+        return summary(self, reg)
+    def _worktree_title_map(self):
+        """``{short-id: title}`` from the Picker's loaded worktree records -- the
+        lookup that correlates an account-scoped pivot's *claiming worktree id*
+        (e.g. a CodeSpace lease's 4-hex beacon) to the owning worktree's title.
+        Keyed by both the 4-hex ``id4`` and the full ``id`` (lower-cased)."""
+        out: dict[str, str] = {}
+        for r in (getattr(self, "data", None) or []):
+            if not isinstance(r, dict):
+                continue
+            title = str(r.get("title") or "")
+            if not title:
+                continue
+            for f in ("id4", "id"):
+                v = r.get(f)
+                if v:
+                    out[str(v).strip().lower()] = title
+        return out
+    def _enrich_pivot_rows(self, reg, rows):
+        """Fill each row's ``worktree_title`` (claiming-worktree title) and
+        ``_worktree_short`` (trailing 4-char id, matching the Worktrees
+        list's own ``id4``) from ``reg.worktree_field``. In-place +
+        idempotent; a no-op with no ``worktree_field``/rows.
+        ``_worktree_short`` is what ``_column_row`` displays instead of the
+        far-longer raw value (Phase 4 item 1 fix: the generic front-
+        truncating ``_clip`` produced a meaningless prefix fragment on a
+        real id). Kept separate from the raw field: ``_task_action_ctx``
+        needs the real, full id."""
+        if not reg or not getattr(reg, "worktree_field", None) or not rows:
+            return
+        titles = self._worktree_title_map()
+        for rec in rows:
+            if not isinstance(rec, dict):
+                continue
+            wt = rec.get(reg.worktree_field)
+            rec["worktree_title"] = titles.get(str(wt).strip().lower(), "") if wt else ""
+            rec["_worktree_short"] = str(wt)[-4:] if wt else ""
+    def _worktree_claiming_task(self, rec):
+        """Phase 4 REVERSE cross-link: ``(row, group_field)`` for the
+        registered-pivot task entry claiming worktree ``rec``, or ``None`` --
+        the mirror of ``_enrich_pivot_rows``' task->worktree correlation.
+        Resolves the machine scope from ``rec``'s OWN ``machine`` field (via
+        ``_machine_key_map``, the same display->registry-key translation
+        ``_pivot_machine_id`` does for the currently selected tab), not the
+        globally selected pivot machine -- so a claiming task shows up for
+        every worktree row while browsing the cross-machine "All" scope,
+        not only ones on whichever machine tab happens to be selected. See
+        ``pivots.find_claiming_task`` for the matching logic."""
+        from . import pivots as pivots_mod
+
+        wid = str(rec.get("id") or "").strip().lower()
+        wid4 = str(rec.get("id4") or "").strip().lower()
+        display = rec.get("machine")
+        machine = self._machine_key_map().get(display, display) if display else None
+        return pivots_mod.find_claiming_task(
+            self.pivots, self._pivot_runtimes, machine, wid, wid4)
+    def _worktree_supervised_workers(self, rec):
+        """Remote workers worktree ``rec`` supervises: cached venue-pivot rows
+        whose ``worker`` block names ``rec`` as their driving worktree (see
+        ``pivots.find_supervised_workers``). Scope resolution mirrors
+        ``_worktree_claiming_task``. Never fetches; ``[]`` until loaded."""
+        from . import pivots as pivots_mod
+
+        display = rec.get("machine")
+        machine = self._machine_key_map().get(display, display) if display else None
+        try:
+            return pivots_mod.find_supervised_workers(
+                getattr(self, "pivots", None) or [],
+                getattr(self, "_pivot_runtimes", None) or {},
+                machine, rec.get("id"))
+        except Exception:
+            return []
+    def _worktree_supervised_workers_index(self, records):
+        from .pivots import supervised_workers_by_worktree
+        from .registered_scopes import read_scope
+
+        machine_keys = self._machine_key_map()
+        scopes = {}
+        result = {}
+        worker_pivots = [
+            d for d in self.pivots
+            if getattr(d.get("pivot"), "worker", None) is not None
+        ]
+        for rec in records:
+            display = rec.get("machine")
+            machine = machine_keys.get(display, display) if display else None
+            wid = str(rec.get("id") or "").strip().lower()
+            workers = []
+            for d in worker_pivots:
+                reg = d["pivot"]
+                scope = read_scope(reg, machine)
+                key = (reg.name, scope)
+                if key not in scopes:
+                    scopes[key] = supervised_workers_by_worktree(
+                        [d], self._pivot_runtimes, scope)
+                workers.extend(scopes[key].get(wid, []))
+            result[self._row_key(rec)] = workers
+        return result
+    def _task_groups(self):
+        """Task rows grouped for display. Groups by the pivot's ``group`` entry
+        field (``group_field``) when the manifest declares one -- e.g. the
+        agent-dispatch board's status group (Blocked/Proposed/Queued/Started/
+        Completed/Abandoned) -- otherwise by the worktree field (the default
+        pin-based grouping). Returns ``[(group_label, [(row_index, entry), ...]),
+        ...]`` in first-seen order, so a ``list`` provider that already emits its
+        rows in the intended section order (as ``--board`` does) controls the
+        section order too."""
+        reg = self._reg_pivot()
+        rows = self._task_rows()
+        if reg is None:
+            return []
+        group_key = reg.group_field or reg.worktree_field
+        default_label = "· ungrouped" if reg.group_field else "· unpinned"
+        groups: dict[str, list] = {}
+        order: list[str] = []
+        for i, r in enumerate(rows):
+            gv = r.get(group_key) if group_key else None
+            key = gv or default_label
+            if key not in groups:
+                groups[key] = []
+                order.append(key)
+            groups[key].append((i, r))
+        return [(k, groups[k]) for k in order]
+    def _selected_task(self):
+        """The task entry under the ('T', i) cursor, or None."""
+        if self.sel[0] != "T":
+            return None
+        rows = self._task_rows()
+        if self.sel[0] != "T":
+            return None
+        i = self.sel[1]
+        return rows[i] if 0 <= i < len(rows) else None
+    def cur_machine(self):
+        label, m, e, ok = self.machines[self.machine_idx]
+        return m, e, ok
+    def _current_tab(self):
+        return self.source_tabs[self.machine_idx]
+    def _current_tab_key(self):
+        """The current tab's canonical loader key: its ``source_id`` when it
+        has one, else its ``(machine, env)`` pair. ``None`` on the "All" tab
+        (index 0), which has neither."""
+        if self.is_all():
+            return None
+        tab = self._current_tab()
+        return tab.get("source_id") or (tab.get("machine"), tab.get("env"))
+    def _activate_current_machine_tab(self, prev_key=None, prev_was_all=False):
+        """Lazily start (or keep alive) the current tab's real load
+        (picker-lazy-per-machine-loading): call this after any change to
+        ``machine_idx``. On the "All" tab, ensures every ready machine is
+        fully loaded (aggregation needs everyone); on a specific machine
+        tab, ensures just that one, and -- since the operator is done
+        looking at wherever they just left -- cancels ``prev_key``'s
+        in-flight load if it was ALSO a specific machine tab (never the
+        "All" tab, which legitimately wants every machine kept loading).
+        Best-effort and silently absent on a source/loader that predates
+        these methods (an older engine, or a bare test fixture)."""
+        loader = getattr(self, "loader", None)
+        if loader is None:
+            return
+        if self.is_all():
+            ensure_all = getattr(loader, "ensure_all_loaded", None)
+            if callable(ensure_all):
+                try:
+                    ensure_all()
+                except Exception:
+                    pass
+            return
+        key = self._current_tab_key()
+        ensure = getattr(loader, "ensure_loaded", None)
+        if callable(ensure) and key:
+            try:
+                ensure(key)
+            except Exception:
+                pass
+        if prev_key and not prev_was_all and prev_key != key:
+            cancel = getattr(loader, "cancel_source", None)
+            if callable(cancel):
+                try:
+                    cancel(prev_key)
+                except Exception:
+                    pass
+    @staticmethod
+    def _record_supports(rec, capability):
+        if rec.get("managed_child") and capability in ("sync", "cleanup", "finalize"):
+            return False
+        if rec.get("source_kind", "machine-ssh") == "machine-ssh":
+            return True
+        return bool((rec.get("source_capabilities") or {}).get(capability))
+    @staticmethod
+    def _row_key(rec):
+        return rec.get("selection_id") or rec.get("id4")
+    def _tab_supports(self, capability):
+        if self.is_all():
+            return capability == "create"
+        tab = self._current_tab()
+        if tab.get("source_kind", "machine-ssh") == "machine-ssh":
+            return True
+        return bool((tab.get("capabilities") or {}).get(capability))
+    def _scope_data(self):
+        """Worktrees in the active source-tab scope."""
+        instances = {tab.get("source_id"): instance for tab in self.source_tabs
+                     if (instance := worktree_source_instance(self, tab))}
+        data = [
+            row for row in self.data
+            if row.get("source_id") not in instances
+            or worktree_row_identity(row)[1] == instances[row["source_id"]]
+        ] if instances else self.data
+        if self.is_all():
+            ready_sources = self.ready_source_ids()
+            ready_envs = self.ready_envs()
+            return [
+                w for w in data
+                if (
+                    w.get("source_id") in ready_sources
+                    or (w.get("machine"), w.get("env")) in ready_envs
+                )
+            ]
+        tab = self._current_tab()
+        source_id = tab.get("source_id")
+        if source_id:
+            return [w for w in data if w.get("source_id") == source_id]
+        m, e, _ = self.cur_machine()
+        return [w for w in data if w["machine"] == m and w["env"] == e]
+    def _hidden_count(self):
+        """How many bridge/system worktrees are hidden in the current scope."""
+        return sum(1 for w in self._scope_data() if w.get("hidden"))
+    def _visible_scope_data(self):
+        data = self._scope_data()
+        if not self.show_hidden:
+            data = [w for w in data if not w.get("hidden")]
+        return data
+    def current_list(self):
+        """(cols, [(section_label, [records])]) for the selected machine tab.
+        'All' interleaves every READY machine and shows the machine/env columns;
+        a specific machine hides them (implied by the tab). Bridge/system
+        worktrees are hidden unless Toggle-hidden is on (#1422). Worktrees with
+        no owning Copilot session are split into a distinct 'Unowned' section so
+        selecting one never silently cold-starts a blank conversation (#1026).
+        ALWAYS the full, unfiltered set -- see current_list_visible() (#2228 P4)."""
+        cols = ACTIVE_SPECS if self.is_all() else LIST_SPECS
+        a, r, c = self.src.bucket(self._visible_scope_data())
+        owned = [w for rows in (a, r, c) for w in rows if w.get("managed_child")]
+        if owned:
+            a, r, c = (
+                [w for w in rows if not w.get("managed_child")]
+                for rows in (a, r, c)
+            )
+        unowned = [w for w in r if w.get("sessionless")]
+        if unowned:
+            r = [w for w in r if not w.get("sessionless")]
+        if self.list_view.group_index == 0:
+            sections = [("Active", a), ("Recent", r + c)]
+        elif self.list_view.group_index == 1:
+            rows = a + r + c
+            sections = [
+                (state, [row for row in rows if row["state"] == state])
+                for state in dict.fromkeys(row["state"] for row in rows)
+            ]
+        else:
+            sections = [("Worktrees", a + r + c)]
+        if unowned:
+            sections.append(("Unowned · no prior session (Open starts fresh)", unowned))
+        if owned:
+            sections.append(("Owned · no session here (controller workspaces)", owned))
+        return cols, [(label, self.list_view.sort(rows, derive.WT_SORT_KEYS))
+                      for label, rows in sections]
+    def current_list_visible(self):
+        """current_list() narrowed/sorted by the "/" bar (#2228 P4) --
+        rendering/navigation ONLY; every other consumer keeps the full set.
+
+        worktree-finality-and-obligations Phase 5: the query also matches
+        against ``state`` (the derived FINAL/MERGED/ACTIVE/... label, already
+        closure-descriptor-aware via ``derive._state``) and ``status_markers``
+        (the raw ``C<N>``/``F<N>``/``U*``/``OC*`` compact tokens) -- an
+        operator can type "final", "merged", or a marker like "c1" to narrow
+        the list, not just title/id text."""
+        cols, sections = self.current_list()
+        if self._kind() != "worktrees":
+            return cols, sections
+        return cols, [(label, self.list_view.filter(
+            [row for row in rows if self.list_view.accepts_status(row, derive.wt_row_always_visible)],
+            ("title", "id", "id4", "state", "status_markers"),
+            keep=derive.wt_row_always_visible)) for label, rows in sections]
+    def _wt_visible_records(self):
+        """Flat, render-order VISIBLE Worktrees rows (nav-only counterpart to
+        list_records())."""
+        _cols, sections = self.current_list_visible()
+        out = []
+        for _label, rows in sections:
+            out.extend(rows)
+        return out
+    def list_records(self):
+        _cols, secs = self.current_list()
+        out = []
+        for _label, rows in secs:
+            out.extend(rows)
+        return out
+    def create_target(self):
+        """Where '+ New Worktree' lands: the active machine, or LOCAL when on
+        'All'."""
+        if self.is_all():
+            return self._src_local()
+        m, e, _ = self.cur_machine()
+        return (m, e)
+    def _update_actionable(self) -> bool:
+        """True when the update indicator is a focusable action (#1430).
+
+        Only when an update is *staged* (``available``) is there something to do
+        (Enter = apply + restart); the spinner/✓ states are informational.
+        """
+        return getattr(self, "update_state", "idle") == "available"
+    def _manager_update_actionable(self) -> bool:
+        """True when the Manager's OWN update indicator is a focusable action.
+
+        Distinct from :meth:`_update_actionable` (the engine/marketplace
+        payload's staged state) -- see ``_manager_update_seg``'s docstring
+        for why the two must not be conflated. Only ``"available"`` has
+        something to do (Enter = self-update + restart); ``current``/``idle``
+        stay informational-only.
+        """
+        return getattr(self, "manager_update_state", "idle") == "available"
+    def _v_stops(self):
+        """Top-region vertical stops, in visual (top-to-bottom) order: the
+        one update icon (Manager "MUP" takes precedence over payload "UPD"),
+        then the View pivot row ("V", 0). The ⚙ Configuration entry is NOT a
+        vertical stop -- it rides the pivot row's horizontal ◀▶ nav (#1426)."""
+        out = []
+        if self._manager_update_actionable():
+            out.append(("MUP", 0))
+        if self._update_actionable() and not self._manager_update_actionable():
+            out.append(("UPD", 0))
+        out.append(("V", 0))
+        return out
+    def stops(self):
+        """Vertical Up/Down flow. ("UPD",0)=update refresh icon (only when an
+        update is staged), ("V",0)=View pivot row, ("M",0)=machine picker,
+        ("BTN",0)=button row, then the table/grid rows."""
+        if self._kind() == "config_section":
+            return [*self._v_stops(), ("M", 0), ("BTN", 0)]
+        if self._kind() == "worktrees":
+            out = [*self._v_stops(), ("M", 0)]
+            if self.button_set():
+                out.append(("BTN", 0))
+            for i in range(len(self._wt_visible_records())):
+                out.append(("L", i))
+        elif self._kind() == "maintenance":
+            out = [*self._v_stops(), ("M", 0), ("BTN", 0)]
+            groups = self.maint_groups()
+            if any(rows for _st, rows in groups):
+                out.append(("SA", 0))   # the "Select all" checkbox
+            li = 0
+            for gi, (_st, rows) in enumerate(groups):
+                out.append(("GH", gi))
+                for _ in rows:
+                    out.append(("C", li))
+                    li += 1
+        elif self._kind() == "registered":
+            # Registered pivot: View nav + machine sub-nav, then (when the
+            # manifest declares one) the data-driven "New …" button, then one
+            # stop per task row (grouped rows are flattened in first-seen
+            # order).
+            out = [*self._v_stops(), ("M", 0)]
+            if self.button_set():
+                out.append(("BTN", 0))
+            for i in range(len(self._task_rows())):
+                out.append(("T", i))
+        else:
+            out = [*self._v_stops(), ("M", 0)]
+            for i in range(len(self.targets)):
+                out.append(("PR", i))
+            out.append(("BTN", 0))   # Apply/Reset at the bottom
+        return out
+    def _pr_head(self):
+        """Grid-region entry point, restoring the last-focused row (#1288).
+        pcol (the host column) already persists across Tab in/out."""
+        return ("PR", min(self.last_pr, max(0, len(self.targets) - 1)))
+    def region_head(self, zone):
+        if zone == "PR":
+            return self._pr_head()
+        if zone == "L":
+            return self._l_head()
+        return {"V": ("V", 0), "UPD": ("V", 0), "MUP": ("V", 0), "CFG": ("CFG", 0), "M": ("M", 0),
+                "BTN": ("BTN", 0), "L": ("L", 0), "SA": ("SA", 0),
+                "GH": ("GH", 0), "C": ("C", 0), "PR": ("PR", 0)}.get(
+                    zone, ("V", 0))
+    def region_heads(self):
+        """Tab/Shift+Tab jump targets — the entry point of each major region.
+        The View pivot row is one region; the ⚙ Configuration entry rides its
+        horizontal ◀▶ nav, so Tab lands on the pivots and ◀▶ reaches Config."""
+        v = [("V", 0)]
+        if self._kind() == "config_section":
+            return [*v, ("M", 0), ("BTN", 0)]
+        if self._kind() == "worktrees":
+            heads = [*v, ("M", 0)]
+            if self.button_set():
+                heads.append(("BTN", 0))
+            if self._wt_visible_records():
+                heads.append(self._l_head())
+        elif self._kind() == "maintenance":
+            heads = [*v, ("M", 0), ("BTN", 0)]
+            if self.maint_records():
+                heads.append(("SA", 0))   # Tab into the selection/list region
+        elif self._kind() == "registered":
+            heads = [*v, ("M", 0)]
+            if self.button_set():
+                heads.append(("BTN", 0))
+            if self._task_rows():
+                heads.append(("T", 0))
+        else:
+            heads = [*v, ("M", 0), self._pr_head(), ("BTN", 0)]
+        return heads
+    def default_sel(self):
+        kind = self._kind()
+        d = {"worktrees": ("BTN", 0), "maintenance": ("BTN", 0),
+             "profiles": ("PR", 0), "registered": ("M", 0)}.get(kind, ("BTN", 0))
+        # The Profiles default (``("PR", 0)``) is only valid when there is at
+        # least one target row. With no targets (or no host columns) that stop
+        # doesn't exist, so fall back to the first real stop instead of handing
+        # back a phantom the caller would ``stops.index()`` on (ValueError).
+        stops = self.stops()
+        if d not in stops:
+            return stops[0] if stops else d
+        return d
+    def anchors(self):
+        return self.region_heads()
+    def cleanup_rows(self):
+        """Maintenance worktree list, scoped to the active machine sub-pivot
+        (All = every machine), each tagged with its prune disposition.
+
+        Shows every in-scope worktree -- including in-use/work-bearing ones --
+        so the disposition column is honest; the Cleanup dialog only *offers*
+        the cleanable buckets, and the executor re-checks safety per worktree.
+        """
+        rows = self._visible_scope_data()
+        for w in rows:
+            bucket = w.get("cleanup_bucket", "wip")
+            lvl = derive.BUCKET_DISPO.get(bucket, "")
+            txt = derive.BUCKET_REASON.get(bucket, "")
+            # Blended disposition (verdict + reason in one colored chip).
+            w["dispo_level"] = lvl
+            w["dispo"] = f" {DISPO_MARK[lvl]} {txt}" if lvl else ""
+        return rows

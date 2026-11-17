@@ -152,7 +152,7 @@ no compatibility retirement or native POSIX qualification is implied.
 
 `agent_remote_driver.mux_observation` owns native PSMux reads for Driver
 creation, Worktrees presence/listing and Manager discovery/client counts.
-It reads the provider's port/key rendezvous and sends only bounded,
+Point observation reads the provider's port/key rendezvous and sends only bounded,
 authenticated `list-panes`/`list-clients` queries and a final read-only
 `display-message` identity fence over loopback. Each command uses its own
 authenticated connection for providers that accept only one command per
@@ -171,8 +171,15 @@ contents afterward. A PID sentinel, when present, must still match.
 Failed PID-less endpoint candidates may be stale; they do not block a complete
 authenticated inventory when every live native server is covered elsewhere.
 An unreachable or unregistered live server, unsupported process mode or changing
-inventory remains unknown. Listings share one absence-coverage
-snapshot within their finite budget; live positive rows use their own reads.
+inventory remains unknown.
+`list_psmux()` is a membership-only read: one complete inventory pass supplies
+authenticated session incarnation and actual attached-client count, without a
+second pane-observation pass. Its rows intentionally omit pane details; callers
+needing those use the unchanged `observe_psmux()` or `observe_psmux_many()`.
+The finite inventory batch uses at most eight short-lived query workers under
+the original one-second listing deadline. Each reads client names between
+matching initial/final session identities, preserving the shared byte bound and complete
+process-birth/registration coverage checks. It does not create a resident worker.
 Native process classification accepts paired double-quotes around the same
 supported `-L` and command tokens as their ordinary Windows argument spelling.
 Unknown options, malformed quoting and ambiguous server forms still refuse
@@ -180,8 +187,9 @@ classification; quoting support does not reduce census or registration coverage.
 Selected-namespace absence uses qualified registration identities while still
 covering every native server. The legacy name-only inventory API retains its
 ambiguity refusal for duplicate logical names across namespaces.
-Catalog discovery unions confirmed inventory identities with directory hints
-before namespace filtering, including registrations published between the reads.
+Catalog discovery uses the complete current inventory rather than probing
+stale directory hints again. Registrations published during the inventory
+must pass its unchanged before/after coverage checks.
 Registration basenames retain their authenticated logical names, so `__`
 inside a default-namespace session is not mistaken for a namespace separator.
 Unicode worktree identity components remain intact; path separators and

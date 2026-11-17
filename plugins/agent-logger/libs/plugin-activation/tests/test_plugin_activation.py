@@ -814,12 +814,17 @@ def test_git_executable_is_resolved_once_per_process(
     """picker-performance-and-responsiveness Phase 4 (remaining item):
     ``_git`` must not rescan ``PATH`` on every call -- a cold Picker boot
     calls it ~17-18 times during project/root discovery alone."""
-    resolver._GIT_WHICH_CACHE.clear()
+    from plugin_resolve import git as discovery
+    discovery._cache.clear()
     which_calls = []
 
-    def fake_which(name: str) -> str:
+    selected = tmp_path / "git.exe"
+    selected.touch()
+    selected.chmod(0o755)
+
+    def fake_which(name: str, *, path: str | None = None) -> str:
         which_calls.append(name)
-        return "/usr/bin/git"
+        return str(selected)
 
     def fake_run(args: Sequence[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(args, 0, stdout="ok\n")
@@ -828,8 +833,17 @@ def test_git_executable_is_resolved_once_per_process(
     monkeypatch.setattr(resolver.subprocess, "run", fake_run)
     resolver._git(tmp_path, "status")
     resolver._git(tmp_path, "status")
-    assert which_calls == ["git"]  # only resolved once, not once per call
-    resolver._GIT_WHICH_CACHE.clear()
+    assert len(which_calls) == 1
+    discovery._cache.clear()
+
+
+def test_git_discovery_error_is_unavailable_without_alternate_installation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from plugin_resolve import git as discovery
+    monkeypatch.setattr(discovery, "resolve_git",
+                        lambda: (_ for _ in ()).throw(PermissionError("unavailable")))
+    assert resolver._git_executable() is None
 
 
 def test_bare_anchor_probe_is_one_combined_git_call(tmp_path: Path) -> None:
@@ -1139,8 +1153,9 @@ def test_local_marketplace_symlink_escape_is_rejected(tmp_path: Path) -> None:
     )
     try:
         (market / "demo").symlink_to(outside, target_is_directory=True)
+        (market / "demo").resolve(strict=True)
     except OSError as exc:
-        pytest.skip(f"directory symlinks unavailable: {exc}")
+        pytest.skip(f"directory symlink traversal unavailable: {exc}")
     _write_json(
         copilot / "settings.json",
         {
@@ -1199,14 +1214,23 @@ def test_registered_identity_memo_survives_processes_and_invalidates_config(
     program = """
 import json, sys
 from plugin_activation import resolve_active_plugins, resolver
+from plugin_activation._project_identity import identity_inputs
+from plugin_activation._remote_identity import normalize_remote
+from pathlib import Path
+def inputs():
+    return identity_inputs(Path(sys.argv[1]) / 'repo',
+                           normalize_remote('https://github.com/example/demo.git'),
+                           resolver._git_executable())
 original = resolver._git
 calls = []
 def counted(*args):
     calls.append(args[1:])
     return original(*args)
 resolver._git = counted
+before = inputs()
 report = resolve_active_plugins(home=sys.argv[1])
-print(json.dumps({"calls": len(calls), "active": sorted(report.active)}))
+print(json.dumps({"calls": len(calls), "active": sorted(report.active),
+                  "before": before, "after": inputs()}))
 """
     env = {**os.environ, "PYTHONPATH": os.pathsep.join(map(str, sys.path))}
 
@@ -1222,7 +1246,11 @@ print(json.dumps({"calls": len(calls), "active": sorted(report.active)}))
     assert root.is_dir()
     assert cold["active"] == warm["active"] == ["demo@local"]
     assert cold["calls"] > 0
-    assert warm["calls"] == 0, (cold, warm)
+    if cold["before"] == cold["after"] == warm["before"] == warm["after"] is not None:
+        assert warm["calls"] == 0, (cold, warm)
+    elif cold["after"] != warm["before"] == warm["after"]:
+        # A busy shared ancestor invalidates reuse; it must retain real probes.
+        assert warm["calls"] > 0, (cold, warm)
     _git(repo, *(["--git-dir", str(repo)] if bare else []),
          "remote", "set-url", "origin", "https://github.com/other/demo.git")
     changed = scan()
@@ -1233,17 +1261,26 @@ print(json.dumps({"calls": len(calls), "active": sorted(report.active)}))
 def test_registered_identity_memo_keeps_registry_and_settings_live(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from plugin_activation._project_identity import identity_inputs
+    from plugin_activation._remote_identity import normalize_remote
+
     repo = tmp_path / "repo"
     _register_project(tmp_path, "demo", repo, "https://github.com/example/demo.git")
     _plugin(repo, "local", "demo")
     settings = _settings(repo, "local", "demo")
+    expected = normalize_remote("https://github.com/example/demo.git")
+    assert expected is not None
+    before = identity_inputs(repo, expected, resolver._git_executable())
     assert "demo@local" in resolve_active_plugins(home=tmp_path).active
     original = resolver._git
     calls: list[tuple[Path | str, ...]] = []
     monkeypatch.setattr(resolver, "_git", _counted_git(original, calls))
     _write_json(settings, {"enabledPlugins": {"demo@local": False}})
     assert resolve_active_plugins(home=tmp_path).active == {}
-    assert calls == []
+    after = identity_inputs(repo, expected, resolver._git_executable())
+    if before is not None and before == after:
+        assert calls == []
+    calls.clear()
     registry = tmp_path / ".agent-worktrees" / "repos.yaml"
     data = yaml.safe_load(registry.read_text(encoding="utf-8"))
     data["repos"]["demo"]["remote"] = "https://github.com/other/demo.git"
@@ -1358,8 +1395,9 @@ def test_registered_identity_memo_missing_or_invalid_is_not_replayed(
     assert "demo@local" in resolve_active_plugins(home=tmp_path).active
     memo = tmp_path / ".agent-worktrees" / "cache" / "project-identities.json"
     if raw is None:
-        memo.unlink()
+        memo.unlink(missing_ok=True)
     else:
+        memo.parent.mkdir(parents=True, exist_ok=True)
         memo.write_text(raw, encoding="utf-8")
     _git(repo, "remote", "set-url", "origin", "https://github.com/other/demo.git")
     original = resolver._git

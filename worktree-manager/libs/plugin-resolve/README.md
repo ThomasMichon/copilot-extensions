@@ -548,3 +548,31 @@ are unchanged.
 
 - Copilot CLI: docs.github.com/.../customize-copilot/plugins-marketplace
 - Claude Code: code.claude.com/docs/en/plugin-marketplaces
+
+## Git and fresh user environments
+
+`plugin_resolve.git.resolve_git(explicit=None, env=None)` returns an absolute
+executable without launching a command. An explicit argument or
+`AGENT_GIT_EXECUTABLE` wins; invalid explicit selection fails without choosing
+another installation. Process PATH precedes Windows fresh user/system PATH and
+Git for Windows installation/App Paths registry metadata. Portable/nondefault
+locations need no fixed ProgramFiles guess.
+
+An unset PATH retains the OS default search; an explicitly empty PATH is not
+silently treated as unset. A launching process may carry its discovered absolute
+Git in `AGENT_GIT_DISCOVERED_EXECUTABLE` rather than forwarding stale PATH. This
+is a soft hint, subordinate to explicit configuration: once it disappears,
+normal discovery resumes instead of creating an unintended permanent pin.
+
+Only successful discovery is cached, with existence checked before reuse.
+Absence is not permanently cached. Discovery never retries a command after
+launch races, missing child CWD, timeout or unknown outcome. A deleted caller
+CWD does not prevent absolute selection with a valid child CWD.
+
+`plugin_resolve.environment.fresh_user_environment(overrides=...)` reads the
+Windows OS user environment with `CreateEnvironmentBlock`, releases its native
+resources and returns a new dictionary. POSIX retains process inheritance.
+Selected overrides are case-insensitive on Windows; do not overlay stale PATH.
+The application still owns runtime selectors, credential/session scrubbing and
+preserving an enclosing isolated test environment. Path-valued overrides must
+be anchored before a child changes CWD.

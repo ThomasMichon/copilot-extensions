@@ -1,0 +1,90 @@
+[build-system]
+requires = ["setuptools>=68", "packaging>=25.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.uv]
+exclude-newer = "7 days"
+
+[project]
+name = "copilot-extensions-worktree-manager"
+version = "0.7.126-dev1"
+description = "Standalone, out-of-plugin control plane (installer, configurator & worktree launcher) for the copilot-extensions harness."
+readme = "README.md"
+license = {file = "LICENSE"}
+requires-python = ">=3.11"
+authors = [{ name = "Thomas Michon" }]
+# Textual is the visual-wizard toolkit the Phase 4 configurator UI uses; declared
+# now so the packaging/venv is validated against the real dependency, even
+# though the Phase 0 skeleton does not yet import it.
+dependencies = [
+    "packaging>=25",
+    "textual>=8.2.8",
+    # Read the installer-owned catalog (data/plugins.toml). tomllib is stdlib on
+    # 3.11+; tomli backports it for 3.10.
+    "tomli>=2 ; python_version < '3.11'",
+    "tomlkit>=0.13.3",
+    # Read the harness's own YAML registries/config (repos.yaml, projects.yaml,
+    # per-project config.yaml) for the Manager state views.
+    "pyyaml>=6",
+    # Manager-owned same-machine Agent Host Protocol provider.
+    "websocket-client>=1.8.0",
+    # Optional-at-runtime native Linux shutdown notification/FD transport.
+    "dbus-next==0.2.3 ; sys_platform == 'linux'",
+    # Preserve the embedded libraries' ordinary external constraints.
+    "pyyaml>=6.0",
+    "pyyaml>=6.0.3",
+    "websockets>=15,<16",
+]
+
+[tool.uv.sources]
+"dbus-next" = { "path" = "vendor/dbus_next-0.2.3-py3-none-any.whl" }
+
+[project.scripts]
+worktree-manager = "worktree_manager.__main__:console_entry"
+worktree-manager-install = "worktree_manager.application_footprints:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "setuptools>=83.0.0", "pydantic>=2", "wheel>=0.45", "packaging>=24", "pyyaml>=6.0", "pyte==0.8.2"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"worktree_manager" = ["data/*.toml"]
+"agent_remote_driver.headed" = ["*.mjs"]
+"agent_remote_driver.bridge_extension" = ["*.mjs"]
+"agent_remote_driver" = ["LICENSE"]
+"repository_policy" = ["LICENSE"]
+"process_telemetry" = ["LICENSE"]
+"plugin_resolve" = ["LICENSE"]
+"agent_procutil" = ["LICENSE", "daemon_instance_runtime.pyz", "daemon_instances.ps1", "daemon_instances.sh", "native_daemon.ps1", "native_daemon.sh", "native_owned.ps1", "native_owned.sh", "windows_broker_task.ps1"]
+"dropin_registry" = ["LICENSE"]
+"plugin_activation" = ["LICENSE"]
+"work_coalescing_singleton" = ["LICENSE"]
+"zdd" = ["LICENSE"]
+"remote_login_shell" = ["LICENSE"]
+"machine_transport" = ["LICENSE"]
+"ssh_manager" = ["LICENSE"]
+"update_telemetry" = ["LICENSE"]
+"update_driver" = ["LICENSE", "directory.ps1", "foundation-source.sh", "foundation.ps1", "foundation.sh", "json-query.awk", "participant.ps1"]
+"worktree_identity" = ["LICENSE"]
+"single_instance_lease" = ["LICENSE", "operation.ps1", "operation.sh"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 99
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Cold construction is prepared under the existing bounded native group before
+# explicit file selection; its assertions keep the normal per-item deadline.
+norecursedirs = ["*.egg", ".*", "_darcs", "build", "CVS", "dist", "node_modules", "venv", "{arch}", "native"]
+markers = [
+    "guard: fast structural and contract checks",
+    "contract(name): behavioral contract attribution",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"src/worktree_manager/production_picker/picker_tui/engine.py" = [
+    "RUF001", "RUF002", "RUF003", "B007", "RUF005", "RUF059",
+]

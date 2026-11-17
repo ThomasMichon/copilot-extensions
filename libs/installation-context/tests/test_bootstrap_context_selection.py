@@ -16,7 +16,7 @@ from test_guest_environment_native import _initialized_host
 
 REPO = Path(__file__).resolve().parents[3]
 CONTEXT_TOOL = REPO / "libs" / "installation-context" / "installation_context.py"
-# Agent Index's compatibility hooks are now unconditional no-ops; exercise
+# Agent Index's compatibility hooks only inspect repository metadata; exercise
 # context refusal at the remaining operative bootstrap boundary instead.
 BEHAVIOR_PLUGINS = ("agent-machines",)
 POWERSHELL = shutil.which("pwsh") or shutil.which("powershell")
@@ -95,6 +95,19 @@ def _environment(home: Path, context: Path) -> dict[str, str]:
         "COPILOT_EXTENSIONS_CONTEXT": str(context),
     })
     environment.pop("COPILOT_PLUGIN_ROOT", None)
+    return environment
+
+
+def _unconfigured_index_environment(home: Path, context: Path) -> dict[str, str]:
+    environment = _environment(home, context)
+    subprocess.run(
+        ["git", "init", "--quiet", "--template=", str(home)],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    environment["AGENT_INDEX_REPO"] = str(home)
     return environment
 
 
@@ -281,10 +294,8 @@ def test_selected_current_manifest_is_a_read_only_noop(
     plugin: str,
     runner: Callable[[str, dict[str, str]], subprocess.CompletedProcess[str]],
 ) -> None:
-    # Agent Index is excluded (see BEHAVIOR_PLUGINS): its compatibility hook
-    # is an unconditional no-op that always emits "{}", regardless of manifest
-    # state, so this test's "requested installation context is not active"
-    # behavior assertion does not apply to it.
+    # Agent Index's metadata-only hook does not select an installation context,
+    # so the context-activation assertion does not apply to it.
     home, context, version = _stamp_context(tmp_path, plugin)
     plugin_root = context.parent
     (plugin_root / "deploy-manifest.json").write_text(
@@ -548,7 +559,7 @@ def test_agent_index_compatibility_bootstrap_never_reads_or_mutates_context(
     context = home / "install.json"
     if receipt != "missing":
         context.write_text("{" if receipt == "malformed" else '{"pluginId":"foreign"}', encoding="utf-8")
-    environment = _environment(home, context)
+    environment = _unconfigured_index_environment(home, context)
     host = None
     if runner is _run_powershell:
         if POWERSHELL is None:
@@ -573,8 +584,8 @@ def test_agent_index_compatibility_bootstrap_never_reads_or_mutates_context(
         else:
             result = runner("agent-index", environment)
         assert result.returncode == 0
-        # The compatibility hook is an unconditional no-op, including for
-        # missing, malformed and foreign contexts.
+        # An unconfigured repository stays inactive without inspecting the
+        # missing, malformed or foreign installation context.
         assert result.stdout == "{}"
         assert result.stderr == ""
         assert evidence() == before
@@ -683,15 +694,18 @@ def test_context_for_other_plugin_preserves_legacy_reconcile(
     home, context, _version = _stamp_context(tmp_path, context_plugin)
     _prepare_legacy_current(home, runner_plugin)
 
-    result = runner(runner_plugin, _environment(home, context))
+    environment = (
+        _unconfigured_index_environment(home, context)
+        if runner_plugin == "agent-index" else _environment(home, context)
+    )
+    result = runner(runner_plugin, environment)
 
     assert result.returncode == 0
     if runner_plugin == "agent-machines":
         assert "without legacy fallback" in result.stdout + result.stderr
     else:
-        # Agent Index's compatibility hook is an unconditional no-op --
-        # always emits "{}" on stdout (hooks.json session-start contract),
-        # never anything on stderr.
+        # Agent Index's metadata-only hook stays inactive in this unconfigured
+        # repository and retains the hooks.json session-start output contract.
         assert result.stdout == "{}"
         assert result.stderr == ""
 
