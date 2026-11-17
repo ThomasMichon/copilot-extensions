@@ -18,9 +18,8 @@ explicitly transferred, the finite issue is resolved and its claim completed,
 and the source worktree's independent obligations are preserved. A plan merge
 is not implementation completion, and source acceptance is not rollout.
 
-**Now:** qualify the initial implementation review's refmap and policy-discovery
-regressions before revising the scoped fetch; complete source-closure admission,
-exact-source qualification, review and required CI afterward.
+**Now:** qualify the scoped-fetch revision after three expanded negatives
+failed as intended; complete exact-source review and required CI afterward.
 **Return:** accept only the finite source scope, then record its actual
 source result and return to the contributor's independent remaining work.
 
@@ -102,8 +101,9 @@ custody remain independent.
 ### Phase 2 - Source delivery and finite acceptance
 
 - [x] Add a few fail-first, fully typed controls using disposable local Git.
-- [x] Pass `branch=default_branch` at the existing preparation fetch call;
-  preserve all subsequent start-point and safe-anchor decisions.
+- [x] Explicitly refresh the configured creation base and its related policy
+  bootstrap through the existing fetch implementation; preserve all subsequent
+  start-point and safe-anchor decisions.
 - [x] Satisfy whole-file strict changed-code checks without suppressions or
   pending-project admission. Limit necessary typing corrections to unchanged
   behavior; reconcile any material contributor overlap before proceeding.
@@ -120,8 +120,12 @@ custody remain independent.
 - [x] **Exact base, fail first:** use a nonstandard configured default branch
   omitted by the ordinary fetch refspec; advance it remotely and prove the real
   helper refreshes/selects its exact head.
-- [x] **Ref scope:** advance an unrelated branch too and prove this operation
-  does not refresh its remote-tracking ref.
+- [ ] **Ref scope:** advance an unrelated branch too and prove this operation
+  does not refresh its remote-tracking ref, including alternate and mirror
+  configured mappings.
+- [ ] **Policy discovery:** the actual offline committed-config reader sees a
+  changed bootstrap declaration and the following preparation selects that
+  declared branch, without refreshing unrelated refs.
 - [x] **Preservation:** retain eligible-anchor fast-forward and existing
   dirty/ahead/diverged/detached/non-default/no-remote controls.
 - [x] **Offline reporting:** the actual preparation caller reports the literal
@@ -137,11 +141,12 @@ custody remain independent.
 
 ## Proposal
 
-Reuse `fetch(branch=...)` inside its existing default-base caller. Keep the
-network bound and literal failure path unchanged. Introduce no public API or
-cross-runtime contract. The architecture-pattern principles of right-sized
-surfaces, cross-platform parity and truthful failure apply; this below-altitude
-correction does not revise a vision or create a new service/lifecycle owner.
+Share the existing fetch implementation with `fetch(branch=...)` and its
+default-base preparation caller. Keep the network bound and literal failure
+path unchanged. Introduce no public API or cross-runtime contract. The
+architecture-pattern principles of right-sized surfaces, cross-platform parity
+and truthful failure apply; this below-altitude correction does not revise a
+vision or create a new service/lifecycle owner.
 
 ### Review refinement - required policy refs are not unrelated refs
 
@@ -171,7 +176,7 @@ does not claim these newly exposed cases already passed.
 
 ### 2026-11-17 - Initial review and expanded fail-first controls
 
-- Review5933811209 against the initial implementation head reports five
+- Review 5933811209 against the initial implementation head reports five
   blocking findings. The complete review and all inline comments were read.
   The moved state module must join the actor-free source closure in addition
   to updating the changed original source digest; current CI confirms that
@@ -180,6 +185,22 @@ does not claim these newly exposed cases already passed.
   behavior. Local preparation again failed before collection, so no expanded
   behavioral result is claimed. Use the supported disposable Windows source
   transport for these negatives rather than alter host tools or containment.
+- That supported negative run then exercised exact test-only candidate
+  `7114f4797f665998f9fa9db045f9049c889be2f4` in
+  [run 44031576866](https://github.com/ThomasMichon/copilot-extensions/actions/runs/44031576866).
+  All six cases executed: the original three passed, while alternate tracking,
+  mirror-local-head protection and policy `dev` to `stable` discovery failed
+  at their intended behavior assertions. This is measured fail-first evidence,
+  not a setup failure or a qualified positive result.
+- Only afterward, factored the existing authenticated/deadline-bound fetch
+  body into a private shared owner. Explicit refreshes use `--refmap=`;
+  preparation adds the distinct recorded policy-bootstrap branch to the same
+  fetch. The public single-branch fetch interface, unscoped fetch behavior,
+  offline reader precedence and safe-anchor decisions remain unchanged.
+- Bound the moved declaration-only module in the existing unit source closure
+  and refreshed the changed original digest, without adding unit nodes or
+  coverage targets or changing budgets. Positive qualification and genuine
+  final-head review/CI remain required.
 
 ### 2026-11-17 - Finite correction validated locally
 
