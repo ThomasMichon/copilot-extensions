@@ -8,7 +8,7 @@
 - **Vision:** Verification improvement below runtime-architecture altitude; preserves `visions/test-portfolio/README.md`'s cheapest faithful tier, bounded feedback and containment.
 - **Umbrella issue:** #9807
 - **Coverage:** [Portfolio tracker and merged lockdown records](coverage.md)
-- **Current slice:** Sweep every project through temporary strict opt-in, catalog all failures, fix low-risk typing deltas in waves, and resweep before finishing projects in descending measured completion order. Persistent strict-new-code selection, arbitrary emitted coverage and exact-candidate parity remain open; they no longer serialize independent diagnostic and annotation preparation. The bounded physical-file/known-composition ratchet merged in #12679; a changed-file check is not persistent admission or complete repository-wide new-code coverage. Retain Payload Invocation's complete original test/program corpus, source/frozen, native/minimum-runtime and reviewed-admission clauses here; #10371 is a retired tracking token, not technical completion. The bounded declared-consumer roster and native fixture corrections merged in #11820 after the reviewed independent-runtime direction in #11796; neither activates a pending project. Promotion-owned copy implementation and complete acceptance merged in #11265; preparation and copied-source correspondence are not admission. Installer Engine (#10931) and Efforts (#10955) retain their separate owners and unmet gates. The original Windows membership report (#11468) is resolved by verified passing original cases. Preserve existing deadlines, source custody, resource limits and individual holds. Agent Roles is strictly admitted by #11485; Payload Invocation preparation merged in #11165. Versioned Runtime (#10331), full-composed-consumer qualification (#10362) and the all-Python campaign remain open. No Main release or installed rollout is inferred from a Dev merge.
+- **Current slice:** Review the manifest-backed persistent strict-file proposal in Phase 1a. The independent diagnostic/annotation roster remains open: sweep every project through temporary strict opt-in, catalog all failures, fix low-risk typing deltas in waves, and resweep before finishing projects in descending measured completion order. Persistent strict-new-code selection, arbitrary emitted coverage and exact-candidate parity remain open; they no longer serialize independent diagnostic and annotation preparation. The bounded physical-file/known-composition ratchet merged in #12679; a changed-file check is not persistent admission or complete repository-wide new-code coverage. Retain Payload Invocation's complete original test/program corpus, source/frozen, native/minimum-runtime and reviewed-admission clauses here; #10371 is a retired tracking token, not technical completion. The bounded declared-consumer roster and native fixture corrections merged in #11820 after the reviewed independent-runtime direction in #11796; neither activates a pending project. Promotion-owned copy implementation and complete acceptance merged in #11265; preparation and copied-source correspondence are not admission. Installer Engine (#10931) and Efforts (#10955) retain their separate owners and unmet gates. The original Windows membership report (#11468) is resolved by verified passing original cases. Preserve existing deadlines, source custody, resource limits and individual holds. Agent Roles is strictly admitted by #11485; Payload Invocation preparation merged in #11165. Versioned Runtime (#10331), full-composed-consumer qualification (#10362) and the all-Python campaign remain open. No Main release or installed rollout is inferred from a Dev merge.
 - **Checker-only follow-up:** #10638 is delivered by merged #10866; #10938 delivers emitted-program visibility/binding completeness. Both are prerequisites, not Harness, Versioned Runtime or Payload Invocation admission. Preserve full-composed-consumer qualification under #10362 independently while progressing the other assigned slices.
 - **Latest fixture prerequisite:** The post-acquisition policy-recheck wrapper correction merged in #12133 after the original regression, Ruff, both declared Python 3.11 strict analysis targets, exact-head approval and required source CI passed. Return to the remaining original Invocation test/program corpus; no pending-project admission, coverage advance or existing native/minimum-runtime gate is closed by this fixture-only fix.
 - **Latest scoped unit qualification:** All 32 original private-file management cases now have ordinary three-phase passes, with original function/helper definitions and module markers preserved. Focused multi-case cohorts avoid repeating startup for every case. This closes that fixture family only; the original full corpus, executed/emitted programs, native/minimum-runtime and strict-admission gates remain open.
@@ -55,12 +55,12 @@ low-risk annotation waves proceed without waiting for that separate gate;
 diagnostic passes do not constitute persistent admission or waive any
 project's existing acceptance criteria.
 
-**Now:** Strict diagnostic and annotation waves. The initial 152-cell
-diagnostic catalog below distinguishes completed analyses from blocked scope.
-Reconcile changed inputs and existing ownership, prepare bounded low-risk
-typing cohorts and resweep affected inputs. Phase 1a remains required before
-further persistent legacy admission; diagnostics and annotation preparation
-may proceed independently.
+**Now:** Review the [manifest-backed persistent strict-file proposal](persistent-strict-files.md)
+for Phase 1a before implementation. The diagnostic and annotation roster
+remains open and independent: reconcile changed inputs and existing ownership,
+prepare bounded low-risk cohorts and resweep affected inputs. Phase 1a remains
+required before further persistent legacy admission; this proposal itself
+adds no coverage or qualification authority.
 
 **Return:** After a prerequisite, publication or guidance refresh, return to
 the next unmet Plan or Validation Plan criterion. Reuse preserved exact-input
@@ -181,6 +181,11 @@ Confirmed operator responses:
   file-weighted accounting remain part of the original all-Python objective.
 - The operator explicitly confirmed tracking both merged strict-project
   coverage and physical Python-file coverage.
+- Persistent-coverage design selection, verbatim:
+  `Use strict_files in the existing project manifest (recommended)`.
+  This selects the next normal-reviewed Phase 1a proposal, not implementation,
+  unmodeled-program qualification, a renewed test budget, SDK work or
+  Main-controller changes.
 - Bounded diagnostics may proceed without another approval prompt, preserving
   existing resource, privacy, custody and cleanup limits. This does not
   authorize rollout, protected shared IPC, production mutation, deadline
@@ -351,6 +356,11 @@ rewrite.
 - [x] Document and validate local `--prepare`, per-project, `--enforced`, `--changed`, `--all` and inventory commands. Default checking never implicitly installs tooling.
 
 ### Phase 1a - Strict new-code gate
+
+The [persistent strict-file proposal](persistent-strict-files.md) specifies the
+selected manifest approach and its validation obligations. It is not yet
+implemented and does not resolve the complete emitted/new-code acceptance
+items below.
 
 - [x] Land the bounded physical-file ratchet and existing composed-input
   selectors, without treating that prerequisite as complete emitted/candidate
@@ -658,6 +668,18 @@ See [rollout](rollout.md) for the CLI contract, per-PR boundaries, setup and
 composition prerequisites, and review/validation rules.
 
 ## Journal
+
+### 2026-11-17 - Session Host helper and caller annotation wave
+
+- #13014 merged after exact-head approval and required CI. Four complete
+  touched files pass both strict analysis targets, and the exposed process
+  return types match the provider's existing native and Windows forms.
+- The complete 45-file project remains pending with 152 Linux and 148 win32
+  diagnostics in seventeen files. Preserved setup failures, helper-revision
+  controls and final caller smoke evidence do not imply native, SDK, copied
+  consumer or persistent project admission.
+- The next selected slice is review of manifest-backed persistent strict
+  files; implementation and any new qualification packet remain gated.
 
 ### 2026-11-17 - First Driver Core annotation wave
 
