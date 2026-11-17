@@ -133,6 +133,49 @@ are expected. A gap or expired registration requires explicit recovery while
 retaining unresolved task effects; it is not permission to create a fresh
 baseline and forget them. Polling remains supported when streaming is absent.
 
+## Executable inert reference
+
+The source-only [reference planner](examples/reviewer_feed.py) exercises these
+boundaries without becoming a shipped client command or an activated adapter.
+It accepts a current `next-actions` page, an independently configured `Scope`,
+retained notification evidence and an exact task-lookup callback. It returns at
+most one `create`, `steer`, `noop`, `reconcile` or `read-page` proposal.
+It never calls a task mutation, starts a worker, persists a request, ACKs an
+event or marks a PR action handled.
+
+The embedding maps `lookup(action)` to the existing task owner's exact
+recipe/dedup lookup in the configured harness lane. `Task` is a detached test/
+example projection, not a new task-owner wire response or an authority grant.
+Its complete queue/installation/machine scope must match the configured
+expectation. Missing, foreign or unknown association remains reconciliation.
+The same applies when a prior accepted/unknown notification remains retained
+but the task no longer appears in the live dedup lookup.
+
+The example's `Notification` records come from the embedding's existing durable
+request owner. Their acceptance means task-notification acceptance, not review
+publication. Preserve original prepared requests and uncertain effects there.
+A returned `notification_key` correlates a proposed action and selected task
+revision; it is not itself a prepared request or an automatic retry license.
+Persist the owner's real request identity before effects, reuse it only for
+that notification's retries, and reconcile before proposing another mutation.
+
+Repeated views and a later suspension/revision with unchanged PR activity
+produce no wake proposal. Materially new candidate/cause activity produces a
+distinct proposal for the same task. `last_served_pr` rotates the bounded
+current view; only confirmed consumer progress advances the embedding's
+durable round-robin position. The example requests further pages instead of
+acting on a partial ranking, and retains unavailable coverage on an empty
+view. Retain the actual request offset in `after`; a nonzero offset refuses
+planning even when the last page says `more: false`. It is intentionally a
+bounded complete-first-page example, not an automatic multi-page collection loop.
+
+The [source controls](tests/test_reviewer_feed_example.py) run actual ReplayStore/
+projection/query pages with a task-owner double, including unchanged and newer
+activity, unknown outcomes, absent/replaced/foreign tasks, holds, stale/partial
+coverage and author-owned rebase recommendations. They assert no delivery/ACK
+or cache mutation from planning. They do not qualify real Dispatch
+interoperability, durable request-owner integration or consumer activation.
+
 ## Inert qualification and operational exits
 
 Consumer examples/tests must exercise actual cache views with synthetic
