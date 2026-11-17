@@ -11,6 +11,9 @@ from pathlib import Path
 from typing import Any
 
 from .attachment_import import MAX_ATTACHMENT_BYTES, AttachmentImportError, validate_names
+from .transport_binding import MutationBinding
+
+_REPARSE_POINT = 0x400
 
 NO_EFFECT_CODES = frozenset(
     {
@@ -22,6 +25,7 @@ NO_EFFECT_CODES = frozenset(
         "database_unconfigured",
         "service_unavailable",
         "create_only_unsupported",
+        "mutation_transport_unsupported",
         "backend_unsupported",
         "needs_unlock",
         "vault_read_failed",
@@ -44,14 +48,14 @@ def _read_file(path: Path, *, private: bool) -> bytes:
         info = parent.lstat()
         if (
             not stat.S_ISDIR(info.st_mode)
-            or getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+            or getattr(info, "st_file_attributes", 0) & _REPARSE_POINT
         ):
             raise AttachmentImportError("input_custody_invalid")
     before = path.lstat()
     if (
         not stat.S_ISREG(before.st_mode)
         or before.st_nlink != 1
-        or getattr(before, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+        or getattr(before, "st_file_attributes", 0) & _REPARSE_POINT
         or before.st_size > MAX_ATTACHMENT_BYTES
         or (
             os.name != "nt"
@@ -99,11 +103,13 @@ def command(args: Any) -> int:
         )
         private = _read_file(private_path, private=True)
         public = _read_file(Path(str(private_path) + ".pub"), private=False)
+        binding = MutationBinding()
         response = cli.send_command(
             {"action": "ping", "health_only": True},
             timeout=5.0,
             strict_endpoint=True,
             require_endpoint=True,
+            binding=binding,
         )
         if not isinstance(response, dict) or response.get("ok") is not True:
             raise AttachmentImportError("service_unavailable")
@@ -114,8 +120,11 @@ def command(args: Any) -> int:
             type(version) is int and version == 1 for version in versions
         ):
             raise AttachmentImportError("create_only_unsupported")
+        binding.accept_health(response)
+        if not binding.ready:
+            raise AttachmentImportError("mutation_transport_unsupported")
         effect_possible = True
-        response = cli.send_command(
+        response = binding.send_once(
             {
                 "action": "import-key-create-only",
                 "entry": entry,
@@ -127,8 +136,6 @@ def command(args: Any) -> int:
                 "allow_prompt": False,
             },
             timeout=75.0,
-            strict_endpoint=True,
-            require_endpoint=True,
         )
         if not isinstance(response, dict) or response.get("ok") is not True:
             code = response.get("code") if isinstance(response, dict) else None

@@ -6,6 +6,7 @@ import ast
 import base64
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field
+from functools import partial
 import importlib.util
 import os
 from pathlib import Path
@@ -98,7 +99,7 @@ def owner(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     locking.__dict__["database_creation_lock"] = lock
     monkeypatch.setitem(sys.modules, locking.__name__, locking)
     loaded: dict[str, ModuleType] = {}
-    for leaf in ("attachment_import", "attachment_import_cli"):
+    for leaf in ("transport_binding", "attachment_import", "attachment_import_cli"):
         spec = importlib.util.spec_from_file_location(
             name + "." + leaf, SOURCE / (leaf + ".py")
         )
@@ -123,20 +124,28 @@ def owner(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         accepting=True,
     )
 
+    def mutate(request: dict[str, Any], _timeout: float | None) -> Any:
+        calls.append(request)
+        response = state.response
+        if response is not None:
+            response = {**response, "key_attachment_import_owner": "synthetic-owner"}
+        return response
+
     def send(request: dict[str, Any], **options: Any) -> Any:
         assert (
             options["strict_endpoint"] is True and options["require_endpoint"] is True
         )
         calls.append(request)
-        return (
-            {
-                "ok": state.running,
-                "accepting_work": state.accepting,
-                "key_attachment_import_versions": state.versions,
-            }
-            if request["action"] == "ping"
-            else state.response
+        assert request["action"] == "ping"
+        options["binding"].select(
+            mutate, single_attempt=True, defaults={},
         )
+        return {
+            "ok": state.running,
+            "accepting_work": state.accepting,
+            "key_attachment_import_versions": state.versions,
+            "key_attachment_import_owner": "synthetic-owner",
+        }
 
     cli = ModuleType(name + ".cli")
     cli.__dict__.update(send_command=send)
@@ -149,6 +158,7 @@ def owner(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         state=state,
         lock_calls=lock_calls,
         package=name,
+        binding=loaded["transport_binding"],
     )
 
 
@@ -249,9 +259,11 @@ def test_create_only_success_uses_new_entry_and_two_nonoverwriting_writes(
 
 
 @pytest.mark.parametrize("unlocked", [True, False])
+@pytest.mark.parametrize("expected_owner", ["synthetic-owner", "other-owner", None])
 def test_actual_service_dispatch_does_not_invoke_unlock(
     owner: SimpleNamespace,
     unlocked: bool,
+    expected_owner: str | None,
 ) -> None:
     tree = ast.parse((SOURCE / "service.py").read_bytes())
     node = next(
@@ -265,6 +277,7 @@ def test_actual_service_dispatch_does_not_invoke_unlock(
     backend = Backend(unlocked=unlocked)
     instance = SimpleNamespace(
         cli=backend,
+        _attachment_import_owner="synthetic-owner",
         _request_ctx=SimpleNamespace(),
         keepalive=lambda: None,
         _check_password_ttl=lambda: None,
@@ -292,16 +305,21 @@ def test_actual_service_dispatch_does_not_invoke_unlock(
             "action": "import-key-create-only",
             "kpdb": "synthetic-db",
             "group": "Example",
+            "expected_import_owner": expected_owner,
         },
         "synthetic-peer",
         "synthetic-transport",
     )
     assert result == (
         {"ok": True, "status": "created"}
-        if unlocked
+        if unlocked and expected_owner == "synthetic-owner"
+        else {"ok": False, "code": "import_owner_changed", "error": "import_owner_changed"}
+        if expected_owner != "synthetic-owner"
         else {"ok": False, "code": "needs_unlock", "error": "needs_unlock"}
+    ) | {"key_attachment_import_owner": "synthetic-owner"}
+    assert len(backend.calls) == (
+        4 if unlocked and expected_owner == "synthetic-owner" else 0
     )
-    assert len(backend.calls) == (4 if unlocked else 0)
 
 
 @pytest.mark.parametrize(
@@ -584,6 +602,216 @@ def test_capability_tracks_supported_cli_input_custody(
                 cli=backend,
                 _generation=None,
                 _runtime_can_work=True,
+                _attachment_import_owner="synthetic-owner",
             )
         )
         assert result["key_attachment_import_versions"] == ([1] if capable else [])
+
+
+@pytest.fixture
+def routed_owner(
+    owner: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> SimpleNamespace:
+    """Execute the actual sender and registry, replacing only IPC/storage edges."""
+    spec = importlib.util.spec_from_file_location(
+        owner.package + ".extensions", SOURCE / "extensions.py"
+    )
+    assert spec is not None and spec.loader is not None
+    extensions = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, extensions)
+    spec.loader.exec_module(extensions)
+    registry = extensions.ExtensionRegistry()
+    registry._loaded = True
+    extensions.__dict__["_REGISTRY"] = registry
+    context = SimpleNamespace(
+        kpdb="synthetic-db", group="Example", vault_name="example",
+        port=12345, sources={"port": "default"},
+    )
+    config = sys.modules[owner.package + ".config"]
+    config.__dict__["resolve_context"] = lambda **_kwargs: context
+    state = SimpleNamespace(
+        discovery_calls=0,
+        endpoint=SimpleNamespace(
+            transport="tcp", source="local", tcp_host_port=("synthetic-host", 23456),
+        ),
+    )
+    events: list[tuple[str, str]] = []
+
+    def discover(_context: object, **_options: object) -> object:
+        state.discovery_calls += 1
+        return state.endpoint
+
+    def native(
+        request: dict[str, Any], _host: str, _port: int, _timeout: float | None,
+    ) -> dict[str, Any]:
+        events.append(("native", request["action"]))
+        return {
+            "ok": True, "status": "created", "accepting_work": True,
+            "key_attachment_import_versions": [1],
+            "key_attachment_import_owner": "synthetic-owner",
+        }
+
+    tree = ast.parse((SOURCE / "cli.py").read_bytes())
+    nodes: list[ast.stmt] = [
+        node for node in tree.body
+        if isinstance(node, ast.ImportFrom) and node.module == "__future__"
+        or isinstance(node, ast.FunctionDef) and node.name == "send_command"
+    ]
+    assert len(nodes) == 2
+    namespace: dict[str, Any] = {
+        "__name__": owner.package + ".cli", "__package__": owner.package,
+        "config": config, "os": SimpleNamespace(environ={}),
+        "IS_WSL": False, "IS_WINDOWS": False, "partial": partial,
+        "_discover_endpoint": discover, "_send_tcp": native,
+        "_send_socket": lambda *_a, **_kw: pytest.fail("unexpected socket fallback"),
+        "rendezvous": SimpleNamespace(
+            EndpointUnavailable=RuntimeError, EndpointStateError=ValueError,
+        ),
+    }
+    exec(
+        compile(ast.Module(body=nodes, type_ignores=[]), str(SOURCE / "cli.py"), "exec"),
+        namespace,
+    )
+    monkeypatch.setattr(owner.cli, "send_command", namespace["send_command"])
+    return SimpleNamespace(
+        owner=owner, registry=registry, events=events, state=state,
+        namespace=namespace, context=context,
+    )
+
+
+@pytest.mark.parametrize(
+    "outcome", ["lost", "raised", "other-success", "other-refusal", "rollback", "created"],
+)
+def test_preferred_mutation_never_falls_through_after_acceptance(
+    routed_owner: SimpleNamespace, capsys: pytest.CaptureFixture[str], outcome: str,
+) -> None:
+    route = routed_owner
+
+    def other(*_args: object) -> dict[str, Any]:
+        pytest.fail("mutation fell through to another extension")
+
+    def preferred(
+        request: dict[str, Any], _timeout: float | None, context: Any,
+    ) -> dict[str, Any] | None:
+        route.events.append(("preferred", request["action"]))
+        if request["action"] == "ping":
+            # A callback-supplied label must not substitute for its actual identity.
+            return {
+                "ok": True, "accepting_work": True,
+                "key_attachment_import_versions": [1],
+                "key_attachment_import_owner": "synthetic-owner",
+                "_transport": "unrelated-label",
+            }
+        assert request["expected_import_owner"] == "synthetic-owner"
+        assert request["kpdb"] == "synthetic-db"
+        assert context.port == 23456
+        if outcome == "raised":
+            raise TimeoutError("synthetic lost mutation reply")
+        if outcome == "lost":
+            return None
+        if outcome == "rollback":
+            return {"ok": False, "code": "create_only_unsupported"}
+        return {
+            "ok": outcome != "other-refusal", "status": "created", "code": "entry_exists",
+            "key_attachment_import_owner": (
+                "synthetic-owner" if outcome == "created" else "other-owner"
+            ),
+        }
+
+    route.registry.register_transport(
+        preferred, before_builtin=True, single_attempt=True, priority=1,
+    )
+    route.registry.register_transport(other, before_builtin=True, priority=2)
+    route.registry.register_transport(other)
+    code = route.owner.client.command(SimpleNamespace(
+        require_running=True, entry="new-key", key_file="/synthetic/example.key",
+    ))
+    output = capsys.readouterr()
+    assert code == (0 if outcome == "created" else 1)
+    assert route.events == [
+        ("preferred", "ping"), ("preferred", "import-key-create-only"),
+    ]
+    assert route.state.discovery_calls == 1
+    if outcome != "created":
+        assert '"effect_status": "unknown"' in output.err
+
+
+def test_legacy_preferred_transport_refuses_before_private_payload(
+    routed_owner: SimpleNamespace, capsys: pytest.CaptureFixture[str],
+) -> None:
+    route = routed_owner
+
+    def legacy(request: dict[str, Any], *_args: object) -> dict[str, Any]:
+        route.events.append(("legacy", request["action"]))
+        assert "key_data" not in request
+        return {
+            "ok": True, "accepting_work": True,
+            "key_attachment_import_versions": [1],
+            "key_attachment_import_owner": "synthetic-owner",
+        }
+
+    route.registry.register_transport(legacy, before_builtin=True)
+    assert route.owner.client.command(SimpleNamespace(
+        require_running=True, entry="new-key", key_file="/synthetic/example.key",
+    )) == 1
+    assert route.events == [("legacy", "ping")]
+    output = capsys.readouterr()
+    assert '"error": "mutation_transport_unsupported"' in output.err
+    assert '"effect_status": "not_started"' in output.err
+
+
+@pytest.mark.parametrize("native_route", ["tcp", "unix", "pipe", "extension"])
+def test_selected_connector_and_context_survive_rebinding_and_loss(
+    routed_owner: SimpleNamespace, native_route: str,
+) -> None:
+    route = routed_owner
+    binding = route.owner.binding.MutationBinding()
+    observed: list[dict[str, Any]] = []
+    route.state.endpoint.transport = "tcp" if native_route == "extension" else native_route
+    route.state.endpoint.address = "synthetic-endpoint"
+    route.namespace["IS_WINDOWS"] = native_route == "pipe"
+    route.state.endpoint.source = "windows"
+
+    def selected(request: dict[str, Any], *_args: object, **_kwargs: object) -> Any:
+        observed.append(request)
+        if request["action"] == "ping":
+            return {
+                "ok": True, "accepting_work": True,
+                "key_attachment_import_versions": [1],
+                "key_attachment_import_owner": "synthetic-owner",
+            }
+        return None
+
+    def other(*_args: object, **_kwargs: object) -> Any:
+        pytest.fail("bound mutation re-resolved its selected connector")
+
+    def pipe_selected(
+        _path: str, request: dict[str, Any], timeout: float | None,
+    ) -> Any:
+        return selected(request, timeout)
+
+    route.namespace.update(
+        _send_tcp=selected, _send_socket=selected, pipe_send=pipe_selected,
+    )
+    if native_route == "extension":
+        route.registry.register_transport(
+            selected, before_builtin=True, single_attempt=True,
+        )
+    health = route.owner.cli.send_command(
+        {"action": "ping", "health_only": True},
+        strict_endpoint=True, require_endpoint=True, binding=binding,
+    )
+    binding.accept_health(health)
+    route.namespace.update(_send_tcp=other, _send_socket=other, pipe_send=other)
+    route.registry._transports_before.clear()
+    route.registry.register_transport(other, before_builtin=True)
+    route.context.kpdb, route.context.port = "other-database", 34567
+    route.state.endpoint = None
+    assert binding.send_once({"action": "import-key-create-only"}, 1.0) is None
+    assert route.state.discovery_calls == 1
+    assert [request["action"] for request in observed] == ["ping", "import-key-create-only"]
+    # Windows-side selection must not inherit the guest's database defaults.
+    assert all("kpdb" not in request for request in observed)
+    with pytest.raises(ValueError, match="unused mutation-capable"):
+        binding.send_once({"action": "import-key-create-only"}, 1.0)
+    assert len(observed) == 2

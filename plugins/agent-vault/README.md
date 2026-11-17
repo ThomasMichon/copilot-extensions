@@ -331,9 +331,19 @@ unlock provider or prompts. Prevent cold payload self-provisioning independently
 with `AGENT_VAULT_NO_SELFPROVISION=1`; the flag does not authorize or suppress an
 installer that ran before CLI dispatch.
 The existing health reply must advertise `key_attachment_import_versions`
-containing integer `1` and accept work before private bytes are sent.
+containing integer `1`, a nonempty `key_attachment_import_owner` identifying
+that service incarnation, and acceptance of work before private bytes are sent.
+The import uses the connector and context selected by that health request,
+once, with `expected_import_owner`; the service checks it before backend access
+and echoes its incarnation on the result. A lost, owner-mismatched or legacy
+reply remains unknown, without rediscovery, transport failover or replay.
 Missing/withdrawn support refuses without mutation; rollback between discovery
 and execution still cannot invoke the older mutating action.
+Preferred extension transports keep their priority. To carry this mutation,
+their existing `register_transport` call must opt into `single_attempt=True`,
+promising one pinned route/owner and at most one send per callback invocation,
+without internal retry or post-send fallback. Legacy callbacks remain usable
+for ordinary reads but refuse this import before receiving private bytes.
 The entry and all parent groups must be unambiguous, the parents must already
 exist, and any existing entry or group at the destination refuses before an add.
 The existing local database creation lock serializes cooperating local writers;

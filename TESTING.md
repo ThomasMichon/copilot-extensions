@@ -7507,6 +7507,13 @@ the actual import-owner, CLI-dispatch and backend bodies with inert storage,
 lock, transport and temporary-file owners. Collision, failed/unknown creation,
 partial attachment outcomes, old-service refusal and unchanged legacy force
 behavior remain distinct; no database, key, service or process is created.
+The same packet composes the actual sender and extension registry to verify
+health-selected single-attempt mutation routing: lost replies and exceptions
+never reach another transport, unsafe legacy callbacks receive no private
+payload, owner changes/rollback cannot hide unknown outcomes, and selected
+native/extension connectors survive rebinding without reuse or rediscovery.
+Service dispatch separately refuses missing/mismatched incarnation bindings
+before backend access.
 The plugin's separate `test_attachment_import_files.py` source packet exercises
 POSIX ordinary-file custody using synthetic non-key bytes. Neither packet
 qualifies a live credential owner, native key pair or privileged materializer.

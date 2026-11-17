@@ -19,7 +19,7 @@ class PasswordMutationAmbiguous(RuntimeError):
 class KeePassXCBackend:
     """keepassxc-cli backend - full access with master password."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._master_pass: dict[str, str] = {}
         self._cli_path: str | None = self._find_cli()
 
@@ -90,7 +90,7 @@ class KeePassXCBackend:
         kpdb: str,
         args: list[str],
         timeout: float = 10,
-    ) -> subprocess.CompletedProcess | None:
+    ) -> subprocess.CompletedProcess[str] | None:
         if not self._cli_path or not self.has_password(kpdb):
             return None
         try:
@@ -118,7 +118,7 @@ class KeePassXCBackend:
 
     def _identity_run(
         self, kpdb: str, args: list[str], deadline: float,
-    ) -> subprocess.CompletedProcess | None:
+    ) -> subprocess.CompletedProcess[str] | None:
         from .identity_key import IdentityKeyError
 
         remaining = deadline - time.monotonic()

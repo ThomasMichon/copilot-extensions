@@ -13,6 +13,7 @@ import signal
 import sys
 import threading
 import time
+from uuid import uuid4
 from argparse import Namespace
 from collections.abc import Callable
 from pathlib import Path
@@ -109,6 +110,7 @@ class VaultService:
         self._password_handoff_deadlines: dict[str, float] = {}
         self._shutdown = False
         self._runtime_can_work = True
+        self._attachment_import_owner = uuid4().hex
         self._default_kpdb: str | None = None
         self.ttl_override: int | None = None  # 0 = persistent (never expire)
         self._unlock_lock = threading.Lock()  # prevents concurrent GUI prompts
@@ -576,6 +578,7 @@ class VaultService:
             "key_attachment_import_versions": (
                 [1] if callable(getattr(self.cli, "import_attachment_create_only", None)) else []
             ),
+            "key_attachment_import_owner": self._attachment_import_owner,
             "auth_handoff_versions": supported_versions(),
             "auth_handoff_receiver": (
                 self._generation.handoff_advertisement()
@@ -619,6 +622,20 @@ class VaultService:
             return invalid
         if action == "ping" and request.get("health_only") is True:
             return self._generation_health()
+        if action == "import-key-create-only":
+            from .attachment_import import handle_request
+
+            if request.get("expected_import_owner") != self._attachment_import_owner:
+                import_result: dict[str, Any] = {
+                    "ok": False, "code": "import_owner_changed", "error": "import_owner_changed",
+                }
+            else:
+                self._check_password_ttl()
+                import_result = handle_request(
+                    self.cli, request.get("kpdb") or resolve_kpdb(required=False),
+                    request.get("group"), request,
+                )
+            return {**import_result, "key_attachment_import_owner": self._attachment_import_owner}
         self._check_password_ttl()
         client = request.get("_client", "")
         kpdb: Any = request.get("kpdb")
@@ -818,11 +835,6 @@ class VaultService:
             if not password:
                 return {"ok": False, "error": "No password provided"}
             return self._set_password(kpdb, entry, password, vault_name, reason)
-
-        if action == "import-key-create-only":
-            from .attachment_import import handle_request
-
-            return handle_request(self.cli, kpdb, group, request)
 
         if action == "import-key":
             import base64
