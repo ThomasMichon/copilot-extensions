@@ -19,7 +19,10 @@ from test_manager_recovery import adopted as adopted
 _PACKAGE = "copilot-extensions-worktree-manager"
 
 
-def _wheel(application: SimpleNamespace, *, name: str = _PACKAGE, version: str = "0.6.35.dev1") -> bytes:
+def _wheel(
+    application: SimpleNamespace, *, name: str = _PACKAGE, version: str = "0.6.35.dev1",
+    ref: str = "application-release",
+) -> bytes:
     output = io.BytesIO()
     with zipfile.ZipFile(output, "w") as archive:
         archive.writestr(
@@ -28,7 +31,7 @@ def _wheel(application: SimpleNamespace, *, name: str = _PACKAGE, version: str =
         )
         archive.writestr(
             "worktree_manager/source_config.py",
-            f"DEFAULT_REPO = {str(application.repo)!r}\nDEFAULT_REF = 'application-release'\n"
+            f"DEFAULT_REPO = {str(application.repo)!r}\nDEFAULT_REF = {ref!r}\n"
             "raise AssertionError('package source must not execute during admission')\n",
         )
     return output.getvalue()
@@ -44,15 +47,27 @@ def _write(path: Path, value: dict[str, Any]) -> None:
     path.write_text(json.dumps(value), encoding="utf-8")
 
 
-@pytest.fixture
-def application(adopted: SimpleNamespace) -> SimpleNamespace:
+def _application(
+    adopted: SimpleNamespace, *, name: str = _PACKAGE, version: str = "0.6.35.dev1",
+) -> SimpleNamespace:
     source_version = "0.6.35-dev1+source." + "a" * 40 + "." + "b" * 16
-    generation = source_version + ".profile." + "c" * 16
+    content = _wheel(adopted, name=name, version=version)
+    filename = "copilot_extensions_worktree_manager-0.6.35.dev1-py3-none-any.whl"
+    binding = {
+        "component": "worktree-manager",
+        "release": {"identity": "source:" + "a" * 40, "sha256": "sha256:" + "b" * 64},
+        "wheels": [{
+            "name": _PACKAGE, "version": "0.6.35.dev1", "filename": filename,
+            "sha256": "sha256:" + hashlib.sha256(content).hexdigest(),
+        }],
+    }
+    canonical = json.dumps(binding, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    digest = hashlib.sha256(canonical.encode("ascii")).hexdigest()
+    generation = source_version + ".profile." + digest[:16]
     slot = adopted.root / "versions" / generation
     (slot / "wheels").mkdir(parents=True)
     adopted.slot = slot
-    adopted.wheel = slot / "wheels" / "copilot_extensions_worktree_manager-0.6.35.dev1-py3-none-any.whl"
-    content = _wheel(adopted)
+    adopted.wheel = slot / "wheels" / filename
     adopted.wheel.write_bytes(content)
     (slot / "pyproject.toml").write_text(
         '[project]\nname="uv-application-copilot-extensions-worktree-manager"\n'
@@ -76,21 +91,18 @@ def application(adopted: SimpleNamespace) -> SimpleNamespace:
             "identity": {"runtime_source": source, "runtime_version": source_version},
             "runtime_version": generation, "local_packages": [_PACKAGE],
             "wheel_inputs": {
-                "lock_id": "sha256:" + "c" * 64,
-                "binding": {
-                    "component": "worktree-manager",
-                    "release": {"identity": "source:" + "a" * 40, "sha256": "sha256:" + "b" * 64},
-                    "wheels": [{
-                        "name": _PACKAGE, "version": "0.6.35.dev1",
-                        "filename": adopted.wheel.name,
-                        "sha256": "sha256:" + hashlib.sha256(content).hexdigest(),
-                    }],
-                },
+                "lock_id": "sha256:" + digest,
+                "binding": binding,
             },
         },
     })
     (adopted.root / "current-version").write_text(generation, encoding="utf-8")
     return adopted
+
+
+@pytest.fixture
+def application(adopted: SimpleNamespace) -> SimpleNamespace:
+    return _application(adopted)
 
 
 def test_normal_controller_reads_application_owned_source_without_executing_it(
@@ -140,9 +152,17 @@ def test_application_wrapper_requires_actual_locked_manager_dependency(
     ("another-package", "0.6.35.dev1"), (_PACKAGE, "0.6.34.dev1"),
 ])
 def test_application_checks_actual_wheel_metadata_not_just_wrapper_or_filename(
-    application: SimpleNamespace, name: str, version: str,
+    adopted: SimpleNamespace, name: str, version: str,
 ) -> None:
-    content = _wheel(application, name=name, version=version)
+    _application(adopted, name=name, version=version)
+    with pytest.raises(recovery.RecoveryRefused, match="wheel metadata"):
+        recovery.adopted_manager()
+
+
+def test_changed_wheel_and_binding_cannot_keep_the_old_profile_identity(
+    application: SimpleNamespace,
+) -> None:
+    content = _wheel(application, ref="changed-release")
     application.wheel.write_bytes(content)
     path = application.slot / "application.json"
     record = _record(path)
@@ -150,7 +170,7 @@ def test_application_checks_actual_wheel_metadata_not_just_wrapper_or_filename(
         "sha256:" + hashlib.sha256(content).hexdigest()
     )
     _write(path, record)
-    with pytest.raises(recovery.RecoveryRefused, match="wheel metadata"):
+    with pytest.raises(recovery.RecoveryRefused, match="binding differs from its profile lock"):
         recovery.adopted_manager()
 
 

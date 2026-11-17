@@ -124,6 +124,9 @@ def inspect_application(
         or _PACKAGE not in construction.get("local_packages", ())
     ):
         raise ValueError("Manager application differs from its owner or source identity")
+    canonical_binding = json.dumps(binding, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    if lock_id != "sha256:" + hashlib.sha256(canonical_binding.encode("ascii")).hexdigest():
+        raise ValueError("Manager application wheel binding differs from its profile lock")
     rows = [row for row in binding["wheels"] if row.get("name") == _PACKAGE]
     if (
         len(rows) != 1 or rows[0].get("filename") != wheel.name
