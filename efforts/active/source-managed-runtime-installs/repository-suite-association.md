@@ -39,24 +39,25 @@ production, execution custody and all operational holds.
 
 ## Validation plan
 
-- [ ] Review the receiving contract before shared caller changes.
-- [ ] A missing association is an explicit unassociated observation and creates
+- [x] Review the receiving contract before shared caller changes; #12987 merged
+  with exact-head approval and passing required checks.
+- [x] A missing association is an explicit unassociated observation and creates
   no configuration, lock or repository.
-- [ ] Inspection ignores ambient cwd and repository configuration there, reads
+- [x] Inspection ignores ambient cwd and repository configuration there, reads
   only the selected Manager configuration, and neither parses adopter YAML nor
   starts Git, a daemon or setup.
-- [ ] Invalid TOML, unknown association versions/fields and malformed roots
+- [x] Invalid TOML, unknown association versions/fields and malformed roots
   refuse without becoming an absent association or overwriting data.
-- [ ] Apply changes only the owned association table through the existing
+- [x] Apply changes only the owned association table through the existing
   configuration writer. Manager self-source, runtime-source policy and all
   unrelated values survive.
-- [ ] An initial binding, repeat request, explicit replacement and clear work
+- [x] An initial binding, repeat request, explicit replacement and clear work
   through the real module boundary. A stale expected root refuses without
   changing the association.
-- [ ] Equivalent native path spellings do not create an accidental retarget.
+- [x] Equivalent native path spellings do not create an accidental retarget.
   Inspection of the stored identity does not require the adopter to remain
   available; consuming its declaration retains the existing path checks.
-- [ ] Cold invocation with the trusted source/tool dependency closure works
+- [x] Cold invocation with the trusted source/tool dependency closure works
   without an installed Manager, registry or running daemon.
 - [ ] Old consumers do not gain association support merely because they ignore
   the new TOML table. Unsupported module/schema discovery remains explicit.
@@ -65,7 +66,17 @@ production, execution custody and all operational holds.
 
 ## Current boundary
 
-This is the receiving design only. Schema-2 recovery remains preview-only.
-There is no production association, new bootstrap request version, installed
-pin, migration, repository write or rollout in this change. The parent effort
-and all installation/adoption gates remain open.
+The receiving contract is reviewed; the isolated Manager module/API and its
+explicit association operations are implemented. The native Windows packet
+passes 21 controls, including actual cold-module inspect/propose/apply/replace/
+clear, expected-root revalidation under the shared lock, failed publication,
+input bounds and unrelated-policy retention. The two changed Python files pass
+whole-file strict analysis for Linux and Windows Python 3.10 targets. The
+Manager checker uses a scoped hash-locked TOML backport environment; this does
+not change the whole project's pending admission.
+
+Schema-2 recovery remains preview-only. No ordinary caller consumes this
+association yet, and no operator installation was configured by the source
+tests. There is no new bootstrap request version, installed pin, migration,
+repository write or rollout. Old-caller negotiation, actual source convergence
+and native installation/adoption gates remain open in the parent.

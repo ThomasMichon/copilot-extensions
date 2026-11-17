@@ -703,7 +703,8 @@
         "worktree-manager"
       ],
       "exclude": [],
-      "level": "pending"
+      "level": "pending",
+      "requirements": "tools/typecheck-toml-requirements.txt"
     }
   ]
 }
