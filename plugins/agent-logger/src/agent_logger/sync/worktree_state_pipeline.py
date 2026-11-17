@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-import stat
 import sys
 import time
 from collections.abc import Iterator
@@ -66,63 +64,47 @@ def _export_directory(
             raise WorktreeStateError("export staging must be disjoint from source and collection")
     if time.monotonic() >= budget.execution_deadline:
         raise WorktreeStateError("worktree export exhausted its shared time budget")
-    with publication_directory(home) as owner:
-        if owner.fd is None:
-            raise WorktreeStateError("private export staging requires a qualified native adapter")
+    with publication_directory(base, durable=True, private=True, durable_root=home) as parent:
+        name = uuid4().hex
+        directory = base / name
         try:
-            os.mkdir(base.name, mode=0o700, dir_fd=owner.fd)
-        except FileExistsError:
-            pass
-        with publication_directory(base, create=False) as parent:
-            info = os.fstat(parent.fd)
-            if info.st_uid != os.geteuid() or stat.S_IMODE(info.st_mode) & 0o077:
-                raise WorktreeStateError(
-                    "export staging parent must be private and owner-controlled"
-                )
-            name = uuid4().hex
-            os.mkdir(name, mode=0o700, dir_fd=parent.fd)
-            directory = base / name
-            original = os.stat(name, dir_fd=parent.fd, follow_symlinks=False)
-            try:
-                yield directory
-                with publication_directory(directory, create=False) as staged:
-                    held = os.fstat(staged.fd)
-                    if (held.st_dev, held.st_ino) != (original.st_dev, original.st_ino):
-                        raise WorktreeStateError("export staging identity changed before cleanup")
-                    members = set(staged.names())
-                    required = {"manifest.json", "agenda.sqlite3"}
-                    if not required <= members <= required | {"manifest.pending.json"}:
-                        raise WorktreeStateError("unexpected export staging content; retained")
-                    if "manifest.pending.json" in members:
-                        with staged.open("manifest.json", protected=True) as published:
-                            raw = published.read(MAX_MANIFEST_BYTES + 1)
-                        with staged.open("manifest.pending.json", protected=True) as prepared:
-                            if (
-                                len(raw) > MAX_MANIFEST_BYTES
-                                or prepared.read(
-                                    MAX_MANIFEST_BYTES + 1,
-                                )
-                                != raw
-                            ):
-                                raise WorktreeStateError(
-                                    "prepared export manifest changed; retained"
-                                )
-                    for member in sorted(members):
-                        with staged.open(member, protected=True):
-                            pass
-                    for member in sorted(members):
-                        staged.unlink(member)
-                    os.fsync(staged.fd)
-                current = os.stat(name, dir_fd=parent.fd, follow_symlinks=False)
-                if (current.st_dev, current.st_ino) != (original.st_dev, original.st_ino):
+            parent.mkdir(name, private=True)
+            parent.sync()
+            original = parent.stat(name)
+            yield directory
+            with publication_directory(directory, create=False, private=True) as staged:
+                held = staged.info()
+                if (held.st_dev, held.st_ino) != (original.st_dev, original.st_ino):
                     raise WorktreeStateError("export staging identity changed before cleanup")
-                os.rmdir(name, dir_fd=parent.fd)
-                os.fsync(parent.fd)
-            except BaseException:
-                print(
-                    f"session-sync: worktree export staging retained: {directory}", file=sys.stderr
-                )
-                raise
+                members = set(staged.names())
+                required = {"manifest.json", "agenda.sqlite3"}
+                if not required <= members <= required | {"manifest.pending.json"}:
+                    raise WorktreeStateError("unexpected export staging content; retained")
+                if "manifest.pending.json" in members:
+                    with staged.open("manifest.json", protected=True) as published:
+                        raw = published.read(MAX_MANIFEST_BYTES + 1)
+                    with staged.open("manifest.pending.json", protected=True) as prepared:
+                        if (
+                            len(raw) > MAX_MANIFEST_BYTES
+                            or prepared.read(MAX_MANIFEST_BYTES + 1) != raw
+                        ):
+                            raise WorktreeStateError("prepared export manifest changed; retained")
+                for member in sorted(members):
+                    with staged.open(member, protected=True):
+                        pass
+                for member in sorted(members):
+                    staged.unlink(member)
+                staged.sync()
+            current = parent.stat(name)
+            if (current.st_dev, current.st_ino) != (original.st_dev, original.st_ino):
+                raise WorktreeStateError("export staging identity changed before cleanup")
+            parent.rmdir(name)
+            parent.sync()
+        except BaseException:
+            print(
+                f"session-sync: worktree export staging retained: {directory}", file=sys.stderr
+            )
+            raise
 
 
 def collect_managed_worktree_state(

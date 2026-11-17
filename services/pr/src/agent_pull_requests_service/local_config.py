@@ -18,13 +18,16 @@ if TYPE_CHECKING:
     from agent_pull_requests.watch_replay_store import ReplayStore
 
 
-def core() -> None:
+def core(*, filtered: bool = False) -> None:
     """Qualify executing source APIs, without native/provider/credential calls."""
     try:
-        from agent_pull_requests.repository_subscriptions import contract
+        if filtered:
+            from agent_pull_requests.filtered_subscriptions import contract
+        else:
+            from agent_pull_requests.repository_subscriptions import contract
         from agent_pull_requests.watch_service import WatchService
         from fleet_manager.local_service_handler import LocalServiceRequest
-        if contract().get("storage") != "repository_cache_version:2" or (
+        if contract().get("storage") != f"repository_cache_version:{3 if filtered else 2}" or (
             "local_socket" not in inspect.signature(WatchService).parameters
             or "response_limit" not in inspect.signature(LocalServiceRequest).parameters
         ):
@@ -43,6 +46,7 @@ class LocalHostConfig:
     drain_timeout: int = 60
     workspaces: None = None
     reports: None = None
+    filtered: bool = False
 
     @property
     def bindings(self) -> tuple[WatchScopeBinding, ...]:
@@ -58,8 +62,13 @@ class LocalHostConfig:
 
     def store(self) -> ReplayStore:
         from agent_pull_requests.watch_replay_store import ReplayStore
-        core()
+        core(filtered=self.filtered)
         self._private_root()
+        if self.filtered:
+            return ReplayStore(
+                self.root, self.namespace, repository_cache=True, repository_continuing=True,
+                repository_filtered=True,
+            )
         return ReplayStore(
             self.root, self.namespace, repository_cache=True, repository_continuing=True,
         )
@@ -89,17 +98,21 @@ class LocalHostConfig:
         value = _fields(raw, {
             "schema", "version", "profile", "root", "namespace", "repository_cache",
         }, {"interval", "operation_seconds", "drain_timeout"})
+        filtered = (value["version"], value["profile"]) == (3, "repository-filtered/v1")
         if value["schema"] != "agent-pull-requests.service" or type(value["version"]) is not int or (
-            value["version"] != 2 or value["profile"] != "repository-local/v1"
+            not filtered and (value["version"], value["profile"]) != (2, "repository-local/v1")
         ):
             raise ValueError("unsupported local host profile")
-        core()
+        core(filtered=filtered)
         from .repository_config import RepositoryConfig
         root = _path(value["root"])
         config = cls(
-            root, value["namespace"], RepositoryConfig.parse(value["repository_cache"], value["namespace"], root),
+            root, value["namespace"], RepositoryConfig.parse(
+                value["repository_cache"], value["namespace"], root, filtered=filtered,
+            ),
             _seconds(value.get("interval", 5)), _seconds(value.get("operation_seconds", 60)),
             _seconds(value.get("drain_timeout", 60)),
+            filtered=filtered,
         )
         store = config.store()
         from single_instance_lease import SingleInstance

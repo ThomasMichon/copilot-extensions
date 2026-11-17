@@ -1,0 +1,98 @@
+{
+  "example_only": true,
+  "description": "Synthetic static-contract walkthroughs, not executable decisions, model evaluation or live-provider qualification.",
+  "cases": [
+    {
+      "id": "held-intake-not-auth-failure",
+      "given": "The coordinator responds, discovery is absent, its queue is stale and activation is held. A manual review succeeded previously.",
+      "expected": "Keep current discovery health unknown, not authenticated-empty or an auth outage. Escalate the concrete held dependency once; continue only supported authorized independent manual work.",
+      "required_guidance": {
+        "references/setup-and-adapters.md": [
+          "A prior successful manual review proves historical capability, not current liveness.",
+          "An absent process alone is not an authentication outage.",
+          "condition, evidence, impact, next owner, resumption condition and default path.",
+          "An unanswered approval form is not approval",
+          "manual review can continue for unattempted eligible retained candidates"
+        ]
+      }
+    },
+    {
+      "id": "assembly-correction-not-repair",
+      "given": "A malformed local argument is rejected before invocation. A corrected argument is available within the existing mandate.",
+      "expected": "Make one bounded corrected attempt without a new permission ceremony; preserve the original clocks and budget. If invocation is uncertain, reconcile instead.",
+      "required_guidance": {
+        "references/setup-and-adapters.md": [
+          "correct the caller input within existing authority and make one bounded corrected attempt.",
+          "If invocation may have occurred, preserve the unknown effect and reconcile it first"
+        ],
+        "references/throughput-and-loops.md": [
+          "A bounded local assembly correction is not permission to reset the original attempt window."
+        ]
+      }
+    },
+    {
+      "id": "provider-error-inside-success",
+      "given": "A read operation exits zero but embeds an access error. An unrelated operation family still works.",
+      "expected": "Stop the affected operation, not the whole role. Keep source membership unknown and do not retry unchanged on a timer. Any changed-input attempt stays bounded.",
+      "required_guidance": {
+        "references/setup-and-adapters.md": [
+          "including provider errors embedded in an exit-zero response.",
+          "Do not retry unchanged on a timer or blanket-block unrelated working operation families.",
+          "Preserve the original failure, clocks, attempt budget and unknown effects"
+        ]
+      }
+    },
+    {
+      "id": "empty-capture-versus-complete-empty",
+      "given": "One enumeration returns no captured body; another successfully returns complete scoped pagination with no candidates or provider error.",
+      "expected": "The first source is unknown. Only the second establishes a healthy empty population, which still does not complete a continuous role.",
+      "required_guidance": {
+        "references/setup-and-adapters.md": [
+          "claim an empty population only after a successful, complete scoped enumeration with no provider error.",
+          "Empty/unknown capture, partial pages or a success footer alone never establish an empty source."
+        ],
+        "references/throughput-and-loops.md": [
+          "A zero actionable queue in continuous mode means idle and observing, not complete."
+        ]
+      }
+    },
+    {
+      "id": "duplicate-delta-result",
+      "given": "A reviewer closes its own thread after a bounded delta assessment. The receipt is accepted but clearing the pending marker fails, then the receipt is delivered again.",
+      "expected": "Retain the actual delta/finding coverage and uncertainty, not full-review credit. Reconcile the accepted revision and pending marker without double counting or reposting.",
+      "required_guidance": {
+        "references/coordination-and-recovery.md": [
+          "A bounded delta or closure of the reviewer's own thread does not earn credit for a fresh full review",
+          "Receipt integration and its pending-result marker must refer to the same accepted state revision",
+          "A repeated delivery must not count twice."
+        ]
+      }
+    },
+    {
+      "id": "returned-result-before-dashboard",
+      "given": "A result awaits acceptance, an eligible vacancy exists, retained source is still applicable and only a final status snapshot is timed.",
+      "expected": "Accept and refill before optional dashboard work, reuse valid evidence and keep unmeasured intervals unknown. Do not reset original clocks or infer the slow phase from the snapshot.",
+      "required_guidance": {
+        "references/throughput-and-loops.md": [
+          "Prioritize returned-result acceptance and eligible lane refill before optional dashboard work.",
+          "Reuse applicable retained source and findings",
+          "uninstrumented intervals explicitly unknown.",
+          "A status snapshot or elapsed wall time alone cannot identify the bottleneck"
+        ]
+      }
+    },
+    {
+      "id": "sunset-with-unknown-effect",
+      "given": "The role is stopped with one owned watch, another role's schedule, an uncertain post, useful WIP and an open author-owned PR.",
+      "expected": "Stop only owned flows, reconcile the uncertain effect and transfer remaining work through a tracked objective or accepted custodian. Keep records and PR custody; report unsettled obligations.",
+      "required_guidance": {
+        "references/coordination-and-recovery.md": [
+          "stop only this role's owned watches, schedules and nudges",
+          "merely naming a proposed recipient is not accepted custody.",
+          "Closing the role does not delete records/resources, abandon an open PR",
+          "not a promise of runtime-enforced cleanup."
+        ]
+      }
+    }
+  ]
+}

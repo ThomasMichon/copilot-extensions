@@ -1455,9 +1455,17 @@ access; it does not depend on a launcher's token default owner. Native Python
 and a Bash child can therefore share the same user-owned inventory even when
 their default owners differ. Existing entries are not reowned or migrated,
 current-token ownership admission is unchanged, and borrowed runtime anchors
-remain read-only metadata. File access/share/disposition, binary record bytes
+remain read-only metadata. Private creation, lock sharing, binary record bytes
 and noninheritance retain their existing behavior. Portable registry imports
 still load no native bindings; Windows descriptor types are initialized lazily.
+
+Read-only record and reconcile-cursor snapshots share read, write and delete
+access on Windows, without acquiring write or delete rights. Publication uses
+`FileRenameInfoEx` with replace-existing and POSIX semantics: an open snapshot
+keeps its old bytes while subsequent opens see the complete replacement.
+Unsupported atomic rename or denied delete sharing fails without unlink-first
+or in-place-write fallback. Ownership, no-indirection, file-identity and byte
+bounds remain enforced; lock entries keep their existing sharing policy.
 
 `reconcile_instances(registry_root=None, limit=128, max_seconds=5,
 terminate=False, runtime_root=None)` is an explicit backstop for **expired

@@ -12,8 +12,8 @@ PROCESS_RECEIPT = "native-child-v1"
 NONCE_ENV = "AGENT_BRIDGE_SESSION_HOST_NONCE"
 
 
-def _unique(pairs: list[tuple[str, object]]) -> dict:
-    value = {}
+def _unique(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    value: dict[str, object] = {}
     for key, item in pairs:
         if key in value:
             raise ValueError("Duplicate headed receipt field")

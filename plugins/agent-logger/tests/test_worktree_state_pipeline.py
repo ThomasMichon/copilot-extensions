@@ -19,17 +19,21 @@ from agent_logger import configuration_layers
 from agent_logger.aggregate import Admission, ExecutionMode
 from agent_logger.sync import worktree_state_pipeline as pipeline
 from agent_logger.sync.targets.filesystem import OneDriveTarget
+from agent_logger.sync.targets.base import Target
 from agent_logger.sync.worktree_state import (
     WorktreeStateError,
     WorktreeStateReceipt,
     WorktreeStateRevision,
 )
+from agent_logger.sync.worktree_state_archive import readback_worktree_state
+from agent_logger.sync.worktree_state_exporter import EffortsExportClient
 from agent_logger.sync.worktree_state_providers import (
     EffortsExporter,
     ManagedPlacement,
     OwnerScope,
     ProjectInventory,
     read_project_inventory,
+    select_efforts_exporter,
 )
 
 from .conftest import init_git_repo
@@ -44,9 +48,6 @@ from .test_worktree_state_providers import (
 from .test_worktree_state_providers import (
     native_owner as native_owner,
 )
-
-pytestmark = pytest.mark.skipif(os.name != "posix", reason="POSIX collection adapter")
-
 
 def selection(home: Path) -> tuple[Admission, ProjectInventory, ManagedPlacement]:
     admission = Admission(IDENTITY.repository, home.parent / "repository")
@@ -76,6 +77,7 @@ def test_actual_composition_refuses_before_discovery_export_or_staging(
     change: str,
 ) -> None:
     cfg, target, plan, _ = packet
+    active: Target = target
     root = target._root()
     admission, inventory, placement = selection(cfg.home)
     if change == "privacy":
@@ -86,7 +88,7 @@ def test_actual_composition_refuses_before_discovery_export_or_staging(
         plan.mode = ExecutionMode.OBSERVE
     else:
         cfg._data["sync"]["target"] = "onedrive"
-        target = OneDriveTarget({"root": str(cfg.home.parent / "cloud")})
+        active = OneDriveTarget({"root": str(cfg.home.parent / "cloud")})
     for name in ("read_project_inventory", "select_efforts_exporter", "_export_directory"):
         monkeypatch.setattr(
             pipeline, name, lambda *args, **kwargs: pytest.fail("unadmitted effect")
@@ -94,7 +96,7 @@ def test_actual_composition_refuses_before_discovery_export_or_staging(
     with pytest.raises(WorktreeStateError):
         pipeline.collect_managed_worktree_state(
             cfg,
-            target,
+            active,
             plan,
             admission,
             inventory,
@@ -114,6 +116,7 @@ def test_changed_owner_scope_or_placement_never_publishes_stale_export(
 ) -> None:
     cfg, target, plan, source = packet
     admission, inventory, placement = selection(cfg.home)
+    assert inventory.scope is not None
     changed = (
         replace(inventory, scope=replace(inventory.scope, repository_id="replaced-owner"))
         if change == "scope"
@@ -256,6 +259,7 @@ def test_staging_cleanup_is_exact_and_failed_or_uncertain_exports_are_retained(
 
 @pytest.mark.contract("managed-worktree-export-collection")
 @pytest.mark.parametrize("entrypoint", ["explicit", "tick", "engine-missing-source"])
+@pytest.mark.timeout(180)
 def test_actual_native_retired_placement_exports_and_collects_under_current_policy(
     packet: Packet,
     native_owner: Path,
@@ -415,7 +419,7 @@ def test_actual_native_retired_placement_exports_and_collects_under_current_poli
         from agent_logger.sync.worktree_state_tick import collect_pass
 
         result = collect_pass(cfg, target)
-        assert len(result.completed) == 1 and not result.failed
+        assert len(result.completed) == 1 and not result.failed, result
         assert [item.store for item in result.deferred] == [inventory.placements[1].store_id]
     else:
         from agent_logger.sync.engine import run_sync
@@ -433,8 +437,8 @@ def test_actual_native_retired_placement_exports_and_collects_under_current_poli
     if entrypoint != "explicit":
         if entrypoint == "tick":
             result = collect_pass(cfg, target)
-            assert [item.store for item in result.completed] == [second.store_id]
-            assert not result.failed
+            assert [item.store for item in result.completed] == [second.store_id], result
+            assert not result.failed, result
         else:
             assert run_sync(cfg) == 1
         second_identity = WorktreeStateRevision(
@@ -448,6 +452,82 @@ def test_actual_native_retired_placement_exports_and_collects_under_current_poli
             target._root() / second_identity.relative_directory / "export/agenda.sqlite3"
         ).read_bytes() == (second_seed / "agenda.sqlite3").read_bytes()
         assert list((cfg.home / "worktree-state-exports").iterdir()) == []
+    assert {
+        path: path.read_bytes() for path in native_owner.parent.rglob("*") if path.is_file()
+    } == before
+
+
+@pytest.mark.contract("managed-worktree-retirement-collection")
+@pytest.mark.timeout(120)
+def test_actual_checkout_retirement_precedes_collection_without_losing_history(
+    packet: Packet, native_owner: Path, efforts_payload: tuple[Path, Path, Path],
+) -> None:
+    cfg, target, plan, source = packet
+    _, root, script = efforts_payload
+    init_git_repo(root, remote="https://" + IDENTITY.repository + ".git")
+    checkout = root.parent / "disposable-checkout"
+    native = {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW")} if os.name == "nt" else {}
+    for arguments in (
+        ["add", "."],
+        ["commit", "-qm", "Synthetic owner fixture"],
+        ["worktree", "add", "-qb", "fixture-checkout", str(checkout)],
+    ):
+        subprocess.run(["git", "-C", str(root), *arguments], check=True, timeout=20, **native)
+    (native_owner / "projects.yaml").write_text(
+        yaml.safe_dump({"projects": {"registered-alias": {}}}), encoding="utf-8",
+    )
+    (native_owner / "repos.yaml").write_text(
+        yaml.safe_dump({"repos": {"registered-alias": {
+            "remote": "https://" + IDENTITY.repository + ".git",
+            **{platform: str(root) for platform in ("linux", "wsl", "windows")},
+        }}}), encoding="utf-8",
+    )
+    prefix, environment, _ = configuration_layers.worktrees_owner_command(cfg.home)
+
+    def owner_process(program: str, *arguments: str) -> None:
+        result = subprocess.run(
+            [prefix[0], "-B", "-c", program, *arguments], cwd=root, env=environment,
+            capture_output=True, timeout=30, **native,
+        )
+        assert result.returncode == 0, result.stderr
+
+    owner_process(
+        "import sys\n" + _RETAINED.replace('str(root/"absent-checkout")', "sys.argv[1]"),
+        str(checkout),
+    )
+    admission = Admission(IDENTITY.repository, root)
+    inventory = read_project_inventory(admission, cfg.home)
+    placement = inventory.placements[0]
+    initial = source.parent / "seed"
+    initial.mkdir(mode=0o700)
+    subprocess.run(
+        [sys.executable, "-I", "-B", "-c", _PRODUCE, str(script.parent),
+         str(placement.state_home), str(initial), placement.worktree, placement.store_id, "rich"],
+        capture_output=True, timeout=30, check=True, **native,
+    )
+    before = {
+        path: path.read_bytes() for path in native_owner.parent.rglob("*") if path.is_file()
+    }
+    assert checkout.is_dir() and not target._root().exists()
+    owner_process(
+        "import sys\nfrom agent_worktrees.git_ops import remove_worktree\n"
+        "assert remove_worktree(sys.argv[1], sys.argv[2])\n", str(root), str(checkout),
+    )
+    assert not checkout.exists() and not target._root().exists()
+    retained = read_project_inventory(admission, cfg.home)
+    assert retained == inventory and placement.canonical_record == "missing"
+    receipt = pipeline.collect_managed_worktree_state(
+        cfg, target, plan, admission, retained, placement,
+        OwnedExecutionBudget.from_timeout(120, cleanup_reserve=5),
+    )
+    assert receipt.identity.revision == 5 and receipt.contributors_sha256
+    client = EffortsExportClient(
+        root, select_efforts_exporter(root),
+        OwnedExecutionBudget.from_timeout(120, cleanup_reserve=5),
+    )
+    assert readback_worktree_state(
+        cfg, target, plan, receipt.identity, client.verify, contributors=client.contributors,
+    ) == receipt
     assert {
         path: path.read_bytes() for path in native_owner.parent.rglob("*") if path.is_file()
     } == before
