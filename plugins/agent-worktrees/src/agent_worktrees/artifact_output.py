@@ -20,6 +20,7 @@ from . import resource_producer as producer, tracking, tracking_write
 from .artifact_output_policy import member_name
 from .artifact_root import AdmittedRoot, _windows_error, admit_root, directory_identity
 from .artifact_scratch import _boundaries
+from .producer_allocation import MAX_GENERATION
 from .resource_delivery import MAX_BYTES, MAX_FILES, valid_summary
 from .tracking_claims import parse_claim_ref
 from .tracking_producer_write import _ProducerClaim, _matched_claim, _owned_record
@@ -27,6 +28,7 @@ from .tracking_producer_write import _ProducerClaim, _matched_claim, _owned_reco
 SCHEMA = "agent-worktrees.user-output/v1"
 NAMESPACE = "worktree-output"
 MARKER = ".copilot-output.json"
+_NATIVE_ID_MAX = (1 << 128) - 1
 
 
 def capabilities() -> dict[str, Any]:
@@ -127,7 +129,7 @@ def _recovery(value: object) -> dict[str, Any]:
     identity = value["root_identity"]
     if (
         not isinstance(identity, dict) or set(identity) != {"device", "inode"}
-        or any(type(number) is not int or number < 0 for number in identity.values())
+        or any(type(number) is not int or not 0 <= number <= _NATIVE_ID_MAX for number in identity.values())
         or not identity["inode"]
     ):
         raise ValueError("invalid native user-output root identity")
@@ -174,10 +176,32 @@ def _destination(
 
 
 def _identity(directory: AdmittedRoot, metadata: dict[str, Any]) -> dict[str, Any]:
+    if any(type(number) is not int or not 0 <= number <= _NATIVE_ID_MAX for number in directory.identity.values()):
+        raise ValueError("user-output filesystem identity exceeds its native bound")
     return {
         "root": metadata["recovery"]["root_identity"], "directory": directory.identity,
         "incarnation": metadata["recovery"]["incarnation"],
     }
+
+
+def _require_reference_capacity(owner: str, recovery: dict[str, Any]) -> None:
+    metadata = {
+        "version": producer.VERSION, "namespace": NAMESPACE,
+        "lifetime": producer.USER_OUTPUT_LIFETIME, "token": "x" * 128,
+        "creator": owner, "recovery": _recovery(recovery), "phase": "allocating",
+        "allocation_epoch": {"generation": MAX_GENERATION, "key_hash": "f" * 64},
+    }
+    # Serialization stand-ins cover native IDs through 128 bits, not an allocated identity.
+    identity = {
+        "root": recovery["root_identity"],
+        "directory": {"device": _NATIVE_ID_MAX, "inode": _NATIVE_ID_MAX},
+        "incarnation": recovery["incarnation"],
+    }
+    try:
+        producer.claim_ref(metadata)
+        producer.claim_ref({**metadata, "phase": "bound", "identity": identity})
+    except ValueError as exc:
+        raise ValueError("user-output allocation lacks lifecycle reference capacity") from exc
 
 
 def _marker(
@@ -368,6 +392,7 @@ def allocate(
                 "request_hash": request_hash,
                 "created_at": datetime.now(timezone.utc).isoformat(),
             }
+        _require_reference_capacity(owner, recovery)
         reserved = _invoke(path, owner, "reserve", {
             "kind": "artifact", "namespace": NAMESPACE,
             "lifetime": producer.USER_OUTPUT_LIFETIME, "recovery": recovery,

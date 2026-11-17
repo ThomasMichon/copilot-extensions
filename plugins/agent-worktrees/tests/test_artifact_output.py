@@ -116,6 +116,60 @@ def test_utf8_filename_limit_is_checked_before_reservation(destination: Destinat
     assert (Path(selection["destination"]) / member).read_bytes() == b"fixture"
 
 
+@pytest.mark.parametrize("overflow", ["begin", "bind"])
+def test_future_reference_overflow_is_refused_before_reservation(
+    destination: Destination, overflow: str,
+) -> None:
+    path, original, operation_id = destination
+    root = Path(original["root"])
+    info = root.stat()
+    root_identity = {"device": info.st_dev, "inode": info.st_ino}
+    incarnation = tracking.load_record(path).creation_nonce
+    content = output._summary(manifest({"report.txt": b"fixture"}))
+    def fits(metadata: dict[str, Any]) -> bool:
+        try:
+            resource_producer.claim_ref(metadata)
+            return True
+        except ValueError:
+            return False
+    for width in range(1, 86):
+        selected = resolve_user_output(
+            {"user_output": {"templates": {"downloads": "/".join(["\u5831" * width] * 5)}}},
+            topic="Report", owner_roots={"downloads": str(root)},
+        )
+        recovery = {
+            "schema": output.SCHEMA, "root": str(root), "root_identity": root_identity,
+            "members": selected["members"], "content": content, "nonce": operation_id,
+            "incarnation": incarnation, "request_hash": "f" * 64,
+            "created_at": "2026-01-02T03:04:05.123456+00:00",
+        }
+        pending = {
+            "version": 1, "namespace": output.NAMESPACE, "lifetime": resource_producer.USER_OUTPUT_LIFETIME,
+            "token": "x" * 43, "creator": "m/p/owner", "phase": "pending", "recovery": recovery,
+        }
+        allocating = {
+            **pending, "phase": "allocating",
+            "allocation_epoch": {"generation": 1, "key_hash": "f" * 64},
+        }
+        bound = {
+            **allocating, "phase": "bound",
+            "identity": {"root": root_identity, "directory": root_identity, "incarnation": incarnation},
+        }
+        if fits(pending) and (
+            not fits(allocating) if overflow == "begin" else fits(allocating) and not fits(bound)
+        ):
+            break
+    else:
+        pytest.fail("fixture could not find the selected future-reference boundary")
+    before = path.read_bytes()
+    with pytest.raises(ValueError, match="lifecycle reference capacity"):
+        output.produce_files(
+            path, "m/p/owner", selection=selected,
+            files={"report.txt": b"fixture"}, operation_id=operation_id,
+        )
+    assert path.read_bytes() == before and list(root.iterdir()) == []
+
+
 def test_existing_destination_is_never_overwritten_or_adopted(destination: Destination) -> None:
     path, selection, _ = destination
     existing = Path(selection["destination"])

@@ -59,6 +59,10 @@ content within the same file/byte limits. Member names are portable, bounded,
 case-insensitively unique plain components, at most 120 characters and 255 UTF-8
 bytes each. Rendered destination components use the same bounds. Directories, streams, links and
 reserved device/control names are not deliverable members in this first producer.
+The complete encoded provider reference has a separate bound. Allocation checks
+space for both its armed attempt and later bound native identity before saving
+responsibility or creating destination directories. A physically valid path can
+therefore be refused before allocation; it never silently selects another path.
 
 ## Allocation and handover
 
