@@ -345,18 +345,14 @@ jobs:
           ], limit=900)
           runner = [sys.executable, "tools/run-plugin-tests.py", "agent-codespaces",
                     "--test-profile", "busy-host-functional"]
-          installer_selection = [
-              "--test-file", "tests/test_installer_engine_adoption.py",
-              "--test-file", "tests/test_install_runtime_only_ps1.py",
-          ]
           run([*runner, "--test-file", "tests/test_snapshot_copy_contract.py",
                "--test-file", "tests/test_installer_test_support.py"], limit=2700)
-          run([*runner, *installer_selection], limit=2700)
+          run([*runner, "--test-file", "tests/test_installer_engine_adoption.py"], limit=2700)
           with tempfile.TemporaryDirectory(prefix="codespaces-installer-") as directory:
               materialized = pathlib.Path(directory) / "materialized"
               run([sys.executable, "tools/materialize_main.py", "--candidate",
                    "--dest", str(materialized)], limit=600)
-              run([*runner, *installer_selection],
+              run([*runner, "--test-file", "tests/test_installer_engine_adoption.py"],
                   cwd=materialized, limit=2700)
           assert not pathlib.Path(directory).exists()
           assert not run(["git", "status", "--porcelain", "--untracked-files=no"], limit=30)

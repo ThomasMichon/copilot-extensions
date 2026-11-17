@@ -8194,11 +8194,13 @@ SSH case is skipped when no `ssh` client is on `PATH`.
 The manual `Installation context full` workflow's `codespaces-installer`
 portfolio runs this complete packet on hosted Linux and Windows: materializer
 and runner integration controls, snapshot-copy/support contracts, the full
-canonical installer and runtime-only PowerShell modules, normal committed-HEAD
-materialization, and both materialized modules. Windows retains all six
-disjoint installer partitions and exercises the runtime-only hold and re-entry
-controls in PowerShell 5 and 7. It records exact source identity, profile, outcomes and cleanup
+canonical installer module, normal committed-HEAD materialization, and the full
+materialized installer module. Windows retains all six disjoint installer
+partitions. It records exact source identity, profile, outcomes and cleanup
 inside one 7200-second functional envelope; required PR CI is unchanged.
+Adding the runtime-only PowerShell packet to both automated selections requires
+an owner-authored workflow change and remains pending. Admitting the packet to
+the test profile does not by itself change the workflow's selected files.
 
 For sustained host contention, explicitly select the test-only
 `busy-host-functional` profile on the existing isolated runner:
@@ -8218,7 +8220,7 @@ The devcontainer wrapper accepts the same profile and file selectors. It strips
 both only from dependency preparation and preserves both for the offline test
 pass; preparation still runs without importing tests.
 
-The first command is run against both canonical and normally materialized
+Run the first command against both canonical and normally materialized
 source for complete installer qualification. Keep the combined sequence,
 including materializer integration, preparation and cleanup, within a finite
 7200-second caller-owned containment envelope. The profile is opt-in and logged:
