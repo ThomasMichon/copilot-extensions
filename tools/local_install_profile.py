@@ -744,13 +744,14 @@ def reuse_applications(
                     name = engine._package_name(observed.payload)
                     root = name + ("[" + ",".join(selected_extras) + "]" if selected_extras else "")
                     root += "==" + inputs.receipt()["distributions"][name]["version"]
-                    policy, _feed = _profile_feed(
+                    policy, feed = _profile_feed(
                         observed, transaction, projections, uv=uv, download_origins=(),
                         wheels=None, deadline=deadline,
                     )
                     if (
                         profile_record["target"] != target or profile_record["roots"] != [root]
                         or profile_record["approval_source"] != policy["policyId"]
+                        or profile_record["acquisition_policy"] != feed.policy_id
                     ):
                         raise ProfileError("prior application target, extras or source policy changed")
                     checked = profile_wheel_inputs(

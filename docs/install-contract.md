@@ -5767,6 +5767,8 @@ One retained configuration serves the portfolio: two bounded settings probes
 and existing local credential inspection, with no resolution, download or build.
 Invalid index field types and supplemental environment or project indexes
 therefore refuse reuse as they do fresh preparation.
+The prior profile must match both source approval and captured acquisition
+policy identities, including global and per-package seasoning cutoffs.
 
 An application may declare a first-party SDK association in its existing
 `pyproject.toml`, separately from its ordinary dependency/extra declaration:

@@ -1407,6 +1407,7 @@ def test_local_prepared_wheel_reuse_retains_exact_inputs_without_another_build(r
     None, "completion", "wheel", "application", "extras", "target", "policy",
     "toolchain", "selected-source", "malformed-config", "unreadable-config", "malformed-config-env",
     "default-string", "url-integer", "supplemental-env", "supplemental-config", "supplemental-project",
+    "strengthened-cutoff", "strengthened-package-cutoff",
 ])
 def test_complete_application_reuse_revalidates_outputs_without_constructing(
     reusable_install_source: tuple[Path, Path, dict[str, Any], dict[str, Any]], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: None | str,
@@ -1448,6 +1449,11 @@ def test_complete_application_reuse_revalidates_outputs_without_constructing(
         lambda value: hashlib.sha256(value.encode()).hexdigest(),
     )
     trusted, policy = native._profile_policy(selected, dict(os.environ), ())
+    with native._reuse_configuration("uv", deadline=deadline) as (transaction, projections):
+        _, feed = native._profile_feed(
+            selected, transaction, projections, uv="uv", download_origins=(),
+            wheels=None, deadline=deadline,
+        )
     if fault == "policy":
         monkeypatch.setattr(native, "_profile_policy", lambda *args: (trusted, policy))
     with native.retain_wheel_inputs(
@@ -1456,7 +1462,7 @@ def test_complete_application_reuse_revalidates_outputs_without_constructing(
     ) as retained:
         profile = native.complete_profile(
             selected, target, ["demo==1.0.0"], retained,
-            policy_id=policy["policyId"], acquisition_id="fixture-acquisition", deadline=deadline,
+            policy_id=policy["policyId"], acquisition_id=feed.policy_id, deadline=deadline,
         )
         snapshot = native._write_snapshot(
             selected, completed / "profiles" / "demo", profile, retained, deadline=deadline,
@@ -1524,6 +1530,7 @@ def test_complete_application_reuse_revalidates_outputs_without_constructing(
     configuration_faults = {
         "malformed-config", "unreadable-config", "malformed-config-env", "default-string",
         "url-integer", "supplemental-env", "supplemental-config", "supplemental-project",
+        "strengthened-cutoff", "strengthened-package-cutoff",
     }
     if fault in configuration_faults:
         assert native.reuse_applications(output, completed, ["demo"], **options) == snapshots
@@ -1546,6 +1553,10 @@ def test_complete_application_reuse_revalidates_outputs_without_constructing(
             monkeypatch.setenv("UV_INDEX", "https://packages.example/simple")
         elif fault == "supplemental-config":
             config.write_text('[[index]]\nurl="https://packages.example/simple"\nauthenticate="never"\n')
+        elif fault == "strengthened-cutoff":
+            config.write_text('exclude-newer="2024-01-01T00:00:00Z"\n')
+        elif fault == "strengthened-package-cutoff":
+            config.write_text('[exclude-newer-package]\ndemo="2024-01-01T00:00:00Z"\n')
         else:
             monkeypatch.delenv("UV_CONFIG_FILE")
             (tmp_path / "uv.toml").write_text(
