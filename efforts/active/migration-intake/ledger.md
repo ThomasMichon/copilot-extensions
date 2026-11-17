@@ -585,3 +585,25 @@ global Validation receiving survived #13001's historical-journal restoration.
 That missing research was not a nonmember finding or a new source hold.
 Its Draft coverage effort, three unchecked technical rows and explicit
 source-OPEN condition remain; no duplicate amendment or retirement follows.
+
+## Singleton receipt and proposed complete receiving (2026-11-17 UTC)
+
+Complete current same-canonical #5512 receiving/source/custody readback confirms
+the original and discussion in the unchanged singleton-correctness ROOT.
+The separate audited explanation retired redundant #5512 tracking
+`NOT_PLANNED`; its Draft effort, sole-owner continuation/handoff condition,
+sequential Phase 1/2 work, deferred design and all technical checks remain.
+An unassigned issue is not vacancy; no implementation takeover occurred.
+
+| Whole contract | Original provenance | Proposed route | Direct receiving | Retained conditions |
+|---|---|---|---|---|
+| Current authentication AND all delegated/relay-subscribe initial/cached waiter axes | Public #5452 complete original/discussion and #11166's already-reviewed #5410 intake | routed (proposed; effective after reviewed whole-domain acceptance) | [agent-dispatch-tasks-pane-ux-overhaul](../agent-dispatch-tasks-pane-ux-overhaul/README.md), P5452-A1/A2, existing P5452/V5452, V5452-A1/A2, expanded actual G5452 and Coordination | Four new unchecked rows; BOTH affected modules, actual constructed/sent values, withdrawn universal claim, legitimate no-token/error behavior, SAME durable waiter/exact command/shared lookup, original finite tiers and actual custodians; historical outside-auth scope explicitly reconciled |
+| INITIAL 70-site headless baseline cohort | Public #5518 original and both complete discussions | routed (proposed; SAME reviewed PR as domain clauses, not accepted yet) | [windows-launch-hardening](../windows-launch-hardening/README.md), canonical P5518/local V5518/C5518/actual G5518 and Journal | Eight new unchecked rows; suppression/removal OR specifically reviewed exception, Rule 3/Rule 4 real-context distinctions, prior credit, bounded Vault claim and GUI/POSIX protection; no every-host/durable-lifetime bar or personal ACK |
+| Existing PID/adoption/safe-stop ONE-OR-MORE plus complete saved-environment union | Public #5549 current expanded original/discussion and inherited #5686 | clarification proposed; source remains OPEN | [agent-index-engine-daemon](../agent-index-engine-daemon/README.md), existing four DE5549 rows and prospective administrative/technical Coordination/Journal clarification | Historical parent-OPEN decision must be explicitly reconciled through actual reviewed domain delivery and whole current readback before separate judgment; no implementation/rollback prerequisite, technical acceptance, owner/resource transfer or replay of #5686 |
+
+The [complete six-source checkpoint](../backlog-reconciliation/journal/2026/11.17-authentication-baseline-and-engine-receiving.md)
+retains #5479's unfinished third-party request and literal maintainer OR,
+and #5555's whole four-pivot/venue outcome beyond Worktrees-local receiving.
+Neither is closed or reassigned. All twelve new product/coordination rows
+remain unchecked; ledger publication alone is not receiving acceptance,
+technical completion, native authority or a source-specific disposition.

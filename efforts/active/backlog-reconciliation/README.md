@@ -3421,6 +3421,12 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [authentication, baseline and engine receiving checkpoint](journal/2026/11.17-authentication-baseline-and-engine-receiving.md)
+  records #13150's actual receipt merge, #5512's separate same-canonical
+  tracking retirement and six current contracts. Whole #5452 authentication/
+  transport and finite #5518 baseline amendments add twelve unchecked rows;
+  #5549's parent-OPEN condition receives a prospective clarification, not
+  silent waiver. The complete census is 887 whole, 158 above fixed 729.
   The [webhook receipt and receiving correction](journal/2026/11.17-webhook-receipt-and-receiving-correction.md)
   records #13148's reviewed delivery and separate #5319/#5427 tracking
   retirements, retaining all unfinished acceptance and custodians. #5340's
