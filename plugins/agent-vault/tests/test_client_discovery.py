@@ -21,7 +21,7 @@ from typing import Any
 
 import pytest
 
-from agent_vault import cli, config, rendezvous, service, winpipe
+from agent_vault import cli, config, launch, rendezvous, service, winpipe
 from agent_vault import extensions as ext
 from agent_vault.extensions import ExtensionRegistry, TransportContext
 
@@ -179,14 +179,14 @@ def test_native_start_port_policy_with_unrelated_healthy_legacy_tcp(
     selected = _EchoServer({"ok": True, "pid": 456, "cli": "locked"})
     launches: list[list[str]] = []
 
-    def launch(arguments: list[str]) -> None:
+    def start_selected(arguments: list[str]) -> None:
         launches.append(arguments)
         _write_scoped_tcp(run_dir, selected.port, "selected-installation")
 
     monkeypatch.setattr(cli, "IS_WINDOWS", True)
     monkeypatch.setattr(cli, "IS_WSL", False)
     monkeypatch.setattr(cli, "_runtime_active", lambda: True)
-    monkeypatch.setattr(cli.launch, "spawn_service", launch)
+    monkeypatch.setattr(launch, "spawn_service", start_selected)
     monkeypatch.setattr(config, "DEFAULT_TCP_PORT", unrelated.port)
     if tagged:
         monkeypatch.setenv("AGENT_VAULT_INSTALLATION_ID", "selected-installation")
