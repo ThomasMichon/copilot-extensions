@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import hashlib
+from importlib import import_module
 import importlib.util
 import json
 import os
@@ -12,16 +13,22 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import tomllib
+import zipfile
 from dataclasses import dataclass
 from contextlib import ExitStack
 from collections.abc import Callable
 from pathlib import Path
+from types import ModuleType
 
 from agent_procutil import SyncProcessLaunchError, no_window_kwargs
 
 from . import control_plane_providers as providers, manager_launch_cli, output, update_events
 from .manager_launcher_ownership import _OWNED_STUBS as _OWNED_STUBS
+
+try:
+    tomllib = import_module("tomllib")
+except ModuleNotFoundError:
+    tomllib = import_module("tomli")
 
 
 class RecoveryRefused(RuntimeError):
@@ -119,6 +126,38 @@ class ControllerSelection:
             self.adoption.verify()
 
 
+def _package(
+    slot: Path, *, include_source: bool = False,
+) -> tuple[bytes | None, list[tuple[Path, str | None]]]:
+    payload = slot / "payload" if (slot / "payload").is_dir() else slot
+    project_path = payload / "pyproject.toml"
+    project_bytes = _read(project_path)
+    if project_bytes is None:
+        raise RecoveryRefused("Registered Manager slot has no package metadata")
+    project = tomllib.loads(project_bytes.decode("utf-8"))
+    name = project.get("project", {}).get("name", "")
+    normalized = re.sub(r"[-_.]+", "-", name).lower() if isinstance(name, str) else ""
+    if normalized == "uv-application-copilot-extensions-worktree-manager":
+        from .manager_application_identity import inspect_application
+
+        try:
+            return inspect_application(payload, project_bytes, _read)
+        except (OSError, AttributeError, KeyError, TypeError, ValueError, zipfile.BadZipFile) as error:
+            raise RecoveryRefused(f"Registered Manager application identity is invalid: {error}") from error
+    if normalized != "copilot-extensions-worktree-manager":
+        raise RecoveryRefused("Registered Manager slot belongs to another package")
+    evidence: list[tuple[Path, str | None]] = [
+        (project_path, hashlib.sha256(project_bytes).hexdigest()),
+    ]
+    source_bytes = None
+    if include_source:
+        source = payload / "src" / "worktree_manager" / "source_config.py"
+        source_bytes = _read(source)
+        if source_bytes is not None:
+            evidence.append((source, hashlib.sha256(source_bytes).hexdigest()))
+    return source_bytes, evidence
+
+
 def _source(root: Path, slot: Path | None) -> tuple[str, str, list[tuple[Path, str | None]]]:
     config = root / "config.toml"
     data = _read(config)
@@ -129,23 +168,10 @@ def _source(root: Path, slot: Path | None) -> tuple[str, str, list[tuple[Path, s
     defaults: dict[str, str] = {}
     evidence = [(config, hashlib.sha256(data).hexdigest() if data is not None else None)]
     if slot is not None:
-        payload = slot / "payload" if (slot / "payload").is_dir() else slot
-        project_path = payload / "pyproject.toml"
-        project_bytes = _read(project_path)
-        if project_bytes is None:
-            raise RecoveryRefused("Registered Manager slot has no package metadata")
-        project = tomllib.loads(project_bytes.decode("utf-8"))
-        name = project.get("project", {}).get("name", "")
-        if not isinstance(name, str) or re.sub(r"[-_.]+", "-", name).lower() != "copilot-extensions-worktree-manager":
-            raise RecoveryRefused("Registered Manager slot belongs to another package")
-        source = payload / "src" / "worktree_manager" / "source_config.py"
-        source_bytes = _read(source)
+        source_bytes, package_evidence = _package(slot, include_source=True)
         if source_bytes is None:
             raise RecoveryRefused("Registered Manager has no attributable source defaults")
-        evidence += [
-            (project_path, hashlib.sha256(project_bytes).hexdigest()),
-            (source, hashlib.sha256(source_bytes).hexdigest()),
-        ]
+        evidence += package_evidence
         # Read the installed Manager's own literal defaults; never execute its
         # unconstructed application or substitute the updater's marketplace.
         for node in ast.parse(source_bytes.decode("utf-8")).body:
@@ -166,7 +192,9 @@ def _source(root: Path, slot: Path | None) -> tuple[str, str, list[tuple[Path, s
     return repo, ref, evidence
 
 
-def _registration(directory: Path):
+def _registration(
+    directory: Path,
+) -> tuple[providers._ControlPlaneProviderManifest | None, tuple[Path, ...]]:
     if directory.is_symlink() or directory.resolve() != directory.absolute():
         raise RecoveryRefused("Manager provider registry is indirect")
     if not directory.exists():
@@ -179,6 +207,8 @@ def _registration(directory: Path):
     entries = tuple(sorted(directory.glob("*.json")))
     for path in entries:
         data = _read(path)
+        if data is None:
+            raise RecoveryRefused(f"Manager provider registration disappeared: {path}")
         try:
             manifest = providers._parse_control_plane_provider_manifest(
                 json.loads(data), source_path=str(path),
@@ -221,15 +251,9 @@ def adopted_manager() -> Adoption | None:
     paths = [*entries, stub, root / "current-version", root / "last-known-good", root / "config.toml"]
     snapshots = {path: _read(path) for path in paths}
     slot = _slot(root, snapshots[root / "current-version"])
-    package_evidence = []
+    package_evidence: list[tuple[Path, str | None]] = []
     if slot is not None:
-        payload = slot / "payload" if (slot / "payload").is_dir() else slot
-        project_path = payload / "pyproject.toml"
-        project = _read(project_path)
-        name = tomllib.loads(project.decode("utf-8")).get("project", {}).get("name", "") if project else ""
-        if not isinstance(name, str) or re.sub(r"[-_.]+", "-", name).lower() != "copilot-extensions-worktree-manager":
-            raise RecoveryRefused("Registered Manager slot belongs to another package")
-        package_evidence.append((project_path, hashlib.sha256(project).hexdigest()))
+        _source_bytes, package_evidence = _package(slot)
     adoption = Adoption(
         root, command, (*(
             (path, hashlib.sha256(data).hexdigest() if data is not None else None)
@@ -257,7 +281,7 @@ def controller_selection() -> ControllerSelection:
     return result
 
 
-def _runtime_api():
+def _runtime_api() -> ModuleType:
     prefix = Path(sys.prefix).resolve()
     if not Path(__file__).resolve().is_relative_to(prefix):
         raise RecoveryRefused("Manager recovery must execute from the installed updater runtime")
@@ -305,7 +329,7 @@ def _source_environment(
 def _run(
     arguments: list[str], *, cwd: Path, env: dict[str, str], timeout: float = 120,
     durable_effects: bool = False,
-):
+) -> subprocess.CompletedProcess[str]:
     from .installer_run import run_installer
 
     if os.name == "nt":
@@ -326,7 +350,9 @@ def _run(
     )
 
 
-def _health_probe(arguments: list[str], root: Path, env: dict[str, str]):
+def _health_probe(
+    arguments: list[str], root: Path, env: dict[str, str],
+) -> subprocess.CompletedProcess[str] | None:
     try:
         return _run(arguments, cwd=root, env=env, timeout=30)
     except (OSError, subprocess.TimeoutExpired, RecoveryTimeout) as error:

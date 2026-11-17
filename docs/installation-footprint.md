@@ -67,6 +67,22 @@ Optional/unconfigured services stay inactive. A complete inventory reports
 them as not applicable; it does not provision Vault, Index hosting, Manager
 maintenance or another capability merely to make every row green.
 
+### Adopted Manager package identity
+
+The normal Worktrees update reader accepts both legacy Manager package payloads
+and the canonical `uv-application-copilot-extensions-worktree-manager` project.
+For an application, the wrapper name alone is insufficient: the exact Manager
+dependency, its associated wheel's package/version and source-profile digest,
+the canonical binding hash/profile lock, and the application component/source
+association must agree. Source defaults
+come from the validated wheel's `worktree_manager/source_config.py` without
+importing or executing it; explicit Manager source configuration retains
+precedence. Admission retains those input bytes for its existing change checks.
+
+This layout recognition neither proves installed health nor authorizes repair,
+selection or service changes. Wrong-package or inconsistent evidence remains
+an explicit refusal. It adds no second whole-portfolio construction check.
+
 ## Installer-equivalent repair
 
 Within an **already authorized repair scope**, use the official update/repair
