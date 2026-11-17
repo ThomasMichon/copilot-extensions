@@ -532,3 +532,19 @@ completion gate, every incumbent checkbox and actual owner; it does not
 reopen #8300's completed claim or waive native/source/resource conditions.
 No implementation, new claimant, credential/provider/script/native effect
 or source/resource transfer follows from either receipt.
+
+## Whole composition reviewed receipt and separate judgment (2026-11-17 UTC)
+
+#13139 merged the administrative-versus-technical gate clarification after
+current-head Copilot approval and required CI. Complete current ROOT,
+source and custody readback confirms all RC1..4/RCV1..3 receiving, with
+all 52 checkbox lines and the technical Plan/global Validation unchanged.
+Earlier proposed routes, continuing-OPEN statements and histories remain.
+
+The separate audited explanation retired #4959 `NOT_PLANNED` as redundant
+tracking only. Its original and all three earlier discussions remain exact;
+the existing composability effort remains Active with every unfinished
+technical gate and actual owner retained. #8300's bounded claim stays
+complete, while independent #5731/#2570/catalog/consumer obligations and
+archived recipe/provider credit remain distinct. No implementation,
+script/provider/task/lease/native operation or resource release follows.
