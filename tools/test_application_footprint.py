@@ -1,7 +1,7 @@
 """Export consumes canonical preparation and preserves the slot setup boundary."""
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from collections.abc import Callable, Iterator
 import hashlib
 import json
@@ -10,6 +10,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from types import SimpleNamespace
 from typing import Any
@@ -43,6 +44,37 @@ def _assert_code_unchanged(slot: Path, expected: dict[str, tuple[bytes, int]]) -
         if expected.get(name) != observed.get(name)
     ]
     assert not changed, changed[:20]
+
+
+@contextmanager
+def _manager_subscriber(endpoint: Any, root: Path) -> Iterator[None]:
+    from work_coalescing_singleton import client
+    from worktree_manager.mux_serving_observation import _existing_token
+
+    token, _identity = _existing_token(root)
+    identity = client.new_client_id()
+    errors: list[Exception] = []
+    stopped = threading.Event()
+
+    def renew() -> None:
+        while not stopped.wait(10):
+            try:
+                client.subscribe(endpoint.client_host, endpoint.port, token, identity)
+            except Exception as error:
+                errors.append(error)
+                return
+
+    client.subscribe(endpoint.client_host, endpoint.port, token, identity)
+    renewal = threading.Thread(target=renew)
+    renewal.start()
+    try:
+        yield
+    finally:
+        stopped.set()
+        renewal.join(timeout=5)
+        client.release(endpoint.client_host, endpoint.port, token, identity)
+        assert not renewal.is_alive()
+        assert not errors, errors
 
 
 @pytest.fixture
@@ -523,7 +555,7 @@ def test_actual_prepared_manager_full_setup_and_source_unavailable_repeat(
     with daemon_test_lifecycle(
         owner="prepared-manager-reference", registry_root=tmp_path / "daemon-instances",
         deadline=deadline, cleanup_results=cleanup,
-    ) as lifecycle:
+    ) as lifecycle, ExitStack() as subscribers:
         environment.update(lifecycle)
         # This explicit lane proves survival beyond the setup caller, under the renewable lease.
         environment.pop("COPILOT_EXTENSIONS_TEST_CONTAINED", None)
@@ -603,6 +635,32 @@ def test_actual_prepared_manager_full_setup_and_source_unavailable_repeat(
                     selected.client_host, selected.port, root=application.root,
                     generation=selected.version,
                 )
+                if not attempt:
+                    subscribers.enter_context(_manager_subscriber(selected, application.root))
+                    native: Callable[[Path], str] = native_retained_path
+                    probe = run_installation_owned(
+                        [
+                            native(slot / ".venv" / "Scripts" / "python.exe"),
+                            "-I", "-B", "-c",
+                            "import json,sys;from pathlib import Path;"
+                            "from worktree_manager import mux_daemon_cutover as c;"
+                            "from worktree_manager.mux_serving_observation import _existing_token;"
+                            "root=Path(sys.argv[1]).resolve();route=c.routed_endpoint(root);"
+                            "token,_=_existing_token(root);"
+                            "health=c.ControlClient('http://'+str(route.bind)+':'+str(route.port),"
+                            "root=root,token=token).health();"
+                            "print(json.dumps({'health':health,"
+                            "'same_generation':c._already_at_version(route,route.version,root=root)}))",
+                            str(application.root),
+                        ],
+                        cwd=home, env=installed_environment,
+                        timeout=max(1, deadline - time.monotonic()),
+                        max_stdout_bytes=1 << 20, max_stderr_bytes=1 << 20,
+                    )
+                    assert probe.returncode == 0, (probe.stdout, probe.stderr)
+                    installed_health = json.loads(probe.stdout)
+                    assert installed_health["same_generation"], installed_health
+                    assert installed_health["health"]["runtime_generation"] == selected.version
                 assert state.read_bytes() == b'{"preserve":true}\n'
                 _assert_code_unchanged(application.slot, immutable)
                 assert (slot / "application.json").is_file()

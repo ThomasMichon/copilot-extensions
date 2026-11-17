@@ -7052,7 +7052,11 @@ must contain the application-root update adapter. This case runs the installed
 `update --target worktree-manager` command twice, including real acquisition,
 packaged promotion/footprint production and incoming setup. It requires live
 incoming routing after caller Jobs close, unchanged old/new code trees and
-preserved durable state. The fixture's selected Dev ref is isolated test input,
+preserved durable state. An authenticated subscriber is retained and renewed
+during the unchanged repeat, then released on exit: the same-PID assertion
+requires actual consumer demand, not suppression of Manager's normal idle
+shutdown. The incoming interpreter also probes its own control-health contract.
+The fixture's selected Dev ref is isolated test input,
 not publication or qualification of unmerged source as the real merged branch.
 An omitted repository skips this case, not a default-update pass.
 
