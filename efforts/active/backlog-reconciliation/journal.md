@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-17 - Webhook and host-teardown receipt, with receiving correction](journal/2026/11.17-webhook-receipt-and-receiving-correction.md)
+
 - [2026-11-17 - Webhook and host-teardown receiving, with five retained contracts](journal/2026/11.17-webhook-and-host-teardown-receiving.md)
 
 - [2026-11-17 - Composition receipt and client-only installation inflow](journal/2026/11.17-composition-receipt-and-client-only-inflow.md)
