@@ -84,6 +84,12 @@ instead of a broad `--fix`. This runs only YAML inspection for that project's
 exact record, never session backfill, lifecycle reconciliation, daemon repair
 or garbage collection. Add `--fix` only after reviewing the result.
 
+A digits-only creation nonce can be misread as a YAML number in older records.
+This same targeted scope can quote its original 16-digit token, preserving any
+leading zeros rather than reconstructing the nonce from the parsed number.
+It never generates a replacement nonce. Duplicate keys, unknown fields and
+tokens outside that writer shape are not eligible for nonce recovery.
+
 Legacy unquoted multiline `bound_agent` text additionally requires an explicit
 boundary: inspect the record, identify the first real field after that text,
 then use `doctor --repair-record <id> --bound-agent-end-field pair_id --json`

@@ -228,6 +228,12 @@ legacy record. Legacy repaired mappings may be reformatted while preserving
 alias-referenced values; the exact original bytes remain in the private backup.
 See [scoped repair and byte/data preservation](../skills/repairing-worktrees/SKILL.md).
 
+The targeted record scope also repairs a legacy `creation_nonce` that the old
+writer emitted as a plain 16-digit number. Report mode identifies the repair;
+`--fix` quotes the original token under the same locks and backup contract,
+including any leading zeros. It does not allocate a new identity or relax the
+exact record reader's string requirement.
+
 ## Disposable producer ownership
 
 `resource-producer <capabilities|reserve|begin|complete|bind|inspect|close> --json

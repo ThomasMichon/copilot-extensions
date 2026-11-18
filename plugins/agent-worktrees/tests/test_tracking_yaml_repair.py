@@ -66,6 +66,68 @@ def test_bound_agent_writer_round_trips_arbitrary_text(tmp_path, agent):
     assert tracking.load_record(path).bound_agent == agent
 
 
+@pytest.mark.parametrize("nonce", [
+    "1234567890123456", "0123456701234567", "0000000000000000", "0123456789abcdef",
+])
+def test_creation_nonce_writer_preserves_string_identity(tmp_path, nonce):
+    path = tmp_path / "wt-agent.yaml"
+    rec = tracking.WorktreeRecord(
+        worktree_id="wt-agent", branch="worktree/wt-agent",
+        worktree_path=str(tmp_path / "wt-agent"), repo="test-project",
+        machine="test-machine", platform="windows", started_at="",
+        last_resumed_at="", resume_count=0, title=None,
+        status="active", completed_at=None, creation_nonce=nonce, sessions=[],
+    )
+    tracking.save_record(rec, path)
+    assert repair.strict_mapping(path.read_text(encoding="utf-8"))["creation_nonce"] == nonce
+    assert tracking.load_record(path).creation_nonce == nonce
+
+
+@pytest.mark.parametrize("nonce", ["1234567890123456", "0123456701234567"])
+def test_targeted_nonce_repair_retains_original_identity(record_dir, capsys, nonce):
+    root, path = record_dir
+    raw = _PREFIX + f"creation_nonce: {nonce}\n" + _SUFFIX
+    path.write_bytes(raw.encode())
+    sibling = root / "wt-other.yaml"
+    sibling.write_bytes(b"untouched: original\n")
+    assert maintenance_cli.cmd_doctor(args(bound_agent_end_field=None)) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["repairable"] and not report["repaired"]
+    assert path.read_bytes() == raw.encode() and not list(root.glob("*.bak"))
+    assert maintenance_cli.cmd_doctor(args(fix=True, bound_agent_end_field=None)) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["repaired"]
+    assert (root / report["backup"]).read_bytes() == raw.encode()
+    assert path.read_text(encoding="utf-8") == raw.replace(nonce, json.dumps(nonce))
+    assert repair.strict_mapping(path.read_text(encoding="utf-8"))["creation_nonce"] == nonce
+    assert sibling.read_bytes() == b"untouched: original\n"
+    assert maintenance_cli.cmd_doctor(args(fix=True, bound_agent_end_field=None)) == 0
+    assert not json.loads(capsys.readouterr().out)["repaired"]
+
+
+@pytest.mark.parametrize("value", [
+    "true", "[1234567890123456]", "123", "12345678901234567",
+    "1234567890123456\ncreation_nonce: 2345678901234567",
+])
+def test_nonce_repair_refuses_non_writer_tokens(record_dir, capsys, value):
+    root, path = record_dir
+    raw = _PREFIX + f"creation_nonce: {value}\n" + _SUFFIX
+    path.write_bytes(raw.encode())
+    maintenance_cli.cmd_doctor(args(fix=True, bound_agent_end_field=None))
+    report = json.loads(capsys.readouterr().out)
+    assert not report["repairable"] and not report["repaired"]
+    assert path.read_bytes() == raw.encode() and not list(root.glob("*.bak"))
+
+
+def test_nonce_repair_refuses_unknown_record_fields(record_dir, capsys):
+    root, path = record_dir
+    raw = _PREFIX + "creation_nonce: 1234567890123456\nforeign: keep\n" + _SUFFIX
+    path.write_bytes(raw.encode())
+    assert maintenance_cli.cmd_doctor(args(fix=True, bound_agent_end_field=None)) == 1
+    assert "unknown fields" in json.loads(capsys.readouterr().out)["error"]
+    assert path.read_bytes() == raw.encode() and not list(root.glob("*.bak"))
+
+
 @pytest.mark.guard
 def test_legacy_repair_preserves_exact_agent_text_and_surrounding_fields():
     fixed = repair.repair_bound_agent(_RAW, "pair_id")
@@ -452,7 +514,8 @@ def test_existing_public_backup_refuses_without_mutation(record_dir):
     assert path.read_bytes() == observed and backup.read_bytes() == observed
 
 
-def test_real_cli_reports_and_repairs_only_named_record(tmp_path):
+@pytest.mark.parametrize("nonce", [None, "1234567890123456", "0123456701234567"])
+def test_real_cli_reports_and_repairs_only_named_record(tmp_path, nonce):
     home, anchor = tmp_path / "home", tmp_path / "anchor"
     anchor.mkdir()
     registry = home / ".agent-worktrees"
@@ -474,7 +537,11 @@ def test_real_cli_reports_and_repairs_only_named_record(tmp_path):
                                    "windows": str(anchor), "linux": str(anchor)}},
     }), encoding="utf-8")
     path = records / "wt-agent.yaml"
-    path.write_bytes(_RAW.encode())
+    raw = _RAW if nonce is None else _PREFIX + f"creation_nonce: {nonce}\n" + _SUFFIX
+    raw = f"repo: test-project\nworktree_path: {anchor}\n" + raw
+    if nonce is not None:
+        raw = "machine: obsolete-host\nplatform: windows\n" + raw
+    path.write_bytes(raw.encode())
     sibling = records / "wt-other.yaml"
     sibling.write_bytes(b"unrelated: malformed: record\n")
     env = os.environ.copy()
@@ -485,20 +552,38 @@ def test_real_cli_reports_and_repairs_only_named_record(tmp_path):
                 "AGENT_WORKTREES_STATUS_MONITOR": "0"})
     source = Path(repair.__file__).resolve().parents[1]
     env["PYTHONPATH"] = str(source)
-    command = [
+    base = [
         sys.executable, "-m", "agent_worktrees", "--project", "test-project",
-        "doctor", "--repair-record", "wt-agent", "--bound-agent-end-field", "pair_id", "--json",
     ]
+    command = [
+        *base,
+        "doctor", "--repair-record", "wt-agent", "--json",
+    ]
+    if nonce is None:
+        command.extend(["--bound-agent-end-field", "pair_id"])
     report = subprocess.run(
         command, cwd=anchor, env=env, capture_output=True, text=True, timeout=30,
+        **no_window_kwargs(),
     )
     assert report.returncode == 0, report.stderr
     assert json.loads(report.stdout)["repairable"]
-    assert path.read_bytes() == _RAW.encode()
+    assert path.read_bytes() == raw.encode()
     applied = subprocess.run(
         [*command, "--fix"], cwd=anchor, env=env, capture_output=True, text=True, timeout=30,
+        **no_window_kwargs(),
     )
     assert applied.returncode == 0, applied.stderr
     assert json.loads(applied.stdout)["repaired"]
-    assert repair.strict_mapping(path.read_text())["bound_agent"] == _TEXT
+    data = repair.strict_mapping(path.read_text(encoding="utf-8"))
+    key, expected = ("bound_agent", _TEXT) if nonce is None else ("creation_nonce", nonce)
+    assert data[key] == expected
     assert sibling.read_bytes() == b"unrelated: malformed: record\n"
+    if nonce is not None:
+        assert not {"machine", "platform"}.intersection(data)
+        readback = subprocess.run(
+            [*base, "record", "--worktree-id", "wt-agent", "--json"],
+            cwd=anchor, env=env, capture_output=True, text=True, timeout=30,
+            **no_window_kwargs(),
+        )
+        assert readback.returncode == 0, readback.stdout + readback.stderr
+        assert json.loads(readback.stdout)["worktree"]["creation_nonce"] == nonce

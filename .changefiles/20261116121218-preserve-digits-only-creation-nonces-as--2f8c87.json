@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve digits-only creation nonces as strings and recover their original tokens through exact-record doctor repair.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

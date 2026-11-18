@@ -2834,7 +2834,7 @@ def _save_record_contents_unlocked(
         content += f"owner_ref: {_yaml_scalar(record.owner_ref)}\n"
     content += receiving_allocation.serialized_receipt(record)
     if record.creation_nonce:
-        content += f"creation_nonce: {_yaml_scalar(record.creation_nonce)}\n"
+        content += yaml.safe_dump({"creation_nonce": record.creation_nonce}, sort_keys=False)
     # agent-bridge-worktree-native-agents: the bound charter. Emitted only
     # when set, so an unbound worktree's YAML stays byte-identical.
     if record.bound_agent:
