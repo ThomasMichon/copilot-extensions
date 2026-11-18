@@ -727,11 +727,14 @@ retain their separate responsibilities.
 #5947's original condition keeps it OPEN until its own full WC1-WC4/WCV1-WCV4
 acceptance is resolved. A complete canonical issue does not prevent planned
 aggregation into its existing rightful domain, but neither a proposal nor
-merging twelve unchecked rows resolves that specific condition. Any earlier
-administrative supersession first requires explicit reconciliation through
-its actual governing source/coordination record, not a generic owner-ACK.
-Only after resolution or that explicit reconciliation do actual reviewed whole
-receiving, current complete ROOT/source/discussion/custody readback and a
-separate judgment permit supersession. No implementation,
+merging twelve unchecked rows resolves that currently published condition.
+This SAME-PR proposal explicitly refines the campaign-introduced administrative
+wording prospectively, without changing technical acceptance or an independent
+owner/resource/operational condition. Once normally reviewed and accepted,
+the refinement must first be explicitly reflected in #5947 while it remains
+OPEN. Only then may complete unfinished acceptance remain planned at the
+existing receiver and current whole ROOT/source/discussion/custody readback
+support a separate administrative supersession judgment. No automatic closure,
+generic owner-ACK or technical-completion claim follows. No implementation,
 native/authentication operation, live migration, owner appointment or
 claim/resource release follows.

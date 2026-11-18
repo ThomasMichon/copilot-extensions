@@ -3431,9 +3431,10 @@ sources, transferring owners or turning partial/planning gains into completion.
   without source clearance. A subsequent domain-ownership assessment proposes
   twelve unchecked complete #5947 callback Plan/local/global Validation rows
   in the existing PR-watch programme, without retiring the source or changing
-  custody. Its original full-acceptance OPEN condition remains explicit;
-  planned-row delivery does not resolve it. The complete count remains
-  883 whole, 154 above fixed 729.
+  custody. Its published full-acceptance OPEN condition remains until an
+  explicitly accepted prospective tracking refinement is reflected in that
+  still-OPEN source; planned-row delivery alone does not resolve it. The
+  complete count remains 883 whole, 154 above fixed 729.
   The [operation-credential receiving receipt](journal/2026/11.17-operation-credential-receiving-receipt.md)
   records #13171's actual reviewed whole-domain acceptance and #5763's
   separately audited redundant-tracker retirement after complete current

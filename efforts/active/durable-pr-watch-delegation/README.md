@@ -230,16 +230,23 @@ without a new generic owner-ACK ceremony.
 
 Keep #5947 OPEN until its own full WC1-WC4/WCV1-WCV4 acceptance is resolved,
 as recorded when it received #6723. This proposal and merging twelve unchecked
-rows do not resolve that source-specific condition. Any earlier administrative
-supersession requires explicit reconciliation of that condition through its
-actual governing source/coordination record; receiving review alone is not
-that reconciliation. Do not invent a generic owner-ACK requirement.
+rows do not resolve that currently published source-specific condition.
 
-Only after that specific condition is resolved or explicitly reconciled,
-actual accepted receiving, normal review, current whole-ROOT and complete
-source/discussion/unchanged-custody readback permit a later, separate tracker
-judgment. A proposal, topic link, checked historical milestone or source
-retirement is not technical completion or claim release.
+This proposes a prospective refinement of the administrative tracking wording
+introduced by this campaign's #6723 intake. It revises no independent owner,
+operator, resource or operational condition. After normal review explicitly
+accepts this refinement, it must first be explicitly reflected in #5947 while
+that issue remains OPEN. Its complete unfinished WC1-WC4/WCV1-WCV4 union may
+then remain planned here under the same actual owners, without requiring the
+old tracking identity to remain open until implementation. All twelve
+technical rows remain unchecked; #6723 retirement is NOT completion of either
+callback feature.
+
+Only after accepted refinement and that source reflection, actual complete
+receiving, current whole-ROOT and complete source/discussion/unchanged-custody
+readback permit a later, separate administrative supersession judgment.
+Neither proposal, review nor merge automatically closes #5947, transfers
+custody or releases a hold. No generic owner-ACK requirement is introduced.
 
 ## Context
 
@@ -1721,11 +1728,12 @@ callback an implicit credential store.
   Coordination in this existing shared PR-watch subscription domain.
   Preserve credited #6019, legacy one-attempt versus acknowledged durable
   delivery, subscriber cwd and actual owner capability/compatibility, with
-  unchanged M1 integration/domain/resource custody. #5947's original full-
-  acceptance OPEN condition remains; planned-row delivery does not resolve it.
-  Resolution or explicit source-condition reconciliation, actual reviewed
-  whole receiving and current whole source/ROOT/custody readback precede
-  any separate administrative judgment. No implementation,
+  unchanged M1 integration/domain/resource custody. #5947's published full-
+  acceptance OPEN condition remains until an explicitly accepted prospective
+  tracking refinement is reflected in that still-OPEN source. Planned-row
+  delivery alone does not resolve it. Actual reviewed whole receiving and
+  current whole source/ROOT/custody readback still precede any separate
+  administrative judgment. No implementation,
   native operation, source disposition or resource transfer was performed.
 - [2026-11-17 - Filtered source completion; parent acceptance retained](journal/2026/11.17%20Filtered%20source%20completion.md)
 - [2026-11-16 - Reviewer-action feed contract reviewed](journal/2026/11.16%20Reviewer%20action%20feed%20contract.md)
