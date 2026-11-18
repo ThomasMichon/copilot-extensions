@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+from work_coalescing_singleton import client as wcs_client
+import platform
+from agent_worktrees import status_monitor_recovery_contract as guarded_recovery
+from agent_worktrees import locks
+
+from types import ModuleType
+from typing import Any, overload
+
 import importlib.util
 import builtins
 import hashlib
@@ -21,6 +29,24 @@ from typing import TYPE_CHECKING, Any, NoReturn, Protocol, TypeVar, TypedDict, c
 
 import pytest
 from agent_procutil import no_window_kwargs
+from update_driver import core
+
+
+@overload
+def _status(request_id: str, *, root: Path) -> core.Request: ...
+
+
+@overload
+def _status(*, root: Path) -> tuple[core.Request, ...]: ...
+
+
+def _status(request_id: str | None = None, *, root: Path) -> core.Request | tuple[core.Request, ...]:
+    result = core.status(request_id, root=root)
+    if request_id is None:
+        assert isinstance(result, tuple)
+    else:
+        assert isinstance(result, core.Request)
+    return result
 
 if TYPE_CHECKING:
     from installer_wheel_snapshot import WheelInstallInputs
@@ -117,7 +143,7 @@ def test_native_release_entry_retains_inputs_without_a_source_association(driver
     assert not held and json.loads(result.read_text()) == {"installed": True}
 
 
-def test_cli_preserves_settled_refusal_as_a_nonzero_result(driver, tmp_path, monkeypatch):
+def test_cli_preserves_settled_refusal_as_a_nonzero_result(driver: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     result = driver.install_driver.refusal_result(
         "2.0.0", driver.InstallationRefused("predecessor route changed"), committed=False,
     )
@@ -1473,9 +1499,11 @@ def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
         monkeypatch.setattr(core, "default_root", lambda: queue)
         observed = []
 
-        def execute(tx):
+        def execute(tx: Any) -> Any:
             observed.append(tx.request.id)
-            with borrowed_custody(root=queue, environ=tx.participant_env()):
+            owner = borrowed_custody(root=queue, environ=tx.participant_env())
+            assert owner is not None
+            with owner:
                 if tx.request.id == later.id:
                     return 0
                 result = driver.install(
@@ -1488,15 +1516,15 @@ def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
         if special == "queue-unknown":
             with pytest.raises(ParticipantError):
                 core.drain(root=queue, executor=execute)
-            assert core.status(first.id, root=queue).state == "interrupted"
-            assert core.status(later.id, root=queue).state == "pending"
+            assert _status(first.id, root=queue).state == "interrupted"
+            assert _status(later.id, root=queue).state == "pending"
             assert observed == [first.id]
             with pytest.raises(core.InterruptedError):
                 core.drain(root=queue, executor=execute)
         else:
             core.drain(root=queue, executor=execute)
             assert observed == [first.id, later.id]
-            assert [(item.state, item.exit_code) for item in core.status(root=queue)] == [
+            assert [(item.state, item.exit_code) for item in _status(root=queue)] == [
                 ("completed", 1), ("completed", 0),
             ]
     elif interrupted or special in {"deferred", "prepublication-interrupted"}:
@@ -1854,6 +1882,7 @@ def test_interrupted_marked_committed_witness_is_never_rolled_back(
 
 def test_restart_spawn_returns_the_real_process_handle_to_its_owner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from types import SimpleNamespace
+    from unittest.mock import Mock
     from agent_worktrees import status_monitor_cutover, status_monitor_runtime as smr
 
     handle = object()
@@ -2333,7 +2362,9 @@ def test_preparation_stamps_installed_metadata_and_preserves_native_scripts(tmp_
     assert cached_info.read_text(encoding="utf-8") == "unchanged cached build provenance\n"
     assert not os.path.samefile(cached_info, package / "_build_info.py")
     content = (package / "_build_info.py").read_text(encoding="utf-8")
-    info = ast.literal_eval(cast(ast.Assign, ast.parse(content).body[-1]).value)
+    assignment = ast.parse(content).body[-1]
+    assert isinstance(assignment, (ast.Assign, ast.AnnAssign)) and assignment.value is not None
+    info = ast.literal_eval(assignment.value)
     assert all(info[key] == value for key, value in provenance.items()
                if key not in ("deployment_source", "frozen_plugin"))
     assert json.loads(info["deployment_source"])["payload_fingerprint"] == "frozen-fingerprint"
