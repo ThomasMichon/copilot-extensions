@@ -17,6 +17,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from agent_bridge.app import create_app
+from agent_bridge.db import Database
 from agent_bridge.models import ServiceConfig
 from agent_bridge.session_manager import SessionManager
 
@@ -71,3 +72,34 @@ def test_startup_does_not_block_on_slow_reattach(tmp_path, monkeypatch):
     # The reattach was still scheduled/invoked (a /health round-trip gave the
     # lifespan loop a chance to run the task's first line).
     assert invoked["called"] is True
+
+
+@pytest.mark.parametrize("passive", [True, False], ids=["passive-candidate", "cold-start"])
+def test_only_cold_start_concludes_an_open_turn(tmp_path, monkeypatch, passive):
+    root = tmp_path / "runtime"
+    root.mkdir()
+    monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(root))
+    cfg = ServiceConfig(port=0, bind="127.0.0.1", db_path=str(root / "sessions.db"),
+                        enable_credential_relay=False)
+    owner = Database(cfg.db_path)
+    try:
+        now = time.time()
+        owner.create_session("active", "active", None, str(tmp_path), "local", "running", now)
+        owner.create_turn("active", 0, "unfinished work", now)
+        original_turn = owner.get_turn("active", 0)
+        original_events = owner.get_events("active")
+        app = create_app(config=cfg, token="test-token")
+        app.state.passive = passive
+        with TestClient(app):
+            turn = owner.get_turn("active", 0)
+            session = owner.get_session("active")
+            assert session and turn
+            if passive:
+                assert session["status"] == "running"
+                assert turn == original_turn and turn["completed_at"] is None
+                assert owner.get_events("active") == original_events
+            else:
+                assert session["status"] == "stopped"
+                assert turn["stop_reason"] == "interrupted" and turn["completed_at"] is not None
+    finally:
+        owner.close()

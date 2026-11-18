@@ -285,7 +285,9 @@ async def _lifespan(app: FastAPI):
     db.start_writer()
     app.state.db = db
 
-    if independent_source:
+    # Neither candidate owns the predecessor's sessions at startup. Cold-start
+    # reconciliation would mark live turns interrupted before the route changes.
+    if independent_source or getattr(app.state, "passive", False):
         (db_path.parent / "hosts").mkdir(parents=True, exist_ok=True)
         mgr = session_manager_from_config(db, cfg, read_only_rehydrate=True)
     else:
