@@ -1404,6 +1404,11 @@ and `bind_instance`; cancel only a **positively refused** creation through
 `cancel_instance_reservation(..., creation_refused=True)`. Lost responses and
 uncertain cleanup retain the original record.
 
+On Windows, runtime and registry roots accept native DOS short-name aliases
+for the same plain directories. Name expansion does not follow junctions or
+symbolic links: redirected roots or ancestors and parent traversal remain
+refused before creation below them. This does not grant cleanup authority.
+
 An automatic executable provenance is never a library-file fallback. POSIX
 lookup uses the actual child environment's `PATH` (including its default when
 absent), resolving relative entries/paths against the child cwd. Multiple
