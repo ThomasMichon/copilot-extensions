@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import stat
@@ -11,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-def add_parser(subparsers) -> None:
+def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     health = subparsers.add_parser("health", help="bounded local health observations")
     commands = health.add_subparsers(dest="health_command", required=True)
     report = commands.add_parser("report", help="summarize explicit local telemetry files")
@@ -64,12 +65,15 @@ def add_parser(subparsers) -> None:
     job.add_argument("--user-id", default="", help="interactive Windows account SID for the proposed task")
     job.set_defaults(func=run_prepare_job)
     enrollment = commands.add_parser(
-        "job", help="explicit local Windows health-job lifecycle; never a service", allow_abbrev=False,
+        "job", help="explicit local Windows or Linux finite health-job lifecycle", allow_abbrev=False,
     )
     operations = enrollment.add_subparsers(dest="job_operation", required=True)
     configure = operations.add_parser("configure", allow_abbrev=False)
     configure.add_argument("--store-dir", type=Path, required=True)
-    configure.add_argument("--user-id", required=True)
+    configure.add_argument(
+        "--user-id", default="", required=sys.platform == "win32",
+        help="Windows interactive SID; Linux derives the executing UID and refuses this option",
+    )
     configure.add_argument("--enabled", action="store_true", help="explicitly adopt recurring local writes")
     configure.add_argument("--apply", action="store_true")
     configure.add_argument("--expect", default="", help="exact local enrollment preview token")
@@ -78,7 +82,7 @@ def add_parser(subparsers) -> None:
         operations.add_parser(operation, allow_abbrev=False).set_defaults(func=run_job)
 
 
-def run_job(args) -> int:
+def run_job(args: argparse.Namespace) -> int:
     from . import health_enrollment as enrollment
     from .health_run import policy_preview
     from .health_slots import HealthError
@@ -88,10 +92,10 @@ def run_job(args) -> int:
     try:
         owner = enrollment.Enrollment(enrollment.select(executing=True, for_collection=False))
         if args.job_operation == "configure":
-            result = owner.configure({
-                "store": str(args.store_dir), "policy_token": policy_preview(args.store_dir)[2],
-                "user_id": args.user_id, "enabled": args.enabled,
-            }, apply=args.apply, expected=args.expect)
+            result = owner.configure(enrollment.local_desired(
+                store=str(args.store_dir), policy_token=policy_preview(args.store_dir)[2],
+                user_id=args.user_id, enabled=args.enabled,
+            ), apply=args.apply, expected=args.expect)
         elif args.job_operation == "status":
             result = owner.status()
         elif args.job_operation == "disable":
@@ -116,7 +120,7 @@ def run_job(args) -> int:
         return 2
 
 
-def run_prepare_job(args) -> int:
+def run_prepare_job(args: argparse.Namespace) -> int:
     from .health_jobs import JobError, prepare
     from .health_run import policy_preview
     from .health_slots import HealthError
@@ -130,7 +134,7 @@ def run_prepare_job(args) -> int:
         launcher = payload / "bin" / ("agent-machines.ps1" if sys.platform == "win32" else "agent-machines")
         if not launcher.is_file():
             raise JobError("owning-launcher-unavailable")
-        windows = {}
+        windows: dict[str, str] = {}
         if sys.platform == "win32":
             import sysconfig
 
@@ -158,7 +162,7 @@ def run_prepare_job(args) -> int:
         return 2
 
 
-def run_collection(args) -> int:
+def run_collection(args: argparse.Namespace) -> int:
     from agent_procutil.owned_process import OwnedCleanupError
 
     from .health_run import run
@@ -188,7 +192,7 @@ def run_collection(args) -> int:
         return 2
 
 
-def run_collect(args) -> int:
+def run_collect(args: argparse.Namespace) -> int:
     from agent_procutil.owned_process import OwnedCleanupError
 
     from .health_collect import collect
@@ -212,7 +216,7 @@ def run_collect(args) -> int:
         return 2
 
 
-def run_observe(args) -> int:
+def run_observe(args: argparse.Namespace) -> int:
     from .health_observe import observe_bridge
     from .health_slots import HealthError
 
@@ -254,7 +258,7 @@ def _chart_overlaps_store(chart: Path, store: Path) -> bool:
     return destination.is_relative_to(namespace)
 
 
-def run_slots(args) -> int:
+def run_slots(args: argparse.Namespace) -> int:
     from . import health_slots
 
     result = None
@@ -288,7 +292,7 @@ def run_slots(args) -> int:
         return 2
 
 
-def run_report(args) -> int:
+def run_report(args: argparse.Namespace) -> int:
     from .health_report import HourlyReport, MAX_INPUTS
 
     try:
@@ -306,7 +310,7 @@ def run_report(args) -> int:
             and _chart_overlaps_store(args.chart, args.store_dir)
         ):
             raise ValueError("chart overlaps health store")
-        seen = set()
+        seen: set[tuple[int, int]] = set()
         for path in args.input:
             descriptor = None
             try:

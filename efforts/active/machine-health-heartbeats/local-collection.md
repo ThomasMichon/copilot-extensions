@@ -454,10 +454,13 @@ The first source slice adds the immutable Linux pair renderer and the finite
 installed action's platform-correct capability lookup. Its focused controls
 retain the existing Windows enrollment and payload-selection packet and check
 the portable action's retention arguments, budget, missing support and
-rendering refusals. It does not expose Linux enrollment: the normal lifecycle
-still refuses before registration. Native pair/state integration, platform
-consent, interruption recovery and actual systemd qualification above remain
-open; this foundation alone satisfies none of those native acceptance items.
+rendering refusals. It does not expose Linux enrollment: that foundation's normal lifecycle still refused before
+registration. The subsequent source slice reuses the enrollment transaction
+for Linux version-2 state and derived UID, exact service/timer ownership,
+disabled publication/readback and partial-pair recovery. Portable controls
+exercise those paths without a user manager. Actual installed/systemd
+qualification above remains open; source controls alone satisfy none of those
+native acceptance items.
 
 ## First complete flow and promotion gates
 
