@@ -750,6 +750,11 @@ _Agent-recommended implementation requirements._
 
 ### Subscriber callback context and truthful legacy outcomes from #5947
 
+[The subscriber-context contract](subscriber-callback-context.md) proposes
+concrete wire, saved-state and rollback boundaries for P5947-3/4. Review it
+before runtime implementation; its source analysis is not mixed-version or
+consumer acceptance evidence.
+
 #6019 already delivered outage-independent expiry and the acknowledged-delivery
 foundation. Preserve that positive credit; the unchecked rows below retain
 whole-contract acceptance and residual work, not a claim that the repaired
