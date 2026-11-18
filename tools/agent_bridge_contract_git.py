@@ -136,7 +136,7 @@ def prefetch_sources(sources: Iterable[tuple[str, str, str]]) -> None:
         if not isinstance(path, str) or not path or any(char in path for char in "\r\n\0"):
             raise ValueError("Invalid provenance path in local evidence batch")
         grouped.setdefault(commit, set()).add(path)
-        objects.update((commit, expected_blob))
+        objects.update((commit, blob))
     prefetch_objects(objects)
     queries: dict[str, tuple[str, str]] = {}
     for commit, selected in sorted(grouped.items()):

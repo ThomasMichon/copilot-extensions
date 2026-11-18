@@ -42,10 +42,12 @@ def test_large_object_inventory_is_bounded_complete_and_deduplicated(
     objects = [f"{index:040x}" for index in range(600)]
     missing = "f" * 40
     calls: list[list[str]] = []
+    roots: list[str] = []
 
     def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
         queries = kwargs["input"].decode("utf-8").splitlines()
         calls.append(queries)
+        roots.append(argv[argv.index("-C") + 1])
         assert argv[-2:] == ["cat-file", "--batch"]
         assert kwargs["timeout"] == 10 and kwargs["check"] is True
         assert kwargs["env"]["GIT_NO_LAZY_FETCH"] == "1"
@@ -60,6 +62,13 @@ def test_large_object_inventory_is_bounded_complete_and_deduplicated(
     for oid in objects:
         assert evidence.blob_sha256(oid) == hashlib.sha256(oid.encode("ascii")).hexdigest()
     assert evidence.blob_sha256(missing) is None
+    alternate = evidence.REPO / "alternate-evidence"
+    calls.clear()
+    roots.clear()
+    observed = list(evidence._batch(objects, root=alternate))
+    assert [query for query, *_ in observed] == objects
+    assert len(calls) > 1 and all(len(batch) <= 256 for batch in calls)
+    assert roots == [str(alternate)] * len(calls)
 
 
 @pytest.mark.parametrize("corruption", ["header", "truncated", "trailing"])

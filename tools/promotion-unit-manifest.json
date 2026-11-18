@@ -6687,7 +6687,7 @@
         "plugins/agent-bridge/src/agent_bridge/retained_postload_evidence.py": "b05ac937b2d76d1cccffb5f2cadf1d14fc0843f412f6f4d9fb041ac459000c9a",
         "plugins/agent-bridge/src/agent_bridge/retained_load_configuration.py": "ee6ac53a49f6ac85dc98891cf5ba74b0d73e4048a922a82bbf4fec90a5b54f35",
         "libs/agent-procutil/src/agent_procutil/cleanup_diagnostics.py": "0675a28c0c233ed235b392d1f1f12faa5196f7b2bb41f3a513fdb5c5b859adfb",
-        "tools/agent_bridge_contract_git.py": "324480b6d087b70ddb1beeb46fcc2ba8d5d0c5aecbf9c90e9847b708547106b3",
-        "tools/promotion_unit_tests/test_bridge_contract_git.py": "90e66bfdc4bad7b72bf12d7cc4b25f1398b9ff1b226f829637c420347f5e0977"
+        "tools/agent_bridge_contract_git.py": "8c115db38e28db8a3dba64977336b444bf7fb5dac8dc544d3e940e88a3e51e8a",
+        "tools/promotion_unit_tests/test_bridge_contract_git.py": "03974fea5ac2c52cbda95424116b69626b870c2987bf848e604471533bea205e"
     }
 }
