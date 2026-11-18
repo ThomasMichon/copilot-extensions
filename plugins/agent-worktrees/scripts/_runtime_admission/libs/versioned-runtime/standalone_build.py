@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Collection, Iterable, Mapping
-import importlib
 from pathlib import Path
 import os
 import re
 import shutil
 import stat
+import sys
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 if TYPE_CHECKING:
@@ -26,6 +26,8 @@ RUNTIME_RESOURCES = {
     "versioned_runtime_construction.py": "versioned_runtime_construction.py",
     "versioned_runtime_publication.py": "versioned_runtime_publication.py",
     "versioned_runtime_source.py": "versioned_runtime_source.py",
+    "versioned_runtime_identity.py": "versioned_runtime_identity.py",
+    "versioned_runtime_fingerprint.py": "versioned_runtime_fingerprint.py",
     "versioned_runtime_cache.py": "versioned_runtime_cache.py",
 }
 APPLICATION_RESOURCES = {
@@ -141,7 +143,10 @@ def embedded_projects(
     project: str | os.PathLike[str],
 ) -> dict[str, tuple[Path, ProjectMetadata]]:
     """Select the explicitly declared first-party build inputs, never runtime packages."""
-    tomllib = importlib.import_module("tomllib")
+    if sys.version_info >= (3, 11):
+        import tomllib
+    else:
+        import tomli as tomllib
     from packaging.requirements import Requirement
     from packaging.utils import canonicalize_name
 
@@ -257,10 +262,9 @@ def commands(
         wheel_base = None
     else:
         wheel_base = bdist_wheel
-    project = Path(project).absolute()
-    project_root = project
-    embedded = embedded_projects(project) if package == "worktree_manager" else {}
-    members = embedded_members(project) if embedded else {}
+    root = Path(project).absolute()
+    embedded = embedded_projects(root) if package == "worktree_manager" else {}
+    members = embedded_members(root) if embedded else {}
     if embedded:
         from setuptools import find_packages
     resources = {
@@ -273,14 +277,14 @@ def commands(
 
     def inputs() -> tuple[dict[str, bytes], bytes]:
         directories: DirectoryIdentities = {}
-        helper_paths = [project / HELPER_NAME]
+        helper_paths = [root / HELPER_NAME]
         optional_helpers = []
         if canonical_directory is not None:
             optional_helpers = helper_paths
             helper_paths = [canonical_directory / "standalone_build.py"]
         primitives: dict[str, bytes] = {}
         for name, resource in resources.items():
-            paths = [project / resource]
+            paths = [root / resource]
             optional = []
             if canonical_directory is not None:
                 optional = paths
@@ -290,7 +294,7 @@ def commands(
                 paths, label, optional_paths=optional, directories=directories,
             )
         for name, source in (companion_resources or {}).items():
-            included = project / "src" / package / name
+            included = root / "src" / package / name
             paths = [Path(source)] if source is not None else [included]
             primitives[name] = select_bytes(
                 paths, name, optional_paths=[included] if source is not None else [],
@@ -328,11 +332,11 @@ def commands(
                         destination = source.joinpath(*selected.split("."))
                         previous = mapping.get(selected)
                         if selected in packages and (
-                            previous is None or (project / previous).resolve() != destination.resolve()
+                            previous is None or (root / previous).resolve() != destination.resolve()
                         ):
                             raise RuntimeError("embedded import package collides with application")
                         mapping[selected] = os.path.relpath(
-                            destination, project,
+                            destination, root,
                         )
                     packages.update(discovered)
                     package_data.update(data.get("tool", {}).get("setuptools", {}).get("package-data", {}))
@@ -340,7 +344,7 @@ def commands(
                 distribution.package_dir = mapping
                 distribution.package_data = package_data
             super().finalize_options()
-            self.build_lib = _native_build_path(project, self.build_lib)
+            self.build_lib = _native_build_path(root, self.build_lib)
 
         def build_packages(self) -> None:
             if not embedded:
@@ -402,7 +406,7 @@ def commands(
             local = [
                 name for name in files
                 if Path(name).parts[0] != "_first_party"
-                and (project_root / name).resolve().is_relative_to(project_root.resolve())
+                and (root / name).resolve().is_relative_to(root.resolve())
             ]
             super().make_release_tree(base_dir, local)
             for name, data in primitives.items():
@@ -446,8 +450,8 @@ def commands(
 
             def finalize_options(self) -> None:
                 super().finalize_options()
-                self.build_dir = _native_build_path(project, self.build_dir)
-                self.install_dir = _native_build_path(project, self.install_dir)
+                self.build_dir = _native_build_path(root, self.build_dir)
+                self.install_dir = _native_build_path(root, self.install_dir)
 
         classes["install_lib"] = WindowsInstallLib
         from setuptools import Distribution
@@ -469,7 +473,7 @@ def commands(
 
                 def finalize_options(self) -> None:
                     super().finalize_options()
-                    self.bdist_dir = _native_build_path(project, self.bdist_dir)
+                    self.bdist_dir = _native_build_path(root, self.bdist_dir)
 
             classes["bdist_wheel"] = BdistWheel
     if wheel_base is not None:
@@ -536,6 +540,9 @@ def commands(
         InstallLibBase = classes.get("install_lib", install_lib)
 
     class InstallLib(InstallLibBase):
+        build_dir: str
+        install_dir: str
+
         def install(self) -> list[str] | None:
             if (
                 not embedded or self.dry_run

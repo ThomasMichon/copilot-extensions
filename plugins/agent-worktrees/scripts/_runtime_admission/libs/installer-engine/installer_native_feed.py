@@ -17,6 +17,7 @@ import sys
 import time
 from typing import Any, BinaryIO, cast
 from urllib.parse import unquote, urlsplit, urlunsplit
+from typing import Any, cast
 
 import installer_dependency_policy as dependencies
 from installer_feed_policy import _is_public_pypi_url
@@ -102,7 +103,8 @@ def _optional(value: str) -> str | None:
 
 
 def _index_url(value: str) -> tuple[str, str, bool]:
-    verbatim = _fields(_body(_body(value, "Url", "(", ")").strip(), "VerbatimUrl"))
+    kind = "Pypi" if value.startswith("Pypi(") else "Url"
+    verbatim = _fields(_body(_body(value, kind, "(", ")").strip(), "VerbatimUrl"))
     url = verbatim.get("url", "")
     wrapper = "DisplaySafeUrl" if url.startswith("DisplaySafeUrl") else "SafeUrl"
     safe = _fields(_body(url, wrapper))
@@ -164,9 +166,7 @@ def _basic(user: str, password: str) -> tuple[tuple[str, str], ...]:
     return (("Authorization", scheme + encoded),)
 
 
-def _netrc(
-    environment: dict[str, str], host: str | None, username: str,
-) -> tuple[str, str] | None:
+def _netrc(environment: dict[str, str], host: str, username: str) -> tuple[str, str | None] | None:
     home = environment.get("USERPROFILE" if os.name == "nt" else "HOME")
     location = environment.get("NETRC")
     path = Path(location) if location else Path(home) / ".netrc" if home else None
@@ -182,9 +182,10 @@ def _netrc(
             if len(content) > 1 << 20:
                 raise NativeFeedError("native netrc credential input is oversized")
             _unchanged(path, before, stream, opened=opened)
-        provider: Any = netrc.netrc.__new__(netrc.netrc)
+        provider = netrc.netrc.__new__(netrc.netrc)
         provider.hosts, provider.macros = {}, {}
-        provider._parse(str(path), io.StringIO(content.decode("utf-8")), False)
+        parse = cast(Callable[[str, io.StringIO, bool], None], getattr(provider, "_parse"))
+        parse(str(path), io.StringIO(content.decode("utf-8")), False)
         credentials = provider.authenticators(host)
         if credentials is None:
             return None
@@ -202,7 +203,7 @@ def _credentials(
     raw: list[tuple[str | None, str]], uv: str, deadline: float,
 ) -> tuple[tuple[str, str], ...]:
     name = index["name"]
-    matches = []
+    matches: list[tuple[str, str | None]] = []
     for candidate_name, candidate in raw:
         if candidate_name is not None and candidate_name != name:
             continue
@@ -217,9 +218,9 @@ def _credentials(
     environment = transaction.environment
     if name is not None:
         stem = "UV_INDEX_" + re.sub(r"[^A-Za-z0-9]", "_", name).upper()
-        user, password = environment.get(stem + "_USERNAME"), environment.get(stem + "_PASSWORD")
-        if user is not None or password is not None:
-            matches.append((user if user is not None else username, password))
+        named_user, named_password = environment.get(stem + "_USERNAME"), environment.get(stem + "_PASSWORD")
+        if named_user is not None or named_password is not None:
+            matches.append((named_user if named_user is not None else username, named_password))
     if len(set(matches)) > 1:
         raise NativeFeedError("native feed credential inputs are ambiguous")
     user, password = matches[0] if matches else (username, None)
@@ -230,7 +231,9 @@ def _credentials(
     if password_present and password is None:
         raise NativeFeedError("native embedded feed credentials could not be captured")
     if password is None:
-        netrc_pair = _netrc(environment, urlsplit(location).hostname, user)
+        host = urlsplit(location).hostname
+        assert host is not None
+        netrc_pair = _netrc(environment, host, user)
         if netrc_pair is not None:
             user, password = netrc_pair
     if password is None:
@@ -242,7 +245,7 @@ def _credentials(
             result = subprocess.run(
                 command, env=environment, cwd=transaction.cwd, capture_output=True,
                 text=True, stdin=subprocess.DEVNULL, timeout=deadline - time.monotonic(),
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
+                creationflags=cast(int, vars(subprocess)["CREATE_NO_WINDOW"]) if os.name == "nt" else 0,
             )
         except (OSError, subprocess.TimeoutExpired):
             raise NativeFeedError("native feed credential lookup failed or timed out") from None
@@ -264,9 +267,7 @@ def _credentials(
     return _basic(user, password)
 
 
-def _configured_index(
-    name: str | None, location: str, raw: list[tuple[str | None, str]],
-) -> bool:
+def _configured_index(name: str | None, location: str, raw: list[tuple[str | None, str]]) -> bool:
     for candidate_name, candidate in raw:
         if candidate_name is not None and candidate_name != name:
             continue
@@ -277,9 +278,7 @@ def _configured_index(
     return False
 
 
-def _tls(
-    network: dict[str, str], *, environment: dict[str, str], deadline: float,
-) -> ssl.SSLContext:
+def _tls(network: dict[str, str], *, environment: dict[str, str], deadline: float) -> ssl.SSLContext:
     _check_deadline(deadline)
     if network.get("allow_insecure_host") != "[]":
         raise NativeFeedError("insecure native feed trust is not permitted")
@@ -289,7 +288,9 @@ def _tls(
     if sys.platform == "win32":
         for store in ("CA", "ROOT"):
             for certificate, encoding, trust in ssl.enum_certificates(store):
-                if encoding == "x509_asn" and (trust is True or ssl.Purpose.SERVER_AUTH.oid in cast(set[str], trust)):
+                if encoding == "x509_asn" and (
+                    trust is True or (isinstance(trust, set) and ssl.Purpose.SERVER_AUTH.oid in trust)
+                ):
                     context.load_verify_locations(cadata=ssl.DER_cert_to_PEM_cert(certificate))
     else:
         paths = ssl.get_default_verify_paths()
@@ -353,7 +354,7 @@ def _local_exclusions(
             raise NativeFeedError("native local exclusions conflict with the selected wheel set")
         body = _body(value, "", "[", "]").strip()
         path = Path(_string(_body(body, "Local", "(", ")").strip().rstrip(",")))
-        options = [Path(argument) for option, argument in dependencies._argument_pairs(transaction.argv[3:])
+        options = [Path(argument) for option, argument in dependencies._argument_pairs(list(transaction.argv[3:]))
                    if option in ("--constraint", "--constraints", "-c")]
         if not path.is_absolute() or options != [path]:
             raise NativeFeedError("native local exclusion input differs from retained arguments")
@@ -375,9 +376,8 @@ def _local_exclusions(
 
 
 def _machine_constraints(
-    outer: dict[str, str], settings: dict[str, str],
-    transaction: dependencies.RetainedUVInstall, wheels: list[dict[str, Any]] | None, *,
-    excluded_local_packages: tuple[str, ...] = (),
+    outer: dict[str, str], settings: dict[str, str], transaction: dependencies.RetainedUVInstall,
+    wheels: list[dict[str, Any]] | None, *, excluded_local_packages: tuple[str, ...] = (),
 ) -> tuple[str, ...]:
     exclusions: tuple[str, ...] = ()
     if excluded_local_packages != ():
@@ -450,6 +450,7 @@ def capture_native_feed_inputs(
     deadline: float, *, wheels: list[dict[str, Any]] | None, profile_policy: str,
     opaque_identity: Callable[[str], str],
     excluded_local_packages: tuple[str, ...] = (),
+    allow_public_indexes: bool = False,
 ) -> NativeFeedInputs:
     """Capture held native settings; callers retain selection/admission authority.
 
@@ -489,13 +490,14 @@ def capture_native_feed_inputs(
         position = body.index("{", match.start())
         inner, end = dependencies._balanced(body, position, "{", "}")
         index = _fields(inner)
-        projected_name = index.get("name", "")
-        name: str | None = None if projected_name == "None" else _string(
-            _body(_body(projected_name, "Some", "(", ")").strip(), "IndexName", "(", ")").strip().rstrip(","),
+        raw_name = index.get("name", "")
+        name: str | None = None if raw_name == "None" else _string(
+            _body(_body(raw_name, "Some", "(", ")").strip(), "IndexName", "(", ")").strip().rstrip(","),
         )
         location, username, password_present = _index_url(index.get("url", ""))
         if (
-            not _configured_index(name, location, raw) or _is_public_pypi_url(location)
+            not _configured_index(name, location, raw)
+            or (_is_public_pypi_url(location) and not allow_public_indexes)
             or index.get("format") != "Simple"
             or index.get("authenticate") not in ("Auto", "Always", "Never")
             or index.get("ignore_error_codes") != "None" or index.get("explicit") != "false"
@@ -513,10 +515,21 @@ def capture_native_feed_inputs(
         ))
         selected.append((index.get("default") == "true", WheelFeed(identity, location, headers)))
         body = body[end:].strip().removeprefix(",")
+    if not selected and not raw and allow_public_indexes:
+        location = "https://pypi.org/simple"
+        headers = _credentials(
+            {"name": None, "authenticate": "Auto"}, transaction, location,
+            "", False, raw, uv, deadline,
+        )
+        identity = "sha256:" + opaque_identity(json.dumps(
+            {"name": None, "url": location, "authenticate": "Auto", "headers": headers},
+            sort_keys=True, separators=(",", ":"),
+        ))
+        selected.append((True, WheelFeed(identity, location, headers)))
     if not selected or len(selected) > 256:
         raise NativeFeedError("native feed configuration has no bounded selected indexes")
     feeds = tuple(feed for _, feed in sorted(selected, key=lambda item: item[0]))
-    pairs = list(dependencies._argument_pairs(transaction.argv[3:]))
+    pairs = list(dependencies._argument_pairs(list(transaction.argv[3:])))
     cutoff = next((value for option, value in pairs if option == "--exclude-newer"), None)
     if cutoff is None:
         raise NativeFeedError("native feed configuration lacks a frozen seasoning cutoff")

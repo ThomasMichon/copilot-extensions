@@ -1,9 +1,11 @@
-"""Partition independently loaded physical programs without dropping source custody."""
+"""Explicit checker execution and physical input custody for independent programs."""
 from __future__ import annotations
 
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, replace
+import os
 from pathlib import Path
+import subprocess
 from typing import TYPE_CHECKING, Callable, Protocol
 
 if TYPE_CHECKING:
@@ -32,6 +34,39 @@ class _InstallerFactory(Protocol):
         self, root: Path, program: str, paths: tuple[str, ...], shared: tuple[str, ...],
         stage_factory: Callable[[], Path], identity: IdentityReader,
     ) -> AbstractContextManager[InstallerProgramView | None]: ...
+
+
+def _import_suffix(path: Path) -> str:
+    suffix = path.suffix
+    lower = suffix.lower()
+    if os.name == "nt" and suffix != lower and lower in {".py", ".pyi"}:
+        try:
+            if path.with_suffix(lower).samefile(path):
+                return lower
+        except OSError:
+            pass
+    return suffix
+
+
+def _run(argv: list[str], root: Path, *, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        argv, cwd=root, env=env, capture_output=True, text=True, encoding="utf-8",
+        errors="strict", timeout=120, creationflags=int(getattr(subprocess, "CREATE_NO_WINDOW", 0)),
+    )
+
+
+def git_environment() -> dict[str, str]:
+    """Keep repository selectors from redirecting inventory or change comparison."""
+    selectors = {
+        "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
+        "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    }
+    env = {
+        key: value for key, value in os.environ.items()
+        if key.upper() not in selectors and not key.upper().startswith("GIT_CONFIG")
+    }
+    env.update(GIT_TERMINAL_PROMPT="0", GIT_NO_LAZY_FETCH="1", GIT_OPTIONAL_LOCKS="0")
+    return env
 
 
 @dataclass(frozen=True)

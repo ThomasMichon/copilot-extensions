@@ -333,7 +333,10 @@ class _Client:
         while True:
             self.budget.check()
             location, origin = _url(location)
-            if index and _feed_policy._is_public_pypi_url(location):
+            if (
+                index and _feed_policy._is_public_pypi_url(location)
+                and origin != _url(feed.index_url)[1]
+            ):
                 raise WheelError("wheel feed cannot substitute a public package index")
             if origins is not None and origin not in origins:
                 raise WheelError(f"wheel acquisition location is outside selected source trust: {origin}")

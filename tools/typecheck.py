@@ -4,7 +4,6 @@ from __future__ import annotations
 import argparse
 from collections import Counter
 from dataclasses import dataclass, field
-from functools import partial
 import hashlib
 from itertools import product
 import json
@@ -39,7 +38,10 @@ from tools.typecheck_bootstrap_views import (  # noqa: E402
     SELECTOR_INPUTS, powershell_selector_view, posix_selector_view,
 )
 from tools.typecheck_new_code import select_new_code  # noqa: E402
-from tools.typecheck_programs import Program, ProgramError, check_independent_project  # noqa: E402
+from tools.typecheck_programs import (  # noqa: E402
+    Program, ProgramError, _import_suffix as _import_suffix, _run as _run,
+    check_independent_project, git_environment as git_environment,
+)
 from installer_dependency_policy import DependencyPolicyError, run_uv_install  # noqa: E402
 from single_instance_lease import AlreadyRunningError  # noqa: E402
 
@@ -218,18 +220,6 @@ class _ImportInputs:
     def verify(self, root: Path) -> None:
         if self != _import_inputs(root, self.roots, self.inventory):
             raise TypecheckError("Declared import inputs changed during type checking")
-
-
-def _import_suffix(path: Path) -> str:
-    suffix = path.suffix
-    lower = suffix.lower()
-    if os.name == "nt" and suffix != lower and lower in {".py", ".pyi"}:
-        try:
-            if path.with_suffix(lower).samefile(path):
-                return lower
-        except OSError:
-            pass
-    return suffix
 
 
 def _import_inputs(root: Path, roots: tuple[str, ...], paths: tuple[str, ...]) -> _ImportInputs:
@@ -465,27 +455,6 @@ class _SourceViews:
         for view in self.views:
             text = view.diagnostics(text, self.root)
         return text
-
-
-def _run(argv: list[str], root: Path, *, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        argv, cwd=root, env=env, capture_output=True, text=True, encoding="utf-8",
-        errors="strict", timeout=120, creationflags=int(getattr(subprocess, "CREATE_NO_WINDOW", 0)),
-    )
-
-
-def git_environment() -> dict[str, str]:
-    """Keep repository selectors from redirecting inventory or change comparison."""
-    selectors = {
-        "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
-        "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-    }
-    env = {
-        key: value for key, value in os.environ.items()
-        if key.upper() not in selectors and not key.upper().startswith("GIT_CONFIG")
-    }
-    env.update(GIT_TERMINAL_PROMPT="0", GIT_NO_LAZY_FETCH="1", GIT_OPTIONAL_LOCKS="0")
-    return env
 
 
 def changed_paths(root: Path, base: str, head: str | None = None) -> tuple[str, ...]:
@@ -753,6 +722,7 @@ def _check_program(
             key: value for key, value in os.environ.items()
             if key not in {"PYTHONPATH", "PYTHONHOME", "MYPYPATH"}
         }
+        physical_files = tuple(file for file in files if file in all_paths)
         installation_entries = tuple(
             entry for entry in all_paths
             if entry.endswith(("/installation_context.py", "/_installation_context.py"))
@@ -764,11 +734,13 @@ def _check_program(
                         and "/" not in file[len(entry.rsplit("/", 1)[0]) + 1:]
                         and not file.endswith("_installation_context_worker.py")
                     )
-                    for file in files
+                    for file in physical_files
                 )
             )
         )
-        for index, entry in enumerate(installation_entries):
+        for index, entry in enumerate(sorted(
+            installation_entries, key=lambda entry: entry != INSTALLATION_ENTRY,
+        )):
             prefix = entry.rsplit("/", 1)[0]
             installation_inputs = tuple(
                 file for file in all_paths if file == entry or (
@@ -783,9 +755,16 @@ def _check_program(
             ) -> SourceView:
                 return installation_view(root, paths, output, entry_path=entry_path)
 
+            imported = prefix in project.import_roots
+            filename = entry.rsplit("/", 1)[1] if imported else (
+                "installation_context.py" if index == 0 else f"_installation_context_program_{index}.py"
+            )
+            if imported and views.stage / filename in views.outputs:
+                raise TypecheckError(
+                    "Copied installation-context imports require independent program bindings"
+                )
             view = views.add(
-                compose_installation, all_paths, installation_inputs,
-                "installation_context.py" if index == 0 else f"_installation_context_program_{index}.py",
+                compose_installation, all_paths, installation_inputs, filename,
             )
             if entry in files:
                 members = {name for name, _content in view.inputs}
@@ -793,33 +772,6 @@ def _check_program(
                     raise TypecheckError(f"{project.name}: composed fragments must share one project owner")
                 files = (*tuple(file for file in files if file not in members), str(view.output))
             ordered_imports.insert(0, str(view.output.parent))
-        for entry in tuple(file for file in files if file.endswith((
-            "/installation_context.py", "/_installation_context.py",
-        )) and file in all_paths):
-            if entry == INSTALLATION_ENTRY:
-                continue
-            prefix = entry.rsplit("/", 1)[0] + "/"
-            copy_members = tuple(file for file in files if file == entry or (
-                file.startswith(prefix + "_installation_context_")
-                and "/" not in file[len(prefix):]
-                and not file.endswith("_installation_context_worker.py")
-            ))
-            imported = prefix.rstrip("/") in project.import_roots
-            filename = (
-                entry.rsplit("/", 1)[1] if imported
-                else "installation_context_" + hashlib.sha256(entry.encode()).hexdigest()[:16] + ".py"
-            )
-            if imported and views.stage / filename in views.outputs:
-                raise TypecheckError(
-                    "Copied installation-context imports require independent program bindings"
-                )
-            view = views.add(
-                partial(installation_view, entry_path=entry), all_paths, copy_members,
-                filename,
-            )
-            files = (*tuple(file for file in files if file not in copy_members), str(view.output))
-            if imported and str(view.output.parent) not in ordered_imports:
-                ordered_imports.insert(0, str(view.output.parent))
         setups = tuple(file for file in files if file.endswith("/setup.py"))
         if len(setups) > 1:
             for entry in setups:

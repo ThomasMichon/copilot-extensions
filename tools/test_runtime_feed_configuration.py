@@ -193,12 +193,12 @@ def test_native_uv_missing_credentials_message_compatibility(
     if authentication == "Always":
         with pytest.raises(AcquisitionUnavailable, match="requires unavailable authentication"):
             _credentials(
-                {"name": None, "authenticate": authentication}, cast("RetainedUVInstall", transaction),
+                {"name": None, "authenticate": authentication}, transaction,
                 origin + "/simple/", "", False, [], "fixture-uv", time.monotonic() + 10,
             )
     else:
         assert _credentials(
-            {"name": None, "authenticate": authentication}, cast("RetainedUVInstall", transaction),
+            {"name": None, "authenticate": authentication}, transaction,
             origin + "/simple/", "", False, [], "fixture-uv", time.monotonic() + 10,
         ) == ()
 
@@ -224,7 +224,7 @@ def test_native_uv_credential_lookup_errors_are_not_absence(
     )
     with pytest.raises(NativeFeedError, match="credential lookup failed"):
         _credentials(
-            {"name": None, "authenticate": "Auto"}, cast("RetainedUVInstall", transaction),
+            {"name": None, "authenticate": "Auto"}, transaction,
             "https://feed.example/simple/", "", False, [], "fixture-uv", time.monotonic() + 10,
         )
 
@@ -760,7 +760,7 @@ def test_native_trust_identity_uses_certificate_sets_but_preserves_real_changes(
 
     state = feeds()
     env = environment(adopter, state, tmp_path)
-    original = cast(Callable[..., Any], vars(native)["_tls_record"])
+    original = native._tls_record
     certificates = ["certificate-a", "certificate-b"]
     changed_transport = False
 

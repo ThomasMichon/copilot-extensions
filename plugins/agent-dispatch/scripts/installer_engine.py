@@ -54,7 +54,6 @@ from installer_source_build import (
     _source_deadline, _source_phase, retained_input_graph, retained_source_wheels,
     revalidate_input_content, check_dev_owner,
     _wheel_construction_hash as _wheel_construction_hash)
-
 from installer_engine_health import (
     HealthRepairRequired as HealthRepairRequired,
     _PREPARE_INSTALLED_CHECK,

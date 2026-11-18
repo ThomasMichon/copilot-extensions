@@ -561,9 +561,10 @@ The view preserves physical source lines, normalizing line endings to LF and
 replacing the loader call and standalone `from __future__ import annotations`
 declarations with blank mapped lines. It refuses other future imports, changed
 loader semantics, missing/extra fragments and file-wide checker directives.
-Product code is never imported or executed. Each original source first passes
-non-executing compilation, so AST-only acceptance cannot hide runtime syntax
-errors. Directive scanning uses Python's universal-newline interpretation,
+Checked loader and fragment code are never imported or executed. Each original
+source first passes non-executing compilation, so AST-only acceptance cannot
+hide runtime syntax errors. Directive scanning uses Python's universal-newline
+interpretation,
 including CR-only sources. Checker diagnostics point back to original loader and
 fragment paths and line numbers. Input and emitted-view bytes are revalidated
 before a result is credited; temporary views are removed while holding the

@@ -128,7 +128,7 @@ def manager_source(adopter: _Adopter, configured_source: tuple[Path, Path, str, 
         canonical.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(_ROOT / canonical.relative_to(repository), canonical)
     select_source(configured_source)
-    return cast(Path, root)
+    return root
 
 
 @pytest.mark.parametrize("uv_selection", ["absolute", "command"])

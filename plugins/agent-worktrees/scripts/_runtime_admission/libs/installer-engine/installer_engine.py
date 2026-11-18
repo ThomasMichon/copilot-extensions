@@ -21,7 +21,7 @@ from dataclasses import dataclass, replace
 from functools import partial
 from pathlib import Path
 from types import ModuleType
-from typing import Any, BinaryIO, TypedDict, cast
+from typing import Any, TypedDict, cast
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -48,15 +48,12 @@ from installer_wheel_snapshot import (
     WheelInstallInputs, WheelReuseInputs as WheelReuseInputs, _digest as _snapshot_digest,
     _open as _snapshot_open, _unchanged as _snapshot_unchanged)
 
-_open, _unchanged, _digest = (cast(Callable[[Path], BinaryIO], _snapshot_open),
-                            cast(Callable[..., os.stat_result], _snapshot_unchanged),
-                            cast(Callable[..., tuple[str, int]], _snapshot_digest))
+_open, _unchanged, _digest = _snapshot_open, _snapshot_unchanged, _snapshot_digest
 from installer_source_build import (
     SourceWheelInputs, _selected_extras as _selected_extras,
     _source_deadline, _source_phase, retained_input_graph, retained_source_wheels,
     revalidate_input_content, check_dev_owner,
     _wheel_construction_hash as _wheel_construction_hash)
-
 from installer_engine_health import (
     HealthRepairRequired as HealthRepairRequired,
     _PREPARE_INSTALLED_CHECK,
@@ -88,7 +85,7 @@ class ReadyCandidate:
     slot: Path
     payload_hash: str
     reused: bool
-    descriptor: int
+    descriptor: int | None
     frozen_plugin: Path
     extras: tuple[str, ...] = ()
     local_packages: tuple[str, ...] | None = None
@@ -167,7 +164,7 @@ def _package_roots(plugin: Path) -> tuple[Path, ...]:
             child = root / path
             if child.is_file():
                 child = _contained(child, (root,))
-                if not _bundled_dbus_next(key, dependency, child):
+                if not cast(Callable[[str, str, Path], bool], _bundled_dbus_next)(key, dependency, child):
                     raise DependencyPolicyError("local UV artifacts cannot prove release age")
                 # The admitted artifact is already covered by its owning package's files.
                 continue
@@ -365,7 +362,9 @@ def _procutil(inputs: FrozenInputs) -> ModuleType:
 
 
 @contextmanager
-def _retained_inputs(inputs: FrozenInputs, uv: Path, python: Path, *, refresh: bool, timeout: float = 180) -> Iterator[FrozenInputs]:
+def _retained_inputs(
+    inputs: FrozenInputs, uv: Path, python: Path, *, refresh: bool, timeout: float = 180,
+) -> Iterator[FrozenInputs]:
     with ExitStack() as owner:
         with _source_phase("retention", timeout, {}) as progress:
             def completed() -> None:
@@ -390,7 +389,7 @@ def _retained_input_graph(inputs: FrozenInputs, uv: Path, python: Path, *, refre
 
 
 def _child(
-    argv: list[str], *, inputs: FrozenInputs, descriptor: int,
+    argv: list[str], *, inputs: FrozenInputs, descriptor: int | None,
     timeout: float, delays: tuple[float, ...] = (), transient: str = "",
     environment: dict[str, str] | None = None, cwd: Path | None = None,
     candidate: Path | None = None,
@@ -462,7 +461,7 @@ def _child(
                 raise TimeoutError("closed wheel acquisition/assembly deadline would expire during retry")
             time.sleep(delays[attempt])
         except subprocess.TimeoutExpired as error:
-            diagnostic = f"{cast(Any, error.stdout) or ''}{cast(Any, error.stderr) or ''}"
+            diagnostic = str(error.stdout or "") + str(error.stderr or "")
             print(
                 f"Installer child timed out after {remaining}s:\n{diagnostic}",
                 file=sys.stderr, flush=True,
@@ -503,7 +502,7 @@ def _input_origins(inputs: FrozenInputs, slot: Path | None = None) -> dict[str, 
 
 def _verify_installed(
     inputs: FrozenInputs, slot: Path, python: Path | None, module: str,
-    descriptor: int, timeout: float, *, health_callable: str | None = None,
+    descriptor: int | None, timeout: float, *, health_callable: str | None = None,
     require_frozen_origin: bool = True,
     confirm_source_contents: bool = False,
 ) -> None:
@@ -529,7 +528,7 @@ def _verify_application_wheels(inputs: FrozenInputs, slot: Path) -> None:
 
 def _construct(
     inputs: FrozenInputs, slot: Path, uv: Path, base_python: Path,
-    descriptor: int, timeout: float, *, refresh: bool = False, nested_environment: bool = False,
+    descriptor: int | None, timeout: float, *, refresh: bool = False, nested_environment: bool = False,
 ) -> Path:
     uv = Path(_select_uv_executable(str(Path.cwd() / uv))).resolve(strict=True)
     base_python = base_python.resolve(strict=True)
@@ -645,7 +644,7 @@ def _construct(
 
 def _prepare_installed(
     inputs: FrozenInputs, slot: Path, python: Path, callable_name: str,
-    data: dict[str, Any], descriptor: int, timeout: float, payload: FrozenInputs,
+    data: dict[str, Any], descriptor: int | None, timeout: float, payload: FrozenInputs,
 ) -> None:
     module, separator, function = callable_name.partition(":")
     if not separator or not module or not function:
@@ -938,6 +937,7 @@ def _candidate(
                         for name in (
                             "runtime_launcher.py", "versioned_runtime.py",
                             "versioned_runtime_leases.py", "versioned_runtime_source.py",
+                            "versioned_runtime_identity.py", "versioned_runtime_fingerprint.py",
                             "versioned_runtime_construction.py",
                             "versioned_runtime_publication.py",
                             "versioned_runtime_cache.py", "daemon_instance_runtime.pyz",
