@@ -171,3 +171,9 @@ The final Gitea metadata plus unchanged legacy Gitea provider packet passes
 metadata opts into stdin JSON.
 Native draft-prefix introduction is checked independently of configured
 prefix matching, so a broad local WIP hold cannot mask a ready-to-draft edit.
+
+The finite source implementation merged in #13226 as `fc7d06b7ba` after
+current-head Copilot approval, no remaining findings and all actual checks
+green. Managed source reconciliation retained its recovery reference.
+This merge does not qualify Gitea exported-worker, installed or live-author
+adoption, and does not change the separately owned observer's runtime.
