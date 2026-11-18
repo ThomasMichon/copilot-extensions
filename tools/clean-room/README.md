@@ -229,21 +229,80 @@ container command with no pull/build fallback, a non-root identity, no network,
 no capabilities or privilege escalation, read-only root and explicit read-only
 inputs. Only the private results directory and an optional separate declared
 cache are writable host binds; both must be outside the repository. Narrow
-read-only repository inputs remain supported. Test HOME and temporary files remain below the
-results mount; no host environment or credentials are forwarded.
+read-only repository inputs remain supported. Test HOME and temporary files
+remain below the results mount; no host environment or credentials are forwarded.
 The plan explicitly clears all uppercase/lowercase Docker proxy defaults so
 the client's proxy configuration cannot inject authenticated URLs or private
 bypass lists. Home/repository protection uses resolved physical boundaries;
 mount sources with CSV delimiters, quotes or line breaks refuse.
 
-This is **not a runnable lane or an execution receipt**. It neither creates
+The planner alone is **not a runnable lane or an execution receipt**. It neither creates
 files nor calls Docker. Its declared host/container partition check is
-arithmetic, not proof of enforcement. The later lifecycle caller must admit
+arithmetic, not proof of enforcement. The lifecycle caller must admit
 the actual ordinary identity and directory access, cached image/prerequisites,
 fresh resource name, native host and container limits, physical ID and retained
 stop/postflight before execution can qualify. Input contents and cache access
 remain the caller's responsibility; validating a mount root does not audit an
 entire input tree. Existing scenario/devcontainer defaults are unchanged.
+
+### Opt-in Linux offline-job owner
+
+`offline_job_run.run_job` composes that planner with the checkout-local
+`offline_job_host` and `offline_job_inspect` modules. This is a synchronous
+single-threaded Python API, not an installed plugin, fleet controller or command-line mode.
+Calling it explicitly can create/start/execute/stop a container; importing it
+does none of those things.
+
+The caller supplies a `Job`, private existing `results` directory, absent
+`control` directory below an existing private parent, repository boundary,
+absolute `deadline_epoch`, aggregate limits and a host-driver partition.
+The actual ordinary UID/GID must match the job. The existing Linux cgroup-v2
+host boundary must already enforce finite memory/CPU/PID limits no greater
+than that partition, with zero extra swap. The owner creates no cgroup or
+service and reserves no shared-host capacity.
+
+The deadline must fit **inside the caller's execution lifetime**. The owner's
+cleanup reserve is subtracted from that deadline; an outer supervisor's own
+cleanup window must not be borrowed as additional execution time. Native
+admission and independent caller cleanup remain the caller's responsibility.
+The partition counts the owned driver and container, not the shared Docker
+daemon's infrastructure.
+The PID1 timer subtracts a safety second so integer clock rounding does not
+silently consume the captured cleanup reserve.
+Failed, empty or noncanonical clock output refuses before arithmetic; the
+computed sleep must also fit the originally declared work duration.
+
+Control records, bounded CLI captures and a fresh empty Docker client config
+stay outside every payload bind. The host's HOME/PATH/configuration are not
+modified, and CLI calls do not inherit credentials, contexts or proxy settings.
+Both capture streams have child-only kernel file-size limits while the CLI
+runs: 64 KiB per control stream and 1 MiB per execution stream, respecting
+tighter inherited limits. Reaching a cap refuses rather than silently accepting
+truncation, and execution overflow still uses the original exact-ID cleanup.
+The client has core dumps disabled and a private control cwd. These are capture
+bounds, not a quota for the payload's declared writable output/cache.
+Whole-home protection uses the registered account home rather than a redirected
+HOME. The owner refuses name collisions, absent cached images and implicit image
+volumes/health checks before creation. It captures and records a full physical ID
+from `create`, verifies its configuration before `start`, then uses only that ID.
+No privileged permission helper, image pull/build, adoption or automatic removal
+is provided.
+
+The retained `cr-report.json` separates execution, configuration and owner-stop
+outcomes. A failed/uncertain create or start is not replayed; missing identity or
+unverified stop yields `unknown`. A zero execution exit alone cannot pass.
+Stopped containers, control records, partial inputs and outputs remain retained.
+The owner's stop observation is **not independent caller postflight**, and Docker
+configuration checks are **not a native kernel enforcement qualification**.
+
+Native qualification is opt-in, not required PR CI: use an authorized cached
+image with `/bin/sh`, `/bin/date` and `/bin/sleep`, scoped inputs and a bounded
+caller. Check the real container's kernel limits and the caller's cleanup,
+then independently inspect the exact retained physical ID after the owner exits.
+An authorized caller-loss/expiry control must observe an actually running
+container stop by its original deadline without lifetime renewal. Missing or
+uncertain evidence is a failure/hold, not permission to remove, restart or retry
+retained resources. Package-specific qualification still belongs in its scenario.
 
 The [Gateway role-tunnel proof](gateway-role-tunnels/README.md) is an opt-in,
 host-driven Tier-P lane with one Gateway, two outbound service connectors and
