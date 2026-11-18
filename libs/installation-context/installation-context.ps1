@@ -109,7 +109,9 @@ try {
     if ((-not $CopilotHome -or -not $DurableHome) -and -not $userHomePath) {
         Fail 'Cannot determine the user home.'
     }
-    if (-not $CopilotHome) { $CopilotHome = Join-Path $userHomePath '.copilot' }
+    if (-not $CopilotHome) {
+        $CopilotHome = if ($env:COPILOT_HOME) { $env:COPILOT_HOME } else { Join-Path $userHomePath '.copilot' }
+    }
     if (-not $DurableHome) { $DurableHome = Join-Path $userHomePath '.copilot-extensions' }
     if (-not [IO.Path]::IsPathRooted($CopilotHome) -or
         -not [IO.Path]::IsPathRooted($DurableHome)) {

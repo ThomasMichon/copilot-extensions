@@ -771,18 +771,41 @@ def _check_program(
             key: value for key, value in os.environ.items()
             if key not in {"PYTHONPATH", "PYTHONHOME", "MYPYPATH"}
         }
-        if INSTALLATION_ENTRY in files or INSTALLATION_ENTRY in all_paths:
+        installation_entries = tuple(
+            entry for entry in all_paths
+            if entry.endswith(("/installation_context.py", "/_installation_context.py"))
+            and (
+                entry == INSTALLATION_ENTRY
+                or any(
+                    file == entry or (
+                        file.startswith(entry.rsplit("/", 1)[0] + "/_installation_context_")
+                        and "/" not in file[len(entry.rsplit("/", 1)[0]) + 1:]
+                        and not file.endswith("_installation_context_worker.py")
+                    )
+                    for file in files
+                )
+            )
+        )
+        for index, entry in enumerate(installation_entries):
+            prefix = entry.rsplit("/", 1)[0]
             installation_inputs = tuple(
-                file for file in all_paths if file == INSTALLATION_ENTRY or (
-                    file.startswith(INSTALLATION_ENTRY.rsplit("/", 1)[0] + "/_installation_context_")
-                    and "/" not in file[len(INSTALLATION_ENTRY.rsplit("/", 1)[0]) + 1:]
+                file for file in all_paths if file == entry or (
+                    file.startswith(prefix + "/_installation_context_")
+                    and "/" not in file[len(prefix) + 1:]
                     and not file.endswith("_installation_context_worker.py")
                 )
             )
+
+            def compose_installation(
+                root: Path, paths: tuple[str, ...], output: Path, *, entry_path: str = entry,
+            ) -> SourceView:
+                return installation_view(root, paths, output, entry_path=entry_path)
+
             view = views.add(
-                installation_view, all_paths, installation_inputs, "installation_context.py",
+                compose_installation, all_paths, installation_inputs,
+                "installation_context.py" if index == 0 else f"_installation_context_program_{index}.py",
             )
-            if INSTALLATION_ENTRY in files:
+            if entry in files:
                 members = {name for name, _content in view.inputs}
                 if not members <= set(files):
                     raise TypecheckError(f"{project.name}: composed fragments must share one project owner")

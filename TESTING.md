@@ -49,6 +49,16 @@ bus/cgroup lifetime and authoritative cleanup. Their separate
 
 ## Select the evidence first
 
+The focused Worktrees credential-isolation regression is
+`tests/test_git_credential_isolation.py`, selected through the canonical
+runner with `--test-file` and `--allow-explicit-tiers`. It runs actual nested
+pytest consumers through `isolated_environment` and `run_contained`, with
+private home/config/project roots, a synthetic inner-repository credential
+pin and a byte-preserved external sentinel configuration. The negative
+non-repository unit always substitutes the Git probe: a caller placing
+basetemp beneath a checkout must never redirect its credential writes there.
+Do not use inline fixture adapters or a live checkout/config as test state.
+
 The opt-in native receiving relocation case
 `tests/native/test_checkout_relocation_staging.py::test_live_cross_volume_receiving_uses_existing_native_owners`
 uses the canonical Worktrees runner with `--allow-explicit-tiers`. Explicit

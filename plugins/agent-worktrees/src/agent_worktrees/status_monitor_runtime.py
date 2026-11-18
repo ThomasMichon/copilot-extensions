@@ -14,6 +14,9 @@ import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from types import ModuleType
+from collections.abc import Callable, Mapping
+from typing import Any, ParamSpec, Protocol, TypeVar, cast
 
 from agent_procutil import windowless_python
 
@@ -24,21 +27,25 @@ from .status_monitor_python import direct_monitor_python as direct_monitor_pytho
 from .status_monitor_spawn import _spawn_detached as _spawn_detached
 
 
-def _core():
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
+
+def _core() -> ModuleType:
     from . import __main__ as core
 
     return core
 
 
-def _core_helper(name: str, local):
+def _core_helper(name: str, local: Callable[_P, _R]) -> Callable[_P, _R]:
     core = sys.modules.get(f"{__package__}.__main__")
     candidate = vars(core).get(name) if core is not None else None
     if callable(candidate) and candidate is not local:
-        return candidate
+        return cast(Callable[_P, _R], candidate)
     return local
 
 
-def add_parsers(sub) -> None:
+def add_parsers(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     p = sub.add_parser(
         "reconcile-sessions",
         help="Run one bounded record/session/projection reconciliation pass",
@@ -293,12 +300,13 @@ def _monitor_claim_handoff_cutover(
     worktree_id = str(request.get("worktree_id") or "").strip()
     path = _monitor_handoff_claim_path(worktree_id, token)
     owner_pid = os.getpid()
-    payload = {
+    session_id = str(request.get("predecessor_session_id") or "").strip() or None
+    payload: dict[str, object] = {
         "schema": 1,
         "kind": "handoff-cutover-claim",
         "token": token,
         "worktree_id": worktree_id or None,
-        "session_id": str(request.get("predecessor_session_id") or "").strip() or None,
+        "session_id": session_id,
         "pid": owner_pid,
         "start_time": locks.process_start_time(owner_pid),
         # Full microsecond precision, not the previous second-truncated
@@ -323,9 +331,9 @@ def _monitor_claim_handoff_cutover(
     }
 
     def _acquired_response() -> dict[str, object]:
-        log_data = {
+        log_data: dict[str, Any] = {
             "worktree_id": worktree_id or None,
-            "session_id": payload["session_id"],
+            "session_id": session_id,
             "source": "python",
             "handoff_token": token or None,
             "reason": "monitor-cutover",
@@ -358,7 +366,7 @@ def _monitor_claim_handoff_cutover(
             activity.log_event(
                 "handoff_cutover_claim",
                 worktree_id=worktree_id or None,
-                session_id=payload["session_id"],
+                session_id=session_id,
                 source="python",
                 handoff_token=token or None,
                 reason="monitor-cutover",
@@ -375,7 +383,8 @@ def _monitor_claim_handoff_cutover(
         staleness = _monitor_handoff_claim_staleness(path)
         if not staleness.get("stale"):
             break
-        prior_claim = staleness.get("claim") if isinstance(staleness.get("claim"), dict) else None
+        raw_claim = staleness.get("claim")
+        prior_claim = raw_claim if isinstance(raw_claim, dict) else None
         reclaim_reason = str(staleness.get("reason") or "").strip() or "unknown"
         reclaim_age_raw = staleness.get("age_seconds")
         reclaim_age_seconds = (
@@ -388,7 +397,7 @@ def _monitor_claim_handoff_cutover(
             activity.log_event(
                 "handoff_cutover_claim",
                 worktree_id=worktree_id or None,
-                session_id=payload["session_id"],
+                session_id=session_id,
                 source="python",
                 handoff_token=token or None,
                 reason="monitor-cutover",
@@ -412,7 +421,7 @@ def _monitor_claim_handoff_cutover(
         activity.log_event(
             "handoff_cutover_claim",
             worktree_id=worktree_id or None,
-            session_id=payload["session_id"],
+            session_id=session_id,
             source="python",
             handoff_token=token or None,
             reason="monitor-cutover",
@@ -424,7 +433,7 @@ def _monitor_claim_handoff_cutover(
         activity.log_event(
             "handoff_cutover_claim",
             worktree_id=worktree_id or None,
-            session_id=payload["session_id"],
+            session_id=session_id,
             source="python",
             handoff_token=token or None,
             reason="monitor-cutover",
@@ -437,7 +446,7 @@ def _monitor_claim_handoff_cutover(
     activity.log_event(
         "handoff_cutover_claim",
         worktree_id=worktree_id or None,
-        session_id=payload["session_id"],
+        session_id=session_id,
         source="python",
         handoff_token=token or None,
         reason="monitor-cutover",
@@ -513,7 +522,14 @@ def _remove_monitor_entry(reg_dir: Path, sess: str) -> None:
             path.unlink()
         except OSError:
             pass
-def _manager_owned_mapping_for_session(session_name: str, *, managed_mux_cache=None) -> dict | None:
+class _ManagedMuxCache(Protocol):
+    def live_session_names(self) -> set[str]: ...
+    def snapshot(self) -> Mapping[Any, dict[str, Any]]: ...
+
+
+def _manager_owned_mapping_for_session(
+    session_name: str, *, managed_mux_cache: _ManagedMuxCache | None = None,
+) -> dict[str, Any] | None:
     if not session_name:
         return None
     current = None
@@ -546,7 +562,10 @@ def _manager_owned_mapping_for_session(session_name: str, *, managed_mux_cache=N
     from . import managed_mux_registry
 
     return managed_mux_registry.live_mapping_for_session(session_name)
-def _monitor_unmanaged_live_sessions(live_wt: set[str], registry: dict[str, str], managed_entries: dict[str, dict], *, managed_mux_cache=None) -> tuple[set[str], list[str]]:
+def _monitor_unmanaged_live_sessions(
+    live_wt: set[str], registry: dict[str, str], managed_entries: dict[str, dict[str, Any]],
+    *, managed_mux_cache: _ManagedMuxCache | None = None,
+) -> tuple[set[str], list[str]]:
     manager_owned_live_wt = {sess for sess in live_wt if _manager_owned_mapping_for_session(sess, managed_mux_cache=managed_mux_cache)}
     unmanaged_live_wt = live_wt - set(managed_entries) - manager_owned_live_wt
     prune_sessions = sorted(
@@ -569,54 +588,40 @@ def _monitor_prune_registry_sessions(reg_dir: Path, registry: dict[str, str], pr
 
 
 def _windowless_python() -> str:
-    """The interpreter for a detached daemon with no recurring console children.
+    """Select the current runtime's windowless interpreter through its owner."""
+    from .daemon_launch_context import windowless
 
-    On Windows a venv ``python.exe`` is a *console* launcher: even started with
-    ``DETACHED_PROCESS`` it re-launches the base interpreter as a child that
-    allocates its OWN console, which Windows Terminal (DefTerm) then surfaces as
-    a visible window/tab.
-    ``pythonw.exe`` (the GUI-subsystem sibling) never allocates a console, so a
-    fully-background daemon (DEVNULL stdio, no console I/O) stays truly
-    windowless through the trampoline. Falls back to ``sys.executable`` when no
-    sibling ``pythonw`` exists (non-standard layout) or off Windows. Daemons
-    with recurring console descendants intentionally retain console Python
-    under ``windowless_daemon_kwargs()`` instead, so those descendants inherit
-    one hidden console tree.
-    """
-    return windowless_python(sys.executable)
+    return windowless(sys.executable, windowless_python)
 
 
 _DAEMON_SESSION_SCOPED_ENV_KEYS = ("COPILOT_AGENT_SESSION_ID",)
 # Re-read from the daemon's own cwd: relative ones are anchored at the caller's.
-_DAEMON_PATH_ENV_KEYS = ("AGENT_HOME", "AGENT_WORKTREES_PAYLOAD_ROOT", "COPILOT_PLUGIN_ROOT")
+_DAEMON_PATH_ENV_KEYS = (
+    "AGENT_HOME", "AGENT_WORKTREES_PAYLOAD_ROOT", "COPILOT_PLUGIN_ROOT", "WORKTREE_MANAGER_ROOT", "GH_CONFIG_DIR",
+)
 
 
 def _daemon_environment() -> dict[str, str]:
-    """Env for the resident daemon: no ephemeral session id beyond the
-    existing credential scrub; keeps ``COPILOT_EXTENSIONS_CONTEXT`` and
-    ``COPILOT_PLUGIN_ROOT`` (an absent context makes ``cfg.install_dir()``
-    resolve the legacy root, not a cell's). Case-insensitive names."""
+    """Compose the selected resident context through its private launch owner."""
     env = _core_helper("_background_environment", status_updater_cli._background_environment)()
-    scoped = {key.upper() for key in _DAEMON_SESSION_SCOPED_ENV_KEYS}
-    paths = {key.upper() for key in _DAEMON_PATH_ENV_KEYS}
-    return {
-        key: os.path.abspath(value) if key.upper() in paths and value.strip()
-        and not Path(value.strip()).anchor else value
-        for key, value in env.items() if key.upper() not in scoped
-    }
+    from agent_procutil import contained_test_mode
+    from plugin_resolve.environment import fresh_user_environment
+    from plugin_resolve.git import resolve_git
+    from .daemon_launch_context import build
+
+    return build(
+        env, refresh=os.name == "nt" and not contained_test_mode(),
+        fresh=fresh_user_environment, git=resolve_git,
+        auth_excluded=status_updater_cli._BACKGROUND_AUTH_ENV_KEYS,
+        scoped=_DAEMON_SESSION_SCOPED_ENV_KEYS, paths=_DAEMON_PATH_ENV_KEYS,
+    )
 
 
 def _daemon_cwd() -> str:
-    """The daemon's own install root (cell root, or legacy
-    ``~/.agent-worktrees``), not the caller's cwd; degrades to HOME if
-    unresolved or not yet materialized."""
-    try:
-        root = cfg.install_dir()
-        if root.is_dir():
-            return os.path.abspath(root)  # spawn_daemon needs an absolute cwd
-    except Exception:
-        pass
-    return os.path.expanduser("~")
+    """Use the selected installation cwd, not the foreground caller's cwd."""
+    from .daemon_launch_context import cwd
+
+    return cwd(cfg.install_dir)
 
 def _ensure_status_monitor() -> bool:
     """Start the resident monitor unless one is already live on the CURRENT
@@ -652,8 +657,8 @@ def _ensure_status_monitor() -> bool:
 
 def _restart_status_monitor(
     *, runtime_python: str | None = None,
-    spawned_handles: list[subprocess.Popen] | None = None,
-) -> dict:
+    spawned_handles: list[subprocess.Popen[Any]] | None = None,
+) -> dict[str, Any]:
     """Reap a superseded status-monitor and (re)spawn the current-runtime one.
 
     Called by the auto-update cutover (the installer, after it activates a new
@@ -669,7 +674,7 @@ def _restart_status_monitor(
     no-op (no spawn) only under the test harness with the monitor disabled
     for this test. Runs from the NEWLY-ACTIVATED slot's interpreter.
     """
-    result: dict = {
+    result: dict[str, Any] = {
         "enabled": _status_monitor_enabled(),
         "reaped": None,
         "spawned": False,
@@ -799,12 +804,16 @@ def _monitor_list_sessions(
 
 
 def publish_mux_observation(
-    mux_bin, live, catalog_observer, publish_rosters, roster_failure,
+    mux_bin: str, live: dict[str, tuple[int, str]] | None,
+    catalog_observer: Callable[[set[str]], object] | None,
+    publish_rosters: Callable[[], object],
+    roster_failure: Callable[[Exception], object] | None,
 ) -> int | None:
     """Keep unknown enumeration and native reads out of periodic pane writes."""
     from . import sessions
 
-    if not sessions._is_psmux(mux_bin):
+    is_psmux = cast(Callable[[str], bool], getattr(sessions, "_is_psmux"))
+    if not is_psmux(mux_bin):
         if live is None and roster_failure is not None:
             roster_failure(RuntimeError("mux-session enumeration unavailable"))
         return -1 if live is None else None
@@ -815,9 +824,9 @@ def publish_mux_observation(
 
 
 def _monitor_managed_session_union(
-    managed_mux_cache,
+    managed_mux_cache: _ManagedMuxCache | None,
     registry: dict[str, str],
-) -> tuple[dict[str, dict], set[str], list[tuple[str, str]]]:
+) -> tuple[dict[str, dict[str, Any]], set[str], list[tuple[str, str]]]:
     from . import mux_link
 
     if managed_mux_cache is None:
@@ -825,7 +834,7 @@ def _monitor_managed_session_union(
     live_sessions = managed_mux_cache.live_session_names()
     if not live_sessions:
         return {}, set(), []
-    entries: dict[str, dict] = {}
+    entries: dict[str, dict[str, Any]] = {}
     served: list[tuple[str, str]] = []
     now = time.time()
     for entry in managed_mux_cache.snapshot().values():
@@ -859,7 +868,7 @@ def _monitor_update_session_incarnations(
     incarnations: dict[str, str],
     live: dict[str, tuple[int, str]],
     unmanaged_live_wt: set[str],
-    managed_entries: dict[str, dict],
+    managed_entries: dict[str, dict[str, Any]],
     ctx_done: set[str],
     published: dict[tuple[str, str], str] | None,
 ) -> None:
@@ -902,7 +911,8 @@ def _monitor_read_session_state_handoff(
     if not path:
         return None
     try:
-        return json.loads(Path(path).read_text(encoding="utf-8"))
+        value: object = json.loads(Path(path).read_text(encoding="utf-8"))
+        return cast(dict[str, object], value) if isinstance(value, dict) else None
     except Exception:
         return None
 

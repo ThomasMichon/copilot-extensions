@@ -1,7 +1,7 @@
 """Git subprocess helper and worktree state classification.
 
-All git operations go through :func:`git` which provides consistent
-error handling, explicit cwd, and machine-readable output.
+The main wrapper and early anchor probe share explicit-aware Git discovery.
+:func:`git` provides consistent error handling, explicit cwd and readable output.
 """
 
 from __future__ import annotations
@@ -21,9 +21,14 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast, overload
+from plugin_resolve.git import resolve_git
 
 
 from . import env_scrub, git_acquisition_budget, git_tree_diff, push_timeout
+from .git_process import (
+    ProcessRunner as _ProcessRunner, TextRunner as _TextRunner,
+    execute as _execute_git, current_branch as _probe_current_branch,
+)
 from .checkout_data import preservation_reason
 from .git_repository_environment import (
     _NO_HOOKS_PATH as _NO_HOOKS_PATH,
@@ -32,7 +37,7 @@ from .git_repository_environment import (
     credential_config_scoped,
     identity_scoped,
 )
-from .git_errors import GitError, _redact_args as _redact_args
+from .git_errors import GitError as GitError, _redact_args as _redact_args
 from .git_fetch import _fetch_refspecs as _fetch_refspecs
 from .git_state_types import (
     _GitProbeOptions,
@@ -78,11 +83,13 @@ def resolve_to_anchor(repo_path: Path) -> Path:
     *is* the anchor itself, tried as a fallback (#7088).
     """
     def _probe(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
+        # Anchor discovery must not depend on the configured wrapper's bootstrap.
         from agent_procutil import no_window_kwargs
 
+        env = repository_identity_env()
         return subprocess.run(
-            ["git", "-C", str(cwd), *args], capture_output=True, text=True, timeout=5,
-            env=repository_identity_env(), **no_window_kwargs(),
+            [resolve_git(env=env), "-C", str(cwd), *args], capture_output=True, text=True, timeout=5,
+            env=env, **no_window_kwargs(),
         )
 
     git_path = repo_path / ".git"
@@ -98,7 +105,7 @@ def resolve_to_anchor(repo_path: Path) -> Path:
                 anchor = common.parent  # common is the shared .git dir
                 if (anchor / ".git").is_dir():
                     return anchor
-                bare = _probe(common, "rev-parse", "--is-bare-repository")
+                bare = _probe(common, "--git-dir", str(common), "rev-parse", "--is-bare-repository")
                 if bare.returncode == 0 and bare.stdout.strip() == "true":
                     return common
         except Exception:
@@ -201,7 +208,6 @@ def git(
     if observation_deadline is not None and not _windows_observation():
         raise push_timeout.ObservationUnavailable("bounded observation is Windows-only")
     prefix = ["-c", f"core.hooksPath={_NO_HOOKS_PATH}"] if no_hooks else []
-    cmd = ["git", *prefix, *args]
     env = (
         repository_identity_env(preserve_credentials=credential_config_scoped())
         if isolated_repository or identity_scoped() else os.environ.copy()
@@ -209,40 +215,17 @@ def git(
     from .update_auth_context import repository_environment, run_acquisition
     env = repository_environment(env)
     env = env_scrub.scrub_python_runtime_env({**env, "GIT_TERMINAL_PROMPT": "0"})
+    cmd = [resolve_git(env=env, cwd=cwd), *prefix, *args]
 
     def execute() -> subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]:
         timeout = git_acquisition_budget.remaining_timeout(requested_timeout)
-        if observation_deadline is not None:
-            if input_data is not None:
-                return push_timeout.run_bounded(
-                    cmd, cwd=cwd, env=env, timeout=timeout,
-                    observation_deadline=observation_deadline,
-                    binary=True, input=input_data,
-                )
-            return push_timeout.run_bounded(
-                cmd, cwd=cwd, env=env, timeout=timeout,
-                observation_deadline=observation_deadline,
-            )
         from agent_procutil import no_window_kwargs
-
-        if kill_tree and timeout is not None:
-            if input_data is not None:
-                return push_timeout.run_bounded(
-                    cmd, cwd=cwd, env=env, timeout=timeout,
-                    binary=True, input=input_data,
-                )
-            return push_timeout.run_bounded(
-                cmd, cwd=cwd, env=env, timeout=timeout,
-            )
-        if input_data is not None:
-            return subprocess.run(
-                cmd, cwd=cwd, capture_output=capture, env=env, timeout=timeout,
-                input=input_data, **no_window_kwargs(),
-            )
-        return subprocess.run(
-            cmd, cwd=cwd, capture_output=capture, env=env, timeout=timeout,
-            text=True, encoding="utf-8", errors="replace",
-            **no_window_kwargs(),
+        return _execute_git(
+            cmd, cwd=cwd, env=env, capture=capture, timeout=timeout, kill_tree=kill_tree,
+            input_data=input_data, observation_deadline=observation_deadline,
+            run=cast(_ProcessRunner, subprocess.run),
+            bounded_run=cast(_ProcessRunner, push_timeout.run_bounded),
+            window_options=no_window_kwargs,
         )
 
     requested_timeout = timeout
@@ -254,7 +237,8 @@ def git(
         if auth_acquisition else execute()
     )
     if check and result.returncode != 0:
-        raise GitError(cmd, result.returncode, result.stderr.strip())
+        stderr = result.stderr.decode("utf-8", errors="replace") if isinstance(result.stderr, bytes) else result.stderr
+        raise GitError(cmd, result.returncode, stderr.strip())
     return result
 
 
@@ -305,18 +289,10 @@ def _get_current_branch_safe(
     observation_deadline: float | None = None,
 ) -> str | None:
     """Return the worktree's current branch, or None if detached/unreadable."""
-    options: _GitProbeOptions = {}
-    if timeout is not None:
-        options["timeout"] = timeout
-    if kill_tree:
-        options["kill_tree"] = True
-    if observation_deadline is not None:
-        options["observation_deadline"] = observation_deadline
-    result = git("rev-parse", "--abbrev-ref", "HEAD", cwd=cwd, check=False, **options)
-    if result.returncode != 0:
-        return None
-    name = result.stdout.strip()
-    return None if name == "HEAD" else name
+    return _probe_current_branch(
+        cwd, timeout=timeout, kill_tree=kill_tree, observation_deadline=observation_deadline,
+        run=cast(_TextRunner, git),
+    )
 
 
 def current_branch(

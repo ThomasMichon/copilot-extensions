@@ -50,6 +50,13 @@ its own declared admission; this does not qualify every shipped copy.
 An `--all` probe reports absent pending scopes without trying to check them;
 explicit scope checks and admitted empty scopes still refuse qualification.
 
+The promotion-produced `apps/worktree-manager` source tree has its own pending
+consumer owner, separate from the canonical Manager source and embedded
+libraries. Its build helper, package code and runtime resources remain in the
+physical inventory; other undeclared application trees still refuse. This is
+ownership accounting, not strict admission or an exclusion from `--new-code`:
+changed physical application files retain the whole-file strict ratchet.
+
 ## Local commands
 
 From the source repository root, with Python and UV available:
@@ -479,6 +486,12 @@ physical fragment must be present exactly once. The separate PowerShell worker
 remains an independent input. The adapter includes the Windows native-read
 helper while keeping compiled filenames in their original lexical spelling;
 the helper itself remains in the checked source.
+
+Changed generated consumer copies use the same composition for both
+`installation_context.py` and `_installation_context.py` entrypoints. A changed
+loader or shared-namespace fragment selects its complete local fragment group,
+not unrelated consumer files or the independent worker. Each view retains its
+own physical membership, source bytes and diagnostic mapping.
 
 When that canonical loader is in the physical inventory, every project also
 receives the faithful view as an import root. A consumer can therefore import
