@@ -80,6 +80,7 @@ VERSIONED_RUNTIME_COMPONENTS = (
     "versioned_runtime_leases.py", "versioned_runtime_construction.py",
     "versioned_runtime_native.ps1",
     "versioned_runtime_source.py",
+    "versioned_runtime_identity.py", "versioned_runtime_fingerprint.py",
     "versioned_runtime_publication.py",
     "versioned_runtime_cache.py",
 )
@@ -341,7 +342,10 @@ def _mark_complete_result_violations(plugins_dir: Path) -> list[str]:
             )
         # Blank PowerShell block comments (keeping line numbers) so prose that
         # names the helper is not mistaken for a call.
-        text = re.sub(r"<#.*?#>", lambda m: "\n" * m.group(0).count("\n"), text, flags=re.S)
+        def blank_comment(match: re.Match[str]) -> str:
+            return "\n" * match.group(0).count("\n")
+
+        text = re.sub(r"<#.*?#>", blank_comment, text, flags=re.S)
         lines = text.split("\n")
         for lineno, line in enumerate(lines, 1):
             # Strings are prose, except a double-quoted `$(...)` that runs the helper.
@@ -402,7 +406,7 @@ def _ps1_else_fails(text: str) -> bool:
     start = text.index("{", text.index(_PS1_HELPER))
     after = text[start + len(_braced_body(text[start:])) + 2:]
     branch = re.match(r"\s*else\s*\{", after)
-    return bool(branch) and _fails_unconditionally(
+    return branch is not None and _fails_unconditionally(
         _braced_body(after[branch.end() - 1:]), ps1=True
     )
 _MARK_COMPLETE_IF_NOT = re.compile(r"\bif\s*\(\s*-not\s*\(\s*Invoke-VersionedMarkComplete\b")
@@ -492,7 +496,7 @@ def _helper_propagates_writer_status(body: str, suffix: str) -> bool:
             )
         writer = _PS1_WRITER.search(code)
         check = writer and _PS1_STATUS_CHECK.search(code, writer.end())
-        return bool(check) and _fails_unconditionally(
+        return check is not None and _fails_unconditionally(
             _braced_body(code[check.end() - 1:]), ps1=True
         )
     lines = [line for line in code.splitlines() if line.strip()]
@@ -557,7 +561,8 @@ def _sh_failure_branch_stops(
     # `if helper || true; then` (or `&&`) no longer tests the helper alone.
     if start is None or re.search(r"\|\||&&", code[:start.start()]):
         return False
-    depth, branch, bodies, begin = 0, "then", {}, start.end()
+    bodies: dict[str, str] = {}
+    depth, branch, begin = 0, "then", start.end()
     for keyword in (k for k in keywords if k.start() >= start.end()):
         word = keyword.group(1)
         if word == "if":

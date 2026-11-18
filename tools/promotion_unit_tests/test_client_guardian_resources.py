@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+from collections.abc import Callable
 import importlib.util
 import io
 import json
@@ -11,6 +12,7 @@ from pathlib import Path
 import subprocess
 import sys
 from types import ModuleType, SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
@@ -41,14 +43,14 @@ test_client_resource_preparation_consumes_shared_startup_deadline = (
 
 
 @pytest.fixture(autouse=True)
-def _portable_artifact_open(tmp_path, monkeypatch):
+def _portable_artifact_open(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from fleet_manager import artifacts, artifact_staging
 
-    def open_fixture(path):
+    def open_fixture(path: Path) -> int:
         assert Path(path).resolve().is_relative_to(tmp_path.resolve())
         return os.open(path, os.O_RDONLY | getattr(os, "O_BINARY", 0))
 
-    def directory_fixture(path):
+    def directory_fixture(path: Path) -> tuple[int, int]:
         assert Path(path).resolve().is_relative_to(tmp_path.resolve())
         info = Path(path).lstat()
         return info.st_dev, info.st_ino
@@ -65,19 +67,20 @@ class _ValueStructure:
 def _inert_native_import() -> ModuleType:
     module = ModuleType("ctypes")
     module.__file__ = None
-    module.Structure = _ValueStructure
-    module.c_int64, module.c_uint32 = object(), object()
+    setattr(module, "Structure", _ValueStructure)
+    setattr(module, "c_int64", object())
+    setattr(module, "c_uint32", object())
 
     def native_access(name: str) -> object:
         raise AssertionError(f"native ctypes API is outside this pure unit: {name}")
 
-    module.__getattr__ = native_access
+    setattr(module, "__getattr__", native_access)
     return module
 
 
-def test_accounting_resource_defers_native_binding_and_reuses_one_layout(monkeypatch):
+def test_accounting_resource_defers_native_binding_and_reuses_one_layout(monkeypatch: pytest.MonkeyPatch) -> None:
     class NoNativeImport(ModuleType):
-        def __getattr__(self, name):
+        def __getattr__(self, name: str) -> Any:
             raise AssertionError(f"portable resource accessed native bindings: {name}")
 
     monkeypatch.setitem(sys.modules, "ctypes", NoNativeImport("ctypes"))
@@ -105,46 +108,47 @@ def test_accounting_resource_defers_native_binding_and_reuses_one_layout(monkeyp
 
 @pytest.mark.parametrize("failed", [False, True])
 def test_retained_streaming_packet_writer_settles_without_reopening_sources(
-    installed, monkeypatch, failed, _canonical=False,
-):
+    installed: tuple[SimpleNamespace, Path], monkeypatch: pytest.MonkeyPatch,
+    failed: bool, _canonical: bool = False,
+) -> None:
     construction, _, evidence = installed_procutil(installed, monkeypatch)
 
     class Thread:
-        def __init__(self, target, args=(), **_kwargs):
+        def __init__(self, target: Callable[..., object], args: tuple[Any, ...] = (), **_kwargs: object) -> None:
             self.target, self.args = target, args
 
-        def start(self):
+        def start(self) -> None:
             self.target(*self.args)
 
-        def join(self, _timeout):
+        def join(self, _timeout: float) -> None:
             pass
 
-        def is_alive(self):
+        def is_alive(self) -> bool:
             return False
 
     class Input(io.BytesIO):
-        written = None
+        written: bytes | None = None
 
-        def write(self, data):
+        def write(self, data: Any) -> int:
             if failed:
                 raise OSError("fixture packet write failed")
             return super().write(data[:2])
 
-        def close(self):
+        def close(self) -> None:
             self.written = self.getvalue()
             super().close()
 
     class Selector:
-        def __enter__(self):
+        def __enter__(self) -> "Selector":
             return self
 
-        def __exit__(self, *_args):
+        def __exit__(self, *_args: object) -> None:
             pass
 
-        def register(self, *_args):
+        def register(self, *_args: object) -> None:
             pass
 
-        def select(self, _timeout):
+        def select(self, _timeout: float) -> list[tuple[str, int]]:
             return [("fixture-readable", 1)]
 
     process = SimpleNamespace(
@@ -161,6 +165,7 @@ def test_retained_streaming_packet_writer_settles_without_reopening_sources(
             )
         monkeypatch.setattr(streaming.threading, "Thread", Thread)
         monkeypatch.setattr(streaming.selectors, "DefaultSelector", Selector)
+        monkeypatch.setattr(streaming, "_windows_pipe_probe", lambda _stream: lambda: 4096)
         capture = streaming.SyncProcessOutput(process, input_bytes=b"complete packet")
         if failed:
             with pytest.raises(OSError, match="fixture packet write failed"):
@@ -174,12 +179,12 @@ def test_retained_streaming_packet_writer_settles_without_reopening_sources(
 
 
 def test_retained_relay_launch_uses_the_verified_bytes_not_its_file(
-    installed, monkeypatch, _canonical=False,
-):
+    installed: tuple[SimpleNamespace, Path], monkeypatch: pytest.MonkeyPatch, _canonical: bool = False,
+) -> None:
     construction, _, evidence = installed_procutil(installed, monkeypatch)
-    calls = []
+    calls: list[tuple[list[str], dict[str, Any]]] = []
 
-    def launch(argv, **options):
+    def launch(argv: list[str], **options: Any) -> None:
         calls.append((argv, options))
         raise RuntimeError("fixture launch stopped before native execution")
 
@@ -192,7 +197,7 @@ def test_retained_relay_launch_uses_the_verified_bytes_not_its_file(
             relay = _load_source(
                 name, ROOT / "libs/agent-procutil/src/agent_procutil/_output_relay.py",
             )
-            relay._retained_source_bytes = retained
+            setattr(relay, "_retained_source_bytes", retained)
         monkeypatch.setattr(package, "spawn_sync_in_kill_on_close_job", launch)
         monkeypatch.setattr(relay, "Path", lambda *_: pytest.fail("reopened relay path"))
         with pytest.raises(RuntimeError, match="fixture launch stopped"):
@@ -206,7 +211,9 @@ def test_retained_relay_launch_uses_the_verified_bytes_not_its_file(
 
 
 @pytest.mark.parametrize("member", ["streaming", "relay"])
-def test_canonical_streaming_implementations_are_measured(installed, monkeypatch, member):
+def test_canonical_streaming_implementations_are_measured(
+    installed: tuple[SimpleNamespace, Path], monkeypatch: pytest.MonkeyPatch, member: str,
+) -> None:
     if member == "streaming":
         for failed in (False, True):
             test_retained_streaming_packet_writer_settles_without_reopening_sources(
@@ -221,8 +228,9 @@ def test_canonical_streaming_implementations_are_measured(installed, monkeypatch
 @pytest.mark.parametrize("platform", ["posix", "nt"])
 @pytest.mark.parametrize("failed", [False, True])
 def test_construction_owner_call_keeps_pair_available_and_preserves_failure_custody(
-    installed, monkeypatch, tmp_path, failed, platform,
-):
+    installed: tuple[SimpleNamespace, Path], monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, failed: bool, platform: str,
+) -> None:
     monkeypatch.setitem(sys.modules, "ctypes", _inert_native_import())
     _diagnostics.test_construction_owner_call_keeps_pair_available_and_preserves_failure_custody(
         installed, monkeypatch, tmp_path, failed, platform,
@@ -236,36 +244,39 @@ def test_construction_owner_call_keeps_pair_available_and_preserves_failure_cust
     "_construction_procutil/streaming.py", "_construction_procutil/_output_relay.py",
     "_versioned_runtime.py", "versioned_runtime_leases.py", "versioned_runtime_construction.py",
     "versioned_runtime_source.py", "versioned_runtime_publication.py", "_installer_process.py",
+    "versioned_runtime_identity.py", "versioned_runtime_fingerprint.py",
 ])
 def test_guardian_receives_admitted_pair_after_disk_replacement(
-    installed, monkeypatch, tmp_path, member, failed,
-):
+    installed: tuple[SimpleNamespace, Path], monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, member: str, failed: bool,
+) -> None:
     construction, package, _ = installed_procutil(installed, monkeypatch, diagnose=False)
     installed_runtime(installed, monkeypatch)
     path = Path(__file__).parents[2] / "libs/installer-engine/installer_engine_process.py"
     spec = importlib.util.spec_from_file_location("fixture_guardian", path)
+    assert spec is not None and spec.loader is not None
     owner = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(owner)
     process_bytes = path.read_bytes()
-    owner._retained_source_bytes = process_bytes
+    setattr(owner, "_retained_source_bytes", process_bytes)
     (package / "_installer_process.py").write_bytes(process_bytes)
     original = construction.artifact_staging._bytes
-    observed = []
-    failure = RuntimeError("native ownership is unconfirmed")
+    observed: list[list[str]] = []
+    failure: Any = RuntimeError("native ownership is unconfirmed")
     failure.process, failure.job = object(), object()
     custody = failure.process, failure.job
 
-    def replaced(path, limit):
+    def replaced(path: Path, limit: int) -> bytes:
         content = original(path, limit)
         if path == package / member:
             path.write_text("raise AssertionError('late unadmitted guardian code executed')\n")
-        return content
+        return cast(bytes, content)
 
     class Guardian:
         returncode = 0
         stdin = None
 
-        def __init__(self, argv, **options):
+        def __init__(self, argv: list[str], **options: Any) -> None:
             assert "--procutil-path" not in argv
             assert options["stdin"] == subprocess.PIPE
             assert options["close_fds"] is True
@@ -274,11 +285,11 @@ def test_guardian_receives_admitted_pair_after_disk_replacement(
             self.bootstrap = argv[argv.index("-c") + 1]
             self.completed = False
 
-        def communicate(self, *, input=None, timeout):
+        def communicate(self, *, input: str | None = None, timeout: float) -> tuple[str, str]:
             if not self.completed:
                 assert isinstance(input, str)
                 before = set(sys.modules)
-                namespace = {"__name__": "fixture_retained_guardian"}
+                namespace: dict[str, Any] = {"__name__": "fixture_retained_guardian"}
                 with monkeypatch.context() as stdio:
                     stdio.setattr(sys, "stdin", SimpleNamespace(buffer=io.BytesIO(input.encode("ascii"))))
                     exec(compile(self.bootstrap, "<guardian-bootstrap>", "exec"), namespace)
@@ -323,7 +334,7 @@ def test_guardian_receives_admitted_pair_after_disk_replacement(
     monkeypatch.setattr(owner.subprocess, "STARTUPINFO", SimpleNamespace, raising=False)
     monkeypatch.setattr(owner.subprocess, "Popen", Guardian)
     monkeypatch.setattr(construction.artifact_staging, "_bytes", replaced)
-    def process_resource(name, *, evidence):
+    def process_resource(name: str, *, evidence: dict[str, Any]) -> ModuleType:
         assert name == "_installer_process.py"
         _path, content = construction._process_resource_data(name, evidence=evidence)
         assert content == process_bytes
@@ -349,12 +360,15 @@ def test_guardian_receives_admitted_pair_after_disk_replacement(
 
 
 @pytest.mark.parametrize("fault", ["missing", "missing-accounting", "extra", "text", "empty", "oversized"])
-def test_guardian_refuses_invalid_closure_without_read_or_execution(monkeypatch, fault):
+def test_guardian_refuses_invalid_closure_without_read_or_execution(
+    monkeypatch: pytest.MonkeyPatch, fault: str,
+) -> None:
     path = Path(__file__).parents[2] / "libs/installer-engine/installer_engine_process.py"
     spec = importlib.util.spec_from_file_location("fixture_guardian", path)
+    assert spec is not None and spec.loader is not None
     owner = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(owner)
-    sources = {name: b"raise AssertionError('invalid closure executed')\n" for name in owner._GUARDIAN_MEMBERS}
+    sources: dict[str, Any] = {name: b"raise AssertionError('invalid closure executed')\n" for name in owner._GUARDIAN_MEMBERS}
     if fault == "missing":
         sources.pop("_construction_procutil/_job_scopes.py")
     elif fault == "missing-accounting":
@@ -380,12 +394,15 @@ def test_guardian_refuses_invalid_closure_without_read_or_execution(monkeypatch,
 @pytest.mark.parametrize("fault", [
     "missing", "missing-accounting", "extra", "bad-base64", "empty", "oversized", "nonstring", "duplicate",
 ])
-def test_bootstrap_rejects_invalid_complete_packet_before_executing_owner(monkeypatch, fault):
+def test_bootstrap_rejects_invalid_complete_packet_before_executing_owner(
+    monkeypatch: pytest.MonkeyPatch, fault: str,
+) -> None:
     path = Path(__file__).parents[2] / "libs/installer-engine/installer_engine_process.py"
     spec = importlib.util.spec_from_file_location("fixture_guardian", path)
+    assert spec is not None and spec.loader is not None
     owner = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(owner)
-    encoded = {
+    encoded: dict[str, Any] = {
         name: base64.b64encode(b"raise AssertionError('invalid closure executed')\n").decode("ascii")
         for name in owner._GUARDIAN_MEMBERS
     }
@@ -412,15 +429,18 @@ def test_bootstrap_rejects_invalid_complete_packet_before_executing_owner(monkey
 
 
 @pytest.mark.parametrize("boundary", ["spawn", "completion"])
-def test_guardian_cannot_report_success_after_requested_execution_limit(monkeypatch, boundary):
+def test_guardian_cannot_report_success_after_requested_execution_limit(
+    monkeypatch: pytest.MonkeyPatch, boundary: str,
+) -> None:
     path = ROOT / "libs/installer-engine/installer_engine_process.py"
     spec = importlib.util.spec_from_file_location("fixture_guardian", path)
+    assert spec is not None and spec.loader is not None
     owner = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(owner)
     clock = {"now": 0.0}
-    observed = []
+    observed: list[tuple[str, float]] = []
 
-    def communicate(*, timeout):
+    def communicate(*, timeout: float) -> tuple[str, str]:
         if boundary == "completion":
             clock["now"] = 2.0
         return "complete", ""
@@ -428,7 +448,7 @@ def test_guardian_cannot_report_success_after_requested_execution_limit(monkeypa
     process = SimpleNamespace(returncode=0, communicate=communicate, wait=lambda **_: None)
     job = SimpleNamespace(terminate_and_wait=lambda timeout: observed.append(("retire", timeout)))
 
-    def spawn(*_args, **_kwargs):
+    def spawn(*_args: object, **_kwargs: object) -> tuple[SimpleNamespace, SimpleNamespace]:
         if boundary == "spawn":
             clock["now"] = 2.0
         return process, job
@@ -448,18 +468,19 @@ def test_guardian_cannot_report_success_after_requested_execution_limit(monkeypa
 
 @pytest.mark.parametrize("absolute_deadline", [None, 2.0])
 def test_progress_guardian_renews_only_quiet_time_and_keeps_explicit_cap(
-    monkeypatch, absolute_deadline,
-):
+    monkeypatch: pytest.MonkeyPatch, absolute_deadline: float | None,
+) -> None:
     path = ROOT / "libs/installer-engine/installer_engine_process.py"
     spec = importlib.util.spec_from_file_location("fixture_guardian", path)
+    assert spec is not None and spec.loader is not None
     owner = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(owner)
     clock = {"now": 0.0}
-    observed = []
+    observed: list[tuple[str, float]] = []
     process = SimpleNamespace(returncode=0, wait=lambda **_: None)
     job = SimpleNamespace(terminate_and_wait=lambda timeout: observed.append(("retire", timeout)))
 
-    def wait(timeout, **options):
+    def wait(timeout: float, **options: Any) -> None:
         assert timeout == 1.0
         assert options["deadline"] == absolute_deadline
         clock["now"] = 3.0
@@ -486,21 +507,23 @@ def test_progress_guardian_renews_only_quiet_time_and_keeps_explicit_cap(
 @pytest.mark.parametrize("deadline", [None, 2.0])
 @pytest.mark.parametrize("boundary", ["packet", "startup", "completion", "retirement"])
 def test_retained_guardian_preserves_deadline_before_launch_and_after_settlement(
-    monkeypatch, tmp_path, boundary, deadline,
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, boundary: str, deadline: float | None,
+) -> None:
     path = ROOT / "libs/installer-engine/installer_engine_process.py"
     spec = importlib.util.spec_from_file_location("fixture_guardian", path)
+    assert spec is not None and spec.loader is not None
     owner = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(owner)
     clock = {"now": 0.0}
-    launches, inheritance = [], []
+    launches: list[list[str]] = []
+    inheritance: list[bool] = []
 
-    def packet(*_args):
+    def packet(*_args: object) -> str:
         if boundary == "packet":
             clock["now"] = 3.0
         return "{}"
 
-    def startup():
+    def startup() -> SimpleNamespace:
         if boundary == "startup":
             clock["now"] = 3.0
         return SimpleNamespace()
@@ -508,13 +531,13 @@ def test_retained_guardian_preserves_deadline_before_launch_and_after_settlement
     class Guardian:
         returncode = 0
 
-        def __init__(self, argv, **_options):
+        def __init__(self, argv: list[str], **_options: object) -> None:
             self.stdin = None
             assert argv[argv.index("--deadline") + 1] == "2.0"
             launches.append(argv)
             self.calls = 0
 
-        def communicate(self, *, input=None, timeout):
+        def communicate(self, *, input: str | None = None, timeout: float) -> tuple[str, str]:
             self.calls += 1
             assert 0 < timeout <= 32
             if boundary == "completion" or boundary == "retirement" and self.calls == 2:

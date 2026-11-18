@@ -7,10 +7,14 @@ import re
 import shutil
 import sys
 from collections.abc import Callable
-from types import ModuleType
 from typing import Any, cast
 
 import materialize_installer_engine as assets
+from promotion_complete_source import _path as source_path
+
+_TOOLING = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(_TOOLING / "libs/installer-engine"))
+from runtime_application_binstubs import setup_binstubs, slot_binstubs  # noqa: E402
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -123,13 +127,9 @@ def materialize(root: Path) -> list[str]:
             or any(character in python for character in "\r\n\0")
         ):
             raise ValueError("application source requires Manager commands and declared Python")
-        generator = Path(__file__).resolve().parents[1] / "libs/installer-engine/runtime_application_binstubs.py"
-        launchers_owner = ModuleType("_source_application_binstubs")
-        launchers_owner.__file__ = str(generator)
-        exec(compile(generator.read_bytes(), str(generator), "exec"), vars(launchers_owner))
         launchers = {}
         for name, entry in commands.items():
-            for filename, text in launchers_owner.slot_binstubs(name, entry, source_project=True).items():
+            for filename, text in slot_binstubs(name, entry, source_project=True).items():
                 if filename in {"install", "install.cmd", "install.ps1", "install.sh"} and name != "worktree-manager":
                     continue
                 if filename in launchers:
@@ -164,6 +164,8 @@ def materialize(root: Path) -> list[str]:
         }
         if any(name.casefold() in reserved for name in launchers):
             raise ValueError("application source commands conflict with project inputs")
+        for name in launchers:
+            source_path(name)
         for path in members.values():
             if problem := assets.derived_path_problem(path, root, required=True):
                 raise ValueError(problem)
@@ -188,7 +190,7 @@ def materialize(root: Path) -> list[str]:
                 path.chmod(0o700)
         directory = destination / "bin"
         directory.mkdir()
-        for filename, text in launchers_owner.setup_binstubs().items():
+        for filename, text in setup_binstubs().items():
             path = directory / filename
             path.write_text(text, encoding="utf-8", newline="\r\n" if path.suffix == ".ps1" else "")
             if path.suffix == ".sh":
@@ -215,7 +217,8 @@ def bind_source(root: Path, *, source_commit: str, source_tree: str) -> list[str
         previous = sys.path[:]
         try:
             sys.path.insert(0, str(TRUSTED_ROOT / "libs/versioned-runtime"))
-            import versioned_runtime_source as owner
+            import versioned_runtime_identity as owner
+            import versioned_runtime_fingerprint as fingerprints
         finally:
             sys.path[:] = previous
         metadata = tomllib.loads((application / "pyproject.toml").read_text(encoding="utf-8"))
@@ -228,7 +231,10 @@ def bind_source(root: Path, *, source_commit: str, source_tree: str) -> list[str
             or not isinstance(version, str)
         ):
             raise ValueError("application source project identity is invalid")
-        digest = owner.assembly_hash(application)
+        digest = owner.assembly_hash(
+            application, native_path=fingerprints.native_path,
+            fingerprint=fingerprints.fingerprint_source,
+        )
         identity = owner.SourceIdentity(
             "worktree-manager", version, source_commit, source_tree, digest,
             owner.runtime_version(version, source_commit, digest),

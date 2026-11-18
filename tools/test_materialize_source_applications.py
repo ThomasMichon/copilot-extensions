@@ -13,6 +13,7 @@ import subprocess
 import sys
 import time
 from types import SimpleNamespace
+from typing import Any
 import zipfile
 
 import pytest
@@ -188,8 +189,28 @@ def test_source_application_does_not_replace_an_existing_output(candidate: Path)
     assert (candidate / "apps/worktree-manager/keep.txt").read_text() == "keep\n"
 
 
+@pytest.mark.parametrize("name", ["con", "nul", "com1", "lpt0"])
+def test_source_commands_refuse_device_names_before_output(
+    candidate: Path, monkeypatch: pytest.MonkeyPatch, name: str,
+) -> None:
+    manifest = candidate / "worktree-manager/pyproject.toml"
+    manifest.write_text(manifest.read_text().replace(
+        'install-helper = "worktree_manager.cli:main"', name + ' = "worktree_manager.cli:main"',
+    ))
+    mkdir = Path.mkdir
+
+    def reject_output(path: Path, *args: Any, **kwargs: Any) -> None:
+        if path == candidate / "apps/worktree-manager":
+            raise AssertionError("a device command reached output creation")
+        mkdir(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "mkdir", reject_output)
+    assert any(line.startswith("SKIP") for line in applications.materialize(candidate))
+    assert not (candidate / "apps").exists()
+
+
 def test_source_application_association_uses_canonical_identity_and_distinct_local_versions(
-    candidate: Path, tmp_path: Path,
+    candidate: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import versioned_runtime_source as owner
 
@@ -198,9 +219,11 @@ def test_source_application_association_uses_canonical_identity_and_distinct_loc
     shutil.copytree(candidate, duplicate)
     versions = []
     for root, commit in ((candidate, "a" * 40), (duplicate, "b" * 40)):
-        assert all(line.startswith("OK") for line in applications.bind_source(
-            root, source_commit=commit, source_tree="c" * 40,
-        ))
+        with monkeypatch.context() as patched:
+            patched.setattr(owner, "_runtime", lambda: pytest.fail("release loaded runtime activation"))
+            assert all(line.startswith("OK") for line in applications.bind_source(
+                root, source_commit=commit, source_tree="c" * 40,
+            ))
         application = root / "apps/worktree-manager"
         identity = owner.read_source_identity(application, "1.2.3", plugin="worktree-manager")
         assert identity is not None

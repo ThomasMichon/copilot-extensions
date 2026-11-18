@@ -656,6 +656,10 @@ source bytes through the existing `SourceIdentity` and local-runtime-version
 owner. Package versions remain unchanged by local composition. This records
 the pre-construction source inputs; it is not completion evidence for a later
 lock, environment, service or public release.
+The emitter uses the canonical data-only identity and fingerprint components,
+not the installed runtime's activation or resource loader. Runtime packaging,
+retained constructor/guardian resources and copied client bootstraps carry those
+same components; the identity format and fingerprint framing are unchanged.
 An app-local Git attributes file preserves emitted bytes through checkout and
 archive transport instead of inheriting repository text conversion. The
 repository's normal source-file line-ending policy remains unchanged.
@@ -665,6 +669,8 @@ the repository's ordinary development ignore rules.
 This output is independently buildable after relocation and carries generated
 slot-local setup/command frontdoors. Command paths that collide with project
 inputs or required directories are rejected before creating the output.
+Generated names also satisfy the existing portable-path contract, including
+Windows device-name refusal, before any destination directory is created.
 `bin/setup --stage` uses PATH UV with
 managed Python selected from the project's declaration. Initial setup creates
 a missing UV lock, then uses locked, non-editable environment synchronization;

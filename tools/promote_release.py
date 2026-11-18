@@ -103,10 +103,9 @@ def _is_ancestor(ancestor: str, descendant: str, *, cwd: Path | None = None) -> 
 
 
 def _load_module(path: Path, name: str) -> Any:
-    spec = importlib.util.spec_from_file_location(name, path)
-    if spec is None or spec.loader is None:
-        raise ImportError(f"Promotion helper is unavailable: {path.name}")
+    spec = importlib.util.spec_from_file_location(name, path)  # type: Any
     module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
     spec.loader.exec_module(module)
     return module
 

@@ -68,6 +68,7 @@
       "payloadDir": "scripts/runtime-input-provider/libs/versioned-runtime",
       "files": [
         "versioned_runtime.py", "versioned_runtime_leases.py", "versioned_runtime_source.py",
+        "versioned_runtime_identity.py", "versioned_runtime_fingerprint.py",
         "versioned_runtime_construction.py", "versioned_runtime_publication.py",
         "versioned_runtime_cache.py",
         "standalone_build.py", "versioned_runtime_native.ps1"
@@ -258,6 +259,8 @@
         "versioned-runtime/versioned_runtime.py",
         "versioned-runtime/versioned_runtime_cache.py",
         "versioned-runtime/versioned_runtime_construction.py",
+        "versioned-runtime/versioned_runtime_identity.py",
+        "versioned-runtime/versioned_runtime_fingerprint.py",
         "versioned-runtime/versioned_runtime_leases.py",
         "versioned-runtime/versioned_runtime_native.ps1",
         "versioned-runtime/versioned_runtime_publication.py",

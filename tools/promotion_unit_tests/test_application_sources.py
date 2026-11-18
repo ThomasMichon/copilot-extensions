@@ -12,6 +12,7 @@ from packaging.utils import canonicalize_name
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "libs" / "installer-engine"))
+sys.path.insert(0, str(ROOT / "libs" / "versioned-runtime"))
 
 from application_sources import (
     application_sources, canonical_application, declared_projects, is_application, project_locations,
@@ -47,6 +48,47 @@ def test_legacy_promotion_does_not_query_source_identity(
 
     assert bind_promotion_source(Path("candidate"), forbidden) == []
     assert promotion_outputs(Path("candidate")) == ()
+
+
+@pytest.mark.parametrize("package", ["1.2.3", "1.2.3+local"])
+def test_pure_source_identity_roundtrip_preserves_version_and_payload_binding(package: str) -> None:
+    from versioned_runtime_identity import (
+        SourceIdentity, SourceIdentityError, parse_source_identity, runtime_version,
+    )
+
+    identity = SourceIdentity(
+        "example", package, "a" * 40, "b" * 40, "c" * 64,
+        runtime_version(package, "a" * 40, "c" * 64),
+    )
+    assert parse_source_identity(
+        identity.document(), package_version=package, plugin="example",
+    ) == identity
+    with pytest.raises(SourceIdentityError, match="immutable inputs"):
+        parse_source_identity({**identity.document(), "source_commit": "d" * 40})
+    with pytest.raises(SourceIdentityError, match="plugin and package"):
+        parse_source_identity(identity.document(), plugin="other")
+
+
+def test_pure_source_fingerprint_preserves_framing_and_relocation(tmp_path: Path) -> None:
+    import hashlib
+    from versioned_runtime_fingerprint import fingerprint_source
+
+    observed: list[tuple[Path, bytes]] = []
+    roots = [tmp_path / "first", tmp_path / "relocated"]
+    for root in roots:
+        root.mkdir()
+        (root / "a").write_bytes(b"first\0content")
+        (root / "b").write_bytes(b"second")
+    digest = fingerprint_source([roots[0]], on_file=lambda *entry: observed.append(entry))
+    expected = hashlib.sha256()
+    for label, content in ((b"./a", b"first\0content"), (b"./b", b"second")):
+        for value in (label, b"file", content):
+            expected.update(len(value).to_bytes(8, "big") + value)
+    assert digest == expected.hexdigest()
+    assert observed == [(roots[0] / "a", b"first\0content"), (roots[0] / "b", b"second")]
+    assert fingerprint_source([roots[1]], on_file=lambda *_entry: None) == digest
+    (roots[1] / "a").write_bytes(b"changed")
+    assert fingerprint_source([roots[1]], on_file=lambda *_entry: None) != digest
 
 
 @pytest.fixture(autouse=True)

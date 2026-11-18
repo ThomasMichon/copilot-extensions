@@ -51,6 +51,7 @@ VRT_NAME = "versioned_runtime.py"
 COMPONENT_NAMES = (
     "versioned_runtime_leases.py", "versioned_runtime_construction.py",
     "versioned_runtime_source.py", "versioned_runtime_readiness.py",
+    "versioned_runtime_identity.py", "versioned_runtime_fingerprint.py",
     "versioned_runtime_publication.py",
     "versioned_runtime_cache.py",
     "versioned_runtime_native.ps1",
