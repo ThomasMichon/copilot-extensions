@@ -8,13 +8,16 @@ import os
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Protocol, TypedDict, cast
+from typing import TYPE_CHECKING, Any, Protocol, TypedDict, cast
 
 from configuration_context import context_from_owner, delivered_context, read_owner_context
-from configuration_layers import Composition, Layer, compose, read_source
+from configuration_layers import compose, read_source
 
 from . import config as cfg
 from . import _knowledge_overlay
+
+if TYPE_CHECKING:
+    from configuration_layers import Composition, Layer
 
 
 class _RepositoryLayers(Protocol):
