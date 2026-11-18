@@ -122,6 +122,20 @@ their earned credit. Normal reviewed delivery, current complete source/ROOT
 readback and separate source-specific judgment precede any tracker retirement;
 neither this proposal nor a tracking change repairs the wait channel.
 
+The proposed complete #6394 receiving below preserves semantic aggregation,
+target-resolution, inbox, registration, bounded Driver delivery, #12487
+compatibility, #11448 subscription, retained-source/publisher and release
+owners. The accepted bounded queued-follow-up plan and next provider/API gate
+materially address BT4's framing, not release of the earlier source/publisher
+obligations. Original BT4/BTV4 and its discussion retain the actual owner's
+additive-phase OR separately accepted follow-up/publication decision before
+closure. Reconcile that recorded condition; do not invent a generic re-ACK.
+The current queued-steering claim is bounded, not custody of this whole union.
+No live reservation was inspected or cleared; zero assignees proves neither
+absence of claims nor source/resource release. #6394 stays OPEN during this
+proposal. Normal review, complete current receiving/readback and a separate
+source-specific judgment precede any administrative disposition.
+
 ## Context
 
 The current bridge already exposes most required mechanisms: create, send, read,
@@ -542,6 +556,86 @@ future-turn queueing or final snapshots for the distinct outcomes below.
   terminal unknowns without replacement, lost custody or blind replay.
   Queue-for-later and final-snapshot-only controls must not pass this lane.
 
+### Proposed complete #6394 delivery and inbox residuals
+
+Reuse incumbent direct identity/admission/provenance/audit gates, the bounded
+[queued-steering](../bridge-queued-steering/README.md) exact-input/fallback
+contract and existing review/CI/release/adoption obligations. Preserve credited
+generation-39/#6420 delivery and bounded notification source without resetting
+their unfinished qualification or equating partial delivery with this union.
+
+- [ ] **TD6394-P1 - BT1 residual:** Unknown/non-live zero-match handles fail
+  nonzero with one clear diagnostic before generic start or its "Starting
+  session" line. Preserve supported registered-agent start OR clean rejection;
+  require no invented mandatory flag. The reported observation did not
+  establish an actual spawn.
+- [ ] **TD6394-P2 - BT2 residual:** Preserve credited immediate non-aborting
+  missing/ordinary steering, explicit queue/interrupt and unknown-urgency
+  diagnosis alongside the existing queue-first compatibility path. Directly
+  retain admitted/SDK-accepted/exact-root-consumed receipts, optional exact
+  receipt, cursor-neutral represented activity/pending/output reads, separately
+  requested finite reply waits, exclusion of nested/pre-consumption/empty-tool
+  false answers, honest post-consumption correlation limits and unavailable/
+  retired/readback races. Reuse incumbent identity/order/replay protections;
+  do not reimplement or reset credited baseline work.
+- [ ] **TD6394-P3 - BT3 residual:** In the existing bounded queued-steering
+  lane, retain count/age/readiness-only notice content, meaningful-change
+  coalescing, no abort/operator impersonation/fabricated idle, and bounded
+  attention for BOTH stale admitted work AND SDK-accepted-without-consumption,
+  with known reason or explicit unknown. Preserve directly received
+  mute/cadence, matching-ID/race and single-ledger protections. Retain the
+  requested real busy-session nudge plus distinct mechanical receipts without
+  an assistant reply.
+- [ ] **TD6394-P4 - BT5:** Distinguish actual receiver exact-native capability
+  from daemon capability or fresh registration. Preserve explicit incompatible
+  refusal with truthful retryability OR truthful incompatible/stale diagnostic
+  treatment, including capability visibility or bounded-age skipped-poll
+  evidence. No unexplained permanent admission.
+- [ ] **TD6394-P5 - BT6:** Registration retirement leaves durable sender-visible
+  terminal receipt/reason, not silent deletion/404. Prefer an allowed capable
+  successor preserving exact-target identity/freshness OR explicit non-carry
+  and resend-after-restart guidance. Payload installation does not replace code
+  loaded by an existing CLI; no restart/replay authority follows.
+- [ ] **TD6394-P6 - BT7:** Bound currentNative() metadata snapshot, session.send
+  and session.abort; expose truthful held/timeout and subsequent progress.
+  Preserve that this hardening was not the observed incompatible-poller cause.
+- [ ] **TD6394-P7 - BT8:** Under the existing consumer owner, retain changed-
+  PID/birth same-session rearming and ordered pending ordinary/queue/control
+  progress. Bounded-age admitted work on a live/idle heartbeating receiver
+  without recent pulls produces list/status attention AND sender receipt
+  visibility AND structured WARNING. Preserve identity, single ledger,
+  retirement protections and observed-incident versus unconfirmed consumer-loop
+  hypothesis distinctions.
+
+#### Local Validation
+
+- [ ] **TD6394-LV1:** Unknown/no-start diagnostic, supported registered-agent
+  start and live addressing; deterministic no-start proof needs no native launch.
+- [ ] **TD6394-LV2:** Exact receipt/read/reply boundaries, consume-before-return,
+  nested/unrelated/pre-consumption/empty-tool controls, rename/replay and honest
+  unknowns; one consumed ID cannot clear others.
+- [ ] **TD6394-LV3:** Actual supported hook delivery and real busy-session
+  nudge/distinct receipts without reply; metadata-only bounded/coalesced/muted
+  notices and exact-ID races. Reuse queued ROOT's separately explicit exact-
+  input/fallback/late-SDK/restart controls.
+- [ ] **TD6394-LV4:** Exact-capable, legacy non-exact and retired receivers;
+  chosen refusal OR diagnostic alternative; skipped-poll/stale visibility and
+  ordinary/control compatibility.
+- [ ] **TD6394-LV5:** Durable retirement receipt/reason; allowed successor OR
+  explicit non-carry/resend outcome, retaining exact identity/freshness/idempotency.
+- [ ] **TD6394-LV6:** Hang each of the three named RPCs; bounded exit, truthful
+  held/timeout and subsequent progress without fabricated acceptance, consumption
+  or reply.
+- [ ] **TD6394-LV7:** Changed-PID/birth re-registration and ordered ordinary/
+  queue/replay-control progress; no loss/duplication; all three stale-consumer
+  signals with healthy active-puller, empty, busy and intentionally muted controls.
+
+Retain file-drop as an UNACCEPTED design, not an implementation checkbox or
+selected prerequisite: same IDs/timestamps/sender/body, one-ledger reconciliation,
+atomic claim, proposed TTL, SSH-account/self-asserted-peer trust, cheap directory-
+only hook, busy-only/idle-wake gap and startup-loaded hook-registration limit.
+No SSH, file effect, cleanup, hook installation or rollout authority follows.
+
 ## Validation Plan
 
 - [ ] **AW4681-G:** Complete all AW4681-P1..3 and LV1..3 lanes: the original
@@ -559,6 +653,13 @@ future-turn queueing or final snapshots for the distinct outcomes below.
   lifecycle gates. Preserve original finite evidence tiers, compatibility,
   serial writers and all custodians; no AHP/all-host/whole-parent
   prerequisite or new transfer ceremony is introduced.
+
+- [ ] **TD6394-G:** Resolve TD6394-P1-P7/LV1-LV7 together with directly reused
+  incumbent identity/admission/audit, queued-steering exact-input/fallback and
+  existing source/review/CI/release/adoption clauses. Preserve original evidence
+  tiers, literal alternatives, source-specific owner condition, current claimants
+  and genuine holds. No whole-parent/AHP/every-host gate, new ACK, implementation
+  completion or resource release follows from documentary receiving.
 
 - [ ] Complete every directly retained #1448 Plan/Validation row above at its
   original evidence tier and bounds, preserving existing owners and holds.
@@ -613,6 +714,20 @@ bridge does not absorb task claiming, recurring scheduling, or unattended goal
 ownership.
 
 ## Journal
+
+### 2026-11-17 - Complete delivery and inbox residual receiving proposed
+
+Added seven unchecked Plan, seven local Validation and one actual global
+Validation rows for the complete #6394 union, reusing already-direct
+identity/admission/audit and bounded queued exact-input/fallback acceptance.
+The actual BT4 source/publisher decision stays in Coordination, not a new
+implementation checkbox or generic acknowledgment ceremony. Generation-39/
+#6420 and bounded notification credit remain distinct from unfinished receipt,
+capability, retirement, RPC and consumer-rearming outcomes. The original
+observation did not establish an actual spawn; the consumer-loop explanation
+remains a hypothesis. File-drop remains an unaccepted alternative. All incumbent
+checks and owners remain; this proposal closes no source and performs no
+implementation, native operation, custody transfer or rollout.
 
 ### 2026-11-17 - Complete attention-wait follow-up proposed
 
