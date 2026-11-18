@@ -117,7 +117,8 @@ def test_exit_settles_turn_and_subscription_or_preserves_both(
         tmp_db.flush()
         assert not retire()
     elif case in {"flush-failed", "replacement"}:
-        def fail_flush() -> None:
+        def fail_flush(records: dict[str, HostRecord]) -> None:
+            assert sid not in records
             raise OSError("index unavailable")
 
         with monkeypatch.context() as failing_index:

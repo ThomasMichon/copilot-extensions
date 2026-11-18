@@ -31,13 +31,13 @@ def test_stopped_row_admits_metadata_but_retires_only_original_host(
     row = tmp_db.get_session(sid)
     assert row is not None
     with monkeypatch.context() as once:
-        def fail_flush() -> None:
+        def fail_flush(records: dict[str, HostRecord]) -> None:
+            assert sid not in records and index.get(sid) == record
             raise OSError("index write failed")
 
         once.setattr(index, "_flush", fail_flush)
         assert not may_refresh_inherited(tmp_db, index, "successor", row, acquired.append)
-    index = HostIndex(path)
-    assert index.get(sid) == record
+    assert index.get(sid) == HostIndex(path).get(sid) == record
     history = tmp_db.get_events(sid)
     assert [event["event_type"] for event in history] == ["turn_complete", "session_state_changed"]
     if case == "replacement":
