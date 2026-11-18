@@ -6637,7 +6637,7 @@
         "libs/ssh-manager/src/ssh_manager/process.py": "2bbe9c89403dda0af0a9e6729b7596d8f662cabd9001820b1b62b6caa9554202",
         "libs/versioned-runtime/standalone_build.py": "b95a5a397a2e32d947d8355ab5a26e4221f0b55ac16ae1a8837f2bf3b6f56eb8",
         "fleet-manager/containers/gateway/Dockerfile": "e69933820c459ed52469246185e76a1169a34b0c3dd317ef2324377aae047538",
-        "fleet-manager/containers/gateway/Dockerfile.dockerignore": "b6f5de3e2c80dd1f235fa414aae1e075231948d102d58d842d7c6bcfaa5a84e7",
+        "fleet-manager/containers/gateway/Dockerfile.dockerignore": "543457d3bcc33ec7f59d627b906ea7c63ee97c65abc60e1e604831495b7ed46c",
         "libs/versioned-runtime/versioned_runtime.py": "d5c979655797b4acd39799862f810fe79ac172b5e9c29d51c0d1a9f70dae78e2",
         "libs/versioned-runtime/versioned_runtime_cache.py": "c6e2d8825df5c44b9db64c550950c7f520c1a7ab6d588db292fc40ec8253663a",
         "libs/versioned-runtime/versioned_runtime_construction.py": "48433749cb757be6ae9bf36c770adc4697865874da1c2424fea841704be67e96",
