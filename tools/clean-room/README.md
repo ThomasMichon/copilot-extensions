@@ -231,6 +231,10 @@ inputs. Only the private results directory and an optional separate declared
 cache are writable host binds; both must be outside the repository. Narrow
 read-only repository inputs remain supported. Test HOME and temporary files remain below the
 results mount; no host environment or credentials are forwarded.
+The plan explicitly clears all uppercase/lowercase Docker proxy defaults so
+the client's proxy configuration cannot inject authenticated URLs or private
+bypass lists. Home/repository protection uses resolved physical boundaries;
+mount sources with CSV delimiters, quotes or line breaks refuse.
 
 This is **not a runnable lane or an execution receipt**. It neither creates
 files nor calls Docker. Its declared host/container partition check is

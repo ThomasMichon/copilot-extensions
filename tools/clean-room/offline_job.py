@@ -104,8 +104,7 @@ def _source(path: Path, *, forbidden: tuple[Path, ...]) -> None:
     if (
         path.anchor != "/"
         or ".." in path.parts
-        or "," in str(path)
-        or "\0" in str(path)
+        or any(character in str(path) for character in (",", '"', "\r", "\n", "\0"))
         or any(path == denied or denied.is_relative_to(path) for denied in forbidden)
     ):
         raise PlanRefusal("broad, indirect or unrepresentable mount source")
@@ -149,6 +148,13 @@ def plan_job(
     for path in (host_home, repository, docker_socket):
         if path.anchor != "/" or ".." in path.parts:
             raise PlanRefusal("host boundaries must be absolute")
+    try:
+        host_home = host_home.resolve(strict=True)
+        repository = repository.resolve(strict=True)
+    except (OSError, RuntimeError) as error:
+        raise PlanRefusal("host boundaries are unavailable") from error
+    if not host_home.is_dir() or not repository.is_dir():
+        raise PlanRefusal("home and repository boundaries must be directories")
     forbidden = (
         host_home,
         repository,
@@ -216,6 +222,10 @@ def plan_job(
         "UV_PYTHON_DOWNLOADS": "never",
         "UV_CACHE_DIR": "/job/cache" if job.cache is not None else "/job/out/cache",
     }
+    # Docker's client configuration can inject these independently of host env.
+    for scheme in ("HTTP", "HTTPS", "FTP", "NO", "ALL"):
+        environment[f"{scheme}_PROXY"] = ""
+        environment[f"{scheme.lower()}_proxy"] = ""
     docker = ("docker", "--host", f"unix://{docker_socket}")
     work_deadline = deadline_epoch - job.cleanup_seconds
     # Absolute expiry survives a slow create or loss of the host-side client.

@@ -31,13 +31,15 @@ class PlanRequest:
         selected: Any = None,
         *,
         results: Path | None = None,
+        home: Path | None = None,
+        repository: Path | None = None,
         now_epoch: float = 1000.0,
     ) -> Any:
         return owner.plan_job(
             selected or self.job,
             results=self.results if results is None else results,
-            host_home=self.home,
-            repository=self.repository,
+            host_home=self.home if home is None else home,
+            repository=self.repository if repository is None else repository,
             deadline_epoch=1240,
             now_epoch=now_epoch,
         )
@@ -217,3 +219,70 @@ def test_narrow_read_only_repository_input_stays_supported(
         replace(request_plan.job, inputs=(owner.Input("scenario", source),))
     )
     assert f"type=bind,src={source},dst=/job/inputs/scenario,readonly" in plan.create
+
+
+@pytest.mark.parametrize("role", ["results", "cache"])
+def test_aliased_repository_boundary_still_rejects_physical_writable_descendants(
+    request_plan: PlanRequest, tmp_path: Path, role: str
+) -> None:
+    alias = tmp_path / "checkout-alias"
+    alias.symlink_to(request_plan.repository, target_is_directory=True)
+    inside = request_plan.repository / role
+    inside.mkdir(mode=0o700)
+    with pytest.raises(
+        owner.PlanRefusal, match="writable root overlaps the repository"
+    ):
+        if role == "results":
+            request_plan(results=inside, repository=alias)
+        else:
+            request_plan(replace(request_plan.job, cache=inside), repository=alias)
+    assert list(inside.iterdir()) == []
+
+
+def test_aliased_home_boundary_still_rejects_whole_physical_home(
+    request_plan: PlanRequest, tmp_path: Path
+) -> None:
+    alias = tmp_path / "home-alias"
+    alias.symlink_to(request_plan.home, target_is_directory=True)
+    with pytest.raises(owner.PlanRefusal, match="mount source"):
+        request_plan(
+            replace(
+                request_plan.job,
+                inputs=(owner.Input("home", request_plan.home),),
+            ),
+            home=alias,
+        )
+
+
+@pytest.mark.parametrize("role", ["input", "results", "cache"])
+@pytest.mark.parametrize("character", ['"', "\n", "\r"])
+def test_unrepresentable_csv_mount_sources_are_rejected(
+    request_plan: PlanRequest, tmp_path: Path, role: str, character: str
+) -> None:
+    path = tmp_path / ("unrepresentable" + character + "path")
+    path.mkdir(mode=0o700)
+    with pytest.raises(owner.PlanRefusal, match="unrepresentable mount source"):
+        if role == "results":
+            request_plan(results=path)
+        elif role == "cache":
+            request_plan(replace(request_plan.job, cache=path))
+        else:
+            request_plan(
+                replace(request_plan.job, inputs=(owner.Input("runtime", path),))
+            )
+
+
+def test_docker_config_proxy_defaults_are_explicitly_overridden(
+    request_plan: PlanRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HTTP_PROXY", "http://proxy.example.com")
+    monkeypatch.setenv("no_proxy", "example.com")
+    command = request_plan().create
+    variables = dict(
+        command[index + 1].split("=", 1)
+        for index, value in enumerate(command)
+        if value == "--env"
+    )
+    for scheme in ("HTTP", "HTTPS", "FTP", "NO", "ALL"):
+        assert variables[f"{scheme}_PROXY"] == ""
+        assert variables[f"{scheme.lower()}_proxy"] == ""
