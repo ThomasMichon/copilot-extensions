@@ -89,6 +89,24 @@ def test_native_code_is_recorded_without_rendering_or_traversing_exceptions() ->
     assert unknown.diagnostics.process_retained is False
 
 
+@pytest.mark.parametrize("accessor", ["job", "retirement"])
+def test_resource_defined_storage_accessors_cannot_mask_custody(accessor: str) -> None:
+    class Resource:
+        @property
+        def __dict__(self) -> dict[str, object]:
+            raise RuntimeError("resource accessor must never run")
+
+        @__dict__.setter
+        def __dict__(self, value: dict[str, object]) -> None:
+            raise RuntimeError("resource accessor must never run")
+
+    job = Resource() if accessor == "job" else SimpleNamespace(_native_retirement=Resource())
+    error = owned.OwnedCleanupError(None, job, phase="job-retire")
+    assert error.job is job
+    assert error.diagnostics.job_settlement == "unknown"
+    assert error.diagnostics.job_retained is True
+
+
 class _Process:
     pid = 123
     returncode: int | None = None
@@ -298,3 +316,49 @@ def test_precreation_job_close_failure_records_numeric_cause_and_no_process(
     assert error.diagnostics.process_retained is False
     assert error.diagnostics.job_retained is True
     assert error.diagnostics.job_settlement == "unknown"
+
+
+def test_primary_failure_keeps_confirmed_settlement_through_later_handle_close_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_procutil import _windows_caller_owned as native
+
+    close_error = OSError(errno.EIO, "password=fake-secret")
+    job = SimpleNamespace(handle=1)
+
+    class Process(_Process):
+        def retire_job(self, job: Any, timeout: float) -> None:
+            super().retire_job(job, timeout)
+            job.handle = None
+
+    class Worker:
+        def __init__(self, *, target: Any, args: tuple[Any, ...], daemon: bool) -> None:
+            self.target, self.args = target, args
+
+        def start(self) -> None:
+            self.target(*self.args)
+
+        def is_alive(self) -> bool:
+            return False
+
+        def join(self, timeout: float) -> None:
+            pass
+
+    process = Process("process-handle-close", close_error)
+    process.stdout = io.BytesIO(b"excess")
+    monkeypatch.setattr(native, "spawn", lambda *args, **kwargs: (process, job))
+    monkeypatch.setattr(owned, "os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(owned, "threading", SimpleNamespace(
+        Thread=Worker, Event=threading.Event, Lock=threading.Lock,
+    ))
+    with pytest.raises(owned.OwnedCleanupError) as caught:
+        owned._run_owned(["fixture"], timeout=10, capture_limits=(0, 0))
+    error = caught.value
+    assert error.__cause__ is close_error
+    assert isinstance(close_error.__context__, owned.OutputLimitExceeded)
+    assert error.process is process and error.job is job
+    assert error.diagnostics.phase == "process-handle-close"
+    assert error.diagnostics.process_settlement == "confirmed"
+    assert error.diagnostics.job_settlement == "confirmed"
+    assert error.diagnostics.output_settlement == "confirmed"
+    assert process.calls == ["retire", "wait", "close"]

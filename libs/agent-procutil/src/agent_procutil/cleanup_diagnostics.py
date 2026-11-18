@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, fields
+from inspect import getattr_static
+from types import GetSetDescriptorType, MemberDescriptorType
 
 _PHASES = frozenset({
     "unknown", "job-retire", "process-wait", "pipe-completion", "pipe-join",
@@ -11,6 +13,13 @@ _PHASES = frozenset({
     "spawn-job-close",
 })
 _SETTLEMENTS = frozenset({"unknown", "confirmed", "unconfirmed"})
+
+
+@dataclass
+class _CleanupSettlement:
+    process: str = "unknown"
+    job: str = "unknown"
+    output: str = "unknown"
 
 
 @dataclass(frozen=True)
@@ -83,11 +92,21 @@ def recorded_native_error(error: BaseException | None) -> tuple[str, int | None]
     return "unknown", None
 
 
+def _recorded_fields(value: object) -> dict[str, object]:
+    descriptor = getattr_static(value, "__dict__", None)
+    if not isinstance(descriptor, (GetSetDescriptorType, MemberDescriptorType)):
+        return {}
+    if descriptor.__name__ != "__dict__":
+        return {}
+    try:
+        namespace = descriptor.__get__(value)
+    except (AttributeError, TypeError):
+        return {}
+    return namespace if type(namespace) is dict else {}
+
+
 def recorded_job_settlement(job: object) -> str:
     """Read only the native owner's existing retirement-confirmation record."""
-    try:
-        retirement = object.__getattribute__(job, "__dict__").get("_native_retirement")
-        confirmed = object.__getattribute__(retirement, "__dict__").get("confirmed")
-    except AttributeError:
-        return "unknown"
+    retirement = _recorded_fields(job).get("_native_retirement")
+    confirmed = _recorded_fields(retirement).get("confirmed")
     return "confirmed" if confirmed is True else "unconfirmed" if confirmed is False else "unknown"

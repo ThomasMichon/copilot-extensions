@@ -21,7 +21,7 @@ from agent_procutil import (
 )
 from agent_procutil.owned_budget import OwnedExecutionBudget
 from agent_procutil.cleanup_diagnostics import (
-    CleanupDiagnostics, recorded_job_settlement, recorded_native_error,
+    CleanupDiagnostics, _CleanupSettlement, recorded_job_settlement, recorded_native_error,
 )
 
 _THREAD_START_CODE = getattr(threading.Thread.start, "__code__", None)
@@ -409,6 +409,7 @@ def _communicate_windows_bounded(
     argv: list[str], timeout: float, capture_limits: tuple[int, int],
     binary: bool = False,
     budget: OwnedExecutionBudget | None = None,
+    _settlement: _CleanupSettlement | None = None,
 ) -> tuple[str | bytes | None, ...]:
     if job is None:
         raise RuntimeError("native child Windows Job custody is unavailable")
@@ -523,7 +524,7 @@ def _communicate_windows_bounded(
     unstarted: set[threading.Thread] = set()
     cleanup_error = None
     cleanup_phase = "unknown"
-    process_settlement = job_settlement = output_settlement = "unknown"
+    settlement = _settlement if _settlement is not None else _CleanupSettlement()
 
     def retry_cleanup(retry_deadline: float) -> None:
         retire(retry_deadline)
@@ -585,10 +586,10 @@ def _communicate_windows_bounded(
     finally:
         try:
             retire()
-            job_settlement = "confirmed"
+            settlement.job = "confirmed"
         except BaseException as error:
             cleanup_error = error
-            cleanup_phase, job_settlement = "job-retire", "unconfirmed"
+            cleanup_phase, settlement.job = "job-retire", "unconfirmed"
         for worker, completed in attempted:
             if worker in unstarted:
                 continue
@@ -604,14 +605,14 @@ def _communicate_windows_bounded(
                 if cleanup_error is None:
                     cleanup_error = error
                     cleanup_phase = phase
-                output_settlement = "unconfirmed"
-        if output_settlement == "unknown":
-            output_settlement = "confirmed"
+                settlement.output = "unconfirmed"
+        if settlement.output == "unknown":
+            settlement.output = "confirmed"
         try:
             process.wait(timeout=budget.cleanup_timeout() if budget else 2.0)
-            process_settlement = "confirmed"
+            settlement.process = "confirmed"
         except BaseException as error:
-            process_settlement = "unconfirmed"
+            settlement.process = "unconfirmed"
             if cleanup_error is None:
                 cleanup_error = error
                 cleanup_phase = "process-wait"
@@ -624,8 +625,8 @@ def _communicate_windows_bounded(
             ] + [("pipe-worker-unstarted", worker) for worker in unstarted],
             cleanup_retry=retry_cleanup,
             phase=cleanup_phase, cause=cleanup_error,
-            process_settlement=process_settlement, job_settlement=job_settlement,
-            output_settlement=output_settlement,
+            process_settlement=settlement.process, job_settlement=settlement.job,
+            output_settlement=settlement.output,
         ) from cleanup_error
     if primary:
         if isinstance(primary[0], subprocess.TimeoutExpired):
@@ -734,7 +735,7 @@ def _run_owned(
         raise
     retained = False
     stream_capture = None
-    process_settlement = job_settlement = output_settlement = "unknown"
+    settlement = _CleanupSettlement()
     stdout: Any
     stderr: Any
     try:
@@ -760,9 +761,9 @@ def _run_owned(
                 process, job, input_text=input_text, deadline=cast(float, deadline),
                 argv=argv, timeout=cast(float, timeout), capture_limits=cast(tuple[int, int], capture_limits),
                 binary=binary,
+                _settlement=settlement,
                 **({"budget": budget} if budget is not None else {}),
             )
-            process_settlement = job_settlement = output_settlement = "confirmed"
         elif windows:
             stdout, stderr = _communicate_windows(
                 process, job, input_text=input_text, deadline=cast(float, deadline),
@@ -788,15 +789,15 @@ def _run_owned(
                 try:
                     cleanup_phase = "job-retire"
                     process.retire_job(job, budget.cleanup_timeout() if budget else 2.0)
-                    job_settlement, cleanup_phase = "confirmed", "process-wait"
+                    settlement.job, cleanup_phase = "confirmed", "process-wait"
                     process.wait(timeout=budget.cleanup_timeout() if budget else 2.0)
-                    process_settlement = "confirmed"
+                    settlement.process = "confirmed"
                 except BaseException as error:
                     retained = True
                     raise OwnedCleanupError(
                         process, job, on_settled=on_settled, phase=cleanup_phase, cause=error,
-                        job_settlement=job_settlement, process_settlement=process_settlement,
-                        output_settlement=output_settlement,
+                        job_settlement=settlement.job, process_settlement=settlement.process,
+                        output_settlement=settlement.output,
                     ) from error
             elif not windows:
                 if confirm_posix_group:
@@ -866,8 +867,8 @@ def _run_owned(
                         ) from error
                     raise OwnedCleanupError(
                         process, job, on_settled=on_settled, phase=cleanup_phase, cause=error,
-                        job_settlement=job_settlement, process_settlement=process_settlement,
-                        output_settlement=output_settlement,
+                        job_settlement=settlement.job, process_settlement=settlement.process,
+                        output_settlement=settlement.output,
                     ) from error
                 if on_settled is not None:
                     on_settled()
