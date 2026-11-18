@@ -448,6 +448,17 @@ from carrier receipt, receiving-mode readiness and peer observations.
    persisted current/prior-hour coverage. Other-host rollout, real carrier
    publication and peer receipt retain their existing independent gates.
 
+#### Implementation boundary
+
+The first source slice adds the immutable Linux pair renderer and the finite
+installed action's platform-correct capability lookup. Its focused controls
+retain the existing Windows enrollment and payload-selection packet and check
+the portable action's retention arguments, budget, missing support and
+rendering refusals. It does not expose Linux enrollment: the normal lifecycle
+still refuses before registration. Native pair/state integration, platform
+consent, interruption recovery and actual systemd qualification above remain
+open; this foundation alone satisfies none of those native acceptance items.
+
 ## First complete flow and promotion gates
 
 Review and merge this amendment before runtime realization. Then deliver one

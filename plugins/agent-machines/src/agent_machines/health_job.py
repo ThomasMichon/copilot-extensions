@@ -13,14 +13,14 @@ import time
 ACTION_SECONDS = 55
 
 
-def main(argv=None) -> int:
+def main(argv: list[str] | None = None) -> int:
     started = time.monotonic()
     parser = argparse.ArgumentParser(allow_abbrev=False)
     parser.add_argument("--store", required=True, type=Path)
     parser.add_argument("--expect-policy", required=True)
     args = parser.parse_args(argv)
     if (
-        sys.platform != "win32"
+        sys.platform not in {"win32", "linux"}
         or not args.store.is_absolute() or ".." in args.store.parts
         or re.fullmatch(r"[a-f0-9]{64}", args.expect_policy) is None
     ):
@@ -30,11 +30,14 @@ def main(argv=None) -> int:
 
     from ._peer_launch import retained_runtime_identity, retained_runtime_prefix
 
-    environment = Path(sys.prefix)
-    slot = environment.parent if environment.name == ".venv" else environment
+    prefix_path = Path(sys.prefix)
+    slot = prefix_path.parent if prefix_path.name == ".venv" else prefix_path
     root = slot.parent.parent
     try:
-        from .health_enrollment import require_collection_support
+        if sys.platform == "win32":
+            from .health_enrollment import require_collection_support
+        else:
+            from .health_job_support import require_collection_support
 
         require_collection_support(Path(sys.executable))
         identity = retained_runtime_identity(root, Path(sys.executable), "agent_machines")
