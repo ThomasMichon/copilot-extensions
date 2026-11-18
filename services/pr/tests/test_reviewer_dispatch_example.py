@@ -4,11 +4,14 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import replace
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from test_reviewer_feed_example import SERVICE, example, load, selection
+if TYPE_CHECKING:
+    from services.pr.tests.test_reviewer_feed_example import SERVICE, example, load, selection
+else:
+    from test_reviewer_feed_example import SERVICE, example, load, selection
 
 load("reviewer_feed", SERVICE / "examples/reviewer_feed.py")
 adapter = load("reviewer_dispatch_example", SERVICE / "examples/reviewer_dispatch.py")
@@ -18,31 +21,40 @@ KEY = "recipe:reviewer:target=forge.example/owner/repository#7"
 
 class Client:
     def __init__(self, scope: Any) -> None:
-        self.task = {
+        self.task: dict[str, Any] = {
             "id": "task-a", "repo": LANE, "dedup_key": KEY,
             "draft_scope": dict(zip(("queue", "installation", "machine"), scope.task_scope)),
             "steering_revision": "revision-a", "status": "suspended", "kind": "finite",
             "hold_reason": None, "awaiting_steer": False,
         }
         self.rows = [deepcopy(self.task)]
-        self.reads: list[tuple] = []
-        self.prepared: list[dict] = []
+        self.reads: list[tuple[str, ...]] = []
+        self.prepared: list[dict[str, Any]] = []
 
-    def lookup_dedup(self, key: str, *, repo: str) -> list[dict]:
+    def lookup_dedup(self, key: str, *, repo: str | None) -> list[dict[str, Any]]:
+        assert repo is not None
         self.reads.append(("lookup", key, repo))
         return deepcopy(self.rows)
 
-    def get(self, task_id: str) -> dict:
+    def get(self, task_id: str) -> dict[str, Any]:
         self.reads.append(("get", task_id))
         return deepcopy(self.task)
 
-    def prepare_steer(self, task_id: str, request_id: str, **kwargs: Any) -> dict:
-        request = {"task_id": task_id, "request_id": request_id, **kwargs}
+    def prepare_steer(
+        self, task_id: str, request_id: str, *, expected_scope: dict[str, Any],
+        fields: dict[str, Any], sender: str | None = None, wake: bool = True,
+        message: str | None = None, expected_status: str, expected_revision: str,
+    ) -> dict[str, Any]:
+        request = {
+            "task_id": task_id, "request_id": request_id, "expected_scope": expected_scope,
+            "fields": fields, "sender": sender, "wake": wake, "message": message,
+            "expected_status": expected_status, "expected_revision": expected_revision,
+        }
         self.prepared.append(deepcopy(request))
         return request
 
 
-def propose(page: dict, scope: Any, client: Client, **kwargs: Any) -> Any:
+def propose(page: dict[str, Any], scope: Any, client: Client, **kwargs: Any) -> Any:
     return example.propose(
         page, scope, lookup=lambda action: adapter.retained_task(
             action, scope, client=client, lane=LANE, task_key=lambda _number: KEY,
@@ -85,7 +97,7 @@ def test_empty_ambiguous_foreign_and_unavailable_lookup_never_propose_creation(t
         assert client.reads == [("lookup", KEY, LANE)] and not client.prepared
 
     class Failed(Client):
-        def lookup_dedup(self, key: str, *, repo: str) -> list[dict]:
+        def lookup_dedup(self, key: str, *, repo: str | None) -> list[dict[str, Any]]:
             raise TimeoutError("lookup unavailable")
 
     with pytest.raises(TimeoutError, match="unavailable"):
@@ -112,11 +124,12 @@ def test_prepare_refuses_task_changes_and_keeps_unknown_native_result(tmp_path: 
     _selected, scope, page = selection(tmp_path)
     client = Client(scope)
     proposal = propose(page, scope, client)
-    for change in (
+    changes: tuple[dict[str, Any], ...] = (
         {"steering_revision": "revision-b"}, {"status": "completed"},
         {"awaiting_steer": True}, {"hold_reason": "operator hold"},
         {"draft_scope": {}}, {"repo": "other-lane"}, {"dedup_key": "replacement"},
-    ):
+    )
+    for change in changes:
         changed = Client(scope)
         changed.task.update(change)
         with pytest.raises(ValueError, match="changed or is held"):
@@ -134,7 +147,9 @@ def test_prepare_refuses_task_changes_and_keeps_unknown_native_result(tmp_path: 
         )
 
     class Refused(Client):
-        def prepare_steer(self, task_id: str, request_id: str, **kwargs: Any) -> dict:
+        def prepare_steer(
+            self, task_id: str, request_id: str, **kwargs: Any,
+        ) -> dict[str, Any]:
             raise ValueError("native preparation refused")
 
     with pytest.raises(ValueError, match="native preparation refused"):
@@ -156,7 +171,7 @@ def test_native_preparation_preserves_original_request_without_submission(
     class Native(PreparedSteeringClientMixin, Client):
         support = 1
 
-        def health(self) -> dict:
+        def health(self) -> dict[str, Any]:
             return {"steering_request_context": self.support}
 
     selected, scope, page = selection(tmp_path)

@@ -3,21 +3,24 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
-from reviewer_feed import Proposal, Scope, Task
+if TYPE_CHECKING:
+    from services.pr.examples.reviewer_feed import Proposal, Scope, Task
+else:
+    from reviewer_feed import Proposal, Scope, Task
 
 
 class Client(Protocol):
-    def lookup_dedup(self, dedup_key: str, *, repo: str | None) -> list[dict]: ...
+    def lookup_dedup(self, dedup_key: str, *, repo: str | None) -> list[dict[str, Any]]: ...
 
-    def get(self, task_id: str) -> dict: ...
+    def get(self, task_id: str) -> dict[str, Any]: ...
 
     def prepare_steer(
-        self, task_id: str, request_id: str, *, expected_scope: dict,
-        fields: dict, sender: str | None, wake: bool, message: str,
+        self, task_id: str, request_id: str, *, expected_scope: dict[str, Any],
+        fields: dict[str, Any], sender: str | None, wake: bool, message: str,
         expected_status: str, expected_revision: str,
-    ) -> dict: ...
+    ) -> dict[str, Any]: ...
 
 
 def _scope(scope: Scope) -> dict[str, str]:
@@ -74,9 +77,9 @@ def retained_task(
 
 def prepare_notification(
     proposal: Proposal, scope: Scope, *, client: Client, request_id: str,
-    fields: dict, sender: str | None, message: str, lane: str,
+    fields: dict[str, Any], sender: str | None, message: str, lane: str,
     task_key: Callable[[int], str],
-) -> dict:
+) -> dict[str, Any]:
     """Prepare through the native owner; the caller must retain before effects."""
     if (
         proposal.kind != "steer" or not proposal.task_id or not proposal.revision
