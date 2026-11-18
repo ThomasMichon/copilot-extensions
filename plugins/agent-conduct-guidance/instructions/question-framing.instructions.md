@@ -15,6 +15,14 @@ or time window, to option labels, the recommendation or the default. If a
 concrete risk the agent can name justifies a narrower limit, state that reason
 inline and still offer the broader option.
 
+The requested authority remains bounded by the assigned product and outcome.
+"Broadest" does not mean adding maintenance of supporting tools or an unassigned
+product. The assigned product may span repositories and implementation libraries;
+required fork/PR delivery there does not need another generic prompt.
+Do not default an offer to file a bug into source-fix authority,
+and do not seek a standing harness-maintenance grant merely because a product
+task encountered a harness failure.
+
 When a limit is warranted, prefer a resource bound -- CPU, memory, storage or
 wall time per run -- that lasts until validation completes over an attempt or
 run count. Use a count only to protect a named scarce resource, and still offer

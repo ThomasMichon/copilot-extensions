@@ -9,10 +9,10 @@ description: >
 
 # Repository contribution procedure
 
-Read [the canonical skill](../../../plugins/copilot-extensions-harness/skills/contributing-to-copilot-extensions/SKILL.md)
+Read [the canonical skill](../../../plugins/copilot-extensions-maintainer/skills/contributing-to-copilot-extensions/SKILL.md)
 in full and follow it for the requested task.
 
-The canonical skill base is `plugins/copilot-extensions-harness/skills/contributing-to-copilot-extensions/`,
+The canonical skill base is `plugins/copilot-extensions-maintainer/skills/contributing-to-copilot-extensions/`,
 relative to the repository root. Resolve its references, scripts, assets,
 `<skill-base>` and `<skill-dir>` from that directory, not this adapter.
 Do not install or activate a plugin merely to use this source.

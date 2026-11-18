@@ -233,9 +233,21 @@ acknowledgement never manufactures this event. A stop arriving during the RPC
 does not erase an acknowledgement, grant permission or complete registration.
 The recovery row's request/state schema remains unchanged, so an older reader
 preserves unknown custody and rejects accepted-load evidence as a no-load
-failure. Hosted registration emission and post-load completion remain in the
-[open follow-through](../../../efforts/active/task-relevance-reconciliation/hosted-native-activation.md);
-this journal addition alone does not repair a registration failure.
+failure.
+
+After a successful load, registration rechecks that acknowledgement against
+the current original operation, executing writer, Host transport, process
+births and epoch. It sends the recorded child PID and explicit
+`--retained-hosted-activation` through Worktrees' qualified registration
+command. It neither creates nor requires a CLI hold for this hosted source.
+A missing acknowledgement, changed association or unconfirmed write retains
+the original recovery gate instead of reporting success. Ordinary CLI-native
+registration still uses its existing hold witness.
+
+Post-load completion and deliberate adaptation of affirmative older history
+remain in the
+[open follow-through](../../../efforts/active/task-relevance-reconciliation/hosted-native-activation.md).
+The registration consumer alone does not repair an interrupted operation.
 
 The same journal retains completed and uncertain operation IDs. A same-ID
 request reads that outcome, never relaunches. Pending/unknown recovery blocks

@@ -724,7 +724,7 @@ def _check_program(
             directory = _import_directory(root, relative)
             if str(directory) not in ordered_imports:
                 ordered_imports.append(str(directory))
-        guard = project.name == "copilot-extensions-harness"
+        guard = project.name == "copilot-extensions-maintainer"
         if guard:
             if (
                 files.count(GUARD_ENTRY) != 1 or all_paths.count(GUARD_ENTRY) != 1

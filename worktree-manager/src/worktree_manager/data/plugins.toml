@@ -226,7 +226,15 @@ steps = [
 [[plugins]]
 name = "copilot-extensions-harness"
 kind = "knowledge"
-summary = "Contributing-to / diagnosing the copilot-extensions harness itself."
+summary = "Consumer diagnosis and canonical repair boundaries for copilot-extensions."
+steps = [
+    { id = "enable", what = "Skills/instructions only — active once the plugin is enabled; no build step." },
+]
+
+[[plugins]]
+name = "copilot-extensions-maintainer"
+kind = "knowledge"
+summary = "Opt-in source procedures for explicitly assigned copilot-extensions maintenance."
 steps = [
     { id = "enable", what = "Skills/instructions only — active once the plugin is enabled; no build step." },
 ]
