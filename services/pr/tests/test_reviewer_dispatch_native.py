@@ -56,6 +56,78 @@ with DispatchClient(sys.argv[2],timeout=2,transport=httpx.HTTPTransport(retries=
         print(json.dumps({'proposal':'unsupported','request':None}))
 """
 
+COORDINATOR_CHILD = """
+import json,os,sys
+from dataclasses import asdict
+from pathlib import Path
+root,fixture=Path(sys.argv[1]),Path(sys.argv[2])
+os.environ['AGENT_DISPATCH_INSTALL_DIR']=str(fixture/'install')
+os.environ['AGENT_DISPATCH_RUN_DIR']=str(fixture/'run')
+for name in (
+    'AGENT_DISPATCH_ENDPOINT','AGENT_DISPATCH_WINDOWS_RUN_DIR',
+    'AGENT_DISPATCH_WINDOWS_MOUNT','AGENT_DISPATCH_TASK_AUTHORITY',
+    'AGENT_DISPATCH_CONTROL_TOKEN_COMMAND','AGENT_DISPATCH_TOKEN_COMMAND',
+    'AGENT_DISPATCH_SHARED_TOKEN_COMMAND','AGENT_DISPATCH_SHARED_CONTROL_TOKEN_COMMAND',
+    'COPILOT_AGENT_SESSION_ID',
+):
+    os.environ.pop(name,None)
+os.environ['AGENT_DISPATCH_SELF_UPDATE']='0'
+sys.path[:0]=[str(root/'services/pr/examples'),
+              str(root/'plugins/agent-dispatch/src'),
+              str(root/'plugins/agent-pull-requests/src')]
+import httpx
+from fastapi.testclient import TestClient
+from agent_dispatch.client import DispatchClient
+from agent_dispatch.coordinator import create_app
+from agent_dispatch.queue import TaskQueue
+from agent_pull_requests.repository_contract import RepositoryIdentity
+from reviewer_feed import Scope,propose
+from reviewer_dispatch import prepare_notification,retained_task,reviewer_task_key
+data=json.load(sys.stdin)
+key=reviewer_task_key('https://forge.example/owner/repo',land='author')
+queue=TaskQueue(fixture/'tasks.db')
+task=queue.create('Fixture review',repo=data['lane'],
+                  dedup_key='unrelated' if data['mode']=='absent' else key(7))
+queue.claim_one('fixture/worker',task_id=task.id)
+queue.start(task.id,'fixture/worker',owner_session_id='fixture-session')
+if data['mode']=='operator-form':
+    queue.set_card(task.id,'fixture/worker',card={
+        'title':'Question','request_input':[{'name':'answer','type':'textarea'}]})
+else:
+    queue.suspend(task.id,'fixture/worker',reason='Fixture wait',cooldown_seconds=None)
+app=create_app(queue,enable_mcp=False,verification_interval=0)
+api=TestClient(app)
+methods=[]
+def forward(request):
+    methods.append(request.method)
+    assert request.method=='GET'
+    response=api.get(request.url.path,params=request.url.params)
+    return httpx.Response(response.status_code,json=response.json(),request=request)
+try:
+    with DispatchClient('http://fixture',transport=httpx.MockTransport(forward)) as client:
+        native=client.get(task.id)
+        scope=Scope(RepositoryIdentity.parse(data['identity']),'consumer','reviewer',
+                    tuple(native['draft_scope'][name] for name in ('queue','installation','machine')))
+        def state():
+            return (asdict(queue.get(task.id)),queue.events(task.id),queue.steer_log(task.id),
+                    queue.list_wakes(task.id),len(queue.list()))
+        before=state()
+        proposal=propose(data['page'],scope,notifications={},now=1000,
+            lookup=lambda action:retained_task(action,scope,client=client,lane=data['lane'],task_key=key))
+        request=None
+        if proposal.kind=='steer':
+            request=prepare_notification(proposal,scope,client=client,
+                request_id='original-native-owner-request',fields={'action':proposal.action_key},
+                sender='consumer',message='Review activity',lane=data['lane'],task_key=key)
+        assert state()==before
+        assert queue.steer_log(task.id)==queue.list_wakes(task.id)==[]
+        print(json.dumps({'proposal':proposal.kind,'prepared':request is not None,
+            'scope_matches':request is None or request['scope']==native['draft_scope'],
+            'unchanged':True,'methods':methods}))
+finally:
+    api.close()
+"""
+
 
 @pytest.mark.skipif(NATIVE is None, reason="select PR_DISPATCH_NATIVE_PYTHON for native SDK proof")
 @pytest.mark.parametrize("mode", ["retained", "unsupported", "foreign"])
@@ -114,9 +186,10 @@ def test_native_http_client_keeps_read_and_preparation_inert(
                 "identity": scope.identity.document(), "task_scope": scope.task_scope,
                 "page": page, "lane": LANE,
             }),
-            text=True, capture_output=True, timeout=15, check=True,
+            text=True, capture_output=True, timeout=15, check=False,
             **no_window_kwargs(),
         )
+        assert result.returncode == 0, result.stderr
         response = json.loads(result.stdout)
     finally:
         server.shutdown()
@@ -142,3 +215,32 @@ def test_native_http_client_keeps_read_and_preparation_inert(
         assert not any(path == "/tasks/task-a" for _method, path, _query in calls)
         if mode == "unsupported":
             assert calls == [("GET", "/health", {})]
+
+
+@pytest.mark.skipif(NATIVE is None, reason="select PR_DISPATCH_NATIVE_PYTHON for native SDK proof")
+@pytest.mark.parametrize("mode,expected", [
+    ("retained", "steer"), ("operator-form", "noop"), ("absent", "reconcile"),
+])
+def test_native_coordinator_queue_routes_preserve_retained_owner(
+    tmp_path: Path, mode: str, expected: str,
+) -> None:
+    assert NATIVE is not None
+    selected, scope, page = selection(tmp_path / "cache")
+    before = selected[1].path.read_bytes()
+    fixture = tmp_path / "coordinator"
+    fixture.mkdir()
+    result = subprocess.run(
+        [NATIVE, "-B", "-c", COORDINATOR_CHILD, str(SERVICE.parents[1]), str(fixture)],
+        input=json.dumps({
+            "identity": scope.identity.document(), "page": page, "lane": LANE, "mode": mode,
+        }),
+        text=True, capture_output=True, timeout=15, check=False,
+        **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr
+    response = json.loads(result.stdout)
+    assert response["proposal"] == expected
+    assert response["prepared"] is (mode == "retained")
+    assert response["scope_matches"] and response["unchanged"]
+    assert response["methods"] and set(response["methods"]) == {"GET"}
+    assert selected[1].path.read_bytes() == before
