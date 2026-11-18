@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Literal
 
 from . import git_ops, output, tracking
+from .config import Config
 
 _COMMIT = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})")
 _FINGERPRINT = re.compile(r"[0-9a-f]{64}")
@@ -183,7 +184,7 @@ def confirm(
 
 
 def publish_recovery(
-    worktree_id: str, config, record, *, reason: str | None,
+    worktree_id: str, config: Config, record: tracking.WorktreeRecord | None, *, reason: str | None,
     confirmation: str | None, title: str | None, dry_run: bool, allow_unsquashed: bool,
 ) -> bool | None:
     """Route an explicit recovery before ordinary publication can mutate state."""

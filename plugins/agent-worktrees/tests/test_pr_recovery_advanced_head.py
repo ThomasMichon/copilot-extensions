@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import importlib
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from agent_worktrees import config as cfg
-from agent_worktrees import finalize, git_collab, git_ops, pr_break_glass, pr_ops, pr_publish, pr_recovery, pr_recovery_plan, pr_rewrite, tracking
+from agent_worktrees import finalize, git_collab, git_ops, pr_break_glass, pr_ops, pr_publish, pr_recovery, pr_recovery_plan, pr_rewrite, providers, tracking
 from agent_worktrees.config import Config
 from agent_worktrees.providers.base import PullResult
-from test_pr_break_glass import _copy_recovered_pr, _recovered_pr, recovery_preview
+from test_pr_break_glass import _copy_recovered_pr, _pr, _recovered_pr, recovery_preview
 from test_pr_break_glass import _recovered_pr_seed as _recovered_pr_seed
 from test_pr_break_glass import recovered_pr as recovered_pr
 
@@ -35,7 +37,7 @@ def record(wid: str) -> tracking.WorktreeRecord:
     return tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
 
 
-def preview(wid: str, config: Config, confirmation: str | None = None) -> dict:
+def preview(wid: str, config: Config, confirmation: str | None = None) -> dict[str, Any]:
     """Return the bound preview, or the refusal's fresh preview for a stale pin."""
     if confirmation is None:
         return recovery_preview(wid, config, REASON)
@@ -86,7 +88,7 @@ def test_confirmed_advanced_head_retains_actual_objects_and_original_evidence(
         wid, config, break_glass_reason=REASON, confirm_break_glass=operation["confirmation"],
     )
     assert pr_publish._tip("origin", branch, str(wt)) == source
-    assert record(wid).pr.head_sha == source
+    assert _pr(record(wid)).head_sha == source
     audit = json.loads(next(metadata(wt).glob("*break-glass*.json")).read_text())
     assert audit["operation"] == json.loads(json.dumps(operation["operation"]))
     assert audit["confirmation_binding"] == "explicit"
@@ -108,9 +110,9 @@ def test_changed_bound_inputs_require_new_confirmation(
     if change.startswith("saved"):
         current = record(wid)
         if change == "saved-head":
-            current.pr.head_sha = actual
+            _pr(current).head_sha = actual
         else:
-            current.pr.base_sha = actual
+            _pr(current).base_sha = actual
         tracking.save_record(current)
     elif change == "source":
         (wt / "later.txt").write_text("unapproved source\n")
@@ -132,7 +134,7 @@ def test_provider_and_ref_must_agree_before_advanced_preview(
         number=42, head_sha=saved, head_ref=branch, head_url=str(remote),
     ))
     assert not finalize.push_changes(wid, config, break_glass_reason=REASON)
-    assert record(wid).pr.head_sha == saved
+    assert _pr(record(wid)).head_sha == saved
     assert not list(metadata(wt).glob("*break-glass*.json"))
 
 
@@ -148,7 +150,7 @@ def test_recovery_cas_never_falls_back_to_unapproved_fast_forward(
     calls = []
     failures = []
 
-    def race(*args: object, **kwargs: object) -> git_ops.PushResult:
+    def race(*args: Any, **kwargs: Any) -> git_ops.PushResult:
         calls.append(kwargs)
         # This new remote tip is an ancestor of the approved source, but was
         # never the lease the operator inspected.
@@ -165,7 +167,7 @@ def test_recovery_cas_never_falls_back_to_unapproved_fast_forward(
     assert "stale info" in failures[0]
     assert calls[0]["force_with_lease_expect"] == actual
     assert pr_publish._tip("origin", branch, str(wt)) == racing != source
-    assert record(wid).pr.head_sha == saved
+    assert _pr(record(wid)).head_sha == saved
 
 
 def test_revalidation_uses_one_fresh_destination_snapshot_for_identity_and_slug(
@@ -173,7 +175,7 @@ def test_revalidation_uses_one_fresh_destination_snapshot_for_identity_and_slug(
 ) -> None:
     config, wid, wt, remote, saved, _branch = recovered_pr
     current = record(wid)
-    pr = current.pr
+    pr = _pr(current)
     operation = pr_recovery_plan.build(
         config, current, pr, source_head=git("rev-parse", "HEAD", cwd=wt),
         expected_head=saved, identity=pr_publish.push_identity("origin", cwd=str(wt)),
@@ -182,7 +184,7 @@ def test_revalidation_uses_one_fresh_destination_snapshot_for_identity_and_slug(
     snapshot = pr_publish._remote_snapshot
     reads = []
 
-    def observed(*args, **kwargs):
+    def observed(*args: Any, **kwargs: Any) -> Any:
         result = snapshot(*args, **kwargs)
         reads.append(result[2])
         return result
@@ -196,7 +198,7 @@ def test_revalidation_uses_one_fresh_destination_snapshot_for_identity_and_slug(
     # only the latter snapshot, never a prior or later decision's authority.
     assert len(reads) == 2
     assert all(target.head_repo and target.head_identity for target in reads)
-    before = record(wid).pr.head_sha
+    before = _pr(record(wid)).head_sha
     git("remote", "set-url", "--push", "origin", str(remote.parent / "repointed.git"), cwd=wt)
     with pytest.raises(ValueError, match="Recovery publication destination changed"):
         pr_recovery_plan.revalidate(
@@ -205,7 +207,7 @@ def test_revalidation_uses_one_fresh_destination_snapshot_for_identity_and_slug(
         )
     assert len(reads) == 3
     assert not reads[-1].head_repo and not reads[-1].head_identity
-    assert record(wid).pr.head_sha == before == saved
+    assert _pr(record(wid)).head_sha == before == saved
     assert git("--git-dir", str(remote), "rev-parse", pr.branch, cwd=wt) == saved
 
 
@@ -219,9 +221,9 @@ def _backed_publication(recovered_pr: RecoveredPR, *, with_base: bool = False) -
     config, wid, wt, remote, saved, branch = recovered_pr
     if with_base:
         current = record(wid)
-        branch = current.pr.branch = f"pr/owned-topic-{git_ops.worktree_suffix(wid)}"
-        current.pr.base_sha = git("merge-base", saved, "origin/master", cwd=wt)
-        current.pr.patch_id = pr_ops._patch_id(current.pr.base_sha, saved, cwd=str(wt))
+        branch = _pr(current).branch = f"pr/owned-topic-{git_ops.worktree_suffix(wid)}"
+        _pr(current).base_sha = git("merge-base", saved, "origin/master", cwd=wt)
+        _pr(current).patch_id = pr_ops._patch_id(_pr(current).base_sha, saved, cwd=str(wt))
         tracking.save_record(current)
         git("--git-dir", str(remote), "update-ref", f"refs/heads/{branch}", saved, cwd=wt)
     git("reset", "--hard", saved, cwd=wt)
@@ -235,30 +237,33 @@ def _backed_publication(recovered_pr: RecoveredPR, *, with_base: bool = False) -
     return config, wid, wt, remote, saved, branch, published
 
 
-def _build_backed_pr_seed(tmp_path_factory, recovered_seed, *, with_base=False):
-    from conftest import _published_seed_environment, _seed_directory
+def _build_backed_pr_seed(
+    tmp_path_factory: pytest.TempPathFactory, recovered_seed: Path, *, with_base: bool = False,
+) -> Path:
+    conftest: Any = importlib.import_module("conftest")
 
     key = "backed-pr-with-base" if with_base else "backed-pr"
-    with _seed_directory(tmp_path_factory, key) as (seed, build):
+    with conftest._seed_directory(tmp_path_factory, key) as (seed, build):
         if build:
-            with _published_seed_environment(tmp_path_factory) as patch:
+            with conftest._published_seed_environment(tmp_path_factory) as patch:
                 _backed_publication(
                     _copy_recovered_pr(recovered_seed, seed, patch), with_base=with_base,
                 )
-        return seed
+        seed_path: Path = seed
+        return seed_path
 
 
 @pytest.fixture(scope="session")
-def _backed_pr_seed(tmp_path_factory, _recovered_pr_seed):
+def _backed_pr_seed(tmp_path_factory: pytest.TempPathFactory, _recovered_pr_seed: Path) -> Path:
     return _build_backed_pr_seed(tmp_path_factory, _recovered_pr_seed)
 
 
 @pytest.fixture(scope="session")
-def _backed_pr_with_base_seed(tmp_path_factory, _recovered_pr_seed):
+def _backed_pr_with_base_seed(tmp_path_factory: pytest.TempPathFactory, _recovered_pr_seed: Path) -> Path:
     return _build_backed_pr_seed(tmp_path_factory, _recovered_pr_seed, with_base=True)
 
 
-def _copy_backed_pr(seed, tmp_path, monkeypatch) -> BackedPR:
+def _copy_backed_pr(seed: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> BackedPR:
     config, wid, wt, remote, saved, branch = _copy_recovered_pr(seed, tmp_path, monkeypatch)
     published = git("--git-dir", str(remote), "rev-parse", f"refs/heads/{branch}", cwd=wt)
     assert (wt / "unpublished.txt").read_text() == "keep this unpublished\n"
@@ -266,27 +271,29 @@ def _copy_backed_pr(seed, tmp_path, monkeypatch) -> BackedPR:
 
 
 @pytest.fixture
-def backed_pr(tmp_path, monkeypatch, _backed_pr_seed) -> BackedPR:
+def backed_pr(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _backed_pr_seed: Path) -> BackedPR:
     return _copy_backed_pr(_backed_pr_seed, tmp_path, monkeypatch)
 
 
 @pytest.fixture
-def backed_pr_with_base(tmp_path, monkeypatch, _backed_pr_with_base_seed) -> BackedPR:
+def backed_pr_with_base(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _backed_pr_with_base_seed: Path,
+) -> BackedPR:
     return _copy_backed_pr(_backed_pr_with_base_seed, tmp_path, monkeypatch)
 
 
 @pytest.mark.parametrize("seed_fixture", ["_backed_pr_seed", "_backed_pr_with_base_seed"])
 def test_backed_copies_isolate_checkpoint_association_and_publication(
-    request, tmp_path, seed_fixture,
+    request: pytest.FixtureRequest, tmp_path: Path, seed_fixture: str,
 ) -> None:
-    seed = request.getfixturevalue(seed_fixture)
+    seed: Path = request.getfixturevalue(seed_fixture)
     before = {path.relative_to(seed): path.read_bytes() for path in seed.rglob("*") if path.is_file()}
     with pytest.MonkeyPatch.context() as patch:
         _, wid, wt, remote, saved, branch, published = _copy_backed_pr(
             seed, tmp_path / "first", patch,
         )
         original_head = git("rev-parse", "HEAD", cwd=wt)
-        original_pr = record(wid).pr
+        original_pr = _pr(record(wid))
         checkpoint = pr_recovery._path(str(wt))
         original_evidence = checkpoint.read_bytes()
         point = json.loads(original_evidence)["checkpoints"][original_pr.pr_id]
@@ -306,7 +313,9 @@ def test_backed_copies_isolate_checkpoint_association_and_publication(
         checkpoint.write_text("{first copy only")
         current = record(wid)
         current.title = "first-copy-only"
-        current.pr.number += 1
+        current_pr = _pr(current)
+        assert current_pr.number is not None
+        current_pr.number += 1
         tracking.save_record(current)
     with pytest.MonkeyPatch.context() as patch:
         _, wid, wt, remote, second_saved, second_branch, second_published = _copy_backed_pr(
@@ -321,13 +330,13 @@ def test_backed_copies_isolate_checkpoint_association_and_publication(
         ).returncode != 0
         assert pr_recovery._path(str(wt)).read_bytes() == original_evidence
         assert record(wid).title != "first-copy-only"
-        assert record(wid).pr.number == original_pr.number
+        assert _pr(record(wid)).number == original_pr.number
         assert pr_recovery._association(record(wid).pr) == point["association"]
     assert {path.relative_to(seed): path.read_bytes() for path in seed.rglob("*") if path.is_file()} == before
 
 
 def test_proven_prior_publication_settles_without_push_or_forge_edit(
-    backed_pr: BackedPR, monkeypatch: pytest.MonkeyPatch, _backed_pr_seed,
+    backed_pr: BackedPR, monkeypatch: pytest.MonkeyPatch, _backed_pr_seed: Path,
 ) -> None:
     config, wid, wt, remote, saved, branch, published = backed_pr
     seed_before = {
@@ -344,12 +353,12 @@ def test_proven_prior_publication_settles_without_push_or_forge_edit(
         pytest.fail("Settlement must not push or edit provider attribution.")
 
     monkeypatch.setattr(git_ops, "push", no_transport)
-    monkeypatch.setattr(pr_rewrite.pr_publish, "record_pushed_head", no_transport)
-    monkeypatch.setattr(pr_rewrite.providers, "get_provider", no_transport)
+    monkeypatch.setattr(pr_publish, "record_pushed_head", no_transport)
+    monkeypatch.setattr(providers, "get_provider", no_transport)
     assert finalize.push_changes(
         wid, config, break_glass_reason=REASON, confirm_break_glass=first["confirmation"],
     )
-    assert record(wid).pr.head_sha == published != source
+    assert _pr(record(wid)).head_sha == published != source
     assert git("rev-parse", "HEAD", cwd=wt) == source
     assert git("--git-dir", str(remote), "rev-parse", branch, cwd=wt) == published
     audit = json.loads(next(metadata(wt).glob("*break-glass*.json")).read_text())
@@ -368,14 +377,14 @@ def test_mutable_checkpoint_target_is_unusable_settlement_evidence(
     config, wid, wt, remote, saved, branch, published = backed_pr
     path = pr_recovery._path(str(wt))
     data = json.loads(path.read_text())
-    data["checkpoints"][record(wid).pr.pr_id]["target_head"] = "refs/remotes/origin/master"
+    data["checkpoints"][_pr(record(wid)).pr_id]["target_head"] = "refs/remotes/origin/master"
     path.write_text(json.dumps(data))
     first = preview(wid, config)
     assert first["operation"]["action"] == "rewrite"
     assert first["operation"]["evidence_status"] == "unusable"
     assert first["operation"]["rebase_base_sha"] == ""
     assert pr_publish._tip("origin", branch, str(wt)) == published
-    assert record(wid).pr.head_sha == saved
+    assert _pr(record(wid)).head_sha == saved
 
 
 def test_changed_backed_evidence_invalidates_settlement_confirmation(
@@ -397,7 +406,7 @@ def test_settlement_updates_base_and_patch_before_next_sync_publication(
     backed_pr_with_base: BackedPR, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config, wid, wt, remote, _saved, branch, published = backed_pr_with_base
-    original_base = record(wid).pr.base_sha
+    original_base = _pr(record(wid)).base_sha
     target = git("rev-parse", "origin/master", cwd=wt)
     first = preview(wid, config)
     assert original_base and original_base != target
@@ -405,11 +414,11 @@ def test_settlement_updates_base_and_patch_before_next_sync_publication(
     assert first["operation"]["rebase_base_sha"] == target
     with monkeypatch.context() as no_transport:
         no_transport.setattr(git_ops, "push", lambda *a, **k: pytest.fail("Settlement must not push."))
-        no_transport.setattr(pr_rewrite.providers, "get_provider", lambda *a: pytest.fail("No provider edits."))
+        no_transport.setattr(providers, "get_provider", lambda *a: pytest.fail("No provider edits."))
         assert finalize.push_changes(
             wid, config, break_glass_reason=REASON, confirm_break_glass=first["confirmation"],
         )
-    settled = record(wid).pr
+    settled = _pr(record(wid))
     assert settled.head_sha == published
     assert settled.base_sha == target
     assert settled.patch_id == pr_ops._patch_id(target, published, cwd=str(wt))
@@ -421,7 +430,7 @@ def test_settlement_updates_base_and_patch_before_next_sync_publication(
     git("push", "origin", "master", cwd=anchor)
     assert git_collab.sync_forward(wid, config)
     assert finalize.push_changes(wid, config)
-    current = record(wid).pr
+    current = _pr(record(wid))
     assert current.head_sha == git("rev-parse", "HEAD", cwd=wt)
     assert current.base_sha == git("rev-parse", "origin/master", cwd=wt) != target
     assert current.patch_id == pr_ops._patch_id(current.base_sha, current.head_sha, cwd=str(wt))
@@ -454,7 +463,7 @@ def test_confirmed_plan_revalidates_after_retention_before_effect(
     first = preview(wid, config)
     real_retain = pr_recovery.retain_rewrite
 
-    def interpose(*args: object, **kwargs: object) -> pr_recovery.RecoveryPoint:
+    def interpose(*args: Any, **kwargs: Any) -> pr_recovery.RecoveryPoint:
         point = real_retain(*args, **kwargs)
         if changed == "provider":
             monkeypatch.setattr(pr_rewrite, "observe_pr", lambda *a: PullResult(
@@ -462,7 +471,7 @@ def test_confirmed_plan_revalidates_after_retention_before_effect(
             ))
         elif changed == "tracking":
             current = record(wid)
-            current.pr.base_sha = actual
+            _pr(current).base_sha = actual
             tracking.save_record(current)
         elif changed == "source":
             (wt / "interposed.txt").write_text("late source\n")
@@ -492,11 +501,12 @@ def test_plan_fields_bind_action_original_record_and_evidence() -> None:
         saved_head="c" * 40, publication_fingerprint="e" * 64,
         action="settle-publication", evidence_fingerprint="f" * 64,
     )
-    for change in (
+    changes: tuple[dict[str, Any], ...] = (
         {"saved_head": "a" * 40}, {"publication_fingerprint": "a" * 64},
         {"action": "rewrite"}, {"evidence_fingerprint": "a" * 64},
         {"rebase_base_sha": "b" * 40},
-    ):
+    )
+    for change in changes:
         assert replace(operation, **change).confirmation(REASON) != operation.confirmation(REASON)
 
 
@@ -553,7 +563,7 @@ def test_settlement_failures_report_bookkeeping_effect_without_claiming_a_push(
     text = captured.out + captured.err
     assert "Remote head was published" not in text
     assert pr_publish._tip("origin", branch, str(wt)) == published
-    assert record(wid).pr.head_sha == (published if failure == "finish" else saved)
+    assert _pr(record(wid)).head_sha == (published if failure == "finish" else saved)
     if failure == "finish":
         assert "bookkeeping was settled without a push; audit needs reconciliation" in text
 
@@ -579,5 +589,5 @@ def test_advanced_head_cli_refuses_stale_pin_with_actual_plan(
     assert payload["operation"]["expected_head"] == actual
     assert payload["operation"]["saved_head"] == saved
     assert payload["operation"]["action"] == "rewrite"
-    assert record(wid).pr.head_sha == saved
+    assert _pr(record(wid)).head_sha == saved
     assert not list(metadata(wt).glob("*break-glass*.json"))

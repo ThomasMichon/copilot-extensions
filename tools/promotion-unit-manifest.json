@@ -6664,7 +6664,7 @@
         "tools/manager_application_provider.json": "2a6bf96931f64ccc67fe6780065d60071dcafb8d6fc2db35958c7910a6783ed3",
         "tools/prepare_manager_application.py": "d50f8d8d6c9cb7bc87586d60cc876280f16fabf6cf0dca7243e06ee214ca6aae",
         "tools/coverage_guided_selection/auditability.py": "7732bc5a9b14a2ab6083f9e73f5d7698888461b387515cb1a17a08174a066ed5",
-        "tools/plugin_test_command_safety.py": "68aa5d88707c3174060c4f272fb7b6b3d7f35da8c2b3f0429854bb811b816208",
+        "tools/plugin_test_command_safety.py": "e9c38a3d45053f7cdda54eafd99fe696119e8f59f5b8abb71258d74751eb93e0",
         "plugins/agent-worktrees/src/agent_worktrees/dispatch_cohort.py": "cf7cf2611b5a1a33883a84e3f5319f3c9b59088fc1701b6fc5ad38d7052a235c",
         "tools/typecheck_bootstrap_views.py": "ffa24829a4d9f638b3f3096e8df11c42f09678bbfa997708844415de5495fa37",
         "plugins/agent-worktrees/payload-invocation.json": "9e0dc64604bc87af7c08f6a18bd3d5612a710c3b3be9aa8eaa1885b0c38f9c11",

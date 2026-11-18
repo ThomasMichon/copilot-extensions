@@ -98,7 +98,7 @@ def push_changes(worktree_id: str, config: Config, record: tracking.WorktreeReco
                  *, dry_run: bool = False, recovery_reason: str | None = None,
                  confirmation: str | None = None) -> bool:
     """Publish as-is; never rebase, squash, or refresh the saved lease."""
-    from .finalize import FinalizeLock
+    from .finalize_lock import FinalizeLock
 
     repo = config.default_repo
     cwd = record.worktree_path if record else str(Path(repo.worktree_root) / worktree_id)
@@ -126,8 +126,9 @@ def push_changes(worktree_id: str, config: Config, record: tracking.WorktreeReco
             # change which PR the request authorizes.
             path = cfg.tracking_dir(config.repo_name) / f"{worktree_id}.yaml"
             fresh = tracking.load_record(path) if path.exists() else None
-            if (record is None or fresh is None or record.active_pr() is None
-                    or not pr_publication_state.matches(fresh.active_pr(), record.active_pr())):
+            expected_pr = record.active_pr() if record is not None else None
+            if (fresh is None or expected_pr is None
+                    or not pr_publication_state.matches(fresh.active_pr(), expected_pr)):
                 raise ValueError("Tracked PR changed while preparing the rewrite; nothing was pushed.")
             recovery = recovery_reason is not None
             pr = _validate(worktree_id, config, fresh, cwd, recovery=recovery)
