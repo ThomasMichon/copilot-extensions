@@ -542,7 +542,8 @@ def test_runner_passes_pause_tolerant_policy_and_keeps_renewal_custody(tmp_path,
     pytest.param("short-name", marks=pytest.mark.skipif(os.name != "nt", reason="Windows short path")),
 ])
 def test_runner_canonicalizes_its_owned_sandbox_before_daemon_admission(tmp_path, monkeypatch, alias):
-    from contextlib import contextmanager
+    from contextlib import contextmanager, nullcontext
+    from tools import plugin_test_lifecycle
 
     parent = tmp_path / "parent"
     parent.mkdir()
@@ -573,6 +574,7 @@ def test_runner_canonicalizes_its_owned_sandbox_before_daemon_admission(tmp_path
         yield {}
 
     monkeypatch.setattr(plugin_test_containment, "daemon_test_lifecycle", lifecycle)
+    monkeypatch.setattr(plugin_test_lifecycle, "_native_instance_pins", lambda *args: nullcontext(None))
     monkeypatch.setattr(plugin_test_containment, "_run_contained_process", lambda *args, **kwargs: 0)
     monkeypatch.setattr(plugin_test_containment, "_read_registry_environment", lambda: None)
     monkeypatch.setattr(plugin_test_containment, "_registry_environment_drift", lambda _: [])

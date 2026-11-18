@@ -105,6 +105,7 @@ def plan(kind, owner, source):
 @pytest.mark.parametrize("action", ["install", "repair"])
 def test_native_engine_fresh_action_keeps_the_selected_artifact(selected, action):
     owner, artifact, _, source = selected
+    source = dataclasses.replace(source, application=None)
     step = update_runtime_plan.plan_engine(owner, "linux", force=True, source=source, action=action)
     assert not step.status
     assert step.argv[2] == action
@@ -131,10 +132,10 @@ def test_native_profile_flows_through_existing_plan_owner(
     snapshot.mkdir()
     native = {
         "identity": json.loads(source.identity),
-        "runtime_version": source.version + ".profile." + "d" * 16,
+        "runtime_version": json.loads(source.identity)["runtime_version"] + ".profile." + "d" * 16,
         "payload_hash": "e" * 64,
     }
-    source = dataclasses.replace(source, install_source=snapshot, native=json.dumps(native))
+    source = dataclasses.replace(source, application=None, install_source=snapshot, native=json.dumps(native))
     monkeypatch.setattr(PreparedRuntimeSource, "validate", lambda *args: None)
     step = plan(kind, owner, source)
     assert not step.status
@@ -393,11 +394,15 @@ def test_forced_source_install_selects_canonical_repair_without_legacy_retry(sel
     assert not runtime.exists()
 
 
-def test_raw_source_identity_alone_cannot_reenter_retired_installer(selected):
+def test_raw_source_identity_keeps_the_legacy_target_separate_from_application_authority(selected):
     owner, artifact, runtime, source = selected
     step = plan("engine", owner, dataclasses.replace(source, application=None))
-    assert step.blocked and "Complete application inputs are required" in step.status
-    assert not step.argv and not runtime.exists()
+    assert not step.blocked and step.source.application is None
+    assert step.artifact == artifact
+    assert step.target_version == json.loads(source.identity)["runtime_version"]
+    assert "--install-application" not in step.argv
+    assert step.fallback_argv == ()
+    assert not runtime.exists()
 
 
 @pytest.mark.parametrize(("status", "exit_code"), [
