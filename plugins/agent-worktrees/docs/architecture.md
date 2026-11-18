@@ -682,6 +682,14 @@ See [startup records and boundaries](../../../docs/agent-lifecycle/startup-bound
 for the two paths and [worktree lifecycle](worktree-lifecycle.md#the-lifecycle-at-a-glance)
 for source landing, finalization and cleanup.
 
+The Python launch entry in `manager_launch_cli` bounds project, configuration
+and launch-plan resolution with a watchdog. This includes direct non-mux
+fallback resolution and refresh retries. After a local or interactive SSH
+child is created, the timer is disarmed before waiting for that child; the
+resolution budget is not a session-lifetime limit. Every return or exception
+also cancels the timer. `agent_worktrees.__main__.cmd_launch` remains the
+compatibility entry for callers.
+
 ```
 {project}                         # launch binstub
   |

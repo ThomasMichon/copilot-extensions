@@ -1288,3 +1288,14 @@ bounded historical credit. All eight new technical rows remain unchecked,
 and every incumbent row, phase, budget and custodian is preserved. Normal
 review and complete current receiving readback precede a separate tracking
 judgment; no hook, diagnostic, native workload or operational remedy ran here.
+
+### 2026-11-18 - Finite resolution-watchdog handoff candidate
+
+The [bounded implementation and qualification record](journal/2026/11.18-watchdog-handoff.md)
+addresses only P2830-6..10 and V2830-2, following the retained plan accepted
+in #9496. Resolution remains bounded; direct local/SSH waits receive the
+cancellation callback at actual handoff. The source candidate and accurate
+whole-file type contracts have focused passing evidence, but publication,
+review/CI and finite acceptance remain gates. All incumbent check states,
+the complete #2830 incident, independent research/advisory lanes and existing
+source/resource/native owners remain unchanged.
