@@ -140,10 +140,10 @@
     {
       "path": "plugins/copilot-extensions-maintainer/tests/test_validate_and_promote_projection.py",
       "sha256": [
-        "548260e5b181d8a4fdd6df8699a5f6d03f34bf3b6fdb17602763b472ee405c04",
-        "91402cdbd92b756ffcf48abde1a4c58fddf097be3834f368ccee473e89581e73"
+        "1eeacf698a9d4aa271b0dfcf7b0e365e1178bec2bc4d21b5fba7db94b557d188",
+        "73bf961c8c07fa5743795a7b740ac52ef9c3ec85651ac2b24fdc004e34013280"
       ],
-      "structure": "cb5fbad6943e7a15f77e2048c087aeaf3a92a2d3f3fb9d84531d347bbbdfb73c"
+      "structure": "0b60c92529e2133114843eec3f64a23e2c4edc589b39487771461fef08ca6252"
     }
   ],
   "assets": [

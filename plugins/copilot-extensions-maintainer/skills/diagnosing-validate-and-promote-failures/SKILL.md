@@ -7,8 +7,8 @@ description: >
   view --log` sequence to identify every failed job (a per-plugin fan-out
   job or one of the other required gate jobs), read a fan-out job's failure
   literally, and classify it as a known accepted flake, a
-  CI-environment-specific test bug, or a genuine regression -- the latter two
-  owed a real fix-forward PR, never a "pre-existing" shrug. Use when
+  CI-environment-specific test bug, or a genuine regression. Diagnose within
+  the assignment; source fixes and reporting retain separate authority. Use when
   `validate-and-promote`/`dev-advanced` is failing, promotion is stuck, or a
   contributor asks "why won't dev promote to main".
   Trigger phrases include:
@@ -23,6 +23,14 @@ description: >
 
 # Diagnosing `validate-and-promote` failures
 
+Use this runbook only within an assigned validation or maintenance scope.
+Plugin enablement or a red promotion run does not assign release maintenance.
+Fix failures covered by the change or an explicit harness-test charter.
+For other failures, report evidence, disposition and acceptance impact, offer
+a report at the established destination and return to the assigned task.
+Do not automatically file an issue/PR or wait for promotion or rollout.
+Required CI remains a merge gate; scope limits never authorize bypassing it.
+
 `validate-and-promote` is the sole automated gate between `dev` and `main`
 (dev-branch-release-pipeline effort, `ThomasMichon/copilot-extensions#3336`).
 It is entered only via `repository_dispatch` (event type `dev-advanced`,
@@ -34,8 +42,8 @@ current full matrix, `fail-fast: false` so more than one can be red at once),
 `worktree-manager` (out-of-plugin worktree-manager suite), and
 `guards-full-sweep` (full-tree, non-PR-scoped guard checks) to succeed. A red
 run blocks **all** pending contributors' already-merged work, not just
-whoever's change happened to break it — treat it with the same urgency as a
-production incident, not a personal test failure.
+whoever's change happened to break it. That impact informs assigned release
+maintenance; it does not expand another contribution's scope.
 
 Route every `gh` call in this runbook through the repository-scoped account
 wrapper -- resolve the current session's actual catalog invocation name
@@ -94,9 +102,8 @@ commands below use `<agent-worktrees catalog argv[0]>` as that placeholder.
      Confirm via same-SHA rerun evidence before assuming this; link the
      tracked issue in your PR description rather than forcing an unrelated
      code change (see `contributing-to-copilot-extensions`'s flake
-     exception -- the *only* sanctioned exception to the fix-forward
-     obligation below). An *undocumented* one-off still needs a fix or a
-     newly filed tracking issue, not a silent skip.
+     policy). An undocumented one-off still needs evidence and a disposition,
+     not a silent skip; reporting and fixes require applicable authority.
    - **CI-environment-specific test bug** — the test's own assumption
      doesn't hold on the runner (classic case: referencing a platform-only
      `subprocess`/`os` constant, like `CREATE_NEW_CONSOLE`, that only exists
@@ -108,7 +115,8 @@ commands below use `<agent-worktrees catalog argv[0]>` as that placeholder.
      platform-only constant too, e.g. `getattr(subprocess,
      "CREATE_NEW_CONSOLE", <fallback>)`, not just the branch condition).
    - **Genuine regression** — the failing assertion reflects real changed
-     behavior in the plugin's own source. Fix the source, not the test.
+     behavior in the plugin's own source. An assigned fix changes the source,
+     not the test. Without fix authority, report the blocker.
 
 5. **Check whether it's already fixed** — another contributor or a
    concurrent agent may have landed the fix already (this pipeline blocks
@@ -127,10 +135,10 @@ commands below use `<agent-worktrees catalog argv[0]>` as that placeholder.
    ```
 
    If `origin/dev`'s tip already contains a fix, don't duplicate it —
-   finalize any worktree you opened as unused and just watch for the next
-   `dev-advanced` run to go green.
+   use the normal lifecycle for any unused worktree. Watch the next
+   `dev-advanced` run only when release tracking is part of the assignment.
 
-6. **Land the real fix** through the normal flow — create a worktree off
+6. **When source fixes are assigned, land the real fix** through the normal flow — create a worktree off
    `dev`, fix the test or the source, add a changefile, run the plugin's own
    suite, and land it via `contributing-to-copilot-extensions`'s PR flow.
    Never patch `main` directly, and never treat a retry/force-deploy of the
@@ -158,9 +166,9 @@ exist there.
 
 ## Reference
 
-`contributing-to-copilot-extensions` (the full PR flow, the fix-forward
-obligation and its known-flake exception, the mandatory changefile/version
-bump, and the `<agent-worktrees catalog argv[0]>` account-routing
+`contributing-to-copilot-extensions` (the full PR flow, scoped test
+accountability and known-flake policy, required changefiles,
+and the `<agent-worktrees catalog argv[0]>` account-routing
 convention); `diagnosing-copilot-extensions` (the sibling skill for
 deployed-plugin/runtime symptoms, as opposed to this repo's own CI); the
 dev-branch-release-pipeline effort (`ThomasMichon/copilot-extensions#3336`)

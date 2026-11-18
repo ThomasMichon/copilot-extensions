@@ -47,6 +47,15 @@ def test_template_is_reviewable_static_fallback() -> None:
     assert content.startswith('---\napplyTo: "**"\n---\n')
     assert "validate-and-promote" in content
     assert "contributing-to-copilot-extensions" in content
+    for path in (
+        _TEMPLATE,
+        _PLUGIN / "skills/diagnosing-validate-and-promote-failures/SKILL.md",
+    ):
+        scoped = " ".join(path.read_text(encoding="utf-8").split())
+        assert "assigned validation or maintenance scope" in scoped
+        assert "Required CI remains a merge gate" in scoped
+    assert "only when the change or explicit" in content
+    assert "even if the failure predates your own change" not in " ".join(content.split())
     # No live/session/host state -- a checked-in static fallback must never
     # embed a resolved filesystem path or session identifier.
     for forbidden in (
