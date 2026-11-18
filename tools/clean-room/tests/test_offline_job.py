@@ -195,7 +195,55 @@ def test_partition_counts_host_and_container_instead_of_granting_both_full_budge
             owner.validate_partition(aggregate=aggregate, host=host, container=over)
 
 
-@pytest.mark.parametrize("role", ["results", "cache"])
+def test_separate_workspace_keeps_runtime_paths_stable_across_fresh_jobs(
+    request_plan: PlanRequest, tmp_path: Path
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(mode=0o700)
+    retained = workspace / "constructed"
+    retained.write_bytes(b"synthetic runtime state")
+    job = replace(request_plan.job, workspace=workspace)
+    first = request_plan(job)
+    second_results = tmp_path / "second-results"
+    second_results.mkdir(mode=0o700)
+    second = request_plan(
+        replace(job, name="cr-offline-abcdef012345"), results=second_results
+    )
+    mount = f"type=bind,src={workspace},dst=/job/workspace"
+    assert mount in first.create and mount in second.create
+    assert first.job.name != second.job.name
+    assert retained.read_bytes() == b"synthetic runtime state"
+    assert list(request_plan.results.iterdir()) == []
+    assert list(second_results.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    "role", ["input", "cache", "results", "parent", "link", "mode"]
+)
+def test_workspace_refuses_overlap_indirection_or_nonprivate_state(
+    request_plan: PlanRequest, tmp_path: Path, role: str
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(mode=0o700)
+    if role == "input":
+        workspace = request_plan.job.inputs[0].source
+    elif role == "cache":
+        workspace = request_plan.job.cache
+    elif role == "results":
+        workspace = request_plan.results
+    elif role == "parent":
+        workspace = tmp_path
+    elif role == "link":
+        link = tmp_path / "workspace-link"
+        link.symlink_to(workspace, target_is_directory=True)
+        workspace = link
+    else:
+        workspace.chmod(0o750)
+    with pytest.raises(owner.PlanRefusal):
+        request_plan(replace(request_plan.job, workspace=workspace))
+
+
+@pytest.mark.parametrize("role", ["results", "cache", "workspace"])
 def test_writable_repository_descendants_are_rejected(
     request_plan: PlanRequest, role: str
 ) -> None:
@@ -207,7 +255,7 @@ def test_writable_repository_descendants_are_rejected(
         if role == "results":
             request_plan(results=inside)
         else:
-            request_plan(replace(request_plan.job, cache=inside))
+            request_plan(replace(request_plan.job, **{role: inside}))
     assert list(inside.iterdir()) == []
 
 
@@ -222,7 +270,7 @@ def test_narrow_read_only_repository_input_stays_supported(
     assert f"type=bind,src={source},dst=/job/inputs/scenario,readonly" in plan.create
 
 
-@pytest.mark.parametrize("role", ["results", "cache"])
+@pytest.mark.parametrize("role", ["results", "cache", "workspace"])
 def test_aliased_repository_boundary_still_rejects_physical_writable_descendants(
     request_plan: PlanRequest, tmp_path: Path, role: str
 ) -> None:
@@ -236,7 +284,7 @@ def test_aliased_repository_boundary_still_rejects_physical_writable_descendants
         if role == "results":
             request_plan(results=inside, repository=alias)
         else:
-            request_plan(replace(request_plan.job, cache=inside), repository=alias)
+            request_plan(replace(request_plan.job, **{role: inside}), repository=alias)
     assert list(inside.iterdir()) == []
 
 
@@ -255,7 +303,7 @@ def test_aliased_home_boundary_still_rejects_whole_physical_home(
         )
 
 
-@pytest.mark.parametrize("role", ["input", "results", "cache"])
+@pytest.mark.parametrize("role", ["input", "results", "cache", "workspace"])
 @pytest.mark.parametrize("character", ['"', "\n", "\r"])
 def test_unrepresentable_csv_mount_sources_are_rejected(
     request_plan: PlanRequest, tmp_path: Path, role: str, character: str
@@ -265,8 +313,8 @@ def test_unrepresentable_csv_mount_sources_are_rejected(
     with pytest.raises(owner.PlanRefusal, match="unrepresentable mount source"):
         if role == "results":
             request_plan(results=path)
-        elif role == "cache":
-            request_plan(replace(request_plan.job, cache=path))
+        elif role in ("cache", "workspace"):
+            request_plan(replace(request_plan.job, **{role: path}))
         else:
             request_plan(
                 replace(request_plan.job, inputs=(owner.Input("runtime", path),))
