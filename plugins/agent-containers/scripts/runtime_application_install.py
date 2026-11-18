@@ -102,7 +102,7 @@ def _read(path: Path, *, limit: int = 65536) -> bytes | None:
 
 def _write(path: Path, content: bytes, *, executable: bool = False) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, filename = tempfile.mkstemp(prefix="." + path.name + ".", dir=path.parent)
+    descriptor, filename = tempfile.mkstemp(prefix=".tmp-", dir=path.parent)
     temporary = Path(filename)
     try:
         with os.fdopen(descriptor, "wb") as stream:
