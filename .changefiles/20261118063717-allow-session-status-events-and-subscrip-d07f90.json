@@ -1,0 +1,9 @@
+{
+  "comment": "Allow session status events and subscription notices to commit with a lifecycle update.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
