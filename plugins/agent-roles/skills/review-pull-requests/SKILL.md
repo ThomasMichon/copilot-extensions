@@ -83,6 +83,10 @@ under that repository's existing planning convention. Capture:
   complete terminal census and settlement of the charter's obligations.
 - Acting identities, reviewer rubric, coordinator/author roles, adapter
   selections, repository-specific review/merge policy and escalation route.
+- Optional [declared Maintainer mode](references/maintainer-mode.md): authoritative
+  roles/CODEOWNER coverage, advisory peer posture and coordinator-owned normal
+  landing for authors without merge permission. This is explicit adoption,
+  not an unconditional policy for all reviewers.
 - Optional author nudges and cooldown/limit, existing observation cadence and
   owner-charter refresh cadence **only if explicitly requested**.
 - Loop discipline: re-review triggers, per-PR round cap and time budget,
@@ -120,6 +124,10 @@ findings/replies, holds/consent uncertainty, watchers/cursors and observed
 terminal outcomes. Session SQL alone does not survive new-owner handoff.
 Refresh a complete, paginated live forge census; partial/failed enumeration is
 unknown or a lower bound, never an empty queue.
+In adopted Maintainer mode, include peer Maintainer authors and reevaluate
+actual qualified current coverage and review blocks on every sweep, not merely
+whether this actor reviewed before. Follow the mode reference for exclusions,
+CODEOWNER duties and source-assessment versus native-review validity.
 
 ## 4. Assign independent lanes and retain context
 
@@ -164,6 +172,9 @@ revision and intent, then verify authoritative readback and current state.
 Fresh reads and commit pinning do not make a read-then-write sequence atomic;
 retain historical effects and reassess on movement. Supplement partial reads
 with complete evidence and preserve every actual owner-required safeguard.
+Apply the Maintainer-mode current-authority and clean-rebase rules when adopted:
+retained source judgment does not by itself satisfy a current native vote or
+an explicit newer-head re-review request.
 
 Retain exact original receipts and unknown provider effect IDs as null;
 reconcile an uncertain post before retry. Verify actual official, non-dismissed

@@ -12,6 +12,14 @@ the public substrate. Scenarios that name specific repos or internal venues live
 with the **harness that consumes them**, mounted into the box at run time (see
 *§6 Ownership & homing*).
 
+The inert `offline_job.py` planning foundation describes a separate
+credential-free cached-input boundary. It does not launch a scenario, replace
+the existing wrappers or claim native enforcement. Its explicit input/output,
+identity, immutable-image and finite-resource declarations are prerequisites
+for a later lifecycle owner, which must independently verify actual admission,
+physical-ID custody and retained stop/postflight. Host-driver and container
+resource declarations are counted together, not each granted the full budget.
+
 ## 1. The matrix — tiers × families
 
 The clean room is not one flow but a **matrix**: two *validation tiers* (how we

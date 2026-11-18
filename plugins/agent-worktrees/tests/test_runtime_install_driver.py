@@ -2,6 +2,14 @@
 
 from __future__ import annotations
 
+from agent_worktrees import config as cfg
+from agent_worktrees import output
+from single_instance_lease.operation import OperationLock
+
+from collections.abc import Iterator
+from types import ModuleType
+from typing import Any, overload
+
 import importlib.util
 import json
 import os
@@ -23,10 +31,36 @@ from update_driver.participant import ENVIRONMENT_KEY, borrowed_custody, partici
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 
 
+def _record_request(
+    queued: list[tuple[core.RequestSpec, core.TrustedRunner]],
+    spec: core.RequestSpec, runner: core.TrustedRunner,
+) -> SimpleNamespace:
+    queued.append((spec, runner))
+    return SimpleNamespace(id="request")
+
+
+@overload
+def _status(request_id: str, *, root: Path | None = None) -> core.Request: ...
+
+
+@overload
+def _status(*, root: Path | None = None) -> tuple[core.Request, ...]: ...
+
+
+def _status(request_id: str | None = None, *, root: Path | None = None) -> core.Request | tuple[core.Request, ...]:
+    result = core.status(request_id, root=root)
+    if request_id is None:
+        assert isinstance(result, tuple)
+    else:
+        assert isinstance(result, core.Request)
+    return result
+
+
 @pytest.fixture
-def adapter(tmp_path, monkeypatch):
+def adapter(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     monkeypatch.syspath_prepend(str(SCRIPTS))
     spec = importlib.util.spec_from_file_location("_worktrees_install_driver_test", SCRIPTS / "runtime_install_driver.py")
+    assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     monkeypatch.setattr(core, "default_root", lambda: tmp_path / "driver")
@@ -34,7 +68,7 @@ def adapter(tmp_path, monkeypatch):
     return module
 
 
-def _arguments(tmp_path, **values):
+def _arguments(tmp_path: Path, **values: Any) -> Any:
     return SimpleNamespace(**{
         "payload": SCRIPTS.parent, "root": tmp_path / "runtime",
         "shell": tmp_path / "powershell.exe", "action": "install",
@@ -45,10 +79,31 @@ def _arguments(tmp_path, **values):
     })
 
 
+@pytest.mark.parametrize("committed", [False, True])
+def test_settled_refusal_survives_the_child_result_boundary(adapter: ModuleType, tmp_path: Path, committed: bool) -> None:
+    result = adapter.refusal_result("2.0.0", RuntimeError("handover refused"), committed=committed)
+    path = tmp_path / "result.json"
+    path.write_text(json.dumps(result), encoding="utf-8")
+    assert adapter.read_result(path, 1, ["child"]) == result
+    with pytest.raises(subprocess.CalledProcessError):
+        adapter.read_result(path, 0, ["child"])
+    with pytest.raises(subprocess.CalledProcessError):
+        adapter.read_result(path, 7, ["child"])
+
+
+@pytest.mark.parametrize("receipt", [None, {}, {"version": 1, "settled": False}])
+def test_unknown_failure_cannot_be_certified_by_an_invalid_receipt(adapter: ModuleType, tmp_path: Path, receipt: None | dict[str, Any]) -> None:
+    path = tmp_path / "result.json"
+    if receipt is not None:
+        path.write_text(json.dumps({"runtime_version": "2.0.0", "installation_refused": receipt}))
+    with pytest.raises((ValueError, subprocess.CalledProcessError)):
+        adapter.read_result(path, 1, ["child"])
+
+
 @pytest.mark.parametrize("exit_code", [0, 7])
 def test_post_child_custody_failure_preserves_native_exit_status(
-    adapter, tmp_path, monkeypatch, exit_code,
-):
+    adapter: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], exit_code: int,
+) -> None:
     from contextlib import nullcontext
     from update_driver import ParticipantError
 
@@ -71,10 +126,11 @@ def test_post_child_custody_failure_preserves_native_exit_status(
     assert caught.value is failure
     child.wait.assert_called_once_with()
     assert owner.assert_owned.call_count == 2
-    assert f"installer child exited {exit_code}; transaction custody is unconfirmed" in "\n".join(caught.value.__notes__)
+    diagnostic = "\n".join(getattr(caught.value, "__notes__", [])) + capsys.readouterr().err
+    assert f"installer child exited {exit_code}; transaction custody is unconfirmed" in diagnostic
 
 
-def test_explicit_native_installation_uses_the_existing_finite_driver(adapter, tmp_path, monkeypatch):
+def test_explicit_native_installation_uses_the_existing_finite_driver(adapter: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(adapter, "_source_digest", lambda payload: "a" * 64)
     args = _arguments(
         tmp_path, project_name="example", bootstrap_python=Path(sys.executable),
@@ -82,10 +138,10 @@ def test_explicit_native_installation_uses_the_existing_finite_driver(adapter, t
     )
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(tmp_path / "context.json"))
     monkeypatch.delenv("COPILOT_EXTENSIONS_COMMAND_LIFECYCLE", raising=False)
-    queued = []
+    queued: list[tuple[core.RequestSpec, core.TrustedRunner]] = []
     driver = SimpleNamespace(
         RequestSpec=core.RequestSpec, TrustedRunner=core.TrustedRunner,
-        enqueue=lambda spec, **kwargs: queued.append((spec, kwargs["runner"])) or SimpleNamespace(id="request"),
+        enqueue=lambda spec, **kwargs: _record_request(queued, spec, kwargs["runner"]),
         drain=Mock(), wait=Mock(return_value=SimpleNamespace(state="completed", exit_code=7)),
     )
     assert adapter._foreground(args, driver) == 7
@@ -107,20 +163,20 @@ def test_explicit_native_installation_uses_the_existing_finite_driver(adapter, t
     driver.wait.assert_called_once_with("request", output=sys.stderr)
 
 
-def test_first_use_busy_driver_does_not_accept_a_request(adapter, tmp_path, monkeypatch, capsys):
+def test_first_use_busy_driver_does_not_accept_a_request(adapter: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     root = tmp_path / "driver"
     root.mkdir()
     monkeypatch.setattr(adapter, "_admission_digest", lambda _args: "a" * 64)
     monkeypatch.delenv("COPILOT_EXTENSIONS_COMMAND_LIFECYCLE", raising=False)
     monkeypatch.delenv("COPILOT_EXTENSIONS_RUNTIME_PUBLICATION", raising=False)
-    with core.OperationLock(root / "execution.lock"):
+    with OperationLock(root / "execution.lock"):
         result = adapter._foreground(_arguments(tmp_path, action="stamp", fail_if_busy=True), core)
     assert result == 75
     assert "::agent-worktrees-driver-busy::" in capsys.readouterr().err
-    assert core.status(root=root) == ()
+    assert _status(root=root) == ()
 
 
-def test_first_use_does_not_drain_an_existing_pending_request(adapter, tmp_path, monkeypatch, capsys):
+def test_first_use_does_not_drain_an_existing_pending_request(adapter: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     root = tmp_path / "driver"
     request = core.enqueue(
         core.RequestSpec("fixture", cwd=str(tmp_path)),
@@ -133,15 +189,15 @@ def test_first_use_does_not_drain_an_existing_pending_request(adapter, tmp_path,
     result = adapter._foreground(_arguments(tmp_path, action="stamp", fail_if_busy=True), core)
     assert result == 75
     assert "::agent-worktrees-driver-busy::" in capsys.readouterr().err
-    assert [(item.id, item.state) for item in core.status(root=root)] == [(request.id, "pending")]
+    assert [(item.id, item.state) for item in _status(root=root)] == [(request.id, "pending")]
 
 
-def test_first_use_retries_a_concurrent_enqueue_without_replaying_it(adapter, tmp_path, monkeypatch, capsys):
+def test_first_use_retries_a_concurrent_enqueue_without_replaying_it(adapter: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     root = tmp_path / "driver"
     original_enqueue = core.enqueue
     peer = []
 
-    def enqueue(spec, *, runner, root=None, **options):
+    def enqueue(spec: Any, *, runner: Any, root: Any=None, **options: Any) -> Any:
         if options.get("_exclusive_custody") is not None:
             peer.append(original_enqueue(
                 core.RequestSpec("fixture", cwd=str(tmp_path)),
@@ -158,10 +214,10 @@ def test_first_use_retries_a_concurrent_enqueue_without_replaying_it(adapter, tm
     assert result == 75
     assert "::agent-worktrees-driver-busy::" in capsys.readouterr().err
     assert len(peer) == 1
-    assert [(item.id, item.state) for item in core.status(root=root)] == [(peer[0].id, "pending")]
+    assert [(item.id, item.state) for item in _status(root=root)] == [(peer[0].id, "pending")]
 
 
-def test_first_use_reports_an_unsettled_queue_without_retrying(adapter, tmp_path, monkeypatch):
+def test_first_use_reports_an_unsettled_queue_without_retrying(adapter: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import sqlite3
     from contextlib import closing
 
@@ -178,12 +234,12 @@ def test_first_use_reports_an_unsettled_queue_without_retrying(adapter, tmp_path
     monkeypatch.delenv("COPILOT_EXTENSIONS_RUNTIME_PUBLICATION", raising=False)
     with pytest.raises(core.InterruptedError, match="unsettled"):
         adapter._foreground(_arguments(tmp_path, action="stamp", fail_if_busy=True), core)
-    assert [(item.id, item.state) for item in core.status(root=root)] == [(request.id, "pending")]
+    assert [(item.id, item.state) for item in _status(root=root)] == [(request.id, "pending")]
 
 
 def test_first_use_reports_an_abandoned_running_request_without_retrying(
-    adapter, tmp_path, monkeypatch, capsys,
-):
+    adapter: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     import sqlite3
     from contextlib import closing
 
@@ -195,7 +251,7 @@ def test_first_use_reports_an_abandoned_running_request_without_retrying(
     )
     with closing(sqlite3.connect(root / "queue.sqlite3")) as db, db:
         db.execute("UPDATE requests SET state='running',started_at=1 WHERE id=?", (request.id,))
-    before = core.status(root=root)
+    before = _status(root=root)
     monkeypatch.setattr(adapter, "_admission_digest", lambda _args: "a" * 64)
     monkeypatch.delenv("COPILOT_EXTENSIONS_COMMAND_LIFECYCLE", raising=False)
     monkeypatch.delenv("COPILOT_EXTENSIONS_RUNTIME_PUBLICATION", raising=False)
@@ -203,10 +259,10 @@ def test_first_use_reports_an_abandoned_running_request_without_retrying(
     with pytest.raises(core.InterruptedError, match="unsettled"):
         adapter._foreground(_arguments(tmp_path, action="stamp", fail_if_busy=True), core)
     assert "::agent-worktrees-driver-busy::" not in capsys.readouterr().err
-    assert core.status(root=root) == before
+    assert _status(root=root) == before
 
 
-def test_first_use_reselects_a_snapshot_changed_before_custody(adapter, tmp_path, monkeypatch, capsys):
+def test_first_use_reselects_a_snapshot_changed_before_custody(adapter: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     from contextlib import nullcontext
 
     original = tmp_path / "original"
@@ -226,7 +282,7 @@ def test_first_use_reselects_a_snapshot_changed_before_custody(adapter, tmp_path
     assert "::agent-worktrees-driver-reselect::" in capsys.readouterr().err
 
 
-def test_first_use_reselects_a_snapshot_created_before_custody(adapter, tmp_path, monkeypatch, capsys):
+def test_first_use_reselects_a_snapshot_created_before_custody(adapter: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     from contextlib import nullcontext
 
     original = tmp_path / "original"
@@ -248,15 +304,15 @@ def test_first_use_reselects_a_snapshot_created_before_custody(adapter, tmp_path
 
 
 @pytest.mark.parametrize("absent", [False, True])
-def test_first_use_retains_snapshot_selection_for_the_driver(adapter, tmp_path, monkeypatch, absent):
+def test_first_use_retains_snapshot_selection_for_the_driver(adapter: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, absent: bool) -> None:
     monkeypatch.setattr(adapter, "_source_digest", lambda _payload: "a" * 64)
     monkeypatch.delenv("COPILOT_EXTENSIONS_COMMAND_LIFECYCLE", raising=False)
     monkeypatch.delenv("COPILOT_EXTENSIONS_RUNTIME_PUBLICATION", raising=False)
     selected = tmp_path / "selected"
-    queued = []
+    queued: list[tuple[core.RequestSpec, core.TrustedRunner]] = []
     driver = SimpleNamespace(
         RequestSpec=core.RequestSpec, TrustedRunner=core.TrustedRunner,
-        run_explicit=lambda spec, **kwargs: queued.append((spec, kwargs["runner"])) or SimpleNamespace(id="request"),
+        run_explicit=lambda spec, **kwargs: _record_request(queued, spec, kwargs["runner"]),
         wait=Mock(return_value=SimpleNamespace(state="completed", exit_code=0)),
     )
     args = _arguments(
@@ -277,7 +333,7 @@ def test_first_use_retains_snapshot_selection_for_the_driver(adapter, tmp_path, 
 @pytest.mark.skipif(os.name != "nt", reason="Windows native installer")
 @pytest.mark.parametrize("mode", ["project", "standalone"])
 @pytest.mark.parametrize("interpreter", ["current", "python310"])
-def test_real_stamp_obeys_selected_authority(tmp_path, mode, interpreter):
+def test_real_stamp_obeys_selected_authority(tmp_path: Path, mode: str, interpreter: str) -> None:
     from update_driver import change_authority
 
     python = Path(sys.executable)
@@ -317,7 +373,7 @@ def test_real_stamp_obeys_selected_authority(tmp_path, mode, interpreter):
          "-File", str(SCRIPTS / "install.ps1"), "-Action", "stamp",
          "-InstallDir", str(home / ".agent-worktrees"), "-BootstrapPython", str(python)],
         cwd=project, env=environment, capture_output=True, text=True, encoding="utf-8",
-        errors="replace", timeout=180, creationflags=subprocess.CREATE_NO_WINDOW,
+        errors="replace", timeout=180, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     marker = home / ".agent-worktrees" / "payload-dir"
     if mode == "project":
@@ -332,7 +388,7 @@ def test_real_stamp_obeys_selected_authority(tmp_path, mode, interpreter):
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows native first-use driver")
 @pytest.mark.parametrize("interpreter", ["current", "python310"])
-def test_real_first_use_reports_abandoned_running_work(tmp_path, interpreter):
+def test_real_first_use_reports_abandoned_running_work(tmp_path: Path, interpreter: str) -> None:
     import sqlite3
     from contextlib import closing
 
@@ -358,7 +414,7 @@ def test_real_first_use_reports_abandoned_running_work(tmp_path, interpreter):
     )
     with closing(sqlite3.connect(root / "queue.sqlite3")) as db, db:
         db.execute("UPDATE requests SET state='running',started_at=1 WHERE id=?", (request.id,))
-    before = core.status(root=root)
+    before = _status(root=root)
     environment = {
         key: os.environ[key] for key in (
             "PATH", "SystemRoot", "WINDIR", "COMSPEC", "PATHEXT", "ProgramFiles", "ProgramFiles(x86)",
@@ -374,18 +430,18 @@ def test_real_first_use_reports_abandoned_running_work(tmp_path, interpreter):
          "--payload", str(SCRIPTS.parent), "--root", str(home / ".agent-worktrees"),
          "--shell", shell, "--action", "stamp", "--fail-if-busy"],
         cwd=project, env=environment, capture_output=True, text=True, encoding="utf-8",
-        errors="replace", timeout=90, creationflags=subprocess.CREATE_NO_WINDOW,
+        errors="replace", timeout=90, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     assert result.returncode != 0
     assert "unsettled running work; recovery required" in result.stderr
     assert "::agent-worktrees-driver-busy::" not in result.stderr
-    assert core.status(root=root) == before
+    assert _status(root=root) == before
     assert not (home / ".agent-worktrees").exists()
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows native first-use locking")
 @pytest.mark.parametrize("entry", ["payload", "global", "global-retarget"])
-def test_first_use_does_not_hold_provision_lock_while_waiting_for_driver(tmp_path, entry):
+def test_first_use_does_not_hold_provision_lock_while_waiting_for_driver(tmp_path: Path, entry: str) -> None:
     import ctypes
 
     from agent_procutil import spawn_sync_in_kill_on_close_job
@@ -458,7 +514,7 @@ def test_first_use_does_not_hold_provision_lock_while_waiting_for_driver(tmp_pat
                 encoding="utf-8",
             )
             environment["TEST_SELECTED"] = str(selected)
-    execution = core.OperationLock(root / "execution.lock")
+    execution = OperationLock(root / "execution.lock")
     execution.acquire()
     log = area / "dispatcher.log"
     process = job = None
@@ -469,12 +525,12 @@ def test_first_use_does_not_hold_provision_lock_while_waiting_for_driver(tmp_pat
                 [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
                  "-File", str(command), "--version"],
                 cwd=project, env=environment, stdin=subprocess.DEVNULL,
-                stdout=output, stderr=subprocess.STDOUT, creationflags=subprocess.CREATE_NO_WINDOW,
+                stdout=output, stderr=subprocess.STDOUT, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
                 require_job=True, allow_breakaway=False,
             )
             deadline = time.monotonic() + 60
             while time.monotonic() < deadline and process.poll() is None:
-                requests = core.status(root=root)
+                requests = _status(root=root)
                 text = log.read_text(encoding="utf-8", errors="replace")
                 if any(request.state == "pending" for request in requests) or "driver is busy" in text:
                     attempted = True
@@ -484,7 +540,7 @@ def test_first_use_does_not_hold_provision_lock_while_waiting_for_driver(tmp_pat
             provision_lock = home / ".agent-worktrees" / ".provision.lock"
             while attempted and time.monotonic() < deadline:
                 if entry.startswith("global"):
-                    kernel = ctypes.windll.kernel32
+                    kernel = getattr(ctypes, "windll").kernel32
                     kernel.CreateMutexW.restype = ctypes.c_void_p
                     kernel.CreateMutexW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_wchar_p]
                     kernel.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
@@ -515,6 +571,7 @@ def test_first_use_does_not_hold_provision_lock_while_waiting_for_driver(tmp_pat
             try:
                 process.wait(timeout=180)
             finally:
+                assert job is not None
                 job.close()
                 if process.poll() is None:
                     process.wait(timeout=10)
@@ -526,7 +583,7 @@ def test_first_use_does_not_hold_provision_lock_while_waiting_for_driver(tmp_pat
         assert selected.read_text(encoding="utf-8") == "replacement"
 
 
-def test_stamp_source_change_is_refused_before_execution(adapter, tmp_path, monkeypatch):
+def test_stamp_source_change_is_refused_before_execution(adapter: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from contextlib import nullcontext
 
     payload = tmp_path / "payload"
@@ -560,7 +617,7 @@ def test_stamp_source_change_is_refused_before_execution(adapter, tmp_path, monk
     ("nested", ".pytest_cache", "payload.ps1"),
     ("nested", "module.pyc"),
 ])
-def test_stamp_source_identity_includes_files_copied_from_generated_paths(adapter, tmp_path, relative):
+def test_stamp_source_identity_includes_files_copied_from_generated_paths(adapter: ModuleType, tmp_path: Path, relative: tuple[str, str, str] | tuple[str, str]) -> None:
     payload = tmp_path / "payload"
     payload.mkdir()
     (payload / "plugin.json").write_text('{"name":"agent-worktrees"}', encoding="utf-8")
@@ -573,7 +630,7 @@ def test_stamp_source_identity_includes_files_copied_from_generated_paths(adapte
     assert adapter._admission_digest(args) != original
 
 
-def test_stamp_source_identity_tracks_generated_files_in_source_snapshots(adapter, tmp_path):
+def test_stamp_source_identity_tracks_generated_files_in_source_snapshots(adapter: ModuleType, tmp_path: Path) -> None:
     payload = tmp_path / "payload"
     payload.mkdir()
     (payload / "plugin.json").write_text('{"name":"agent-worktrees"}', encoding="utf-8")
@@ -587,7 +644,7 @@ def test_stamp_source_identity_tracks_generated_files_in_source_snapshots(adapte
     assert adapter._admission_digest(args) != original
 
 
-def test_stamp_bootstrap_rejects_redirected_admission_sources(adapter, tmp_path):
+def test_stamp_bootstrap_rejects_redirected_admission_sources(adapter: ModuleType, tmp_path: Path) -> None:
     payload = tmp_path / "payload"
     base = payload / "scripts" / "_runtime_admission" / "libs"
     for name in ("update-driver", "single-instance-lease", "agent-procutil"):
@@ -603,12 +660,12 @@ def test_stamp_bootstrap_rejects_redirected_admission_sources(adapter, tmp_path)
         adapter.bootstrap(payload, stamp=True)
 
 
-def test_stamp_bootstrap_refuses_missing_admission_sources(adapter, tmp_path):
+def test_stamp_bootstrap_refuses_missing_admission_sources(adapter: ModuleType, tmp_path: Path) -> None:
     with pytest.raises(RuntimeError, match="ordinary admission sources"):
         adapter.bootstrap(tmp_path / "payload", stamp=True)
 
 
-def test_stamp_source_refuses_nonfile_metadata(adapter, tmp_path):
+def test_stamp_source_refuses_nonfile_metadata(adapter: ModuleType, tmp_path: Path) -> None:
     payload = tmp_path / "payload"
     payload.mkdir()
     (payload / "plugin.json").write_text('{"name":"agent-worktrees"}', encoding="utf-8")
@@ -620,8 +677,8 @@ def test_stamp_source_refuses_nonfile_metadata(adapter, tmp_path):
 @pytest.mark.parametrize("action", ["install", "repair"])
 @pytest.mark.parametrize("input_timeout", [None, 1234.5])
 def test_native_source_installation_retains_selection_through_the_driver(
-    adapter, tmp_path, monkeypatch, action, input_timeout,
-):
+    adapter: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, action: str, input_timeout: None | float,
+) -> None:
     monkeypatch.setattr(adapter, "_source_digest", lambda payload: "a" * 64)
     monkeypatch.delenv("COPILOT_EXTENSIONS_COMMAND_LIFECYCLE", raising=False)
     monkeypatch.delenv("COPILOT_EXTENSIONS_RUNTIME_PUBLICATION", raising=False)
@@ -631,10 +688,10 @@ def test_native_source_installation_retains_selection_through_the_driver(
         tmp_path, action=action, install_source=snapshot, source_descriptor=descriptor,
         input_timeout=input_timeout,
     )
-    queued = []
+    queued: list[tuple[core.RequestSpec, core.TrustedRunner]] = []
     driver = SimpleNamespace(
         RequestSpec=core.RequestSpec, TrustedRunner=core.TrustedRunner,
-        enqueue=lambda spec, **kwargs: queued.append((spec, kwargs["runner"])) or SimpleNamespace(id="request"),
+        enqueue=lambda spec, **kwargs: _record_request(queued, spec, kwargs["runner"]),
         drain=Mock(), wait=Mock(return_value=SimpleNamespace(state="completed", exit_code=0)),
     )
     assert adapter._foreground(args, driver) == 0
@@ -655,14 +712,14 @@ def test_native_source_installation_retains_selection_through_the_driver(
 
 
 @pytest.mark.parametrize("action", ["install", "update"])
-def test_native_runtime_only_survives_driver_admission(adapter, tmp_path, monkeypatch, action):
+def test_native_runtime_only_survives_driver_admission(adapter: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, action: str) -> None:
     monkeypatch.setattr(adapter, "_source_digest", lambda payload: "a" * 64)
     monkeypatch.delenv("COPILOT_EXTENSIONS_COMMAND_LIFECYCLE", raising=False)
     monkeypatch.delenv("COPILOT_EXTENSIONS_RUNTIME_PUBLICATION", raising=False)
-    queued = []
+    queued: list[tuple[core.RequestSpec, core.TrustedRunner]] = []
     driver = SimpleNamespace(
         RequestSpec=core.RequestSpec, TrustedRunner=core.TrustedRunner,
-        enqueue=lambda spec, **kwargs: queued.append((spec, kwargs["runner"])) or SimpleNamespace(id="request"),
+        enqueue=lambda spec, **kwargs: _record_request(queued, spec, kwargs["runner"]),
         drain=Mock(), wait=Mock(return_value=SimpleNamespace(state="completed", exit_code=0)),
     )
     assert adapter._foreground(_arguments(tmp_path, action=action, runtime_only=True), driver) == 0
@@ -677,8 +734,8 @@ def test_native_runtime_only_survives_driver_admission(adapter, tmp_path, monkey
     ("install", "example"), ("update", ""), ("repair", None), ("uninstall", None),
 ])
 def test_native_runtime_only_refuses_contradictions_before_admission(
-    adapter, tmp_path, monkeypatch, capsys, action, project,
-):
+    adapter: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], action: str, project: None | str,
+) -> None:
     bootstrap = Mock()
     monkeypatch.setattr(adapter, "bootstrap", bootstrap)
     argv = [
@@ -697,8 +754,8 @@ def test_native_runtime_only_refuses_contradictions_before_admission(
 
 @pytest.mark.parametrize("value", ["0", "-1", "nan", "inf", "-inf"])
 def test_native_input_timeout_refuses_invalid_budget_before_admission(
-    adapter, tmp_path, monkeypatch, value, capsys,
-):
+    adapter: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, value: str, capsys: pytest.CaptureFixture[str],
+) -> None:
     bootstrap = Mock()
     monkeypatch.setattr(adapter, "bootstrap", bootstrap)
     with pytest.raises(SystemExit) as failure:
@@ -715,8 +772,8 @@ def test_native_input_timeout_refuses_invalid_budget_before_admission(
 
 @pytest.mark.parametrize("action", ["uninstall", "dev", "dev-release"])
 def test_native_driver_refuses_source_selection_for_other_actions(
-    adapter, tmp_path, monkeypatch, action, capsys,
-):
+    adapter: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, action: str, capsys: pytest.CaptureFixture[str],
+) -> None:
     bootstrap = Mock()
     monkeypatch.setattr(adapter, "bootstrap", bootstrap)
     with pytest.raises(SystemExit) as failure:
@@ -734,8 +791,8 @@ def test_native_driver_refuses_source_selection_for_other_actions(
     "COPILOT_EXTENSIONS_COMMAND_LIFECYCLE", "COPILOT_EXTENSIONS_RUNTIME_PUBLICATION",
 ])
 def test_cold_native_entry_never_waits_for_the_driver_under_publication_custody(
-    adapter, tmp_path, monkeypatch, ticket,
-):
+    adapter: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ticket: str,
+) -> None:
     monkeypatch.setenv(ticket, "live-only-not-journaled")
     driver = SimpleNamespace(enqueue=Mock())
     with pytest.raises(RuntimeError, match="precede publication custody"):
@@ -746,8 +803,8 @@ def test_cold_native_entry_never_waits_for_the_driver_under_publication_custody(
 @pytest.mark.skipif(os.name != "nt", reason="Windows installed dev-release entry")
 @pytest.mark.parametrize("as_json", [False, True])
 def test_public_dev_release_uses_the_existing_json_execution_boundary(
-    tmp_path, monkeypatch, capsys, as_json,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], as_json: bool,
+) -> None:
     import argparse
     from contextlib import contextmanager
     from agent_worktrees import runtime_dev_cli, update_driver_json_cli
@@ -756,12 +813,12 @@ def test_public_dev_release_uses_the_existing_json_execution_boundary(
     owner = tmp_path / "absent-owner"
     root = tmp_path / "runtime"
     slot = root / "versions" / "dev"
-    monkeypatch.setattr(runtime_dev_cli.sys, "prefix", str(slot))
-    monkeypatch.setattr(runtime_dev_cli.cfg, "install_dir", lambda: root)
+    monkeypatch.setattr(sys, "prefix", str(slot))
+    monkeypatch.setattr(cfg, "install_dir", lambda: root)
     seen = []
 
     @contextmanager
-    def retain(requested, version):
+    def retain(requested: Any, version: Any) -> Iterator[Any]:
         assert requested == root and version == "dev"
         seen.append("retained")
         try:
@@ -769,15 +826,15 @@ def test_public_dev_release_uses_the_existing_json_execution_boundary(
         finally:
             seen.append("released")
 
-    def run(verb, flags, args, execute, *, retained_dev):
+    def run(verb: Any, flags: Any, args: Any, execute: Any, *, retained_dev: Any) -> Any:
         assert verb == "dev-release" and flags == ["--json", "--owner", str(owner)]
         assert args.json is True and args.owner == owner
         assert retained_dev and seen == ["retained"]
         seen.append(verb)
         return execute(args)
 
-    def release(args):
-        runtime_dev_cli.output._json_output({"runtime_version": "1.2.3"})
+    def release(args: Any) -> Any:
+        output._json_output({"runtime_version": "1.2.3"})
         return 0
 
     monkeypatch.setattr(update_driver_json_cli, "_run_request", run)
@@ -785,29 +842,29 @@ def test_public_dev_release_uses_the_existing_json_execution_boundary(
         runtime=SimpleNamespace(retention_lease=retain),
     ))
     monkeypatch.setattr(runtime_dev_cli, "_cmd_dev_release", release)
-    with runtime_dev_cli.output.capture_json_output() as captured:
+    with output.capture_json_output() as captured:
         assert runtime_dev_cli.cmd_dev_release(argparse.Namespace(owner=owner, json=as_json)) == 0
-    output = captured.getvalue() if as_json else capsys.readouterr().out
+    text = captured.getvalue() if as_json else capsys.readouterr().out
     if as_json:
-        assert json.loads(output)["runtime_version"] == "1.2.3"
+        assert json.loads(text)["runtime_version"] == "1.2.3"
     else:
-        assert "current-version -> 1.2.3" in output
+        assert "current-version -> 1.2.3" in text
     assert seen == ["retained", "dev-release", "released"]
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows installed dev-release entry")
-def test_public_dev_release_reports_retention_failure_as_json(tmp_path, monkeypatch):
+def test_public_dev_release_reports_retention_failure_as_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import argparse
     from contextlib import contextmanager
     from agent_worktrees import runtime_dev_cli, update_driver_json_cli
 
     monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
     root = tmp_path / "runtime"
-    monkeypatch.setattr(runtime_dev_cli.sys, "prefix", str(root / "versions" / "dev"))
-    monkeypatch.setattr(runtime_dev_cli.cfg, "install_dir", lambda: root)
+    monkeypatch.setattr(sys, "prefix", str(root / "versions" / "dev"))
+    monkeypatch.setattr(cfg, "install_dir", lambda: root)
 
     @contextmanager
-    def retain(*args):
+    def retain(*args: Any) -> Iterator[Any]:
         raise RuntimeError("retention unavailable")
         yield
 
@@ -815,7 +872,7 @@ def test_public_dev_release_reports_retention_failure_as_json(tmp_path, monkeypa
         runtime=SimpleNamespace(retention_lease=retain),
     ))
     monkeypatch.setattr(update_driver_json_cli, "_run_request", lambda *a, **k: pytest.fail("unretained execution"))
-    with runtime_dev_cli.output.capture_json_output() as captured:
+    with output.capture_json_output() as captured:
         assert runtime_dev_cli.cmd_dev_release(argparse.Namespace(json=True)) == 1
     assert json.loads(captured.getvalue())["error"] == "retention unavailable"
 
@@ -825,8 +882,8 @@ def test_public_dev_release_reports_retention_failure_as_json(tmp_path, monkeypa
 @pytest.mark.parametrize("scoped", [False, True])
 @pytest.mark.parametrize("check", [False, True])
 def test_native_handoff_reexports_live_custody_without_another_queue(
-    adapter, tmp_path, monkeypatch, scoped, check, backend,
-):
+    adapter: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scoped: bool, check: bool, backend: str,
+) -> None:
     args = _arguments(tmp_path, check_native=check)
     request = core.enqueue(
         core.RequestSpec(backend),
@@ -834,10 +891,10 @@ def test_native_handoff_reexports_live_custody_without_another_queue(
     )
     calls = []
 
-    def spawn(command, **options):
+    def spawn(command: Any, **options: Any) -> Any:
         assert command[:1] == [str(args.shell)]
         assert command[-4:] == ["-Action", "install", "-InstallDir", str(args.root)]
-        assert options["creationflags"] == subprocess.CREATE_NO_WINDOW
+        assert options["creationflags"] == getattr(subprocess, "CREATE_NO_WINDOW", 0)
         assert options["stdout"] is sys.stdout and options["stderr"] is sys.stderr
         assert ENVIRONMENT_KEY not in os.environ
         assert options["env"][adapter.NATIVE_ENV] == "1"
@@ -849,20 +906,22 @@ def test_native_handoff_reexports_live_custody_without_another_queue(
     monkeypatch.setattr(adapter.subprocess, "Popen", spawn)
     monkeypatch.setattr(adapter, "_source_digest", lambda payload: pytest.fail("engine owner must not enqueue"))
 
-    def execute(transaction):
+    def execute(transaction: Any) -> Any:
         monkeypatch.setenv(ENVIRONMENT_KEY, transaction.participant_env()[ENVIRONMENT_KEY])
         if scoped:
-            with borrowed_custody(root=core.default_root()):
+            owner = borrowed_custody(root=core.default_root())
+            assert owner is not None
+            with owner:
                 return adapter._execute(args)
         return adapter._execute(args)
 
     assert core.drain(executor=execute) == 0
-    assert core.status(request.id).state == "completed"
+    assert _status(request.id).state == "completed"
     assert len(calls) == (0 if check else 1)
 
 
 @pytest.mark.parametrize("changed", ["source", "root", "arguments", "backend", None])
-def test_native_participant_checks_exact_admitted_installation(adapter, tmp_path, monkeypatch, changed):
+def test_native_participant_checks_exact_admitted_installation(adapter: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, changed: None | str) -> None:
     args = _arguments(tmp_path, check_native=True)
     monkeypatch.setattr(adapter, "_source_digest", lambda payload: "a" * 64)
     request = core.enqueue(
@@ -875,7 +934,7 @@ def test_native_participant_checks_exact_admitted_installation(adapter, tmp_path
         runner=core.TrustedRunner((sys.executable, "-c", "pass"), str(tmp_path)),
     )
 
-    def execute(transaction):
+    def execute(transaction: Any) -> Any:
         monkeypatch.setenv(ENVIRONMENT_KEY, transaction.participant_env()[ENVIRONMENT_KEY])
         return adapter._execute(args)
 
@@ -884,11 +943,11 @@ def test_native_participant_checks_exact_admitted_installation(adapter, tmp_path
     else:
         with pytest.raises(RuntimeError, match="unclosed participants"):
             core.drain(executor=execute)
-    assert core.status(request.id).state == ("completed" if changed is None else "interrupted")
+    assert _status(request.id).state == ("completed" if changed is None else "interrupted")
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows native installation")
-def test_missing_custody_refuses_before_native_execution(adapter, tmp_path, monkeypatch):
+def test_missing_custody_refuses_before_native_execution(adapter: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     spawn = Mock()
     monkeypatch.setattr(adapter.subprocess, "Popen", spawn)
     with pytest.raises(RuntimeError, match="live driver custody"):
@@ -901,8 +960,8 @@ def test_missing_custody_refuses_before_native_execution(adapter, tmp_path, monk
 @pytest.mark.parametrize("check", [False, True])
 @pytest.mark.parametrize("staged", [False, True])
 def test_native_uninstall_admits_then_removes_broker_before_finite_code(
-    adapter, tmp_path, monkeypatch, check, staged,
-):
+    adapter: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, check: bool, staged: bool,
+) -> None:
     from update_driver import windows_broker
 
     args = _arguments(
@@ -917,7 +976,7 @@ def test_native_uninstall_admits_then_removes_broker_before_finite_code(
         monkeypatch.delenv("COPILOT_PLUGIN_STAGED_FROM", raising=False)
     phases = []
 
-    def cleanup(**arguments):
+    def cleanup(**arguments: Any) -> Any:
         assert arguments["root"] == args.root
         assert arguments["profile"] == SCRIPTS / "uninstall-profile.json"
         assert arguments["profile"].is_file()
@@ -937,26 +996,26 @@ def test_native_uninstall_admits_then_removes_broker_before_finite_code(
         runner=core.TrustedRunner((sys.executable, "-c", "pass"), str(tmp_path)),
     )
 
-    def execute(transaction):
+    def execute(transaction: Any) -> Any:
         monkeypatch.setenv(ENVIRONMENT_KEY, transaction.participant_env()[ENVIRONMENT_KEY])
         return adapter._execute(args)
 
     assert core.drain(executor=execute) == 0
-    assert core.status(request.id).state == "completed"
+    assert _status(request.id).state == "completed"
     assert phases == (["admit"] if check else ["admit", "broker", "finite"])
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows native removal custody")
 @pytest.mark.parametrize("failure", ["admit", "broker"])
 def test_failed_native_uninstall_admission_or_broker_removal_retains_runtime(
-    adapter, tmp_path, monkeypatch, failure,
-):
+    adapter: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str,
+) -> None:
     from update_driver import windows_broker
 
     phases = []
     args = _arguments(tmp_path, action="uninstall", remove_runtime=True)
 
-    def phase(name):
+    def phase(name: Any) -> Any:
         phases.append(name)
         if name == failure:
             raise RuntimeError("retained removal obligation")
@@ -971,20 +1030,20 @@ def test_failed_native_uninstall_admission_or_broker_removal_retains_runtime(
         runner=core.TrustedRunner((sys.executable, "-c", "pass"), str(tmp_path)),
     )
 
-    def execute(transaction):
+    def execute(transaction: Any) -> Any:
         monkeypatch.setenv(ENVIRONMENT_KEY, transaction.participant_env()[ENVIRONMENT_KEY])
         return adapter._execute(args)
 
     with pytest.raises(RuntimeError, match="unclosed participants"):
         core.drain(executor=execute)
-    assert core.status(request.id).state == "interrupted"
+    assert _status(request.id).state == "interrupted"
     assert phases == (["admit"] if failure == "admit" else ["admit", "broker"])
     assert not args.root.exists()
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows adoption adapter")
 @pytest.mark.parametrize("scoped", [False, True])
-def test_broker_adoption_uses_the_retained_installed_entry(adapter, tmp_path, monkeypatch, scoped):
+def test_broker_adoption_uses_the_retained_installed_entry(adapter: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scoped: bool) -> None:
     import versioned_runtime as runtime
 
     monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
@@ -996,7 +1055,7 @@ def test_broker_adoption_uses_the_retained_installed_entry(adapter, tmp_path, mo
         runner=core.TrustedRunner((sys.executable, "-c", "pass"), str(tmp_path)),
     )
 
-    def spawn(command, **options):
+    def spawn(command: Any, **options: Any) -> Any:
         assert command == [
             str(interpreter), "-I", "-m", "update_driver.windows_broker",
             "--runtime-root", str(root), "--slot", str(slot),
@@ -1009,20 +1068,22 @@ def test_broker_adoption_uses_the_retained_installed_entry(adapter, tmp_path, mo
 
     monkeypatch.setattr(adapter.subprocess, "Popen", spawn)
 
-    def execute(transaction):
+    def execute(transaction: Any) -> Any:
         monkeypatch.setenv(ENVIRONMENT_KEY, transaction.participant_env()[ENVIRONMENT_KEY])
         if scoped:
-            with borrowed_custody(root=core.default_root()):
+            owner = borrowed_custody(root=core.default_root())
+            assert owner is not None
+            with owner:
                 adapter.adopt_broker(root, slot)
         else:
             adapter.adopt_broker(root, slot)
         return 0
 
     assert core.drain(executor=execute) == 0
-    assert core.status(request.id).state == "completed"
+    assert _status(request.id).state == "completed"
 
 
-def test_contained_installation_does_not_register_a_host_task(adapter, tmp_path, monkeypatch):
+def test_contained_installation_does_not_register_a_host_task(adapter: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("COPILOT_EXTENSIONS_TEST_CONTAINED", "1")
     spawn = Mock()
     monkeypatch.setattr(adapter.subprocess, "Popen", spawn)
@@ -1031,14 +1092,14 @@ def test_contained_installation_does_not_register_a_host_task(adapter, tmp_path,
     assert not core.default_root().exists()
 
 
-def test_unowned_bootstrap_environment_never_requires_installed_driver_dependencies(adapter, monkeypatch):
+def test_unowned_bootstrap_environment_never_requires_installed_driver_dependencies(adapter: ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delitem(sys.modules, "update_driver")
     monkeypatch.setenv("BOOTSTRAP_CONTEXT", "preserved")
     assert adapter.child_environment()["BOOTSTRAP_CONTEXT"] == "preserved"
     assert "update_driver" not in sys.modules
 
 
-def test_installer_runner_reexports_only_the_scoped_witness(adapter, tmp_path, monkeypatch):
+def test_installer_runner_reexports_only_the_scoped_witness(adapter: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_worktrees import installer_run
 
     request = core.enqueue(
@@ -1047,7 +1108,7 @@ def test_installer_runner_reexports_only_the_scoped_witness(adapter, tmp_path, m
     )
     seen = []
 
-    def spawn(argv, cwd, env, capture, **kwargs):
+    def spawn(argv: Any, cwd: Any, env: Any, capture: Any, **kwargs: Any) -> Any:
         assert ENVIRONMENT_KEY not in os.environ
         assert env["TARGET_CONTEXT"] == "preserved"
         with participant(root=core.default_root(), witness=env[ENVIRONMENT_KEY]) as child:
@@ -1057,9 +1118,11 @@ def test_installer_runner_reexports_only_the_scoped_witness(adapter, tmp_path, m
 
     monkeypatch.setattr(installer_run, "_spawn", spawn)
 
-    def execute(transaction):
+    def execute(transaction: Any) -> Any:
         monkeypatch.setenv(ENVIRONMENT_KEY, transaction.participant_env()[ENVIRONMENT_KEY])
-        with borrowed_custody(root=core.default_root()):
+        owner = borrowed_custody(root=core.default_root())
+        assert owner is not None
+        with owner:
             result = installer_run.run_installer(
                 ["installer"], cwd=tmp_path, env={"TARGET_CONTEXT": "preserved"}, deadline_s=5,
             )
@@ -1067,15 +1130,15 @@ def test_installer_runner_reexports_only_the_scoped_witness(adapter, tmp_path, m
         return 0
 
     assert core.drain(executor=execute) == 0
-    assert core.status(request.id).state == "completed"
+    assert _status(request.id).state == "completed"
     assert seen == [["installer"]]
 
 
 @pytest.mark.skipif(os.name != "nt", reason="actual Windows native driver entry")
 @pytest.mark.parametrize("abandoned,runtime_only", [(False, False), (False, True), (True, False)])
 def test_real_cold_driver_and_native_reentry_use_the_same_owner(
-    adapter, tmp_path, monkeypatch, abandoned, runtime_only,
-):
+    adapter: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, abandoned: bool, runtime_only: bool,
+) -> None:
     """Use a copied fixed no-install shell, never the product installer."""
     from agent_procutil.owned_process import run_owned
 
@@ -1146,8 +1209,8 @@ def test_real_cold_driver_and_native_reentry_use_the_same_owner(
             "exit $LASTEXITCODE\n",
             encoding="utf-8",
         )
-    def report_progress():
-        rows = core.status(root=Path.home() / ".copilot-extensions" / "update-driver")
+    def report_progress() -> Any:
+        rows = _status(root=Path.home() / ".copilot-extensions" / "update-driver")
         print(f"native-driver-progress requests={len(rows)}", flush=True)
         for row in rows:
             print(f"native-driver-progress state={row.state} error={row.error}", flush=True)
@@ -1170,7 +1233,7 @@ def test_real_cold_driver_and_native_reentry_use_the_same_owner(
     if abandoned:
         assert result.returncode != 0
         assert not receipt.exists()
-        rows = core.status(root=Path.home() / ".copilot-extensions" / "update-driver")
+        rows = _status(root=Path.home() / ".copilot-extensions" / "update-driver")
         assert len(rows) == 1 and rows[0].state == "interrupted"
         assert rows[0].exit_code is None and rows[0].settled_at is None
         log = rows[0].log_path.read_text(encoding="utf-8")
@@ -1183,7 +1246,7 @@ def test_real_cold_driver_and_native_reentry_use_the_same_owner(
         "deadline": "7", "globalDeadline": "500",
         "runtimeOnly": runtime_only,
     }
-    rows = core.status(root=Path.home() / ".copilot-extensions" / "update-driver")
+    rows = _status(root=Path.home() / ".copilot-extensions" / "update-driver")
     assert len(rows) == 1 and rows[0].state == "completed"
     assert rows[0].exit_code == 0 and rows[0].error is None
     log = rows[0].log_path.read_text(encoding="utf-8")

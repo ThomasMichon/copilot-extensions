@@ -644,6 +644,7 @@ def test_external_state_root_suppresses_console_for_resolved_command(
     monkeypatch.setattr(
         module, "_worktrees_command", lambda: r"C:\bin\agent-worktrees.CMD"
     )
+    module._probe_support()  # Resolve native files before emulating the Windows launch branch.
     monkeypatch.setattr(module.os, "name", "nt")
     captured: dict[str, dict[str, object] | list[str]] = {}
 
