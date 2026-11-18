@@ -381,7 +381,9 @@ The internal installed-definition renderer can now describe an immutable Linux
 service/timer pair bound to one runtime generation and local UID. Unlike
 `prepare-job`, this action invokes the slot's retained bootstrap and
 `agent_machines.health_job` directly, without Bash, payload lookup, provisioning
-or a GUI interpreter. The finite root uses the existing 55-second owned budget
+or a GUI interpreter. It requires the retained owner's canonical `bin/python`,
+not a `python3` or versioned executable alias.
+The finite root uses the existing 55-second owned budget
 and five-second cleanup reserve. Collection support must come from exactly one
 package beneath that selected virtual environment's Linux `lib/python3.x`
 directory; missing, ambiguous or unsupported declarations refuse before launch.

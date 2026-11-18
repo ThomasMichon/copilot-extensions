@@ -40,6 +40,8 @@ def test_installed_pair_pins_the_retained_finite_action_without_payload_or_accou
     ("/example/versions/../1.2", "/example/versions/../1.2/bin/python"),
     ("/example/versions/1.2", "/usr/bin/python3"),
     ("/example/versions/1.2", "/example/versions/1.2/bin/bash"),
+    ("/example/versions/1.2", "/example/versions/1.2/bin/python3"),
+    ("/example/versions/1.2", "/example/versions/1.2/.venv/bin/python3.13"),
 ])
 def test_pair_refuses_mutable_or_unbound_closures(slot: str, python: str) -> None:
     with pytest.raises(jobs.JobError, match="immutable-job-runtime-required"):

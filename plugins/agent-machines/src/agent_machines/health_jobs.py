@@ -205,7 +205,7 @@ def installed_linux_definition(
         not directory.is_absolute() or directory.parent.name != "versions"
         or directory.name in {"", ".", "..", "dev"} or ".." in directory.parts
         or interpreter.parent not in {directory / "bin", directory / ".venv" / "bin"}
-        or re.fullmatch(r"python(?:3(?:\.[0-9]+)?)?", interpreter.name) is None
+        or interpreter.name != "python"
     ):
         raise JobError("immutable-job-runtime-required")
     if type(account_uid) is not int or account_uid < 0 or type(enabled) is not bool:
