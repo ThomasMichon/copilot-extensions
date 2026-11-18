@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from contextvars import ContextVar
 import re
-from typing import Any
+from typing import Any, overload
 from urllib.parse import unquote
 
 last_result: ContextVar[dict[str, Any] | None] = ContextVar("publication_label_result", default=None)
@@ -29,6 +29,14 @@ def parse_origin(raw: Any) -> PublicationOrigin | None:
                    for label in labels)):
         raise ValueError("publication_origin.labels must be nonempty label strings")
     return PublicationOrigin(identity, tuple(dict.fromkeys(labels)))
+
+
+@overload
+def origin_dict(origin: PublicationOrigin) -> dict[str, Any]: ...
+
+
+@overload
+def origin_dict(origin: None) -> None: ...
 
 
 def origin_dict(origin: PublicationOrigin | None) -> dict[str, Any] | None:

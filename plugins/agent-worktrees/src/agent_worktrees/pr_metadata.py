@@ -90,7 +90,8 @@ def update(config: Config, repo: str, number: int, *, title: str | None = None,
     if origin is not None:
         pr_publication_labels.validate_policy(prcfg, origin)
     provider = providers.get_provider(prcfg.provider)
-    if prcfg.provider == "github":
+    operation = getattr(provider, "update_pull_metadata", None)
+    if prcfg.provider == "github" and operation is None:
         from .providers import github_metadata
         token = providers.account_token_for_slug(repo, prcfg)
         return github_metadata.update(
@@ -98,7 +99,6 @@ def update(config: Config, repo: str, number: int, *, title: str | None = None,
             reviewers=reviewers, work_items=work_items, origin=origin,
             api_base=prcfg.api_base, token=token, run=providers.run_cli,
         )
-    operation = getattr(provider, "update_pull_metadata", None)
     if operation is None:
         raise ProviderError(f"{prcfg.provider} does not support author metadata updates")
     token = providers.account_token_for_slug(repo, prcfg)

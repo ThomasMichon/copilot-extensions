@@ -55,6 +55,8 @@ def cmd_publication_labels(args: argparse.Namespace) -> int:
             if target is None or target.number is None:
                 raise ValueError("Repair needs a tracked existing PR")
             result = labels.refresh(config, record, target) or {"ok": True, "skipped": "no publication origin"}
+        if result is None:
+            raise ValueError("Publication-label repair returned no outcome")
         output._json_output(result) if args.json else print(result)
         return 0 if result["ok"] else 1
     except (ValueError, OSError, providers.ProviderError) as exc:

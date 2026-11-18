@@ -75,7 +75,8 @@ def _valid(payload: Any, args: Any) -> bool:
         return False
     if success:
         if (
-            not isinstance(result, dict) or result.get("success") is not True
+            not isinstance(result, dict) or not isinstance(source, dict)
+            or result.get("success") is not True
             or result.get("worktree_id") != source["worktree_id"]
             or result.get("branch") != args.expected_branch
             or result.get("action") not in ("up-to-date", "fast-forwarded", "reset-past-squash", "rebased")
