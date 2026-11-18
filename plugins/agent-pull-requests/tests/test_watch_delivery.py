@@ -8,7 +8,11 @@ import subprocess
 import sys
 import threading
 import time
+from argparse import Namespace
+from collections.abc import Callable, Iterator
+from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, NoReturn, Protocol
 
 import pytest
 from agent_procutil import no_window_kwargs
@@ -18,15 +22,19 @@ from agent_pull_requests.watch_daemon import WatchDaemon, read_subscriptions_sta
 from agent_pull_requests.watch_notification import (
     ACKNOWLEDGED_NOTIFICATIONS as PROTOCOL, default_notify, event_payload,
 )
-from agent_pull_requests.watch_registry import WatchKey, WatchRegistry
+from agent_pull_requests.watch_registry import FiredEvent, WatchKey, WatchRegistry
 from agent_pull_requests.watch_storage import write_subscriptions_state
 from agent_pull_requests.watch_subscription import subscribe
 
 pytestmark = pytest.mark.contract("agent_pull_requests.watch.acknowledged_delivery")
 
 
-def wait(predicate, timeout=3):
-    def ready():
+class DaemonFactory(Protocol):
+    def __call__(self, **kwargs: Any) -> WatchDaemon: ...
+
+
+def wait(predicate: Callable[[], object], timeout: float = 3) -> None:
+    def ready() -> object:
         try:
             return predicate()
         except IndexError:
@@ -40,7 +48,7 @@ def wait(predicate, timeout=3):
     assert ready()
 
 
-def spec(identity="one", **changes):
+def spec(identity: str = "one", **changes: Any) -> dict[str, Any]:
     return {
         "repo": "example/project", "number": 1, "subscriber_id": identity,
         "until": [MERGED], "notify": {"argv": [sys.executable, "consumer.py"]},
@@ -49,11 +57,11 @@ def spec(identity="one", **changes):
 
 
 @pytest.fixture
-def make(tmp_path, monkeypatch):
+def make(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[DaemonFactory]:
     monkeypatch.setenv("AGENT_PULL_REQUESTS_HOME", str(tmp_path))
-    daemons = []
+    daemons: list[WatchDaemon] = []
 
-    def create(**kwargs):
+    def create(**kwargs: Any) -> WatchDaemon:
         daemon = WatchDaemon(
             fetch=kwargs.pop("fetch", lambda *_: PRSnapshot(merged=True, pr_state="closed")),
             poll_interval=0.01, idle_exit=0.01, **kwargs,
@@ -67,7 +75,7 @@ def make(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("code", [0, 7])
-def test_actual_callback_stdin_and_exit_code(tmp_path, code):
+def test_actual_callback_stdin_and_exit_code(tmp_path: Path, code: int) -> None:
     output = tmp_path / "callback.json"
     registry = WatchRegistry()
     registry.register(
@@ -88,17 +96,155 @@ def test_actual_callback_stdin_and_exit_code(tmp_path, code):
     assert expected["transitions"] == ["merged"] and expected["merged"] is True
 
 
-def test_acknowledged_callback_owns_tree_without_worktrees_provider(monkeypatch):
+@pytest.mark.parametrize("code", [0, 7])
+def test_legacy_callback_history_records_actual_exit_without_changing_wire(
+    make: DaemonFactory, tmp_path: Path, code: int,
+) -> None:
+    output = tmp_path / "legacy.json"
+    daemon = make()
+    registration = spec(notify={"argv": [
+        sys.executable, "-c",
+        "import pathlib,sys; pathlib.Path(sys.argv[1]).write_text(sys.stdin.read());"
+        "sys.exit(int(sys.argv[2]))",
+        str(output), str(code),
+    ]})
+    del registration["notification_protocol"]
+    assert daemon.compute("register", registration) == {"registered": True}
+    wait(lambda: daemon.compute("status", {})["legacy_callback_history"]["outcomes"])
+    history = daemon.status()["legacy_callback_history"]
+    result = history["outcomes"][0]
+    assert result["outcome"] == ("completed" if code == 0 else "failed")
+    assert result["error"] == (None if code == 0 else "callback_nonzero")
+    assert result["repo"] == "example/project"
+    assert result["subscriber_id"] == "one"
+    assert result["registration_id"]
+    payload = json.loads(output.read_text())
+    assert payload["subscriber_id"] == "one" and payload["transitions"] == ["merged"]
+    assert "notification_protocol" not in payload and "event_id" not in payload
+    daemon.close()
+    assert daemon.status()["pending_deliveries"] == []
+    assert daemon.status()["legacy_callback_history"] == history
+    assert read_subscriptions_state() == []
+    assert str(output) not in json.dumps(history)
+    restored = make()
+    assert restored.status()["legacy_callback_history"]["outcomes"] == []
+
+
+@pytest.mark.parametrize("failure,error", [
+    ("timeout", "callback_timeout"),
+    ("exception", "callback_error"),
+    ("no_result", "callback_result_unknown"),
+])
+def test_legacy_callback_history_exposes_unknown_without_retry_or_private_errors(
+    make: DaemonFactory, failure: str, error: str,
+) -> None:
+    calls: list[FiredEvent] = []
+
+    def notify(event: FiredEvent) -> None:
+        calls.append(event)
+        if failure == "timeout":
+            raise subprocess.TimeoutExpired("private-callback-command", 1)
+        if failure == "exception":
+            raise OSError("private-callback-diagnostic")
+        return None
+
+    daemon = make(notify=notify)
+    registration = spec()
+    del registration["notification_protocol"]
+    daemon.compute("register", registration)
+    wait(lambda: daemon.status()["legacy_callback_history"]["outcomes"])
+    daemon.close()
+    history = daemon.status()["legacy_callback_history"]
+    assert len(calls) == len(history["outcomes"]) == 1
+    assert history["outcomes"][0]["outcome"] == "unknown"
+    assert history["outcomes"][0]["error"] == error
+    assert "private-callback" not in json.dumps(history)
+    assert daemon.status()["pending_deliveries"] == []
+    assert read_subscriptions_state() == []
+
+
+@pytest.mark.parametrize("failure,error", [
+    ("launch-error", "callback_error"),
+    ("timeout", "callback_timeout"),
+])
+def test_real_legacy_callback_failures_are_unknown_without_durable_retry(
+    make: DaemonFactory, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    failure: str, error: str,
+) -> None:
     from agent_pull_requests import watch_notification
 
-    calls = []
+    missing = tmp_path / "private-callback-missing.exe"
+    assert not missing.exists()
+    callback = "import time; time.sleep(30) # private-callback-command"
+    argv = (
+        [sys.executable, "-c", callback]
+        if failure == "timeout" else [str(missing)]
+    )
+    monkeypatch.setattr(watch_notification, "CALLBACK_TIMEOUT", 0.1)
+    daemon = make(notify=default_notify)
+    registration = spec(notify={"argv": argv})
+    del registration["notification_protocol"]
+    assert daemon.compute("register", registration) == {"registered": True}
+    wait(lambda: daemon.status()["legacy_callback_history"]["outcomes"])
+    daemon.close()
 
-    def owned(argv, **kwargs):
+    history = daemon.status()["legacy_callback_history"]
+    assert len(history["outcomes"]) == 1
+    assert history["outcomes"][0]["outcome"] == "unknown"
+    assert history["outcomes"][0]["error"] == error
+    assert "private-callback" not in json.dumps(history)
+    assert str(tmp_path) not in json.dumps(history)
+    assert daemon.status()["pending_deliveries"] == []
+    assert daemon.status()["subscribers"] == {}
+    assert not daemon._deliveries.workers
+    assert read_subscriptions_state() == []
+    time.sleep(0.1)
+    assert daemon.status()["legacy_callback_history"] == history
+    assert not daemon._deliveries.workers
+    assert read_subscriptions_state() == []
+    restored = make(notify=default_notify)
+    assert restored.status()["legacy_callback_history"]["outcomes"] == []
+
+
+def test_legacy_callback_history_bounds_retention_and_identity_without_mutating_snapshot(
+    make: DaemonFactory,
+) -> None:
+    daemon = make(notify=lambda _event: 7)
+    deliveries = daemon._deliveries
+    limit = daemon.status()["legacy_callback_history"]["limit"]
+    registry = WatchRegistry()
+    key = WatchKey("example/" + "r" * 1000, 1)
+    for index in range(limit + 2):
+        registry.register(key, str(index) + "s" * 1000, until=(MERGED,), notify={})
+        event = registry.apply_snapshot(key, PRSnapshot(merged=True))[0]
+        deliveries._run_legacy(event)
+    history = daemon.status()["legacy_callback_history"]
+    assert history["protocol"] == "legacy_callback_history/v1"
+    assert history["retention"] == "process-local"
+    assert history["evicted"] == 2 and len(history["outcomes"]) == limit
+    assert all(
+        result["identity_truncated"] and len(result["repo"]) <= 256
+        and len(result["subscriber_id"]) <= 256
+        for result in history["outcomes"]
+    )
+    assert history["outcomes"][0]["subscriber_id"].startswith("2s")
+    history["outcomes"][0]["error"] = "modified-by-reader"
+    assert daemon.status()["legacy_callback_history"]["outcomes"][0]["error"] == "callback_nonzero"
+
+
+def test_acknowledged_callback_owns_tree_without_worktrees_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_pull_requests import watch_notification
+
+    calls: list[tuple[list[str], dict[str, Any]]] = []
+
+    def owned(argv: list[str], **kwargs: Any) -> SimpleNamespace:
         calls.append((argv, kwargs))
         return SimpleNamespace(returncode=0)
 
     monkeypatch.setattr(watch_notification, "run_owned", owned)
-    monkeypatch.setattr(watch_notification.subprocess, "run", lambda *_a, **_kw: pytest.fail("unowned launch"))
+    monkeypatch.setattr(subprocess, "run", lambda *_a, **_kw: pytest.fail("unowned launch"))
     registry = WatchRegistry()
     key = WatchKey("example/project", 1)
     registry.register(key, "one", until=(MERGED,), acknowledged=True,
@@ -112,11 +258,13 @@ def test_acknowledged_callback_owns_tree_without_worktrees_provider(monkeypatch)
 
 
 @pytest.mark.parametrize("failure", ["nonzero", "timeout", "exception"])
-def test_failed_callback_remains_pending_and_replays_after_restart(make, failure):
-    payloads = []
-    observed_disk = []
+def test_failed_callback_remains_pending_and_replays_after_restart(
+    make: DaemonFactory, failure: str,
+) -> None:
+    payloads: list[dict[str, Any]] = []
+    observed_disk: list[list[dict[str, Any]]] = []
 
-    def fail(event):
+    def fail(event: FiredEvent) -> int:
         payloads.append(json.loads(json.dumps(event_payload(event))))
         observed_disk.append(read_subscriptions_state())
         if failure == "timeout":
@@ -139,7 +287,7 @@ def test_failed_callback_remains_pending_and_replays_after_restart(make, failure
     assert 0 < saved["pending"]["next_attempt"] - time.time() <= 1
     assert "sensitive" not in json.dumps(saved)
 
-    def ack(event):
+    def ack(event: FiredEvent) -> int:
         payloads.append(json.loads(json.dumps(event_payload(event))))
         return 0
 
@@ -149,14 +297,16 @@ def test_failed_callback_remains_pending_and_replays_after_restart(make, failure
     assert read_subscriptions_state() == []
 
 
-def test_local_ack_write_failure_replays_successful_remote_commit(make, monkeypatch):
+def test_local_ack_write_failure_replays_successful_remote_commit(
+    make: DaemonFactory, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_pull_requests import watch_daemon
 
-    committed = []
+    committed: list[dict[str, Any]] = []
     original_write = watch_daemon.write_subscriptions_state
     failed = threading.Event()
 
-    def write(entries):
+    def write(entries: list[dict[str, Any]]) -> None:
         if not entries and not failed.is_set():
             failed.set()
             raise OSError("local ACK write failed after remote commit")
@@ -164,7 +314,7 @@ def test_local_ack_write_failure_replays_successful_remote_commit(make, monkeypa
 
     monkeypatch.setattr(watch_daemon, "write_subscriptions_state", write)
 
-    def ack(event):
+    def ack(event: FiredEvent) -> int:
         committed.append(event_payload(event).copy())
         return 0
 
@@ -177,14 +327,21 @@ def test_local_ack_write_failure_replays_successful_remote_commit(make, monkeypa
     assert daemon.status()["persistence_error"] is None
 
 
-def test_state_write_outage_is_visible_and_never_delivers_before_persistence(make, monkeypatch):
+def test_state_write_outage_is_visible_and_never_delivers_before_persistence(
+    make: DaemonFactory, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_pull_requests import watch_daemon
 
-    calls = []
-    daemon = make(notify=lambda e: calls.append(e) or 0)
+    calls: list[FiredEvent] = []
+
+    def notify(event: FiredEvent) -> int:
+        calls.append(event)
+        return 0
+
+    daemon = make(notify=notify)
     original_write = watch_daemon.write_subscriptions_state
 
-    def fail(entries):
+    def fail(entries: list[dict[str, Any]]) -> NoReturn:
         raise OSError("private filesystem diagnostic")
 
     monkeypatch.setattr(watch_daemon, "write_subscriptions_state", fail)
@@ -201,7 +358,9 @@ def test_state_write_outage_is_visible_and_never_delivers_before_persistence(mak
     assert daemon.status()["persistence_error"] is None
 
 
-def test_failed_replacement_preserves_original_registration(make, monkeypatch):
+def test_failed_replacement_preserves_original_registration(
+    make: DaemonFactory, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_pull_requests import watch_daemon
 
     daemon = make(fetch=lambda *_: PRSnapshot())
@@ -209,7 +368,7 @@ def test_failed_replacement_preserves_original_registration(make, monkeypatch):
     key = WatchKey("example/project", 1)
     original = daemon._registry.subscriber(key, "one")
 
-    def fail(entries):
+    def fail(entries: list[dict[str, Any]]) -> NoReturn:
         raise OSError("state unavailable")
 
     monkeypatch.setattr(watch_daemon, "write_subscriptions_state", fail)
@@ -218,12 +377,14 @@ def test_failed_replacement_preserves_original_registration(make, monkeypatch):
     assert daemon._registry.subscriber(key, "one") is original
     assert read_subscriptions_state()[0]["registration_id"] == first["registration_id"]
 
-def test_failed_cancellation_preserves_pending_registration(make, monkeypatch):
+def test_failed_cancellation_preserves_pending_registration(
+    make: DaemonFactory, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_pull_requests import watch_daemon
 
     entered, release = threading.Event(), threading.Event()
 
-    def notify(event):
+    def notify(event: FiredEvent) -> int:
         entered.set()
         assert release.wait(3)
         return 1
@@ -236,7 +397,7 @@ def test_failed_cancellation_preserves_pending_registration(make, monkeypatch):
     saved = read_subscriptions_state()
     write = watch_daemon.write_subscriptions_state
 
-    def fail(entries):
+    def fail(entries: list[dict[str, Any]]) -> NoReturn:
         raise OSError("cancel write unavailable")
 
     try:
@@ -258,14 +419,16 @@ def test_failed_cancellation_preserves_pending_registration(make, monkeypatch):
     finally:
         release.set()
 
-def test_failed_legacy_fire_write_recovers_without_restart(make, monkeypatch):
+def test_failed_legacy_fire_write_recovers_without_restart(
+    make: DaemonFactory, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_pull_requests import watch_daemon
 
     write = watch_daemon.write_subscriptions_state
     failed = threading.Event()
-    calls = []
+    calls: list[FiredEvent] = []
 
-    def fail_once(entries):
+    def fail_once(entries: list[dict[str, Any]]) -> None:
         if not entries and not failed.is_set():
             failed.set()
             raise OSError("state unavailable")
@@ -280,7 +443,9 @@ def test_failed_legacy_fire_write_recovers_without_restart(make, monkeypatch):
     assert read_subscriptions_state() == []
 
 @pytest.mark.parametrize("operation", ["register", "unregister"])
-def test_post_replace_failure_retains_committed_memory_state(make, monkeypatch, operation):
+def test_post_replace_failure_retains_committed_memory_state(
+    make: DaemonFactory, monkeypatch: pytest.MonkeyPatch, operation: str,
+) -> None:
     from agent_pull_requests import watch_daemon
     from agent_pull_requests.watch_storage import StateCommitUncertain
 
@@ -288,7 +453,7 @@ def test_post_replace_failure_retains_committed_memory_state(make, monkeypatch, 
     old = daemon.compute("register", spec(timeout=60))
     write = watch_daemon.write_subscriptions_state
 
-    def uncertain(entries):
+    def uncertain(entries: list[dict[str, Any]]) -> NoReturn:
         write(entries)
         raise StateCommitUncertain("directory sync failed")
 
@@ -297,6 +462,7 @@ def test_post_replace_failure_retains_committed_memory_state(make, monkeypatch, 
         result = daemon.compute("register", spec(timeout=20))
         assert result["ambiguous_registration"]
         memory = daemon._registry.subscriber(WatchKey("example/project", 1), "one")
+        assert memory is not None
         assert memory.registration_id != old["registration_id"]
         assert memory.registration_id == read_subscriptions_state()[0]["registration_id"]
     else:
@@ -309,7 +475,9 @@ def test_post_replace_failure_retains_committed_memory_state(make, monkeypatch, 
 
 
 @pytest.mark.parametrize("identity", [None, "", False, 1])
-def test_explicit_malformed_cancellation_identity_never_disables_fence(make, identity):
+def test_explicit_malformed_cancellation_identity_never_disables_fence(
+    make: DaemonFactory, identity: str | bool | int | None,
+) -> None:
     daemon = make(fetch=lambda *_: PRSnapshot())
     daemon.compute("register", spec(timeout=60))
     result = daemon.compute("unregister", {
@@ -320,10 +488,12 @@ def test_explicit_malformed_cancellation_identity_never_disables_fence(make, ide
     assert daemon.status()["subscribers"] == {"example/project#1": ["one"]}
 
 
-def test_cli_explicit_empty_cancellation_identity_is_forwarded(monkeypatch, capsys):
+def test_cli_explicit_empty_cancellation_identity_is_forwarded(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     from agent_pull_requests import __main__ as cli
 
-    def request(kind, payload):
+    def request(kind: str, payload: dict[str, Any]) -> dict[str, Any]:
         if kind == "health":
             return {"capabilities": [PROTOCOL]}
         assert kind == "unregister"
@@ -331,25 +501,27 @@ def test_cli_explicit_empty_cancellation_identity_is_forwarded(monkeypatch, caps
         return {"error": "invalid cancellation registration identity"}
 
     monkeypatch.setattr(cli, "_watch_request", request)
-    assert cli._cmd_watch_unsubscribe(SimpleNamespace(
+    assert cli._cmd_watch_unsubscribe(Namespace(
         repo="example/project", number=1, subscriber_id="one", registration_id="", json=True,
     )) == 1
     assert "error" in json.loads(capsys.readouterr().out)
 
 @pytest.mark.parametrize("supported", [True, False])
-def test_fenced_cancellation_requires_capability_and_echo(monkeypatch, capsys, supported):
+def test_fenced_cancellation_requires_capability_and_echo(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], supported: bool,
+) -> None:
     from agent_pull_requests import __main__ as cli
 
-    calls = []
+    calls: list[str] = []
 
-    def request(kind, payload):
+    def request(kind: str, payload: dict[str, Any]) -> dict[str, Any]:
         calls.append(kind)
         if kind == "health":
             return {"capabilities": [PROTOCOL] if supported else []}
         return {"unregistered": True}
 
     monkeypatch.setattr(cli, "_watch_request", request)
-    assert cli._cmd_watch_unsubscribe(SimpleNamespace(
+    assert cli._cmd_watch_unsubscribe(Namespace(
         repo="example/project", number=1, subscriber_id="one", registration_id="old", json=True,
     )) == 1
     result = json.loads(capsys.readouterr().out)
@@ -359,7 +531,7 @@ def test_fenced_cancellation_requires_capability_and_echo(monkeypatch, capsys, s
         assert result["ambiguous_cancellation"]
 
 
-def test_boolean_pending_event_number_fails_closed():
+def test_boolean_pending_event_number_fails_closed() -> None:
     registry = WatchRegistry()
     key = WatchKey("example/project", 1)
     registry.register(key, "one", until=(MERGED,), acknowledged=True,
@@ -371,13 +543,15 @@ def test_boolean_pending_event_number_fails_closed():
         WatchRegistry().restore_state(entries)
 
 @pytest.mark.parametrize("kind", ["register", "unregister"])
-def test_mutation_requests_never_coalesce_different_subscribers(monkeypatch, kind):
+def test_mutation_requests_never_coalesce_different_subscribers(
+    monkeypatch: pytest.MonkeyPatch, kind: str,
+) -> None:
     import work_coalescing_singleton
     from agent_pull_requests import __main__ as cli
 
-    keys = []
+    keys: list[str] = []
 
-    def call(**kwargs):
+    def call(**kwargs: Any) -> dict[str, Any]:
         keys.append(kwargs["key"])
         return {}
 
@@ -386,7 +560,9 @@ def test_mutation_requests_never_coalesce_different_subscribers(monkeypatch, kin
         cli._watch_request(kind, {"repo": "example/project", "number": 1, "subscriber_id": identity})
     assert len(set(keys)) == 3
 
-def test_registration_transport_fallback_reports_ambiguous_mutation(monkeypatch):
+def test_registration_transport_fallback_reports_ambiguous_mutation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import work_coalescing_singleton
     from agent_pull_requests import __main__ as cli
 
@@ -397,29 +573,29 @@ def test_registration_transport_fallback_reports_ambiguous_mutation(monkeypatch)
     cancelled = cli._watch_request("unregister", spec())
     assert cancelled["ambiguous_cancellation"] is True and "unregistered" not in cancelled
 
-def test_watch_fetch_has_finite_subprocess_deadline(monkeypatch):
+def test_watch_fetch_has_finite_subprocess_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_pull_requests import __main__ as cli
 
     monkeypatch.setattr(cli, "_agent_worktrees_command", lambda: "owner-command")
 
-    def run(*args, **kwargs):
+    def run(*args: object, **kwargs: object) -> NoReturn:
         assert kwargs["timeout"] == 20
         raise subprocess.TimeoutExpired("owner-command", 20)
 
-    monkeypatch.setattr(cli.subprocess, "run", run)
+    monkeypatch.setattr(subprocess, "run", run)
     with pytest.raises(subprocess.TimeoutExpired):
         cli._watch_github_snapshot("example/project", 1)
 
 
-def test_absolute_deadline_alone_cannot_downgrade_corrupt_durable_state():
-    entry = {
+def test_absolute_deadline_alone_cannot_downgrade_corrupt_durable_state() -> None:
+    entry: dict[str, Any] = {
         "repo": "example/project", "number": 1, "subscriber_id": "one",
         "until": [MERGED], "notify": {}, "deadline_at": time.time() + 10,
     }
     with pytest.raises(ValueError, match="invalid persisted acknowledged subscription"):
         WatchRegistry().restore_state([entry])
 
-def test_null_absolute_deadline_requires_null_remaining_timeout():
+def test_null_absolute_deadline_requires_null_remaining_timeout() -> None:
     registry = WatchRegistry()
     registry.register(WatchKey("example/project", 1), "one", until=(MERGED,),
                       acknowledged=True, notify={"argv": ["consumer"]})
@@ -429,14 +605,14 @@ def test_null_absolute_deadline_requires_null_remaining_timeout():
         WatchRegistry().restore_state(entries)
 
 
-def test_legacy_restored_notify_timeout_keeps_fixed_ceiling(monkeypatch):
-    from agent_pull_requests import watch_notification
-
-    def run(*args, **kwargs):
+def test_legacy_restored_notify_timeout_keeps_fixed_ceiling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def run(*args: object, **kwargs: object) -> SimpleNamespace:
         assert kwargs["timeout"] == 30
         return SimpleNamespace(returncode=0)
 
-    monkeypatch.setattr(watch_notification.subprocess, "run", run)
+    monkeypatch.setattr(subprocess, "run", run)
     registry = WatchRegistry()
     key = WatchKey("example/project", 1)
     registry.register(key, "legacy", until=(MERGED,), notify={"argv": ["consumer"], "timeout": 99999})
@@ -444,17 +620,20 @@ def test_legacy_restored_notify_timeout_keeps_fixed_ceiling(monkeypatch):
     assert default_notify(event) == 0
 
 
-def test_unchanged_snapshots_do_not_rewrite_registry(make, monkeypatch):
+def test_unchanged_snapshots_do_not_rewrite_registry(
+    make: DaemonFactory, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_pull_requests import watch_daemon
 
-    writes, polls = [], []
+    writes: list[list[dict[str, Any]]] = []
+    polls: list[int] = []
     write = watch_daemon.write_subscriptions_state
 
-    def record(entries):
+    def record(entries: list[dict[str, Any]]) -> None:
         writes.append(entries)
         write(entries)
 
-    def fetch(*_):
+    def fetch(*_: object) -> PRSnapshot:
         polls.append(1)
         return PRSnapshot()
 
@@ -466,15 +645,15 @@ def test_unchanged_snapshots_do_not_rewrite_registry(make, monkeypatch):
     assert len(writes) == 2
     assert writes[-1][0]["baseline"] is not None
 
-def test_callback_burst_has_bounded_concurrency_and_no_lost_events(make):
+def test_callback_burst_has_bounded_concurrency_and_no_lost_events(make: DaemonFactory) -> None:
     release = threading.Event()
     burst_ready = threading.Event()
     lock = threading.Lock()
     active = 0
     peak = 0
-    calls = []
+    calls: list[str] = []
 
-    def notify(event):
+    def notify(event: FiredEvent) -> int:
         nonlocal active, peak
         with lock:
             active += 1
@@ -487,7 +666,7 @@ def test_callback_burst_has_bounded_concurrency_and_no_lost_events(make):
             with lock:
                 active -= 1
 
-    def fetch(*args):
+    def fetch(*args: object) -> PRSnapshot:
         burst_ready.wait()
         return PRSnapshot(merged=True, pr_state="closed")
 
@@ -506,17 +685,19 @@ def test_callback_burst_has_bounded_concurrency_and_no_lost_events(make):
         burst_ready.set()
         release.set()
 
-def test_pending_only_key_retires_poller_and_scheduler_waits_for_retry(make):
+def test_pending_only_key_retires_poller_and_scheduler_waits_for_retry(make: DaemonFactory) -> None:
     daemon = make(notify=lambda event: 1)
     daemon.compute("register", spec())
     wait(lambda: daemon.status()["pending_deliveries"][0]["attempts"] == 1)
     wait(lambda: not daemon._pollers)
-    assert daemon._deliveries.scheduler.is_alive()
+    scheduler = daemon._deliveries.scheduler
+    assert scheduler is not None
+    assert scheduler.is_alive()
     attempts = daemon.status()["pending_deliveries"][0]["attempts"]
     time.sleep(0.1)
     assert daemon.status()["pending_deliveries"][0]["attempts"] == attempts
 
-def test_scheduler_wait_is_bounded_for_oversized_retry_timestamp(make):
+def test_scheduler_wait_is_bounded_for_oversized_retry_timestamp(make: DaemonFactory) -> None:
     registry = WatchRegistry()
     key = WatchKey("example/project", 1)
     registry.register(key, "one", until=(MERGED,), acknowledged=True,
@@ -527,22 +708,30 @@ def test_scheduler_wait_is_bounded_for_oversized_retry_timestamp(make):
     write_subscriptions_state(entries)
     daemon = make(notify=lambda event: pytest.fail("retry is not due"))
     time.sleep(0.1)
-    assert daemon._deliveries.scheduler.is_alive()
+    scheduler = daemon._deliveries.scheduler
+    assert scheduler is not None
+    assert scheduler.is_alive()
     daemon.close()
 
-def test_delivery_thread_start_failure_recovers_without_restart(make, monkeypatch):
+def test_delivery_thread_start_failure_recovers_without_restart(
+    make: DaemonFactory, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     original = threading.Thread.start
     failed = threading.Event()
-    delivered = []
+    delivered: list[FiredEvent] = []
 
-    def start(thread):
+    def start(thread: threading.Thread) -> None:
         if thread.name.startswith("pr-notify:") and not failed.is_set():
             failed.set()
             raise RuntimeError("cannot start new thread")
         original(thread)
 
     monkeypatch.setattr(threading.Thread, "start", start)
-    daemon = make(notify=lambda event: delivered.append(event) or 0)
+    def notify(event: FiredEvent) -> int:
+        delivered.append(event)
+        return 0
+
+    daemon = make(notify=notify)
     daemon.compute("register", spec())
     wait(lambda: failed.is_set() and len(delivered) == 1)
     wait(lambda: not daemon._deliveries.workers)
@@ -550,7 +739,7 @@ def test_delivery_thread_start_failure_recovers_without_restart(make, monkeypatc
     assert not daemon.status()["subscribers"]
 
 
-def test_persisted_event_requires_exclusive_timeout_or_transition():
+def test_persisted_event_requires_exclusive_timeout_or_transition() -> None:
     registry = WatchRegistry()
     key = WatchKey("example/project", 1)
     registry.register(key, "one", until=(MERGED,), acknowledged=True,
@@ -562,7 +751,7 @@ def test_persisted_event_requires_exclusive_timeout_or_transition():
         WatchRegistry().restore_state(entries)
 
 @pytest.mark.parametrize("remove_all", [True, False])
-def test_transition_payload_requires_complete_snapshot(remove_all):
+def test_transition_payload_requires_complete_snapshot(remove_all: bool) -> None:
     registry = WatchRegistry()
     key = WatchKey("example/project", 1)
     registry.register(key, "one", until=(MERGED,), acknowledged=True, notify={"argv": ["consumer"]})
@@ -574,12 +763,12 @@ def test_transition_payload_requires_complete_snapshot(remove_all):
     with pytest.raises(ValueError, match="invalid persisted acknowledged subscription"):
         WatchRegistry().restore_state(entries)
 
-def test_shutdown_drains_legacy_callbacks_queued_beyond_worker_limit(make):
+def test_shutdown_drains_legacy_callbacks_queued_beyond_worker_limit(make: DaemonFactory) -> None:
     release = threading.Event()
-    calls = []
+    calls: list[str] = []
     lock = threading.Lock()
 
-    def notify(event):
+    def notify(event: FiredEvent) -> None:
         with lock:
             calls.append(event.subscriber.subscriber_id)
         assert release.wait(3)
@@ -596,8 +785,8 @@ def test_shutdown_drains_legacy_callbacks_queued_beyond_worker_limit(make):
     assert len(calls) == len(set(calls)) == 20
     assert not daemon._deliveries.legacy_queue
 
-def test_already_fired_legacy_event_is_queued_after_shutdown(make):
-    calls = []
+def test_already_fired_legacy_event_is_queued_after_shutdown(make: DaemonFactory) -> None:
+    calls: list[FiredEvent] = []
     daemon = make(notify=lambda event: calls.append(event))
     registry = WatchRegistry()
     key = WatchKey("example/project", 1)
@@ -612,7 +801,9 @@ def test_already_fired_legacy_event_is_queued_after_shutdown(make):
 @pytest.mark.parametrize("field,value", [
     ("repo", None), ("subscriber_id", 42), ("registration_id", "  "),
 ])
-def test_acknowledged_raw_identity_must_be_nonblank_string(field, value):
+def test_acknowledged_raw_identity_must_be_nonblank_string(
+    field: str, value: str | int | None,
+) -> None:
     registry = WatchRegistry()
     registry.register(WatchKey("example/project", 1), "one", until=(MERGED,),
                       acknowledged=True, notify={"argv": ["consumer"]})
@@ -622,29 +813,35 @@ def test_acknowledged_raw_identity_must_be_nonblank_string(field, value):
         WatchRegistry().restore_state(entries)
 
 @pytest.mark.parametrize("durable_first", [True, False])
-def test_mixed_protocol_duplicate_never_overwrites_durable_event(durable_first):
+def test_mixed_protocol_duplicate_never_overwrites_durable_event(durable_first: bool) -> None:
     registry = WatchRegistry()
     key = WatchKey("example/project", 1)
     registry.register(key, "one", until=(MERGED,), acknowledged=True,
                       notify={"argv": ["consumer"]})
     registry.apply_snapshot(key, PRSnapshot(merged=True))
     durable = registry.snapshot_state()[0]
-    legacy = {"repo": key.repo, "number": 1, "subscriber_id": "one", "until": [MERGED], "notify": {}}
+    legacy: dict[str, Any] = {
+        "repo": key.repo, "number": 1, "subscriber_id": "one", "until": [MERGED], "notify": {},
+    }
     entries = [durable, legacy] if durable_first else [legacy, durable]
     with pytest.raises(ValueError, match="invalid persisted acknowledged subscription"):
         WatchRegistry().restore_state(entries)
 
 
-def test_shutdown_during_fetch_preserves_subscriber_for_successor(make):
+def test_shutdown_during_fetch_preserves_subscriber_for_successor(make: DaemonFactory) -> None:
     entered, release = threading.Event(), threading.Event()
-    callbacks = []
+    callbacks: list[FiredEvent] = []
 
-    def fetch(*_):
+    def fetch(*_: object) -> PRSnapshot:
         entered.set()
         assert release.wait(3)
         return PRSnapshot(merged=True)
 
-    daemon = make(fetch=fetch, notify=lambda e: callbacks.append(e) or 0)
+    def notify(event: FiredEvent) -> int:
+        callbacks.append(event)
+        return 0
+
+    daemon = make(fetch=fetch, notify=notify)
     daemon.compute("register", spec())
     assert entered.wait(2)
     daemon.compute("shutdown", {})
@@ -655,7 +852,7 @@ def test_shutdown_during_fetch_preserves_subscriber_for_successor(make):
     assert len(saved) == 1 and saved[0]["pending"] is None
 
 
-def test_acknowledged_state_requires_absolute_deadline_field():
+def test_acknowledged_state_requires_absolute_deadline_field() -> None:
     registry = WatchRegistry()
     registry.register(WatchKey("example/project", 1), "one", until=(MERGED,),
                       acknowledged=True, notify={"argv": ["consumer"]}, timeout=20)
@@ -665,7 +862,9 @@ def test_acknowledged_state_requires_absolute_deadline_field():
         WatchRegistry().restore_state(entries)
 
 
-def test_acknowledged_absolute_deadline_survives_clock_pair_skew_and_repeated_reloads(monkeypatch):
+def test_acknowledged_absolute_deadline_survives_clock_pair_skew_and_repeated_reloads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     clock = {"wall": 1000.0, "monotonic": 100.0}
     monkeypatch.setattr(time, "time", lambda: clock["wall"])
     monkeypatch.setattr(time, "monotonic", lambda: clock["monotonic"])
@@ -692,7 +891,9 @@ def test_acknowledged_absolute_deadline_survives_clock_pair_skew_and_repeated_re
         registry = restored
 
 
-def test_default_shutdown_drains_actual_callback_beyond_old_deadline(make, tmp_path):
+def test_default_shutdown_drains_actual_callback_beyond_old_deadline(
+    make: DaemonFactory, tmp_path: Path,
+) -> None:
     started, finished = tmp_path / "started", tmp_path / "finished"
     daemon = make()
     notify = {"argv": [
@@ -710,7 +911,9 @@ def test_default_shutdown_drains_actual_callback_beyond_old_deadline(make, tmp_p
     assert not daemon._deliveries.workers
 
 
-def test_duplicate_recovery_and_immutable_payload_with_downtime_deadline(monkeypatch):
+def test_duplicate_recovery_and_immutable_payload_with_downtime_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     registry = WatchRegistry()
     key = WatchKey("example/project", 1)
     sub = registry.register(
@@ -738,7 +941,7 @@ def test_duplicate_recovery_and_immutable_payload_with_downtime_deadline(monkeyp
 
 
 @pytest.mark.parametrize("mode", ["timeout", "launch-error"])
-def test_real_callback_timeout_and_launch_error_stay_pending(make, mode):
+def test_real_callback_timeout_and_launch_error_stay_pending(make: DaemonFactory, mode: str) -> None:
     notify = (
         {"argv": [sys.executable, "-c", "import time; time.sleep(20)"], "timeout": 0.05}
         if mode == "timeout" else {"argv": ["nonexistent-watch-test-callback-89217"]}
@@ -752,11 +955,11 @@ def test_real_callback_timeout_and_launch_error_stay_pending(make, mode):
     )
 
 
-def test_unregister_reregister_and_late_ack_do_not_remove_new_registration(make):
+def test_unregister_reregister_and_late_ack_do_not_remove_new_registration(make: DaemonFactory) -> None:
     started, release = threading.Event(), threading.Event()
-    payloads = []
+    payloads: list[dict[str, Any]] = []
 
-    def notify(event):
+    def notify(event: FiredEvent) -> int:
         payloads.append(event_payload(event).copy())
         first = len(payloads) == 1
         if first:
@@ -780,7 +983,7 @@ def test_unregister_reregister_and_late_ack_do_not_remove_new_registration(make)
         }) == {"unregistered": False}
         wait(lambda: len(payloads) == 2)
         release.set()
-        def old_worker_finished():
+        def old_worker_finished() -> bool:
             with daemon._deliveries.lock:
                 return old["registration_id"] not in daemon._deliveries.workers
 
@@ -792,11 +995,11 @@ def test_unregister_reregister_and_late_ack_do_not_remove_new_registration(make)
         release.set()
 
 
-def test_blocked_callback_never_starves_same_key_subscriber_or_overlaps(make):
+def test_blocked_callback_never_starves_same_key_subscriber_or_overlaps(make: DaemonFactory) -> None:
     started, release = threading.Event(), threading.Event()
-    calls = []
+    calls: list[str] = []
 
-    def notify(event):
+    def notify(event: FiredEvent) -> int:
         identity = event.subscriber.subscriber_id
         calls.append(identity)
         if identity == "slow":
@@ -824,11 +1027,11 @@ def test_blocked_callback_never_starves_same_key_subscriber_or_overlaps(make):
     assert read_subscriptions_state() == []
 
 
-def test_slow_legacy_callback_does_not_block_opted_in_observation(make):
+def test_slow_legacy_callback_does_not_block_opted_in_observation(make: DaemonFactory) -> None:
     started, release = threading.Event(), threading.Event()
-    calls = []
+    calls: list[str] = []
 
-    def notify(event):
+    def notify(event: FiredEvent) -> int:
         calls.append(event.subscriber.subscriber_id)
         if event.subscriber.subscriber_id == "legacy":
             started.set()
@@ -847,29 +1050,36 @@ def test_slow_legacy_callback_does_not_block_opted_in_observation(make):
         release.set()
 
 
+INVALID_NOTIFY_VALUES: list[object] = [
+    None, {}, {"argv": []}, {"argv": "callback"}, {"argv": [""]},
+    {"argv": [True]}, {"argv": ["bad\0command"]},
+    {"argv": ["callback"], "timeout": float("nan")},
+    {"argv": ["callback"], "timeout": True},
+    {"argv": ["callback"], "timeout": 31},
+    {"argv": ["callback"], "unexpected": 1},
+]
+
+
 @pytest.mark.parametrize("changes", [
     {"timeout": v} for v in [0, -1, float("nan"), float("inf"), True, "1"]
 ] + [
-    {"notify": v} for v in [
-        None, {}, {"argv": []}, {"argv": "callback"}, {"argv": [""]},
-        {"argv": [True]}, {"argv": ["bad\0command"]},
-        {"argv": ["callback"], "timeout": float("nan")},
-        {"argv": ["callback"], "timeout": True},
-        {"argv": ["callback"], "timeout": 31},
-        {"argv": ["callback"], "unexpected": 1},
-    ]
+    {"notify": v} for v in INVALID_NOTIFY_VALUES
 ] + [
     {"notification_protocol": "unsupported/v2"}, {"notification_protocol": None},
     {"number": True}, {"until": "merged"}, {"until": []},
 ])
-def test_invalid_opt_in_registration_is_explicit_failure(make, changes):
+def test_invalid_opt_in_registration_is_explicit_failure(
+    make: DaemonFactory, changes: dict[str, Any],
+) -> None:
     daemon = make(notify=lambda _: 0)
     assert "error" in daemon.compute("register", spec(**changes))
     assert daemon.status()["subscribers"] == {}
     assert read_subscriptions_state() == []
 
 
-def test_corrupt_opt_in_state_fails_closed_without_overwriting(tmp_path, monkeypatch):
+def test_corrupt_opt_in_state_fails_closed_without_overwriting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("AGENT_PULL_REQUESTS_HOME", str(tmp_path))
     write_subscriptions_state([spec(pending={"secret": "not-to-be-printed"})])
     before = (tmp_path / "watch-subscriptions.json").read_bytes()
@@ -879,40 +1089,44 @@ def test_corrupt_opt_in_state_fails_closed_without_overwriting(tmp_path, monkeyp
     assert (tmp_path / "watch-subscriptions.json").read_bytes() == before
 
 
-def test_expired_wait_during_fetch_outage_is_durably_notified(make):
-    events = []
+def test_expired_wait_during_fetch_outage_is_durably_notified(make: DaemonFactory) -> None:
+    events: list[dict[str, Any]] = []
 
-    def unavailable(*_):
+    def unavailable(*_: object) -> NoReturn:
         raise OSError("provider unavailable")
 
-    daemon = make(fetch=unavailable, notify=lambda e: events.append(event_payload(e)) or 0)
+    def notify(event: FiredEvent) -> int:
+        events.append(event_payload(event))
+        return 0
+
+    daemon = make(fetch=unavailable, notify=notify)
     daemon.compute("register", spec(timeout=0.02))
     wait(lambda: len(events) == 1 and daemon.status()["subscribers"] == {})
     assert events[0]["timed_out"] is True and events[0]["transitions"] == []
     assert "pr_state" not in events[0]
 
 
-def test_legacy_state_and_wire_remain_unchanged(make):
+def test_legacy_state_and_wire_remain_unchanged(make: DaemonFactory) -> None:
     write_subscriptions_state([{
         "repo": "example/project", "number": 1, "subscriber_id": "legacy",
         "until": [MERGED], "notify": {},
     }])
-    payloads = []
+    payloads: list[dict[str, Any]] = []
     daemon = make(notify=lambda e: payloads.append(event_payload(e)))
     wait(lambda: len(payloads) == 1)
     assert "event_id" not in payloads[0] and "notification_protocol" not in payloads[0]
     assert daemon.status()["subscribers"] == {}
 
 
-def test_cli_negotiates_without_new_fields_to_old_owner(capsys):
-    calls = []
-    args = SimpleNamespace(
+def test_cli_negotiates_without_new_fields_to_old_owner(capsys: pytest.CaptureFixture[str]) -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+    args = Namespace(
         repo="example/project", number=1, subscriber_id="one", until=None,
         notify_argv=["consumer"], timeout=10, json=True,
         acknowledged_notifications=True, notify_timeout=2,
     )
 
-    def request(kind, payload):
+    def request(kind: str, payload: dict[str, Any]) -> dict[str, Any]:
         calls.append((kind, payload))
         return {"capabilities": []}
 
@@ -932,14 +1146,16 @@ def test_cli_negotiates_without_new_fields_to_old_owner(capsys):
     {"registered": True, "notification_protocol": PROTOCOL, "registration_id": ""},
     {"registered": True, "notification_protocol": "legacy", "registration_id": "one"},
 ])
-def test_cli_owner_rollover_requires_registration_protocol_echo(capsys, response):
-    args = SimpleNamespace(
+def test_cli_owner_rollover_requires_registration_protocol_echo(
+    capsys: pytest.CaptureFixture[str], response: dict[str, Any],
+) -> None:
+    args = Namespace(
         repo="example/project", number=1, subscriber_id="one", until=None,
         notify_argv=["consumer"], timeout=10, json=True,
         acknowledged_notifications=True, notify_timeout=2,
     )
 
-    def request(kind, payload):
+    def request(kind: str, payload: dict[str, Any]) -> dict[str, Any]:
         return {"capabilities": [PROTOCOL]} if kind == "health" else response
 
     assert subscribe(args, request) == 1
@@ -953,7 +1169,7 @@ def test_cli_owner_rollover_requires_registration_protocol_echo(capsys, response
     {"merged": "false"}, {"closed": 0}, {"review_decision": False},
     {"mergeable": []}, {"checks_state": 5},
 ])
-def test_corrupt_acknowledged_baseline_fails_closed(changes):
+def test_corrupt_acknowledged_baseline_fails_closed(changes: dict[str, Any]) -> None:
     registry = WatchRegistry()
     key = WatchKey("example/project", 1)
     registry.register(key, "one", until=(MERGED,), acknowledged=True,
@@ -965,7 +1181,7 @@ def test_corrupt_acknowledged_baseline_fails_closed(changes):
         WatchRegistry().restore_state(entries)
 
 
-def test_isolated_process_crash_then_restart_replays_original_payload(tmp_path):
+def test_isolated_process_crash_then_restart_replays_original_payload(tmp_path: Path) -> None:
     output = tmp_path / "delivered.json"
     env = {**os.environ, "AGENT_PULL_REQUESTS_HOME": str(tmp_path)}
     crash = """
