@@ -63,17 +63,42 @@ def _processes() -> list[tuple[int, str]]:
 
 
 def servers() -> dict[int, str]:
+    """Return live mux servers plus opaque processes that may be servers.
+
+    A process this token may not open (typically an elevated server observed by
+    a medium-integrity monitor) cannot be classified, so it is returned with its
+    snapshot start time; callers' registration coverage must then prove it.
+    Verifiably exited processes are skipped rather than blanking observation.
+    """
     result = {}
+    snapshot: dict[int, str] | None = None
     for pid, _image in _processes():
         before = locks.process_start_time(pid)
-        command = windows_process_census.command_line(pid)
-        if before is None or command is None or locks.process_start_time(pid) != before:
-            raise MuxObservationUnavailable("Native mux process identity is unavailable")
+        command = windows_process_census.command_line(pid) if before is not None else None
+        if before is None or command is None:
+            field = "start time" if before is None else "command line"
+            state, error = locks.access(pid)
+            if state == "gone":
+                continue
+            if state == "denied":
+                if snapshot is None:
+                    snapshot = locks.system_start_times()
+                if snapshot.get(pid) is not None:
+                    result[pid] = snapshot[pid]
+                    continue
+            raise MuxObservationUnavailable(
+                f"Native mux process identity is unavailable: pid {pid} {field} "
+                f"is unreadable ({state}, Win32 error {error})",
+            )
+        if locks.process_start_time(pid) != before:
+            raise MuxObservationUnavailable(
+                f"Native mux process identity is unavailable: pid {pid} start time changed",
+            )
         match = _COMMAND.match(command)
         mode = match[2].strip('"') if match else None
         if mode == "server" and not match[1]:
             result[pid] = before
         elif mode not in _CLIENTS:
             # Unknown/global-option forms might be servers; never omit them.
-            raise MuxObservationUnavailable("Native mux process mode is unconfirmed")
+            raise MuxObservationUnavailable(f"Native mux process mode is unconfirmed: pid {pid}")
     return result

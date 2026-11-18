@@ -363,8 +363,62 @@ def test_native_census_refuses_unreadable_reused_or_unknown_processes(
     values = iter(times)
     monkeypatch.setattr(mux_process_identity, "process_start_time", lambda pid: next(values))
     monkeypatch.setattr(mux_process_identity, "command_line", lambda pid: command)
-    with pytest.raises(MuxObservationUnavailable):
+    monkeypatch.setattr(mux_process_identity, "access", lambda pid: ("live", 0))
+    with pytest.raises(MuxObservationUnavailable, match="pid 101"):
         native.servers()
+
+
+def _census(
+    monkeypatch: pytest.MonkeyPatch, readable: dict[int, str], states: dict[int, tuple[str, int]],
+) -> None:
+    pids = sorted({*readable, *states})
+    monkeypatch.setattr(native, "_processes", lambda: [(pid, "psmux.exe") for pid in pids])
+    monkeypatch.setattr(
+        mux_process_identity, "process_start_time", lambda pid: "1" if pid in readable else None,
+    )
+    monkeypatch.setattr(mux_process_identity, "command_line", lambda pid: "psmux " + readable[pid])
+    monkeypatch.setattr(mux_process_identity, "access", lambda pid: states[pid])
+    monkeypatch.setattr(mux_process_identity, "system_start_times", lambda: {202: "9", 303: "8"})
+
+
+def test_native_census_skips_processes_that_exited_mid_census(monkeypatch: pytest.MonkeyPatch) -> None:
+    _census(monkeypatch, {101: "server -s fixture"}, {202: ("gone", 87), 303: ("gone", 0)})
+    assert native.servers() == {101: "1"}
+
+
+def test_native_census_keeps_inaccessible_processes_as_possible_servers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A medium-integrity monitor cannot open elevated servers; their snapshot
+    # identity must still require registration coverage instead of blanking.
+    _census(monkeypatch, {101: "attach-session -t fixture"}, {202: ("denied", 5)})
+    assert native.servers() == {202: "9"}
+
+
+@pytest.mark.parametrize("state,snapshot", [(("unknown", 6), {202: "9"}), (("denied", 5), {})])
+def test_native_census_names_the_unclassifiable_process(
+    monkeypatch: pytest.MonkeyPatch, state: tuple[str, int], snapshot: dict[int, str],
+) -> None:
+    _census(monkeypatch, {}, {202: state})
+    monkeypatch.setattr(mux_process_identity, "system_start_times", lambda: snapshot)
+    with pytest.raises(
+        MuxObservationUnavailable, match=rf"pid 202 start time is unreadable \({state[0]}, Win32 error {state[1]}\)",
+    ):
+        native.servers()
+
+
+def test_uncovered_inaccessible_process_still_fails_closed(registered: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(native, "servers", lambda: {101: "123", 202: "9"})
+    with pytest.raises(MuxObservationUnavailable, match="missing its registration: pid 202"):
+        reader.observe()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="native Windows census")
+def test_native_snapshot_start_time_matches_process_start_time() -> None:
+    assert mux_process_identity.system_start_times()[os.getpid()] == (
+        mux_process_identity.process_start_time(os.getpid())
+    )
+    assert mux_process_identity.access(os.getpid()) == ("live", 0)
 
 
 @pytest.mark.parametrize("error", [18, 5])
