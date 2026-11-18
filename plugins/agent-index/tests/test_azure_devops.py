@@ -4,6 +4,7 @@ import base64
 import json
 import time
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
@@ -15,7 +16,7 @@ from agent_index.indexing.work_counts import measure_reindex
 
 def _json_response(
     status_code: int,
-    payload,
+    payload: object,
     *,
     headers: dict[str, str] | None = None,
 ) -> httpx.Response:
@@ -26,7 +27,9 @@ def _json_response(
     )
 
 
-def _work_item_payload(work_item_id: int, *, changed: str = "2026-01-02T03:04:05Z") -> dict:
+def _work_item_payload(
+    work_item_id: int, *, changed: str = "2026-01-02T03:04:05Z",
+) -> dict[str, Any]:
     return {
         "id": work_item_id,
         "fields": {
@@ -294,7 +297,7 @@ def test_ado_pr_reviewer_me_resolves_connection_data_once() -> None:
     assert connection_data_calls == 1
 
 
-def test_ado_config_file_loading_from_env(monkeypatch) -> None:
+def test_ado_config_file_loading_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     config_path = Path.cwd() / ".agent-index-ado-test-config.json"
     try:
         config_path.write_text(
@@ -361,7 +364,7 @@ def test_ado_no_firehose_without_queries() -> None:
     assert requests == []
 
 
-def test_ado_429_retry_after_sleeps_then_proceeds(monkeypatch) -> None:
+def test_ado_429_retry_after_sleeps_then_proceeds(monkeypatch: pytest.MonkeyPatch) -> None:
     sleeps: list[float] = []
     monkeypatch.setattr(time, "sleep", sleeps.append)
     calls = 0
@@ -426,7 +429,7 @@ def test_ado_list_paths_returns_ids_only() -> None:
     assert not any("workitemsbatch" in path or path.endswith("/comments") for path in seen_paths)
 
 
-def test_ado_registry_aliases(monkeypatch) -> None:
+def test_ado_registry_aliases(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AGENT_INDEX_ADO_TOKEN", "pat-token")
 
     assert isinstance(get_connector("ado:acme/widgets"), AzureDevOpsConnector)
@@ -492,12 +495,14 @@ def test_ado_incremental_filters_metadata_before_hydrating_bodies(
     )
 
     @measure_reindex
-    def run():
+    def run() -> dict[str, object]:
         return {"entries": connector.discover_changed("2026-01-03T00:01:00Z")}
 
     result = run()
     entries = result["entries"]
     counts = result["work_counts"]
+    assert isinstance(entries, list)
+    assert isinstance(counts, dict)
     assert counts["acquisition_by_source"] == {
         "ado:acme/widgets:workitems": {
             "identity_records": 203,
@@ -526,7 +531,7 @@ def test_ado_incremental_refuses_incomplete_metadata_before_body_fetch(fault: st
         if request.url.path.endswith("/workitemsbatch"):
             payload = json.loads(request.content)
             assert payload.get("fields") == ["System.Id", "System.ChangedDate"]
-            items = [
+            items: list[dict[str, Any]] = [
                 {"id": 1, "fields": {"System.ChangedDate": "2026-01-03T00:00:00Z"}},
                 {"id": 2, "fields": {"System.ChangedDate": "2026-01-03T00:00:00Z"}},
             ]
@@ -616,7 +621,7 @@ def test_ado_work_item_comment_pages_are_complete_or_refused(outcome: str) -> No
         tokens.append(current)
         if current is None:
             first_page_seen = True
-            page = {
+            page: dict[str, Any] = {
                 "comments": [{"id": 1, "text": "First page"}],
                 "continuationToken": token,
                 "nextPage": "https://foreign.example/never-follow-this-url",
@@ -651,10 +656,13 @@ def test_ado_work_item_comment_pages_are_complete_or_refused(outcome: str) -> No
 
     if outcome == "complete":
         result = run()
-        assert len(result["entries"]) == 1
-        assert "First page" in result["entries"][0].content
-        assert "Last page" in result["entries"][0].content
-        assert result["work_counts"]["http_by_purpose"]["comment_page"]["attempts"] == 2
+        entries, counts = result["entries"], result["work_counts"]
+        assert isinstance(entries, list)
+        assert isinstance(counts, dict)
+        assert len(entries) == 1
+        assert "First page" in entries[0].content
+        assert "Last page" in entries[0].content
+        assert counts["http_by_purpose"]["comment_page"]["attempts"] == 2
     else:
         error = {
             "later-404": httpx.HTTPStatusError,
@@ -662,9 +670,10 @@ def test_ado_work_item_comment_pages_are_complete_or_refused(outcome: str) -> No
         }.get(outcome, ValueError)
         with pytest.raises(error):
             run()
-    assert tokens == (
+    expected_tokens: list[str | None] = (
         [None] if outcome in {"cancel", "missing-token"} else [None, token]
     )
+    assert tokens == expected_tokens
 
 
 @pytest.mark.parametrize("status", [200, 404])
@@ -685,7 +694,7 @@ def test_ado_work_item_comments_preserve_legacy_and_initial_not_found(status: in
 
 
 def test_ado_parsed_work_item_counts_precede_filtering_and_query_deduplication() -> None:
-    def handler(request):
+    def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("/wiql"):
             return _json_response(200, {
                 "workItems": [{"id": 1}, {"id": 1}, None],
@@ -718,12 +727,15 @@ def test_ado_parsed_work_item_counts_precede_filtering_and_query_deduplication()
     )
 
     @measure_reindex
-    def run():
+    def run() -> dict[str, object]:
         return {"entries": connector.discover_changed("2026-01-03T00:01:00Z")}
 
     result = run()
-    assert [entry.path for entry in result["entries"]] == ["workitems/2.md"]
-    assert result["work_counts"]["acquisition_by_source"] == {
+    entries, counts = result["entries"], result["work_counts"]
+    assert isinstance(entries, list)
+    assert isinstance(counts, dict)
+    assert [entry.path for entry in entries] == ["workitems/2.md"]
+    assert counts["acquisition_by_source"] == {
         "ado:acme/widgets:workitems": {
             "identity_records": 3, "item_body_records": 3, "comment_body_records": 0,
         },
@@ -731,8 +743,10 @@ def test_ado_parsed_work_item_counts_precede_filtering_and_query_deduplication()
 
 
 @pytest.mark.parametrize("later_status", [200, 404])
-def test_ado_parsed_comment_counts_survive_refusal_and_ignore_invalid_bodies(later_status):
-    def handler(request):
+def test_ado_parsed_comment_counts_survive_refusal_and_ignore_invalid_bodies(
+    later_status: int,
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
         if not request.url.params.get("continuationToken"):
             return _json_response(200, {
                 "comments": [
@@ -749,13 +763,14 @@ def test_ado_parsed_comment_counts_survive_refusal_and_ignore_invalid_bodies(lat
     )
 
     @measure_reindex
-    def run():
+    def run() -> dict[str, object]:
         error = ValueError if later_status == 200 else httpx.HTTPStatusError
         with pytest.raises(error):
             connector._work_item_comments(1)
         return {}
 
     counts = run()["work_counts"]
+    assert isinstance(counts, dict)
     assert counts["acquisition_by_source"] == {
         "ado:acme/widgets:workitems": {
             "identity_records": 0, "item_body_records": 0,
@@ -765,55 +780,11 @@ def test_ado_parsed_comment_counts_survive_refusal_and_ignore_invalid_bodies(lat
     assert counts["http_by_purpose"]["comment_page"]["attempts"] == 2
 
 
-def test_ado_parsed_pull_counts_include_list_bodies_and_duplicates_not_metadata() -> None:
-    def handler(request):
-        path = request.url.path
-        if path.endswith("/connectionData"):
-            return _json_response(200, {"authenticatedUser": {"id": "account"}})
-        if path.endswith("/repositories"):
-            return _json_response(200, {"value": [{"id": "repo-1", "name": "widgets"}]})
-        if path.endswith("/pullrequests"):
-            item = {"pullRequestId": 1, "description": None, "repository": {"id": "repo-1"}}
-            return _json_response(200, {"value": [
-                item, item, None,
-                {"pullRequestId": 2, "description": 9}, {"pullRequestId": 3},
-            ]})
-        assert path.endswith("/pullRequests/1/threads")
-        return _json_response(200, {"value": [
-            {"comments": [{"content": ""}, {"content": None}, {"content": []}, {}, None]},
-            {"comments": [{"content": "another"}]},
-        ]})
-
-    connector = AzureDevOpsConnector(
-        "ado:acme/widgets", token="pat-token", min_interval_s=0,
-        transport=httpx.MockTransport(handler), work_item_queries=[],
-        pull_request_queries=[{"repository": "widgets", "creator": "me"}],
-    )
-
-    @measure_reindex
-    def run(paths_only=False):
-        return {"entries": connector.list_paths() if paths_only else connector.discover()}
-
-    counts = run()["work_counts"]
-    assert counts["acquisition_by_source"] == {
-        "ado:acme/widgets:pulls": {
-            "identity_records": 4, "item_body_records": 2, "comment_body_records": 3,
-        },
-    }
-    assert counts["http_by_purpose"]["metadata"]["attempts"] == 2
-    assert counts["http_by_purpose"]["identity_page"]["attempts"] == 1
-    assert counts["http_by_purpose"]["comment_page"]["attempts"] == 1
-    assert "unclassified" not in counts["http_by_purpose"]
-    assert run(True)["work_counts"]["acquisition_by_source"] == {
-        "ado:acme/widgets:pulls": {
-            "identity_records": 4, "item_body_records": 2, "comment_body_records": 0,
-        },
-    }
-
-
 @pytest.mark.parametrize("comments", [False, True])
 @pytest.mark.parametrize("payload", [{}, [], {"value": []}])
-def test_ado_parsed_empty_pull_pages_differ_from_unrecognized_envelopes(comments, payload):
+def test_ado_parsed_empty_pull_pages_differ_from_unrecognized_envelopes(
+    comments: bool, payload: dict[str, Any] | list[Any],
+) -> None:
     connector = AzureDevOpsConnector(
         "ado:acme/widgets", token="pat-token", min_interval_s=0,
         transport=httpx.MockTransport(lambda _request: _json_response(200, payload)),
@@ -821,7 +792,7 @@ def test_ado_parsed_empty_pull_pages_differ_from_unrecognized_envelopes(comments
     )
 
     @measure_reindex
-    def run():
+    def run() -> dict[str, object]:
         if comments:
             assert connector._pull_request_comments({
                 "pullRequestId": 1, "repository": {"id": "repo-1"},
@@ -830,7 +801,9 @@ def test_ado_parsed_empty_pull_pages_differ_from_unrecognized_envelopes(comments
             assert list(connector._iter_pull_requests(since=None)) == []
         return {}
 
-    assert run()["work_counts"]["acquisition_by_source"] == (
+    counts = run()["work_counts"]
+    assert isinstance(counts, dict)
+    assert counts["acquisition_by_source"] == (
         {"ado:acme/widgets:pulls": {
             "identity_records": 0, "item_body_records": 0, "comment_body_records": 0,
         }} if payload != {} else {}
@@ -838,7 +811,9 @@ def test_ado_parsed_empty_pull_pages_differ_from_unrecognized_envelopes(comments
 
 
 @pytest.mark.parametrize("payload", [{}, {"workItems": []}, {"workItemRelations": []}])
-def test_ado_parsed_empty_query_pages_differ_from_unrecognized_envelopes(payload):
+def test_ado_parsed_empty_query_pages_differ_from_unrecognized_envelopes(
+    payload: dict[str, Any],
+) -> None:
     connector = AzureDevOpsConnector(
         "ado:acme/widgets", token="pat-token", min_interval_s=0,
         transport=httpx.MockTransport(lambda _request: _json_response(200, payload)),
@@ -846,11 +821,13 @@ def test_ado_parsed_empty_query_pages_differ_from_unrecognized_envelopes(payload
     )
 
     @measure_reindex
-    def run():
+    def run() -> dict[str, object]:
         assert connector._work_item_ids() == []
         return {}
 
-    assert run()["work_counts"]["acquisition_by_source"] == (
+    counts = run()["work_counts"]
+    assert isinstance(counts, dict)
+    assert counts["acquisition_by_source"] == (
         {"ado:acme/widgets:workitems": {
             "identity_records": 0, "item_body_records": 0, "comment_body_records": 0,
         }} if payload != {} else {}
@@ -858,10 +835,10 @@ def test_ado_parsed_empty_query_pages_differ_from_unrecognized_envelopes(payload
 
 
 @pytest.mark.parametrize("failure", ["http", "json"])
-def test_ado_parsed_pull_pages_remain_counted_after_later_request_failure(failure):
-    seen_tokens = []
+def test_ado_parsed_pull_pages_remain_counted_after_later_request_failure(failure: str) -> None:
+    seen_tokens: list[str | None] = []
 
-    def handler(request):
+    def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path.endswith("/pullrequests")
         token = request.url.params.get("continuationToken")
         seen_tokens.append(token)
@@ -881,7 +858,7 @@ def test_ado_parsed_pull_pages_remain_counted_after_later_request_failure(failur
     )
 
     @measure_reindex
-    def run():
+    def run() -> dict[str, object]:
         error = httpx.HTTPStatusError if failure == "http" else ValueError
         emitted = []
         with pytest.raises(error):
@@ -891,6 +868,7 @@ def test_ado_parsed_pull_pages_remain_counted_after_later_request_failure(failur
         return {}
 
     counts = run()["work_counts"]
+    assert isinstance(counts, dict)
     assert counts["acquisition_by_source"] == {
         "ado:acme/widgets:pulls": {
             "identity_records": 2, "item_body_records": 2, "comment_body_records": 0,

@@ -181,6 +181,10 @@ requires the same PR/repository identity and a string/null description, and
 replaces only the selected description. Short descriptions need no extra read.
 An unavailable or invalid detail response refuses acquisition rather than
 indexing a preview; the original query metadata and comment path remain intact.
+Missing or nontext listing descriptions also refuse acquisition; an explicit
+null still means an empty description. Cancellation is checked again after the
+detail read, before requesting comments. Point-description reads are unconditional:
+the shared HTTP session caches validators, not the response bodies needed here.
 This adds no history enumeration, cursor capability or reconciliation authority.
 
 Work-item comments follow the comments API's JSON-body continuation tokens

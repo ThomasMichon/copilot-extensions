@@ -374,13 +374,19 @@ class AzureDevOpsConnector:
             if since_dt and not self._pull_request_in_window(pull_request, since_dt):
                 continue
             pull_request = self._complete_pull_description(pull_request)
+            if cancel_check:
+                cancel_check()
             comments = self._pull_request_comments(pull_request)
             entries.append(self._pull_request_entry(pull_request, comments))
         return entries
 
     def _complete_pull_description(self, pull_request: dict[str, Any]) -> dict[str, Any]:
         description = pull_request.get("description")
-        if not isinstance(description, str):
+        if "description" not in pull_request or (
+            description is not None and not isinstance(description, str)
+        ):
+            raise ValueError("Azure DevOps pull-request listing has no valid description")
+        if description is None:
             return pull_request
         # Also recognize UTF-16 previews whose astral characters use two units.
         if len(description.encode("utf-16-le", "surrogatepass")) < 800:
@@ -389,6 +395,7 @@ class AzureDevOpsConnector:
         result = self._http.get_json(
             self._project_path("_apis", "git", "pullrequests", str(pull_request["pullRequestId"])),
             params={"api-version": _DEFAULT_API_VERSION},
+            etag=False,
             purpose="item_body",
         )
         details = result.data
