@@ -1,154 +1,199 @@
 # One PR review in snapshots
 
-The job is **review PR 12033 at the requested head and return the review
-reference**. Follow the records below to answer a practical question: has the
-reviewer merely been allocated, or has it actually accepted the work?
+The job is to review PR 12033 at head `a7139c4` and return a reference to
+that review. Dispatch tracks **the job** in a task row and **one attempt to
+run its worker** in a spawn reservation. A spawn reservation is always tied
+to a task.
 
-This is a **worked example, not a production dump**. It uses a fresh finite
-task in a configured, one-slot pool and a new local checkout. `T` stands for
-the generated Dispatch task ID; `review-pr-12033` is a title, not a database
-key. `R` is `dispatch-task:<T>:1`. `W` is
-`my-dev-box-20261015-234705-d67a`, `B` is the Bridge control ID, and `N` is
-the native conversation ID. Selected fields are shown; `null` means a field
-is empty, **no row** means the object does not yet exist. Snapshots at
-different owners are not one database transaction.
+| Event in this example | Task status | Reservation state |
+|---|---|---|
+| Producer requests the review | `queued` | No row |
+| Allocator commits a slot | `claimed`, no worker yet | `reserving` |
+| Supervisor records startup | `claimed`, worker has not accepted | `spawned` |
+| Reviewer accepts | `started` | `spawned` |
+| Reviewer submits; verification is required | `submitted` | `spawned` |
+| Evaluator rejects that submission | `started`, same reviewer | `spawned`, same attempt |
+| Evaluator confirms a corrected submission | `completed` | No change from confirmation itself |
+
+These are snapshots of a **fresh local checkout in a configured pool**, not
+every legal combination or a production dump. The IDs are fictional but use
+the formats written by the components. Each card shows selected fields and
+example values. `null` means the row exists but the field is empty.
 
 ## 1. A producer creates the task
 
-```text
-Dispatch  tasks[T] = {title: "review-pr-12033", status: queued,
-                      generation: 0, attempts: 0, owner: null, owner_session_id: null}
-          task_events: creation recorded with destination queued
-          spawn_reservations: no row for T
-Worktrees no W record or checkout
-Bridge    no B, Host or CLI registration for this job
-Copilot   no worker or conversation for this job
+```mermaid
+erDiagram
+    tasks {
+        text id PK "74c0d0e37e7140ad9ad8c96663670f21"
+        text title "review-pr-12033"
+        text status "queued"
+        integer generation "0"
+        integer attempts "0"
+        text owner "null"
+        text owner_session_id "null"
+    }
 ```
 
-The request identifies the repository, PR and revision to review. A matching
-pool registration already exists independently of `T`. An exclusive resource
-key, if configured, can prevent two attempts from working the same resource.
-It is not the task ID. [Task creation](../../plugins/agent-dispatch/src/agent_dispatch/queue_storage.py)
+`review-pr-12033` is the title, not the key. [Dispatch records creation](../../plugins/agent-dispatch/src/agent_dispatch/queue_storage.py)
+in `task_events`. The reviewers' pool already exists. There is no reservation,
+checkout, process or conversation for this job yet.
 
 ## 2. Dispatch commits the slot before it calls a launcher
 
-```text
-Dispatch  tasks[T] = {status: claimed, generation: 1, attempts: 1,
-                      owner: null, owner_session_id: null, lease_expires_at: null}
-          spawn_reservations[R] = {task_id: T, attempt: 1, state: reserving,
-                                   worktree: null, session_handle: null,
-                                   startup_complete: false}
-          task_pool_assignments[T] = {reservation_key: R, task_generation: 1,
-                                      registration_id: reviewers, machine: my-dev-box, env: linux}
-          pool_reservation_bindings[R] = the same selected pool instance
-Worktrees / Bridge / Copilot  unchanged
+```mermaid
+erDiagram
+    tasks ||--o{ spawn_reservations : "has attempts"
+    tasks {
+        text status "claimed"
+        integer generation "1"
+        integer attempts "1"
+        text owner "null"
+    }
+    spawn_reservations {
+        text key PK "dispatch-task:74c0d0e37e7140ad9ad8c96663670f21:1"
+        text state "reserving"
+        integer attempt "1"
+        text worktree "null"
+        text session_handle "null"
+        boolean startup_complete "false"
+    }
 ```
 
-**Nothing has been spawned.** Dispatch reserved the right to try. These queue
-writes commit together; if the supervisor exits immediately afterward, another
-reader can see the attempt without seeing a worker. With no capacity a fresh
-task stays `queued`; no new attempt is spent merely because the slot is full.
-In the legacy path only the reservation is made first: the task stays queued
-until the worker claims it. [Placement transaction](../../plugins/agent-dispatch/src/agent_dispatch/queue_pool_placement.py)
+In the same [placement transaction](../../plugins/agent-dispatch/src/agent_dispatch/queue_pool_placement.py),
+`task_pool_assignments` links generation 1 to the reservation and the pool
+`reviewers / my-dev-box / linux`; `pool_reservation_bindings` keeps that
+attempt's pool identity. **No process was started.** If the slot is full,
+the fresh job stays `queued` without spending an attempt. In the legacy
+reservation-first path, the task stays queued until a worker claims it.
 
 ## 3. Worktrees allocates the checkout
 
-```text
-Worktrees workspace-creation.sqlite3: creations[key_digest] pending → complete
-          Git: branch worktree/<W> and checkout at the returned path
-          worktrees/<W>.yaml: repo, worktree_id=W, branch, worktree_path,
-                             creation_nonce, status=active, sessions=[]
-                             dispatch_attempt: task_id=T, reservation_key=R, attempt=1, …
-Dispatch  R: worktree=W, worktree_ownership=created, allocation_project,
-             worktree_path and creation identity recorded on return
-Bridge / Copilot  no conversation required to allocate W
+```mermaid
+erDiagram
+    worktree_record {
+        text worktree_id "my-dev-box-20261015-234705-d67a"
+        text repo "example-project"
+        text branch "worktree/my-dev-box-20261015-234705-d67a"
+        text creation_nonce "53c816f4c9127be0"
+        text status "active"
+        list sessions "empty"
+    }
 ```
 
-The SQLite row is for **keyed creation**. The writer reserves the allocation
-identity before Git creation, saves the YAML record and finishes any required
-pairing before returning success. If an owning worktree requested the child,
-its responsibility is recorded before the Git effect. The YAML is canonical;
-the resident roster and status caches are not additional lifecycle commits.
-An interrupted return can leave the journal pending even when the directory
-exists. See [creation](../../plugins/agent-worktrees/src/agent_worktrees/worktree_creation.py),
-[journal](../../plugins/agent-worktrees/src/agent_worktrees/creation_requests.py) and
-[which startup step failed?](startup-boundaries.md).
+This card is the **Worktrees YAML record**, not a SQL table. Its
+`dispatch_attempt` points back to the task ID, reservation key and attempt 1.
+For [keyed creation](../../plugins/agent-worktrees/src/agent_worktrees/creation_requests.py),
+`workspace-creation.sqlite3` records `pending` before allocation and `complete`
+after successful creation. Git can already contain the checkout while that
+journal is pending. On return, Dispatch records the worktree ID, project,
+path and `worktree_ownership=created` on its reservation. The task is still
+`claimed`; there need not be a conversation. See [checkout creation](../../plugins/agent-worktrees/src/agent_worktrees/worktree_creation.py)
+and [startup boundaries](startup-boundaries.md) for pairing and preparation.
 
-## 4. Start the execution: choose one column, not both
+## 4. Bridge connects a conversation
 
 | Observation | Hosted ACP | Interactive CLI in a mux |
 |---|---|---|
-| Before native identity | `sessions[B]` is persisted `starting`, targeting `W`; native ID not yet known. | Bridge reserves CLI mode for `W`. Worktrees creates or targets the mux; a pane is not a conversation. No ACP `sessions[B]` row is required. |
-| Process tracking | The independent Host owns the child. Its private `host-…json` state file records startup evidence. Bridge's Host-state `index.json` associates `B` with the file, endpoint, Host/child PIDs, birth evidence and frontend ownership. | Manager can record the mux session incarnation and pane in `mux-mapping.json`. Native registration, when observed, records the session/head in Worktrees. The Bridge extension registers `live_sessions[N]` with `W`, PID/birth and heartbeat. |
-| Ready, **before task prompt** | `session/new` returns `N`; Bridge persists `sessions[B].acp_session_id=N`, becomes `idle`, and binds native lineage to `W`. A fresh unprompted creation can have **zero turns**. | An unseeded acquisition waits for the expected live registration and matching Worktrees head. Before `N` is observed, report *native ID unknown*, not “the pane ID is N.” |
-| First task delivery | The ordinary worker path creates without a prompt, records the returned identities and uses a separate keyed send. An admitted prompt has a `turns` row; a running turn is not a submitted review. | Exact delivery goes into `live_messages` for `N`. A queued inbox row, SDK send, acknowledgement and observed consumption are different observations. This is not an ACP `turns` row. |
+| Before native identity | Bridge assigns its own control ID, `a3112f7c-8a4`, and writes a `starting` session for the checkout. The native ID is still unknown. | Bridge reserves CLI mode for the checkout. Worktrees starts the CLI in a mux. No ACP control row is required. |
+| Process tracking | Session Host runs the child and writes a private `host-…json` state file. Bridge's Host-state `index.json` maps the control ID to that file, endpoint and Host/child process identities. | Manager records the mux incarnation and pane in `mux-mapping.json`. The CLI hook reports the native ID to Worktrees; the Bridge extension registers it in `live_sessions` with worktree, PID/birth and heartbeat. |
+| First task delivery | The ordinary worker path records the returned identities before a separate keyed send. An admitted prompt creates a `turns` row. | The job goes into `live_messages` for the native ID. SDK send, inbox acknowledgement and observed consumption are separate steps. |
 
-**When does Copilot create a conversation?** Distinguish the native ID, the
-first user message and the on-disk transcript. ACP gives Bridge a native ID
-*before* the first task prompt. In the CLI path this guide can establish when
-the hook/extension **reports** an ID, not the instant the CLI writes its private
-transcript. Neither a running child nor an empty transcript proves a user
-turn happened. See [ACP creation](../../plugins/agent-bridge/src/agent_bridge/acp_client.py),
-[Host launcher](../../libs/copilot-driver-core/src/agent_remote_driver/session_host/launcher.py),
-[Host index](../../plugins/agent-bridge/src/agent_bridge/session_host/host_index.py),
-[ordinary worker startup](../../plugins/agent-dispatch/src/agent_dispatch/ordinary_bridge.py)
-and [CLI acquisition](../../plugins/agent-bridge/src/agent_bridge/acquisition_plugins.py).
+```mermaid
+erDiagram
+    sessions {
+        text id PK "a3112f7c-8a4"
+        text acp_session_id "8f2a40f1-b7d1-4d63-978a-5159a84a1cc9"
+        text status "idle"
+    }
+```
 
-## 5. What the reviewer sees, and what `start` changes
+In this ACP snapshot, **Copilot returned the native GUID** in the
+[`session/new` response](../../plugins/agent-bridge/src/agent_bridge/acp_client.py).
+Bridge did not choose it. Both IDs are known before the first task prompt;
+there can be zero turns. For the interactive CLI, `copilot --session-id <uuid>`
+can select a UUID for a new conversation or resume an existing one. The
+[Worktrees headed seed launcher](../../plugins/agent-worktrees/src/agent_worktrees/launch_seed_native.py)
+can supply that flag for an eligible new interactive launch. A requested ID
+is not a registration: [CLI acquisition](../../plugins/agent-bridge/src/agent_bridge/acquisition_plugins.py)
+waits for the live native ID to match the Worktrees head.
+
+## 5. The reviewer accepts the job
 
 An illustrative exchange, shortened from the [pool-worker guidance](../../plugins/agent-dispatch/src/agent_dispatch/embody_prompts.py)
 and the [ordinary startup seed](../../plugins/agent-dispatch/src/agent_dispatch/ordinary_invocation.py):
 
-> **Task:** Review PR 12033 at head H. Submit a reference to the review on H.
+> **Task:** Review PR 12033 at head `a7139c4`. Submit a reference to the review on that head.
 >
-> **Dispatch guidance in the first prompt:** Task T is already claimed by the
+> **Dispatch guidance in the first prompt:** The task is already claimed by the
 > allocator at generation 1. Use the original coordinator. Read the operating
 > procedures, the worker charter and the task. Check for duplicate work. Do
 > not claim it again. If you accept, start it with your own workspace identity
 > and the retained native session ID.
 >
-> **Worker action:** Read T, verify the PR head, accept with
-> `start T --pool-generation 1 --owner-session-id N`, then report progress.
-> If H has changed or the assignment cannot be accepted, report the blocker
+> **Worker action:** Read the task, verify the PR head, then call `start` with
+> generation 1 and native GUID `8f2a40f1-b7d1-4d63-978a-5159a84a1cc9`.
+> If the head has changed or the assignment cannot be accepted, report the blocker
 > instead of reviewing a different head.
 
-Before that `start`, `tasks[T]` can still be `claimed` and unowned while a
-reviewer is reading the prompt. After a successful start:
+The worker's `start` changes the task row. It does not create another
+reservation, conversation or checkout.
 
-```text
-Dispatch  tasks[T] = {status: started, generation: 1,
-                      owner: my-dev-box/<W>, owner_session_id: N, started_at: …}
-          R is the SAME reservation; no new slot or native launch
-          task_events records acceptance; task_progress can now record review work
-Worktrees W is still active; head N is not a verdict on PR 12033
-Bridge    the transport can be in a turn or idle between turns
+```mermaid
+erDiagram
+    tasks {
+        text title "review-pr-12033"
+        text status "started"
+        integer generation "1"
+        text owner "my-dev-box/my-dev-box-20261015-234705-d67a"
+        text owner_session_id "8f2a40f1-b7d1-4d63-978a-5159a84a1cc9"
+    }
 ```
 
 **Task and reservation are coupled by checks, not by matching status names.**
-Normally `R.state=spawned` once the supervisor publishes startup. The
+Normally the reservation is `spawned` once the supervisor publishes startup. The
 [initial-start guard](../../plugins/agent-dispatch/src/agent_dispatch/queue_pool_placement.py)
 also permits `reserving` if the exact worker, native, workspace, assignment
 and other guards already match. `start` is the worker's acceptance, not a
-request to set `R.state=started`; there is no such reservation state.
+reservation state. If the reviewer suspends to wait for an author, the task
+can be `suspended` while the reservation is still `spawned`. Parking the
+process is a separate step that can make the reservation `cold`; see
+[pool wake order](pool-wake-order.md).
 
-**Can R manage a taskless worker?** No. The supported
-[spawn-reservation operation](../../plugins/agent-dispatch/src/agent_dispatch/queue_spawn_reservations.py)
-takes an existing task ID. `R` identifies an attempt for that task. Bridge
-and Worktrees can start a standalone session without Dispatch, but that is not
-a free-standing Dispatch spawn reservation.
+## 6. The evaluator checks the submitted review
 
-## 6. Wait for a new PR head, or finish the review
+The worker submits its review reference. Dispatch writes `submitted`, clears
+the active `owner`, and keeps `completed_by`, `owner_session_id` and the
+result. Because this task requires verification, the [Dispatch supervisor](../../plugins/agent-dispatch/src/agent_dispatch/supervisor.py)
+does **not** release the worker just because it submitted.
 
-If changes are requested and this worker should review the next revision,
-`T` can be `suspended` with the same owner and `N`. Suspending the **task**
-does not itself park the **process**: `R` can remain `spawned` until cooling
-completes, then become `cold`. See [who gets the next slot?](pool-wake-order.md).
+| Evaluator decision | Task after the decision | Latest reservation after the decision |
+|---|---|---|
+| Reject: the review covers the wrong PR head | `started`; same task ID, generation, submitting worker and native GUID | Still `spawned`. No release, new attempt or new allocation. |
+| Reject, but the latest reservation is `cold`, `releasing`, or already marked for release or conclusion | Rejection refused. The still-current submission remains `submitted`; no rejection feedback or wake is written. | Unchanged. Dispatch does not reverse retirement to make rejection succeed. |
+| Confirm: the review covers the requested head | `completed` | Confirmation alone does not change it. The supervisor settles outstanding assignment responsibility, then requests release. |
 
-If the goal is met, the reviewer instead submits the review reference:
-`started → submitted`; an independent confirmation can record `completed`.
-Neither step proves resource cleanup. For a created workspace, release can
-show `R.state=releasing` while native retirement or checkout conclusion is
-pending. Only the relevant owners can establish exit, settle the reservation
-and finalize or retire `W`. A reused checkout need not be removed.
+[Rejection](../../plugins/agent-dispatch/src/agent_dispatch/queue_submission_rejection.py)
+is one queue transaction. Dispatch checks the exact submission, restores the
+submitter and lease, moves the previous result into `verification_rejection`
+feedback, clears the task's current result fields, and queues a wake for the
+same conversation. A stale evaluation, hold or worker/session already assigned
+elsewhere also blocks the change. A directly claimed task **without** a spawn
+reservation can pass these checks; rejection does not create one.
+
+**Model boundary:** `started / spawned` describes both a reviewer that just
+accepted and one whose submission was rejected but whose wake is still
+pending. To tell those apart, read `task_events`, `task_steer` and the wake
+outbox. A successful rejection means *revision is assigned*, not *the worker
+has read the feedback*. The [rejection tests](../../plugins/agent-dispatch/tests/test_submission_rejection.py)
+exercise the transaction, replay and the race with retirement.
+
+After confirmation, **Session Host** reports its ACP child's exit to Bridge;
+on the mux path **Worktrees and Manager** observe the native activation and
+pane, not just a terminal detach. **The Dispatch supervisor** uses the
+driver's retirement evidence to settle the reservation. **Worktrees** checks
+Git content, claims and activity before finalizing or removing a managed
+checkout. A confirmed review can therefore coexist with a reservation still
+`releasing` and a checkout still on disk.
 
 [Run map](README.md) · [Task and reservation states](dispatch.md) · [Workspace closure](worktree.md)
