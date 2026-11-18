@@ -59,6 +59,9 @@ def run_probes(
             [name for name in evidence.PROBES if name not in isolated_probes],
         ) if group
     ]
+    if isolated_test_file is not None and len(groups) != 2:
+        raise ValueError(f"{label} isolated collection requires a separate remainder")
+    invocations = [groups] if isolated_test_file is not None else [[group] for group in groups]
     with tempfile.TemporaryDirectory(
         prefix=f"http47-capture-http{evidence.GENERATION}-", dir=parent,
     ) as temporary:
@@ -75,25 +78,40 @@ def run_probes(
         if not math.isfinite(budget) or budget <= 0:
             raise ValueError(f"{label} aggregate probe budget must be finite and positive")
         deadline = time.monotonic() + budget
-        for index, group in enumerate(groups):
+        for index, cohorts in enumerate(invocations):
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise ValueError(f"{label} aggregate probe deadline expired")
-            junit = directory / f"junit-{index}.xml"
-            test_file = (
-                isolated_test_file
-                if isolated_test_file is not None and set(group) <= isolated_probes
-                else Path(evidence.TEST).relative_to("plugins/agent-bridge").as_posix()
+            junit_root = directory / f"junit-{index}"
+            test_file = Path(evidence.TEST).relative_to("plugins/agent-bridge").as_posix()
+            if isolated_test_file is not None:
+                files = [isolated_test_file, test_file]
+                reports = [
+                    (junit_root / "agent-bridge" / f"group-{number:03d}.xml", group)
+                    for number, group in enumerate(cohorts, start=1)
+                ]
+                report_arguments = ["--junit-dir", str(junit_root)]
+                pytest_options = "-vv --durations=20"
+            else:
+                files = [test_file]
+                reports = [(junit_root.with_suffix(".xml"), cohorts[0])]
+                report_arguments = []
+                pytest_options = (
+                    shlex.quote("--junitxml=" + str(reports[0][0])) + " -vv --durations=20"
+                )
+            print(
+                f"{label} bounded runner {index + 1}/{len(invocations)} "
+                f"({len(cohorts)} observer cohorts)", flush=True,
             )
-            print(f"{label} bounded probe group {index + 1}/{len(groups)}", flush=True)
             with patch.dict(os.environ, {
                 binding.REQUEST: str(request), binding.REQUEST_SHA: evidence.digest(payload),
-                "PYTEST_ADDOPTS": shlex.quote("--junitxml=" + str(junit)) + " -vv --durations=20",
+                "PYTEST_ADDOPTS": pytest_options,
             }):
                 result = run_caller_owned([
                     sys.executable, str(root / "tools/run-plugin-tests.py"), "agent-bridge",
-                    "--test-file", test_file,
-                    "-k", " or ".join(group),
+                    *(argument for name in files for argument in ("--test-file", name)),
+                    *report_arguments,
+                    "-k", " or ".join(name for group in cohorts for name in group),
                     "--subsuite-timeout", str(remaining),
                     "--plugin-timeout", str(remaining),
                     *(["--test-timeout", "120"] if os.name == "nt" else []),
@@ -103,13 +121,18 @@ def run_probes(
             print(result.stderr, end="", file=sys.stderr)
             if result.returncode or request.read_bytes() != payload:
                 raise ValueError(f"{label} bounded probes failed or request changed")
-            for case in ET.parse(junit).getroot().iter("testcase"):
-                name = case.attrib.get("name", "").split("[", 1)[0]
-                if name not in group or any(
-                    case.find(tag) is not None for tag in ("failure", "error", "skipped")
-                ):
-                    raise ValueError(f"{label} probe failed, skipped or escaped its portfolio")
-                cases[name] = cases.get(name, 0) + 1
+            if isolated_test_file is not None and set(junit_root.rglob("*.xml")) != {
+                path for path, _ in reports
+            }:
+                raise ValueError(f"{label} observer cohort reports are incomplete or unexpected")
+            for junit, group in reports:
+                for case in ET.parse(junit).getroot().iter("testcase"):
+                    name = case.attrib.get("name", "").split("[", 1)[0]
+                    if name not in group or any(
+                        case.find(tag) is not None for tag in ("failure", "error", "skipped")
+                    ):
+                        raise ValueError(f"{label} probe failed, skipped or escaped its portfolio")
+                    cases[name] = cases.get(name, 0) + 1
         if cases != evidence.PROBES:
             raise ValueError(f"{label} probe portfolio is incomplete or duplicated")
         receipt = binding.verify_interpreters(

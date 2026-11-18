@@ -37,9 +37,13 @@ historical_repository = old_guards.repository
 CaptureCase = tuple[ModuleType, ModuleType]
 
 
-@pytest.mark.parametrize("fault", [None, "skipped", "missing", "duplicate", "request"])
+@pytest.mark.parametrize(("fault", "shared_runner"), [
+    (None, True), (None, False), ("skipped", True), ("missing", True),
+    ("duplicate", True), ("request", True), ("missing-report", True),
+    ("extra-report", True), ("wrong-cohort", True),
+])
 def test_isolated_capture_collection_preserves_portfolio_and_aggregate_deadline(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str | None,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str | None, shared_runner: bool,
 ) -> None:
     from agent_procutil import owned_process
     import bridge_http47_runtime as binding
@@ -66,29 +70,45 @@ def test_isolated_capture_collection_preserves_portfolio_and_aggregate_deadline(
     def run(argv: list[str], **limits: Any) -> subprocess.CompletedProcess[str]:
         index = len(calls)
         calls.append(argv)
-        assert argv[argv.index("--test-file") + 1] == (
-            "tests/test_isolated.py" if index == 0 else "tests/test_all.py"
+        assert [
+            argv[position + 1] for position, value in enumerate(argv) if value == "--test-file"
+        ] == (
+            ["tests/test_isolated.py", "tests/test_all.py"]
+            if shared_runner else ["tests/test_all.py"]
         )
         remaining = (230.0, 210.0)[index]
         assert limits["timeout"] == remaining
         for option in ("--subsuite-timeout", "--plugin-timeout"):
             assert float(argv[argv.index(option) + 1]) == remaining
         names = argv[argv.index("-k") + 1].split(" or ")
-        assert names == (["test_owner"] if index == 0 else ["test_remaining"])
+        expected_names = ["test_owner", "test_remaining"]
+        assert names == (expected_names if shared_runner else [expected_names[index]])
         request = Path(os.environ[binding.REQUEST])
         payload = json.loads(request.read_bytes())
         Path(payload["report"]).write_bytes(evidence.encode(expected))
-        suite = ET.Element("testsuite")
-        for name in names:
-            count = 0 if fault == "missing" and index == 0 else (
-                2 if fault == "duplicate" and index == 0 else 1
+        if shared_runner:
+            report_root = Path(argv[argv.index("--junit-dir") + 1]) / "agent-bridge"
+            report_root.mkdir(parents=True)
+            reports = [(report_root / f"group-{number:03d}.xml", name)
+                       for number, name in enumerate(names, start=1)]
+        else:
+            junit_argument = shlex.split(os.environ["PYTEST_ADDOPTS"])[0].split("=", 1)[1]
+            reports = [(Path(junit_argument), names[0])]
+        for number, (junit, name) in enumerate(reports):
+            if fault == "missing-report" and number == 0:
+                continue
+            suite = ET.Element("testsuite")
+            count = 0 if fault == "missing" and number == 0 else (
+                2 if fault == "duplicate" and number == 0 else 1
             )
             for _ in range(count):
-                case = ET.SubElement(suite, "testcase", name=name)
-                if fault == "skipped" and index == 0:
+                case_name = names[1 - number] if fault == "wrong-cohort" else name
+                case = ET.SubElement(suite, "testcase", name=case_name)
+                if fault == "skipped" and number == 0:
                     ET.SubElement(case, "skipped")
-        junit = shlex.split(os.environ["PYTEST_ADDOPTS"])[0].split("=", 1)[1]
-        ET.ElementTree(suite).write(junit)
+            ET.ElementTree(suite).write(junit)
+        if fault == "extra-report":
+            ET.ElementTree(ET.Element("testsuite")).write(reports[0][0].with_name("extra.xml"))
         if fault == "request" and index == 0:
             request.write_bytes(request.read_bytes() + b"\n")
         return subprocess.CompletedProcess(argv, 0, "", "")
@@ -104,7 +124,8 @@ def test_isolated_capture_collection_preserves_portfolio_and_aggregate_deadline(
     monkeypatch.setattr(binding, "verify_interpreters", verify)
     kwargs: dict[str, Any] = {
         "evidence": spec, "isolated_probes": frozenset({"test_owner"}),
-        "isolated_test_file": "tests/test_isolated.py", "aggregate_timeout": 240,
+        "isolated_test_file": "tests/test_isolated.py" if shared_runner else None,
+        "aggregate_timeout": 240,
     }
     if fault:
         with pytest.raises(ValueError):
@@ -112,7 +133,7 @@ def test_isolated_capture_collection_preserves_portfolio_and_aggregate_deadline(
         assert not verified
     else:
         assert capture.run_probes(tmp_path, proof, vector, **kwargs) == expected
-        assert len(calls) == 2 and len(verified) == 1
+        assert len(calls) == (1 if shared_runner else 2) and len(verified) == 1
 
 
 @pytest.mark.parametrize("isolated_probes", [frozenset(), frozenset({"test_owner"})])
@@ -127,6 +148,19 @@ def test_isolated_capture_refuses_an_unbound_collection_source(
         capture.run_probes(
             tmp_path, {}, {}, evidence=cast(ModuleType, spec), isolated_probes=isolated_probes,
             isolated_test_file="tests/test_unbound.py",
+        )
+
+
+def test_isolated_capture_requires_a_distinct_remainder(tmp_path: Path) -> None:
+    spec = SimpleNamespace(
+        GENERATION=52, PROBES={"test_owner": 1},
+        safe=lambda root, path, **kwargs: root / path,
+    )
+    with pytest.raises(ValueError, match="separate remainder"):
+        capture.run_probes(
+            tmp_path, {"plugins/agent-bridge/tests/test_isolated.py": {}}, {},
+            evidence=cast(ModuleType, spec), isolated_probes=frozenset({"test_owner"}),
+            isolated_test_file="tests/test_isolated.py",
         )
 
 
