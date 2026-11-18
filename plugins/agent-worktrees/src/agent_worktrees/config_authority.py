@@ -4,20 +4,27 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING
+import socket
+from subprocess import CompletedProcess
+from typing import TYPE_CHECKING, Any
+
+import yaml
+
+from . import config_acquisition, config_migrations, registry_paths
 
 if TYPE_CHECKING:
     from .config import Config
+    from .tracking import WorktreeRecord
 
 def _load_state_root_authority(
     name: str, anchor: str, platform_name: str, remote_name: str | None,
-) -> tuple[dict, str]:
+) -> tuple[dict[str, Any] | None, str]:
     """Read only state-root gates from the registered committed config."""
     from . import config as cfg, git_ops, repos
 
     root = Path(anchor)
 
-    def _git(*args: str):
+    def _git(*args: str) -> CompletedProcess[str]:
         return git_ops.git(
             *args, cwd=root, check=False, capture=True,
             isolated_repository=True,
@@ -51,7 +58,7 @@ def _load_state_root_authority(
             if remote_name else [f"refs/heads/{branch}"]
         )
 
-    def _read_branch(branch: str, *, required: bool) -> dict | None:
+    def _read_branch(branch: str, *, required: bool) -> dict[str, Any] | None:
         ref = ""
         listing = None
         for candidate_ref in _refs(branch):
@@ -89,10 +96,8 @@ def _load_state_root_authority(
             None,
         )
         if selected is None:
-            if required:
-                raise ValueError(
-                    f"committed authority config is absent for project {name!r}"
-                )
+            if required and remote_name and not ref.startswith(f"refs/remotes/{remote_name}/"):
+                raise ValueError("committed authority absence requires the remote tracking ref")
             return None
         content = _git(
             "show", f"{ref}:{selected.as_posix()}",
@@ -101,7 +106,7 @@ def _load_state_root_authority(
             raise ValueError(
                 f"cannot read committed authority config for {name!r}"
             )
-        raw = cfg.yaml.safe_load(content.stdout)
+        raw = yaml.safe_load(content.stdout)
         if not isinstance(raw, dict):
             raise ValueError(
                 f"committed authority config for {name!r} is malformed"
@@ -145,24 +150,57 @@ def _load_state_root_authority(
         raise ValueError(f"cannot resolve committed branch for project {name!r}")
 
     data = _read_branch(branch, required=True)
+    if data is None and head.returncode != 0:
+        raise ValueError("committed authority absence requires a resolved default HEAD")
     declared = data.get("default_branch") if data is not None else None
     if isinstance(declared, str) and declared and declared != branch:
         hopped = _read_branch(declared, required=False)
         if hopped is not None:
             data = hopped
-    return data or {}, remote_name
+    return data, remote_name
+
+
+def _require_absent_repository_policy(anchor: str) -> None:
+    """Prove that the ordinary config loader has no disk policy fallback."""
+    from . import config as cfg
+
+    root = Path(anchor)
+    candidates = [
+        cfg.inrepo_config_path(root),
+        cfg.legacy_inrepo_config_path(root),
+        root / cfg.INREPO_CONFIG_FILENAME,
+    ]
+    context = getattr(registry_paths, "installation_context_call")(
+        registry_paths.installation_context,
+    )
+    marketplace = str(context.get("marketplaceId", "")).strip() if isinstance(context, dict) else ""
+    if marketplace:
+        candidates.append(
+            root / cfg.MARKETPLACE_OVERLAYS_DIR / marketplace / cfg.GLOBAL_CONFIG_FILENAME
+        )
+    for candidate in candidates:
+        if config_acquisition.source_exists(candidate, "registration-policy", strict=True):
+            raise ValueError("repository policy fallback is present; authority is unavailable")
+
+
+def _require_absent_policy_record(record: WorktreeRecord | None, config: Config) -> None:
+    """Admit only an independently proven local checkout."""
+    from . import retained_checkout
+
+    if not retained_checkout.is_local(record, config):
+        raise ValueError("config-free registration requires a proven local checkout")
 
 
 def load_project_authority_config(
-    name: str, *, path: Path | None = None,
+    name: str, *, path: Path | None = None, record: WorktreeRecord | None = None,
 ) -> Config:
     """Resolve only identity, registry, and state-root facts used by fences."""
     from . import config as cfg
 
     path = path or cfg.project_dir(name) / "config.yaml"
-    global_raw = cfg.config_migrations.migrate_loaded(
+    global_raw = config_migrations.migrate_loaded(
         cfg._load_yaml_safe(cfg.global_config_path()),
-        cfg.config_migrations.SCHEMA_CONFIG,
+        config_migrations.SCHEMA_CONFIG,
     )
     machine_raw = cfg._load_yaml_safe(path)
     dropins = cfg._load_config_d(
@@ -176,7 +214,7 @@ def load_project_authority_config(
     platform_name = (
         machine_raw.get("platform")
         or global_raw.get("platform")
-        or cfg.detect_platform()
+        or getattr(cfg, "detect_platform")()
     )
     from .machine_identity import configured_machine_binding
 
@@ -206,6 +244,40 @@ def load_project_authority_config(
     inrepo_authority, resolved_remote = _load_state_root_authority(
         name, str(anchor), platform_name, remote_name,
     )
+    absent_policy = inrepo_authority is None
+    if inrepo_authority is None:
+        from dropin_registry import ScanAuthority
+        from . import config_dropins, inrepo_config_source
+
+        _require_absent_repository_policy(str(anchor))
+        strict_global = config_migrations.migrate_loaded(
+            inrepo_config_source.load_config_file(cfg.global_config_path(), strict=True),
+            config_migrations.SCHEMA_CONFIG,
+        )
+        strict_machine = inrepo_config_source.load_config_file(path, strict=True)
+        report = config_dropins.scan_config_dropin_registry(
+            path.parent / "config.d", project_name=name, strict=True,
+        )
+        if report.authority not in (ScanAuthority.COMPLETE, ScanAuthority.ABSENT) or report.findings:
+            raise ValueError("machine configuration fragments are unavailable")
+        strict_dropins: dict[str, Any] = {}
+        for contribution in report.active_configs:
+            strict_dropins = cfg._deep_merge(strict_dropins, contribution.raw_config)
+        strict_machine = cfg._deep_merge(strict_dropins, strict_machine)
+        if strict_global != global_raw or strict_machine != machine_raw:
+            raise ValueError("machine configuration authority changed during acquisition")
+        if ("repos" in machine_raw and not isinstance(machine_raw["repos"], dict)) or (
+            not isinstance(machine_repos, dict)
+        ) or (
+            name in machine_repos and not isinstance(machine_repos[name], dict)
+        ):
+            raise ValueError("machine repository configuration is malformed")
+        flags = ("stateless", "requires_external_state_root")
+        if any(key in machine_repo and type(machine_repo[key]) is not bool for key in flags):
+            raise ValueError("machine state-root policy is malformed")
+        if record is None or any(machine_repo.get(key, False) for key in flags):
+            raise ValueError("committed authority config is absent")
+        inrepo_authority = {}
     stateless = bool(
         machine_repo.get("stateless", inrepo_authority.get("stateless", False))
     )
@@ -243,23 +315,25 @@ def load_project_authority_config(
     from .machine_identity import resolve_execution_machine
 
     try:
-        return replace(config, machine=resolve_execution_machine(
-            configured_machine or cfg.socket.gethostname(),
-            guest=cfg.detect_platform() == "wsl", configured=bool(configured_machine),
+        config = replace(config, machine=resolve_execution_machine(
+            configured_machine or socket.gethostname(),
+            guest=getattr(cfg, "detect_platform")() == "wsl", configured=bool(configured_machine),
             load_entries=lambda: cfg.load_machines_yaml(str(anchor), config=config),
             preserve_native_hostname=True,
         ))
-    except (OSError, ValueError, TypeError, cfg.yaml.YAMLError):
-        return config
+    except (OSError, ValueError, TypeError, yaml.YAMLError):
+        pass
+    if absent_policy:
+        _require_absent_policy_record(record, config)
+    return config
 
 
-def registration_record_config(record) -> Config:
+def registration_record_config(record: WorktreeRecord) -> Config:
     """Return receiving-side configuration after fencing registration."""
-    from . import config as cfg
     from .execution_spaces import ExecutionSpaceError, require_record_mutation
 
     try:
-        config = load_project_authority_config(record.repo)
+        config = load_project_authority_config(record.repo, record=record)
         if record.repo not in config.repos:
             raise ValueError(
                 "requested project is not registered in receiving-side configuration"
@@ -268,13 +342,13 @@ def registration_record_config(record) -> Config:
         return config
     except (
         OSError, ValueError, KeyError, TypeError,
-        cfg.yaml.YAMLError,
+        yaml.YAMLError,
     ) as exc:
         raise ExecutionSpaceError(
             f"cannot establish receiving-side authority for project {record.repo!r}: {exc}"
         ) from exc
 
 
-def require_registration_record_mutation(record) -> None:
+def require_registration_record_mutation(record: WorktreeRecord) -> None:
     """Fence one session-registration record without full project policy."""
     registration_record_config(record)

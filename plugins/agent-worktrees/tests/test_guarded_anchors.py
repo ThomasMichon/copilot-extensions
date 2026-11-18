@@ -9,21 +9,37 @@ from pathlib import Path
 import subprocess
 import stat
 import sys
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
 import pytest
+from collections.abc import Sequence
+from contextlib import AbstractContextManager
+from agent_worktrees import repos
+from agent_worktrees.repos_registry_reader import RepositoryResolutionError
+from agent_worktrees.status_segment_cache import _StatusSegmentCache
+from typing import TypeVar, Any, BinaryIO, Callable, IO, Iterator, NoReturn, cast
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 
 
-def _load(name):
+
+
+_T = TypeVar("_T")
+_U = TypeVar("_U")
+
+def _append_result(values: list[_T], value: _T, result: _U) -> _U:
+    values.append(value)
+    return result
+
+def _load(name: str) -> ModuleType:
     spec = importlib.util.spec_from_file_location(name, SCRIPTS / f"{name}.py")
+    assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
-def _repo(path, *, bare=False):
+def _repo(path: Path, *, bare: bool=False) -> Path:
     git = path if bare else path / ".git"
     git.mkdir(parents=True)
     (git / "HEAD").write_text("ref: refs/heads/main\n")
@@ -32,7 +48,7 @@ def _repo(path, *, bare=False):
     return path
 
 
-def _snapshot(reader, caller, registry, roots=()):
+def _snapshot(reader: ModuleType, caller: Path, registry: Path, roots: Sequence[dict[str, Any]]=()) -> dict[str, Any]:
     return {
         "schema": "agent-worktrees.guarded-anchors", "version": 1,
         "source_root": reader.canonical(caller),
@@ -44,7 +60,7 @@ def _snapshot(reader, caller, registry, roots=()):
     }
 
 
-def test_missing_map_is_unavailable_not_complete_empty(tmp_path):
+def test_missing_map_is_unavailable_not_complete_empty(tmp_path: Path) -> None:
     reader = _load("guarded_anchor_map")
     caller = _repo(tmp_path / "caller")
     registry = tmp_path / "registry"
@@ -54,21 +70,80 @@ def test_missing_map_is_unavailable_not_complete_empty(tmp_path):
     path.write_text(json.dumps(_snapshot(reader, caller, registry)))
     result = reader.read_map(caller, registry)
     assert result.status == "ready" and result.roots == []
+    assert result.anchor_inventory is None
 
 
-def test_git_marker_probe_failure_cannot_fall_back_to_parent_repository(tmp_path, monkeypatch):
+@pytest.mark.parametrize("damage", [
+    "status", "parser", "row", "count", "shared-count", "surrogate-row", "surrogate-observation",
+])
+def test_invalid_anchor_inventory_does_not_discard_confirmed_roots(tmp_path: Path, damage: str) -> None:
+    reader = _load("guarded_anchor_map")
+    caller = _repo(tmp_path / "caller")
+    target = _repo(tmp_path / "target")
+    registry = tmp_path / "registry"
+    root = {
+        "name": "target", "delegate": "agent-bridge", "path": reader.canonical(target),
+        "identity": reader.repository_identity(target),
+    }
+    inventory = reader.unavailable_anchor_inventory("synthetic")
+    if damage == "status":
+        inventory["status"] = []
+    elif damage == "parser":
+        inventory["observations"] = [{
+            "source": "repos.yaml", "parser": [], "status": "observed", "reason": "",
+        }]
+    elif damage == "row":
+        inventory["rows"] = [{"name": "target", "path": "\0"}]
+    elif damage == "surrogate-row":
+        inventory["rows"] = [{"name": "target", "path": "/source/\ud800"}]
+    elif damage == "surrogate-observation":
+        inventory["observations"] = [{
+            "source": "\ud800", "parser": "pyyaml", "status": "observed", "reason": "",
+        }]
+    else:
+        count = reader.MAX_ROOTS + (damage == "count")
+        inventory["rows"] = [{"name": "target", "path": "/source/target"}] * count
+    value = _snapshot(reader, caller, registry, [root])
+    value["anchor_inventory"] = inventory
+    path = reader.map_path(caller, registry)
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps(value), encoding="utf-8")
+    result = reader.read_map(caller, registry)
+    assert result.status == "ready" and result.roots == [root]
+    assert result.anchor_inventory["status"] == "unavailable"
+    assert result.anchor_inventory["reason"] == "invalid-anchor-inventory"
+
+
+def test_anchor_inventory_ignores_unknown_fields_before_publication() -> None:
+    reader = _load("guarded_anchor_map")
+    value = {
+        "version": 1, "status": "observed", "qualification": "managed-observation",
+        "rows": [],
+        "observations": [
+            {"source": name, "parser": "pyyaml", "status": "observed", "reason": ""}
+            for name in ("projects.yaml", "repos.yaml")
+        ],
+        "unknown": "\ud800",
+    }
+    result = reader.read_anchor_inventory(value)
+    assert result["status"] == "observed"
+    assert "unknown" not in result
+    assert json.dumps(result, ensure_ascii=False).encode("utf-8")
+
+
+def test_git_marker_probe_failure_cannot_fall_back_to_parent_repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     reader = _load("guarded_anchor_map")
     parent = _repo(tmp_path / "parent")
     nested = _repo(parent / "nested")
     marker = nested / ".git"
     original_stat, original_lstat = Path.stat, Path.lstat
 
-    def unavailable(path, *args, **kwargs):
+    def unavailable(path: Path, *args: Any, **kwargs: Any) -> os.stat_result:
         if path == marker:
             raise PermissionError("synthetic unreadable Git marker")
         return original_stat(path, *args, **kwargs)
 
-    def unavailable_lstat(path, *args, **kwargs):
+    def unavailable_lstat(path: Path, *args: Any, **kwargs: Any) -> os.stat_result:
         if path == marker:
             raise PermissionError("synthetic unreadable Git marker")
         return original_lstat(path, *args, **kwargs)
@@ -82,7 +157,7 @@ def test_git_marker_probe_failure_cannot_fall_back_to_parent_repository(tmp_path
 
 
 @pytest.mark.parametrize("missing", ["objects", "refs"])
-def test_repository_identity_requires_common_git_metadata(tmp_path, missing):
+def test_repository_identity_requires_common_git_metadata(tmp_path: Path, missing: str) -> None:
     reader = _load("guarded_anchor_map")
     caller = _repo(tmp_path / "caller")
     (caller / ".git" / missing).rmdir()
@@ -92,11 +167,11 @@ def test_repository_identity_requires_common_git_metadata(tmp_path, missing):
 
 
 @pytest.mark.parametrize("missing", ["HEAD", "objects", "refs"])
-def test_repository_probe_observes_failed_and_successful_dependencies(tmp_path, missing):
+def test_repository_probe_observes_failed_and_successful_dependencies(tmp_path: Path, missing: str) -> None:
     reader = _load("guarded_anchor_map")
     caller = _repo(tmp_path / "caller")
     target = caller / ".git" / missing
-    observed = []
+    observed: list[Path] = []
     assert reader.repository_identity(caller, observe=observed.append)
     assert caller in observed and target in observed
     if target.is_dir():
@@ -108,11 +183,11 @@ def test_repository_probe_observes_failed_and_successful_dependencies(tmp_path, 
     assert target in observed
 
 
-def test_map_validation_does_not_probe_inventory_paths(tmp_path, monkeypatch):
+def test_map_validation_does_not_probe_inventory_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     reader = _load("guarded_anchor_map")
     caller = _repo(tmp_path / "caller")
     registry = tmp_path / "registry"
-    roots = []
+    roots: list[dict[str, Any]] = []
     for index in range(20):
         target = os.path.normcase(os.path.abspath(tmp_path / f"unrelated-{index}"))
         roots.append({
@@ -125,7 +200,7 @@ def test_map_validation_does_not_probe_inventory_paths(tmp_path, monkeypatch):
     path.write_text(json.dumps(_snapshot(reader, caller, registry, roots)))
     original = os.path.realpath
 
-    def no_inventory_probe(value, *args, **kwargs):
+    def no_inventory_probe(value: str, *args: Any, **kwargs: Any) -> str:
         assert not any(os.fspath(value).startswith(row["path"]) for row in roots), "inventory filesystem traversal"
         return original(value, *args, **kwargs)
 
@@ -134,7 +209,7 @@ def test_map_validation_does_not_probe_inventory_paths(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("damage", ["unreadable", "nonregular"])
-def test_linked_common_directory_probe_failure_cannot_publish_local_git_identity(tmp_path, monkeypatch, damage):
+def test_linked_common_directory_probe_failure_cannot_publish_local_git_identity(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, damage: str) -> None:
     reader = _load("guarded_anchor_map")
     anchor = _repo(tmp_path / "anchor", bare=True)
     gitdir = anchor / "worktrees" / "linked"
@@ -147,12 +222,12 @@ def test_linked_common_directory_probe_failure_cannot_publish_local_git_identity
     (linked / ".git").write_text(f"gitdir: {gitdir}\n")
     original_stat, original_lstat = Path.stat, Path.lstat
 
-    def unavailable(path, *args, **kwargs):
+    def unavailable(path: Path, *args: Any, **kwargs: Any) -> os.stat_result:
         if path == common:
             raise PermissionError("synthetic unreadable common-directory marker")
         return original_stat(path, *args, **kwargs)
 
-    def unavailable_lstat(path, *args, **kwargs):
+    def unavailable_lstat(path: Path, *args: Any, **kwargs: Any) -> os.stat_result:
         if path == common:
             raise PermissionError("synthetic unreadable common-directory marker")
         return original_lstat(path, *args, **kwargs)
@@ -172,7 +247,7 @@ def test_linked_common_directory_probe_failure_cannot_publish_local_git_identity
     assert reader.repository_identity(linked / "new.txt")["common_dir"] == reader.canonical(anchor)
 
 
-def test_map_reader_and_bounded_writer_complete_during_publication(tmp_path, monkeypatch):
+def test_map_reader_and_bounded_writer_complete_during_publication(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from concurrent.futures import ThreadPoolExecutor
     import threading
 
@@ -190,11 +265,11 @@ def test_map_reader_and_bounded_writer_complete_during_publication(tmp_path, mon
     attempted = threading.Event()
     writes = []
 
-    def observe_replace(source, destination):
+    def observe_replace(source: Path, destination: Path) -> None:
         attempted.set()
         return original_replace(source, destination)
 
-    def publish_while_open(selected):
+    def publish_while_open(selected: Path) -> BinaryIO:
         stream = original_open(selected)
         if selected == path:
             try:
@@ -206,9 +281,9 @@ def test_map_reader_and_bounded_writer_complete_during_publication(tmp_path, mon
             except BaseException:
                 stream.close()
                 raise
-        return stream
+        return cast(BinaryIO, stream)
 
-    monkeypatch.setattr(tracking.os, "replace", observe_replace)
+    monkeypatch.setattr(getattr(tracking, "os"), "replace", observe_replace)
     monkeypatch.setattr(reader, "_open_map", publish_while_open)
     with ThreadPoolExecutor(max_workers=1) as workers:
         result = reader.read_map(caller, registry)
@@ -219,7 +294,7 @@ def test_map_reader_and_bounded_writer_complete_during_publication(tmp_path, mon
 
 
 @pytest.mark.parametrize("damage", ["json", "scope", "version", "incomplete", "row"])
-def test_unusable_map_fails_open_without_acquisition(tmp_path, monkeypatch, damage):
+def test_unusable_map_fails_open_without_acquisition(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, damage: str) -> None:
     guard = _load("cross_repo_guard")
     reader = _load("guarded_anchor_map")
     caller = _repo(tmp_path / "caller")
@@ -245,7 +320,7 @@ def test_unusable_map_fails_open_without_acquisition(tmp_path, monkeypatch, dama
     assert reader.read_map(caller, registry).status == "unusable"
 
 
-def test_repository_identity_is_nearest_and_resolves_common_directory(tmp_path):
+def test_repository_identity_is_nearest_and_resolves_common_directory(tmp_path: Path) -> None:
     reader = _load("guarded_anchor_map")
     anchor = _repo(tmp_path / "anchor", bare=True)
     linked = tmp_path / "linked"
@@ -263,7 +338,7 @@ def test_repository_identity_is_nearest_and_resolves_common_directory(tmp_path):
     assert reader.repository_identity(anchor)["common_dir"] == reader.canonical(anchor)
 
 
-def test_git_pointer_path_spaces_are_preserved(tmp_path):
+def test_git_pointer_path_spaces_are_preserved(tmp_path: Path) -> None:
     reader = _load("guarded_anchor_map")
     base = Path("\\\\?\\" + str(tmp_path)) if os.name == "nt" else tmp_path
     anchor = _repo(base / "anchor with suffix ", bare=True)
@@ -282,7 +357,7 @@ def test_git_pointer_path_spaces_are_preserved(tmp_path):
     assert identity["common_dir"] == reader.canonical(anchor)
 
 
-def test_native_and_resident_share_file_only_decisions_and_live_controls(tmp_path, monkeypatch):
+def test_native_and_resident_share_file_only_decisions_and_live_controls(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_worktrees import __main__ as main
     from agent_worktrees import related, registry_paths, repos
 
@@ -314,7 +389,7 @@ def test_native_and_resident_share_file_only_decisions_and_live_controls(tmp_pat
     assert policy.pre(payload)["permissionDecision"] == "deny"
     monkeypatch.setattr(main, "_activate_project_for_path", lambda *a, **k: pytest.fail("pre activated project"))
     assert main._resident_hook_decision(
-        "preToolUse", payload, segment_cache=None, policy=policy,
+        "preToolUse", payload, segment_cache=cast(_StatusSegmentCache, None), policy=policy,
     )["permissionDecision"] == "deny"
     monkeypatch.setenv("CROSS_REPO_GUARD", "off")
     assert policy.pre(payload) == {}
@@ -329,7 +404,7 @@ def test_native_and_resident_share_file_only_decisions_and_live_controls(tmp_pat
     assert policy.pre(payload)["permissionDecision"] == "deny"
 
 
-def test_nested_repository_does_not_inherit_parent_guard(tmp_path):
+def test_nested_repository_does_not_inherit_parent_guard(tmp_path: Path) -> None:
     reader = _load("guarded_anchor_map")
     guard = _load("cross_repo_guard")
     target = _repo(tmp_path / "target")
@@ -350,7 +425,7 @@ def test_nested_repository_does_not_inherit_parent_guard(tmp_path):
     ("powershell", {"command": "git commit -m first; git commit -m second"}),
     ("powershell", {"command": "git -C . commit -m first; git -C . commit -m second"}),
 ])
-def test_target_identity_resolution_is_event_local_not_inventory_sized(tmp_path, monkeypatch, tool, args):
+def test_target_identity_resolution_is_event_local_not_inventory_sized(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tool: str, args: dict[str, Any]) -> None:
     guard = _load("cross_repo_guard")
     target = _repo(tmp_path / "guarded")
     outside = _repo(tmp_path / "outside")
@@ -359,11 +434,11 @@ def test_target_identity_resolution_is_event_local_not_inventory_sized(tmp_path,
         "identity": guard._guard_map.repository_identity(target),
     }
     original = guard._guard_map.repository_identity
-    observed = []
+    observed: list[Path] = []
 
-    def observe(path):
+    def observe(path: Path) -> dict[str, str] | None:
         observed.append(path)
-        return original(path)
+        return cast(dict[str, str] | None, original(path))
 
     monkeypatch.setattr(guard._guard_map, "repository_identity", observe)
     roots = [{**row, "name": f"target-{index}"} for index in range(20)]
@@ -374,7 +449,7 @@ def test_target_identity_resolution_is_event_local_not_inventory_sized(tmp_path,
 
 @pytest.mark.parametrize("kind", ["anchor", "linked", "nested"])
 @pytest.mark.parametrize("relative", [False, True])
-def test_literal_git_directory_uses_repository_identity(tmp_path, kind, relative):
+def test_literal_git_directory_uses_repository_identity(tmp_path: Path, kind: str, relative: bool) -> None:
     guard = _load("cross_repo_guard")
     anchor = _repo(tmp_path / "guarded space")
     target = anchor
@@ -405,7 +480,7 @@ def test_literal_git_directory_uses_repository_identity(tmp_path, kind, relative
 
 @pytest.mark.parametrize("guarded_target", [False, True])
 @pytest.mark.parametrize("explicit_directory", [False, True])
-def test_git_message_directory_option_is_not_a_write_target(tmp_path, guarded_target, explicit_directory):
+def test_git_message_directory_option_is_not_a_write_target(tmp_path: Path, guarded_target: bool, explicit_directory: bool) -> None:
     guard = _load("cross_repo_guard")
     anchor = _repo(tmp_path / "guarded")
     outside = _repo(tmp_path / "outside")
@@ -435,7 +510,7 @@ def test_git_message_directory_option_is_not_a_write_target(tmp_path, guarded_ta
 ])
 @pytest.mark.parametrize("guarded_target", [False, True])
 @pytest.mark.parametrize("subcommand", ["rm tracked.txt", "commit -m new"])
-def test_git_global_options_preserve_write_repository(tmp_path, options, guarded_target, subcommand):
+def test_git_global_options_preserve_write_repository(tmp_path: Path, options: str, guarded_target: bool, subcommand: str) -> None:
     guard = _load("cross_repo_guard")
     anchor = _repo(tmp_path / "guarded")
     outside = _repo(tmp_path / "outside")
@@ -453,7 +528,7 @@ def test_git_global_options_preserve_write_repository(tmp_path, options, guarded
     assert bool(result) is guarded_target
 
 
-def test_git_global_options_read_does_not_acquire_guard_facts(tmp_path, monkeypatch):
+def test_git_global_options_read_does_not_acquire_guard_facts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     guard = _load("cross_repo_guard")
     monkeypatch.setattr(
         guard._guard_map, "repository_identity",
@@ -466,7 +541,7 @@ def test_git_global_options_read_does_not_acquire_guard_facts(tmp_path, monkeypa
 
 
 @pytest.mark.parametrize("subcommand", ["status", "log", "diff", "show", "rev-parse", "merge-base", "fetch"])
-def test_same_name_alias_cannot_turn_git_read_into_guarded_write(tmp_path, monkeypatch, subcommand):
+def test_same_name_alias_cannot_turn_git_read_into_guarded_write(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, subcommand: str) -> None:
     guard = _load("cross_repo_guard")
     monkeypatch.setattr(
         guard._guard_map, "repository_identity",
@@ -480,7 +555,7 @@ def test_same_name_alias_cannot_turn_git_read_into_guarded_write(tmp_path, monke
 
 @pytest.mark.parametrize("option", ["--work-tree '{outside}'", "--work-tree='{outside}'"])
 @pytest.mark.parametrize("guarded_repository", [False, True])
-def test_worktree_override_preserves_git_index_repository(tmp_path, option, guarded_repository):
+def test_worktree_override_preserves_git_index_repository(tmp_path: Path, option: str, guarded_repository: bool) -> None:
     guard = _load("cross_repo_guard")
     anchor = _repo(tmp_path / "guarded")
     outside = _repo(tmp_path / "outside")
@@ -508,7 +583,7 @@ def test_worktree_override_preserves_git_index_repository(tmp_path, option, guar
     "git -c alias.save=commit save -m new",
 ])
 @pytest.mark.parametrize("guarded_repository", [False, True])
-def test_git_dashed_writes_and_builtin_alias_names_preserve_guard(tmp_path, command, guarded_repository):
+def test_git_dashed_writes_and_builtin_alias_names_preserve_guard(tmp_path: Path, command: str, guarded_repository: bool) -> None:
     guard = _load("cross_repo_guard")
     anchor = _repo(tmp_path / "guarded")
     outside = _repo(tmp_path / "outside")
@@ -531,8 +606,8 @@ def test_git_dashed_writes_and_builtin_alias_names_preserve_guard(tmp_path, comm
     ("checkout -- tracked.txt", True),
 ])
 def test_repository_only_git_operation_does_not_write_explicit_worktree(
-    tmp_path, subcommand, writes_worktree,
-):
+    tmp_path: Path, subcommand: str, writes_worktree: bool,
+) -> None:
     guard = _load("cross_repo_guard")
     anchor = _repo(tmp_path / "guarded")
     outside = _repo(tmp_path / "outside")
@@ -554,8 +629,8 @@ def test_repository_only_git_operation_does_not_write_explicit_worktree(
 @pytest.mark.parametrize("guarded_target", [False, True])
 @pytest.mark.parametrize("option", ["--git-dir .git", "--git-dir=.git"])
 def test_relative_git_directory_resolves_after_final_cwd(
-    tmp_path, guarded_target, option,
-):
+    tmp_path: Path, guarded_target: bool, option: str,
+) -> None:
     guard = _load("cross_repo_guard")
     anchor = _repo(tmp_path / "guarded")
     outside = _repo(tmp_path / "outside")
@@ -574,7 +649,7 @@ def test_relative_git_directory_resolves_after_final_cwd(
 
 
 @pytest.mark.parametrize("guarded_target", [False, True])
-def test_relative_worktree_resolves_after_final_cwd(tmp_path, guarded_target):
+def test_relative_worktree_resolves_after_final_cwd(tmp_path: Path, guarded_target: bool) -> None:
     guard = _load("cross_repo_guard")
     anchor = _repo(tmp_path / "guarded")
     outside = _repo(tmp_path / "outside")
@@ -594,7 +669,7 @@ def test_relative_worktree_resolves_after_final_cwd(tmp_path, guarded_target):
     assert bool(result) is guarded_target
 
 
-def test_git_native_relative_overrides_match_parser_targets(tmp_path):
+def test_git_native_relative_overrides_match_parser_targets(tmp_path: Path) -> None:
     import shutil
 
     git = shutil.which("git")
@@ -620,7 +695,7 @@ def test_git_native_relative_overrides_match_parser_targets(tmp_path):
     ]
 
 
-def test_map_scope_does_not_borrow_other_installation(tmp_path):
+def test_map_scope_does_not_borrow_other_installation(tmp_path: Path) -> None:
     reader = _load("guarded_anchor_map")
     caller = _repo(tmp_path / "caller")
     first, second = tmp_path / "first", tmp_path / "second"
@@ -634,7 +709,7 @@ def test_map_scope_does_not_borrow_other_installation(tmp_path):
     assert reader.read_map(caller, second).status == "unusable"
 
 
-def test_legacy_agent_home_selects_map_and_grants_without_borrowing_real_home(tmp_path):
+def test_legacy_agent_home_selects_map_and_grants_without_borrowing_real_home(tmp_path: Path) -> None:
     guard = _load("cross_repo_guard")
     reader = _load("guarded_anchor_map")
     caller = _repo(tmp_path / "caller")
@@ -662,7 +737,7 @@ def test_legacy_agent_home_selects_map_and_grants_without_borrowing_real_home(tm
 
 
 @pytest.fixture
-def producer(tmp_path, monkeypatch):
+def producer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     from dropin_registry import ScanAuthority
     from agent_worktrees import config, guarded_anchors as producer, related, related_acquisition, repos
     from agent_worktrees.acquisition_report import AcquisitionReport, SourceObservation
@@ -683,13 +758,13 @@ def producer(tmp_path, monkeypatch):
     monkeypatch.setattr(producer, "read_registry", lambda *a, **k: registry)
     registered_entry_root = repos.registered_entry_root
     monkeypatch.setattr(repos, "registered_entry_root", lambda entry: paths[entry.name])
-    configurations = []
-    monkeypatch.setattr(config, "load_config", lambda *a, **k: configurations.append(k["project"]) or k)
+    configurations: list[str] = []
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: _append_result(configurations, k["project"], k))
     monkeypatch.setattr(config, "project_dir", lambda name: root / name)
     monkeypatch.setattr(producer, "resolve_active_plugins", lambda **k: k)
     observation = SourceObservation("synthetic", "related-file", ScanAuthority.COMPLETE)
 
-    def sources(caller, **kwargs):
+    def sources(caller: str, **kwargs: Any) -> AcquisitionReport[list[str]]:
         assert kwargs["activation_report"]["project_root"] == Path(caller)
         assert kwargs["activation_report"]["home"] == config._home()
         assert kwargs["configuration"]["project"] == Path(caller).name
@@ -709,7 +784,79 @@ def producer(tmp_path, monkeypatch):
     )
 
 
-def test_producer_keeps_directional_callers_and_withdraws_removed_policy(producer):
+def test_original_anchor_inventory_uses_original_files_and_managed_project_refresh(producer: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
+    from agent_worktrees.repos_registry_transaction import revision
+
+    p = producer
+    p.root.mkdir()
+    source = p.root / "repos.yaml"
+    source.write_text(
+        'repos:\n  target:\n    class: worktree\n'
+        '    windows: "C:\\\\Source\\\\target"\n    linux: /source/\U0001f4c4\n'
+        '  knowledge:\n    class: knowledge\n    linux: /source/knowledge\n',
+        encoding="utf-8",
+    )
+    p.registry._baseline = (str(source.resolve()), revision(source.read_bytes()))
+    projects = p.root / "projects.yaml"
+    projects.write_text("projects: {}\n", encoding="utf-8")
+    p.module.refresh(p.callers, registry_root=p.root)
+    before = p.reader.read_map(p.callers[0], p.root)
+    assert before.anchor_inventory["status"] == "observed"
+    assert before.anchor_inventory["rows"] == [
+        {"name": "target", "path": "C:\\Source\\target"},
+        {"name": "target", "path": "/source/\U0001f4c4"},
+    ]
+    monkeypatch.setattr(p.module.registry_paths, "registry_root", lambda *args, **kwargs: p.root)
+    p.module.managed_write(lambda: projects.write_text(
+        "projects:\n  target:\n    base_repo: true\n", encoding="utf-8",
+    ))
+    after = p.reader.read_map(p.callers[0], p.root)
+    assert after.status == "ready" and after.roots == before.roots
+    assert after.anchor_inventory["status"] == "observed"
+    assert after.anchor_inventory["rows"] == []
+    projects.unlink()
+    p.module.refresh(p.callers, registry_root=p.root)
+    unavailable = p.reader.read_map(p.callers[0], p.root)
+    assert unavailable.status == "ready" and unavailable.roots == before.roots
+    assert unavailable.anchor_inventory["status"] == "unavailable"
+    assert unavailable.anchor_inventory["rows"] == before.anchor_inventory["rows"]
+
+
+def test_anchor_inventory_byte_bound_preserves_existing_publication(producer: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
+    p = producer
+    p.module.refresh(p.callers, registry_root=p.root)
+    path = p.reader.map_path(p.callers[0], p.root)
+    value = json.loads(path.read_text(encoding="utf-8"))
+    value.pop("anchor_inventory")
+    monkeypatch.setattr(p.reader, "MAX_BYTES", len(json.dumps(value, ensure_ascii=False).encode("utf-8")) + 64)
+    monkeypatch.setattr(p.module, "_reader", lambda: p.reader)
+    p.module.refresh([p.callers[0]], registry_root=p.root, include_prepared=False)
+    result = p.reader.read_map(p.callers[0], p.root)
+    assert result.status == "ready" and result.roots == value["roots"]
+    assert result.anchor_inventory is None
+    assert path.stat().st_size <= p.reader.MAX_BYTES
+
+
+def test_unencodable_original_inventory_preserves_confirmed_roots(producer: SimpleNamespace) -> None:
+    from agent_worktrees.repos_registry_transaction import revision
+
+    p = producer
+    p.root.mkdir()
+    source = p.root / "repos.yaml"
+    source.write_text(
+        'repos:\n  target:\n    class: worktree\n    linux: "/source/\\uD800"\n',
+        encoding="utf-8",
+    )
+    p.registry._baseline = (str(source.resolve()), revision(source.read_bytes()))
+    (p.root / "projects.yaml").write_text("projects: {}\n", encoding="utf-8")
+    assert p.module.refresh(p.callers, registry_root=p.root)["published"] == 2
+    result = p.reader.read_map(p.callers[0], p.root)
+    assert result.status == "ready" and result.roots[0]["name"] == "target"
+    assert result.anchor_inventory["status"] == "unavailable"
+    assert result.anchor_inventory["reason"] == "invalid-anchor-inventory"
+
+
+def test_producer_keeps_directional_callers_and_withdraws_removed_policy(producer: SimpleNamespace) -> None:
     p = producer
     assert p.module.refresh(p.callers, registry_root=p.root)["published"] == 2
     assert p.reader.read_map(p.callers[0], p.root).roots[0]["name"] == "target"
@@ -722,7 +869,7 @@ def test_producer_keeps_directional_callers_and_withdraws_removed_policy(produce
     assert "source_revision" not in data  # No invented stable owner-input proof.
 
 
-def test_preparation_does_not_recompute_other_prepared_callers(producer, monkeypatch):
+def test_preparation_does_not_recompute_other_prepared_callers(producer: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     p = producer
     monkeypatch.setattr(p.module.registry_paths, "registry_root", lambda *a: p.root)
     p.module.refresh(p.callers, registry_root=p.root)
@@ -736,7 +883,7 @@ def test_preparation_does_not_recompute_other_prepared_callers(producer, monkeyp
     assert other_path.read_bytes() == other
 
 
-def test_registered_alias_and_physical_shell_targets_remain_guarded(producer, monkeypatch):
+def test_registered_alias_and_physical_shell_targets_remain_guarded(producer: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     import shutil
 
     from agent_worktrees import repos
@@ -781,11 +928,11 @@ def test_registered_alias_and_physical_shell_targets_remain_guarded(producer, mo
         ) is None
 
 
-def test_failed_producer_withdraws_old_view_and_reports_failure(producer, monkeypatch):
+def test_failed_producer_withdraws_old_view_and_reports_failure(producer: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     p = producer
     p.module.refresh(p.callers, registry_root=p.root)
 
-    def failed(*args):
+    def failed(*args: Any) -> NoReturn:
         raise ValueError("synthetic acquisition failure")
 
     monkeypatch.setattr(p.module, "build_snapshot", failed)
@@ -795,7 +942,7 @@ def test_failed_producer_withdraws_old_view_and_reports_failure(producer, monkey
 
 
 @pytest.mark.parametrize("disabled", [False, True])
-def test_resident_cross_repo_policy_skips_git_for_irrelevant_or_disabled_events(tmp_path, monkeypatch, disabled):
+def test_resident_cross_repo_policy_skips_git_for_irrelevant_or_disabled_events(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, disabled: bool) -> None:
     from agent_worktrees.__main__ import _ResidentHookPolicy
 
     guard = _load("cross_repo_guard")
@@ -813,7 +960,7 @@ def test_resident_cross_repo_policy_skips_git_for_irrelevant_or_disabled_events(
     }) == {}
 
 
-def test_binding_load_failure_is_observed_despite_an_outer_warm_config_cache(producer, monkeypatch):
+def test_binding_load_failure_is_observed_despite_an_outer_warm_config_cache(producer: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_worktrees import config, config_acquisition
     from agent_worktrees.config_cache import ConfigCacheSession, memoize_in_scope
 
@@ -822,7 +969,7 @@ def test_binding_load_failure_is_observed_despite_an_outer_warm_config_cache(pro
     binding.write_text("knowledge_repo: knowledge\n")
     original = config.load_config
 
-    def compute(*args, **kwargs):
+    def compute(*args: Any, **kwargs: Any) -> config.Config:
         config_acquisition.full_load_started()
         config._load_yaml_safe(binding)
         return original(*args, **kwargs)
@@ -844,13 +991,13 @@ def test_binding_load_failure_is_observed_despite_an_outer_warm_config_cache(pro
         assert p.module.refresh(registry_root=p.root)["published"] == 2
 
 
-def test_activation_acquisition_uses_the_configuration_agent_home(producer, monkeypatch):
+def test_activation_acquisition_uses_the_configuration_agent_home(producer: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     p = producer
     home = p.root.parent / "selected-home"
     monkeypatch.setenv("AGENT_HOME", str(home))
     selected = []
 
-    def activation(**kwargs):
+    def activation(**kwargs: Any) -> dict[str, Path]:
         selected.append(kwargs["home"])
         return kwargs
 
@@ -860,7 +1007,7 @@ def test_activation_acquisition_uses_the_configuration_agent_home(producer, monk
 
 
 @pytest.mark.parametrize("state", ["absent", "appeared", "unreadable"])
-def test_optional_presence_observation_is_qualified_before_publication(producer, monkeypatch, state):
+def test_optional_presence_observation_is_qualified_before_publication(producer: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, state: str) -> None:
     from agent_worktrees import config, config_acquisition
 
     p = producer
@@ -873,14 +1020,14 @@ def test_optional_presence_observation_is_qualified_before_publication(producer,
             False if path == source else original_exists(path, *args, **kwargs)
         ))
 
-        def unreadable(path, *args, **kwargs):
+        def unreadable(path: Path, *args: Any, **kwargs: Any) -> os.stat_result:
             if isinstance(path, (str, Path)) and Path(path) == source:
                 raise PermissionError("synthetic inaccessible optional source")
             return original_stat(path, *args, **kwargs)
 
         monkeypatch.setattr(os, "stat", unreadable)
 
-    def load(*args, **kwargs):
+    def load(*args: Any, **kwargs: Any) -> config.Config:
         present = config_acquisition.source_exists(source, "optional-source")
         if state == "appeared" and not present:
             source.write_text("value: changed\n")
@@ -896,7 +1043,7 @@ def test_optional_presence_observation_is_qualified_before_publication(producer,
 
 
 @pytest.mark.parametrize("state", ["absent", "empty", "invalid", "unreadable"])
-def test_inrepo_completion_keeps_optional_absence_publishable(producer, monkeypatch, state):
+def test_inrepo_completion_keeps_optional_absence_publishable(producer: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, state: str) -> None:
     from agent_worktrees import config, git_ops
 
     p = producer
@@ -913,22 +1060,22 @@ def test_inrepo_completion_keeps_optional_absence_publishable(producer, monkeypa
     original_open = open
     values = []
 
-    def offline(*args, **kwargs):
+    def offline(*args: Any, **kwargs: Any) -> SimpleNamespace:
         assert args == ("symbolic-ref", "-q", "refs/remotes/origin/HEAD")
         return SimpleNamespace(returncode=1, stdout="")
 
-    def unreadable(file, *args, **kwargs):
+    def unreadable(file: str | os.PathLike[str] | int, *args: Any, **kwargs: Any) -> IO[Any]:
         if isinstance(file, (str, os.PathLike)) and Path(file) in paths:
             raise PermissionError("synthetic unreadable in-repository configuration")
-        return original_open(file, *args, **kwargs)
+        return cast(IO[Any], original_open(file, *args, **kwargs))
 
-    def load(*args, **kwargs):
+    def load(*args: Any, **kwargs: Any) -> config.Config:
         anchor = p.callers[("first", "second").index(kwargs["project"])]
         values.append(config._load_inrepo_config(str(anchor)))
         return original(*args, **kwargs)
 
     monkeypatch.setattr(git_ops, "git", offline)
-    monkeypatch.setattr(config.registry_paths, "installation_context", lambda: None)
+    monkeypatch.setattr(getattr(config, "registry_paths"), "installation_context", lambda: None)
     monkeypatch.setattr(config, "load_config", load)
     if state == "unreadable":
         monkeypatch.setattr("builtins.open", unreadable)
@@ -944,7 +1091,7 @@ def test_inrepo_completion_keeps_optional_absence_publishable(producer, monkeypa
 
 
 @pytest.mark.parametrize("machine_source", ["unset", "global", "project", "registry-failure"])
-def test_execution_completion_preserves_guard_publication_findings(producer, monkeypatch, machine_source):
+def test_execution_completion_preserves_guard_publication_findings(producer: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, machine_source: str) -> None:
     from agent_worktrees import config, config_acquisition, state_root
 
     p = producer
@@ -954,7 +1101,7 @@ def test_execution_completion_preserves_guard_publication_findings(producer, mon
         SimpleNamespace(anchor=cfg.default_repo.anchor),
     ])
 
-    def registry(*args, **kwargs):
+    def registry(*args: Any, **kwargs: Any) -> NoReturn:
         raise FileNotFoundError("synthetic execution registry failure")
 
     if machine_source == "registry-failure":
@@ -963,7 +1110,7 @@ def test_execution_completion_preserves_guard_publication_findings(producer, mon
             (caller / "machines.yaml").write_text("machines: {}\n")
         monkeypatch.setattr(config, "load_machines_yaml", registry)
 
-    def load(*args, **kwargs):
+    def load(*args: Any, **kwargs: Any) -> config.Config:
         project = kwargs["project"]
         caller = p.callers[("first", "second").index(project)]
         selected = config.Config(
@@ -971,7 +1118,7 @@ def test_execution_completion_preserves_guard_publication_findings(producer, mon
             repos={project: config.RepoConfig(anchor=str(caller), worktree_root=str(caller.parent / "trees"))},
         )
         configured = machine_source != "unset"
-        result = config_acquisition.execution_config(
+        result = cast(Callable[[config.Config, str, dict[str, str], dict[str, str]], config.Config], config_acquisition.execution_config)(
             selected, machine if configured else "",
             {"machine": machine} if machine_source == "project" else {},
             {"machine": machine} if machine_source in ("global", "registry-failure") else {},
@@ -990,7 +1137,7 @@ def test_execution_completion_preserves_guard_publication_findings(producer, mon
         assert p.reader.read_map(p.callers[1], p.root).roots == []
 
 
-def test_unreadable_declared_guarded_checkout_is_not_complete_empty(producer, monkeypatch):
+def test_unreadable_declared_guarded_checkout_is_not_complete_empty(producer: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_worktrees import repos
 
     p = producer
@@ -1001,9 +1148,9 @@ def test_unreadable_declared_guarded_checkout_is_not_complete_empty(producer, mo
         str(p.target) if entry.name == "target" else original_local(entry)
     ))
 
-    def unavailable(entry):
+    def unavailable(entry: repos.RepoEntry) -> Path:
         if entry.name == "target":
-            raise repos.RepositoryResolutionError("synthetic unreadable checkout") from PermissionError()
+            raise RepositoryResolutionError("synthetic unreadable checkout") from PermissionError()
         return original_root(entry)
 
     monkeypatch.setattr(repos, "registered_entry_root", unavailable)
@@ -1017,7 +1164,7 @@ def test_unreadable_declared_guarded_checkout_is_not_complete_empty(producer, mo
     assert p.reader.read_map(p.callers[0], p.root).roots[0]["name"] == "target"
 
 
-def test_project_posture_changes_refresh_prepared_facts(producer, monkeypatch):
+def test_project_posture_changes_refresh_prepared_facts(producer: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_worktrees import installer
 
     p = producer
@@ -1036,7 +1183,7 @@ def test_project_posture_changes_refresh_prepared_facts(producer, monkeypatch):
     assert next(row for row in after.postures if row["name"] == "second")["elevated"]
 
 
-def test_supplemental_subdirectory_does_not_poison_confirmed_roots(producer, monkeypatch):
+def test_supplemental_subdirectory_does_not_poison_confirmed_roots(producer: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_worktrees import repos
 
     p = producer
@@ -1054,14 +1201,14 @@ def test_supplemental_subdirectory_does_not_poison_confirmed_roots(producer, mon
     assert not any(row["name"] == "second" for row in result.postures)
 
 
-def test_failed_projects_read_keeps_only_confirmed_delegated_roots(producer, monkeypatch):
+def test_failed_projects_read_keeps_only_confirmed_delegated_roots(producer: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_worktrees import installer
 
     p = producer
     p.registry.repos["first"].repo_class = "worktree"
     p.registry.repos["second"].repo_class = "singleton"
 
-    def unavailable(*, strict=False):
+    def unavailable(*, strict: bool=False) -> NoReturn:
         assert strict
         raise PermissionError("synthetic unreadable project registry")
 
@@ -1074,13 +1221,13 @@ def test_failed_projects_read_keeps_only_confirmed_delegated_roots(producer, mon
 
 
 @pytest.mark.parametrize("consumer", ["hook", "withdraw", "refresh"])
-def test_nonregular_map_is_rejected_by_every_reader(producer, monkeypatch, consumer):
+def test_nonregular_map_is_rejected_by_every_reader(producer: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, consumer: str) -> None:
     p = producer
     p.module.refresh(p.callers, registry_root=p.root)
     path = p.reader.map_path(p.callers[0], p.root)
     original_lstat = Path.lstat
 
-    def nonregular(selected, *args, **kwargs):
+    def nonregular(selected: Path, *args: Any, **kwargs: Any) -> os.stat_result | SimpleNamespace:
         if selected == path:
             return SimpleNamespace(st_mode=stat.S_IFIFO, st_file_attributes=0)
         return original_lstat(selected, *args, **kwargs)
@@ -1098,7 +1245,7 @@ def test_nonregular_map_is_rejected_by_every_reader(producer, monkeypatch, consu
         assert p.module.refresh(registry_root=p.root)["published"] == 1
 
 
-def test_missing_reader_refuses_source_mutation_without_destroying_retry_scopes(producer, monkeypatch):
+def test_missing_reader_refuses_source_mutation_without_destroying_retry_scopes(producer: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     p = producer
     monkeypatch.setattr(p.module.registry_paths, "registry_root", lambda *a: p.root)
     p.module.refresh(p.callers)
@@ -1106,7 +1253,7 @@ def test_missing_reader_refuses_source_mutation_without_destroying_retry_scopes(
     before = [path.read_bytes() for path in paths]
     effects = []
 
-    def missing():
+    def missing() -> NoReturn:
         raise p.module.GuardPublicationError("guard-map reader is unavailable")
 
     monkeypatch.setattr(p.module, "_reader", missing)
@@ -1117,7 +1264,7 @@ def test_missing_reader_refuses_source_mutation_without_destroying_retry_scopes(
 
 
 @pytest.mark.parametrize("operation", ["refresh", "managed_write"])
-def test_failed_map_listing_cannot_mutate_sources_or_report_empty_success(producer, monkeypatch, operation):
+def test_failed_map_listing_cannot_mutate_sources_or_report_empty_success(producer: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, operation: str) -> None:
     p = producer
     monkeypatch.setattr(p.module.registry_paths, "registry_root", lambda *args: p.root)
     p.module.refresh(p.callers)
@@ -1127,7 +1274,7 @@ def test_failed_map_listing_cannot_mutate_sources_or_report_empty_success(produc
     original = os.scandir
     effects = []
 
-    def unavailable(path):
+    def unavailable(path: Path) -> AbstractContextManager[Iterator[os.DirEntry[str]]]:
         if isinstance(path, (str, Path)) and Path(path) == directory:
             raise PermissionError("synthetic unreadable map inventory")
         return original(path)
@@ -1142,7 +1289,7 @@ def test_failed_map_listing_cannot_mutate_sources_or_report_empty_success(produc
     assert [path.read_bytes() for path in paths] == before
 
 
-def test_indirected_map_store_cannot_read_or_mutate_another_store(producer, monkeypatch):
+def test_indirected_map_store_cannot_read_or_mutate_another_store(producer: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     import shutil
 
     p = producer
@@ -1183,7 +1330,7 @@ def test_indirected_map_store_cannot_read_or_mutate_another_store(producer, monk
     ("prepare", 1), ("prepare", 2),
     ("managed_write", 1), ("managed_write", 2), ("managed_write", 3),
 ])
-def test_transient_map_read_failure_preserves_retry_scope(producer, monkeypatch, operation, failed_read):
+def test_transient_map_read_failure_preserves_retry_scope(producer: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, operation: str, failed_read: int) -> None:
     p = producer
     monkeypatch.setattr(p.module.registry_paths, "registry_root", lambda *args: p.root)
     p.module.refresh(p.callers)
@@ -1192,7 +1339,7 @@ def test_transient_map_read_failure_preserves_retry_scope(producer, monkeypatch,
     reads = 0
     effects = []
 
-    def unavailable(selected, reader):
+    def unavailable(selected: Path, reader: ModuleType) -> Any:
         nonlocal reads
         if selected == path:
             reads += 1
@@ -1223,14 +1370,14 @@ def test_transient_map_read_failure_preserves_retry_scope(producer, monkeypatch,
 
 
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="native FIFO unavailable")
-def test_native_fifo_does_not_block_hook_withdrawal_or_prepared_scan(producer):
+def test_native_fifo_does_not_block_hook_withdrawal_or_prepared_scan(producer: SimpleNamespace) -> None:
     p = producer
     p.module.refresh(p.callers, registry_root=p.root)
     path = p.reader.map_path(p.callers[0], p.root)
 
-    def fifo():
+    def fifo() -> None:
         path.unlink(missing_ok=True)
-        os.mkfifo(path)
+        getattr(os, "mkfifo")(path)
 
     fifo()
     assert p.reader.read_map(p.callers[0], p.root).status == "unusable"
@@ -1241,12 +1388,12 @@ def test_native_fifo_does_not_block_hook_withdrawal_or_prepared_scan(producer):
     assert stat.S_ISREG(path.lstat().st_mode)
 
 
-def test_interrupted_refresh_retains_all_prepared_caller_retry_scopes(producer, monkeypatch):
+def test_interrupted_refresh_retains_all_prepared_caller_retry_scopes(producer: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     p = producer
     p.module.refresh(p.callers, registry_root=p.root)
     original_write = p.module._atomic_write
 
-    def interrupt_publication(path, content):
+    def interrupt_publication(path: Path, content: str) -> None:
         if json.loads(content).get("inventory_authority") == "complete":
             raise KeyboardInterrupt("synthetic interrupted acquisition")
         original_write(path, content)
@@ -1264,7 +1411,7 @@ def test_interrupted_refresh_retains_all_prepared_caller_retry_scopes(producer, 
     assert all(p.reader.read_map(caller, p.root).status == "ready" for caller in p.callers)
 
 
-def test_transient_checkout_identity_failure_retains_scope_for_later_refresh(producer, monkeypatch):
+def test_transient_checkout_identity_failure_retains_scope_for_later_refresh(producer: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     p = producer
     p.module.refresh(p.callers, registry_root=p.root)
     monkeypatch.setattr(p.module, "_reader", lambda: p.reader)
@@ -1281,7 +1428,7 @@ def test_transient_checkout_identity_failure_retains_scope_for_later_refresh(pro
     assert p.reader.read_map(p.callers[0], p.root).status == "ready"
 
 
-def test_unavailable_registered_identity_is_not_a_removed_caller(producer, monkeypatch):
+def test_unavailable_registered_identity_is_not_a_removed_caller(producer: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_worktrees import repos
 
     p = producer
@@ -1292,9 +1439,9 @@ def test_unavailable_registered_identity_is_not_a_removed_caller(producer, monke
         str(p.callers[0]) if entry.name == "first" else original_local(entry)
     ))
 
-    def unavailable(entry):
+    def unavailable(entry: repos.RepoEntry) -> Path:
         if entry.name == "first":
-            raise repos.RepositoryResolutionError("synthetic unavailable registered path")
+            raise RepositoryResolutionError("synthetic unavailable registered path")
         return original_root(entry)
 
     monkeypatch.setattr(repos, "registered_entry_root", unavailable)
@@ -1306,7 +1453,7 @@ def test_unavailable_registered_identity_is_not_a_removed_caller(producer, monke
 
 
 @pytest.mark.parametrize("operation", ["refresh", "managed_write"])
-def test_publication_lock_order_allows_registry_owned_nested_work(producer, monkeypatch, operation):
+def test_publication_lock_order_allows_registry_owned_nested_work(producer: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, operation: str) -> None:
     from concurrent.futures import ThreadPoolExecutor
     from contextlib import contextmanager
     import threading
@@ -1318,7 +1465,7 @@ def test_publication_lock_order_allows_registry_owned_nested_work(producer, monk
     effects = []
 
     @contextmanager
-    def observe_registry_lock(path):
+    def observe_registry_lock(path: Path) -> Iterator[None]:
         requested.set()
         with original_lock(path):
             yield
@@ -1337,7 +1484,7 @@ def test_publication_lock_order_allows_registry_owned_nested_work(producer, monk
     assert effects == (["nested"] if operation == "refresh" else ["nested", "parallel"])
 
 
-def test_removed_registered_caller_is_retired_but_explicit_request_errors(producer, monkeypatch):
+def test_removed_registered_caller_is_retired_but_explicit_request_errors(producer: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     p = producer
     monkeypatch.setattr(p.module.registry_paths, "registry_root", lambda *a: p.root)
     p.module.refresh(p.callers)
@@ -1352,7 +1499,7 @@ def test_removed_registered_caller_is_retired_but_explicit_request_errors(produc
     assert p.reader.read_map(p.callers[0], p.root).status == "missing"
 
 
-def test_removed_caller_retires_even_when_unrelated_registration_is_unavailable(producer, monkeypatch):
+def test_removed_caller_retires_even_when_unrelated_registration_is_unavailable(producer: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_worktrees import repos
 
     p = producer
@@ -1364,9 +1511,9 @@ def test_removed_caller_retires_even_when_unrelated_registration_is_unavailable(
         str(p.target) if entry.name == "target" else original_local(entry)
     ))
 
-    def unavailable(entry):
+    def unavailable(entry: repos.RepoEntry) -> Path:
         if entry.name == "target":
-            raise repos.RepositoryResolutionError("synthetic unrelated unavailable path")
+            raise RepositoryResolutionError("synthetic unrelated unavailable path")
         return original_root(entry)
 
     monkeypatch.setattr(repos, "registered_entry_root", unavailable)
@@ -1376,7 +1523,7 @@ def test_removed_caller_retires_even_when_unrelated_registration_is_unavailable(
     assert p.module.refresh()["published"] == 1
 
 
-def test_initial_resident_preparation_refreshes_views_and_reports_unavailability(producer, monkeypatch, capsys):
+def test_initial_resident_preparation_refreshes_views_and_reports_unavailability(producer: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     p = producer
     monkeypatch.setattr(p.module.registry_paths, "registry_root", lambda *a: p.root)
     p.module.refresh(p.callers)
@@ -1385,7 +1532,7 @@ def test_initial_resident_preparation_refreshes_views_and_reports_unavailability
     assert p.reader.read_map(p.callers[0], p.root).roots == []
     assert capsys.readouterr().err == ""
 
-    def failed(*args):
+    def failed(*args: Any) -> NoReturn:
         raise p.module.GuardPublicationError("synthetic acquisition unavailable")
 
     monkeypatch.setattr(p.module, "build_snapshot", failed)
@@ -1395,20 +1542,20 @@ def test_initial_resident_preparation_refreshes_views_and_reports_unavailability
 
 
 @pytest.mark.parametrize("refuse", [False, True])
-def test_managed_validation_precedes_withdrawal_and_preserves_views_on_refusal(producer, monkeypatch, refuse):
+def test_managed_validation_precedes_withdrawal_and_preserves_views_on_refusal(producer: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, refuse: bool) -> None:
     p = producer
     monkeypatch.setattr(p.module.registry_paths, "registry_root", lambda *a: p.root)
     p.module.refresh(p.callers, registry_root=p.root)
     before = {p.reader.map_path(caller, p.root): p.reader.map_path(caller, p.root).read_bytes() for caller in p.callers}
     calls = []
 
-    def validate():
+    def validate() -> None:
         calls.append("validate")
         assert all(p.reader.read_map(caller, p.root).status == "ready" for caller in p.callers)
         if refuse:
             raise ValueError("synthetic validation refusal")
 
-    def write():
+    def write() -> None:
         calls.append("write")
         assert all(p.reader.read_map(caller, p.root).status == "unusable" for caller in p.callers)
 
@@ -1424,7 +1571,7 @@ def test_managed_validation_precedes_withdrawal_and_preserves_views_on_refusal(p
 
 
 @pytest.mark.parametrize("budgeted", [False, True])
-def test_managed_write_withdraws_before_mutation_and_retains_failed_scope(producer, monkeypatch, budgeted):
+def test_managed_write_withdraws_before_mutation_and_retains_failed_scope(producer: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, budgeted: bool) -> None:
     from agent_procutil.owned_budget import OwnedExecutionBudget
 
     p = producer
@@ -1434,7 +1581,7 @@ def test_managed_write_withdraws_before_mutation_and_retains_failed_scope(produc
     before_files = set(directory.iterdir())
     arguments = {"budget": OwnedExecutionBudget.from_timeout(5, cleanup_reserve=1)} if budgeted else {}
 
-    def failed_write():
+    def failed_write() -> NoReturn:
         assert all(p.reader.read_map(caller, p.root).status == "unusable" for caller in p.callers)
         raise ValueError("synthetic partially completed mutation")
 
@@ -1445,7 +1592,7 @@ def test_managed_write_withdraws_before_mutation_and_retains_failed_scope(produc
     assert p.module.refresh(registry_root=p.root)["published"] == 2
 
 
-def test_failed_prewrite_restoration_retains_previous_views_and_requires_owner_recovery(producer, monkeypatch):
+def test_failed_prewrite_restoration_retains_previous_views_and_requires_owner_recovery(producer: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_procutil.owned_budget import OwnedExecutionBudget
 
     p = producer
@@ -1456,11 +1603,11 @@ def test_failed_prewrite_restoration_retains_previous_views_and_requires_owner_r
     previous = {p.reader.map_path(caller, p.root).read_bytes() for caller in p.callers}
     original = p.module._withdraw_views
 
-    def expired(*args, **kwargs):
+    def expired(*args: Any, **kwargs: Any) -> NoReturn:
         original(*args, **kwargs)
         raise TimeoutError("synthetic prewrite execution expiry")
 
-    def failed_restore(*args):
+    def failed_restore(*args: Any) -> NoReturn:
         raise PermissionError("synthetic restoration failure")
 
     with monkeypatch.context() as fault:
@@ -1479,13 +1626,13 @@ def test_failed_prewrite_restoration_retains_previous_views_and_requires_owner_r
     assert all(p.reader.read_map(caller, p.root).status == "ready" for caller in p.callers)
 
 
-def test_managed_write_reports_completed_source_before_publication_failure(producer, monkeypatch):
+def test_managed_write_reports_completed_source_before_publication_failure(producer: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     p = producer
     monkeypatch.setattr(p.module.registry_paths, "registry_root", lambda *a: p.root)
     p.module.refresh(p.callers, registry_root=p.root)
     effects = []
 
-    def failed_publication(*args, **kwargs):
+    def failed_publication(*args: Any, **kwargs: Any) -> NoReturn:
         raise p.module.GuardPublicationError("synthetic publisher failure")
 
     monkeypatch.setattr(p.module, "_refresh_locked", failed_publication)
@@ -1495,7 +1642,7 @@ def test_managed_write_reports_completed_source_before_publication_failure(produ
     assert all(p.reader.read_map(caller, p.root).status == "unusable" for caller in p.callers)
 
 
-def test_indeterminate_acquisition_is_not_a_complete_empty_map(producer, monkeypatch):
+def test_indeterminate_acquisition_is_not_a_complete_empty_map(producer: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     from dropin_registry import ScanAuthority
     from agent_worktrees import related_acquisition
     from agent_worktrees.acquisition_report import AcquisitionReport, SourceObservation
@@ -1512,13 +1659,13 @@ def test_indeterminate_acquisition_is_not_a_complete_empty_map(producer, monkeyp
     assert p.reader.read_map(p.callers[0], p.root).status == "unusable"
 
 
-def test_managed_related_mutations_publish_after_write(tmp_path, monkeypatch):
+def test_managed_related_mutations_publish_after_write(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_worktrees import guarded_anchors as producer, registry_paths, related, repos
 
     caller = _repo(tmp_path / "caller")
     registry = tmp_path / "registry"
     monkeypatch.setattr(registry_paths, "registry_root", lambda *a: registry)
-    observed = []
+    observed: list[tuple[related.RelatedConfig, list[str]]] = []
     monkeypatch.setattr(producer, "_refresh_locked", lambda root, callers, **kwargs: observed.append(
         (related.read_related(caller), callers),
     ))
@@ -1536,7 +1683,7 @@ def test_managed_related_mutations_publish_after_write(tmp_path, monkeypatch):
     assert observed[-1][1] == []
 
 
-def test_plugin_related_mutation_refreshes_views_without_preparing_plugin_checkout(tmp_path, monkeypatch):
+def test_plugin_related_mutation_refreshes_views_without_preparing_plugin_checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_worktrees import guarded_anchors as producer, registry_paths, related
 
     caller = _repo(tmp_path / "caller")
@@ -1544,7 +1691,7 @@ def test_plugin_related_mutation_refreshes_views_without_preparing_plugin_checko
     plugin.mkdir(parents=True)
     (plugin / "plugin.json").write_text('{"name":"sample"}')
     monkeypatch.setattr(registry_paths, "registry_root", lambda *a: tmp_path / "registry")
-    observed = []
+    observed: list[list[str]] = []
     monkeypatch.setattr(producer, "_refresh_locked", lambda root, callers, **kwargs: observed.append(callers))
     related.write_related(plugin, related.RelatedConfig())
     assert observed == [[]]
@@ -1552,8 +1699,8 @@ def test_plugin_related_mutation_refreshes_views_without_preparing_plugin_checko
 
 @pytest.mark.parametrize("unrelated_unavailable", [False, True])
 def test_unregistered_related_write_refreshes_existing_callers_without_requiring_registration(
-    producer, monkeypatch, capsys, unrelated_unavailable,
-):
+    producer: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], unrelated_unavailable: bool,
+) -> None:
     from agent_worktrees import related, repos
 
     p = producer
@@ -1568,9 +1715,9 @@ def test_unregistered_related_write_refreshes_existing_callers_without_requiring
             str(p.root.parent / "unavailable") if entry.name == "unrelated" else original_local(entry)
         ))
 
-        def unavailable(entry):
+        def unavailable(entry: repos.RepoEntry) -> Path:
             if entry.name == "unrelated":
-                raise repos.RepositoryResolutionError("synthetic unrelated unavailable path")
+                raise RepositoryResolutionError("synthetic unrelated unavailable path")
             return original_root(entry)
 
         monkeypatch.setattr(repos, "registered_entry_root", unavailable)
@@ -1582,7 +1729,7 @@ def test_unregistered_related_write_refreshes_existing_callers_without_requiring
         assert "new caller registration unavailable; not prepared" in capsys.readouterr().err
 
 
-def test_explicit_refresh_command_and_strict_argument_rejection(producer, monkeypatch, capsys):
+def test_explicit_refresh_command_and_strict_argument_rejection(producer: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     p = producer
     monkeypatch.setattr(p.module.registry_paths, "registry_root", lambda *a: p.root)
     assert p.module.main(["--repo", str(p.callers[0]), "--json"]) == 0
@@ -1592,7 +1739,7 @@ def test_explicit_refresh_command_and_strict_argument_rejection(producer, monkey
     assert exc.value.code == 2
 
 
-def test_native_entry_cold_warm_missing_map_and_deployed_reader_closure(tmp_path, monkeypatch):
+def test_native_entry_cold_warm_missing_map_and_deployed_reader_closure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_worktrees import installer
 
     reader = _load("guarded_anchor_map")
@@ -1634,7 +1781,7 @@ def test_native_entry_cold_warm_missing_map_and_deployed_reader_closure(tmp_path
     assert not (target / "new").exists()
 
 
-def test_concurrent_publication_exposes_only_whole_maps(producer):
+def test_concurrent_publication_exposes_only_whole_maps(producer: SimpleNamespace) -> None:
     from concurrent.futures import ThreadPoolExecutor
 
     p = producer
@@ -1653,7 +1800,7 @@ def test_concurrent_publication_exposes_only_whole_maps(producer):
         assert all(future.result()["published"] == 2 for future in futures)
 
 
-def test_producer_uses_real_caller_overlay_precedence_and_managed_removal(tmp_path, monkeypatch):
+def test_producer_uses_real_caller_overlay_precedence_and_managed_removal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import yaml
 
     from dropin_registry import ScanAuthority
@@ -1680,10 +1827,10 @@ def test_producer_uses_real_caller_overlay_precedence_and_managed_removal(tmp_pa
     plugin.mkdir(parents=True)
     (plugin / "plugin.json").write_text('{"name":"sample"}')
 
-    def entry(delegate, location):
+    def entry(delegate: str, location: str) -> dict[str, Any]:
         return {"delegate": {"via": delegate}, "locus": {"preferred": f"machine:{location}"}}
 
-    def layer(anchor, entries, *, direct=False, plugin_owned=False):
+    def layer(anchor: Path, entries: dict[str, Any], *, direct: bool=False, plugin_owned: bool=False) -> None:
         directory = (
             Path() if direct else Path(related.INREPO_DIRNAME)
             if plugin_owned else related.CANONICAL_RELATED_DIR
@@ -1715,19 +1862,19 @@ def test_producer_uses_real_caller_overlay_precedence_and_managed_removal(tmp_pa
     monkeypatch.setattr(guarded_anchors, "read_registry", lambda *args, **kwargs: registry)
     monkeypatch.setattr(repos, "registered_entry_root", lambda item: paths[item.name])
 
-    def configuration(*args, project, **kwargs):
+    def configuration(*args: Any, project: str, **kwargs: Any) -> SimpleNamespace:
         return SimpleNamespace(
             repo_name=project, knowledge_repo=project,
             default_repo=SimpleNamespace(anchor=str(callers[project])),
         )
 
-    def machine_source(base, *, project):
+    def machine_source(base: str | Path, *, project: str) -> AcquisitionReport[str]:
         assert Path(base) == callers[project]
         return AcquisitionReport("native-machine", str(local[project]), (
             SourceObservation(str(local[project]), "native-machine", ScanAuthority.COMPLETE),
         ))
 
-    def activation(*, home, project_root):
+    def activation(*, home: Path, project_root: Path) -> SimpleNamespace:
         assert home == config._home() and project_root in callers.values()
         return SimpleNamespace(
             authority=ScanAuthority.COMPLETE, findings=(), plugin_names=None, decisions={},
@@ -1745,7 +1892,7 @@ def test_producer_uses_real_caller_overlay_precedence_and_managed_removal(tmp_pa
     monkeypatch.setattr(guarded_anchors, "resolve_active_plugins", activation)
     assert guarded_anchors.refresh(callers.values())["published"] == 2
 
-    def rows(name):
+    def rows(name: str) -> dict[str, dict[str, Any]]:
         result = reader.read_map(callers[name], root)
         assert result.status == "ready", result.reason
         return {row["name"]: row for row in result.roots}
@@ -1766,7 +1913,7 @@ def test_producer_uses_real_caller_overlay_precedence_and_managed_removal(tmp_pa
     assert "plugin-only" in rows("first")
     original_stat = os.stat
 
-    def unreadable_global(path, *args, **kwargs):
+    def unreadable_global(path: Path, *args: Any, **kwargs: Any) -> os.stat_result:
         if isinstance(path, (str, Path)) and Path(path) == root / "related.yaml":
             raise PermissionError("synthetic unreadable machine-wide policy")
         return original_stat(path, *args, **kwargs)
@@ -1781,7 +1928,7 @@ def test_producer_uses_real_caller_overlay_precedence_and_managed_removal(tmp_pa
     assert rows("first")["target"]["locus"]["preferred"] == "machine:global"
 
 
-def test_installed_runtime_reads_its_shipped_map_without_published_wrappers(tmp_path, monkeypatch):
+def test_installed_runtime_reads_its_shipped_map_without_published_wrappers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_worktrees import config as cfg, guarded_anchors
 
     package = tmp_path / "site-packages" / "agent_worktrees"

@@ -46,25 +46,53 @@ foreach ($_pyEnvVar in @('PYTHONHOME', 'PYTHONPATH', 'PYTHONEXECUTABLE', 'VIRTUA
 # from the snapshot the stamp recorded, then dispatch. Opt out with
 # AGENT_WORKTREES_NO_SELFPROVISION=1 (then falls through to a PATH python).
 $_root = Join-Path $env:USERPROFILE '.agent-worktrees'
+function Get-AwTerminalHost {
+    # The installer publishes a byte-identical copy of this file to the user
+    # command directory, where no sibling plugin.json exists. Locate the
+    # selected payload's terminal host through the deploy manifest's command
+    # binding (the current selection record), then the retired payload-dir
+    # snapshot pointer. Without the host, Picker Python would stay resident as
+    # the parent of every interactive Manager session.
+    if (Test-Path -LiteralPath (Join-Path $_awPayloadRoot 'plugin.json') -PathType Leaf) {
+        $hostScript = Join-Path $_awPayloadRoot 'bin\terminal-launch.ps1'
+        if (Test-Path -LiteralPath $hostScript -PathType Leaf) { return $hostScript }
+        return $null
+    }
+    $selected = @()
+    try {
+        $manifest = ConvertFrom-Json -InputObject ([IO.File]::ReadAllText(
+            (Join-Path $_root 'deploy-manifest.json'))) -ErrorAction Stop
+        foreach ($candidate in @($manifest.commandBinding.payloadRoot, $manifest.source.path)) {
+            if ($candidate -is [string] -and $candidate -and [IO.Path]::IsPathRooted($candidate) -and
+                (Test-Path -LiteralPath (Join-Path $candidate 'plugin.json') -PathType Leaf)) {
+                $selected += $candidate
+            }
+        }
+    } catch {}
+    try { $selected += ([IO.File]::ReadAllText((Join-Path $_root 'payload-dir'))).Trim() } catch {}
+    foreach ($payload in $selected) {
+        if (-not $payload) { continue }
+        $hostScript = Join-Path $payload 'bin\terminal-launch.ps1'
+        if (Test-Path -LiteralPath $hostScript -PathType Leaf) { return $hostScript }
+    }
+    return $null
+}
+function Test-AwInteractiveConsole {
+    return $env:OS -eq 'Windows_NT' -and -not [Console]::IsInputRedirected
+}
 function Invoke-AwTerminalPython {
     param([string]$Python, [string[]]$PythonArguments, [string[]]$QueryArguments)
-    $payload = $_awPayloadRoot
-    if (-not (Test-Path -LiteralPath (Join-Path $payload 'plugin.json') -PathType Leaf)) {
-        $pointer = Join-Path $_root 'payload-dir'
-        if (-not (Test-Path -LiteralPath $pointer -PathType Leaf)) {
-            & $Python @PythonArguments
-            return
-        }
-        $payload = ([IO.File]::ReadAllText($pointer)).Trim()
-    }
-    $hostScript = Join-Path $payload 'bin\terminal-launch.ps1'
-    if (Test-Path -LiteralPath $hostScript -PathType Leaf) {
+    $hostScript = Get-AwTerminalHost
+    if ($hostScript) {
         . $hostScript
         Invoke-WorktreeTerminalLaunch -Executable $Python -Arguments $PythonArguments `
             -QueryArguments $QueryArguments -Package agent_worktrees
-    } else {
-        & $Python @PythonArguments
+        return
     }
+    if (Test-AwInteractiveConsole) {
+        [Console]::Error.WriteLine('[agent-worktrees] terminal launch host not found; the session stays attached to Python. Repair the agent-worktrees install.')
+    }
+    & $Python @PythonArguments
 }
 function _resolve_aw_py {
     $resolver = Join-Path $_root 'bin\resolve-runtime.ps1'

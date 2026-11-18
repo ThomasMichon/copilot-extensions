@@ -21,6 +21,7 @@ import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 
 from work_coalescing_singleton import CoalescingServer
 
@@ -47,7 +48,7 @@ _POLLER_IDLE_EXIT_S = 5.0
 _SHUTDOWN_REQUEST_DEADLINE_S = CALLBACK_TIMEOUT + 5.0
 
 
-def rendezvous_fields(server: CoalescingServer) -> dict:
+def rendezvous_fields(server: CoalescingServer) -> dict[str, Any]:
     rv = server.rendezvous()
     return {
         "watch_transport": rv["transport"],
@@ -59,7 +60,7 @@ def rendezvous_fields(server: CoalescingServer) -> dict:
     }
 
 
-def endpoint_from_rendezvous(data: dict | None) -> tuple[str, int, str] | None:
+def endpoint_from_rendezvous(data: dict[str, Any] | None) -> tuple[str, int, str] | None:
     if not isinstance(data, dict):
         return None
     endpoint = data.get("watch_endpoint")
@@ -154,13 +155,13 @@ class WatchDaemon:
         for key in self._registry.active_keys():
             self._ensure_poller(key)
 
-    def _read_state(self) -> list[dict]:
+    def _read_state(self) -> list[dict[str, Any]]:
         return (
             read_subscriptions_state() if self._state_root is None
             else read_subscriptions_state(self._state_root)
         )
 
-    def _persist(self, entries: list[dict] | None = None) -> None:
+    def _persist(self, entries: list[dict[str, Any]] | None = None) -> None:
         """Serialize every persist call against every other -- multiple
         poller threads (any of them, firing concurrently, plus register/
         unregister from a control-plane handler thread) can all call this
@@ -185,7 +186,7 @@ class WatchDaemon:
 
     # -- control-plane entrypoint -----------------------------------
 
-    def compute(self, kind: str, payload: dict) -> dict:
+    def compute(self, kind: str, payload: dict[str, Any]) -> dict[str, Any]:
         if kind not in {"register", "unregister"}:
             return self._compute_request(kind, payload)
         with self._admission:
@@ -199,7 +200,7 @@ class WatchDaemon:
                 self._active_mutations -= 1
                 self._admission.notify_all()
 
-    def _compute_request(self, kind: str, payload: dict) -> dict:
+    def _compute_request(self, kind: str, payload: dict[str, Any]) -> dict[str, Any]:
         if kind == "register":
             return self._handle_register(payload)
         if kind == "unregister":
@@ -240,7 +241,7 @@ class WatchDaemon:
                 ok = self._registry.unregister(
                     key, identity, registration_id=sub.registration_id,
                 )
-            result = {"unregistered": ok}
+            result: dict[str, Any] = {"unregistered": ok}
             if key.worktrees_command:
                 result["in_flight"] = any(
                     item["registration_id"] == sub.registration_id
@@ -270,7 +271,7 @@ class WatchDaemon:
             return {"shutting_down": True}
         return {"error": f"unknown kind {kind!r}"}
 
-    def _handle_register(self, payload: dict) -> dict:
+    def _handle_register(self, payload: dict[str, Any]) -> dict[str, Any]:
         from .watch_provider import command_path, target_id
 
         try:
@@ -317,7 +318,10 @@ class WatchDaemon:
             return {"error": "invalid watch registration or notification specification"}
         if command:
             try:
-                snap = self._native_fetch(repo, number, command)
+                native_fetch = self._native_fetch
+                if native_fetch is None:
+                    return {"error": "native snapshot capability is unavailable"}
+                snap = native_fetch(repo, number, command)
                 if snap.provider != "azure-devops" or (
                     snap.observation is None and not (snap.merged or snap.closed_unmerged)
                 ):
@@ -634,10 +638,11 @@ class WatchDaemon:
         if not self._shutdown_event.is_set() and self._registry.watching_count(key):
             self._ensure_poller(key)
 
-    def status(self) -> dict:
+    def status(self) -> dict[str, Any]:
         return {
             "subscribers": self._registry.status(),
             "pending_deliveries": self._deliveries.status(),
+            "legacy_callback_history": self._deliveries.legacy_status(),
             "persistence_error": self._persistence_error,
             "delivery_error": self._deliveries.start_error,
             "capabilities": self._capabilities(),

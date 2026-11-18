@@ -195,7 +195,10 @@ def _observe(
             covered.add(reported_pid)
             result[base] = (name, clients, detail)
         if covered != servers.keys():
-            raise MuxObservationUnavailable("A live mux server is missing its registration")
+            missing = ", ".join(str(pid) for pid in sorted(servers.keys() - covered))
+            raise MuxObservationUnavailable(
+                f"A live mux server is missing its registration: pid {missing}",
+            )
         if (
             windows_mux_processes.servers() != servers
             or _registrations(root, servers, deadline) != registrations

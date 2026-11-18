@@ -23,13 +23,13 @@ The frontend checks that actual response before the dependent operation.
 Missing or older peers refuse: no raw forge fallback, automatic update,
 credential workaround or silent switch to GitHub.
 
-## GitHub title and description updates
+## GitHub and Gitea title and description updates
 
-For an enabled GitHub target, `operations.metadata-update: true` admits the
+For an enabled GitHub or Gitea target, `operations.metadata-update: true` admits the
 existing native `update` / Worktrees `pr-update` path for title and description
 changes. Supply at least one of `--title`, `--body` or `--body-file`; body and
 body-file are mutually exclusive. Files are read as UTF-8 by the owner without
-newline translation. GitHub reviewer, work-item and publication-origin/label
+newline translation. GitHub/Gitea reviewer, work-item and publication-origin/label
 options refuse on this path. Azure DevOps retains its existing broader metadata
 support.
 
@@ -43,9 +43,20 @@ marker from local tracking. Reconcile through the original source owner when
 needed. Title-only edits leave the description untouched, even when its marker
 needs separate repair.
 
-The GitHub provider reads the exact target before writing, updates requested
-fields only, then verifies authoritative readback. Drafts remain drafts;
-terminal or malformed targets refuse. The version-1
+The selected provider reads the exact target before writing, updates requested
+fields only, then verifies authoritative readback. Terminal or malformed targets
+refuse. GitHub drafts remain drafts. Gitea title edits retain the existing
+recognized draft/WIP prefix and cannot introduce one on an unprefixed title.
+The owner uses built-in and target-configured `wip_title_prefixes`, requires
+boolean native draft evidence for title edits and verifies it after writing.
+Both titles must also retain the same result under the shared configured-WIP
+classifier, independently of native draft state.
+Unknown native prefixes or contradictory draft/title evidence refuse title
+editing; body-only edits remain available. No prefix is inserted or removed
+automatically. Configure nonstandard prefix policy on the actual target rather
+than assuming another instance's defaults.
+
+The version-1
 `agent-worktrees.pr-metadata` result retains repository/PR identity and
 `actions.title` / `actions.description` with `not_attempted`, `confirmed`,
 `failed` or `unknown`. Only complete confirmation has `ok: true` and exit 0.
@@ -57,8 +68,17 @@ unknown at the frontend too.
 No create, push, comment, reviewer request, readiness, hold/consent change, merge
 or claim settlement is performed. Readback is not atomic compare-and-swap and
 cannot prevent another participant from editing later. Existing callers remain
-usable; old or rolled-back selected runtimes refuse this optional GitHub feature
+usable; old or rolled-back selected runtimes refuse these optional provider features
 before dispatch. Source support is not installed or live-provider qualification.
+
+Gitea metadata currently uses its registered target's local credential
+configuration. Gitea does not advertise `worker-policy-config`: credential-free
+exported worker policy cannot supply that authentication, and the owner does
+not borrow an ambient or unrelated target's credential. Native calls with
+delivered `--config` therefore refuse this optional Gitea composition before
+update dispatch. Existing GitHub/Azure DevOps worker-policy support is unchanged.
+Gitea body JSON travels through the existing HTTP owner's stdin path, not a
+large process argument.
 
 ## Explicit worker policy
 

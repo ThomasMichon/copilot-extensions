@@ -5,8 +5,9 @@ Part of [Task Relevance Reconciliation](README.md), correcting the remaining
 boundary within [retained native recovery](retained-metadata-recovery.md).
 **Status: plan reviewed in #13160; receiving writer source accepted in #13162;
 Bridge negotiation and accepted-load journaling accepted in #13172.
-Hosted registration is under qualification.
-Post-load reconciliation and runtime acceptance remain open.**
+Hosted registration accepted in #13176.
+Original-owner post-load reconciliation and historical adaptation are under
+source qualification; runtime acceptance remains open.**
 
 ## Measured contract gap
 
@@ -140,24 +141,30 @@ separate process. The child acknowledges loading the original UUID without
 creating a CLI hold. Registration preserves the ended identified activation,
 appends one hosted activation and is byte-idempotent on retry. Transport
 reattachment to the same Host/child adds no load, new conversation or prompt.
-This fixture supplies original-operation admission; it does not yet qualify
-post-load reconciliation, historical adaptation or installed recovery.
+The extended fixture also exercises actual original-operation admission,
+post-load failure, frontend rehydration, historical adaptation and a committed
+registration whose response is lost. Reconciliation retains the same Host and
+child and performs no additional native load or prompt. Stop holds and a live
+foreign generation refuse without altering canonical lineage or releasing the
+gate. Separate child-exit controls keep unknown original Host custody intact.
+This is model-free source qualification, not installed recovery or native
+Windows qualification.
 
 ## Validation plan
 
-- [ ] Exercise the actual Bridge-to-Worktrees parser/process boundary with a
+- [x] Exercise the actual Bridge-to-Worktrees parser/process boundary with a
       model-free ACP worker that acknowledges loading the original UUID and
       deliberately creates **no CLI hold**. Preserve ended identified history,
       append one hosted activation and prove normal same-native continuation.
       A fabricated open-hold fixture is not the discriminating positive case.
-- [ ] Inject failure after the accepted load but before lineage commit, lose
+- [x] Inject failure after the accepted load but before lineage commit, lose
       the response and restart the frontend. Reconcile through the surviving
       original Host with exactly one load, no new conversation/Host and no
       prompt. Independently inspect canonical lineage and the original journal.
 - [ ] Race registration/reconciliation with competing resume, stop, head
       movement, incarnation change and process exit/reuse. Unknown, changed,
       foreign, remote or unsupported observations preserve custody and bytes.
-- [ ] Exercise repeated registration and response loss after commit: one
+- [x] Exercise repeated registration and response loss after commit: one
       activation, original intervals unchanged, one operation outcome and
       unchanged task acceptance. A closed hosted source cannot be reactivated
       by changing only an operation ID.

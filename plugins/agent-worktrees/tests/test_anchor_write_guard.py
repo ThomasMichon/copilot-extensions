@@ -18,6 +18,7 @@ from pathlib import Path
 import sys
 
 import pytest
+from typing import Any, NoReturn
 
 pytestmark = pytest.mark.guard
 
@@ -46,17 +47,17 @@ def _linked_worktree(path: Path) -> Path:
 
 
 @pytest.fixture
-def anchor(tmp_path: Path) -> list[dict]:
+def anchor(tmp_path: Path) -> list[dict[str, str]]:
     """One worktree-class repo whose anchor is a real main checkout on disk."""
     root = _main_checkout(tmp_path, "myrepo")
     return [{"name": "myrepo", "path": str(root)}]
 
 
-def _write(tool, path, cwd):
+def _write(tool: str, path: str | Path, cwd: str | Path) -> dict[str, Any]:
     return {"toolName": tool, "cwd": str(cwd), "toolArgs": {"path": str(path)}}
 
 
-def _shell(cmd, cwd):
+def _shell(cmd: str, cwd: str | Path) -> dict[str, Any]:
     return {"toolName": "bash", "cwd": str(cwd), "toolArgs": {"command": cmd}}
 
 
@@ -74,7 +75,7 @@ def _shell(cmd, cwd):
     pytest.param(r"echo ${value:-$'\'}'}; git commit -m test", True, id="ansi-quote"),
     pytest.param("echo ${value:-'}'}", False, id="read-only"),
 ])
-def test_braced_parameter_boundaries_match_native_bash(tmp_path, anchor, command, writes):
+def test_braced_parameter_boundaries_match_native_bash(tmp_path: Path, anchor: list[dict[str, str]], command: str, writes: bool) -> None:
     from agent_procutil import no_window_kwargs
 
     executable = shutil.which("bash")
@@ -107,7 +108,7 @@ def test_braced_parameter_boundaries_match_native_bash(tmp_path, anchor, command
 
 # --- write-tool blocking ------------------------------------------------------
 
-def test_write_into_anchor_denies(tmp_path, anchor):
+def test_write_into_anchor_denies(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     target = Path(anchor[0]["path"]) / "src" / "x.py"
     d = guard.decide(_write("create", target, tmp_path), env={},
                      home=tmp_path, anchors=anchor)
@@ -116,7 +117,7 @@ def test_write_into_anchor_denies(tmp_path, anchor):
     assert "worktree" in d["permissionDecisionReason"].lower()
 
 
-def test_write_into_linked_worktree_allows(tmp_path, anchor):
+def test_write_into_linked_worktree_allows(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     # A sibling worktree sharing the anchor's name PREFIX (myrepo.worktrees/...);
     # its .git is a file, so it must always pass.
     wt = _linked_worktree(tmp_path / "myrepo.worktrees" / "wt1")
@@ -125,7 +126,7 @@ def test_write_into_linked_worktree_allows(tmp_path, anchor):
                         anchors=anchor) is None
 
 
-def test_write_into_nested_linked_worktree_allows(tmp_path, anchor):
+def test_write_into_nested_linked_worktree_allows(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     # Even a worktree nested INSIDE the anchor path is fine (.git file wins).
     wt = _linked_worktree(Path(anchor[0]["path"]) / ".worktrees" / "wt1")
     target = wt / "x.py"
@@ -133,7 +134,7 @@ def test_write_into_nested_linked_worktree_allows(tmp_path, anchor):
                         anchors=anchor) is None
 
 
-def test_write_into_unregistered_main_checkout_allows(tmp_path, anchor):
+def test_write_into_unregistered_main_checkout_allows(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     # A different main checkout not registered as worktree-class (e.g. a
     # singleton like SPO.Core) must not be blocked.
     other = _main_checkout(tmp_path, "singleton-repo")
@@ -142,21 +143,21 @@ def test_write_into_unregistered_main_checkout_allows(tmp_path, anchor):
                         home=tmp_path, anchors=anchor) is None
 
 
-def test_write_outside_any_repo_allows(tmp_path, anchor):
+def test_write_outside_any_repo_allows(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     target = tmp_path / "loose" / "x.py"
     assert guard.decide(_write("create", target, tmp_path), env={},
                         home=tmp_path, anchors=anchor) is None
 
 
-def test_read_tool_into_anchor_allows(tmp_path, anchor):
+def test_read_tool_into_anchor_allows(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     target = Path(anchor[0]["path"]) / "README.md"
     p = {"toolName": "view", "cwd": str(tmp_path), "toolArgs": {"path": str(target)}}
     assert guard.decide(p, env={}, home=tmp_path, anchors=anchor) is None
 
 
 def test_explicit_invalid_context_never_reads_legacy_registry(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     invalid = tmp_path / "invalid" / "install.json"
     invalid.parent.mkdir()
     invalid.write_text("{", encoding="utf-8")
@@ -180,7 +181,7 @@ def test_explicit_invalid_context_never_reads_legacy_registry(
         )
 
 
-def test_relative_write_path_resolves_against_cwd(tmp_path, anchor):
+def test_relative_write_path_resolves_against_cwd(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     cwd = Path(anchor[0]["path"]) / "src"
     p = {"toolName": "edit", "cwd": str(cwd), "toolArgs": {"path": "x.py"}}
     d = guard.decide(p, env={}, home=tmp_path, anchors=anchor)
@@ -189,21 +190,21 @@ def test_relative_write_path_resolves_against_cwd(tmp_path, anchor):
 
 # --- shell blocking -----------------------------------------------------------
 
-def test_shell_write_into_anchor_denies(tmp_path, anchor):
+def test_shell_write_into_anchor_denies(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     gp = anchor[0]["path"]
     d = guard.decide(_shell(f'Set-Content "{gp}\\notes.md" "hi"', tmp_path),
                      env={}, home=tmp_path, anchors=anchor)
     assert d and d["permissionDecision"] == "deny"
 
 
-def test_shell_git_commit_into_anchor_denies(tmp_path, anchor):
+def test_shell_git_commit_into_anchor_denies(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     gp = anchor[0]["path"]
     d = guard.decide(_shell(f'git -C "{gp}" commit -m x', tmp_path),
                      env={}, home=tmp_path, anchors=anchor)
     assert d and d["permissionDecision"] == "deny"
 
 
-def test_shell_git_commit_into_anchor_with_spaced_quoted_dashC_path_denies(tmp_path):
+def test_shell_git_commit_into_anchor_with_spaced_quoted_dashC_path_denies(tmp_path: Path) -> None:
     """A quoted ``-C "<anchor path with a space>"`` must still be caught by
     the cheap early-out: a bare ``\\S+`` there only matched the first word
     of the quoted path, so the whole early-out missed the match and the
@@ -216,8 +217,8 @@ def test_shell_git_commit_into_anchor_with_spaced_quoted_dashC_path_denies(tmp_p
 
 
 def test_shell_git_branch_force_move_into_anchor_with_spaced_quoted_dashC_path_denies(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     root = _main_checkout(tmp_path, "my anchor repo")
     spaced_anchor = [{"name": "myrepo", "path": str(root)}]
     d = guard.decide(_shell(f'git -C "{root}" branch -f main origin/main', tmp_path),
@@ -225,13 +226,13 @@ def test_shell_git_branch_force_move_into_anchor_with_spaced_quoted_dashC_path_d
     assert d and d["permissionDecision"] == "deny"
 
 
-def test_shell_read_into_anchor_allows(tmp_path, anchor):
+def test_shell_read_into_anchor_allows(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     gp = anchor[0]["path"]
     assert guard.decide(_shell(f'cat "{gp}/README.md"', tmp_path),
                         env={}, home=tmp_path, anchors=anchor) is None
 
 
-def test_shell_git_pull_ff_only_with_dashC_into_anchor_allows(tmp_path, anchor):
+def test_shell_git_pull_ff_only_with_dashC_into_anchor_allows(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     """``git pull --ff-only`` is exempt: git structurally refuses instead of
     ever creating a merge commit or applying ``pull.rebase``, so it can
     never introduce agent-authored content."""
@@ -241,19 +242,19 @@ def test_shell_git_pull_ff_only_with_dashC_into_anchor_allows(tmp_path, anchor):
         env={}, home=tmp_path, anchors=anchor) is None
 
 
-def test_shell_git_pull_ff_only_from_anchor_cwd_allows(tmp_path, anchor):
+def test_shell_git_pull_ff_only_from_anchor_cwd_allows(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     gp = anchor[0]["path"]
     assert guard.decide(_shell("git pull origin main --ff-only", gp),
                         env={}, home=tmp_path, anchors=anchor) is None
 
 
-def test_shell_git_fetch_from_anchor_cwd_allows(tmp_path, anchor):
+def test_shell_git_fetch_from_anchor_cwd_allows(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     gp = anchor[0]["path"]
     assert guard.decide(_shell("git fetch origin", gp),
                         env={}, home=tmp_path, anchors=anchor) is None
 
 
-def test_shell_git_merge_base_from_anchor_cwd_allows(tmp_path, anchor):
+def test_shell_git_merge_base_from_anchor_cwd_allows(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     gp = anchor[0]["path"]
     assert guard.decide(_shell("git merge-base main HEAD", gp),
                         env={}, home=tmp_path, anchors=anchor) is None
@@ -267,22 +268,22 @@ def test_shell_git_merge_base_from_anchor_cwd_allows(tmp_path, anchor):
     ],
 )
 def test_shell_mutating_dashed_git_command_from_anchor_denies(
-    tmp_path, anchor, command,
-):
+    tmp_path: Path, anchor: list[dict[str, str]], command: str,
+) -> None:
     gp = anchor[0]["path"]
     d = guard.decide(_shell(command, gp), env={},
                      home=tmp_path, anchors=anchor)
     assert d and d["permissionDecision"] == "deny"
 
 
-def test_shell_git_exe_commit_from_anchor_cwd_denies(tmp_path, anchor):
+def test_shell_git_exe_commit_from_anchor_cwd_denies(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     gp = anchor[0]["path"]
     d = guard.decide(_shell("git.exe commit -m example", gp), env={},
                      home=tmp_path, anchors=anchor)
     assert d and d["permissionDecision"] == "deny"
 
 
-def test_shell_git_exe_merge_base_from_anchor_cwd_allows(tmp_path, anchor):
+def test_shell_git_exe_merge_base_from_anchor_cwd_allows(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     gp = anchor[0]["path"]
     assert guard.decide(_shell("git.exe merge-base main HEAD", gp),
                         env={}, home=tmp_path, anchors=anchor) is None
@@ -290,15 +291,15 @@ def test_shell_git_exe_merge_base_from_anchor_cwd_allows(tmp_path, anchor):
 
 @pytest.mark.parametrize("executable", ["git-commit", "git-commit.exe"])
 def test_shell_direct_git_commit_from_anchor_cwd_denies(
-    tmp_path, anchor, executable,
-):
+    tmp_path: Path, anchor: list[dict[str, str]], executable: str,
+) -> None:
     gp = anchor[0]["path"]
     d = guard.decide(_shell(f"{executable} -m example", gp), env={},
                      home=tmp_path, anchors=anchor)
     assert d and d["permissionDecision"] == "deny"
 
 
-def test_shell_direct_git_merge_base_from_anchor_cwd_allows(tmp_path, anchor):
+def test_shell_direct_git_merge_base_from_anchor_cwd_allows(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     gp = anchor[0]["path"]
     assert guard.decide(_shell("git-merge-base main HEAD", gp),
                         env={}, home=tmp_path, anchors=anchor) is None
@@ -306,8 +307,8 @@ def test_shell_direct_git_merge_base_from_anchor_cwd_allows(tmp_path, anchor):
 
 @pytest.mark.parametrize("separator", ["\n", "; ", " && "])
 def test_shell_git_readonly_batch_from_anchor_cwd_allows(
-    tmp_path, anchor, separator,
-):
+    tmp_path: Path, anchor: list[dict[str, str]], separator: str,
+) -> None:
     gp = anchor[0]["path"]
     command = separator.join([
         "git pull --ff-only origin main",
@@ -319,8 +320,8 @@ def test_shell_git_readonly_batch_from_anchor_cwd_allows(
 
 
 def test_shell_git_fetch_and_powershell_merge_base_assignment_allows(
-    tmp_path, anchor,
-):
+    tmp_path: Path, anchor: list[dict[str, str]],
+) -> None:
     gp = anchor[0]["path"]
     command = (
         "git fetch origin refs/pull/42/head\n"
@@ -332,8 +333,8 @@ def test_shell_git_fetch_and_powershell_merge_base_assignment_allows(
 
 @pytest.mark.parametrize("newline", ["\n", "\r\n"])
 def test_bash_git_line_continuation_from_anchor_denies(
-    tmp_path, anchor, newline,
-):
+    tmp_path: Path, anchor: list[dict[str, str]], newline: str,
+) -> None:
     gp = anchor[0]["path"]
     command = f"git \\{newline}commit --allow-empty -m example"
     d = guard.decide(_shell(command, gp), env={},
@@ -343,8 +344,8 @@ def test_bash_git_line_continuation_from_anchor_denies(
 
 @pytest.mark.parametrize("newline", ["\n", "\r\n"])
 def test_powershell_git_line_continuation_from_anchor_denies(
-    tmp_path, anchor, newline,
-):
+    tmp_path: Path, anchor: list[dict[str, str]], newline: str,
+) -> None:
     gp = anchor[0]["path"]
     payload = {
         "toolName": "powershell",
@@ -359,8 +360,8 @@ def test_powershell_git_line_continuation_from_anchor_denies(
 
 @pytest.mark.parametrize("separator", ["\n", "; ", " && "])
 def test_shell_git_readonly_batch_with_dashC_allows(
-    tmp_path, anchor, separator,
-):
+    tmp_path: Path, anchor: list[dict[str, str]], separator: str,
+) -> None:
     gp = anchor[0]["path"]
     command = separator.join([
         f'git --no-pager -C "{gp}" pull --ff-only origin main',
@@ -371,7 +372,7 @@ def test_shell_git_readonly_batch_with_dashC_allows(
                         anchors=anchor) is None
 
 
-def test_shell_git_write_with_global_options_still_denies(tmp_path, anchor):
+def test_shell_git_write_with_global_options_still_denies(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     gp = anchor[0]["path"]
     command = (
         f'git --no-pager -c color.ui=false -C "{gp}" commit -m example'
@@ -386,8 +387,8 @@ def test_shell_git_write_with_global_options_still_denies(tmp_path, anchor):
     ("pull", "--ff-only", False),
 ])
 def test_builtin_git_write_name_is_not_replaced_by_alias(
-    tmp_path, anchor, subcommand, arguments, denied,
-):
+    tmp_path: Path, anchor: list[dict[str, str]], subcommand: str, arguments: str, denied: bool,
+) -> None:
     gp = anchor[0]["path"]
     result = guard.decide(
         _shell(f'git -C "{gp}" -c alias.{subcommand}=status {subcommand} {arguments}', tmp_path),
@@ -397,7 +398,7 @@ def test_builtin_git_write_name_is_not_replaced_by_alias(
 
 
 @pytest.mark.parametrize("subcommand", ["status", "log", "diff", "show", "rev-parse", "merge-base", "fetch"])
-def test_builtin_git_read_name_is_not_replaced_by_alias(tmp_path, anchor, subcommand):
+def test_builtin_git_read_name_is_not_replaced_by_alias(tmp_path: Path, anchor: list[dict[str, str]], subcommand: str) -> None:
     gp = anchor[0]["path"]
     assert guard.decide(
         _shell(f'git -C "{gp}" -c alias.{subcommand}=commit {subcommand}', tmp_path),
@@ -415,8 +416,8 @@ def test_builtin_git_read_name_is_not_replaced_by_alias(tmp_path, anchor, subcom
     ],
 )
 def test_shell_git_command_local_alias_from_anchor_denies(
-    tmp_path, anchor, config,
-):
+    tmp_path: Path, anchor: list[dict[str, str]], config: str,
+) -> None:
     gp = anchor[0]["path"]
     d = guard.decide(
         _shell(f'git -C "{gp}" -c "{config}" save -m example', tmp_path),
@@ -433,8 +434,8 @@ def test_shell_git_command_local_alias_from_anchor_denies(
     ],
 )
 def test_shell_git_quoted_config_separator_from_anchor_denies(
-    tmp_path, anchor, config,
-):
+    tmp_path: Path, anchor: list[dict[str, str]], config: str,
+) -> None:
     gp = anchor[0]["path"]
     command = (
         f'git -C "{gp}" -c "{config}" '
@@ -446,8 +447,8 @@ def test_shell_git_quoted_config_separator_from_anchor_denies(
 
 
 def test_shell_git_alias_with_quoted_separator_from_anchor_denies(
-    tmp_path, anchor,
-):
+    tmp_path: Path, anchor: list[dict[str, str]],
+) -> None:
     gp = anchor[0]["path"]
     command = (
         f'git -C "{gp}" -c "alias.save=!echo before; git commit" save'
@@ -467,8 +468,8 @@ def test_shell_git_alias_with_quoted_separator_from_anchor_denies(
     ],
 )
 def test_bash_git_command_substitution_from_anchor_denies(
-    tmp_path, anchor, command,
-):
+    tmp_path: Path, anchor: list[dict[str, str]], command: str,
+) -> None:
     gp = anchor[0]["path"]
     d = guard.decide(_shell(command, gp), env={},
                      home=tmp_path, anchors=anchor)
@@ -483,8 +484,8 @@ def test_bash_git_command_substitution_from_anchor_denies(
     ],
 )
 def test_bash_unquoted_substitution_separator_from_anchor_denies(
-    tmp_path, anchor, command,
-):
+    tmp_path: Path, anchor: list[dict[str, str]], command: str,
+) -> None:
     gp = anchor[0]["path"]
     d = guard.decide(_shell(command, gp), env={},
                      home=tmp_path, anchors=anchor)
@@ -499,15 +500,15 @@ def test_bash_unquoted_substitution_separator_from_anchor_denies(
     ],
 )
 def test_bash_process_substitution_from_anchor_denies(
-    tmp_path, anchor, command,
-):
+    tmp_path: Path, anchor: list[dict[str, str]], command: str,
+) -> None:
     gp = anchor[0]["path"]
     d = guard.decide(_shell(command, gp), env={},
                      home=tmp_path, anchors=anchor)
     assert d and d["permissionDecision"] == "deny"
 
 
-def test_bash_single_quoted_git_substitution_text_allows(tmp_path, anchor):
+def test_bash_single_quoted_git_substitution_text_allows(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     gp = anchor[0]["path"]
     assert guard.decide(
         _shell("echo '$(git commit --allow-empty -m example)'", gp),
@@ -516,8 +517,8 @@ def test_bash_single_quoted_git_substitution_text_allows(tmp_path, anchor):
 
 
 def test_powershell_git_command_substitution_from_anchor_denies(
-    tmp_path, anchor,
-):
+    tmp_path: Path, anchor: list[dict[str, str]],
+) -> None:
     gp = anchor[0]["path"]
     payload = {
         "toolName": "powershell",
@@ -531,8 +532,8 @@ def test_powershell_git_command_substitution_from_anchor_denies(
 
 
 def test_powershell_git_array_subexpression_from_anchor_denies(
-    tmp_path, anchor,
-):
+    tmp_path: Path, anchor: list[dict[str, str]],
+) -> None:
     gp = anchor[0]["path"]
     payload = {
         "toolName": "powershell",
@@ -556,8 +557,8 @@ def test_powershell_git_array_subexpression_from_anchor_denies(
     ],
 )
 def test_powershell_comment_boundaries_preserve_git_command(
-    tmp_path, anchor, command,
-):
+    tmp_path: Path, anchor: list[dict[str, str]], command: str,
+) -> None:
     gp = anchor[0]["path"]
     payload = {
         "toolName": "powershell",
@@ -582,8 +583,8 @@ def test_powershell_comment_boundaries_preserve_git_command(
     ],
 )
 def test_shell_comment_openers_do_not_hide_next_git_command(
-    tmp_path, anchor, tool, command,
-):
+    tmp_path: Path, anchor: list[dict[str, str]], tool: str, command: str,
+) -> None:
     gp = anchor[0]["path"]
     payload = {
         "toolName": tool,
@@ -602,8 +603,8 @@ def test_shell_comment_openers_do_not_hide_next_git_command(
     ],
 )
 def test_powershell_git_grouping_expression_from_anchor(
-    tmp_path, anchor, expression, expected,
-):
+    tmp_path: Path, anchor: list[dict[str, str]], expression: str, expected: str | None,
+) -> None:
     gp = anchor[0]["path"]
     payload = {
         "toolName": "powershell",
@@ -617,7 +618,7 @@ def test_powershell_git_grouping_expression_from_anchor(
         assert decision is None
 
 
-def test_powershell_doubled_apostrophe_path_denies(tmp_path, anchor):
+def test_powershell_doubled_apostrophe_path_denies(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     literal = _main_checkout(tmp_path, "anchor'name")
     escaped = str(literal).replace("'", "''")
     anchors = [*anchor, {"name": "literal", "path": str(literal)}]
@@ -632,7 +633,7 @@ def test_powershell_doubled_apostrophe_path_denies(tmp_path, anchor):
     assert decision and decision["permissionDecision"] == "deny"
 
 
-def test_cmd_apostrophe_does_not_quote_separator(tmp_path, anchor):
+def test_cmd_apostrophe_does_not_quote_separator(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     gp = anchor[0]["path"]
     payload = {
         "toolName": "cmd",
@@ -647,7 +648,7 @@ def test_cmd_apostrophe_does_not_quote_separator(tmp_path, anchor):
     assert d and d["permissionDecision"] == "deny"
 
 
-def test_shell_git_config_env_alias_from_anchor_denies(tmp_path, anchor):
+def test_shell_git_config_env_alias_from_anchor_denies(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     gp = anchor[0]["path"]
     command = (
         "VALUE='commit -m example' "
@@ -660,8 +661,8 @@ def test_shell_git_config_env_alias_from_anchor_denies(tmp_path, anchor):
 
 @pytest.mark.parametrize("dash_c", ["-C", "-C{}"])
 def test_shell_git_commit_with_dashC_forms_still_denies(
-    tmp_path, anchor, dash_c,
-):
+    tmp_path: Path, anchor: list[dict[str, str]], dash_c: str,
+) -> None:
     gp = anchor[0]["path"]
     option = f'-C "{gp}"' if dash_c == "-C" else dash_c.format(gp)
     d = guard.decide(_shell(f"git {option} commit -m example", tmp_path),
@@ -669,7 +670,7 @@ def test_shell_git_commit_with_dashC_forms_still_denies(
     assert d and d["permissionDecision"] == "deny"
 
 
-def test_shell_git_commit_with_attached_quoted_dashC_denies(tmp_path, anchor):
+def test_shell_git_commit_with_attached_quoted_dashC_denies(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     spaced = _main_checkout(tmp_path, "anchor with spaces")
     anchors = [*anchor, {"name": "spaced", "path": str(spaced)}]
     d = guard.decide(
@@ -681,8 +682,8 @@ def test_shell_git_commit_with_attached_quoted_dashC_denies(tmp_path, anchor):
 
 @pytest.mark.parametrize("empty_path", ['""', "''"])
 def test_shell_git_empty_dashC_from_anchor_denies(
-    tmp_path, anchor, empty_path,
-):
+    tmp_path: Path, anchor: list[dict[str, str]], empty_path: str,
+) -> None:
     gp = anchor[0]["path"]
     d = guard.decide(
         _shell(f"git -C {empty_path} commit -m example", gp),
@@ -693,8 +694,8 @@ def test_shell_git_empty_dashC_from_anchor_denies(
 
 @pytest.mark.parametrize("suffix", ["%literal", "$literal"])
 def test_shell_git_quoted_literal_expansion_character_path_denies(
-    tmp_path, anchor, suffix,
-):
+    tmp_path: Path, anchor: list[dict[str, str]], suffix: str,
+) -> None:
     literal = _main_checkout(tmp_path, f"anchor{suffix}")
     anchors = [*anchor, {"name": "literal", "path": str(literal)}]
     d = guard.decide(
@@ -706,8 +707,8 @@ def test_shell_git_quoted_literal_expansion_character_path_denies(
 
 @pytest.mark.parametrize("suffix", ["$literal", "`literal"])
 def test_bash_double_quoted_escaped_character_path_denies(
-    tmp_path, anchor, suffix,
-):
+    tmp_path: Path, anchor: list[dict[str, str]], suffix: str,
+) -> None:
     literal = _main_checkout(tmp_path, f"anchor{suffix}")
     escaped = str(literal).replace(suffix[0], f"\\{suffix[0]}")
     anchors = [*anchor, {"name": "literal", "path": str(literal)}]
@@ -718,7 +719,7 @@ def test_bash_double_quoted_escaped_character_path_denies(
     assert d and d["permissionDecision"] == "deny"
 
 
-def test_shell_git_unresolved_dashC_variable_still_allows(tmp_path, anchor):
+def test_shell_git_unresolved_dashC_variable_still_allows(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     gp = anchor[0]["path"]
     command = f"$repo='{gp}'; git -C $repo commit -m example"
     assert guard.decide(_shell(command, tmp_path), env={},
@@ -726,7 +727,7 @@ def test_shell_git_unresolved_dashC_variable_still_allows(tmp_path, anchor):
 
 
 @pytest.mark.skipif(os.name != "nt", reason="PowerShell backslash separator")
-def test_powershell_git_dashC_trailing_separator_denies(tmp_path, anchor):
+def test_powershell_git_dashC_trailing_separator_denies(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     gp = anchor[0]["path"]
     payload = {
         "toolName": "powershell",
@@ -737,7 +738,7 @@ def test_powershell_git_dashC_trailing_separator_denies(tmp_path, anchor):
     assert d and d["permissionDecision"] == "deny"
 
 
-def test_powershell_git_dashC_backtick_spaces_denies(tmp_path, anchor):
+def test_powershell_git_dashC_backtick_spaces_denies(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     spaced = _main_checkout(tmp_path, "anchor with spaces")
     escaped = str(spaced).replace(" ", "` ")
     anchors = [*anchor, {"name": "spaced", "path": str(spaced)}]
@@ -750,7 +751,7 @@ def test_powershell_git_dashC_backtick_spaces_denies(tmp_path, anchor):
     assert d and d["permissionDecision"] == "deny"
 
 
-def test_shell_git_commit_with_escaped_space_dashC_denies(tmp_path, anchor):
+def test_shell_git_commit_with_escaped_space_dashC_denies(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     spaced = _main_checkout(tmp_path, "anchor with spaces")
     escaped = str(spaced).replace(" ", "\\ ")
     anchors = [*anchor, {"name": "spaced", "path": str(spaced)}]
@@ -761,7 +762,7 @@ def test_shell_git_commit_with_escaped_space_dashC_denies(tmp_path, anchor):
     assert d and d["permissionDecision"] == "deny"
 
 
-def test_shell_git_repeated_dashC_uses_only_final_directory(tmp_path, anchor):
+def test_shell_git_repeated_dashC_uses_only_final_directory(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     other = _main_checkout(tmp_path, "other-repo")
     gp = anchor[0]["path"]
     assert guard.decide(
@@ -780,8 +781,8 @@ def test_shell_git_repeated_dashC_uses_only_final_directory(tmp_path, anchor):
     ],
 )
 def test_shell_git_commit_with_repository_target_options_denies(
-    tmp_path, anchor, option,
-):
+    tmp_path: Path, anchor: list[dict[str, str]], option: str,
+) -> None:
     gp = anchor[0]["path"]
     d = guard.decide(_shell(
         f"git {option.format(gp)} commit -m example", tmp_path,
@@ -789,7 +790,7 @@ def test_shell_git_commit_with_repository_target_options_denies(
     assert d and d["permissionDecision"] == "deny"
 
 
-def test_shell_git_dir_elsewhere_overrides_anchor_cwd(tmp_path, anchor):
+def test_shell_git_dir_elsewhere_overrides_anchor_cwd(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     other = _main_checkout(tmp_path, "other-repo")
     gp = anchor[0]["path"]
     assert guard.decide(
@@ -798,7 +799,7 @@ def test_shell_git_dir_elsewhere_overrides_anchor_cwd(tmp_path, anchor):
     ) is None
 
 
-def test_shell_git_dir_elsewhere_overrides_anchor_dashC(tmp_path, anchor):
+def test_shell_git_dir_elsewhere_overrides_anchor_dashC(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     other = _main_checkout(tmp_path, "other-repo")
     gp = anchor[0]["path"]
     assert guard.decide(
@@ -812,8 +813,8 @@ def test_shell_git_dir_elsewhere_overrides_anchor_dashC(tmp_path, anchor):
 
 @pytest.mark.parametrize("use_dash_c", [False, True])
 def test_shell_git_dir_elsewhere_checkout_keeps_implicit_anchor_work_tree(
-    tmp_path, anchor, use_dash_c,
-):
+    tmp_path: Path, anchor: list[dict[str, str]], use_dash_c: bool,
+) -> None:
     other = _main_checkout(tmp_path, "other-repo")
     gp = anchor[0]["path"]
     prefix = f'git -C "{gp}"' if use_dash_c else "git"
@@ -828,8 +829,8 @@ def test_shell_git_dir_elsewhere_checkout_keeps_implicit_anchor_work_tree(
 
 @pytest.mark.parametrize("option", ["--git-dir", "--work-tree"])
 def test_shell_repeated_repository_target_uses_final_value(
-    tmp_path, anchor, option,
-):
+    tmp_path: Path, anchor: list[dict[str, str]], option: str,
+) -> None:
     other = _main_checkout(tmp_path, "other-repo")
     gp = anchor[0]["path"]
     anchor_target = f"{gp}/.git" if option == "--git-dir" else gp
@@ -846,8 +847,8 @@ def test_shell_repeated_repository_target_uses_final_value(
 
 @pytest.mark.parametrize("option", ["--git-dir", "--work-tree"])
 def test_shell_repeated_repository_target_final_anchor_denies(
-    tmp_path, anchor, option,
-):
+    tmp_path: Path, anchor: list[dict[str, str]], option: str,
+) -> None:
     other = _main_checkout(tmp_path, "other-repo")
     gp = anchor[0]["path"]
     anchor_target = f"{gp}/.git" if option == "--git-dir" else gp
@@ -864,8 +865,8 @@ def test_shell_repeated_repository_target_final_anchor_denies(
 
 
 def test_shell_work_tree_elsewhere_keeps_anchor_repository_target(
-    tmp_path, anchor,
-):
+    tmp_path: Path, anchor: list[dict[str, str]],
+) -> None:
     other = tmp_path / "other-work-tree"
     other.mkdir()
     gp = anchor[0]["path"]
@@ -885,7 +886,7 @@ def test_shell_work_tree_elsewhere_keeps_anchor_repository_target(
         "git -C . --help commit",
     ],
 )
-def test_shell_git_terminal_global_options_allow(tmp_path, anchor, command):
+def test_shell_git_terminal_global_options_allow(tmp_path: Path, anchor: list[dict[str, str]], command: str) -> None:
     gp = anchor[0]["path"]
     assert guard.decide(_shell(command, gp), env={}, home=tmp_path,
                         anchors=anchor) is None
@@ -893,8 +894,8 @@ def test_shell_git_terminal_global_options_allow(tmp_path, anchor, command):
 
 @pytest.mark.parametrize("separator", ["\n", "; ", " && "])
 def test_shell_git_batch_with_real_mutation_still_denies(
-    tmp_path, anchor, separator,
-):
+    tmp_path: Path, anchor: list[dict[str, str]], separator: str,
+) -> None:
     gp = anchor[0]["path"]
     command = separator.join([
         "git fetch origin refs/pull/42/head",
@@ -906,8 +907,8 @@ def test_shell_git_batch_with_real_mutation_still_denies(
 
 
 def test_shell_git_bare_pull_without_ff_only_from_anchor_cwd_denies(
-    tmp_path, anchor,
-):
+    tmp_path: Path, anchor: list[dict[str, str]],
+) -> None:
     """A bare ``git pull`` (no ``--ff-only``) is NOT exempt -- on a diverged
     anchor its default merge could create a genuine new local commit, so it
     stays denied exactly like every other git-write verb."""
@@ -918,8 +919,8 @@ def test_shell_git_bare_pull_without_ff_only_from_anchor_cwd_denies(
 
 
 def test_shell_git_pull_with_ff_only_substring_in_branch_name_denies(
-    tmp_path, anchor,
-):
+    tmp_path: Path, anchor: list[dict[str, str]],
+) -> None:
     """The ``--ff-only`` match must require a standalone argument, not a
     substring anywhere in the segment -- a branch name that merely CONTAINS
     the literal text ``--ff-only`` (no real flag passed) is still an unsafe
@@ -939,15 +940,15 @@ def test_shell_git_pull_with_ff_only_substring_in_branch_name_denies(
     ],
 )
 def test_shell_git_pull_with_ff_only_argument_text_denies(
-    tmp_path, anchor, command,
-):
+    tmp_path: Path, anchor: list[dict[str, str]], command: str,
+) -> None:
     gp = anchor[0]["path"]
     d = guard.decide(_shell(command, gp), env={}, home=tmp_path,
                      anchors=anchor)
     assert d and d["permissionDecision"] == "deny"
 
 
-def test_shell_git_pull_last_no_ff_mode_denies(tmp_path, anchor):
+def test_shell_git_pull_last_no_ff_mode_denies(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     gp = anchor[0]["path"]
     d = guard.decide(
         _shell("git pull --ff-only --no-ff origin main", gp),
@@ -956,7 +957,7 @@ def test_shell_git_pull_last_no_ff_mode_denies(tmp_path, anchor):
     assert d and d["permissionDecision"] == "deny"
 
 
-def test_shell_git_pull_last_ff_only_mode_allows(tmp_path, anchor):
+def test_shell_git_pull_last_ff_only_mode_allows(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     gp = anchor[0]["path"]
     assert guard.decide(
         _shell("git pull --no-ff --ff-only origin main", gp),
@@ -965,8 +966,8 @@ def test_shell_git_pull_last_ff_only_mode_allows(tmp_path, anchor):
 
 
 def test_shell_git_commit_with_pull_ff_only_in_message_denies(
-    tmp_path, anchor,
-):
+    tmp_path: Path, anchor: list[dict[str, str]],
+) -> None:
     """The ``--ff-only`` exemption must key off the actual git SUBCOMMAND,
     not a bare substring search -- a ``commit`` whose message happens to
     contain the literal text ``pull --ff-only`` is still a genuine commit
@@ -979,8 +980,8 @@ def test_shell_git_commit_with_pull_ff_only_in_message_denies(
 
 
 def test_shell_git_commit_still_denies_alongside_pull_exemption(
-    tmp_path, anchor,
-):
+    tmp_path: Path, anchor: list[dict[str, str]],
+) -> None:
     """The ``pull --ff-only`` exemption must not have loosened any OTHER git
     mutation verb -- ``commit`` (and by the same list, merge/rebase/
     checkout/etc.) still denies."""
@@ -996,35 +997,35 @@ def test_shell_git_commit_still_denies_alongside_pull_exemption(
 # ``git branch -f main origin/main`` directly against the anchor checkout
 # -- a genuine mutation this guard must catch.
 
-def test_shell_git_branch_force_move_into_anchor_denies(tmp_path, anchor):
+def test_shell_git_branch_force_move_into_anchor_denies(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     gp = anchor[0]["path"]
     d = guard.decide(_shell(f'git -C "{gp}" branch -f main origin/main', tmp_path),
                      env={}, home=tmp_path, anchors=anchor)
     assert d and d["permissionDecision"] == "deny"
 
 
-def test_shell_git_branch_force_move_from_anchor_cwd_denies(tmp_path, anchor):
+def test_shell_git_branch_force_move_from_anchor_cwd_denies(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     gp = anchor[0]["path"]
     d = guard.decide(_shell("git branch -f main origin/main", gp), env={},
                      home=tmp_path, anchors=anchor)
     assert d and d["permissionDecision"] == "deny"
 
 
-def test_shell_git_branch_delete_from_anchor_cwd_denies(tmp_path, anchor):
+def test_shell_git_branch_delete_from_anchor_cwd_denies(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     gp = anchor[0]["path"]
     d = guard.decide(_shell("git branch -D stale-branch", gp), env={},
                      home=tmp_path, anchors=anchor)
     assert d and d["permissionDecision"] == "deny"
 
 
-def test_shell_git_branch_move_rename_from_anchor_cwd_denies(tmp_path, anchor):
+def test_shell_git_branch_move_rename_from_anchor_cwd_denies(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     gp = anchor[0]["path"]
     d = guard.decide(_shell("git branch -m old-name new-name", gp), env={},
                      home=tmp_path, anchors=anchor)
     assert d and d["permissionDecision"] == "deny"
 
 
-def test_shell_git_branch_combined_short_flags_from_anchor_cwd_denies(tmp_path, anchor):
+def test_shell_git_branch_combined_short_flags_from_anchor_cwd_denies(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     """Git accepts short flags COMBINED into one token (``-df`` = force
     delete, exactly like ``-d -f``) -- a regex matching only a standalone
     ``-f``/``-d``/etc. would miss this cluster entirely, wrongly treating a
@@ -1035,28 +1036,28 @@ def test_shell_git_branch_combined_short_flags_from_anchor_cwd_denies(tmp_path, 
     assert d and d["permissionDecision"] == "deny"
 
 
-def test_shell_git_branch_bare_listing_from_anchor_cwd_allows(tmp_path, anchor):
+def test_shell_git_branch_bare_listing_from_anchor_cwd_allows(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     """A plain ``git branch`` (no args) only lists and must stay allowed."""
     gp = anchor[0]["path"]
     assert guard.decide(_shell("git branch", gp), env={}, home=tmp_path,
                         anchors=anchor) is None
 
 
-def test_shell_git_branch_verbose_list_from_anchor_cwd_allows(tmp_path, anchor):
+def test_shell_git_branch_verbose_list_from_anchor_cwd_allows(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     gp = anchor[0]["path"]
     assert guard.decide(_shell("git branch -vv", gp), env={}, home=tmp_path,
                         anchors=anchor) is None
 
 
-def test_shell_git_branch_show_current_from_anchor_cwd_allows(tmp_path, anchor):
+def test_shell_git_branch_show_current_from_anchor_cwd_allows(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     gp = anchor[0]["path"]
     assert guard.decide(_shell("git branch --show-current", gp), env={},
                         home=tmp_path, anchors=anchor) is None
 
 
 def test_shell_git_branch_merged_with_embedded_value_from_anchor_cwd_allows(
-    tmp_path, anchor,
-):
+    tmp_path: Path, anchor: list[dict[str, str]],
+) -> None:
     """A value-bearing read-only flag using the embedded ``=value`` form
     (no separate positional argument) stays allowed."""
     gp = anchor[0]["path"]
@@ -1065,8 +1066,8 @@ def test_shell_git_branch_merged_with_embedded_value_from_anchor_cwd_allows(
 
 
 def test_shell_git_branch_column_with_embedded_value_from_anchor_cwd_allows(
-    tmp_path, anchor,
-):
+    tmp_path: Path, anchor: list[dict[str, str]],
+) -> None:
     """``--column`` also accepts a value-bearing ``=<options>`` form (e.g.
     ``--column=dense``), not just the bare flag."""
     gp = anchor[0]["path"]
@@ -1074,7 +1075,7 @@ def test_shell_git_branch_column_with_embedded_value_from_anchor_cwd_allows(
                         home=tmp_path, anchors=anchor) is None
 
 
-def test_shell_git_branch_short_list_flag_from_anchor_cwd_allows(tmp_path, anchor):
+def test_shell_git_branch_short_list_flag_from_anchor_cwd_allows(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     """``-l`` is git's short form of the read-only ``--list`` mode."""
     gp = anchor[0]["path"]
     assert guard.decide(_shell("git branch -l", gp), env={}, home=tmp_path,
@@ -1086,7 +1087,7 @@ def test_shell_git_branch_short_list_flag_from_anchor_cwd_allows(tmp_path, ancho
 # --track/--set-upstream-to/--unset-upstream/--edit-description all mutate
 # a ref or its config but carry none of the blacklisted flags ---------------
 
-def test_shell_git_branch_track_from_anchor_cwd_denies(tmp_path, anchor):
+def test_shell_git_branch_track_from_anchor_cwd_denies(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     """``--track`` creates a new ref plus upstream config -- a real
     mutation with none of the previously-blacklisted flags."""
     gp = anchor[0]["path"]
@@ -1095,28 +1096,28 @@ def test_shell_git_branch_track_from_anchor_cwd_denies(tmp_path, anchor):
     assert d and d["permissionDecision"] == "deny"
 
 
-def test_shell_git_branch_set_upstream_to_from_anchor_cwd_denies(tmp_path, anchor):
+def test_shell_git_branch_set_upstream_to_from_anchor_cwd_denies(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     gp = anchor[0]["path"]
     d = guard.decide(_shell("git branch --set-upstream-to=origin/main", gp),
                      env={}, home=tmp_path, anchors=anchor)
     assert d and d["permissionDecision"] == "deny"
 
 
-def test_shell_git_branch_unset_upstream_from_anchor_cwd_denies(tmp_path, anchor):
+def test_shell_git_branch_unset_upstream_from_anchor_cwd_denies(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     gp = anchor[0]["path"]
     d = guard.decide(_shell("git branch --unset-upstream", gp), env={},
                      home=tmp_path, anchors=anchor)
     assert d and d["permissionDecision"] == "deny"
 
 
-def test_shell_git_branch_edit_description_from_anchor_cwd_denies(tmp_path, anchor):
+def test_shell_git_branch_edit_description_from_anchor_cwd_denies(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     gp = anchor[0]["path"]
     d = guard.decide(_shell("git branch --edit-description", gp), env={},
                      home=tmp_path, anchors=anchor)
     assert d and d["permissionDecision"] == "deny"
 
 
-def test_shell_git_branch_bare_positional_name_from_anchor_cwd_denies(tmp_path, anchor):
+def test_shell_git_branch_bare_positional_name_from_anchor_cwd_denies(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     """A bare positional argument with no recognized flag at all (plain
     branch creation) is unrecognized and must deny, not be assumed safe."""
     gp = anchor[0]["path"]
@@ -1125,7 +1126,7 @@ def test_shell_git_branch_bare_positional_name_from_anchor_cwd_denies(tmp_path, 
     assert d and d["permissionDecision"] == "deny"
 
 
-def test_shell_git_commit_with_branch_force_in_message_denies(tmp_path, anchor):
+def test_shell_git_commit_with_branch_force_in_message_denies(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     """The ``branch`` exemption must key off the actual git SUBCOMMAND, not a
     bare substring search -- a ``commit`` whose message happens to contain
     ``branch -f`` is still a genuine commit and must still deny."""
@@ -1137,7 +1138,7 @@ def test_shell_git_commit_with_branch_force_in_message_denies(tmp_path, anchor):
 
 # -- cwd-scoped git mutation (no path named) -- the incident-class case --------
 
-def test_shell_git_commit_from_anchor_cwd_denies(tmp_path, anchor):
+def test_shell_git_commit_from_anchor_cwd_denies(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     # ``git commit`` with cwd INSIDE the anchor mutates it without naming a path.
     gp = anchor[0]["path"]
     d = guard.decide(_shell("git commit -m x", gp), env={}, home=tmp_path,
@@ -1145,21 +1146,21 @@ def test_shell_git_commit_from_anchor_cwd_denies(tmp_path, anchor):
     assert d and d["permissionDecision"] == "deny"
 
 
-def test_shell_git_add_from_anchor_subdir_denies(tmp_path, anchor):
+def test_shell_git_add_from_anchor_subdir_denies(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     cwd = Path(anchor[0]["path"]) / "src"
     d = guard.decide(_shell("git add -A", cwd), env={}, home=tmp_path,
                      anchors=anchor)
     assert d and d["permissionDecision"] == "deny"
 
 
-def test_shell_git_commit_from_worktree_cwd_allows(tmp_path, anchor):
+def test_shell_git_commit_from_worktree_cwd_allows(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     # Same command from a LINKED worktree cwd (.git file) is fine.
     wt = _linked_worktree(tmp_path / "myrepo.worktrees" / "wt1")
     assert guard.decide(_shell("git commit -m x", wt), env={}, home=tmp_path,
                         anchors=anchor) is None
 
 
-def test_shell_git_dashC_worktree_from_anchor_cwd_allows(tmp_path, anchor):
+def test_shell_git_dashC_worktree_from_anchor_cwd_allows(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     # ``git -C <worktree>`` run FROM the anchor cwd targets the worktree, not the
     # anchor -- the ``-C`` redirect is left to the (path-literal) scan.
     wt = _linked_worktree(tmp_path / "myrepo.worktrees" / "wt2")
@@ -1168,7 +1169,7 @@ def test_shell_git_dashC_worktree_from_anchor_cwd_allows(tmp_path, anchor):
     assert d is None
 
 
-def test_shell_explicit_linked_worktree_targets_allow(tmp_path, anchor):
+def test_shell_explicit_linked_worktree_targets_allow(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     anchor_root = Path(anchor[0]["path"])
     git_dir = anchor_root / ".git" / "worktrees" / "explicit"
     git_dir.mkdir(parents=True)
@@ -1183,7 +1184,7 @@ def test_shell_explicit_linked_worktree_targets_allow(tmp_path, anchor):
                         home=tmp_path, anchors=anchor) is None
 
 
-def test_shell_linked_worktree_git_dir_from_cwd_allows(tmp_path, anchor):
+def test_shell_linked_worktree_git_dir_from_cwd_allows(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     anchor_root = Path(anchor[0]["path"])
     git_dir = anchor_root / ".git" / "worktrees" / "cwd-only"
     git_dir.mkdir(parents=True)
@@ -1197,8 +1198,8 @@ def test_shell_linked_worktree_git_dir_from_cwd_allows(tmp_path, anchor):
 
 
 def test_shell_fake_linked_worktree_pointing_at_anchor_git_dir_denies(
-    tmp_path, anchor,
-):
+    tmp_path: Path, anchor: list[dict[str, str]],
+) -> None:
     anchor_root = Path(anchor[0]["path"])
     external = tmp_path / "external-work-tree"
     external.mkdir()
@@ -1215,7 +1216,7 @@ def test_shell_fake_linked_worktree_pointing_at_anchor_git_dir_denies(
     assert d and d["permissionDecision"] == "deny"
 
 
-def test_shell_symlinked_anchor_git_dir_denies(tmp_path, anchor):
+def test_shell_symlinked_anchor_git_dir_denies(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     anchor_git = Path(anchor[0]["path"]) / ".git"
     alias = tmp_path / "anchor-git-link"
     try:
@@ -1229,7 +1230,7 @@ def test_shell_symlinked_anchor_git_dir_denies(tmp_path, anchor):
     assert d and d["permissionDecision"] == "deny"
 
 
-def test_shell_spoofed_linked_git_dir_symlink_denies(tmp_path, anchor):
+def test_shell_spoofed_linked_git_dir_symlink_denies(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     anchor_git = Path(anchor[0]["path"]) / ".git"
     spoof_parent = tmp_path / "outside" / ".git" / "worktrees"
     spoof_parent.mkdir(parents=True)
@@ -1253,20 +1254,20 @@ def test_shell_spoofed_linked_git_dir_symlink_denies(tmp_path, anchor):
     assert d and d["permissionDecision"] == "deny"
 
 
-def test_shell_git_read_from_anchor_cwd_allows(tmp_path, anchor):
+def test_shell_git_read_from_anchor_cwd_allows(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     # A read-only git command from the anchor cwd is fine (no write verb).
     assert guard.decide(_shell("git status", anchor[0]["path"]),
                         env={}, home=tmp_path, anchors=anchor) is None
 
 
-def test_shell_git_commit_from_unrelated_cwd_allows(tmp_path, anchor):
+def test_shell_git_commit_from_unrelated_cwd_allows(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     # cwd is not a worktree-class anchor -> not our business.
     other = _main_checkout(tmp_path, "singleton-repo")
     assert guard.decide(_shell("git commit -m x", other),
                         env={}, home=tmp_path, anchors=anchor) is None
 
 
-def test_shell_write_into_sibling_worktree_allows(tmp_path, anchor):
+def test_shell_write_into_sibling_worktree_allows(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     # A write into ``<anchor>.worktrees\...`` shares the anchor's string prefix
     # but NOT the anchor+separator boundary, so it must not be flagged.
     gp = anchor[0]["path"]
@@ -1281,8 +1282,8 @@ def test_shell_write_into_sibling_worktree_allows(tmp_path, anchor):
 # write *target* is.
 
 def test_shell_readonly_git_with_fd_redirect_and_anchor_in_var_allows(
-    tmp_path, anchor
-):
+    tmp_path: Path, anchor: list[dict[str, str]]
+) -> None:
     # Repro 1: a read-only `git fetch`/`git log` where the anchor path is only in
     # a `$var=`/`cd`, and the sole "write" token is the `>` of a `2>&1` fd dup.
     gp = anchor[0]["path"]
@@ -1292,7 +1293,7 @@ def test_shell_readonly_git_with_fd_redirect_and_anchor_in_var_allows(
                         anchors=anchor) is None
 
 
-def test_shell_fd_dup_redirect_is_not_a_write(tmp_path, anchor):
+def test_shell_fd_dup_redirect_is_not_a_write(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     # `2>&1` / `1>&2` are fd dups, not file writes -- even with the anchor named
     # in an inert position.
     gp = anchor[0]["path"]
@@ -1300,7 +1301,7 @@ def test_shell_fd_dup_redirect_is_not_a_write(tmp_path, anchor):
                         env={}, home=tmp_path, anchors=anchor) is None
 
 
-def test_shell_anchor_in_quoted_body_payload_allows(tmp_path, anchor):
+def test_shell_anchor_in_quoted_body_payload_allows(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     # Repro 2: `gh issue create` whose --body PROSE mentions the anchor path and
     # write verbs (Set-Content, git commit) as data, not commands.
     gp = anchor[0]["path"]
@@ -1311,13 +1312,13 @@ def test_shell_anchor_in_quoted_body_payload_allows(tmp_path, anchor):
                         anchors=anchor) is None
 
 
-def test_shell_cd_into_anchor_then_read_allows(tmp_path, anchor):
+def test_shell_cd_into_anchor_then_read_allows(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     gp = anchor[0]["path"]
     assert guard.decide(_shell(f'cd "{gp}"; git status', tmp_path),
                         env={}, home=tmp_path, anchors=anchor) is None
 
 
-def test_shell_stderr_redirect_to_anchor_file_still_denies(tmp_path, anchor):
+def test_shell_stderr_redirect_to_anchor_file_still_denies(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     # A real fd-to-FILE redirect INTO the anchor (`2> <anchor>\err.log`) is a
     # write and must still be denied (only fd-dup `>&` is exempt).
     gp = anchor[0]["path"]
@@ -1326,14 +1327,14 @@ def test_shell_stderr_redirect_to_anchor_file_still_denies(tmp_path, anchor):
     assert d and d["permissionDecision"] == "deny"
 
 
-def test_shell_redirect_into_anchor_still_denies(tmp_path, anchor):
+def test_shell_redirect_into_anchor_still_denies(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     gp = anchor[0]["path"]
     d = guard.decide(_shell(f'echo hi > "{gp}\\note.txt"', tmp_path),
                      env={}, home=tmp_path, anchors=anchor)
     assert d and d["permissionDecision"] == "deny"
 
 
-def test_shell_sudo_prefixed_write_into_anchor_denies(tmp_path, anchor):
+def test_shell_sudo_prefixed_write_into_anchor_denies(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     # A wrapper prefix (sudo) before the write verb must not be a blind spot.
     gp = anchor[0]["path"]
     d = guard.decide(_shell(f'sudo rm -rf "{gp}/src"', tmp_path),
@@ -1342,8 +1343,8 @@ def test_shell_sudo_prefixed_write_into_anchor_denies(tmp_path, anchor):
 
 
 def test_shell_env_assignment_prefixed_git_write_from_anchor_cwd_denies(
-    tmp_path, anchor
-):
+    tmp_path: Path, anchor: list[dict[str, str]]
+) -> None:
     # A leading env-assignment (VAR=...) before `git commit` must still be seen.
     gp = anchor[0]["path"]
     d = guard.decide(_shell("GIT_AUTHOR_NAME=x git commit -m y", gp),
@@ -1353,7 +1354,7 @@ def test_shell_env_assignment_prefixed_git_write_from_anchor_cwd_denies(
 
 # -- in-command `cd <anchor>` moves the effective cwd (dotfiles#1144 follow-up) --
 
-def test_shell_cd_into_anchor_then_git_commit_denies(tmp_path, anchor):
+def test_shell_cd_into_anchor_then_git_commit_denies(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     # The tool cwd is elsewhere, but `cd <anchor>` inside the command makes the
     # subsequent `git commit` write the anchor. Must be caught.
     gp = anchor[0]["path"]
@@ -1362,7 +1363,7 @@ def test_shell_cd_into_anchor_then_git_commit_denies(tmp_path, anchor):
     assert d and d["permissionDecision"] == "deny"
 
 
-def test_shell_cd_into_anchor_subdir_then_git_write_denies(tmp_path, anchor):
+def test_shell_cd_into_anchor_subdir_then_git_write_denies(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     gp = anchor[0]["path"]
     d = guard.decide(_shell(f'cd "{gp}\\src" && git add -A', tmp_path),
                      env={}, home=tmp_path, anchors=anchor)
@@ -1370,8 +1371,8 @@ def test_shell_cd_into_anchor_subdir_then_git_write_denies(tmp_path, anchor):
 
 
 def test_shell_cd_into_anchor_forwardslash_subdir_then_git_write_denies(
-    tmp_path, anchor
-):
+    tmp_path: Path, anchor: list[dict[str, str]]
+) -> None:
     # Forward-slash subdir is the POSIX-native form of the same vector.
     gp = anchor[0]["path"]
     d = guard.decide(_shell(f'cd "{gp}/src" && git add -A', tmp_path),
@@ -1380,8 +1381,8 @@ def test_shell_cd_into_anchor_forwardslash_subdir_then_git_write_denies(
 
 
 def test_shell_cd_relative_backslash_subdir_from_anchor_then_git_write_denies(
-    tmp_path, anchor
-):
+    tmp_path: Path, anchor: list[dict[str, str]]
+) -> None:
     # A RELATIVE backslash subpath from the anchor cwd must also normalize so the
     # effective cwd stays inside the anchor (defense-in-depth on POSIX).
     gp = anchor[0]["path"]
@@ -1390,7 +1391,7 @@ def test_shell_cd_relative_backslash_subdir_from_anchor_then_git_write_denies(
     assert d and d["permissionDecision"] == "deny"
 
 
-def test_shell_cd_into_non_anchor_backslash_dir_still_allows(tmp_path, anchor):
+def test_shell_cd_into_non_anchor_backslash_dir_still_allows(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     # Separator normalization must not over-fire: a cd into an unrelated dir that
     # merely shares no ancestry with the anchor is still allowed.
     d = guard.decide(_shell('cd "/tmp/elsewhere\\src" && git add -A', tmp_path),
@@ -1398,7 +1399,7 @@ def test_shell_cd_into_non_anchor_backslash_dir_still_allows(tmp_path, anchor):
     assert d is None
 
 
-def test_shell_cmd_style_cd_slash_d_into_anchor_denies(tmp_path, anchor):
+def test_shell_cmd_style_cd_slash_d_into_anchor_denies(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     # CMD `cd /d <path>` (SHELL_TOOLS includes cmd): the /d flag must be skipped,
     # not captured as the directory target.
     gp = anchor[0]["path"]
@@ -1409,13 +1410,13 @@ def test_shell_cmd_style_cd_slash_d_into_anchor_denies(tmp_path, anchor):
     assert d and d["permissionDecision"] == "deny"
 
 
-def test_shell_cd_into_anchor_then_read_still_allows(tmp_path, anchor):
+def test_shell_cd_into_anchor_then_read_still_allows(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     gp = anchor[0]["path"]
     assert guard.decide(_shell(f'cd "{gp}"; git status', tmp_path),
                         env={}, home=tmp_path, anchors=anchor) is None
 
 
-def test_shell_cd_variable_target_does_not_move_cwd(tmp_path, anchor):
+def test_shell_cd_variable_target_does_not_move_cwd(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     # `cd $a` is unresolvable, so it must NOT be treated as moving into the
     # anchor -- otherwise the read-only repro would falsely deny again.
     gp = anchor[0]["path"]
@@ -1425,14 +1426,14 @@ def test_shell_cd_variable_target_does_not_move_cwd(tmp_path, anchor):
                         home=tmp_path, anchors=anchor) is None
 
 
-def test_shell_cd_into_then_out_of_anchor_allows(tmp_path, anchor):
+def test_shell_cd_into_then_out_of_anchor_allows(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     gp = anchor[0]["path"]
     cmd = f'cd "{gp}"; cd ..; git commit -m x'
     assert guard.decide(_shell(cmd, tmp_path), env={},
                         home=tmp_path, anchors=anchor) is None
 
 
-def test_shell_cd_into_sibling_worktree_then_git_write_allows(tmp_path, anchor):
+def test_shell_cd_into_sibling_worktree_then_git_write_allows(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     # `cd <anchor>.worktrees\wt` is NOT inside the anchor -> git write there is
     # fine.
     gp = anchor[0]["path"]
@@ -1442,7 +1443,7 @@ def test_shell_cd_into_sibling_worktree_then_git_write_allows(tmp_path, anchor):
                         env={}, home=tmp_path, anchors=anchor) is None
 
 
-def test_shell_write_verb_not_at_command_position_allows(tmp_path, anchor):
+def test_shell_write_verb_not_at_command_position_allows(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     # A write cmdlet name appearing mid-segment as an argument value (not at
     # command position) with the anchor in a quoted arg must not trigger.
     gp = anchor[0]["path"]
@@ -1453,7 +1454,7 @@ def test_shell_write_verb_not_at_command_position_allows(tmp_path, anchor):
 
 # --- modes + kill switches ----------------------------------------------------
 
-def test_kill_switch_env_allows(tmp_path, anchor):
+def test_kill_switch_env_allows(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     target = Path(anchor[0]["path"]) / "x.py"
     p = _write("create", target, tmp_path)
     assert guard.decide(p, env={"ANCHOR_WRITE_GUARD": "off"}, home=tmp_path,
@@ -1464,7 +1465,7 @@ def test_kill_switch_env_allows(tmp_path, anchor):
                         anchors=anchor) is None
 
 
-def test_mode_warn_returns_additional_context(tmp_path, anchor):
+def test_mode_warn_returns_additional_context(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     target = Path(anchor[0]["path"]) / "x.py"
     d = guard.decide(_write("create", target, tmp_path),
                      env={"ANCHOR_WRITE_GUARD_MODE": "warn"}, home=tmp_path,
@@ -1472,7 +1473,7 @@ def test_mode_warn_returns_additional_context(tmp_path, anchor):
     assert d and "additionalContext" in d and "permissionDecision" not in d
 
 
-def test_mode_ask_returns_ask(tmp_path, anchor):
+def test_mode_ask_returns_ask(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     target = Path(anchor[0]["path"]) / "x.py"
     d = guard.decide(_write("create", target, tmp_path),
                      env={"ANCHOR_WRITE_GUARD_MODE": "ask"}, home=tmp_path,
@@ -1482,7 +1483,7 @@ def test_mode_ask_returns_ask(tmp_path, anchor):
 
 # --- break-glass --------------------------------------------------------------
 
-def test_active_break_glass_allows(tmp_path, anchor):
+def test_active_break_glass_allows(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     home = tmp_path / "home"
     (home / ".agent-worktrees").mkdir(parents=True)
     (home / ".agent-worktrees" / "allow-edits.json").write_text(json.dumps({
@@ -1493,7 +1494,7 @@ def test_active_break_glass_allows(tmp_path, anchor):
                         home=home, anchors=anchor) is None
 
 
-def test_expired_break_glass_still_denies(tmp_path, anchor):
+def test_expired_break_glass_still_denies(tmp_path: Path, anchor: list[dict[str, str]]) -> None:
     home = tmp_path / "home"
     (home / ".agent-worktrees").mkdir(parents=True)
     (home / ".agent-worktrees" / "allow-edits.json").write_text(json.dumps({
@@ -1507,7 +1508,7 @@ def test_expired_break_glass_still_denies(tmp_path, anchor):
 
 # --- empty set / fail-open ----------------------------------------------------
 
-def test_no_anchors_allows(tmp_path):
+def test_no_anchors_allows(tmp_path: Path) -> None:
     target = tmp_path / "anything" / "x.py"
     assert guard.decide(_write("create", target, tmp_path), env={},
                         home=tmp_path, anchors=[]) is None
@@ -1515,7 +1516,7 @@ def test_no_anchors_allows(tmp_path):
 
 # --- repos.yaml discovery (stdlib mini-parser) --------------------------------
 
-def test_load_worktree_anchors_filters_by_class(tmp_path):
+def test_load_worktree_anchors_filters_by_class(tmp_path: Path) -> None:
     home = tmp_path / "home"
     (home / ".agent-worktrees").mkdir(parents=True)
     (home / ".agent-worktrees" / "repos.yaml").write_text(
@@ -1544,7 +1545,7 @@ def test_load_worktree_anchors_filters_by_class(tmp_path):
 
 
 @pytest.mark.parametrize("no_pyyaml", [False, True])
-def test_base_repo_adoption_is_not_guarded(tmp_path, monkeypatch, no_pyyaml):
+def test_base_repo_adoption_is_not_guarded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, no_pyyaml: bool) -> None:
     """projects.yaml ``base_repo: true`` means the anchor IS the working checkout
     (e.g. a CodeSpace dedicated to one task), even for a ``class: worktree`` repo."""
     if no_pyyaml:
@@ -1572,5 +1573,109 @@ def test_base_repo_adoption_is_not_guarded(tmp_path, monkeypatch, no_pyyaml):
     assert {a["name"] for a in guard.load_worktree_anchors(reg)} == {"other-wt"}
 
 
-def test_load_worktree_anchors_missing_file_is_empty(tmp_path):
+def test_load_worktree_anchors_missing_file_is_empty(tmp_path: Path) -> None:
     assert guard.load_worktree_anchors(tmp_path / "nope") == []
+
+
+@pytest.mark.parametrize("fallback", [False, True])
+def test_anchor_inventory_report_preserves_original_values_and_single_reads(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fallback: bool) -> None:
+    if fallback:
+        monkeypatch.setitem(sys.modules, "yaml", None)
+    else:
+        import yaml
+
+        assert yaml.safe_load("repos: {}") == {"repos": {}}
+    (tmp_path / "repos.yaml").write_text(
+        'repos:\n  "kept repo":\n    class: worktree\n'
+        '    windows: "C:\\\\Source\\\\kept"\n    wsl: /mnt/source/kept\n'
+        '    linux: /source/kept\n  excluded:\n    class: worktree\n'
+        '    linux: /source/excluded\n  knowledge:\n    class: knowledge\n'
+        '    linux: /source/knowledge\n  reference:\n    class: reference\n'
+        '    linux: /source/reference\n  singleton:\n    class: singleton\n'
+        '    linux: /source/singleton\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "projects.yaml").write_text(
+        'projects:\n  excluded:\n    base_repo: true\n', encoding="utf-8",
+    )
+    expected = guard.load_worktree_anchors(tmp_path)
+    reads = []
+    original = Path.read_text
+
+    def observed(path: Path, *args: Any, **kwargs: Any) -> str:
+        if path.parent == tmp_path:
+            reads.append(path.name)
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", observed)
+    report = guard.anchor_inventory_report(tmp_path)
+    assert report["rows"] == expected == [
+        {"name": "kept repo", "path": "C:\\Source\\kept"},
+        {"name": "kept repo", "path": "/mnt/source/kept"},
+        {"name": "kept repo", "path": "/source/kept"},
+    ]
+    assert reads == ["projects.yaml", "repos.yaml"]
+    assert report["status"] == "observed"
+    assert [item["parser"] for item in report["observations"]] == [
+        "fallback" if fallback else "pyyaml",
+    ] * 2
+
+
+@pytest.mark.parametrize("failure", ["missing", "parser", "shape", "opaque"])
+def test_anchor_inventory_report_retains_unavailable_original_results(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str) -> None:
+    (tmp_path / "repos.yaml").write_text(
+        "repos:\n  target:\n    class: worktree\n    linux: /source/target\n",
+        encoding="utf-8",
+    )
+    projects = tmp_path / "projects.yaml"
+    if failure != "missing":
+        projects.write_text("projects: {}\n", encoding="utf-8")
+    if failure == "parser":
+        import yaml
+
+        def broken(_text: str) -> NoReturn:
+            raise ValueError("synthetic parser failure")
+
+        monkeypatch.setattr(yaml, "safe_load", broken)
+    elif failure == "shape":
+        projects.write_text("projects: [unexpected]\n", encoding="utf-8")
+    elif failure == "opaque":
+        monkeypatch.setattr(guard, "load_base_repo_names", lambda root: set())
+    expected = guard.load_worktree_anchors(tmp_path)
+    report = guard.anchor_inventory_report(tmp_path)
+    assert report["rows"] == expected == [{"name": "target", "path": "/source/target"}]
+    assert report["status"] == "unavailable"
+    assert any(item["status"] == "unavailable" for item in report["observations"])
+
+
+def test_anchor_inventory_observed_empty_is_not_missing(tmp_path: Path) -> None:
+    (tmp_path / "repos.yaml").write_text("repos: {}\n", encoding="utf-8")
+    (tmp_path / "projects.yaml").write_text("projects: {}\n", encoding="utf-8")
+    report = guard.anchor_inventory_report(tmp_path)
+    assert report["rows"] == []
+    assert report["status"] == "observed"
+    (tmp_path / "repos.yaml").unlink()
+    report = guard.anchor_inventory_report(tmp_path)
+    assert report["rows"] == []
+    assert report["status"] == "unavailable"
+
+
+@pytest.mark.parametrize("section", ["projects", "repos"])
+@pytest.mark.parametrize("document", [
+    "[]", "false", "0", "''", "{section}: []", "{section}: false", "{section}: 0",
+    "{section}: ''",
+])
+def test_anchor_inventory_falsey_shapes_remain_unavailable(tmp_path: Path, section: str, document: str) -> None:
+    for name in ("projects", "repos"):
+        (tmp_path / (name + ".yaml")).write_text(name + ": {}\n", encoding="utf-8")
+    (tmp_path / (section + ".yaml")).write_text(
+        document.format(section=section) + "\n", encoding="utf-8",
+    )
+    expected = guard.load_worktree_anchors(tmp_path)
+    report = guard.anchor_inventory_report(tmp_path)
+    assert report["rows"] == expected == []
+    assert report["status"] == "unavailable"
+    selected = next(item for item in report["observations"]
+                    if item["source"] == str(tmp_path / (section + ".yaml")))
+    assert selected["parser"] == "pyyaml"
+    assert selected["reason"] == "invalid-" + section + "-shape"

@@ -4,9 +4,18 @@ from __future__ import annotations
 
 import os
 import subprocess
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
+
+
+class _StreamArguments(TypedDict, total=False):
+    output_fd: int
+    log: Callable[[str], None]
+
+
+class _SettlementArguments(TypedDict, total=False):
+    on_settled: Callable[[], None]
 
 
 def run_plan_step(
@@ -16,7 +25,11 @@ def run_plan_step(
     """Run one plan step under its installer deadline, killing its tree on expiry."""
     from . import reconcile
     from .installer_run import run_installer
-    from .update_runtime import _installer_timeout
+    from . import update_runtime
+
+    _installer_timeout: Callable[[str, Mapping[str, str], Path | None], int] = getattr(
+        update_runtime, "_installer_timeout",
+    )
 
     env = os.environ.copy()
     for key in update.get("unset_environment", reconcile._RUNTIME_ENV_UNSET):
@@ -31,7 +44,7 @@ def run_plan_step(
     except (OSError, ValueError) as error:
         log(f"    {error}")
         return 1
-    stream = (
+    stream: _StreamArguments = (
         {"output_fd": output_fd} if output_fd is not None
         else {"log": lambda line: log(f"    {line}")}
     )
@@ -41,8 +54,11 @@ def run_plan_step(
     ):
         from . import update_acquisition
 
-        def acquire(command, *, cwd, env, timeout, on_settled=None):
-            settlement = {"on_settled": on_settled} if on_settled is not None else {}
+        def acquire(
+            command: list[str], *, cwd: Path | None, env: dict[str, str], timeout: float,
+            on_settled: Callable[[], None] | None = None,
+        ) -> subprocess.CompletedProcess[str]:
+            settlement: _SettlementArguments = {"on_settled": on_settled} if on_settled is not None else {}
             run = run_installer(
                 command, cwd=cwd, env=env, deadline_s=timeout,
                 require_tree_exit=True, **stream, **settlement,
@@ -233,7 +249,7 @@ HOOK_SHIM_FILES = (
     "deregister-session.ps1", "deregister-session.sh",
     "anchor-hygiene-check.ps1", "anchor-hygiene-check.sh",
     "provision-check.ps1", "provision-check.sh",
-    "statelessness_guard.py", "guarded_anchor_map.py", "cross_repo_guard.py", "anchor_shell_parser.py", "anchor_write_guard.py",
+    "statelessness_guard.py", "guarded_anchor_map.py", "cross_repo_guard.py", "anchor_shell_parser.py", "anchor_registry.py", "anchor_write_guard.py",
     "pr_supersede_guard.py",
     "registry_root.py",
     "hook_client.py", "managed_session.py", "tool_call_forms.py", "managed-session.ps1", "managed-session.sh", "execution_platform.py", "managed_project_identity.py", "remote_identity.py", "hook_pre_policy.py", "hook_policy_process.py",
