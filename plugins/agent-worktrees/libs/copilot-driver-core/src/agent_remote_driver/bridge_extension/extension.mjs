@@ -367,6 +367,7 @@ export async function activateBridgeExtension({ joinSession, pluginRoot }) {
         getJson: bridgeGetJson, post: bridgeFetch, session, inFlight: state.inFlight,
         mainTurn: state.mainTurn, log: extLog,
         onPending: (sid, messages) => state.pendingInput.offered(sid, messages),
+        onSubmitted: (sid, id) => state.pendingInput.confirmed(sid, id),
         pluginReadiness: true, isCurrent: () => state.registered && state.sessionId === sid
           && state.nativeSessionId === sid,
       });
@@ -490,6 +491,7 @@ export async function activateBridgeExtension({ joinSession, pluginRoot }) {
       cwd: () => state.meta?.cwd, isCurrent: (sid) => state.sessionId === sid,
       canSend: () => state.deliveryEnabled && state.registered, log: extLog,
       onPending: (sid, messages) => state.pendingInput.offered(sid, messages),
+      onSubmitted: (sid, id) => state.pendingInput.confirmed(sid, id),
       onConsumed: (sid, id) => state.pendingInput.confirmed(sid, id),
       sourceAllowed: (source) => source === "agent-bridge" || isRemoteDriverSource(source),
       ...(process.env.AGENT_BRIDGE_RECEIVING_PLUGIN_ROOT

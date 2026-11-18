@@ -67,6 +67,7 @@ export function createRetainedInbox({
   sourceAllowed,
   portableLaunch,
   onPending = () => {},
+  onSubmitted = () => {},
   onConsumed = () => {},
   receivingApi,
   validateSendContext,
@@ -190,7 +191,13 @@ export function createRetainedInbox({
     }
     const receipts = response.messages;
     const attempts = receipts.filter((row) => row.handoff_started_at !== null && row.stage !== "consumed");
-    onPending(sid, attempts.map((row) => ({ id: row.message_id })));
+    for (const receipt of receipts) {
+      if (receipt.stage === "sdk_accepted" || receipt.stage === "consumed") {
+        onSubmitted(sid, receipt.message_id);
+      }
+    }
+    onPending(sid, attempts.filter((row) => row.stage !== "sdk_accepted")
+      .map((row) => ({ id: row.message_id })));
     let events = [];
     // A page skipped during cooldown has not been reconciled. Advancing it
     // would phase-lock history reads to the first page of a persistent backlog.
@@ -411,11 +418,13 @@ export function createRetainedInbox({
       await nativeContext(sid);
       await readiness();
       if (!sendAllowed(sid, allowSend)) throw new Error("consumer changed after final admission");
-      const messageId = await nativeCall(() => {
+      await nativeCall(async () => {
         if (!sendAllowed(sid, allowSend)) throw new Error("consumer changed at SDK invocation");
-        return session.send(options);
+        const messageId = await session.send(options);
+        if (!nonblank(messageId)) throw new Error("SDK acceptance reply unavailable");
+        // A late reply still settles submission attention, not the original receipt.
+        onSubmitted(sid, msg.id);
       });
-      if (!nonblank(messageId)) throw new Error("SDK acceptance reply unavailable");
     } catch (error) {
       note(`original handoff ${msg.id}/${msg.handoff_id}: ${errorText(error)}; acceptance unknown`);
       await report(receipt, "unknown");
