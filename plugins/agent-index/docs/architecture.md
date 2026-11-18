@@ -173,6 +173,23 @@ shared paged acquisition journal, durable query progress, immutable full
 snapshots or authoritative tombstones. This legacy optimization does not
 qualify those delta-bounded or recovery gates.
 
+The PR-list API documents descriptions truncated up to 400 symbols, without
+a completeness flag or a specified Unicode truncation rule. The connector
+therefore does not infer completeness from preview length. After query eligibility
+and duplicate filtering, it point-reads every selected nonempty description
+through the configured project endpoint,
+requires the same PR/repository identity and a string/null/omitted description, and
+replaces only the selected description. Empty descriptions need no extra read.
+An unavailable or invalid detail response refuses acquisition rather than
+indexing a preview; the original query metadata and comment path remain intact.
+Nontext listing/detail descriptions refuse acquisition. Null or omitted
+descriptions mean empty text: the provider's `GitPullRequest.Description`
+serializer uses `EmitDefaultValue=false`, including after a description is cleared.
+Cancellation is checked again after the
+detail read, before requesting comments. Point-description reads are unconditional:
+the shared HTTP session caches validators, not the response bodies needed here.
+This adds no history enumeration, cursor capability or reconciliation authority.
+
 Work-item comments follow the comments API's JSON-body continuation tokens
 on the same selected work-item path, without following a supplied `nextPage`
 URL. Malformed pages, repeated tokens, a next-page indicator without a token,

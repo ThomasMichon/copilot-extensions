@@ -76,6 +76,8 @@ def require_configuration(plan: Plan, snapshot: dict[str, Any]) -> None:
     }
     if job.cache is not None:
         expected_mounts["/job/cache"] = (str(job.cache), True)
+    if job.workspace is not None:
+        expected_mounts["/job/workspace"] = (str(job.workspace), True)
     mounts = snapshot["Mounts"]
     observed_mounts = {
         item["Destination"]: (item["Source"], item["RW"])

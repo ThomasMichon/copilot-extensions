@@ -14,6 +14,11 @@ selected reviewer and original registration. Do not equate repository strings
 or PR numbers across accounts or forges. The observation account does not select
 the identity used for a later write.
 
+The explicit [expected-consumer SDK client](LOCAL.md#explicit-expected-consumer-client)
+also negotiates the executing service's configured consumer and asserts it on
+each existing operation. This is a local selection prerequisite, not a Dispatch
+adapter or permission to register/wake work; ordinary clients remain unchanged.
+
 Polling `next-actions` and consuming its SSE view must have the same selection
 semantics. The stream supplies current first pages, not an archive of transient
 rankings or a complete repository dump. If `more` is true, use `next_after`

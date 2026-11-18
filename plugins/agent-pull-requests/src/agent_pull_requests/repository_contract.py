@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from urllib.parse import urlsplit
 
 PROTOCOL = "agent-pull-requests.repository-cache/v1"
+CONSUMER_BINDING_PROTOCOL = "agent-pull-requests.repository-consumer/v1"
 STORAGE_EXTENSION = "repository_cache_version:1"
 MAX_TARGETS = 16
 MAX_PULLS = 200
