@@ -3,9 +3,10 @@
 Part of [Task Relevance Reconciliation](README.md), correcting the remaining
 [#12696](https://github.com/ThomasMichon/copilot-extensions/issues/12696)
 boundary within [retained native recovery](retained-metadata-recovery.md).
-**Status: plan reviewed in #13160; receiving writer source accepted in #13162.
-Bridge negotiation and accepted-load journaling are under qualification.
-Hosted registration, post-load reconciliation and runtime acceptance remain open.**
+**Status: plan reviewed in #13160; receiving writer source accepted in #13162;
+Bridge negotiation and accepted-load journaling accepted in #13172.
+Hosted registration is under qualification.
+Post-load reconciliation and runtime acceptance remain open.**
 
 ## Measured contract gap
 
@@ -123,8 +124,24 @@ The original recovery row keeps its existing strict request/state shape.
 Prior readers continue to treat an interrupted operation as unknown and retain
 its launch gate; their no-load settlement rejects the additional acceptance
 event. This passive rollback does not complete an accepted load, but also cannot
-turn it into a new eligible load. The initial slice does not yet emit the
-hosted registration option or claim post-load completion.
+turn it into a new eligible load.
+
+The registration consumer rechecks the original operation, current transport,
+physical Host/child births, epoch and executing writer against that acknowledged
+event before conveying its activation to Worktrees. It explicitly names the
+recorded child PID rather than attempting to make another PID satisfy the
+CLI-native hold route. An unconfirmed registration leaves the original
+operation held; the consumer does not itself reconcile an interrupted load.
+
+The model-free source control in
+`plugins/agent-bridge/tests/test_retained_hosted_registration.py` exercises a
+real Session Host and ACP child, then the actual Worktrees parser in a
+separate process. The child acknowledges loading the original UUID without
+creating a CLI hold. Registration preserves the ended identified activation,
+appends one hosted activation and is byte-idempotent on retry. Transport
+reattachment to the same Host/child adds no load, new conversation or prompt.
+This fixture supplies original-operation admission; it does not yet qualify
+post-load reconciliation, historical adaptation or installed recovery.
 
 ## Validation plan
 

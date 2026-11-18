@@ -5398,7 +5398,14 @@
         "tools/promotion_unit_tests/test_retained_load_acceptance.py::test_executor_capability_cannot_be_guessed[0]",
         "tools/promotion_unit_tests/test_retained_load_acceptance.py::test_executor_capability_cannot_be_guessed[1]",
         "tools/promotion_unit_tests/test_retained_load_acceptance.py::test_executor_capability_cannot_be_guessed[2]",
-        "tools/promotion_unit_tests/test_retained_load_acceptance.py::test_failed_commit_retains_unknown_acceptance"
+        "tools/promotion_unit_tests/test_retained_load_acceptance.py::test_failed_commit_retains_unknown_acceptance",
+        "tools/promotion_unit_tests/test_retained_load_acceptance.py::test_registration_uses_only_original_acknowledged_activation",
+        "tools/promotion_unit_tests/test_retained_load_acceptance.py::test_registration_retains_unknown_or_changed_custody[missing]",
+        "tools/promotion_unit_tests/test_retained_load_acceptance.py::test_registration_retains_unknown_or_changed_custody[transport]",
+        "tools/promotion_unit_tests/test_retained_load_acceptance.py::test_registration_retains_unknown_or_changed_custody[nonce]",
+        "tools/promotion_unit_tests/test_retained_load_acceptance.py::test_registration_retains_unknown_or_changed_custody[birth]",
+        "tools/promotion_unit_tests/test_retained_load_acceptance.py::test_registration_retains_unknown_or_changed_custody[writer]",
+        "tools/promotion_unit_tests/test_retained_load_acceptance.py::test_registration_retains_unknown_or_changed_custody[stop]"
     ],
     "coverage_targets": [
         "plugins/agent-worktrees/src/agent_worktrees/resource_delivery.py",
@@ -6628,7 +6635,7 @@
         "plugins/agent-vault/src/agent_vault/source_start.py": "9c023d7099a6aa762e82f91539018cbbd4f75ebd76e9061fe8bc10d9c6e74970",
         "tools/promotion_unit_tests/test_hosted_activation.py": "20b44b2d24ea15e988b07a81d15eb01643a137d62666ff9b23e29fe8cfaf7f1c",
         "plugins/agent-worktrees/src/agent_worktrees/retained_hosted_activation.py": "3e854addd94b96a577c4222b2808073fcd17224f8d97ca0f261fadb783f28c4a",
-        "plugins/agent-bridge/src/agent_bridge/retained_load_acceptance.py": "a019c867fd8d231b7bf5f0a707c0da4e84dd462492548b36a3054d52baf8d219",
-        "tools/promotion_unit_tests/test_retained_load_acceptance.py": "323528d12443b09d2a5abc61928975a266ec453fd394832af918dd9b1cd28c82"
+        "plugins/agent-bridge/src/agent_bridge/retained_load_acceptance.py": "f315ca94adb740d0615b4db2f33e606a2869d098852f65c54b669bcb9a00f4d3",
+        "tools/promotion_unit_tests/test_retained_load_acceptance.py": "83ee877ae8c75e0b46c3e7484667da630e793ed285e77b8ba35d1485fd65f4c7"
     }
 }
