@@ -1,6 +1,7 @@
 """Offline construction and local health of an admitted client, never activation."""
 
-from contextlib import ExitStack, contextmanager
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import AbstractContextManager, ExitStack, contextmanager
 from email.parser import BytesParser
 import hashlib
 import importlib.util
@@ -13,11 +14,13 @@ import subprocess
 import sys
 import time
 from types import ModuleType
+from typing import Any, cast
 import uuid
 import zipfile
 
 from . import artifact_staging, client_admission
-from .planning import MAX_BYTES, PlanError, canonical, decode, digest, integer, record
+from . import planning as _planning
+from .planning import MAX_BYTES, PlanError
 from .private_state import create_private_file, private_directory
 from .release import validate_release
 from .release_selection import ReleaseSelection
@@ -27,14 +30,21 @@ OWNER = "client-owner.json"
 COMPLETION = "client-constructed.json"
 BOOTSTRAP = "runtime-bootstrap"
 REMOVING = "client-runtime-removing.json"
+canonical = cast(Callable[[object], bytes], _planning.canonical)
+decode = cast(Callable[[bytes], Any], _planning.decode)
+digest = cast(Callable[[object], str], _planning.digest)
+integer = cast(Callable[..., None], _planning.integer)
+record = cast(Callable[..., None], _planning.record)
+_Checkpoint = Callable[[], tuple[dict[str, Any], dict[str, Any], dict[str, Any]]]
+_Custody = Callable[[], AbstractContextManager[tuple[Path, Callable[[], None], _Checkpoint]]]
 
 
-def _not_removing(namespace):
+def _not_removing(namespace: Path) -> None:
     if os.path.lexists(namespace / REMOVING):
         raise PlanError("client runtime removal is unsettled; exact owned removal retry is required")
 
 
-def _write_exclusive(path, value):
+def _write_exclusive(path: Path, value: object) -> None:
     descriptor = create_private_file(path)
     try:
         content = canonical(value)
@@ -48,20 +58,20 @@ def _write_exclusive(path, value):
         os.close(descriptor)
 
 
-def _write(path, value):
+def _write(path: Path, value: object) -> None:
     # Abandoned attempts remain evidence, never a shared retry prerequisite.
     temporary = path.with_name("." + path.name + ".write-" + uuid.uuid4().hex)
     _write_exclusive(temporary, value)
     os.replace(temporary, path)
-    client_admission._sync_directory(path.parent)
+    cast(Callable[[Path], None], client_admission._sync_directory)(path.parent)
 
 
-def _read(path):
-    client_admission._ordinary_file(path)
+def _read(path: Path) -> Any:
+    cast(Callable[[Path], os.stat_result], client_admission._ordinary_file)(path)
     return decode(artifact_staging._bytes(path, MAX_BYTES))
 
 
-def _namespace(root, identity):
+def _namespace(root: Path, identity: dict[str, Any]) -> Path:
     expected = {"schema": "fleet-manager.client-runtime-owner", "version": 1, "identity": identity}
     namespace = root / NAMESPACE
     if os.path.lexists(namespace):
@@ -78,28 +88,30 @@ def _namespace(root, identity):
         if any(entry.name not in {OWNER, OWNER + ".tmp"} for entry in entries):
             raise PlanError("client runtime initialization contains foreign state")
         for entry in entries:
-            client_admission._ordinary_file(entry)
+            cast(Callable[[Path], os.stat_result], client_admission._ordinary_file)(entry)
         for entry in entries:
             entry.unlink()
         temporary.rmdir()
     private_directory(temporary)
     _write_exclusive(temporary / OWNER, expected)
-    client_admission._sync_directory(temporary)
+    cast(Callable[[Path], None], client_admission._sync_directory)(temporary)
     os.rename(temporary, namespace)
-    client_admission._sync_directory(root)
+    cast(Callable[[Path], None], client_admission._sync_directory)(root)
     return namespace
 
 
-def _compatible(manifest, target, identity):
-    target = decode(canonical(target))
-    record(target, "fleet-manager.client-target",
+def _compatible(
+    manifest: dict[str, Any], target: object, identity: dict[str, Any],
+) -> dict[str, Any]:
+    selected_target = decode(canonical(target))
+    record(selected_target, "fleet-manager.client-target",
            {"authority", "installation", "revision", "components"})
-    integer(target["revision"], "client target revision", minimum=1)
-    if (target["authority"], target["installation"]) != (
+    integer(selected_target["revision"], "client target revision", minimum=1)
+    if (selected_target["authority"], selected_target["installation"]) != (
         identity["authority"], identity["installation"],
     ):
         raise PlanError("client target installation scope mismatch")
-    components = target["components"]
+    components = selected_target["components"]
     if not isinstance(components, dict) or set(components) != set(manifest["roles"]["client"]):
         raise PlanError("client target must describe the exact selected component closure")
     for name, current in components.items():
@@ -118,10 +130,10 @@ def _compatible(manifest, target, identity):
             or not set(schemas) <= set(declaration["data_schemas"])
         ):
             raise PlanError("selected client is incompatible with the target API or retained/config data")
-    return target
+    return cast(dict[str, Any], selected_target)
 
 
-def _wheel(staged, snapshots):
+def _wheel(staged: artifact_staging.StagedArtifacts, snapshots: dict[str, bytes]) -> tuple[str, bytes]:
     # This first constructor supports the existing dependency-free portable client,
     # not source builds, hosting extras or a new dependency resolver.
     if len(snapshots) != 1:
@@ -152,7 +164,7 @@ def _wheel(staged, snapshots):
     return filename, content
 
 
-def _environment(slot):
+def _environment(slot: Path) -> dict[str, str]:
     home = slot / "health-home"
     home.mkdir(mode=0o700, exist_ok=True)
     temporary = home
@@ -177,7 +189,9 @@ def _environment(slot):
     return environment
 
 
-def _process_resource_data(name, *, evidence=None):
+def _process_resource_data(
+    name: str, *, evidence: dict[str, Any] | None = None,
+) -> tuple[Path, bytes]:
     if (
         not isinstance(name, str) or not name or any(value in name for value in ("\\", ":", "\0"))
         or PureWindowsPath(name).anchor or PurePosixPath(name).anchor
@@ -195,19 +209,19 @@ def _process_resource_data(name, *, evidence=None):
     return path, content
 
 
-def _process_resource(name, *, evidence=None):
+def _process_resource(name: str, *, evidence: dict[str, Any] | None = None) -> ModuleType:
     path, content = _process_resource_data(name, evidence=evidence)
     spec = importlib.util.spec_from_file_location("fleet_manager." + path.stem, path)
     if spec is None or spec.loader is None:
         raise PlanError("client construction process resource could not be loaded")
     module = importlib.util.module_from_spec(spec)
     exec(compile(content, str(path), "exec"), module.__dict__)
-    module._retained_source_bytes = content
+    setattr(module, "_retained_source_bytes", content)
     return module
 
 
 @contextmanager
-def _procutil_resource(evidence):
+def _procutil_resource(evidence: dict[str, Any]) -> Iterator[ModuleType]:
     members = {
         name: _process_resource_data("_construction_procutil/" + name + ".py", evidence=evidence)
         for name in ("__init__", "_job_scopes", "_windows_job_types", "_output_relay", "streaming")
@@ -215,16 +229,16 @@ def _procutil_resource(evidence):
     name = f"fleet_manager._retained_construction_procutil_{uuid.uuid4().hex}"
     module = ModuleType(name)
     module.__package__, module.__path__ = name, []
-    module._retained_source_members = {
+    setattr(module, "_retained_source_members", {
         "_construction_procutil/" + member + ".py": content
         for member, (_, content) in members.items()
-    }
+    })
     registered = []
     try:
         for member, (path, content) in members.items():
             child = module if member == "__init__" else ModuleType(name + "." + member)
             child.__file__, child.__package__ = str(path), name
-            child._retained_source_bytes = content
+            setattr(child, "_retained_source_bytes", content)
             sys.modules[child.__name__] = child
             registered.append(child)
             exec(compile(content, str(path), "exec"), child.__dict__)
@@ -235,7 +249,10 @@ def _procutil_resource(evidence):
                 del sys.modules[child.__name__]
 
 
-def _run(argv, slot, phase, *, descriptor, resource_evidence=None):
+def _run(
+    argv: Sequence[str | Path], slot: Path, phase: str, *, descriptor: int | None,
+    resource_evidence: dict[str, Any] | None = None,
+) -> bytes:
     deadline = time.monotonic() + 45
     evidence = (artifact_staging.diagnose_client()
                 if resource_evidence is None else resource_evidence)
@@ -248,6 +265,7 @@ def _run(argv, slot, phase, *, descriptor, resource_evidence=None):
                 **{name: _process_resource_data(name, evidence=evidence)[1] for name in (
                     "_versioned_runtime.py", "versioned_runtime_leases.py",
                     "versioned_runtime_construction.py", "versioned_runtime_source.py",
+                    "versioned_runtime_identity.py", "versioned_runtime_fingerprint.py",
                     "versioned_runtime_publication.py",
                 )},
             } if os.name == "nt" else None
@@ -266,14 +284,14 @@ def _run(argv, slot, phase, *, descriptor, resource_evidence=None):
         raise PlanError(f"client {phase} failed with exit status {error.returncode}") from None
     if len(result.stdout) > MAX_BYTES or len(result.stderr) > MAX_BYTES:
         raise PlanError(f"client {phase} output exceeds its byte bound")
-    return result.stdout.encode("utf-8")
+    return cast(bytes, result.stdout.encode("utf-8"))
 
 
-def _python(slot):
+def _python(slot: Path) -> Path:
     return slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
 
 
-def _import_policy(slot, evidence, descriptor):
+def _import_policy(slot: Path, evidence: dict[str, Any], descriptor: int | None) -> None:
     purelib = decode(_run([
         _python(slot), "-I", "-B", "-c",
         "import json,sysconfig; print(json.dumps(sysconfig.get_path('purelib')))",
@@ -291,10 +309,10 @@ def _import_policy(slot, evidence, descriptor):
         stream.write(b"import sys; sys.dont_write_bytecode = True\n")
         stream.flush()
         os.fsync(stream.fileno())
-    client_admission._sync_directory(purelib)
+    cast(Callable[[Path], None], client_admission._sync_directory)(purelib)
 
 
-def _bootstrap(slot, evidence):
+def _bootstrap(slot: Path, evidence: dict[str, Any]) -> None:
     directory = slot / BOOTSTRAP
     directory.mkdir(mode=0o700)
     for source, target in (
@@ -303,6 +321,7 @@ def _bootstrap(slot, evidence):
         *((name + ".py", name + ".py") for name in (
             "versioned_runtime_leases", "versioned_runtime_construction",
             "versioned_runtime_source", "versioned_runtime_publication",
+            "versioned_runtime_identity", "versioned_runtime_fingerprint",
         )),
     ):
         data = artifact_staging._bytes(Path(__file__).absolute().with_name(source), MAX_BYTES)
@@ -313,18 +332,21 @@ def _bootstrap(slot, evidence):
             stream.write(data)
             stream.flush()
             os.fsync(stream.fileno())
-    client_admission._sync_directory(directory)
-    client_admission._sync_directory(slot)
+    cast(Callable[[Path], None], client_admission._sync_directory)(directory)
+    cast(Callable[[Path], None], client_admission._sync_directory)(slot)
 
 
-def _pip(slot):
+def _pip(slot: Path) -> list[str | Path]:
     return [
         sys.executable, "-I", "-B", "-m", "pip", "--python", _python(slot),
         "--isolated", "--disable-pip-version-check",
     ]
 
 
-def _health(slot, checkpoint, descriptor, resource_evidence):
+def _health(
+    slot: Path, checkpoint: _Checkpoint, descriptor: int | None,
+    resource_evidence: dict[str, Any],
+) -> dict[str, Any]:
     console = slot / ("Scripts/fleet-manager.exe" if os.name == "nt" else "bin/fleet-manager")
     artifact_staging._file_stat(console)
     checkpoint()
@@ -348,7 +370,7 @@ def _health(slot, checkpoint, descriptor, resource_evidence):
     return report
 
 
-def _tree(primitive, slot):
+def _tree(primitive: ModuleType, slot: Path) -> str:
     members = sorted(
         (path for path in slot.iterdir()
          if path.name not in {COMPLETION, primitive.COMPLETE_MARKER}),
@@ -370,20 +392,20 @@ def _tree(primitive, slot):
     return digest({"files": primitive.fingerprint_source(paths), "links": links})
 
 
-def _unfinished(slot, intent, binding):
+def _unfinished(slot: Path, intent: Path, binding: dict[str, Any]) -> None:
     artifact_staging._directory(slot)
     if _read(intent) != binding:
         raise PlanError("unfinished client candidate has a foreign installation or release")
 
 
-def _construction_intent(namespace, version, slot, binding):
+def _construction_intent(namespace: Path, version: str, slot: Path, binding: dict[str, Any]) -> Path:
     directory = namespace / "client-inputs"
     intent = directory / (version + ".json")
     if os.path.lexists(directory):
         artifact_staging._directory(directory)
     else:
         private_directory(directory)
-        client_admission._sync_directory(namespace)
+        cast(Callable[[Path], None], client_admission._sync_directory)(namespace)
     if os.path.lexists(intent):
         if _read(intent) != binding:
             raise PlanError("client construction intent belongs to a different installation or release")
@@ -396,7 +418,7 @@ def _construction_intent(namespace, version, slot, binding):
     return intent
 
 
-def _completed_intent(namespace, version, binding):
+def _completed_intent(namespace: Path, version: str, binding: dict[str, Any]) -> Path:
     intent = namespace / "client-inputs" / (version + ".json")
     artifact_staging._directory(intent.parent)
     if _read(intent) != binding:
@@ -404,7 +426,7 @@ def _completed_intent(namespace, version, binding):
     return intent
 
 
-def _invalidate_removed_outcome(namespace, version, identity):
+def _invalidate_removed_outcome(namespace: Path, version: str, identity: dict[str, Any]) -> None:
     directory = namespace / "client-runtime-removed"
     if not os.path.lexists(directory):
         return
@@ -413,20 +435,25 @@ def _invalidate_removed_outcome(namespace, version, identity):
     if os.path.lexists(path):
         from .client_runtime_removal import _outcome
 
-        _outcome(_read(path), identity, version)
+        cast(Callable[[object, dict[str, Any], str], object], _outcome)(_read(path), identity, version)
         path.unlink()
-        client_admission._sync_directory(directory)
+        cast(Callable[[Path], None], client_admission._sync_directory)(directory)
 
 
-def _discard(primitive, namespace, version, intent, binding):
+def _discard(
+    primitive: ModuleType, namespace: Path, version: str, intent: Path, binding: dict[str, Any],
+) -> None:
     primitive.discard_failed_candidate(
         namespace, version, validate=lambda candidate: _unfinished(candidate, intent, binding),
     )
 
 
-def _request(identity, selection, staged, current_policy, current_target):
-    identity = client_admission._identity(identity)
-    selection = client_admission._selection(selection, identity)
+def _request(
+    identity: dict[str, Any], selection: dict[str, Any], staged: artifact_staging.StagedArtifacts,
+    current_policy: Callable[[], object], current_target: Callable[[], object],
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    identity = cast(Callable[[object], dict[str, Any]], client_admission._identity)(identity)
+    selection = cast(Callable[[object, dict[str, Any]], dict[str, Any]], client_admission._selection)(selection, identity)
     if not isinstance(staged, artifact_staging.StagedArtifacts):
         raise PlanError("client construction requires a live retained artifact stage")
     if (staged.authority, staged.installation, staged.role) != (
@@ -440,15 +467,19 @@ def _request(identity, selection, staged, current_policy, current_target):
     binding = {
         "schema": "fleet-manager.client-construction-input", "version": 1,
         "identity": identity, "selection": selection,
-        "selection_digest": ReleaseSelection.from_dict(selection).selection_digest,
+        "selection_digest": cast(Callable[[object], ReleaseSelection], ReleaseSelection.from_dict)(selection).selection_digest,
     }
     return identity, selection, binding
 
 
-def _checkpoint(connection, identity, selection, binding, staged, current_policy,
-                current_target, clock, unchanged):
+def _checkpoint(
+    connection: sqlite3.Connection, identity: dict[str, Any], selection: dict[str, Any],
+    binding: dict[str, Any], staged: artifact_staging.StagedArtifacts,
+    current_policy: Callable[[], object], current_target: Callable[[], object],
+    clock: Callable[[], int], unchanged: Callable[[], None],
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     unchanged()
-    admitted = client_admission._read_state(connection, identity)
+    admitted = cast(Callable[..., dict[str, Any]], client_admission._read_state)(connection, identity)
     if not admitted or admitted["selection_digest"] != binding["selection_digest"]:
         raise PlanError("client construction requires the exact durably admitted selection")
     policy, target = _verified(
@@ -458,7 +489,10 @@ def _checkpoint(connection, identity, selection, binding, staged, current_policy
     return policy, target, admitted
 
 
-def _verified(identity, selection, staged, current_policy, current_target, clock):
+def _verified(
+    identity: dict[str, Any], selection: dict[str, Any], staged: artifact_staging.StagedArtifacts,
+    current_policy: Callable[[], object], current_target: Callable[[], object], clock: Callable[[], int],
+) -> tuple[dict[str, Any], dict[str, Any]]:
     policy = decode(canonical(current_policy()))
     evidence = staged.reverify(policy, clock=clock)
     if (
@@ -467,12 +501,14 @@ def _verified(identity, selection, staged, current_policy, current_target, clock
         or sorted(staged.artifacts) != selection["components"]
     ):
         raise PlanError("client construction release differs from its admitted selection")
-    manifest = validate_release(decode(staged.read_manifest(policy, clock=clock)))
+    manifest = cast(Callable[[object], dict[str, Any]], validate_release)(decode(staged.read_manifest(policy, clock=clock)))
     target = _compatible(manifest, current_target(), identity)
     return policy, target
 
 
-def _completion(primitive, namespace, version, binding):
+def _completion(
+    primitive: ModuleType, namespace: Path, version: str, binding: dict[str, Any],
+) -> dict[str, Any]:
     _completed_intent(namespace, version, binding)
     slot = primitive.version_dir(namespace, version)
     completion = _read(slot / COMPLETION)
@@ -487,11 +523,14 @@ def _completion(primitive, namespace, version, binding):
         or _tree(primitive, slot) != completion["runtime_sha256"]
     ):
         raise PlanError("completed client candidate differs; distinct-generation repair is required")
-    return completion
+    return cast(dict[str, Any], completion)
 
 
-def construct_client_release(root, identity, selection, staged, *,
-                             current_policy, current_target, clock=lambda: int(time.time())):
+def construct_client_release(
+    root: Path, identity: dict[str, Any], selection: dict[str, Any],
+    staged: artifact_staging.StagedArtifacts, *, current_policy: Callable[[], object],
+    current_target: Callable[[], object], clock: Callable[[], int] = lambda: int(time.time()),
+) -> dict[str, Any]:
     """Build the supplied admitted client; current trusted inputs are supplied by its owner."""
     identity, selection, binding = _request(
         identity, selection, staged, current_policy, current_target,
@@ -505,17 +544,20 @@ def construct_client_release(root, identity, selection, staged, *,
 
 
 @contextmanager
-def _admitted_custody(root, identity, selection, binding, staged, current_policy,
-                      current_target, clock):
+def _admitted_custody(
+    root: Path, identity: dict[str, Any], selection: dict[str, Any], binding: dict[str, Any],
+    staged: artifact_staging.StagedArtifacts, current_policy: Callable[[], object],
+    current_target: Callable[[], object], clock: Callable[[], int],
+) -> Iterator[tuple[Path, Callable[[], None], _Checkpoint]]:
     with (
         client_admission._owned(root) as (path, database_root, unchanged),
         client_admission._connection(
             path, database_root=database_root, readonly=False,
         ) as connection,
     ):
-        client_admission._begin_write(connection, path)
+        cast(Callable[[sqlite3.Connection, Path], None], client_admission._begin_write)(connection, path)
 
-        def checkpoint():
+        def checkpoint() -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
             return _checkpoint(
                 connection, identity, selection, binding, staged,
                 current_policy, current_target, clock, unchanged,
@@ -524,7 +566,10 @@ def _admitted_custody(root, identity, selection, binding, staged, current_policy
         yield path, unchanged, checkpoint
 
 
-def _construct_client_release(identity, selection, staged, *, binding, custody, clock):
+def _construct_client_release(
+    identity: dict[str, Any], selection: dict[str, Any], staged: artifact_staging.StagedArtifacts,
+    *, binding: dict[str, Any], custody: _Custody, clock: Callable[[], int],
+) -> dict[str, Any]:
     try:
         metadata.distribution("pip")
     except metadata.PackageNotFoundError:
@@ -543,7 +588,7 @@ def _construct_client_release(identity, selection, staged, *, binding, custody, 
                 previous = {primitive.current_version(namespace)}
                 good = namespace / primitive.LAST_KNOWN_GOOD_FILE
                 if os.path.lexists(good):
-                    client_admission._ordinary_file(good)
+                    cast(Callable[[Path], os.stat_result], client_admission._ordinary_file)(good)
                     previous.add(good.read_text(encoding="utf-8").strip())
                 for prior in previous:
                     if prior:

@@ -10,6 +10,11 @@ from collections.abc import Callable
 from typing import Any, cast
 
 import materialize_installer_engine as assets
+from promotion_complete_source import _path as source_path
+
+_TOOLING = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(_TOOLING / "libs/installer-engine"))
+from runtime_application_binstubs import setup_binstubs, slot_binstubs  # noqa: E402
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -112,6 +117,24 @@ def materialize(root: Path) -> list[str]:
             raise ValueError("application source package is missing")
         resources = injected_resources("worktree-manager", root)
         manifest = _project_manifest(source)
+        metadata = tomllib.loads(manifest)["project"]
+        commands = metadata.get("scripts")
+        python = metadata.get("requires-python")
+        if (
+            not isinstance(commands, dict) or "worktree-manager" not in commands
+            or any(not isinstance(entry, str) for entry in commands.values())
+            or not isinstance(python, str) or not python.strip()
+            or any(character in python for character in "\r\n\0")
+        ):
+            raise ValueError("application source requires Manager commands and declared Python")
+        launchers = {}
+        for name, entry in commands.items():
+            for filename, text in slot_binstubs(name, entry, source_project=True).items():
+                if filename in {"install", "install.cmd", "install.ps1", "install.sh"} and name != "worktree-manager":
+                    continue
+                if filename in launchers:
+                    raise ValueError("application source commands collide")
+                launchers[filename] = text
         members = {
             path.relative_to(source).as_posix(): path
             for path in (source / "src").rglob("*") if path.is_file()
@@ -135,6 +158,14 @@ def materialize(root: Path) -> list[str]:
                 raise ValueError("included application source resource differs from its owner")
             members[relative] = path
         members["_standalone_runtime_build.py"] = root / "libs/versioned-runtime/standalone_build.py"
+        members["install.py"] = root / "libs/installer-engine/runtime_application_install.py"
+        reserved = {Path(name).parts[0].casefold() for name in members} | {
+            "pyproject.toml", "manifest.in", ".python-version", ".gitattributes", "bin", "build", "dist",
+        }
+        if any(name.casefold() in reserved for name in launchers):
+            raise ValueError("application source commands conflict with project inputs")
+        for name in launchers:
+            source_path(name)
         for path in members.values():
             if problem := assets.derived_path_problem(path, root, required=True):
                 raise ValueError(problem)
@@ -148,8 +179,86 @@ def materialize(root: Path) -> list[str]:
             "include _standalone_runtime_build.py\nrecursive-include src *\n",
             encoding="utf-8", newline="\n",
         )
+        (destination / ".gitattributes").write_text("* -text\n", encoding="utf-8", newline="\n")
+        (destination / ".python-version").write_text(
+            python + "\n", encoding="utf-8", newline="\n",
+        )
+        for filename, text in launchers.items():
+            path = destination / filename
+            path.write_text(text, encoding="utf-8", newline="\r\n" if path.suffix == ".ps1" else "")
+            if path.suffix == ".sh" or not path.suffix:
+                path.chmod(0o700)
+        directory = destination / "bin"
+        directory.mkdir()
+        for filename, text in setup_binstubs().items():
+            path = directory / filename
+            path.write_text(text, encoding="utf-8", newline="\r\n" if path.suffix == ".ps1" else "")
+            if path.suffix == ".sh":
+                path.chmod(0o700)
         if problems := materialized_local_source_problems(destination):
             raise ValueError("; ".join(problems))
         return [f"OK   {destination} <- {source} (embedded application source)"]
     except (OSError, ValueError, RuntimeError, ArtifactBuildError) as error:
         return [f"SKIP {declaration}: {error}"]
+
+
+def bind_source(root: Path, *, source_commit: str, source_tree: str) -> list[str]:
+    """Associate the emitted source inputs through the existing version owner."""
+    root = root.absolute()
+    application = root / "apps/worktree-manager"
+    target = application / "runtime-source.json"
+    try:
+        if problem := assets.derived_path_problem(target, root, required=False):
+            raise ValueError(problem)
+        if target.exists():
+            raise ValueError("application source association already exists")
+        from standalone_python_artifacts import TRUSTED_ROOT
+
+        previous = sys.path[:]
+        try:
+            sys.path.insert(0, str(TRUSTED_ROOT / "libs/versioned-runtime"))
+            import versioned_runtime_identity as owner
+            import versioned_runtime_fingerprint as fingerprints
+        finally:
+            sys.path[:] = previous
+        metadata = tomllib.loads((application / "pyproject.toml").read_text(encoding="utf-8"))
+        project = metadata.get("project")
+        name = project.get("name") if isinstance(project, dict) else None
+        version = project.get("version") if isinstance(project, dict) else None
+        if (
+            not isinstance(name, str)
+            or re.sub(r"[-_.]+", "-", name).lower() != "copilot-extensions-worktree-manager"
+            or not isinstance(version, str)
+        ):
+            raise ValueError("application source project identity is invalid")
+        digest = owner.assembly_hash(
+            application, native_path=fingerprints.native_path,
+            fingerprint=fingerprints.fingerprint_source,
+        )
+        identity = owner.SourceIdentity(
+            "worktree-manager", version, source_commit, source_tree, digest,
+            owner.runtime_version(version, source_commit, digest),
+        )
+        document = identity.document()
+        owner.parse_source_identity(document, package_version=version, plugin="worktree-manager")
+        target.write_text(json.dumps(document, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
+        return [f"OK   {target} (source-qualified application identity)"]
+    except (OSError, ValueError, RuntimeError) as error:
+        return [f"SKIP {target}: {error}"]
+
+
+def bind_promotion_source(root: Path, read_identity: Callable[[], str]) -> list[str]:
+    """Keep opted-in source association with its producer, not Git discovery."""
+    if not (root / "worktree-manager" / _DECLARATION).is_file():
+        return []
+    commit, tree = read_identity().splitlines()
+    return bind_source(root, source_commit=commit, source_tree=tree)
+
+
+def promotion_outputs(root: Path) -> tuple[str, ...]:
+    """Identify complete emitted distributions that bypass development ignores."""
+    application = "apps/worktree-manager"
+    return (application,) if (
+        (root / "worktree-manager" / _DECLARATION).is_file()
+        and (root / application / "runtime-source.json").is_file()
+    ) else ()

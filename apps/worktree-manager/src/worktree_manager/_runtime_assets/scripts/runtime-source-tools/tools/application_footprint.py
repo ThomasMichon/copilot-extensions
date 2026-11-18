@@ -98,22 +98,11 @@ def _ordinary_tree(root: Path, *, deadline: float) -> None:
 
 
 def _setup_frontdoors(application: Path) -> None:
+    from runtime_application_binstubs import setup_binstubs
+
     directory = application / "bin"
     directory.mkdir(exist_ok=True)
-    entries = {
-        "setup.ps1": (
-            "$ErrorActionPreference = 'Stop'\n"
-            "& (Join-Path (Split-Path -Parent $PSScriptRoot) 'install.ps1') @args\n"
-            "exit $LASTEXITCODE\n"
-        ),
-        "setup.cmd": '@echo off\r\n"%~dp0..\\install.cmd" %*\r\n',
-        "setup.sh": (
-            "#!/bin/sh\n"
-            'slot=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd) || exit\n'
-            'exec "$slot/install.sh" "$@"\n'
-        ),
-    }
-    for name, content in entries.items():
+    for name, content in setup_binstubs().items():
         path = directory / name
         with path.open("x", encoding="utf-8", newline="") as stream:
             stream.write(content)

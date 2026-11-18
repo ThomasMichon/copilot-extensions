@@ -9,6 +9,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+from collections.abc import Callable
 
 import pytest
 
@@ -18,8 +19,8 @@ pytestmark = pytest.mark.skipif(os.name != "nt", reason="native Windows Redirect
 REPO = Path(__file__).resolve().parents[1]
 
 
-def _guard_flags():
-    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+def _guard_flags() -> int:
+    kernel = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
     kernel.GetProcessMitigationPolicy.argtypes = [
         ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_size_t,
     ]
@@ -27,24 +28,25 @@ def _guard_flags():
     if not kernel.GetProcessMitigationPolicy(
         ctypes.c_void_p(-1), 16, ctypes.byref(value), ctypes.sizeof(value),
     ):
-        raise ctypes.WinError(ctypes.get_last_error())
+        raise getattr(ctypes, "WinError")(getattr(ctypes, "get_last_error")())
     return value.value
 
 
-def _plain(path):
+def _plain(path: str) -> str:
     prefix = chr(92) * 2 + "?" + chr(92)
     return path[len(prefix):] if path.startswith(prefix) else path
 
 
 @pytest.mark.parametrize("frontend", ["policy", "python", "policy-named", "python-named"])
 def test_cold_sdk_installs_twice_from_a_guarded_caller_without_console_windows(
-    tmp_path, record_property, monkeypatch, frontend,
-):
+    tmp_path: Path, record_property: Callable[[str, object], None],
+    monkeypatch: pytest.MonkeyPatch, frontend: str,
+) -> None:
     before = _guard_flags()
     physical = support.policy._configuration.physical_executable
     uv = shutil.which("uv")
     assert uv, "native qualification requires the existing selected UV"
-    base = physical(sys._base_executable)
+    base = physical(getattr(sys, "_base_executable"))
     selected = physical(uv)
     assert base and selected
     sdk = tmp_path / "sdk"
@@ -64,6 +66,7 @@ def test_cold_sdk_installs_twice_from_a_guarded_caller_without_console_windows(
         for name in (
             "versioned_runtime.py", "versioned_runtime_leases.py", "versioned_runtime_construction.py",
             "versioned_runtime_source.py", "versioned_runtime_publication.py",
+            "versioned_runtime_identity.py", "versioned_runtime_fingerprint.py",
         ):
             shutil.copyfile(REPO / "libs" / "versioned-runtime" / name, sdk / name)
     script = tmp_path / "guarded.py"
@@ -71,18 +74,19 @@ def test_cold_sdk_installs_twice_from_a_guarded_caller_without_console_windows(
     with monkeypatch.context() as imports:
         imports.syspath_prepend(str(REPO / "libs" / "agent-procutil" / "src"))
         imports.syspath_prepend(str(REPO / "libs" / "agent-procutil" / "tests"))
-        from test_spawn_daemon_windows_integration import _WindowObserver, _configure_win32
+        import importlib
+        observation = importlib.import_module("test_spawn_daemon_windows_integration")
     environment = dict(os.environ)
     for name in (
         "__PYVENV_LAUNCHER__", "PYTHONHOME", "UV_INTERNAL__PYTHONHOME",
         "VIRTUAL_ENV", "CONDA_PREFIX",
     ):
         environment.pop(name, None)
-    with _WindowObserver(*_configure_win32()) as windows:
+    with observation._WindowObserver(*observation._configure_win32()) as windows:
         result = subprocess.run(
             [_plain(base), "-I", "-B", str(script), str(sdk), str(tmp_path), _plain(selected), frontend],
             capture_output=True, text=True, timeout=25, env=environment,
-            creationflags=subprocess.CREATE_NO_WINDOW,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW"),
         )
     assert result.returncode == 0, result.stderr
     observed = json.loads(result.stdout)

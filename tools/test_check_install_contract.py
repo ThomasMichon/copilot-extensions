@@ -8,6 +8,9 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
+from collections.abc import Callable, Iterator
+from typing import Any, cast
+from types import ModuleType
 import pytest
 import install_contract_guard
 from bundle_input_cases import TestBundleInputs as TestBundleInputs
@@ -63,13 +66,13 @@ def _gate_source(tmp_path: Path) -> Path:
 
 
 @pytest.mark.parametrize("regression", ["missing", "drift"])
-def test_shared_payload_copy_contract_is_enforced(monkeypatch, capsys, regression):
+def test_shared_payload_copy_contract_is_enforced(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], regression: str) -> None:
     extract = checker._extract_marker
     changed = False
 
-    def extract_regression(text, start, end):
+    def extract_regression(text: str, start: str, end: str) -> str | None:
         nonlocal changed
-        block = extract(text, start, end)
+        block = cast("str | None", extract(text, start, end))
         if start == "# === install-contract:v4 payload-copy" and not changed:
             assert block is not None
             changed = True
@@ -88,10 +91,10 @@ def test_actual_update_machine_gate_contract() -> None:
     assert checker.check_machine_gate(source) == []
 
 
-def test_install_guard_runs_machine_gate_contract(monkeypatch, capsys) -> None:
+def test_install_guard_runs_machine_gate_contract(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     called = []
 
-    def fail(source):
+    def fail(source: Path) -> list[str]:
         called.append(source)
         return ["synthetic machine-gate violation"]
 
@@ -102,10 +105,10 @@ def test_install_guard_runs_machine_gate_contract(monkeypatch, capsys) -> None:
     assert "synthetic machine-gate violation" in output.out + output.err
 
 
-def test_install_guard_runs_receipt_contract(monkeypatch, capsys) -> None:
+def test_install_guard_runs_receipt_contract(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     called = []
 
-    def fail(source):
+    def fail(source: Path) -> list[str]:
         called.append(source)
         return ["synthetic receipt violation"]
 
@@ -116,10 +119,10 @@ def test_install_guard_runs_receipt_contract(monkeypatch, capsys) -> None:
     assert "synthetic receipt violation" in output.out + output.err
 
 
-def test_install_guard_runs_monitor_outcome_contract(monkeypatch, capsys) -> None:
+def test_install_guard_runs_monitor_outcome_contract(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     called = []
 
-    def fail(source):
+    def fail(source: Path) -> list[str]:
         called.append(source)
         return ["synthetic monitor outcome violation"]
 
@@ -281,7 +284,7 @@ def test_canonical_policy_invocation_counts_but_documentation_does_not() -> None
     "& $Py -I (Join-Path $PSScriptRoot 'installer_dependency_policy.py') -- --python $Py",
     '"$PY" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv --python "$PY"',
 ])
-def test_policy_calls_require_provider_and_argument_separator(statement):
+def test_policy_calls_require_provider_and_argument_separator(statement: str) -> None:
     assert checker._incomplete_dependency_policy_calls(statement) == 1
     assert checker._incomplete_dependency_policy_calls("# " + statement) == 0
 
@@ -291,7 +294,7 @@ def test_policy_calls_require_provider_and_argument_separator(statement):
     "& $Py -I (Join-Path $PSScriptRoot 'installer_dependency_policy.py') `\n    --uv $Uv -- --python $Py",
     "$args = @('-I', (Join-Path $PSScriptRoot 'installer_dependency_policy.py'), '--uv', 'uv', '--', '--python', $Py)",
 ])
-def test_policy_calls_accept_complete_native_and_array_argv(statement):
+def test_policy_calls_accept_complete_native_and_array_argv(statement: str) -> None:
     assert checker._incomplete_dependency_policy_calls(statement) == 0
 
 
@@ -303,8 +306,9 @@ def test_engine_usage_accepts_trailing_comment_same_as_shared_parser() -> None:
     assert checker._uses_installer_engine(ps1, "ps1") is True
 
 
-def _runtime():
+def _runtime() -> ModuleType:
     spec = importlib.util.spec_from_file_location("guard_runtime", checker.VERSIONED_RUNTIME_CANONICAL)
+    assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -315,10 +319,11 @@ def test_canonical_retention_contract_executes() -> None:
     checker._check_runtime_retention(_runtime())
 
 
-def test_install_guard_executes_shared_retention_contract(monkeypatch) -> None:
+def test_install_guard_executes_shared_retention_contract(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = []
 
-    def check(runtime):
+    def check(runtime: ModuleType) -> None:
+        assert runtime.__file__ is not None
         calls.append(Path(runtime.__file__))
         install_contract_guard.check_runtime_retention(runtime)
 
@@ -328,14 +333,14 @@ def test_install_guard_executes_shared_retention_contract(monkeypatch) -> None:
 
 
 @pytest.mark.parametrize("cleanup", ["gc", "toss_incomplete"])
-def test_retention_contract_rejects_unprotected_cleanup(monkeypatch, cleanup) -> None:
+def test_retention_contract_rejects_unprotected_cleanup(monkeypatch: pytest.MonkeyPatch, cleanup: str) -> None:
     runtime = _runtime()
     monkeypatch.setattr(runtime, cleanup, lambda root: ["candidate"])
     with pytest.raises(AssertionError, match="construction owner"):
         checker._check_runtime_retention(runtime)
 
 
-def test_retention_contract_rejects_unprotected_incomplete_slot(monkeypatch) -> None:
+def test_retention_contract_rejects_unprotected_incomplete_slot(monkeypatch: pytest.MonkeyPatch) -> None:
     runtime = _runtime()
     real_slot = runtime.slot
     monkeypatch.setattr(
@@ -356,7 +361,7 @@ def _plugin(root: Path, name: str, manifest: object, *, installer: str | None = 
         (plugin / "scripts" / installer).write_text("# installer\n", encoding="utf-8")
 
 
-def test_runtime_scope_accepts_reconciled_runtime_and_payload_only(tmp_path) -> None:
+def test_runtime_scope_accepts_reconciled_runtime_and_payload_only(tmp_path: Path) -> None:
     _plugin(tmp_path, "gated", {"runtimeScope": "machine-gated"}, installer="install.ps1")
     _plugin(tmp_path, "everywhere", {"runtimeScope": "universal"}, installer="init.sh")
     _plugin(tmp_path, "skills-only", {"runtimeScope": "none"})
@@ -366,7 +371,7 @@ def test_runtime_scope_accepts_reconciled_runtime_and_payload_only(tmp_path) -> 
 
 
 @pytest.mark.parametrize("installer", ["install.ps1", "install.sh", "init.ps1", "init.sh"])
-def test_runtime_installer_must_not_declare_none(tmp_path, installer) -> None:
+def test_runtime_installer_must_not_declare_none(tmp_path: Path, installer: str) -> None:
     _plugin(tmp_path, "agent-example", {"runtimeScope": "none"}, installer=installer)
 
     violations = checker._runtime_scope_violations(tmp_path)
@@ -376,7 +381,7 @@ def test_runtime_installer_must_not_declare_none(tmp_path, installer) -> None:
     assert "'none'" in violations[0]
 
 
-def test_runtime_installer_must_declare_a_scope(tmp_path) -> None:
+def test_runtime_installer_must_declare_a_scope(tmp_path: Path) -> None:
     _plugin(tmp_path, "agent-example", {"name": "agent-example"}, installer="install.sh")
 
     violations = checker._runtime_scope_violations(tmp_path)
@@ -386,7 +391,7 @@ def test_runtime_installer_must_declare_a_scope(tmp_path) -> None:
 
 
 @pytest.mark.parametrize("scope", ["machine_gated", "Universal", "", 3, None])
-def test_declared_scope_must_be_valid(tmp_path, scope) -> None:
+def test_declared_scope_must_be_valid(tmp_path: Path, scope: object) -> None:
     _plugin(tmp_path, "skills-only", {"runtimeScope": scope})
 
     violations = checker._runtime_scope_violations(tmp_path)
@@ -395,7 +400,7 @@ def test_declared_scope_must_be_valid(tmp_path, scope) -> None:
     assert violations[0].startswith("skills-only: runtimeScope ")
 
 
-def test_unreadable_manifest_is_reported(tmp_path) -> None:
+def test_unreadable_manifest_is_reported(tmp_path: Path) -> None:
     _plugin(tmp_path, "broken", "{not json")
     _plugin(tmp_path, "array", "[]")
 
@@ -432,7 +437,7 @@ def test_valid_scopes_match_the_reconciler() -> None:
         '    exec 7< "$f" 2>/dev/null',
     ],
 )
-def test_exec_redirect_that_swallows_stderr_is_rejected(tmp_path, line) -> None:
+def test_exec_redirect_that_swallows_stderr_is_rejected(tmp_path: Path, line: str) -> None:
     scripts = tmp_path / "plugins" / "demo" / "scripts"
     scripts.mkdir(parents=True)
     (scripts / "install.sh").write_text(f"#!/usr/bin/env bash\n{line}\n", encoding="utf-8")
@@ -451,7 +456,7 @@ def test_exec_redirect_that_swallows_stderr_is_rejected(tmp_path, line) -> None:
         '    exec "$PY" -m tool 2>/dev/null',
     ],
 )
-def test_grouped_exec_redirect_is_accepted(tmp_path, line) -> None:
+def test_grouped_exec_redirect_is_accepted(tmp_path: Path, line: str) -> None:
     scripts = tmp_path / "plugins" / "demo" / "scripts"
     scripts.mkdir(parents=True)
     (scripts / "install.sh").write_text(f"#!/usr/bin/env bash\n{line}\n", encoding="utf-8")
@@ -666,7 +671,7 @@ def _scripts(tmp_path: Path, name: str, text: str) -> Path:
         "ps1-helper-returns-numeric", "ps1-call-returns-numeric", "sh-returns-ps1-false",
     ],
 )
-def test_ignored_completion_marker_failures_are_violations(tmp_path, name, text) -> None:
+def test_ignored_completion_marker_failures_are_violations(tmp_path: Path, name: str, text: str) -> None:
     assert checker._mark_complete_result_violations(_scripts(tmp_path, name, text))
 
 
@@ -735,7 +740,7 @@ def test_ignored_completion_marker_failures_are_violations(tmp_path, name, text)
         "mentions-in-comments-and-strings", "sh-if-not-writer",
     ],
 )
-def test_checked_completion_marker_publication_passes(tmp_path, name, text) -> None:
+def test_checked_completion_marker_publication_passes(tmp_path: Path, name: str, text: str) -> None:
     assert checker._mark_complete_result_violations(_scripts(tmp_path, name, text)) == []
 
 
@@ -757,12 +762,12 @@ def test_every_shipped_installer_checks_its_completion_marker() -> None:
     (".ps1", "if ($enabled) {\nComplete-RuntimeConstruction -PayloadHash $actualHash\n}\nreturn $true\n", False),
     (".ps1", "Complete-RuntimeConstruction -PayloadHash $actualHash | Out-Null\nreturn $true\n", False),
 ])
-def test_attached_completion_must_propagate_failure(suffix, body, accepted):
+def test_attached_completion_must_propagate_failure(suffix: str, body: str, accepted: bool) -> None:
     assert checker._helper_propagates_writer_status(body, suffix) is accepted
 
 
 @pytest.mark.parametrize("failure", [None, "writer", "hash"])
-def test_shipped_powershell_completion_returns_true_only_after_publication(tmp_path, failure):
+def test_shipped_powershell_completion_returns_true_only_after_publication(tmp_path: Path, failure: str | None) -> None:
     host = shutil.which("powershell.exe") if os.name == "nt" else shutil.which("pwsh")
     if not host:
         pytest.skip("no PowerShell")
@@ -791,8 +796,8 @@ function Complete-RuntimeConstruction([string]$PayloadHash) {
     $script:Published = $true
 }
 """
-    for path, helper in helpers:
-        script += helper + "\n$script:Published = $false\n"
+    for path, definition in helpers:
+        script += definition + "\n$script:Published = $false\n"
         script += """
 $refused = $false
 try { $ok = Invoke-VersionedMarkComplete } catch { $refused = $true }
@@ -806,7 +811,7 @@ if ($Failure) {
     result = subprocess.run(
         [host, "-NoProfile", "-NonInteractive", "-Command", script],
         capture_output=True, text=True, timeout=30,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout.splitlines() == [path.parent.parent.name for path, _ in helpers]
@@ -836,7 +841,7 @@ def _working_bash() -> str | None:
             probe = subprocess.run(
                 [candidate, "-c", 'probe() { printf "%s" "$1"; }; probe "quoted value"'],
                 capture_output=True, text=True, timeout=30, env=_bash_environment(candidate),
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
             )
         except (OSError, subprocess.TimeoutExpired):
             continue
@@ -868,7 +873,7 @@ if _versioned_mark_complete >/dev/null; then echo RC=0; else echo "RC=$?"; fi
 @pytest.mark.parametrize(("writer_rc", "hash_fails"), [(0, False), (3, False), (0, True)],
                          ids=["writer-ok", "writer-fails", "payload-hash-fails"])
 def test_every_shipped_shell_helper_reports_its_writer_status(
-    tmp_path, writer_rc, hash_fails
+    tmp_path: Path, writer_rc: int, hash_fails: bool
 ) -> None:
     """Run each shipped ``_versioned_mark_complete`` against a stub writer.
 
@@ -915,7 +920,7 @@ def test_every_shipped_shell_helper_reports_its_writer_status(
         )
         result = subprocess.run(
             [bash, "-c", script], capture_output=True, text=True, env=env, timeout=60,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
         )
         status = result.stdout.strip().rpartition("RC=")[2]
         should_fail = writer_rc != 0 or (hash_fails and computes_hash)
@@ -931,7 +936,7 @@ _SH_PAYLOAD_HASH_DEF = re.compile(r"^_payload_hash\(\) \{\n.*?^\}\n", re.M | re.
 
 
 @pytest.mark.parametrize("tools", ["working", "failing"])
-def test_shipped_payload_hash_helpers_fail_closed(tmp_path, tools) -> None:
+def test_shipped_payload_hash_helpers_fail_closed(tmp_path: Path, tools: str) -> None:
     """Run each shipped self-contained ``_payload_hash`` for real.
 
     With a working SHA-256 tool it prints a 64-hex digest; when every tool
@@ -953,7 +958,7 @@ def test_shipped_payload_hash_helpers_fail_closed(tmp_path, tools) -> None:
         "sha256sum() { return 1; }; shasum() { return 1; }; openssl() { return 1; }\n"
         if tools == "failing" else ""
     )
-    checked, failures = [], []
+    checked, delegated, failures = [], [], []
     for path in sorted(checker.PLUGINS_DIR.glob("*/scripts/*.sh")):
         text = path.read_text(encoding="utf-8").replace("\r\n", "\n")
         helper = _SH_PAYLOAD_HASH_DEF.search(text)
@@ -973,6 +978,7 @@ def test_shipped_payload_hash_helpers_fail_closed(tmp_path, tools) -> None:
             r"\b(?:_bootstrap_python|_compute_payload_hash)\b",
             package_hash,
         ):
+            delegated.append(path)
             continue
         checked.append(path)
         script = (
@@ -982,7 +988,7 @@ def test_shipped_payload_hash_helpers_fail_closed(tmp_path, tools) -> None:
         result = subprocess.run(
             [bash, "-c", script], capture_output=True, text=True, timeout=60,
             env=_bash_environment(bash),
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
         )
         line = result.stdout.strip().splitlines()[-1] if result.stdout.strip() else ""
         rc, _, out = line.partition(" OUT=")
@@ -991,7 +997,14 @@ def test_shipped_payload_hash_helpers_fail_closed(tmp_path, tools) -> None:
             failures.append(f"{name}: {line!r} {result.stderr.strip()}")
         if tools == "failing" and (rc == "RC=0" or out):
             failures.append(f"{name}: hashing failed but returned {line!r}")
-    assert len(checked) >= 8
+    assert {path.parent.parent.name for path in checked} == {
+        "agent-codespaces", "agent-logger", "agent-mcp", "agent-ssh",
+        "agent-worktrees", "budget-guidance",
+    }
+    assert {path.parent.parent.name for path in delegated} == {
+        "agent-bridge", "agent-dispatch", "agent-index", "agent-machines",
+        "agent-pull-requests", "agent-vault",
+    }
     assert failures == []
 
 
@@ -1059,7 +1072,7 @@ def test_powershell_candidates_match_legacy_and_prune_only_backstop(
     walk = checker.os.walk
     visited: list[Path] = []
 
-    def recording_walk(*args, **kwargs):
+    def recording_walk(*args: Any, **kwargs: Any) -> Iterator[tuple[str, list[str], list[str]]]:
         for directory, dirs, files in walk(*args, **kwargs):
             visited.append(Path(directory))
             yield directory, dirs, files
@@ -1138,7 +1151,7 @@ def test_install_contract_diagnostics_match_legacy_scan(
 def test_powershell_scan_surfaces_directory_errors(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, repo_backstop: bool
 ) -> None:
-    def failing_walk(root, *, onerror):
+    def failing_walk(root: Path, *, onerror: Callable[[OSError], None]) -> Iterator[object]:
         onerror(PermissionError("script directory unreadable"))
         return iter(())
 
@@ -1156,7 +1169,7 @@ def test_install_contract_surfaces_script_read_errors(
     read_text = Path.read_text
     unreadable = tmp_path / "libs/demo/tests/host.ps1"
 
-    def guarded_read(path, *args, **kwargs):
+    def guarded_read(path: Path, *args: Any, **kwargs: Any) -> str:
         if path == unreadable:
             raise PermissionError("script unreadable")
         return read_text(path, *args, **kwargs)

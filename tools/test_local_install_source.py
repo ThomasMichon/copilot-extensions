@@ -2510,6 +2510,7 @@ def prepare_native_source_inputs(tmp_path: Path, request: pytest.FixtureRequest)
     )
     for name in (
         "versioned_runtime.py", "versioned_runtime_leases.py", "versioned_runtime_source.py",
+        "versioned_runtime_identity.py", "versioned_runtime_fingerprint.py",
         "versioned_runtime_construction.py", "versioned_runtime_publication.py",
     ):
         if not standalone:
@@ -2657,6 +2658,7 @@ def test_application_candidate_retains_its_admitted_runtime_helpers(native_sourc
             for name in (
                 "runtime_launcher.py", "versioned_runtime.py", "versioned_runtime_leases.py",
                 "versioned_runtime_source.py", "versioned_runtime_construction.py",
+                "versioned_runtime_identity.py", "versioned_runtime_fingerprint.py",
                 "versioned_runtime_publication.py",
             ):
                 assert (candidate.slot / ".runtime-bootstrap" / name).read_bytes() == (
@@ -3704,6 +3706,7 @@ def test_application_adapter_runs_real_install_repeat_and_retains_failed_start(
     assert {helper.name for helper in helpers} == {
         "runtime_launcher.py", "versioned_runtime.py", "versioned_runtime_leases.py",
         "versioned_runtime_source.py", "versioned_runtime_construction.py",
+        "versioned_runtime_identity.py", "versioned_runtime_fingerprint.py",
         "versioned_runtime_publication.py", "versioned_runtime_cache.py",
     }
     for helper in helpers:
