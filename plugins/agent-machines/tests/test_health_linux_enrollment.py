@@ -168,6 +168,8 @@ class Pair:
         self.fail_after = ""
         self.unavailable = False
         self.loaded = True
+        self.timer_enabled: bool | None = None
+        self.timer_active: bool | None = None
 
     def call(
         self, operation: str, *, expected: str = "", definition: dict[str, Any] | None = None,
@@ -182,6 +184,7 @@ class Pair:
         if operation in {"create", "replace"}:
             assert definition is not None and not definition["enabled"]
             self.definition = copy.deepcopy(definition)
+            self.timer_enabled = self.timer_active = False
             if self.fail_after == "partial":
                 del self.definition["artifacts"][next(reversed(self.definition["artifacts"]))]
                 self.fail_after = ""
@@ -190,25 +193,37 @@ class Pair:
         elif operation == "enable":
             assert self.definition is not None
             self.definition["enabled"] = True
+            self.timer_enabled = self.timer_active = True
         elif operation == "disable":
             assert self.definition is not None
             self.definition["enabled"] = False
+            self.timer_enabled = self.timer_active = False
             self.instances.clear()
         elif operation == "remove":
             self.definition = None
+            self.timer_enabled = self.timer_active = False
         if self.fail_after == operation:
             self.fail_after = ""
             raise RuntimeError("lost native reply")
         return self.snapshot()
 
     def snapshot(self) -> dict[str, Any]:
+        enabled = bool(self.definition and self.definition["enabled"])
+        timer_enabled = enabled if self.timer_enabled is None else self.timer_enabled
+        timer_active = enabled if self.timer_active is None else self.timer_active
+        observed = copy.deepcopy(self.definition)
+        if observed is not None:
+            observed["enabled"] = timer_enabled and timer_active
         return {
-            "configured": self.definition is not None, "definition": copy.deepcopy(self.definition),
-            "enabled": bool(self.definition and self.definition["enabled"]), "account_uid": 1000,
+            "configured": self.definition is not None, "definition": observed,
+            "enabled": timer_enabled and timer_active, "account_uid": 1000,
+            "timer_enabled": timer_enabled, "timer_active": timer_active,
             "instances": self.instances[:], "loaded": self.loaded and bool(
                 self.definition and len(self.definition["artifacts"]) == 2
             ),
-            "digest": hashlib.sha256(json.dumps(self.definition, sort_keys=True).encode()).hexdigest(),
+            "digest": hashlib.sha256(json.dumps(
+                [observed, timer_enabled, timer_active], sort_keys=True,
+            ).encode()).hexdigest(),
         }
 
 
@@ -379,6 +394,28 @@ def test_disabled_candidate_is_not_accepted_until_manager_load_is_confirmed(
     assert not owner.read()["confirmed"] and not owner.read()["pending"]
     assert references.owners[enrollment.REFERENCE] == []
     assert "enable" not in pair.calls
+
+
+@pytest.mark.parametrize(("enabled", "active"), [(True, False), (False, True)])
+@pytest.mark.parametrize("operation", ["disable", "converge"])
+@pytest.mark.parametrize("desired_enabled", [False, True])
+def test_enrollment_settles_mixed_timer_states_instead_of_reporting_noop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    enabled: bool, active: bool, operation: str, desired_enabled: bool,
+) -> None:
+    owner, pair, references, _ = linux_case(tmp_path, monkeypatch)
+    adopt(owner, {**desired(), "enabled": desired_enabled})
+    pair.timer_enabled, pair.timer_active = enabled, active
+    pair.calls.clear()
+    observed = owner.status()
+    assert (observed["timer_enabled"], observed["timer_active"]) == (enabled, active)
+    result = owner.disable() if operation == "disable" else owner.converge()
+    assert result["status"] == ("disabled" if operation == "disable" else "converged")
+    expected = desired_enabled and operation == "converge"
+    assert result["timer_enabled"] is expected and result["timer_active"] is expected
+    assert not result["instances"] and pair.calls[0] == "disable"
+    assert ("enable" in pair.calls) is expected
+    assert not result["recovery_required"] and references.pending is None
 
 
 def test_cross_platform_state_and_account_changes_refuse_before_native_calls(

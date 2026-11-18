@@ -367,6 +367,11 @@ class Enrollment:
     def _normalize(self, native: Document) -> Document:
         return {**native, "definition": native.get("xml")} if self.platform == "win32" else native
 
+    def _activation_matches(self, native: Document, enabled: bool) -> bool:
+        if self.platform == "linux":
+            return native["timer_enabled"] is enabled and native["timer_active"] is enabled
+        return bool(native["enabled"] == enabled)
+
     def read(self) -> Document:
         reader = cast(Callable[..., tuple[Document | None, Any]], slots._read)
         state, _ = reader(self.path, self._validate_state, optional=True, maximum=MAX_STATE)
@@ -394,7 +399,10 @@ class Enrollment:
                 return self._result("not-adopted", native, state, changed=False)
             if not native["configured"]:
                 raise slots.HealthError("owned-health-task-missing")
-            if not native["enabled"] and not state["desired"]["enabled"] and not native["instances"]:
+            if (
+                self._activation_matches(native, False)
+                and not state["desired"]["enabled"] and not native["instances"]
+            ):
                 return self._result("disabled", native, state, changed=False)
             record = {
                 **state["confirmed"], "desired": {**state["desired"], "enabled": False},
@@ -411,7 +419,7 @@ class Enrollment:
             try:
                 native = self._native_call("disable", expected=native["digest"])
                 if (
-                    native["enabled"] or native["instances"]
+                    not self._activation_matches(native, False) or native["instances"]
                     or self._signature(native["definition"]) != self._signature(record["definition"])
                 ):
                     raise slots.HealthError("native-health-task-settlement-unconfirmed")
@@ -425,7 +433,10 @@ class Enrollment:
     ) -> Document:
         return {
             "schema": SCHEMA, "version": state["version"], "status": status, "changed": changed,
-            **({"platform": "linux"} if self.platform == "linux" else {}),
+            **({
+                "platform": "linux", "timer_enabled": native["timer_enabled"],
+                "timer_active": native["timer_active"],
+            } if self.platform == "linux" else {}),
             "adopted": state["desired"] is not None, "configured": native["configured"],
             "enabled": native["enabled"], "instances": native["instances"],
             "state": native.get("state"), "last_result": native.get("last_result"),
@@ -485,7 +496,12 @@ class Enrollment:
             raise slots.HealthError("foreign-or-drifted-health-task")
         if not native["configured"]:
             return
-        if record is None or self._signature(native["definition"]) != self._signature(record["definition"]):
+        if record is None:
+            raise slots.HealthError("foreign-or-drifted-health-task")
+        observed, expected = native["definition"], record["definition"]
+        if self.platform == "linux":
+            observed, expected = self._disabled(observed), self._disabled(expected)
+        if self._signature(observed) != self._signature(expected):
             raise slots.HealthError("foreign-or-drifted-health-task")
         if self._definition_owner(native["definition"]) != self.owner:
             raise slots.HealthError("foreign-or-drifted-health-task")
@@ -587,6 +603,7 @@ class Enrollment:
                 if (
                     native["configured"]
                     and self._signature(native["definition"]) == self._signature(candidate["definition"])
+                    and self._activation_matches(native, desired["enabled"])
                     and (self.platform == "win32" or native["loaded"])
                 ):
                     references = self.leases.read_runtime_references(self.root).get(REFERENCE, [])
@@ -679,7 +696,7 @@ class Enrollment:
         target = candidate["definition"] if candidate else None
         if native["configured"]:
             native = self._native_call("disable", expected=native["digest"])
-            if native["enabled"] or native["instances"]:
+            if not self._activation_matches(native, False) or native["instances"]:
                 raise slots.HealthError("native-health-task-settlement-unconfirmed")
         if candidate is None:
             native = self._native_call("remove", expected=native["digest"])
@@ -699,7 +716,10 @@ class Enrollment:
             # Withdrawal must not depend on collection readiness.
             self._policy(candidate["desired"], native)
             native = self._native_call("enable", expected=native["digest"])
-        if self._signature(native["definition"]) != self._signature(target):
+        if (
+            self._signature(native["definition"]) != self._signature(target)
+            or not self._activation_matches(native, candidate["desired"]["enabled"])
+        ):
             raise slots.HealthError("native-health-task-readback-failed")
         return native
 
@@ -711,7 +731,7 @@ class Enrollment:
         if current["pending"] is None or current["pending"]["native_unsettled"]:
             raise slots.HealthError("native-health-task-cleanup-unconfirmed")
         if record is not None and not record["desired"]["enabled"] and (
-            native["enabled"] or native["instances"]
+            not self._activation_matches(native, False) or native["instances"]
         ):
             raise slots.HealthError("native-health-task-settlement-unconfirmed")
         pending = state["pending"]
@@ -774,7 +794,7 @@ class Enrollment:
                 }
                 native = self._switch(native, matched)
             if (
-                native["enabled"] or native["instances"]
+                not self._activation_matches(native, False) or native["instances"]
                 or matched is None
                 or self._signature(native["definition"]) != self._signature(self._disabled(matched["definition"]))
             ):
@@ -789,6 +809,7 @@ class Enrollment:
             )
         if not rollback and candidate and matched == candidate and (
             self._signature(native["definition"]) == self._signature(candidate["definition"])
+            and self._activation_matches(native, candidate["desired"]["enabled"])
             and (self.platform == "win32" or native["loaded"])
         ):
             self._qualify_record(candidate, native)
