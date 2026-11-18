@@ -91,6 +91,15 @@ def update(config: Config, repo: str, number: int, *, title: str | None = None,
         pr_publication_labels.validate_policy(prcfg, origin)
     provider = providers.get_provider(prcfg.provider)
     operation = getattr(provider, "update_pull_metadata", None)
+    if prcfg.provider == "gitea" and operation is None:
+        from .providers import gitea_metadata
+        token = providers.account_token_for_slug(repo, prcfg)
+        return gitea_metadata.update(
+            provider, repo, number, title=title, description=description,
+            reviewers=reviewers, work_items=work_items, origin=origin,
+            api_base=prcfg.api_base, token=token,
+            wip_title_prefixes=prcfg.wip_title_prefixes,
+        )
     if prcfg.provider == "github" and operation is None:
         from .providers import github_metadata
         token = providers.account_token_for_slug(repo, prcfg)

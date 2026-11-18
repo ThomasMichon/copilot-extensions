@@ -174,9 +174,9 @@ def _run(args: Any, prefix: list[str]) -> tuple[int, dict[str, Any]]:
     try:
         return _execute(args, prefix, argv, support)
     except (OSError, RuntimeError, subprocess.SubprocessError, UnicodeError) as exc:
-        if args.command == "update" and support.get("provider") == "github":
+        if args.command == "update" and support.get("provider") in ("github", "gitea"):
             from .native_metadata import failure
-            return 1, failure(args, str(exc))
+            return 1, failure(args, str(exc), provider=support["provider"])
         if args.command != "ready":
             raise
         return 1, readiness_failure(
@@ -199,7 +199,7 @@ def _execute(args: Any, prefix: list[str], argv: list[str],
             "Native author response is unconfirmed; reconcile the same source/PR before retrying"
         ) from None
     if (args.command != "ready"
-            and not (args.command == "update" and support.get("provider") == "github")
+            and not (args.command == "update" and support.get("provider") in ("github", "gitea"))
             and isinstance(payload, dict) and result.returncode
             and payload.get("error") and "repo" not in payload):
         return result.returncode, payload
@@ -231,9 +231,9 @@ def _execute(args: Any, prefix: list[str], argv: list[str],
             or payload["ok"] and payload.get("error")
         ):
             raise RuntimeError("Native readiness response is unconfirmed; reconcile this PR before retrying")
-    if args.command == "update" and support.get("provider") == "github":
-        from .native_metadata import validate_github
-        validate_github(args, payload, result.returncode)
+    if args.command == "update" and support.get("provider") in ("github", "gitea"):
+        from .native_metadata import validate
+        validate(args, payload, result.returncode, provider=support["provider"])
     if result.returncode or payload.get("ok") is not True:
         return result.returncode or 1, payload
     if args.command == "push" and (

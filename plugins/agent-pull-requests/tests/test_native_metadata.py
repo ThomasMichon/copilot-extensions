@@ -1,4 +1,4 @@
-"""GitHub metadata forwarding preserves selected-owner uncertainty and skew."""
+"""Metadata forwarding preserves selected-provider uncertainty and skew."""
 
 from __future__ import annotations
 
@@ -15,6 +15,12 @@ import pytest
 from agent_pull_requests import native_author
 
 REPO = "example/project"
+PROVIDER = "github"
+
+
+@pytest.fixture(autouse=True, params=["github", "gitea"])
+def provider(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys.modules[__name__], "PROVIDER", request.param)
 
 
 def arguments(**kwargs: Any) -> SimpleNamespace:
@@ -38,7 +44,7 @@ def support() -> dict[str, Any]:
     return {
         "schema": "agent-worktrees.pr-author-capabilities",
         "version": 1,
-        "provider": "github",
+        "provider": PROVIDER,
         "repo": REPO,
         "operations": {"metadata-update": True, "future": True},
     }
@@ -48,7 +54,7 @@ def result(status: str = "confirmed") -> dict[str, Any]:
     return {
         "schema": "agent-worktrees.pr-metadata",
         "version": 1,
-        "provider": "github",
+        "provider": PROVIDER,
         "repo": REPO,
         "number": 7,
         "publication_retained": True,
@@ -84,7 +90,7 @@ def test_native_metadata_keeps_every_owner_outcome(
     [
         {"schema": "other"},
         {"version": True},
-        {"provider": "gitea"},
+        {"provider": "other"},
         {"ok": False},
         {"actions": {}},
         {"actions": {"title": {"status": "confirmed"}}},

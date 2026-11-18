@@ -4,7 +4,7 @@ Back to the [CLI parity inventory](cli-parity-inventory.md) and
 [canonical effort](README.md#author-publication-and-metadata-convergence).
 Coordination: #10923; GitHub source baseline: #13199.
 
-**Proposed contract, not implemented or installed support.** This closes part
+**Contract reviewed in #13225; source qualification below.** This closes part
 of the PR-domain [author metadata intent](../../../visions/plugins/agent-pull-requests/README.md#complete-author-publication-and-metadata)
 through the existing Worktrees/provider owner, following
 [version-skew-safe contracts](../../../docs/patterns/service-contract-evolution.md)
@@ -101,24 +101,52 @@ new prerequisite probe, deprecation or removal is introduced.
 
 ## Validation plan
 
-- [ ] Exercise the real explicit parser, claimant, target/config/account/endpoint
+- [x] Exercise the real explicit parser, claimant, target/config/account/endpoint
   resolution and Gitea transport with synthetic active/draft/terminal,
   wrong-target, malformed and unsupported-option controls.
-- [ ] Qualify title-only, body-only, combined, empty body, already-satisfied and
+- [x] Qualify title-only, body-only, combined, empty body, already-satisfied and
   quote-heavy multiline Unicode body-file inputs; assert that only selected
   fields are written and unrelated PR state/claims remain untouched.
-- [ ] Reuse source-preservation controls for distinct updater/source, original
+- [x] Reuse source-preservation controls for distinct updater/source, original
   raw/codename/root/encrypted markers, missing/anonymous/conflicting/malformed
   source and literal examples. Prove real composed-body validation.
-- [ ] Prove draft/WIP preservation with default and configured prefixes,
+- [x] Prove draft/WIP preservation with default and configured prefixes,
   contradictory/missing server evidence and unsafe title transformations.
-- [ ] Inject pre-write refusal, authoritative rejection, lost response,
+- [x] Inject pre-write refusal, authoritative rejection, lost response,
   partial confirmation, concurrent source changes and failed/mismatched
   readback; retain uncertainty and prove no automatic write replay.
-- [ ] Exercise the native frontend/owner process seam, strict action validation,
+- [x] Exercise the native frontend/owner process seam, strict action validation,
   mixed versions, additive fields, rollback and delivered-policy refusals.
   Preserve the existing Azure DevOps/GitHub regression packets.
 - [ ] Record isolated source and native-platform qualification separately from
   release, installation and authorized live-provider mutation. No live write,
   credential/account probe, service deployment or HTTP mutation hosting is
   authorized by this proposed source contract.
+
+## Journal
+
+### 2026-11-18 - Reviewed contract; isolated implementation
+
+Contract #13225 merged as `7c095883fe` after current-head Copilot approval,
+all required checks and normal managed Maintainer completion. Implementation
+uses the existing Gitea HTTP owner and shared source parser, retaining the
+selected account, optional worker policy, claimant and per-action outcomes.
+Native frontend validation extends the existing source-preserving result
+contract to Gitea; it does not add another forge client or fallback.
+Isolated source validation remains distinct from release, installation,
+native-platform execution and authorized live-provider mutation.
+
+The bounded supervisor and offline test-isolation containers pass 159
+Worktrees metadata/author cases, including existing GitHub and Azure DevOps
+regressions, and 130 frontend cases with five Windows-only skips on Linux.
+The frontend controls run for both GitHub and Gitea, including the actual
+subprocess/body-file seam and malformed, partial, missing-capability and
+rolled-back-owner outcomes. A composed parser/target/account/provider fixture
+reaches actual Gitea curl serialization with synthetic responses.
+
+Each combined changed-title/body operation uses seven provider requests;
+an already-satisfied repeat uses three reads and no write. These are isolated
+work-count controls, not live-forge latency or native cold/warm measurements.
+Whole-file strict typing passes Linux and Windows analysis for all seven
+changed Python files. Source lint and install-contract/documentation guards
+pass. No existing positively admitted unit-source binding changed.
