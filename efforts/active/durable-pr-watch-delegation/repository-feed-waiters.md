@@ -2,7 +2,8 @@
 
 Review-first refinement of [reviewer-action feeds](reviewer-action-feeds.md)
 under [the canonical effort](README.md), coordinated by #12947.
-This is a proposed source contract, not implemented support or activation.
+The owner contract is reviewed; its first native reader/storage expansion is
+described below. Full delivery support and activation are not implemented.
 It is a later consumer slice, not another prerequisite for the independently
 useful cache/event milestone.
 
@@ -141,9 +142,32 @@ boundary; do not claim transparent rollback or pin data to one executable
 forever. Actual reader transition/adoption remains the lifecycle owner's job,
 not a submit-time migration or authority label.
 
+## Native reader/storage expansion
+
+The existing waiter library accepts a distinct retained feed intent through
+its native storage validator. The
+[reader contract](../../../plugins/agent-dispatch/docs/delegated-service-replay.md#repository-feed-reader-expansion)
+documents its original request/baseline and complete local binding. It reuses
+the current waiter row and indexed replay-progress columns; no request journal
+or task copy is introduced.
+
+Focused source controls exercise callback/scoped-watch/feed coexistence on
+actual SQLite storage, reopen and original-request conflict, strict malformed
+or mixed variants, detached known/unknown baselines and binding isolation.
+Both preparing and active feed rows remain excluded from local recovery.
+The current callback HTTP protocol rejects this storage-only variant before
+task/outbox changes. That refusal is not delivery negotiation or proof that
+every historical runtime can execute the new intent.
+
+The first reader expansion does not add a producer, factory selector,
+capability advertisement, transport, wake/ACK implementation or enrollment.
+Compatible reader/lifecycle transition, typed client selection and actual
+consumer recovery remain part of the serial acceptance below.
+
 ## Serial plan and validation
 
-- [ ] Review this owner/contract refinement before new protocol or storage code.
+- [x] Review this owner/contract refinement before new protocol or storage code
+  (#13293).
 - [ ] Qualify the new strict delegation variant through actual waiter storage,
   serializer and restart, preserving legacy/scoped-watch rows and unsupported
   reader behavior and exclusion from local PID/preparing recovery. No parallel

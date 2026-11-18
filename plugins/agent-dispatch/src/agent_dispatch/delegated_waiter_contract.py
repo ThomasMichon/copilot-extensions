@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import re
+from typing import Any
 
 PROTOCOL = "delegated_run_waiters/v1"
 NOTIFICATIONS = "acknowledged_notifications/v1"
@@ -18,14 +19,15 @@ RECOVERY_GRACE = 120.0
 
 def positive_timeout(value: object) -> float:
     if (
-        type(value) not in (int, float) or not 0 < value <= MAX_TIMEOUT
+        not isinstance(value, (int, float)) or type(value) not in (int, float)
+        or not 0 < value <= MAX_TIMEOUT
         or not math.isfinite(value)
     ):
         raise ValueError("PR-watch timeout must be finite, positive and at most 2147483 seconds")
     return float(value)
 
 
-def validate_delegation(value: object, *, armed: bool = False) -> dict:
+def validate_delegation(value: object, *, armed: bool = False) -> dict[str, Any]:
     fields = {"coordinator_id", "preparation_id", "subscriber_id", "repo", "number",
               "timeout", "until", "shared"}
     if isinstance(value, dict) and "installation" in value:
@@ -65,7 +67,15 @@ def validate_delegation(value: object, *, armed: bool = False) -> dict:
     return dict(value)
 
 
-def validate_event(value: object, delegation: dict) -> dict:
+def validate_retained_delegation(value: object, *, armed: bool = False) -> dict[str, Any]:
+    """Expand native storage readers without enabling the callback wire variant."""
+    if isinstance(value, dict) and ("feed" in value or "protocol" in value):
+        from .repository_feed_waiter_contract import validate_feed_delegation
+        return validate_feed_delegation(value, armed=armed)
+    return validate_delegation(value, armed=armed)
+
+
+def validate_event(value: object, delegation: dict[str, Any]) -> dict[str, Any]:
     required = {"event_id", "registration_id", "notification_protocol", "repo",
                 "number", "subscriber_id", "transitions", "timed_out"}
     snapshot = {"pr_state", "merged", "review_decision", "mergeable", "checks_state"}
