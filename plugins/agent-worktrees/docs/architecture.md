@@ -1,5 +1,10 @@
 # Agent Worktrees -- Architecture
 
+For the execution path, see [the worktree in an automated task](../../../docs/agent-lifecycle/worktree.md).
+Worktrees can allocate a checkout before any Copilot process exists. The
+[review snapshots](../../../docs/agent-lifecycle/review-snapshots.md) show
+which records appear at allocation, launch and native session registration.
+
 ## Git and resident launch environments
 
 The Git wrapper and checkout-anchor probe select an absolute executable through
@@ -384,7 +389,8 @@ hooks/extensions consult the session-binding env (see
 
 ## The Worktree Record -- Single-Writer Contract (invariant)
 
-The per-worktree tracking YAML (`~/.{project}/worktrees/{id}.yaml`) is the
+The per-worktree tracking YAML (`worktrees/{id}.yaml` in the resolved project
+state directory; `~/.{project}/worktrees/{id}.yaml` in the legacy layout) is the
 **ground-layer state** of the agent fabric (see the `agent-fabric` vision in
 this repo's `visions/`). Two invariants keep the layers composable -- *enhancing,
 never overriding* one another -- as new orthogonal fields accrue on the record
@@ -668,6 +674,13 @@ currently catches (it flags raw `call_from_thread`, not unmarshalled
 shared-state mutation).
 
 ## Session Lifecycle
+
+The diagram below is the interactive Manager/CLI launch path. Hosted ACP uses
+Bridge and Session Host instead of a terminal pane. A session activation,
+the worktree's current head and the checkout's Git status are separate facts.
+See [startup records and boundaries](../../../docs/agent-lifecycle/startup-boundaries.md)
+for the two paths and [worktree lifecycle](worktree-lifecycle.md#the-lifecycle-at-a-glance)
+for source landing, finalization and cleanup.
 
 ```
 {project}                         # launch binstub

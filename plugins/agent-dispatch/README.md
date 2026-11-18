@@ -1,5 +1,9 @@
 # agent-dispatch
 
+Start with [how an automated task runs](../../docs/agent-lifecycle/README.md)
+for the cross-plugin map, or the [Dispatch state model](#state-model) for
+the difference between a task, a reservation and a worker.
+
 See the [configuration reference](docs/configuration.md) for coordinator
 environment, reusable registrar/identity fields and configuration boundaries.
 Windows scheduling is optional and separate from service capability; see
@@ -848,36 +852,28 @@ q.reconcile_liveness()
 
 ### State model
 
-**Current implementation.** The states below describe the worker-claim lifecycle. Supervised spawn
-reservation is a separate operation before the embodied worker claims the task;
-it does not itself move the task to `claimed`. The
-[pool-owned assignment/startup target](docs/spawn-supervisor.md#assignment-lifecycle-current-versus-target)
-and its linked repair plan are not implemented by this state diagram.
-
-```
-proposed -> queued -> claimed -> started -> submitted -> completed
-                ^         |          |            |            (terminal)
-                +-- decline/yield ---+            |
-                ^                                  +-- confirm
-                +-- owner-gone (liveness GC requeue, attempts++)
-started -> suspended -> started
-               |                                   (resume; same owner)
-               +-----------> queued                (release; replacement)
-               +-----------> submitted             (condition resolved)
-   (any non-terminal except completed) -------> abandoned     (terminal, permission-gated)
-```
+The task records the job; a spawn reservation records one attempt to provide
+its worker. In the **legacy path**, reserving does not claim the task. In
+**configured-pool placement**, the same transaction reserves capacity and
+changes the task to `claimed` before a worker or native session exists.
+Neither path treats launch or prompt delivery as worker acceptance.
+The [task and reservation diagrams](../../docs/agent-lifecycle/dispatch.md)
+show their separate transitions. The [PR review snapshots](../../docs/agent-lifecycle/review-snapshots.md)
+show how they join in the queue.
 
 - **proposed** -- written but not yet claimable (a draft handoff / undecided idea).
 - **queued** -- claimable.
-- **claimed** -- held by a worker (may evaluate before committing).
+- **claimed** -- held for evaluation by a worker, or assigned to a pool and
+  awaiting the selected worker's acceptance.
 - **started** -- under active implementation.
 - **suspended** -- previously started but dormant and non-claimable; retains the
   same owner/session, worktree identity, generation, progress, and card while
   clearing active lease/activity.
-- **submitted** -- the worker's provisional completion claim. A task reaches
-  this state only when `require_verification=true`; it then waits for a
-  whole-goal evaluator (or an operator override) to decide whether the stated
-  goal is actually complete or should be abandoned.
+- **submitted** -- the worker's provisional completion claim. With
+  `require_verification=true` it stays here while waiting for a
+  whole-goal evaluator or an operator decision. A successful evaluator rejection
+  restores `started` to the same worker and session and queues feedback and a
+  wake. It does not create, retire or advance a reservation.
 - **completed** / **abandoned** -- terminal (abandon requires permission).
   Liveness GC moves a held task whose owner has gone past the attempts cap to
   **abandoned**, clearing its ownership and completion metadata. The legacy
@@ -908,8 +904,8 @@ started -> suspended -> started
   for bounded attempts, holds and capacity-preserving exhaustion.
   For a non-pool interactive owner, `resume <id>` restores **suspended → started** under
   the same owner and atomically enqueues its durable wake. A supervised owner
-  without a captured interactive inbox instead releases to **queued** and
-  settles its reservation for safe re-embodiment. `release <id>`
+  headless owner without a captured native session instead remains **suspended**
+  with `resume_requested` set on the normal wake path. `release <id>`
   explicitly clears ownership and moves **suspended → queued**. Suspended tasks
   do not participate in liveness GC or claiming. Intentional waits do not spend
   recovery attempts; an explicitly requested pool recovery has its own bounded
@@ -933,9 +929,9 @@ started -> suspended -> started
   preserved owner without waking a process or fabricating an active turn.
 - A steer submitted while suspended is stored and requests affirmative recovery
   for a pool assignment, without bypassing a hold. For non-pool tasks it either
-  resumes an interactive task to **started** with a durable wake, or releases a task without a captured inbox to
-  **queued** for re-embodiment, in the same transaction. A replacement body
-  consumes pending steering immediately after it starts. The HTTP request never
+  resumes an interactive task to **started**, or leaves a headless task
+  **suspended** with `resume_requested` set for its supervisor. Steering is
+  retained for the worker. The HTTP request never
   calls the bridge. The coordinator service drains interactive wakes
   asynchronously, retries with exponential backoff across restarts, and uses
   the stable wake id as the bridge idempotency key. Task

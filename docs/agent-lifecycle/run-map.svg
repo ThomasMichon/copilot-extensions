@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="560" height="434" viewBox="0 0 560 434" role="img" aria-labelledby="title desc">
+  <title id="title">Four records behind one automated task</title>
+  <desc id="desc">Dispatch keeps a task and reserves a place for a worker. Bridge connects its conversation. Worktrees tracks the checkout it uses. Dispatch records the result; session and workspace cleanup are separate.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0 0L6 3L0 6Z" fill="#435466"/></marker>
+  </defs>
+  <rect x="1" y="1" width="558" height="432" rx="14" fill="#f8fafc" stroke="#a9b5c3"/>
+  <g fill="none" stroke="#435466" stroke-width="2.5" marker-end="url(#arrow)">
+    <path d="M280 89v24"/>
+    <path d="M280 190v16H145v23"/>
+    <path d="M280 190v16h135v23"/>
+    <path d="M145 316v18h135v17"/>
+    <path d="M415 316v18H280" marker-end="none"/>
+  </g>
+  <g font-family="system-ui, sans-serif" text-anchor="middle">
+    <rect x="93" y="17" width="374" height="72" rx="11" fill="#e1edfc" stroke="#47729b"/>
+    <text x="280" y="47" fill="#183d62" font-size="21" font-weight="700">1. Dispatch: task</text>
+    <text x="280" y="73" fill="#233547" font-size="17">What result is needed?</text>
+    <rect x="93" y="117" width="374" height="73" rx="11" fill="#e1edfc" stroke="#47729b"/>
+    <text x="280" y="147" fill="#183d62" font-size="21" font-weight="700">2. Dispatch: reservation</text>
+    <text x="280" y="173" fill="#233547" font-size="17">Which worker slot is held?</text>
+    <rect x="16" y="234" width="258" height="82" rx="11" fill="#dcf3ea" stroke="#427b68"/>
+    <text x="145" y="265" fill="#154c3d" font-size="21" font-weight="700">3. Bridge: session</text>
+    <text x="145" y="293" fill="#233547" font-size="17">Which conversation?</text>
+    <rect x="286" y="234" width="258" height="82" rx="11" fill="#fff0d6" stroke="#986c2b"/>
+    <text x="415" y="265" fill="#674611" font-size="21" font-weight="700">3. Worktrees</text>
+    <text x="415" y="293" fill="#233547" font-size="17">Which checkout?</text>
+    <rect x="45" y="356" width="470" height="62" rx="11" fill="#ffffff" stroke="#7b8998"/>
+    <text x="280" y="382" fill="#233547" font-size="20" font-weight="700">4. Submit the result</text>
+    <text x="280" y="405" fill="#233547" font-size="16">Check the worker, slot and checkout separately.</text>
+  </g>
+</svg>

@@ -1,5 +1,9 @@
 # Agent Bridge -- Architecture
 
+For an automated job, start with [Bridge in the task lifecycle](../../../docs/agent-lifecycle/bridge.md).
+The [review snapshots](../../../docs/agent-lifecycle/review-snapshots.md) show
+the Bridge control ID, native conversation ID and first turn separately.
+
 ## Service Design
 
 Agent Bridge runs as a persistent HTTP service on a loopback port. By default
@@ -275,6 +279,11 @@ The token is generated on first run and stored in `~/.agent-bridge/auth.yaml`.
 
 ### Worktree discovery
 
+`GET /api/v1/targets` combines managed sessions, registered Hosts, live CLI
+registrations and discovered worktrees. Listing a workspace does not start
+Copilot or create a session row. [Target inventory](target-inventory.md)
+describes the separate metadata import and its current caller coverage.
+
 `GET /api/v1/worktrees?render=true` (HTTP protocol 37) reads Agent Bridge's
 published in-memory projection of Worktree Manager's existing list/DB/cache
 owner. It does not run a foreground fleet crawl, SSH, Git, session-history
@@ -523,17 +532,21 @@ satisfy required-graceful rollout.
 
 ### Session States
 
-```
-STARTING --> IDLE <--> RUNNING --> STOPPED --> ENDED
-                                     |
-                                     +--> ENDED
-```
+The [hosted-session status](../src/agent_bridge/session_status.py) has eight
+names. A fresh object starts as `created`; normal creation first **persists**
+`starting`. ACP `session/new` returns the native conversation ID before a user
+turn. A ready session is `idle`; an admitted turn moves it to `running` and
+settlement normally returns it to `idle`.
 
-- **STARTING** -- subprocess launching
-- **IDLE** -- waiting for prompts
-- **RUNNING** -- processing a turn
-- **STOPPED** -- paused, state preserved
-- **ENDED** -- cleanup complete
+| Observation | Interpretation |
+|---|---|
+| `stopped` | Bridge retains resumable metadata. The Session Host and child may still be alive. Reattaching to a surviving Host does not load the conversation in a new process. |
+| `failed` | A lifecycle operation failed. The status alone does not establish that the native process exited. |
+| `stopping`, `ended` | `stopping` is declared, not a required intermediate write. A successful end normally removes the control row; it does not settle a Dispatch reservation or remove a checkout. |
+
+Operations enforce their own guards. The [transition diagram and operation table](../../../docs/agent-lifecycle/bridge.md#what-can-happen-to-a-hosted-session)
+describe them. Live CLI registration and foreground-turn state are separate
+from the hosted-session status.
 
 These runtime states are not the complete caller-facing delegation model.
 Logical delegate identity, caller attachment, transport liveness, and
@@ -1209,6 +1222,10 @@ or discarded attempt history instead retain an explicit unknown hold through
 the external process-exit boundary, never a false compatibility/finished claim.
 
 - **Sessions:** SQLite database at `~/.agent-bridge/sessions.db` (WAL mode)
+- **Execution:** the Session Host index links Bridge session IDs to Host state
+  files and process identities. A represented CLI instead registers in
+  `live_sessions`; it need not have an owned `sessions` row. See the
+  [storage map](../../../docs/agent-lifecycle/bridge.md#where-bridge-stores-each-fact).
 - **Config:** YAML at `~/.agent-bridge/config.yaml`
 - **Auth:** Bearer token at `~/.agent-bridge/auth.yaml`
 - **Routing table:** `~/.agent-bridge/active.json` -- the client-facing
