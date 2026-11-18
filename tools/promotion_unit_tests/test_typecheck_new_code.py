@@ -127,8 +127,8 @@ def test_new_code_frontdoor_checks_whole_files_without_admitting_owner(
         ("lib-payload-invocation", "libs/payload-invocation/templates/powershell-shim.tmpl"),
         ("lib-payload-invocation", "libs/agent-procutil/src/agent_procutil/python_cache.py"),
         ("lib-payload-invocation", "libs/payload-invocation/new.py"),
-        ("copilot-extensions-harness", "plugins/copilot-extensions-harness/python-emitted-inputs.json"),
-        ("copilot-extensions-harness", "plugins/copilot-extensions-harness/scripts/new.py"),
+        ("copilot-extensions-maintainer", "plugins/copilot-extensions-maintainer/python-emitted-inputs.json"),
+        ("copilot-extensions-maintainer", "plugins/copilot-extensions-maintainer/scripts/new.py"),
         ("lib-installation-context", "libs/installation-context/_installation_context_new.py"),
     ],
 )
@@ -137,7 +137,7 @@ def test_new_code_selection_preserves_complete_composed_bindings(
 ) -> None:
     prefixes = {
         "lib-payload-invocation": "libs/payload-invocation",
-        "copilot-extensions-harness": "plugins/copilot-extensions-harness/scripts",
+        "copilot-extensions-maintainer": "plugins/copilot-extensions-maintainer/scripts",
         "lib-installation-context": "libs/installation-context",
     }
     prefix = prefixes[owner]
@@ -213,7 +213,7 @@ def test_vendored_installation_view_preserves_local_custody(
     "change",
     [
         "libs/payload-invocation/templates/powershell-shim.tmpl",
-        "plugins/copilot-extensions-harness/python-emitted-inputs.json",
+        "plugins/copilot-extensions-maintainer/python-emitted-inputs.json",
     ],
 )
 def test_new_code_refuses_program_inputs_without_physical_owner(tmp_path: Path, change: str) -> None:

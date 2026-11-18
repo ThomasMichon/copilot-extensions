@@ -82,5 +82,5 @@ plugins/agent-worktrees/src/agent_worktrees/state_root.py:443  pre-existing at r
 plugins/agent-worktrees/src/agent_worktrees/validate.py:109  pre-existing at rule introduction, see #5518
 plugins/agent-worktrees/src/agent_worktrees/worktree_identity.py:366  pre-existing at rule introduction, see #5518 (relocated from __main__.py:5285 by the compatibility-root-decoupling effort's _find_repo_dir migration slice)
 plugins/ai-attribution/scripts/write_session_guidance.py:110  pre-existing at rule introduction, see #5518
-plugins/copilot-extensions-harness/scripts/copilot-mention-guard.py:141  pre-existing at rule introduction, see #5518
-plugins/copilot-extensions-harness/scripts/copilot-mention-guard.py:155  pre-existing at rule introduction, see #5518
+plugins/copilot-extensions-maintainer/scripts/copilot-mention-guard.py:141  pre-existing at rule introduction, see #5518
+plugins/copilot-extensions-maintainer/scripts/copilot-mention-guard.py:155  pre-existing at rule introduction, see #5518

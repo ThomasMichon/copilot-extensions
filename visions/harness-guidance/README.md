@@ -3,7 +3,7 @@
 - **Subject:** Ambient guidance across repositories, plugins, skills, and operator policy
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-11-06
+- **Last revised:** 2026-11-17
 - **Reality docs:** `docs/patterns/session-scoped-dynamic-guidance.md`, `docs/patterns/worktree-scoped-dynamic-guidance.md`, `docs/harness-runbook.md`
 
 ## Purpose & Intent
@@ -78,6 +78,28 @@ Every piece of guidance should have one authoritative owner. Repository-owned
 identity, configuration, and invariants should remain with the repository;
 generic plugin policy should evolve with and be delivered by its plugin; and
 detailed procedures should live in skills.
+
+### charter-bounded-autonomy
+
+Guidance should derive the agent's charter from the operator's assigned product,
+outcome and repositories, not from supporting tools, access or role. Normal
+relevant tests, understood rebases and required fork/PR delivery should remain
+autonomous within an assigned source change. Products may span repositories,
+including implementation libraries; required fork/PR delivery to those
+repositories should not need another generic prompt. A supporting tooling failure
+should not create another source assignment or make the product wait for an
+upstream review, merge, release or rollout.
+
+Consumer awareness and safe diagnosis should remain separate from optional
+source-maintenance procedures. Enabling a maintainer package should make
+procedures available, not grant authority. Explicit source contributions should
+remain possible through repository docs without enabling that package.
+Installer-equivalent local repair, bug reporting and source publication should
+retain separate effect authority. Repair should restore canonical artifacts,
+never patch installed package logic. A grant to resolve harness-focused test
+failures should not become authority to fix every incidental problem.
+Bounded automatic maintenance should
+require an explicit operator charter and named destinations.
 
 ### concise-context-kernel
 

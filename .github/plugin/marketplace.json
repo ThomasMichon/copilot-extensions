@@ -6,13 +6,13 @@
   },
   "metadata": {
     "description": "Copilot CLI plugins for worktree isolation, service lifecycle, inter-agent communication, GitHub Codespaces management, local container fleets, MCP bridging, session logging, context-window handoff, effort planning, budget posture, coordinator-first delegation, publication safety, WSL environment setup, and CLI customization",
-    "version": "1.27.34-dev1"
+    "version": "1.27.35-dev1"
   },
   "plugins": [
     {
       "name": "agent-worktrees",
       "description": "Worktree isolation system for concurrent Copilot CLI sessions - lifecycle management, finalization, cleanup, service discovery, and deployment patterns for monorepos",
-      "version": "1.27.34-dev1",
+      "version": "1.27.35-dev1",
       "source": "plugins/agent-worktrees"
     },
     {
@@ -25,7 +25,7 @@
     {
       "name": "agent-bridge",
       "description": "Live cross-boundary inter-agent communication service - conversation transport, session management, SSE event streaming, agent subprocess spawning, and ACP-over-WebSocket support for external clients",
-      "version": "0.9.477-dev1",
+      "version": "0.9.478-dev1",
       "source": "plugins/agent-bridge"
     },
     {
@@ -86,7 +86,7 @@
     {
       "name": "customizing-copilot",
       "description": "Customize, diagnose, and extend the Copilot CLI - authoring skills, defining sub-agents, registering MCP servers, installing plugins, building an agent control-harness, reviewing customizations, diagnosing startup hangs, hoisting plugin agents around a delegation limitation, componentizing oversized modules, orchestrating multi-file componentization campaigns, authoring <repo>-harness plugins, and setting up an instruction-projection sync worker - with the per-skill folder conventions and Agent Skills best practices; ships twelve focused skills",
-      "version": "0.2.73-dev1",
+      "version": "0.2.74-dev1",
       "source": "plugins/customizing-copilot"
     },
     {
@@ -103,9 +103,16 @@
     },
     {
       "name": "copilot-extensions-harness",
-      "description": "Operator harness for the copilot-extensions repo. Primary: help any consumer identify which local scripts/processes belong to this suite and enforce never-monkey-patch (file a bug upstream or auto-update instead). Secondary: portable contribution, deployment, and clean-room validation guidance plus an ambient pointer to the general-purpose, organization-neutral contribution boundary.",
-      "version": "0.1.36-dev1",
+      "description": "Consumer awareness and diagnosis for copilot-extensions. Identifies artifact ownership and separates authorized installer-equivalent repair from prohibited package-code patches. Dependency failures do not authorize source contributions or upstream publication.",
+      "version": "0.1.37-dev1",
       "source": "plugins/copilot-extensions-harness"
+    },
+    {
+      "name": "copilot-extensions-maintainer",
+      "description": "Opt-in contribution, review, release-triage and clean-room procedures for explicitly assigned copilot-extensions source work. Availability does not expand the operator's charter.",
+      "version": "0.1.1-dev1",
+      "source": "plugins/copilot-extensions-maintainer",
+      "defaultEnabled": false
     },
     {
       "name": "wsl-setup",
@@ -146,7 +153,7 @@
     {
       "name": "agent-conduct-guidance",
       "description": "Independent ambient conduct modules and scoped task-time procedures: useful autonomy and operator pre-clearance, decision-scoped operator questions, maintenance standby, consented elevation, multi-agent authority and custody, headless process hygiene, scratch-space hygiene and secret-pattern masking avoidance. Optional assignment prompt/contract authoring and inert model configuration impose no delegation strategy.",
-      "version": "0.1.43-dev1",
+      "version": "0.1.44-dev1",
       "source": "plugins/agent-conduct-guidance"
     },
     {

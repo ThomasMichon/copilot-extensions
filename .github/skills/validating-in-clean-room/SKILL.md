@@ -9,10 +9,10 @@ description: >
 
 # Repository clean-room validation
 
-Read [the canonical skill](../../../plugins/copilot-extensions-harness/skills/validating-in-clean-room/SKILL.md)
+Read [the canonical skill](../../../plugins/copilot-extensions-maintainer/skills/validating-in-clean-room/SKILL.md)
 in full and follow it for the requested task.
 
-The canonical skill base is `plugins/copilot-extensions-harness/skills/validating-in-clean-room/`,
+The canonical skill base is `plugins/copilot-extensions-maintainer/skills/validating-in-clean-room/`,
 relative to the repository root. Resolve its references, scripts, assets,
 `<skill-base>` and `<skill-dir>` from that directory, not this adapter.
 Do not install or activate a plugin merely to use this source.

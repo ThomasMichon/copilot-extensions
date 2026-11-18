@@ -3,7 +3,7 @@ name: authoring-harness-plugins
 description: >
   Ship an operator-harness plugin for a repo -- the <repo>-harness standard. A
   payload-only plugin, authored by a repo's owner, that provides the skills to
-  work ON that repo (contribute + diagnose), portable to any control repo that
+  consume that repo safely, with optional source-maintenance procedures, portable to any control repo that
   enables it. Use when a repo should ship its own operator skills instead of
   every consumer hand-writing a per-repo narrative.
   Trigger phrases include:
@@ -25,13 +25,42 @@ call site on POSIX; in PowerShell invoke it as
 `& "<agent-worktrees catalog argv[0]>" <args>`.
 
 The **`<repo>-harness`** standard: a repo ships its own *operator harness* — a
-payload-only Copilot CLI plugin that teaches an agent how to work **on** that
-repo. Instead of every downstream control repo hand-writing a per-repo narrative,
+payload-only Copilot CLI plugin that teaches an agent how to consume that
+repo safely. Instead of every downstream control repo hand-writing a per-repo narrative,
 the repo owner authors the operator skills **once**, versions them with the repo,
 and any consumer adopts them with one `enabledPlugins` line.
 
-The reference implementation is **`copilot-extensions-harness`** in the
-copilot-extensions repo — read it as the template.
+The reference implementation is **`copilot-extensions-harness`** with its
+optional **`copilot-extensions-maintainer`** companion in the copilot-extensions
+repo. Read their separate contracts as the template.
+
+## Consumer boundary and optional maintenance
+
+The base `<repo>-harness` owns artifact awareness, diagnosis and safe use.
+During another product's task, supporting tooling/harness source stays frozen.
+The product may span repositories, including implementation libraries; its
+required source changes and fork/PR delivery do not need another generic prompt.
+A failed
+command does not assign a source fix, authorize an upstream issue or PR,
+or make the product wait for upstream review, merge, release or rollout.
+Report the error and offer a bug report at the established destination.
+Reporting, source contribution and local repair have separate authority.
+
+Preserve authorized installer-equivalent local repair: restore canonical
+artifacts using their authentic installer or supported recovery procedure.
+Never patch installed package logic, deployed runtime code or vendor payloads.
+If no supported path remains, identify the blocked step and continue any
+independent authorized work.
+
+Source contribution, review and release procedures may live in an optional
+`<repo>-maintainer` package with `defaultEnabled: false`. Enabling it makes
+procedures available; it grants no task, publication authority or Maintainer
+role. Automatic maintenance requires an explicit bounded operator charter.
+Keep canonical source procedures reachable from repository docs and native
+adapters: an explicit source assignment must not require installing or
+enabling this optional package. That assignment includes normal relevant
+tests, understood rebases and required fork/PR delivery without repeated
+generic approval requests, but not unrelated source or deployment.
 
 ## When to author one
 
@@ -65,7 +94,8 @@ status). Substance in the plugin; keep the narrative thin.
    |---------|-------|----------------|
    | `agent-<thing>` | adds capability `<thing>` to the **general agent** | broadly (infra) |
    | `harness-<thing>` | adds capability `<thing>` to the **general harness** | broadly (infra) |
-   | **`<repo>-harness`** | **harness-side** plugin to work ON / **control** `<repo>` from a control plane | the **control harness**, never `<repo>` itself |
+   | **`<repo>-harness`** | **harness-side** consumer awareness and diagnosis for `<repo>` | the **control harness**, never `<repo>` itself |
+   | `<repo>-maintainer` | optional source-maintenance procedures for assigned work | an explicitly opted-in control harness |
    | `<repo>-agent` | **in-repo** agent capabilities for `<repo>` | `<repo>`'s own venue, never outside it |
 
    A harness plugin authored here is the **`<repo>-harness`** case: it targets a
@@ -148,8 +178,8 @@ Non-negotiables:
   the plugin README's dependency/prerequisite section explicit enough that an
   operator can satisfy those requirements before invoking the agent.
 - **No dead references** — every file/skill/plugin you link must exist.
-- **Bump the manifest + marketplace catalog version together** on any change (README
-  included).
+- **Follow the target's release flow** on every package change, including README
+  changes. In this suite, add a changefile; do not hand-edit existing versions.
 
 `reviewing-customizations` checks structural coherence; this section is the content bar it
 can't fully see.
@@ -161,8 +191,13 @@ plugins/<repo>-harness/
   plugin.json                                  # payload-only manifest
   README.md                                    # overview + the <repo>-harness standard note
   skills/
-    contributing-to-<repo>/SKILL.md            # how to change + land work in the repo
     diagnosing-<repo>/SKILL.md                 # symptom -> cause -> action for its deployed artifacts
+
+plugins/<repo>-maintainer/                     # optional, defaultEnabled: false
+  plugin.json
+  README.md
+  skills/
+    contributing-to-<repo>/SKILL.md             # assigned source changes and required delivery
 ```
 
 `plugin.json` mirrors any payload-only plugin — `name`, `description`,
@@ -226,7 +261,7 @@ are in the copilot-extensions pattern
 for a full build-capable venue, is an optional add-on — **not** required for the
 golden path.)
 
-### What the two skills should contain
+### What the consumer and maintainer skills should contain
 
 **`diagnosing-<repo>` is the harness's primary, hard-guidance skill** — every
 consumer needs it, whether or not it ever contributes. It must give an agent
@@ -239,18 +274,23 @@ two things unconditionally:
 2. **The no-monkey-patch rule.** Never hand-edit an installed/deployed copy or
    a running runtime to work around a bug — that fix is invisible to every
    other consumer and is silently overwritten on the next update. When
-   something is wrong, there are exactly two sanctioned responses: **file a bug
-   upstream** (sanitized per the repo's own publication rules — no PII,
-   internal paths, hostnames, or proprietary context) **or run the repo's
-   auto-update/reset path**. A **symptom → cause → action** table, the key
-   diagnostic commands, and a reset/baseline escape hatch round this out. Lead
-   with **diagnose-before-remediate** discipline throughout.
+   something is wrong, diagnose within the assignment. Supported recovery or
+   installer-equivalent repair may restore canonical artifacts only within
+   existing repair authority; an error does not authorize an update or reset.
+   Report the error and **offer a bug report** at the established destination.
+   Publishing that report needs applicable authority and public-safe content.
+   Source fixes need a separately assigned contribution; do not automatically
+   create an upstream issue/PR or wait for an upstream fix. A
+   **symptom → cause → action** table and bounded diagnostic commands round this
+   out. Lead with **diagnose-before-remediate** discipline throughout.
 
-**`contributing-to-<repo>` is secondary** — it exists for the subset of
-consumers who choose to become contributors with a local checkout. It covers
+**`contributing-to-<repo>` belongs in the optional maintainer package** — it
+serves explicitly assigned source contributions. Repository docs and native
+adapters must expose the same procedure without enabling that package. It covers
 repo layout; the contribution flow (branch/PR or worktree, per the repo's
-policy); the **gotchas that silently swallow work** (for a marketplace repo,
-the mandatory version bump); test/lint/contract gates; deploy-after-merge; and
+policy); required release metadata such as changefiles; test/lint/contract
+gates; normal rebases and fork/PR delivery without generic approval ceremonies;
+separate rollout authority; and
 the "edit the source, never the deployed copy" rule — the contributor-side
 mirror of the no-monkey-patch rule above, for the case where the agent *is*
 about to make a real, versioned fix rather than a throwaway local patch.
@@ -260,9 +300,8 @@ with different triggers.
 
 ## Wire it into the marketplace
 
-Register the new plugin like any other: add a `plugins[]` entry in the repo's
-marketplace catalog and bump the catalog version (a new plugin is a catalog
-change). Follow the repo's own release rules — the harness plugin is versioned by
+Register each package in the marketplace catalog, with the maintainer companion
+disabled by default. Follow the repo's own release rules — the harness plugin is versioned by
 the same pipeline as everything else it ships.
 
 ## How consumers adopt it

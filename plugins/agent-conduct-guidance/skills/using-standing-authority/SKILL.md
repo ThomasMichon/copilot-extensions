@@ -31,6 +31,20 @@ designated issue/PR publication need no extra generic permission question when
 the charter covers them. Diagnose a concrete failure read-only before choosing
 a remedy; a slow review is not a failure. Preserve stricter applicable gates.
 
+Identify the assigned product and designated repositories before classifying a
+prerequisite as in scope. Supporting tools and harnesses are not assigned source
+work merely because they fail. An enabled maintainer plugin or Maintainer role
+does not enlarge the charter. Product tasks keep supporting source frozen:
+diagnose proportionately, use already-authorized canonical local repair, then
+report and offer a bug report. Do not start a source PR or wait for an upstream
+fix. Carry that boundary to workers and successors.
+
+An explicit source-change request includes relevant tests, understood rebases
+and required fork/PR delivery. It is not necessary to activate a maintainer
+plugin or ask generic approval for those ordinary steps. An operator's private
+automatic-maintenance grant applies only to its named source responsibility;
+do not carry it into a different product assignment.
+
 An author agent keeps its full context and git history for the PRs it opened, so
 managing its own PRs and the branches it created is part of that delivery and
 never needs an operator approval prompt. That covers rebasing onto the target

@@ -334,10 +334,18 @@ class _SessionResumeMixin:
                 try:
                     if session.target.worktree_id is None or session.acp_session_id is None:
                         raise ValueError("Retained registration requires its workspace and native identity")
-                    worktree_lineage.register_session(
+                    hosted = None
+                    if recovery_operation is not None:
+                        from .retained_load_acceptance import registration
+
+                        hosted = registration(recovery_operation, session.client)
+                    if not worktree_lineage.register_session(
                         session.target.worktree_id, session.acp_session_id,
-                        pid=session.pid, worktree_dir=session.target.cwd,
-                    )
+                        pid=hosted["child"]["pid"] if hosted is not None else session.pid,
+                        worktree_dir=session.target.cwd,
+                        hosted_activation=hosted,
+                    ):
+                        raise ValueError("Retained native registration was not confirmed")
                 except Exception:
                     await registration_pending(self, session)
                     raise

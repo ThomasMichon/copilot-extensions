@@ -104,7 +104,7 @@ class _PreparationOptions(TypedDict, total=False):
 # repo-wide contract, not something scoped to their own diff) -- see
 # ``changed_plugins``'s own docstring for why these must always be scheduled
 # alongside any change, not merely when their own files are touched.
-_CROSS_PLUGIN_CONTRACT_TESTERS = {"copilot-extensions-harness", "customizing-copilot"}
+_CROSS_PLUGIN_CONTRACT_TESTERS = {"copilot-extensions-maintainer", "customizing-copilot"}
 
 # The PR owner's complete watch contracts outgrew a single 300-second group.
 # Use smaller sequential groups, not a wider item, group, or plugin deadline.
@@ -224,7 +224,7 @@ def changed_plugins(base: str) -> list[str]:
     whenever anything changed at all.
 
     Some plugins' own test suites assert properties about OTHER plugins --
-    e.g. ``copilot-extensions-harness``'s ``test_session_context_declarations.py``
+    e.g. ``copilot-extensions-maintainer``'s ``test_session_context_declarations.py``
     walks every marketplace plugin's manifest and hooks. A PR touching only
     that OTHER plugin never appears in this function's own diff-based
     detection, so on a PR (which schedules only the ``--changed`` set,
@@ -233,7 +233,7 @@ def changed_plugins(base: str) -> list[str]:
     relevant change, but never scheduled, so a real regression it would have
     caught can merge with no red check anywhere
     (ThomasMichon/copilot-extensions#4166 -- delegation-guidance's migration
-    broke copilot-extensions-harness's own contract test, invisible until
+    broke copilot-extensions-maintainer's own contract test, invisible until
     the next push-triggered --all run on dev days later, by which point it
     had stalled the whole promotion pipeline for every unrelated PR).
     Always including these testers keeps that class of contract test in the

@@ -3,6 +3,15 @@
   "version": 1,
   "projections": [
     {
+      "id": "charter-boundary",
+      "deliveryMode": "selector",
+      "template": "instructions/charter-boundary.instructions.md",
+      "destination": ".github/instructions/agent-conduct-guidance/charter-boundary.instructions.md",
+      "customizationKind": "instructions",
+      "applyTo": "**",
+      "legacyMarkers": []
+    },
+    {
       "id": "useful-autonomy",
       "deliveryMode": "selector",
       "template": "instructions/useful-autonomy.instructions.md",

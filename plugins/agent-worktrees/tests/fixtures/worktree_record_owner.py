@@ -3,14 +3,17 @@
 import json
 import os
 from pathlib import Path
+import socket
 import sys
+from typing import Any
 
-root, state, project_name, worktree_id, *argv = sys.argv[1:]
-root, state = Path(root), Path(state)
+root_arg, state_arg, project_name, worktree_id, *argv = sys.argv[1:]
+root, state = Path(root_arg), Path(state_arg)
 sys.path.insert(0, str(root / "plugins/agent-worktrees/src"))
 for library in ("lazy-cli-dispatch", "work-coalescing-singleton", "update-telemetry"):
     sys.path.insert(0, str(root / "libs" / library / "src"))
 from agent_worktrees import config as cfg, tracking
+from agent_worktrees.tracking_lifecycle import create_new_record
 
 project = state / "project"
 records = project / "worktrees"
@@ -24,8 +27,8 @@ config = cfg.Config(
     srcroot=str(state), machine="local", platform="linux", repo_name=project_name,
     repos={project_name: cfg.RepoConfig(anchor=str(state), worktree_root=str(state / "trees"))},
 )
-cfg.detect_platform = lambda: "linux"
-cfg.socket.gethostname = lambda: "local"
+setattr(cfg, "detect_platform", lambda: "linux")
+socket.gethostname = lambda: "local"
 cfg.load_project_config = lambda *a, **k: config
 cfg.load_config = lambda *a, **k: config
 cfg.project_dir = lambda *a, **k: project
@@ -42,7 +45,7 @@ path = records / f"{worktree_id}.yaml"
 if not path.exists():
     checkout = state / "trees" / worktree_id
     checkout.mkdir(parents=True, exist_ok=True)
-    tracking.create_new_record(
+    create_new_record(
         worktree_id, f"worktree/{worktree_id}", str(checkout), project_name,
         "local", "linux", records,
     )
@@ -63,8 +66,22 @@ elif argv == ["snapshot"]:
         "creation_nonce": record.creation_nonce,
         "resources": [item.to_dict() for item in record.resources],
         "head": record.resolved_head_session,
-        "sessions": [item.session_id for item in record.sessions],
+        "sessions": [item.session_id for item in (record.sessions or [])],
     }))
+elif len(argv) == 2 and argv[0] == "seed-ended-native":
+    from agent_worktrees import config_authority
+    from agent_worktrees import tracking_session_registration_write as registration
+    from agent_worktrees import tracking_session_deregistration_write as deregistration
+
+    config_authority.load_project_authority_config = lambda *a, **k: config
+    original = {
+        "worktree_id": worktree_id, "yaml_path": str(path), "session_id": argv[1],
+        "source": "hook:new", "started_at": "first", "source_identity": "native:original",
+    }
+    assert registration.apply_session_register(original)["ok"]
+    assert deregistration.apply_session_deregister({
+        **original, "ended_at": "original-exit",
+    })["lifecycle"] == "ended"
 else:
     if command[:1] in (["record"], ["head-session"]) or command[:2] == ["resource-relationship", "capabilities"]:
         import argparse
@@ -80,7 +97,7 @@ else:
         }[command[0]]
         provider = import_module("agent_worktrees." + module)
         if command[0] == "head-session":
-            provider._all_tracking_dirs = lambda: [records]
+            setattr(provider, "_all_tracking_dirs", lambda: [records])
         if command[0] == "head-session":
             provider.add_head_parser(sub)
         elif command[0] == "resource-relationship":
@@ -97,7 +114,7 @@ else:
     os.environ.pop("PYTEST_CURRENT_TEST", None)
     assert status_monitor_runtime._status_monitor_enabled()
 
-    def resident(kind, payload):
+    def resident(kind: str, payload: dict[str, Any]) -> dict[str, Any]:
         with (state / "resident-calls").open("a", encoding="utf-8") as stream:
             stream.write(json.dumps(payload) + "\n")
         return {"error": "lifecycle", "message": "unqualified resident received session write"}

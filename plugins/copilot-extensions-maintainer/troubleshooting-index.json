@@ -1,0 +1,18 @@
+{
+  "schema": "copilot-extensions.troubleshooting-index",
+  "version": 1,
+  "categories": [
+    {
+      "id": "commented-verdict-handling",
+      "summary": "A PR review verdict came back as a plain comment with no approval/change-request, and it's unclear whether that blocks landing.",
+      "pointer": "`commented-review-verdict.instructions.md` -- check the repo's own review policy first; only advisory absent one",
+      "markers": ["Commented-verdict review fallback", "never gates a merge"]
+    },
+    {
+      "id": "validate-and-promote-failure",
+      "summary": "The `validate-and-promote` release-pipeline workflow (dev-advanced) is red, blocking dev-to-main promotion for every pending contributor.",
+      "pointer": "`validate-and-promote-triage.instructions.md` -- within assigned diagnosis, identify failed jobs and classify known-flake vs. CI-test-bug vs. regression; fix forward only within the assigned source or maintenance scope, otherwise report the blocker and acceptance impact; full runbook in `diagnosing-validate-and-promote-failures`",
+      "markers": ["validate-and-promote", "full - <plugin>", "fix-forward"]
+    }
+  ]
+}
