@@ -217,10 +217,17 @@ class HostIndex:
             lease.release()
 
     @contextmanager
-    def _locked_reload(self) -> Iterator[None]:
+    def _locked_reload(self, *, strict: bool = False) -> Iterator[None]:
         """Reload, mutate and flush under the existing cross-process mutex."""
         with self._locked_index():
-            self._load_or_raise()
+            if strict:
+                # Do not silently fill absent owner fields or drop unknown records on flush.
+                from .host_inventory import read_inventory
+
+                inventory = read_inventory(self._path.absolute())
+                self._records = {record.session_id: record for record in inventory.records}
+            else:
+                self._load_or_raise()
             yield
             self._flush()
 
@@ -349,6 +356,7 @@ class HostIndex:
         owner_pid: int,
         pid_alive: Callable[[int], bool],
         force: bool = False,
+        require_owner_fields: bool = False,
     ) -> HostRecord:
         """Claim ``session_id`` for ``generation``, or raise :class:`ClaimConflict`.
 
@@ -363,8 +371,13 @@ class HostIndex:
         (claiming is about taking over an *existing* record -- use
         :meth:`register` to create one).
         """
-        with self._locked_reload():
+        with self._locked_reload(strict=require_owner_fields):
             rec = self._records[session_id]
+            if require_owner_fields and (
+                bool(rec.owner_generation) != bool(rec.owner_pid) or rec.owner_pid > 0x7fff_ffff
+                or (rec.owner_generation == generation and rec.owner_pid != owner_pid)
+            ):
+                raise HostInventoryError("Incomplete or inconsistent Session Host owner claim")
             decide_acquire(
                 rec, key=session_id, generation=generation, owner_pid=owner_pid,
                 pid_alive=pid_alive, force=force,

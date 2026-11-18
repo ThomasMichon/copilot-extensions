@@ -699,6 +699,11 @@ class _SessionCoreMixin(_SessionDrainGateMixin):
             existing = self._sessions.get(sid) if merge else None
             if existing is not None and self._session_metadata_in_use(existing, include_readers=not promote_inherited):
                 continue
+            if promote_inherited:
+                from .passive_maintenance import may_refresh_inherited
+
+                if not may_refresh_inherited(cast("SessionManager", self), row):
+                    continue
 
             if status == SessionStatus.ENDED.value and sid not in retained and not promote_inherited:
                 if read_only:

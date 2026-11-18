@@ -7,13 +7,40 @@ import os
 import sqlite3
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from fastapi import FastAPI
+from single_instance_lease.supersession import pid_alive
 from zdd import process_exit, routing
+from zdd.claims import ClaimConflict
 from zdd.diagnostics import process_start_time
 
 from .config import config_dir
-from .session_manager import SessionManager
+from .session_status import SessionStatus
+
+if TYPE_CHECKING:
+    from .session_manager import SessionManager
+
+
+def may_refresh_inherited(manager: SessionManager, row: dict[str, Any]) -> bool:
+    """Terminal/dormant metadata needs no transport. Otherwise acquire the Host."""
+    status = row["status"]
+    if status in {SessionStatus.ENDED.value, SessionStatus.FAILED.value} or (
+        status == SessionStatus.STOPPED.value and (
+            row.get("runtime_custody_json") is not None or not row.get("background_recovery_enabled", 1)
+        )
+    ):
+        return True
+    if row.get("runtime_custody_json") is not None:
+        return False
+    try:
+        manager._host_index.claim(
+            row["id"], generation=manager._generation_id, owner_pid=os.getpid(),
+            pid_alive=pid_alive, require_owner_fields=True,
+        )
+    except (ClaimConflict, KeyError):
+        return False
+    return True
 
 
 def refresh_inherited_sessions(manager: SessionManager) -> None:
