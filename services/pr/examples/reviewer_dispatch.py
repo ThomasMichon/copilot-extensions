@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol
+from urllib.parse import urlsplit
 
 if TYPE_CHECKING:
     from services.pr.examples.reviewer_feed import Proposal, Scope, Task
@@ -21,6 +22,32 @@ class Client(Protocol):
         fields: dict[str, Any], sender: str | None, wake: bool, message: str,
         expected_status: str, expected_revision: str,
     ) -> dict[str, Any]: ...
+
+
+def reviewer_task_key(
+    target: str, *, land: Literal["self", "author"],
+) -> Callable[[int], str]:
+    """Bind the native recipe to a trusted HTTPS target, not a feed field."""
+    address = urlsplit(target)
+    parts = address.path.lstrip("/").split("/")
+    if (
+        address.scheme != "https" or not address.hostname
+        or address.username is not None or address.password is not None
+        or address.query or address.fragment or target.endswith("/")
+        or any(char.isspace() for char in target)
+        or len(parts) < 2 or any(part in {"", ".", ".."} for part in parts)
+    ):
+        raise ValueError("configured forge-qualified HTTPS repository required")
+    address.port
+    from agent_dispatch.recipes.registry import dedup_key_for, render_recipe
+
+    def key(pr: int) -> str:
+        if type(pr) is not int or pr < 1:
+            raise ValueError("positive PR number required")
+        rendered = render_recipe("reviewer", {"repo": target, "pr": str(pr), "land": land})
+        return dedup_key_for(rendered)
+
+    return key
 
 
 def _scope(scope: Scope) -> dict[str, str]:

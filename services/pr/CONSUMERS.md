@@ -184,11 +184,14 @@ It is source-only example code, not an installed service command or a new
 dependency of the foreground host. Select the existing Dispatch client and
 its finite transport deadline explicitly in the embedding.
 
-Supply a trusted harness `lane` and a `task_key(pr)` function using the existing
-`recipes.render_recipe("reviewer", {"repo": configured_target, "pr": str(pr),
-"land": configured_landing})` followed by `recipes.dedup_key_for`.
-Use an explicitly forge-qualified `configured_target` for non-GitHub targets;
-do not derive the harness lane, target or landing policy from a feed body.
+Supply a trusted harness `lane` and bind `task_key` with the example's
+`reviewer_task_key(configured_target, land=configured_landing)`. It delegates to
+the existing `recipes.render_recipe` and `recipes.dedup_key_for`, preserving
+the native target identity across landing-policy changes. This narrow example
+requires an explicit HTTPS repository target, including for GitHub; it rejects
+bare `owner/repo` shorthand instead of silently assigning a non-GitHub target
+to GitHub. Do not derive the harness lane, target or landing policy from a feed
+body.
 Pass `retained_task` as the planner's lookup callback. It performs exact
 lane-scoped association lookup, then rereads the same task and checks its
 dedup key, complete owner-reported `draft_scope`, current steering revision,
@@ -213,10 +216,13 @@ another. Preparation is not acceptance, a wake, freshness proof for buffered
 PR evidence or permission to act.
 
 The [source controls](tests/test_reviewer_dispatch_example.py) exercise actual
-cache pages, native task wire-shaped doubles and the existing native prepared
-steering implementation, including capability refusal and detached request
-identity. They do not qualify a live coordinator transport, actual recipe
-target configuration, durable request-owner storage or consumer activation.
+cache pages, native task wire-shaped doubles, the existing native reviewer
+recipe, exact-lookup request construction and prepared steering implementation.
+They cover capability refusal before the task request, distinct forge targets,
+stable task identity across landing-policy changes and detached request identity.
+The HTTP boundary remains a GET-only double; these controls do not qualify a
+live coordinator transport, a deployed target configuration, durable request-owner
+storage or consumer activation.
 
 ## Inert qualification and operational exits
 
