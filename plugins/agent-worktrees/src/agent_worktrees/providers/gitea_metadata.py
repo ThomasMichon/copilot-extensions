@@ -27,6 +27,8 @@ def _title_safe(current: str, requested: str, draft: bool,
         raise ProviderError("Native draft prefix is unrecognized; retain title and edit body only")
     if not draft and any(original.startswith(p) for p in _SERVER_NATIVE_WIP_PREFIXES):
         raise ProviderError("Native draft evidence contradicts the current title")
+    if not draft and any(desired.startswith(p) for p in _SERVER_NATIVE_WIP_PREFIXES):
+        raise ProviderError("Metadata title cannot introduce a native draft prefix")
     if matched:
         prefix = max(matched, key=len)
         if not desired.startswith(prefix.casefold()):

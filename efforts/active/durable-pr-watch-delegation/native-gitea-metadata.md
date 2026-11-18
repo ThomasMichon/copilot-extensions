@@ -167,5 +167,7 @@ Focused controls cover overlapping/Unicode prefix cases, actual export/load
 and token resolution with pre-dispatch refusal, and body files larger than
 the single-argument limit.
 The final Gitea metadata plus unchanged legacy Gitea provider packet passes
-95 selected cases. The legacy transport retains its existing default; only
+97 selected cases. The legacy transport retains its existing default; only
 metadata opts into stdin JSON.
+Native draft-prefix introduction is checked independently of configured
+prefix matching, so a broad local WIP hold cannot mask a ready-to-draft edit.

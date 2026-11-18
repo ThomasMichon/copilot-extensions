@@ -147,6 +147,8 @@ def test_wrong_malformed_or_terminal_evidence_never_writes(
         ("hold before", False, "after", ("hold ",), False),
         ("Draft: before", False, "Draft: blocked after", ("draft: blocked",), False),
         ("\u00df before", False, "ss after", ("\u00df",), False),
+        ("working before", False, "WIP: after", ("w",), False),
+        ("[progress] before", False, "[WIP] after", ("[",), False),
     ],
 )
 def test_title_preserves_native_and_configured_draft_wip_semantics(
