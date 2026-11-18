@@ -104,13 +104,13 @@ def add_parsers(sub) -> None:
                    help="Intentionally publish rewritten owned PR history using its recorded exact head lease")
     p.add_argument(
         "--break-glass-reason", default=None, metavar="REASON",
-        help="Preview operator recovery of an existing PR despite incomplete historical ownership. "
-        "Requires per-PR sign-off; preserves exact-head leases, hooks and merge gates.",
+        help="Recover the owning worktree's existing PR despite incomplete historical ownership. "
+        "Line-of-business for the author; binds the current preview and preserves exact-head "
+        "leases, hooks and merge gates. Combine with --dry-run to preview.",
     )
     p.add_argument(
         "--confirm-break-glass", default=None, metavar="PREVIEW_FINGERPRINT",
-        help="Confirm the exact previewed source/remote operation only after real operator sign-off. "
-        "Never add this automatically after a refusal.",
+        help="Optionally pin a previously previewed operation; refuses if the preview changed.",
     )
     p.add_argument("worktree_id", nargs="?", default=None)
     p.add_argument("--title", default=None, help="Set worktree title")

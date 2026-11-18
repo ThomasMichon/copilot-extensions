@@ -12,7 +12,7 @@ from agent_worktrees import config as cfg
 from agent_worktrees import finalize, git_collab, git_ops, pr_break_glass, pr_ops, pr_publish, pr_recovery, pr_recovery_plan, pr_rewrite, tracking
 from agent_worktrees.config import Config
 from agent_worktrees.providers.base import PullResult
-from test_pr_break_glass import _copy_recovered_pr, _recovered_pr
+from test_pr_break_glass import _copy_recovered_pr, _recovered_pr, recovery_preview
 from test_pr_break_glass import _recovered_pr_seed as _recovered_pr_seed
 from test_pr_break_glass import recovered_pr as recovered_pr
 
@@ -36,6 +36,9 @@ def record(wid: str) -> tracking.WorktreeRecord:
 
 
 def preview(wid: str, config: Config, confirmation: str | None = None) -> dict:
+    """Return the bound preview, or the refusal's fresh preview for a stale pin."""
+    if confirmation is None:
+        return recovery_preview(wid, config, REASON)
     with pytest.raises(pr_break_glass.ConfirmationRequired) as required:
         finalize.push_changes(
             wid, config, break_glass_reason=REASON, confirm_break_glass=confirmation,
@@ -86,6 +89,8 @@ def test_confirmed_advanced_head_retains_actual_objects_and_original_evidence(
     assert record(wid).pr.head_sha == source
     audit = json.loads(next(metadata(wt).glob("*break-glass*.json")).read_text())
     assert audit["operation"] == json.loads(json.dumps(operation["operation"]))
+    assert audit["confirmation_binding"] == "explicit"
+    assert audit["authorization_basis"] == pr_break_glass.EXPLICIT_BASIS
     assert audit["saved_publication"]["head_sha"] == saved
     assert audit["saved_publication"]["branch"] == branch
     assert audit["outcome"] == "succeeded"
@@ -553,7 +558,7 @@ def test_settlement_failures_report_bookkeeping_effect_without_claiming_a_push(
         assert "bookkeeping was settled without a push; audit needs reconciliation" in text
 
 
-def test_advanced_head_cli_returns_actual_plan_with_exit_two(
+def test_advanced_head_cli_refuses_stale_pin_with_actual_plan(
     recovered_pr: RecoveredPR, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str],
 ) -> None:
     from agent_worktrees import __main__ as cli, finalize_cli
@@ -564,12 +569,13 @@ def test_advanced_head_cli_returns_actual_plan_with_exit_two(
     monkeypatch.chdir(wt)
     capfd.readouterr()
     args = cli.build_parser().parse_args([
-        "push-changes", wid, "--break-glass-reason", REASON, "--json",
+        "push-changes", wid, "--break-glass-reason", REASON,
+        "--confirm-break-glass", "0" * 64, "--json",
     ])
     assert finalize_cli.cmd_push_changes(args) == 2
     payload = json.loads(capfd.readouterr().out)
     assert payload["success"] is False
-    assert payload["confirmation_required"] is True
+    assert payload["preview_changed"] is True
     assert payload["operation"]["expected_head"] == actual
     assert payload["operation"]["saved_head"] == saved
     assert payload["operation"]["action"] == "rewrite"

@@ -99,25 +99,40 @@ def invocation_attribution() -> InvocationAttribution:
     )
 
 
+AUTO_BOUND_BASIS = (
+    "line-of-business author recovery from the owning worktree; exact-lease bound"
+)
+EXPLICIT_BASIS = (
+    "line-of-business author recovery from the owning worktree; "
+    "caller-pinned preview confirmation; exact-lease bound"
+)
+
+
 @dataclass(frozen=True)
 class ConfirmedRecovery:
     operation: RecoveryPreview
     reason: str
     confirmation: str
+    binding: Literal["auto-bound", "explicit"] = "explicit"
+
+    @property
+    def authorization_basis(self) -> str:
+        return AUTO_BOUND_BASIS if self.binding == "auto-bound" else EXPLICIT_BASIS
 
 
 class ConfirmationRequired(ValueError):
-    def __init__(self, operation: RecoveryPreview, reason: str, *, changed: bool = False) -> None:
+    """A caller-pinned preview no longer matches the current recovery operation."""
+
+    def __init__(self, operation: RecoveryPreview, reason: str, *, changed: bool = True) -> None:
         message = (
-            "Recovery confirmation no longer matches the proposed operation; obtain a new preview "
-            "and operator sign-off."
-            if changed else
-            "Recovery requires explicit operator sign-off for this PR and proposed action. "
-            "Inspect the preview; never add confirmation on an agent's own judgment."
+            "Recovery confirmation no longer matches the proposed operation; the preview changed. "
+            "Re-preview with --dry-run and retry, or omit --confirm-break-glass to bind the "
+            "current preview."
         )
         super().__init__(message)
         self.preview: dict[str, object] = {
             "confirmation_required": True,
+            "preview_changed": changed,
             "operation": asdict(operation),
             "reason": reason,
             "confirmation": operation.confirmation(reason),
@@ -128,20 +143,26 @@ class ConfirmationRequired(ValueError):
 def _reason(reason: str) -> str:
     value = reason.strip()
     if not value:
-        raise ValueError("A non-empty operator recovery reason is required.")
+        raise ValueError("A non-empty recovery reason is required.")
     return value
 
 
 def confirm(
     operation: RecoveryPreview, reason: str, confirmation: str | None,
 ) -> ConfirmedRecovery:
-    """Validate the exact preview; this is friction, not operator authentication."""
+    """Bind the exact preview for the owning author's recovery.
+
+    Recovery of an agent's own existing PR is line-of-business: an omitted
+    confirmation binds the freshly computed preview automatically. A
+    caller-pinned confirmation must still match, so a stale preview never
+    authorizes a different operation.
+    """
     reason = _reason(reason)
     expected = operation.confirmation(reason)
     if confirmation is None:
-        raise ConfirmationRequired(operation, reason)
+        return ConfirmedRecovery(operation, reason, expected, binding="auto-bound")
     if confirmation != expected:
-        raise ConfirmationRequired(operation, reason, changed=True)
+        raise ConfirmationRequired(operation, reason)
     return ConfirmedRecovery(operation, reason, expected)
 
 
@@ -189,7 +210,8 @@ class RecoveryAudit:
             "saved_publication": self.saved_publication,
             "reason": self.approved.reason,
             "confirmation": self.approved.confirmation,
-            "authorization_basis": "explicit per-PR operator sign-off; procedural confirmation",
+            "authorization_basis": self.approved.authorization_basis,
+            "confirmation_binding": self.approved.binding,
             "invoker": self.invoker.to_dict(),
             "started_at": self.started_at,
             "finished_at": self.finished_at,

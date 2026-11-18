@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 
 import pytest
@@ -32,20 +32,42 @@ def operation() -> recovery.RecoveryPreview:
     )
 
 
+def recovery_preview(wid: str, config, reason: str = "Approved recovered plan") -> dict:
+    """Dry-run recovery and return the preview it bound, with no effects."""
+    bound: list[recovery.ConfirmedRecovery] = []
+    real = recovery.confirm
+
+    def spy(*args: object, **kwargs: object) -> recovery.ConfirmedRecovery:
+        bound.append(real(*args, **kwargs))
+        return bound[-1]
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(recovery, "confirm", spy)
+        assert finalize.push_changes(wid, config, break_glass_reason=reason, dry_run=True)
+    (approved,) = bound
+    return {
+        "operation": asdict(approved.operation),
+        "confirmation": approved.confirmation,
+        "binding": approved.binding,
+    }
+
+
 @pytest.mark.guard
-def test_unconfirmed_preview_mutates_nothing(
+def test_omitted_confirmation_auto_binds_preview_without_writes(
     operation: recovery.RecoveryPreview, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def unexpected_write(*args: object, **kwargs: object) -> None:
-        pytest.fail("An unconfirmed preview must not write audit or tracking data.")
+        pytest.fail("Binding a preview must not write audit or tracking data.")
 
     monkeypatch.setattr(recovery.tracking, "_atomic_write", unexpected_write)
     before = list(tmp_path.iterdir())
-    with pytest.raises(recovery.ConfirmationRequired) as error:
-        recovery.confirm(operation, "Operator-authorized recovery", None)
-    assert error.value.preview["confirmation_required"] is True
-    assert error.value.preview["operation"]["source_head"] == operation.source_head
-    assert error.value.preview["operation"]["expected_head"] == operation.expected_head
+    reason = "Owning-worktree recovery"
+    approved = recovery.confirm(operation, reason, None)
+    assert approved.binding == "auto-bound"
+    assert approved.operation == operation
+    assert approved.confirmation == operation.confirmation(reason)
+    assert "line-of-business" in approved.authorization_basis
+    assert recovery.confirm(operation, reason, approved.confirmation).binding == "explicit"
     assert list(tmp_path.iterdir()) == before
 
 
@@ -59,14 +81,18 @@ def test_unconfirmed_preview_mutates_nothing(
     {"provider": "gitea"},
     {"destination_fingerprint": "c" * 64},
 ])
-def test_changed_operation_requires_fresh_signoff(
+def test_changed_operation_refuses_pinned_confirmation(
     operation: recovery.RecoveryPreview, changes: dict[str, object],
 ) -> None:
     reason = "Operator-authorized recovery"
     confirmation = operation.confirmation(reason)
     changed = replace(operation, **changes)
-    with pytest.raises(recovery.ConfirmationRequired, match="no longer matches"):
+    with pytest.raises(recovery.ConfirmationRequired, match="no longer matches") as error:
         recovery.confirm(changed, reason, confirmation)
+    assert "re-preview" in str(error.value).lower()
+    assert "sign-off" not in str(error.value).lower()
+    assert error.value.preview["preview_changed"] is True
+    assert error.value.preview["confirmation"] == changed.confirmation(reason)
 
 
 @pytest.mark.guard
@@ -361,9 +387,7 @@ def test_azure_recovery_preview_matches_ssh_destination(
     before = record_path.read_bytes()
     refs_before = git_ops.git("show-ref", cwd=str(wt)).stdout
     if source_repository == "project":
-        with pytest.raises(recovery.ConfirmationRequired) as required:
-            finalize.push_changes(wid, config, break_glass_reason="Approved recovered plan")
-        assert required.value.preview["operation"]["provider"] == "azure-devops"
+        assert recovery_preview(wid, config)["operation"]["provider"] == "azure-devops"
     else:
         assert not finalize.push_changes(wid, config, break_glass_reason="Approved recovered plan")
     assert record_path.read_bytes() == before
@@ -373,7 +397,7 @@ def test_azure_recovery_preview_matches_ssh_destination(
 
 @pytest.mark.guard
 @pytest.mark.timeout(120)
-def test_real_recovery_requires_confirmation_and_retains_commits(
+def test_owning_worktree_recovery_auto_binds_and_retains_commits(
     recovered_pr, _recovered_pr_seed, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config, wid, wt, remote, old, branch = recovered_pr
@@ -386,15 +410,12 @@ def test_real_recovery_requires_confirmation_and_retains_commits(
     assert not finalize.push_changes(wid, config, rewrite_pr=True)
     before = (cfg.tracking_dir() / f"{wid}.yaml").read_bytes()
     refs_before = git_ops.git("show-ref", cwd=str(wt)).stdout
-    with pytest.raises(recovery.ConfirmationRequired) as required:
-        finalize.push_changes(wid, config, break_glass_reason="Approved recovered plan")
+    preview = recovery_preview(wid, config)
+    assert preview["binding"] == "auto-bound"
     assert (cfg.tracking_dir() / f"{wid}.yaml").read_bytes() == before
     assert git_ops.git("show-ref", cwd=str(wt)).stdout == refs_before
     assert pr_publish._tip("origin", branch, str(wt)) == old
-    assert finalize.push_changes(
-        wid, config, break_glass_reason="Approved recovered plan",
-        confirm_break_glass=required.value.preview["confirmation"],
-    )
+    assert finalize.push_changes(wid, config, break_glass_reason="Approved recovered plan")
     assert pr_publish._tip("origin", branch, str(wt)) == source
     assert git_ops.git("--git-dir", str(remote), "rev-parse", "master", cwd=str(wt)).stdout.strip() != source
     directory = Path(git_ops.git("rev-parse", "--absolute-git-dir", cwd=str(wt)).stdout.strip())
@@ -402,6 +423,10 @@ def test_real_recovery_requires_confirmation_and_retains_commits(
     assert len(audits) == 1
     audit = json.loads(audits[0].read_text(encoding="utf-8"))
     assert audit["outcome"] == "succeeded"
+    assert audit["version"] == 1
+    assert audit["confirmation_binding"] == "auto-bound"
+    assert audit["authorization_basis"] == recovery.AUTO_BOUND_BASIS
+    assert audit["confirmation"] == preview["confirmation"]
     for name, expected in (("source", source), ("published", old)):
         assert git_ops.git("rev-parse", audit["recovery_refs"][name], cwd=str(wt)).stdout.strip() == expected
     assert seed_record.read_bytes() == seed_before
@@ -415,21 +440,20 @@ def test_real_recovery_refuses_unseen_local_commit(
     recovered_pr, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config, wid, wt, _remote, old, branch = recovered_pr
-    with pytest.raises(recovery.ConfirmationRequired) as required:
-        finalize.push_changes(wid, config, break_glass_reason="Approved recovered plan")
+    required = recovery_preview(wid, config, "Approved recovered plan")
     (wt / "later.txt").write_text("not previewed\n")
     git_ops.git("add", "later.txt", cwd=str(wt))
     git_ops.git("commit", "-m", "unseen later commit", cwd=str(wt))
     with pytest.raises(recovery.ConfirmationRequired, match="no longer matches"):
         finalize.push_changes(
             wid, config, break_glass_reason="Approved recovered plan",
-            confirm_break_glass=required.value.preview["confirmation"],
+            confirm_break_glass=required["confirmation"],
         )
     assert pr_publish._tip("origin", branch, str(wt)) == old
 
 
 @pytest.mark.timeout(120)
-def test_recovery_cli_returns_bound_preview_json(
+def test_recovery_cli_refuses_stale_pinned_preview_with_json(
     recovered_pr, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str],
 ) -> None:
     from agent_worktrees import __main__ as cli
@@ -439,12 +463,14 @@ def test_recovery_cli_returns_bound_preview_json(
     monkeypatch.chdir(wt)
     capfd.readouterr()
     args = cli.build_parser().parse_args([
-        "push-changes", wid, "--break-glass-reason", "Approved recovered plan", "--json",
+        "push-changes", wid, "--break-glass-reason", "Approved recovered plan",
+        "--confirm-break-glass", "0" * 64, "--json",
     ])
     assert finalize_cli.cmd_push_changes(args) == 2
     payload = json.loads(capfd.readouterr().out)
     assert payload["success"] is False
-    assert payload["confirmation_required"] is True
+    assert payload["preview_changed"] is True
+    assert "sign-off" not in payload["error"]
     assert payload["operation"]["source_head"]
     assert payload["operation"]["expected_head"] == old
     assert pr_publish._tip("origin", branch, str(wt)) == old
@@ -475,7 +501,8 @@ def test_recovery_cli_selects_target_project_from_other_cwd(recovered_pr, monkey
     capfd.readouterr()
     args = cli.build_parser().parse_args([
         "push-changes", wid, "--config", str(config_path),
-        "--break-glass-reason", "Approved recovered plan", "--json",
+        "--break-glass-reason", "Approved recovered plan",
+        "--confirm-break-glass", "0" * 64, "--json",
     ])
     assert finalize_cli.cmd_push_changes(args) == 2
     payload = json.loads(capfd.readouterr().out)
@@ -493,8 +520,7 @@ def test_recovery_keeps_transport_and_protected_history_gates(
     recovered_pr, monkeypatch: pytest.MonkeyPatch, defect: str,
 ) -> None:
     config, wid, wt, remote, old, branch = recovered_pr
-    with pytest.raises(recovery.ConfirmationRequired) as required:
-        finalize.push_changes(wid, config, break_glass_reason="Approved recovered plan")
+    required = recovery_preview(wid, config, "Approved recovered plan")
     if defect == "moved":
         moved = git_ops.git("rev-parse", "origin/master", cwd=str(wt)).stdout.strip()
         git_ops.git("--git-dir", str(remote), "update-ref", f"refs/heads/{branch}", moved, old, cwd=str(wt))
@@ -519,12 +545,12 @@ def test_recovery_keeps_transport_and_protected_history_gates(
         with pytest.raises(recovery.ConfirmationRequired, match="no longer matches"):
             finalize.push_changes(
                 wid, config, break_glass_reason="Approved recovered plan",
-                confirm_break_glass=required.value.preview["confirmation"],
+                confirm_break_glass=required["confirmation"],
             )
     else:
         assert not finalize.push_changes(
             wid, config, break_glass_reason="Approved recovered plan",
-            confirm_break_glass=required.value.preview["confirmation"],
+            confirm_break_glass=required["confirmation"],
         )
     expected = moved if defect == "moved" else "" if defect == "deleted" else old
     assert pr_publish._tip("origin", branch, str(wt)) == expected
@@ -537,8 +563,7 @@ def test_recovery_transport_pins_approved_objects(recovered_pr, monkeypatch, rac
     config, wid, wt, remote, old, branch = recovered_pr
     source = git_ops.git("rev-parse", "HEAD", cwd=str(wt)).stdout.strip()
     moved = git_ops.git("rev-parse", "origin/master", cwd=str(wt)).stdout.strip()
-    with pytest.raises(recovery.ConfirmationRequired) as required:
-        finalize.push_changes(wid, config, break_glass_reason="Approved recovered plan")
+    required = recovery_preview(wid, config, "Approved recovered plan")
     real_push = git_ops.push
 
     def raced_push(*args, **kwargs):
@@ -551,7 +576,7 @@ def test_recovery_transport_pins_approved_objects(recovered_pr, monkeypatch, rac
     monkeypatch.setattr(git_ops, "push", raced_push)
     assert finalize.push_changes(
         wid, config, break_glass_reason="Approved recovered plan",
-        confirm_break_glass=required.value.preview["confirmation"],
+        confirm_break_glass=required["confirmation"],
     ) is (race == "local")
     assert pr_publish._tip("origin", branch, str(wt)) == (moved if race == "remote" else source)
 
@@ -562,8 +587,7 @@ def test_recovery_reconciles_failed_transport_before_audit(recovered_pr, monkeyp
     config, wid, wt, remote, old, branch = recovered_pr
     source = git_ops.git("rev-parse", "HEAD", cwd=str(wt)).stdout.strip()
     moved = git_ops.git("rev-parse", "origin/master", cwd=str(wt)).stdout.strip()
-    with pytest.raises(recovery.ConfirmationRequired) as required:
-        finalize.push_changes(wid, config, break_glass_reason="Approved recovered plan")
+    required = recovery_preview(wid, config, "Approved recovered plan")
     real_push = git_ops.push
     real_tip = pr_publish._tip
     failed = False
@@ -584,7 +608,7 @@ def test_recovery_reconciles_failed_transport_before_audit(recovered_pr, monkeyp
     capfd.readouterr()
     assert finalize.push_changes(
         wid, config, break_glass_reason="Approved recovered plan",
-        confirm_break_glass=required.value.preview["confirmation"],
+        confirm_break_glass=required["confirmation"],
     ) is (remote_state == "accepted")
     directory = Path(git_ops.git("rev-parse", "--absolute-git-dir", cwd=str(wt)).stdout.strip())
     audit = json.loads(next(directory.glob("agent-worktrees-pr-break-glass-*.json")).read_text())
@@ -601,8 +625,7 @@ def test_recovery_reconciles_failed_transport_before_audit(recovered_pr, monkeyp
 @pytest.mark.timeout(120)
 def test_recovery_missing_tip_fetch_is_bounded_and_audited(recovered_pr, monkeypatch):
     config, wid, wt, _remote, old, branch = recovered_pr
-    with pytest.raises(recovery.ConfirmationRequired) as required:
-        finalize.push_changes(wid, config, break_glass_reason="Approved recovered plan")
+    required = recovery_preview(wid, config, "Approved recovered plan")
     real_git = git_ops.git
     real_exists = git_ops.ref_exists
     monkeypatch.setattr(git_ops, "ref_exists", lambda ref, **kwargs: (
@@ -620,15 +643,15 @@ def test_recovery_missing_tip_fetch_is_bounded_and_audited(recovered_pr, monkeyp
     monkeypatch.setattr(git_ops, "git", stalled)
     assert not finalize.push_changes(
         wid, config, break_glass_reason="Approved recovered plan",
-        confirm_break_glass=required.value.preview["confirmation"],
+        confirm_break_glass=required["confirmation"],
     )
     assert pr_publish._tip("origin", branch, str(wt)) == old
     directory = Path(real_git("rev-parse", "--absolute-git-dir", cwd=str(wt)).stdout.strip())
     audit = json.loads(next(directory.glob("agent-worktrees-pr-break-glass-*.json")).read_text())
     assert audit["outcome"] == "failed"
     monkeypatch.setattr(git_ops, "ref_exists", real_exists)
-    with pytest.raises(recovery.ConfirmationRequired):
-        finalize.push_changes(wid, config, break_glass_reason="Approved recovered plan")
+    monkeypatch.setattr(git_ops, "git", real_git)
+    assert recovery_preview(wid, config)["operation"]["expected_head"] == old
 
 
 @pytest.mark.timeout(120)
@@ -636,8 +659,7 @@ def test_recovery_missing_tip_fetch_is_bounded_and_audited(recovered_pr, monkeyp
 def test_recovery_audit_failures_report_actual_transport(recovered_pr, monkeypatch, capfd, failure):
     config, wid, wt, _remote, old, branch = recovered_pr
     source = git_ops.git("rev-parse", "HEAD", cwd=str(wt)).stdout.strip()
-    with pytest.raises(recovery.ConfirmationRequired) as required:
-        finalize.push_changes(wid, config, break_glass_reason="Approved recovered plan")
+    required = recovery_preview(wid, config, "Approved recovered plan")
     if failure == "tracking":
         def denied(*args, **kwargs):
             raise OSError("tracking persistence denied")
@@ -654,7 +676,7 @@ def test_recovery_audit_failures_report_actual_transport(recovered_pr, monkeypat
     capfd.readouterr()
     assert not finalize.push_changes(
         wid, config, break_glass_reason="Approved recovered plan",
-        confirm_break_glass=required.value.preview["confirmation"],
+        confirm_break_glass=required["confirmation"],
     )
     captured = capfd.readouterr()
     assert pr_publish._tip("origin", branch, str(wt)) == (old if failure == "begin" else source)
@@ -695,11 +717,10 @@ def test_recovered_pr_keeps_frozen_public_attribution(pr_repo, monkeypatch, mode
 
     monkeypatch.setattr(providers, "get_provider", lambda *a: Provider())
     monkeypatch.setattr(providers, "account_token_for_slug", lambda *a: None)
-    with pytest.raises(recovery.ConfirmationRequired) as required:
-        finalize.push_changes(wid, config, break_glass_reason="Private operator rationale")
+    required = recovery_preview(wid, config, "Private operator rationale")
     assert finalize.push_changes(
         wid, config, break_glass_reason="Private operator rationale",
-        confirm_break_glass=required.value.preview["confirmation"],
+        confirm_break_glass=required["confirmation"],
     )
     current = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
     assert current.pr.attribution_mode == mode

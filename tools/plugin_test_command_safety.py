@@ -40,6 +40,10 @@ class UnsafeTestCommand(RuntimeError):
     """The command cannot safely target resources on a shared test host."""
 
 
+class UnexecutableTestCommand(UnsafeTestCommand, ValueError):
+    """The command can never execute; matches the OS's own ``ValueError`` refusal."""
+
+
 def _within(path: Path, root: Path) -> bool:
     try:
         return path.resolve().is_relative_to(root.resolve())
@@ -80,7 +84,7 @@ def _tokens(command: object) -> list[str]:
     if isinstance(command, (str, bytes)):
         text = os.fsdecode(command)
         if "\0" in text:
-            raise UnsafeTestCommand("cannot inspect a test command containing NUL")
+            raise UnexecutableTestCommand("cannot inspect a test command containing NUL (embedded null character)")
         if not text.strip():
             return []
         if os.name == "nt":
