@@ -4,6 +4,7 @@ import {
   createRetainedInbox, retainedDeliverySelected, retainedConsumption,
 } from "../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/retained-delivery.mjs";
 import { isRemoteDriverSource } from "../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/remote-driver.mjs";
+import { PendingInputNotice } from "../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/delivery.mjs";
 
 const contract = "retained-inbox-v1";
 const sid = "native-a";
@@ -128,6 +129,55 @@ function fixture() {
   });
   return f;
 }
+
+test("accepted retained recovery clears submission attention without consuming or resending", async () => {
+  const f = fixture();
+  f.add();
+  const notice = new PendingInputNotice({ now: () => f.clock, reminderMs: 0 });
+  const options = {
+    onPending: (target, messages) => notice.offered(target, messages),
+    onSubmitted: (target, id) => notice.confirmed(target, id),
+  };
+  const inbox = f.consumer("consumer-a", options);
+  await inbox.tick(sid);
+  assert.equal(f.rows[0].handoff_stage, "sdk_accepted");
+  assert.equal(notice.pending.size, 0);
+  // A stale local offer and a new consumer must reconcile the original receipt.
+  notice.offered(sid, [{ id: 1 }]);
+  await f.consumer("consumer-b", options).tick(sid, { allowSend: false });
+  assert.equal(notice.pending.size, 0);
+  assert.equal(f.sends.length, 1);
+  assert.equal(f.rows[0].handoff_stage, "sdk_accepted");
+  assert.equal(f.calls.some((call) => call.body?.outcome === "consumed"), false);
+});
+
+test("late SDK acceptance clears attention even while the original receipt remains uncertain", async () => {
+  const f = fixture();
+  f.add();
+  let release;
+  f.session.send = (options) => {
+    f.sends.push(options);
+    return new Promise((resolve) => { release = resolve; });
+  };
+  const notice = new PendingInputNotice();
+  const inbox = f.consumer("consumer-a", {
+    nativeTimeoutMs: 5,
+    onPending: (target, messages) => notice.offered(target, messages),
+    onSubmitted: (target, id) => notice.confirmed(target, id),
+  });
+  await inbox.tick(sid);
+  assert.equal(f.rows[0].handoff_stage, "unknown");
+  assert.equal(notice.pending.size, 1);
+  release("sdk-late");
+  await tick();
+  assert.equal(notice.pending.size, 0);
+  f.clock += 30_001;
+  await inbox.tick(sid);
+  assert.equal(notice.pending.size, 0);
+  assert.equal(f.sends.length, 1);
+  assert.equal(f.rows[0].handoff_stage, "unknown");
+  assert.equal(f.calls.some((call) => call.body?.outcome === "consumed"), false);
+});
 
 test("versioned retained controls reconstruct bounded history without SDK dispatch", async () => {
   const f = fixture();
@@ -588,17 +638,23 @@ test("retired offered handoffs remain blocked; reload cannot begin or resend the
 test("lost acceptance report reply is read back through its original receipt", async () => {
   const f = fixture();
   f.add();
-  const consumer = f.consumer();
+  const notice = new PendingInputNotice();
+  const consumer = f.consumer("consumer-a", {
+    onPending: (target, messages) => notice.offered(target, messages),
+    onSubmitted: (target, id) => notice.confirmed(target, id),
+  });
   f.after = async (_method, path, body) => {
     if (path.endsWith("/outcome") && body.outcome === "sdk_accepted") throw new Error("lost acceptance report");
   };
   await consumer.tick(sid);
   assert.equal(f.rows[0].handoff_stage, "sdk_accepted");
+  assert.equal(notice.pending.size, 0);
   f.clock += 30_000;
   await consumer.tick(sid);
   assert.equal(f.sends.length, 1);
   assert.equal(f.calls.filter((call) => call.path.endsWith("/outcome")).length, 1);
   assert.ok(f.calls.some((call) => call.path.endsWith("/recovery/1")));
+  assert.equal(notice.pending.size, 0);
 });
 
 test("recovery never attributes another native context's history after a concurrent rename", async () => {

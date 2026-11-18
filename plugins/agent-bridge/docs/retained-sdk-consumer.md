@@ -50,9 +50,16 @@ Nested/foreign callbacks, intentional `/peer` mute and unavailable current
 registration produce no notice. A repeated notice is coalesced for 30 seconds.
 No hook acknowledgement, peer reply or new delivery queue is required.
 
-SDK acceptance does not clear pending input. A native root input observation,
-or the retained consumer's existing exact original-receipt history check,
-clears its own observed ID. A session-binding change invalidates the old set.
+Successful SDK submission clears its own ID from this yield notice, including
+an accepted original receipt recovered after reconnect. The notice tracks work
+still awaiting submission, not submitted input awaiting model consumption.
+A native root input observation, or the retained consumer's existing exact
+original-receipt history check, also clears its own observed ID. Clearing the
+notice never marks a receipt consumed or answered; those still require their
+original independent evidence. A session-binding change invalidates the old set.
+The most recent 1,000 confirmations suppress stale offers within that binding.
+A late successful SDK reply clears attention even after its reporting deadline;
+the original uncertain receipt and no-resend fence remain independent.
 At the 1,000-ID bound, observation becomes explicitly incomplete rather than
 evicting known IDs or claiming the inbox is empty. Unknown overflow is not a
 reason to replay input; it does not itself demand an end-turn after all known

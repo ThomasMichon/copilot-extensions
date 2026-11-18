@@ -322,25 +322,29 @@ test("post-tool notification sees a stalled drain without network or false consu
   assert.equal(f.calls.some((call) => call.route.endsWith("/messages/ack")), false);
 });
 
-test("accepted input remains noticeable until its exact root event, not nested or foreign input", async () => {
-  const f = await load(undefined);
-  const hook = f.joined.hooks.onPostToolUse;
-  const input = { sessionId: "native-a" };
-  const invocation = { sessionId: "native-a" };
-  assert.equal(hook({ ...input, agentId: "child" }, invocation), undefined);
-  assert.equal(hook({ ...input, parentToolCallId: "parent" }, invocation), undefined);
-  assert.equal(hook({ ...input, sessionId: "child" }, invocation), undefined);
-  assert.equal(hook(input, { sessionId: "foreign" }), undefined);
-  const event = {
-    type: "user.message", sessionId: "native-a",
-    data: { source: "agent-bridge", content: f.sends[0].prompt },
-  };
-  f.handlers[0]({ ...event, agentId: "child", sessionId: "child-native" });
-  f.handlers[0]({ ...event, sessionId: undefined, data: { ...event.data, source: "user" } });
-  assert.match(hook(input, invocation).additionalContext, /END YOUR TURN/);
-  f.handlers[0](event);
-  assert.equal(hook(input, invocation), undefined);
-});
+for (const selected of [undefined, "1"]) {
+  test(`${selected ? "retained" : "legacy"} submission clears the yield notice without claiming consumption`, async () => {
+    let release;
+    const pending = new Promise((resolve) => { release = resolve; });
+    const f = await load(selected, 51, { send: () => pending });
+    const hook = f.joined.hooks.onPostToolUse;
+    const input = { sessionId: "native-a" };
+    const invocation = { sessionId: "native-a" };
+    assert.equal(f.sends.length, 1);
+    assert.equal(hook({ ...input, agentId: "child" }, invocation), undefined);
+    assert.equal(hook({ ...input, parentToolCallId: "parent" }, invocation), undefined);
+    assert.equal(hook({ ...input, sessionId: "child" }, invocation), undefined);
+    assert.equal(hook(input, { sessionId: "foreign" }), undefined);
+    release("sdk-message-a");
+    await settle();
+    assert.equal(hook(input, invocation), undefined);
+    f.timers.find((timer) => timer.ms === 1_000).fn();
+    await settle();
+    assert.equal(f.calls.some((call) => call.route.endsWith("/events")), false);
+    assert.equal(f.calls.some((call) => call.body?.outcome === "consumed"), false);
+    assert.equal(f.sends.length, 1);
+  });
+}
 
 test("intentional mute suppresses pending-input hooks", async () => {
   const f = await load(undefined, 51, { muted: true });
