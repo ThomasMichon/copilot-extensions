@@ -8,7 +8,10 @@ from pathlib import Path
 import pytest
 
 from agent_procutil import _daemon_instance_store as store
-from agent_procutil.daemon_instances import DaemonInstanceSpec
+from agent_procutil._daemon_instance_identity import path_identity
+from agent_procutil.daemon_instances import (
+    INSTANCE_ENV, TEST_CONTEXT_ENV, DaemonInstanceReceipt, DaemonInstanceSpec,
+)
 
 pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="Windows DOS names only")
 
@@ -90,6 +93,59 @@ def test_short_runtime_artifacts_keep_cleanup_custody(
     ).status == "settled"
     assert not artifact.exists()
     assert proof.read_text() == "retain"
+
+
+def test_short_receipt_cannot_claim_inventory_artifact(
+    short_runtime: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime, short = short_runtime
+    monkeypatch.delenv(INSTANCE_ENV, raising=False)
+    monkeypatch.delenv(TEST_CONTEXT_ENV, raising=False)
+    guard = store.admit(
+        "short-inventory", runtime_root=runtime, source=__file__,
+        registry_root=short / "registry", purpose="production",
+    )
+    receipt = DaemonInstanceReceipt(guard.receipt.instance_id, short / "registry")
+    artifact = guard.receipt.record_path.with_suffix(".lock")
+    try:
+        with pytest.raises(ValueError, match="inventory"):
+            store.add_artifact(receipt, artifact)
+        assert store.inspect(receipt.registry_root)[0]["artifact_count"] == "0"
+        assert artifact.exists()
+    finally:
+        guard.close()
+
+
+def test_short_receipt_cleanup_refuses_recorded_inventory_artifact(
+    short_runtime: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime, short = short_runtime
+    monkeypatch.delenv(INSTANCE_ENV, raising=False)
+    monkeypatch.delenv(TEST_CONTEXT_ENV, raising=False)
+    guard = store.admit(
+        "short-inventory", runtime_root=runtime, source=__file__,
+        registry_root=short / "registry", purpose="production",
+    )
+    guard.close()
+    receipt = DaemonInstanceReceipt(guard.receipt.instance_id, short / "registry")
+    with store._locked(receipt) as path:
+        artifact = path.with_suffix(".lock")
+        device, inode = path_identity(artifact)
+        record = store._read(path)
+        record.update({
+            "artifact_count": "1", "artifact_0_path": str(artifact),
+            "artifact_0_device": device, "artifact_0_inode": inode,
+        })
+        store._write(path, record)
+    monkeypatch.setattr(store, "identity_state", lambda *_: "dead")
+    monkeypatch.setattr(
+        store, "delete_owned_file", lambda *_: pytest.fail("inventory deletion attempted"),
+    )
+    result = store.cleanup(receipt, terminate=False, runtime_root=runtime)
+    assert result.reason == "inventory-artifact-refused"
+    assert result.removed == ()
+    assert artifact.exists()
+    assert receipt.record_path.exists()
 
 
 @pytest.mark.parametrize("existing", [False, True])

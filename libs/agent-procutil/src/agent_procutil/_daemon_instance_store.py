@@ -734,7 +734,7 @@ def add_artifact(receipt: DaemonInstanceReceipt, artifact: Path) -> None:
         if not artifact.is_absolute() or artifact.parent.resolve(strict=True) != artifact.parent:
             raise ValueError("daemon artifact parent is redirected")
         artifact.relative_to(root)
-        if artifact.is_relative_to(receipt.registry_root):
+        if artifact.is_relative_to(path.parent):
             raise ValueError("daemon inventory is not an application lifecycle artifact")
         if artifact == Path(record["source"]):
             raise ValueError("daemon source is not a lifecycle artifact")
@@ -862,7 +862,7 @@ def cleanup(
                 _remaining(deadline)
                 artifact = Path(record[f"artifact_{index}_path"])
                 artifact.relative_to(root)
-                if artifact.is_relative_to(receipt.registry_root):
+                if artifact.is_relative_to(path.parent):
                     return result("held", "inventory-artifact-refused")
                 if artifact.parent.resolve(strict=True) != artifact.parent:
                     return result("held", "artifact-parent-changed")
