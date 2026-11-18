@@ -374,27 +374,32 @@ or whole-parent completion gate is added.
   atomic claim stay deferred. Native context-only continuation and new-process cutover
   remain separate.
 
-- [ ] **P2830-6:** Inherited2633 row1: keep bounded project/config/plan resolution
+- [x] **P2830-6:** Inherited2633 row1: keep bounded project/config/plan resolution
   INCLUDING direct fallback's own resolution; do not cancel so early that required
   resolution becomes unbounded.
 
-- [ ] **P2830-7:** Inherited2633 row2: disarm at ACTUAL handoff BEFORE legitimate
+- [x] **P2830-7:** Inherited2633 row2: disarm at ACTUAL handoff BEFORE legitimate
   long-lived local executable or interactive SSH child wait; preserve healthy Windows
   launcher-wait cancellation and normal lifetime without timeout enlargement.
 
-- [ ] **P2830-8:** Inherited2633 row3: unconditional normal/error/SystemExit
+- [x] **P2830-8:** Inherited2633 row3: unconditional normal/error/SystemExit
   cancellation; synthetic timer/child/blocking-wait controls observe timer already
   disarmed INSIDE wait. No real watchdog, budget sleep, process launch/probe/termination
   for this ordering proof.
 
-- [ ] **P2830-9:** Inherited2633 row4: conservative full-ancestor/snapshot/live-edge
+- [x] **P2830-9:** Inherited2633 row4: conservative full-ancestor/snapshot/live-edge
   safeguards; live Copilot/mux/SSH/WSL vetoes, service/self/age/signature gates and
   explicit termination authority. Unknown ancestry/claim visibility is non-authorizing.
 
-- [ ] **P2830-10:** Inherited2633 row5: CPython-close and larger repeated-trigger remain
+- [x] **P2830-10:** Inherited2633 row5: CPython-close and larger repeated-trigger remain
   hypotheses unless established. Original2830 native incident acceptance stays
   separately owned; finite watchdog boundary does not complete the incident or wait for
   all parents.
+
+Finite source acceptance: [#13291 and its qualification record](journal/2026/11.18-watchdog-handoff.md)
+resolve only these five inherited rows at their original synthetic/source tier.
+The ancestry/reaper logic and custody are preserved, not requalified as native
+incident recovery. P2830-1..5, P2830-11, V2830-1/3 and G2830 remain open.
 
 - [ ] **P2830-11:** Source-specific canonical restriction: Keep2830 as FULL incident
   owner;4282/2457/2633 are bounded related scopes, not exhaustive successors. No
@@ -640,7 +645,7 @@ not another full-roster baseline or a replacement for existing startup phases.
   dirty/unpushed/live/unknown safeguards. Original trigger may remain explicitly
   unknown.
 
-- [ ] **V2830-2:** For the FIVE inherited2633 rows, use synthetic
+- [x] **V2830-2:** For the FIVE inherited2633 rows, use synthetic
   timer/child/blocking-wait controls: required fallback resolution stays bounded, timer
   is already disarmed at actual handoff before legitimate wait, finally cancels on
   normal/error/SystemExit. No real watchdog, timeout-budget sleep, process
@@ -1288,3 +1293,24 @@ bounded historical credit. All eight new technical rows remain unchecked,
 and every incumbent row, phase, budget and custodian is preserved. Normal
 review and complete current receiving readback precede a separate tracking
 judgment; no hook, diagnostic, native workload or operational remedy ran here.
+
+### 2026-11-18 - Finite resolution-watchdog handoff candidate
+
+The [bounded implementation and qualification record](journal/2026/11.18-watchdog-handoff.md)
+addresses only P2830-6..10 and V2830-2, following the retained plan accepted
+in #9496. Resolution remains bounded; direct local/SSH waits receive the
+cancellation callback at actual handoff. The source candidate and accurate
+whole-file type contracts have focused passing evidence, but publication,
+review/CI and finite acceptance remain gates. All incumbent check states,
+the complete #2830 incident, independent research/advisory lanes and existing
+source/resource/native owners remain unchanged.
+
+### 2026-11-18 - Finite watchdog source acceptance
+
+#13291 actually merged as`f353f7758cdfc5c9ab7388861ce306caf58e4e25`
+after current-head approval, empty inline/thread findings and green requiredCI.
+The [qualification record](journal/2026/11.18-watchdog-handoff.md) accepts
+only P2830-6..10/V2830-2, including preserved ancestry/custody and explicit
+unknown incident causes. The whole incident, native recovery, independent
+research/advisory work and full startup objective remain open. No source
+acceptance here grants installed rollout or releases another owner's resource.

@@ -14,14 +14,18 @@ import json
 import os
 import platform
 import re
-import subprocess
+import subprocess as subprocess
 import sys
+import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from types import ModuleType
+from typing import Any, Literal, ParamSpec, TypeVar, cast
 
 from . import config as cfg, output
 from . import control_plane_providers as _cpp
+from . import terminal_launch as _terminal_launch
 from .update_events import bounded
 
 _WORKTREE_MANAGER_BIN = "worktree-manager"
@@ -50,7 +54,11 @@ _parse_control_plane_provider_manifest = _cpp._parse_control_plane_provider_mani
 _discover_control_plane_provider_manifests = _cpp._discover_control_plane_provider_manifests
 
 
-def _core():
+_P = ParamSpec("_P")
+_T = TypeVar("_T")
+
+
+def _core() -> ModuleType:
     # Local import: avoids a module-load-time cycle with front_door_cli
     # (which imports this module to re-export its names) -- same seam
     # control_plane_providers.py's own lazy imports already preserve.
@@ -59,10 +67,10 @@ def _core():
     return core
 
 
-def _core_helper(name: str, local):
+def _core_helper(name: str, local: Callable[_P, _T]) -> Callable[_P, _T]:
     candidate = vars(_core()).get(name)
     if callable(candidate) and candidate is not local:
-        return candidate
+        return cast(Callable[_P, _T], candidate)
     return local
 
 
@@ -384,7 +392,7 @@ def _agent_worktrees_launch_command(project: str | None) -> list[str]:
 
 def _resolve_direct_launch_plan(
     project: str | None, passthrough: list[str]
-) -> tuple[dict[str, object], str | None]:
+) -> tuple[dict[str, Any], str | None]:
     """Resolve the same launch plan the mux launchers consume, but in Python."""
     resolve_args = _agent_worktrees_launch_command(project)
     resolve_args += ["resolve", "--no-mux", *passthrough]
@@ -411,7 +419,151 @@ def _resolve_direct_launch_plan(
     return plan, project
 
 
-def _wait_for_launch_child(proc: subprocess.Popen) -> int:
+def cmd_launch(argv: list[str]) -> int:
+    """Default action: exec into launch-session.sh with passthrough args.
+
+    Consumes ``--no-update``, ``--no-mux``, and ``--verbose`` and propagates
+    them as environment variables so launch-session.sh can read them.
+    """
+    _terminal_launch.validate_or_exit()
+    core = _core()
+    env_set: Callable[[str, str], None] = core._env_set
+    watchdog_callback: Callable[[], None] = core._fire_launch_resolution_watchdog
+    resolution_timeout: float = core._LAUNCH_RESOLUTION_TIMEOUT_SECS
+    passthrough: list[str] = []
+    for arg in argv:
+        if arg == "--no-update":
+            env_set("WORKTREE_NO_UPDATE", "1")
+        elif arg == "--no-mux":
+            env_set("WORKTREE_NO_MUX", "1")
+        elif arg == "--verbose":
+            env_set("WORKTREE_VERBOSE", "1")
+        else:
+            passthrough.append(arg)
+
+    # Bounds the resolution below (never the handoff itself, which cancels
+    # this before blocking on the child/session -- see the docstring above).
+    # The `finally` is the safety net: cancel unconditionally on EVERY exit
+    # path (normal return, sys.exit, or an unexpected exception raised
+    # anywhere below) -- an explicit .cancel() at a specific handoff point is
+    # a documentation aid, never the only thing standing between a failure
+    # here and a real, unmocked timer left armed in the background.
+    _watchdog = threading.Timer(
+        resolution_timeout, watchdog_callback
+    )
+    _watchdog.daemon = True
+    _watchdog.start()
+    try:
+        launch_project = cfg.active_project()
+        launcher_args = (
+            ["--project", launch_project, *passthrough] if launch_project else passthrough
+        )
+
+        # Resolve launch support from the same validated runtime root that
+        # entered this Python process. An explicit cell must never fall back
+        # to legacy.
+        from . import registry_paths
+
+        context = registry_paths.installation_context()
+        inst_dir = (
+            Path(context["pluginRoot"])
+            if context is not None
+            else cfg.install_dir()
+        )
+        if context is not None:
+            env_set("AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT", str(inst_dir))
+            try:
+                env_set(
+                    "AGENT_WORKTREES_LAUNCH_RECOVERY_ANCHOR",
+                    cfg.load_config(project=launch_project).default_repo.anchor,
+                )
+            except (OSError, RuntimeError, ValueError):
+                os.environ.pop("AGENT_WORKTREES_LAUNCH_RECOVERY_ANCHOR", None)
+        detect_platform: Callable[[], str] = getattr(cfg, "detect_platform")
+        plat = detect_platform()
+        legacy_name = "launch-session.cmd" if plat == "windows" else "launch-session.sh"
+        # Phase 3b Sub-slice 2a Step 2 cutover complete (efforts/active/
+        # worktree-manager-control-plane/phase-3b-mux-relocation.md): the
+        # relocated Worktree Manager path has been live on real hardware for
+        # months (multiple self-updated versions observed), so the in-plugin
+        # launch-session/pane-wrapper rollback tier is retired along with the
+        # files themselves. agent-worktrees never re-derives a mux launcher of
+        # its own; the ONLY tiers are the relocated Worktree Manager launcher
+        # (a "bring your own mux" controller today, generalized later per the
+        # session-hosting vision) and the direct, non-mux fallback below.
+        candidate = _core_helper(
+            "_usable_worktree_manager_launcher_dir", _usable_worktree_manager_launcher_dir,
+        )()
+        launch_bin = candidate if candidate is not None and (candidate / legacy_name).exists() else None
+        if launch_bin is None:
+            output.warn(
+                "No launch-session script found (neither the relocated "
+                "Worktree Manager launcher nor the in-plugin fallback); "
+                "launching Copilot directly without mux."
+            )
+            return _core_helper(
+                "_run_direct_launch_fallback", _run_direct_launch_fallback,
+            )(
+                launch_project, passthrough, on_handoff=_watchdog.cancel,
+            )
+
+        if plat == "windows":
+            launch_script = launch_bin / "launch-session.cmd"
+        else:
+            launch_script = launch_bin / "launch-session.sh"
+
+        if plat == "windows":
+            # Two launch shapes on Windows (copilot-extensions #102 -- launcher
+            # depth):
+            #   * ACP / --stdio: keep the cmd.exe -> .cmd shim. The .cmd forwards
+            #     stdin verbatim, which a stdio MCP server requires
+            #     (docs/patterns/cross-platform-parity.md); dropping it risks
+            #     corrupting the JSON-RPC channel.
+            #   * Interactive: hand off straight to `pwsh -File launch-session.ps1`,
+            #     dropping the cmd.exe shim entirely -- one fewer resident process
+            #     per worktree session. The .cmd's only extra job (native recovery
+            #     when the venv is broken) is unreachable here anyway: reaching
+            #     cmd_launch means Python already ran, so the venv is healthy.
+            is_stdio = "--stdio" in passthrough or "--acp" in passthrough
+            ps1 = launch_script.with_name("launch-session.ps1")
+            if is_stdio or not ps1.exists():
+                argv = ["cmd.exe", "/c", str(launch_script), *launcher_args]
+            else:
+                argv = ["pwsh.exe", "-NoProfile", "-NoLogo", "-File", str(ps1), *launcher_args]
+            # Popen + wait (never os.exec on Windows, which has no true exec and
+            # would detach the child from the console): hold the console and catch
+            # KeyboardInterrupt (Ctrl+C) so the child (launch-session.ps1) can finish
+            # its try/finally handoff check + post-exit finalization instead of being
+            # killed mid-cleanup.
+            proc = subprocess.Popen(argv)
+            _watchdog.cancel()  # resolution is done -- the wait below is expected
+            try:
+                rc = proc.wait()
+            except KeyboardInterrupt:
+                # Ctrl+C was sent to the entire console process group.
+                # The child (pwsh -> copilot, or cmd.exe -> pwsh -> copilot in
+                # stdio mode) received it too. Wait for the child to finish its
+                # cleanup (handoff check, post-exit finalization) rather than
+                # killing it.
+                try:
+                    rc = proc.wait(timeout=30)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    rc = 130  # 128 + SIGINT(2)
+            sys.exit(rc)
+        else:
+            os.execvp("bash", ["bash", str(launch_script), *launcher_args])
+        return 1  # unreachable -- os.execvp replaces process
+    finally:
+        _watchdog.cancel()
+
+
+
+def _wait_for_launch_child(
+    proc: subprocess.Popen[bytes], *, on_handoff: Callable[[], None] | None = None,
+) -> int:
+    if on_handoff is not None:
+        on_handoff()
     try:
         return proc.wait()
     except KeyboardInterrupt:
@@ -433,7 +585,10 @@ def _run_post_exit_for_direct_launch(project: str | None, worktree_id: str) -> N
         )
 
 
-def _run_direct_launch_fallback(project: str | None, passthrough: list[str]) -> int:
+def _run_direct_launch_fallback(
+    project: str | None, passthrough: list[str], *,
+    on_handoff: Callable[[], None] | None = None,
+) -> int:
     """Launch Copilot directly from the resolved plan when mux support is absent."""
     while True:
         plan, project = _resolve_direct_launch_plan(project, passthrough)
@@ -455,7 +610,7 @@ def _run_direct_launch_fallback(project: str | None, passthrough: list[str]) -> 
                 output.err("Remote launch plan is missing ssh handoff details.")
                 return 1
             proc = subprocess.Popen(["ssh", "-t", ssh_alias, remote_cmd])  # headless-guard: allow interactive SSH in caller's console
-            return _wait_for_launch_child(proc)
+            return _wait_for_launch_child(proc, on_handoff=on_handoff)
         if action != "exec":
             output.err(f"Unknown launch action: {action}")
             return 1
@@ -476,7 +631,7 @@ def _run_direct_launch_fallback(project: str | None, passthrough: list[str]) -> 
         child_env.pop("WORKTREE_ID", None)
         child_env.pop("WORKTREE_PROJECT", None)
         proc = subprocess.Popen(cmd, cwd=work_dir, env=child_env)
-        rc = _wait_for_launch_child(proc)
+        rc = _wait_for_launch_child(proc, on_handoff=on_handoff)
         worktree_id = plan.get("worktree_id")
         if isinstance(worktree_id, str) and worktree_id and plan.get("post_exit"):
             _run_post_exit_for_direct_launch(project, worktree_id)
@@ -636,7 +791,8 @@ def cmd_noninteractive_bare() -> int:
         file=sys.stderr,
     )
     print(file=sys.stderr)
-    rc = _core().cmd_worktree_dispatch(["list"])
+    dispatch: Callable[[list[str]], int] = _core().cmd_worktree_dispatch
+    rc = dispatch(["list"])
     print(file=sys.stderr)
     print(
         f"Manage it with: {project} worktree <create|status|push|finalize|cleanup>",
@@ -657,7 +813,8 @@ def cmd_headless_bare() -> int:
         file=sys.stderr,
     )
     print(file=sys.stderr)
-    rc = _core().cmd_worktree_dispatch(["list"])
+    dispatch: Callable[[list[str]], int] = _core().cmd_worktree_dispatch
+    rc = dispatch(["list"])
     print(file=sys.stderr)
     print(
         f"Manage it with: {project} worktree <create|status|push|finalize|cleanup>",
@@ -700,7 +857,8 @@ def dispatch_bare_invocation(has_project: bool) -> int:
     if bundled_picker_available():
         if has_project:
             output.warn("Launching the bundled picker.")
-            return _core().cmd_launch([])
+            launch: Callable[[list[str]], int] = _core().cmd_launch
+            return launch([])
         rc = help_unrouted()
     else:
         rc = manager_install_trigger(project)

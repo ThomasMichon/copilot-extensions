@@ -288,7 +288,7 @@
       "cd:headed/caller.py::execute::Popen": 1,
       "k:stdio_pump.py::exec_stdio::Popen": 1,
       "s:copilot_detach.py::cmd_attached::Popen": 1,
-      "w:__main__.py::cmd_launch::Popen": 1,
+      "w:manager_launch_cli.py::cmd_launch::Popen": 1,
       "w:copilot_cli.py::cmd_copilot::Popen": 1,
       "w:manager_launch_cli.py::_run_direct_launch_fallback::Popen": 2,
       "r:plugins/agent-bridge/spikes/session-host/session_host.py::SessionHost.spawn_child::Popen": 1,
