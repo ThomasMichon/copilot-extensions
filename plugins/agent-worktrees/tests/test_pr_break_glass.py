@@ -477,6 +477,44 @@ def test_recovery_cli_refuses_stale_pinned_preview_with_json(
 
 
 @pytest.mark.timeout(120)
+def test_recovery_cli_dry_run_json_returns_bound_preview_without_state(
+    recovered_pr, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str],
+) -> None:
+    from agent_worktrees import __main__ as cli
+
+    config, wid, wt, _remote, old, branch = recovered_pr
+    monkeypatch.setattr(cfg, "load_config", lambda *a, **k: config)
+    monkeypatch.chdir(wt)
+    ledger = cfg.tracking_dir() / f"{wid}.yaml"
+    before = ledger.read_bytes()
+    git_dir = Path(git_ops.git("rev-parse", "--absolute-git-dir", cwd=str(wt)).stdout.strip())
+    capfd.readouterr()
+    args = cli.build_parser().parse_args([
+        "push-changes", wid, "--break-glass-reason", "Approved recovered plan",
+        "--dry-run", "--json",
+    ])
+    assert finalize_cli.cmd_push_changes(args) == 0
+    payload = json.loads(capfd.readouterr().out)
+    preview = payload["recovery_preview"]
+    head = git_ops.git("rev-parse", "HEAD", cwd=str(wt)).stdout.strip()
+    assert preview["operation"]["source_head"] == head
+    assert preview["operation"]["expected_head"] == old
+    assert preview["operation"]["branch"] == branch
+    assert preview["operation"]["number"] > 0
+    assert preview["confirmation_binding"] == "auto-bound"
+    assert preview["confirmation"] == recovery.RecoveryPreview(
+        **{**preview["operation"], "overrides": tuple(preview["operation"]["overrides"])},
+    ).confirmation("Approved recovered plan")
+    assert ledger.read_bytes() == before
+    assert not pr_recovery._path(str(wt)).exists()
+    assert not list(git_dir.glob("agent-worktrees-pr-break-glass-*.json"))
+    assert not git_ops.git(
+        "for-each-ref", "refs/agent-worktrees/recovery", cwd=str(wt),
+    ).stdout.strip()
+    assert pr_publish._tip("origin", branch, str(wt)) == old
+
+
+@pytest.mark.timeout(120)
 def test_recovery_cli_selects_target_project_from_other_cwd(recovered_pr, monkeypatch, capfd):
     from agent_worktrees import __main__ as cli
 

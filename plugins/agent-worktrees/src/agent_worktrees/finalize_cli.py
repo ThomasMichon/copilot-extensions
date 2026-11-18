@@ -586,6 +586,10 @@ def cmd_push_changes(args: argparse.Namespace) -> int:
             from .pr_publication_labels import last_result
             if success and last_result.get() is not None:
                 out["publication_labels"] = last_result.get()
+            if args.dry_run and recovery_reason is not None:
+                preview = pr_break_glass.last_preview.get()
+                if preview is not None:
+                    out["recovery_preview"] = preview
             if reminder is not None:
                 out["reminder"] = reminder.as_dict()
             output._json_output(out)

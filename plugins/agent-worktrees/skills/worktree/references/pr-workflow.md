@@ -1239,7 +1239,8 @@ source commit, original saved head and current provider/ref-agreed expected
 remote commit, binds that preview automatically, revalidates it immediately
 before taking effect and then proceeds. Saved publication authority, action and
 any validated backed-sync proof are also fingerprint-bound. Add `--dry-run` to
-see the operation and its preview fingerprint without changing Git refs,
+see the bound operation and its preview fingerprint (returned as
+`recovery_preview` with `--json`) without changing Git refs,
 tracking, audits or the remote. Passing `--confirm-break-glass
 <preview-fingerprint>` is optional pinning: a changed source (including an
 amend), destination, reason, saved publication, expected head, action or

@@ -8,6 +8,7 @@ import json
 import os
 import re
 import uuid
+from contextvars import ContextVar
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -119,6 +120,21 @@ class ConfirmedRecovery:
     def authorization_basis(self) -> str:
         return AUTO_BOUND_BASIS if self.binding == "auto-bound" else EXPLICIT_BASIS
 
+    def preview(self, remote: str) -> dict[str, object]:
+        """Structured dry-run preview: the bound operation and its pin."""
+        return {
+            "remote": remote,
+            "operation": asdict(self.operation),
+            "reason": self.reason,
+            "confirmation": self.confirmation,
+            "confirmation_binding": self.binding,
+            "authorization_basis": self.authorization_basis,
+        }
+
+
+# Set by a recovery dry-run so a JSON caller can return the structured preview.
+last_preview: ContextVar[dict[str, object] | None] = ContextVar("recovery_preview", default=None)
+
 
 class ConfirmationRequired(ValueError):
     """A caller-pinned preview no longer matches the current recovery operation."""
@@ -176,6 +192,7 @@ def publish_recovery(
         return False
     if reason is None:
         return None
+    last_preview.set(None)
     if title or allow_unsquashed:
         output.err("Recovery publishes the confirmed committed tip as-is; title/squash options are inapplicable.")
         return False

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 from dataclasses import replace
@@ -190,7 +191,10 @@ def push_changes(worktree_id: str, config: Config, record: tracking.WorktreeReco
                 action = approved.operation.action if approved is not None else "rewrite"
                 print(f"[dry-run] Would {action} {target.remote}/{pr.branch} with exact lease {remote_tip}.")
                 if approved is not None:
+                    preview = approved.preview(target.remote)
+                    pr_break_glass.last_preview.set(preview)
                     print(f"[dry-run] Recovery preview fingerprint: {approved.confirmation}")
+                    print(json.dumps(preview, sort_keys=True, indent=2))
                 return True
             if approved is not None:
                 git_dir = Path(git_ops.git(

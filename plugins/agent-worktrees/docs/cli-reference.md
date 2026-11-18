@@ -1134,8 +1134,10 @@ head remains separate from the current head agreed by the provider and remote
 ref; disagreement or an unreadable/deleted ref refuses before any effect. The
 preview also binds the original publication authority, proposed action and any
 validated recovery evidence, and is revalidated immediately before taking
-effect. Add `--dry-run` to print the operation and its preview fingerprint
-without changing Git refs, tracking data, audit files or the remote head.
+effect. Add `--dry-run` to print the bound operation (PR, source commit, saved
+head, expected head, evidence) and its preview fingerprint without changing Git
+refs, tracking data, audit files or the remote head; with `--json` the same
+structured preview is returned as `recovery_preview`.
 A caller may pin that preview with `--confirm-break-glass <preview-fingerprint>`;
 if the source, reason, destination, saved publication, expected head, action or
 evidence changed since, the pinned call refuses with exit 2 and the new preview.
