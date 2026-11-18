@@ -206,6 +206,11 @@ async def run_owner_loop(
                     break
             work.assert_owned()
             seen = await _read_hold_signature(registry)
+            # The read can wait on the store lock; honor stop, yield and
+            # demotion that arrived meanwhile before admitting a cycle.
+            if stop.is_set() or keeper.yielded or not keeper.beat():
+                break
+            demoted = bool(_PROCESS_SELECTION and _PROCESS_SELECTION.superseded())
             if not demoted:
                 try:
                     await owner.reconcile()
