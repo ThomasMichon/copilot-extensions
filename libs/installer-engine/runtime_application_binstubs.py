@@ -15,9 +15,26 @@ _CLEAR = (
 _FLAGS = "run --locked --no-dev --no-editable --link-mode hardlink"
 
 
+def setup_binstubs() -> dict[str, str]:
+    """Return version-local setup entries for the canonical install scripts."""
+    return {
+        "setup.ps1": (
+            "$ErrorActionPreference = 'Stop'\n"
+            "& (Join-Path (Split-Path -Parent $PSScriptRoot) 'install.ps1') @args\n"
+            "exit $LASTEXITCODE\n"
+        ),
+        "setup.cmd": '@echo off\r\n"%~dp0..\\install.cmd" %*\r\n',
+        "setup.sh": (
+            "#!/bin/sh\n"
+            'slot=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd) || exit\n'
+            'exec "$slot/install.sh" "$@"\n'
+        ),
+    }
+
+
 def slot_binstubs(
     name: str, module: str, *, python_platform: str | None = None,
-    python_request: str | None = None,
+    python_request: str | None = None, source_project: bool = False,
 ) -> dict[str, str]:
     """Return relocatable app/install stubs without publishing any of them."""
     package, separator, attribute = module.partition(":")
@@ -45,6 +62,50 @@ def slot_binstubs(
         ("install", None),
     ):
         script = "install.py" if command == "install" else name + ".py"
+        selected_flags = flags
+        ps_prepare = cmd_prepare = sh_prepare = sh_preflight = ""
+        if source_project:
+            selected_flags += " --managed-python"
+            if command == "install":
+                ps_prepare = (
+                    "if (-not (Test-Path -LiteralPath (Join-Path $slot 'uv.lock'))) {\n"
+                    "    & uv lock --managed-python --project $slot\n"
+                    "    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }\n"
+                    "}\n"
+                )
+                cmd_prepare = (
+                    'if exist "%SLOT%\\uv.lock" goto source_lock_ready\r\n'
+                    'uv lock --managed-python --project "%SLOT%"\r\n'
+                    "if errorlevel 1 exit /b %errorlevel%\r\n"
+                    ":source_lock_ready\r\n"
+                )
+                sh_prepare = (
+                    'if [ ! -f "$slot/uv.lock" ]; then\n'
+                    '    uv lock --managed-python --project "$slot" || exit\n'
+                    "fi\n"
+                )
+            else:
+                selected_flags += " --no-sync --no-python-downloads"
+                ps_prepare = (
+                    "foreach ($file in @('uv.lock', '.venv\\pyvenv.cfg', '.venv\\Scripts\\python.exe')) {\n"
+                    "    if (-not (Test-Path -LiteralPath (Join-Path $slot $file) -PathType Leaf)) {\n"
+                    "        throw 'Application is not staged; run bin/setup --stage'\n"
+                    "    }\n"
+                    "}\n"
+                )
+                cmd_prepare = (
+                    "for %%F in (uv.lock .venv\\pyvenv.cfg .venv\\Scripts\\python.exe) do (\r\n"
+                    '    if not exist "%SLOT%\\%%F" (\r\n'
+                    "        >&2 echo Application is not staged; run bin\\setup --stage\r\n"
+                    "        exit /b 1\r\n    )\r\n)\r\n"
+                )
+                sh_preflight = (
+                    'if [ ! -f "$slot/uv.lock" ] || [ ! -f "$slot/.venv/pyvenv.cfg" ] || {\n'
+                    '    [ ! -f "$slot/.venv/bin/python" ] && [ ! -f "$slot/.venv/Scripts/python.exe" ];\n'
+                    "}; then\n"
+                    "    echo 'Application is not staged; run bin/setup --stage' >&2\n"
+                    "    exit 1\nfi\n"
+                )
         ps_target = target or f"-I -X utf8 -B (Join-Path $slot '{script}')"
         cmd_target = target or f'-I -X utf8 -B "%SLOT%\\{script}"'
         sh_target = target or f'-I -X utf8 -B "$slot/{script}"'
@@ -64,7 +125,8 @@ def slot_binstubs(
             "} else {\n"
             "    $forwarded = @($args | ForEach-Object { if ($_ -eq '') { '\"\"' } else { $_ } })\n"
             "}\n"
-            f"& uv {flags} --project $slot python {ps_target} @forwarded\n"
+            + ps_prepare
+            + f"& uv {selected_flags} --project $slot python {ps_target} @forwarded\n"
             "exit $LASTEXITCODE\n"
         )
         result[command + ".cmd"] = (
@@ -73,7 +135,8 @@ def slot_binstubs(
             + "".join(f'set "{key}="\r\n' for key in _CLEAR)
             + 'if not defined UV_CACHE_DIR for %%I in ("%SLOT%\\..\\..") do '
             'set "UV_CACHE_DIR=%%~fI\\cache\\uv"\r\n'
-            + f'uv {flags} --project "%SLOT%" python {cmd_target} %*\r\n'
+            + cmd_prepare
+            + f'uv {selected_flags} --project "%SLOT%" python {cmd_target} %*\r\n'
             + "exit /b %errorlevel%\r\n"
         )
         shell = (
@@ -84,12 +147,14 @@ def slot_binstubs(
             '    root=$(CDPATH= cd -- "$slot/../.." && pwd) || exit\n'
             '    UV_CACHE_DIR="$root/cache/uv"\n'
             "fi\n"
+            + sh_preflight +
             "if command -v cygpath >/dev/null 2>&1; then\n"
             '    slot=$(cygpath -w "$slot") || exit\n'
             '    UV_CACHE_DIR=$(cygpath -w "$UV_CACHE_DIR") || exit\n'
             "fi\n"
             "export UV_CACHE_DIR\n"
-            f'exec uv {flags} --project "$slot" python {sh_target} "$@"\n'
+            + sh_prepare
+            + f'exec uv {selected_flags} --project "$slot" python {sh_target} "$@"\n'
         )
         result[command + ".sh"] = shell
         result[command] = shell
@@ -138,13 +203,17 @@ def _launcher_root(root: Path) -> Path:
 
 def global_binstubs(
     name: str, root_environment: str, default_directory: str, *, root: Path | None = None,
+    slot_directory: str = "",
 ) -> dict[str, str]:
     """Globals only resolve the current marker and invoke the slot-local app."""
     if (
         not _NAME.fullmatch(name) or not _ENVIRONMENT.fullmatch(root_environment)
         or not re.fullmatch(r"\.[a-z0-9][a-z0-9-]*(?:/[a-z0-9][a-z0-9-]*)*", default_directory)
+        or (slot_directory != "" and not _NAME.fullmatch(slot_directory))
     ):
         raise ValueError("global launchers require an ordinary app and root binding")
+    command = f"{slot_directory}/{name}" if slot_directory else name
+    windows_command = command.replace("/", "\\")
     if root is not None:
         root = _launcher_root(root)
     shell_root = (
@@ -168,7 +237,7 @@ def global_binstubs(
         "echo 'Invalid current application version' >&2; exit 1;; esac\n"
         'case "$version" in ""|*[!0-9A-Za-z._+-]*) '
         "echo 'Invalid current application version' >&2; exit 1;; esac\n"
-        f'exec "$root/versions/$version/{name}.sh" "$@"\n'
+        f'exec "$root/versions/$version/{command}.sh" "$@"\n'
     )
     return {
         name: shell,
@@ -180,7 +249,7 @@ def global_binstubs(
             "$version = [IO.File]::ReadAllText((Join-Path $root 'current-version')).Trim()\n"
             "if ($version -notmatch '^[0-9][0-9A-Za-z._+-]*$') { throw 'Invalid current application version' }\n"
             "$slot = Join-Path (Join-Path $root 'versions') $version\n"
-            f"& (Join-Path $slot '{name}.ps1') @args\n"
+            f"& (Join-Path $slot '{windows_command}.ps1') @args\n"
             "exit $LASTEXITCODE\n"
         ),
         name + ".cmd": (
@@ -204,7 +273,7 @@ def global_binstubs(
             '%%I in ("!VERSION!") do exit /b 1\r\n'
             'for /f "delims=" %%I in ("!VERSION!") do (\r\n'
             '    endlocal\r\n    set "VERSION=%%I"\r\n)\r\n'
-            f'"%ROOT%\\versions\\%VERSION%\\{name}.cmd" %*\r\n'
+            f'"%ROOT%\\versions\\%VERSION%\\{windows_command}.cmd" %*\r\n'
         ),
     }
 

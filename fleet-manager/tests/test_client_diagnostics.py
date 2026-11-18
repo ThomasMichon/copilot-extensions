@@ -1,8 +1,11 @@
 import base64
 import hashlib
+import importlib.util
 from pathlib import Path
 import stat
-from types import SimpleNamespace
+import sys
+from types import ModuleType, SimpleNamespace
+from typing import Any, Callable, Iterator, cast
 
 import pytest
 
@@ -11,7 +14,10 @@ from fleet_manager.planning import PlanError
 
 
 class Entry(str):
-    def __new__(cls, name, data):
+    hash: Any
+    size: int
+
+    def __new__(cls, name: str, data: bytes) -> "Entry":
         value = super().__new__(cls, name)
         value.hash = SimpleNamespace(
             mode="sha256",
@@ -22,7 +28,7 @@ class Entry(str):
 
 
 @pytest.fixture
-def installed(tmp_path, monkeypatch):
+def installed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[SimpleNamespace, Path]:
     package = tmp_path / "fleet_manager"
     package.mkdir()
     files = []
@@ -30,6 +36,7 @@ def installed(tmp_path, monkeypatch):
         "__init__.py", "_versioned_runtime.py",
         "versioned_runtime_leases.py", "versioned_runtime_construction.py",
         "versioned_runtime_source.py", "versioned_runtime_publication.py",
+        "versioned_runtime_identity.py", "versioned_runtime_fingerprint.py",
         "_installer_process.py", "_runtime_launcher.py",
         "_construction_procutil/__init__.py", "_construction_procutil/_job_scopes.py",
         "_construction_procutil/_windows_job_types.py",
@@ -44,7 +51,7 @@ def installed(tmp_path, monkeypatch):
         locate_file=lambda entry: tmp_path / str(entry),
     )
     monkeypatch.setattr(client_diagnostics, "__file__", str(package / "client_diagnostics.py"))
-    def discover(**arguments):
+    def discover(**arguments: object) -> Iterator[SimpleNamespace]:
         assert arguments == {"name": "fleet-manager", "path": [str(tmp_path)]}
         return iter([distribution])
 
@@ -52,7 +59,7 @@ def installed(tmp_path, monkeypatch):
     return distribution, package
 
 
-def test_client_evidence_does_not_claim_release_or_controller_readiness(installed):
+def test_client_evidence_does_not_claim_release_or_controller_readiness(installed: tuple[SimpleNamespace, Path]) -> None:
     report = client_diagnostics.diagnose_client()
     assert report["status"] == "installed"
     assert report["evidence"] == "local-installed-resource-record"
@@ -62,6 +69,7 @@ def test_client_evidence_does_not_claim_release_or_controller_readiness(installe
         "__init__.py", "_versioned_runtime.py",
         "versioned_runtime_leases.py", "versioned_runtime_construction.py",
         "versioned_runtime_source.py", "versioned_runtime_publication.py",
+        "versioned_runtime_identity.py", "versioned_runtime_fingerprint.py",
         "_installer_process.py", "_runtime_launcher.py",
         "_construction_procutil/__init__.py", "_construction_procutil/_job_scopes.py",
         "_construction_procutil/_windows_job_types.py",
@@ -70,7 +78,9 @@ def test_client_evidence_does_not_claim_release_or_controller_readiness(installe
     assert report["runtime_resource_sha256s"]["_versioned_runtime.py"] == report["runtime_resource_sha256"]
 
 
-def installed_procutil(installed, monkeypatch, *, diagnose=True):
+def installed_procutil(
+    installed: tuple[SimpleNamespace, Path], monkeypatch: pytest.MonkeyPatch, *, diagnose: bool = True,
+) -> tuple[ModuleType, Path, dict[str, Any] | None]:
     from fleet_manager import client_construction
 
     distribution, package = installed
@@ -88,17 +98,19 @@ def installed_procutil(installed, monkeypatch, *, diagnose=True):
     return client_construction, package, evidence
 
 
-def test_construction_uses_retained_package_and_scope_bytes_without_module_leaks(installed, monkeypatch):
+def test_construction_uses_retained_package_and_scope_bytes_without_module_leaks(
+    installed: tuple[SimpleNamespace, Path], monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import sys
 
     construction, package, evidence = installed_procutil(installed, monkeypatch)
     original = construction.artifact_staging._bytes
 
-    def replaced(path, limit):
+    def replaced(path: Path, limit: int) -> bytes:
         content = original(path, limit)
         if path.parent == package / "_construction_procutil":
             path.write_text("raise AssertionError('late unadmitted code executed')\n")
-        return content
+        return cast(bytes, content)
 
     monkeypatch.setattr(construction.artifact_staging, "_bytes", replaced)
     with construction._procutil_resource(evidence) as module:
@@ -115,7 +127,9 @@ def test_construction_uses_retained_package_and_scope_bytes_without_module_leaks
 
 @pytest.mark.parametrize("member", ["__init__.py", "_job_scopes.py", "_windows_job_types.py",
                                    "_output_relay.py", "streaming.py"])
-def test_changed_construction_package_member_refuses_before_execution(installed, monkeypatch, member):
+def test_changed_construction_package_member_refuses_before_execution(
+    installed: tuple[SimpleNamespace, Path], monkeypatch: pytest.MonkeyPatch, member: str,
+) -> None:
     import sys
 
     construction, package, evidence = installed_procutil(installed, monkeypatch)
@@ -135,10 +149,12 @@ def test_changed_construction_package_member_refuses_before_execution(installed,
     "_construction_procutil\\_job_scopes.py", "_construction_procutil/./_job_scopes.py",
     "_construction_procutil//_job_scopes.py", "_construction_procutil/_job_scopes.py:stream",
 ])
-def test_process_resource_rejects_path_escape_before_read(installed, monkeypatch, name):
+def test_process_resource_rejects_path_escape_before_read(
+    installed: tuple[SimpleNamespace, Path], monkeypatch: pytest.MonkeyPatch, name: str,
+) -> None:
     construction, _package, _evidence = installed_procutil(installed, monkeypatch)
 
-    def read(*_args):
+    def read(*_args: object) -> bytes:
         raise AssertionError("invalid resource path was read")
 
     monkeypatch.setattr(construction.artifact_staging, "_bytes", read)
@@ -149,8 +165,9 @@ def test_process_resource_rejects_path_escape_before_read(installed, monkeypatch
 @pytest.mark.parametrize("platform", ["posix", "nt"])
 @pytest.mark.parametrize("failed", [False, True])
 def test_construction_owner_call_keeps_pair_available_and_preserves_failure_custody(
-    installed, monkeypatch, tmp_path, failed, platform,
-):
+    installed: tuple[SimpleNamespace, Path], monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, failed: bool, platform: str,
+) -> None:
     import os
     import sys
 
@@ -159,12 +176,12 @@ def test_construction_owner_call_keeps_pair_available_and_preserves_failure_cust
     evidence = construction.artifact_staging.diagnose_client()
     retained = construction._process_resource_data("_installer_process.py", evidence=evidence)[1]
     monkeypatch.setattr(construction, "os", SimpleNamespace(**{**vars(os), "name": platform}))
-    failure = RuntimeError("native ownership is unconfirmed")
+    failure: Any = RuntimeError("native ownership is unconfirmed")
     failure.process, failure.job = object(), object()
     custody = failure.process, failure.job
-    observed = []
+    observed: list[str] = []
 
-    def run_owned(argv, **options):
+    def run_owned(argv: list[str], **options: Any) -> SimpleNamespace:
         module = options["procutil"]
         observed.append(module.__name__)
         assert sys.modules[module.__name__] is module
@@ -180,6 +197,7 @@ def test_construction_owner_call_keeps_pair_available_and_preserves_failure_cust
                     "_construction_procutil/streaming.py", "_construction_procutil/_output_relay.py",
                     "versioned_runtime_leases.py", "versioned_runtime_construction.py",
                     "versioned_runtime_source.py", "versioned_runtime_publication.py",
+                    "versioned_runtime_identity.py", "versioned_runtime_fingerprint.py",
                 )
             }
             assert sources["_installer_process.py"] == retained
@@ -189,7 +207,7 @@ def test_construction_owner_call_keeps_pair_available_and_preserves_failure_cust
             raise failure
         return SimpleNamespace(stdout="complete", stderr="")
 
-    def owner(name, *, evidence):
+    def owner(name: str, *, evidence: dict[str, Any]) -> SimpleNamespace:
         assert name == "_installer_process.py"
         return SimpleNamespace(run_owned=run_owned, _retained_source_bytes=retained)
 
@@ -211,8 +229,9 @@ def test_construction_owner_call_keeps_pair_available_and_preserves_failure_cust
 @pytest.mark.parametrize("stage", ["diagnostics", "owner", "procutil", "runtime"])
 @pytest.mark.parametrize("elapsed", [44, 45])
 def test_client_resource_preparation_consumes_shared_startup_deadline(
-    installed, monkeypatch, tmp_path, stage, elapsed,
-):
+    installed: tuple[SimpleNamespace, Path], monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, stage: str, elapsed: int,
+) -> None:
     import os
     import sys
 
@@ -226,7 +245,7 @@ def test_client_resource_preparation_consumes_shared_startup_deadline(
     ] + [Entry("fleet_manager/_installer_process.py", content)]
     evidence = construction.artifact_staging.diagnose_client()
     clock = {"now": 0}
-    observed = []
+    observed: list[dict[str, Any]] = []
     original_read = construction.artifact_staging._bytes
     original_diagnose = construction.artifact_staging.diagnose_client
     original_owner = construction._process_resource
@@ -236,30 +255,30 @@ def test_client_resource_preparation_consumes_shared_startup_deadline(
         "runtime": "_versioned_runtime.py",
     }.get(stage)
 
-    def read(path, limit):
+    def read(path: Path, limit: int) -> bytes:
         data = original_read(path, limit)
         if path.name == delayed_member:
             clock["now"] = elapsed
-        return data
+        return cast(bytes, data)
 
-    def diagnose():
+    def diagnose() -> dict[str, Any]:
         result = original_diagnose()
         if stage == "diagnostics":
             clock["now"] = elapsed
-        return result
+        return cast(dict[str, Any], result)
 
-    def retained(argv, **options):
+    def retained(argv: list[str], **options: Any) -> SimpleNamespace:
         observed.append(options)
         assert options["deadline"] == 45
         assert options["timeout"] == 45 - elapsed
         return SimpleNamespace(stdout="complete", stderr="")
 
-    def owner(name, *, evidence):
+    def owner(name: str, *, evidence: dict[str, Any]) -> ModuleType:
         module = original_owner(name, evidence=evidence)
         monkeypatch.setattr(module, "time", SimpleNamespace(monotonic=lambda: clock["now"]))
         monkeypatch.setattr(module, "os", SimpleNamespace(name="nt"))
         monkeypatch.setattr(module, "_retained_windows", retained)
-        return module
+        return cast(ModuleType, module)
 
     monkeypatch.setattr(construction, "time", SimpleNamespace(monotonic=lambda: clock["now"]))
     monkeypatch.setattr(construction, "os", SimpleNamespace(**{**vars(os), "name": "nt"}))
@@ -270,7 +289,7 @@ def test_client_resource_preparation_consumes_shared_startup_deadline(
     slot.mkdir(parents=True)
     prefix = "fleet_manager._retained_construction_procutil_"
     before = {name for name in sys.modules if name.startswith(prefix)}
-    options = {"descriptor": 1, "resource_evidence": None if stage == "diagnostics" else evidence}
+    options: dict[str, Any] = {"descriptor": 1, "resource_evidence": None if stage == "diagnostics" else evidence}
     if elapsed == 45:
         with pytest.raises(PlanError, match="client fixture timed out"):
             construction._run(["fixture"], slot, "fixture", **options)
@@ -281,7 +300,9 @@ def test_client_resource_preparation_consumes_shared_startup_deadline(
     assert {name for name in sys.modules if name.startswith(prefix)} == before
 
 
-def installed_runtime(installed, monkeypatch):
+def installed_runtime(
+    installed: tuple[SimpleNamespace, Path], monkeypatch: pytest.MonkeyPatch,
+) -> tuple[ModuleType, Path]:
     from fleet_manager import artifact_staging
 
     distribution, package = installed
@@ -289,6 +310,7 @@ def installed_runtime(installed, monkeypatch):
     for name in (
         "_versioned_runtime.py", "versioned_runtime_leases.py", "versioned_runtime_construction.py",
         "versioned_runtime_source.py", "versioned_runtime_publication.py",
+        "versioned_runtime_identity.py", "versioned_runtime_fingerprint.py",
     ):
         source = "versioned_runtime.py" if name == "_versioned_runtime.py" else name
         content = (library / source).read_bytes()
@@ -303,15 +325,18 @@ def installed_runtime(installed, monkeypatch):
 @pytest.mark.parametrize("member", [
     "_versioned_runtime.py", "versioned_runtime_leases.py", "versioned_runtime_construction.py",
     "versioned_runtime_source.py", "versioned_runtime_publication.py",
+    "versioned_runtime_identity.py", "versioned_runtime_fingerprint.py",
 ])
-def test_runtime_and_companion_replacement_after_admission_is_refused(installed, monkeypatch, member):
+def test_runtime_and_companion_replacement_after_admission_is_refused(
+    installed: tuple[SimpleNamespace, Path], monkeypatch: pytest.MonkeyPatch, member: str,
+) -> None:
     staging, package = installed_runtime(installed, monkeypatch)
     original = staging.diagnose_client
 
-    def replaced():
+    def replaced() -> dict[str, Any]:
         evidence = original()
         (package / member).write_text("raise AssertionError('unadmitted code executed')\n")
-        return evidence
+        return cast(dict[str, Any], evidence)
 
     monkeypatch.setattr(staging, "diagnose_client", replaced)
     with pytest.raises(PlanError, match="changed after RECORD admission"):
@@ -322,18 +347,21 @@ def test_runtime_and_companion_replacement_after_admission_is_refused(installed,
 @pytest.mark.parametrize("member", [
     "versioned_runtime_leases.py", "versioned_runtime_construction.py", "versioned_runtime_source.py",
     "versioned_runtime_publication.py",
+    "versioned_runtime_identity.py", "versioned_runtime_fingerprint.py",
 ])
-def test_companions_execute_only_retained_bytes_across_late_replacement(installed, monkeypatch, member):
+def test_companions_execute_only_retained_bytes_across_late_replacement(
+    installed: tuple[SimpleNamespace, Path], monkeypatch: pytest.MonkeyPatch, member: str,
+) -> None:
     import sys
 
     staging, package = installed_runtime(installed, monkeypatch)
     original = staging._bytes
 
-    def replaced(path, limit):
+    def replaced(path: Path, limit: int) -> bytes:
         content = original(path, limit)
         if path == package / member:
             path.write_text("raise AssertionError('unadmitted code executed')\n")
-        return content
+        return cast(bytes, content)
 
     monkeypatch.setattr(staging, "_bytes", replaced)
     with staging._primitive() as runtime:
@@ -341,6 +369,7 @@ def test_companions_execute_only_retained_bytes_across_late_replacement(installe
         for name in (
             "versioned_runtime_leases.py", "versioned_runtime_construction.py",
             "versioned_runtime_source.py", "versioned_runtime_publication.py",
+            "versioned_runtime_identity.py", "versioned_runtime_fingerprint.py",
         ):
             (package / name).write_text("raise AssertionError('late code executed')\n")
         assert runtime.ConstructionTimeout.__module__ == prefix + "_versioned_runtime_leases"
@@ -358,7 +387,9 @@ def test_companions_execute_only_retained_bytes_across_late_replacement(installe
     "missing-hash", "weak-hash", "bad-size", "bad-hash", "missing-resource",
     "oversized-resource", "foreign-package", "directory-resource",
 ])
-def test_missing_conflicting_or_tampered_installed_evidence_fails(installed, failure):
+def test_missing_conflicting_or_tampered_installed_evidence_fails(
+    installed: tuple[SimpleNamespace, Path], failure: str,
+) -> None:
     distribution, package = installed
     entry = distribution.files[-1]
     if failure == "version":
@@ -392,21 +423,23 @@ def test_missing_conflicting_or_tampered_installed_evidence_fails(installed, fai
     assert {path: path.read_bytes() for path in package.iterdir() if path.is_file()} == before
 
 
-def test_missing_distribution_is_not_silently_source_checkout_success(monkeypatch):
+def test_missing_distribution_is_not_silently_source_checkout_success(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(client_diagnostics.metadata.Distribution, "discover", lambda **_: iter(()))
     with pytest.raises(PlanError, match="distribution is not installed"):
         client_diagnostics.diagnose_client()
 
 
 @pytest.mark.parametrize("error", [ValueError("private metadata"), PermissionError("private metadata")])
-def test_malformed_or_unreadable_inventory_reports_bounded_cause(installed, monkeypatch, error):
+def test_malformed_or_unreadable_inventory_reports_bounded_cause(
+    installed: tuple[SimpleNamespace, Path], monkeypatch: pytest.MonkeyPatch, error: Exception,
+) -> None:
     distribution, _ = installed
 
     class BrokenInventory:
         version = distribution.version
 
         @property
-        def files(self):
+        def files(self) -> None:
             raise error
 
     monkeypatch.setattr(client_diagnostics.metadata.Distribution, "discover",
@@ -416,15 +449,19 @@ def test_malformed_or_unreadable_inventory_reports_bounded_cause(installed, monk
     assert "private metadata" not in str(exc.value)
 
 
-def test_ambient_metadata_discovery_is_never_a_fallback(installed, monkeypatch):
-    def ambient(*args, **kwargs):
+def test_ambient_metadata_discovery_is_never_a_fallback(
+    installed: tuple[SimpleNamespace, Path], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def ambient(*args: object, **kwargs: object) -> None:
         raise AssertionError("ambient metadata search was attempted")
 
     monkeypatch.setattr(client_diagnostics.metadata, "distribution", ambient)
     assert client_diagnostics.diagnose_client()["status"] == "installed"
 
 
-def test_duplicate_local_distributions_are_refused(installed, monkeypatch):
+def test_duplicate_local_distributions_are_refused(
+    installed: tuple[SimpleNamespace, Path], monkeypatch: pytest.MonkeyPatch,
+) -> None:
     distribution, _ = installed
     monkeypatch.setattr(client_diagnostics.metadata.Distribution, "discover",
                         lambda **_: iter([distribution, distribution]))
@@ -432,14 +469,16 @@ def test_duplicate_local_distributions_are_refused(installed, monkeypatch):
         client_diagnostics.diagnose_client()
 
 
-def test_resource_read_error_is_nonsecret(installed, monkeypatch):
+def test_resource_read_error_is_nonsecret(
+    installed: tuple[SimpleNamespace, Path], monkeypatch: pytest.MonkeyPatch,
+) -> None:
     distribution, package = installed
     original = Path.open
 
-    def denied(path, *args, **kwargs):
+    def denied(path: Path, *args: Any, **kwargs: Any) -> Any:
         if path == package / "_versioned_runtime.py":
             raise PermissionError("private input value")
-        return original(path, *args, **kwargs)
+        return cast(Callable[..., Any], original)(path, *args, **kwargs)
 
     monkeypatch.setattr(Path, "open", denied)
     with pytest.raises(PlanError, match="resource could not be read") as exc:
@@ -449,12 +488,14 @@ def test_resource_read_error_is_nonsecret(installed, monkeypatch):
 
 @pytest.mark.parametrize("level", [0, 1, 2])
 @pytest.mark.parametrize("kind", ["symlink", "reparse-point", "file"])
-def test_linked_or_invalid_resource_ancestors_fail_before_reading(installed, monkeypatch, level, kind):
+def test_linked_or_invalid_resource_ancestors_fail_before_reading(
+    installed: tuple[SimpleNamespace, Path], monkeypatch: pytest.MonkeyPatch, level: int, kind: str,
+) -> None:
     _, package = installed
     ancestor = (package, package.parent, package.parent.parent)[level]
     original = Path.lstat
 
-    def altered(path, *args, **kwargs):
+    def altered(path: Path, *args: Any, **kwargs: Any) -> Any:
         if path == ancestor:
             return SimpleNamespace(
                 st_mode=stat.S_IFLNK if kind == "symlink" else (
@@ -464,7 +505,7 @@ def test_linked_or_invalid_resource_ancestors_fail_before_reading(installed, mon
             )
         return original(path, *args, **kwargs)
 
-    def unread(path, *args, **kwargs):
+    def unread(path: Path, *args: Any, **kwargs: Any) -> None:
         pytest.fail("resource bytes must not be read through an invalid ancestor")
 
     monkeypatch.setattr(Path, "lstat", altered)
@@ -472,3 +513,30 @@ def test_linked_or_invalid_resource_ancestors_fail_before_reading(installed, mon
     monkeypatch.setattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400, raising=False)
     with pytest.raises(PlanError, match="must not be linked|ancestor must be a directory"):
         client_diagnostics.diagnose_client()
+
+
+def test_copied_client_bootstrap_retains_pure_runtime_components(
+    installed: tuple[SimpleNamespace, Path], monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    from fleet_manager import client_construction
+
+    staging, package = installed_runtime(installed, monkeypatch)
+    evidence = staging.diagnose_client()
+    monkeypatch.setattr(client_construction, "__file__", str(package / "client_construction.py"))
+    slot = tmp_path / "candidate"
+    slot.mkdir()
+    client_construction._bootstrap(slot, evidence)
+    bootstrap = slot / client_construction.BOOTSTRAP
+    for member in ("versioned_runtime_identity.py", "versioned_runtime_fingerprint.py"):
+        assert (bootstrap / member).read_bytes() == (package / member).read_bytes()
+    spec = importlib.util.spec_from_file_location("fixture_copied_client_runtime", bootstrap / "versioned_runtime.py")
+    assert spec is not None and spec.loader is not None
+    runtime = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, runtime)
+    try:
+        spec.loader.exec_module(runtime)
+        assert len(runtime.fingerprint_source([package / "__init__.py"])) == 64
+    finally:
+        for component in tuple(sys.modules):
+            if component.startswith(spec.name + "_"):
+                del sys.modules[component]

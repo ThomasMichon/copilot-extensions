@@ -384,7 +384,7 @@ def _candidate_snapshot(
         raise RuntimeError("Executing checkout is not the exact admitted candidate")
     selectors = [
         "worktree-manager", "plugins/agent-worktrees", "libs", "tools", "docs",
-        "plugins/agent-containers/setup.py", ".github/plugin/marketplace.json",
+        ".github/plugin/marketplace.json",
     ]
     required = {
         manifest.source_relative(name)
@@ -393,13 +393,19 @@ def _candidate_snapshot(
         )
         for name in manifest.files
     }
+    inventory = "plugins/agent-worktrees/scripts/_runtime_admission/toolkit.json"
+    toolkit = json.loads(_run(
+        ["git", "show", f"{actual}:{inventory}"], env, REPO, diagnostics, "candidate-toolkit",
+    ))
+    required.update(toolkit["files"])
     selectors.extend(sorted(
         name for name in required
         if not any(name == parent or name.startswith(parent + "/") for parent in selectors)
     ))
     archive = root / "candidate.tar"
     result = subprocess.run(
-        ["git", "archive", "--format=tar", "--output", str(archive), actual, *selectors],
+        ["git", "--literal-pathspecs", "archive", "--format=tar", "--output", str(archive),
+         actual, "--", *selectors],
         cwd=REPO, env=env, timeout=30, capture_output=True, check=False, **no_window_kwargs(),
     )
     if result.returncode:
@@ -691,11 +697,14 @@ def _witness(
 
             wait(installed_ready, "rendered project Picker")
             offers = []
+            # The PowerShell project entry runs the published front door in
+            # process, so the console's own shell is the terminal host.
+            shells = {console.process.pid, *descendants}
             for path in Path(env["TEMP"]).glob("ce-terminal-*/request.json"):
                 from agent_procutil._terminal_offer import validate
 
                 _, offer = cast(tuple[Path, dict[str, Any]], validate(str(path)))
-                if offer["host_pid"] in descendants:
+                if offer["host_pid"] in shells:
                     offers.append(offer)
             if not offers:
                 raise RuntimeError("Interactive shell bypassed its native terminal capability admission")
@@ -1160,8 +1169,22 @@ def test_consumer_exit_after_pending_probe_preserves_pre_input_evidence(
     _consumer_exit_case(tmp_path, monkeypatch, pending=True)
 
 
+def test_in_process_powershell_entry_admits_the_console_shell_as_terminal_host(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The quit-dialog failure proves the offer gate admitted the console root.
+    _consumer_exit_case(tmp_path, monkeypatch, pending=False, shell="powershell", host_pid=100)
+
+
+def test_offer_from_outside_the_console_tree_is_still_a_bypass(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _consumer_exit_case(tmp_path, monkeypatch, pending=False, shell="powershell", host_pid=999)
+
+
 def _consumer_exit_case(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, pending: bool,
+    shell: str = "cmd", host_pid: int = 101,
 ) -> None:
     from types import SimpleNamespace
 
@@ -1174,7 +1197,8 @@ def _consumer_exit_case(
     request.touch()
     diagnostics = tmp_path / "diagnostics"
     diagnostics.mkdir()
-    exit_path = diagnostics / "cmd.exit.json"
+    exit_path = diagnostics / (shell + ".exit.json")
+    admitted = host_pid in {100, 101, 102}
     cleaned: list[bool] = []
 
     class FailedConsole:
@@ -1187,6 +1211,10 @@ def _consumer_exit_case(
             self.job = SimpleNamespace(terminate_and_wait=self.cleanup)
 
         def cleanup(self, _timeout: float) -> None:
+            if not admitted:
+                assert not exit_path.exists() and not self.input_sent
+                cleaned.append(True)
+                return
             evidence = json.loads(exit_path.read_text(encoding="utf-8"))
             assert evidence["input_sent"] is (not pending)
             assert evidence["exit_code"] == 0xFFFFFFFF
@@ -1217,7 +1245,7 @@ def _consumer_exit_case(
             assert cleaned
 
     monkeypatch.setattr(_terminal_console_fixture, "Console", FailedConsole)
-    monkeypatch.setattr(_terminal_offer, "validate", lambda _: (request, {"host_pid": 101}))
+    monkeypatch.setattr(_terminal_offer, "validate", lambda _: (request, {"host_pid": host_pid}))
 
     def probe(
         _console: _Console, _manager: Path, _engine: Path,
@@ -1231,10 +1259,14 @@ def _consumer_exit_case(
 
     monkeypatch.setitem(globals(), "_installed_picker", probe)
     label = "rendered project Picker" if pending else "keyboard-driven quit dialog"
-    with pytest.raises(RuntimeError, match="Consumer exited 4294967295 before " + label):
-        _witness("cmd", tmp_path / "project.cmd", {"TEMP": str(tmp_path)}, tmp_path,
+    expected = ("Consumer exited 4294967295 before " + label if admitted
+                else "bypassed its native terminal capability admission")
+    with pytest.raises(RuntimeError, match=expected):
+        _witness(shell, tmp_path / ("project." + shell), {"TEMP": str(tmp_path)}, tmp_path,
                  diagnostics, tmp_path / "manager", tmp_path / "engine")
-    assert _failure_evidence(tmp_path)["cmd.exit.json"]["truncated"] is False
+    assert cleaned == [True]
+    if admitted:
+        assert _failure_evidence(tmp_path)[shell + ".exit.json"]["truncated"] is False
 
 
 def test_retained_engine_source_uses_published_snapshot_not_runtime_slot(tmp_path: Path) -> None:
@@ -1499,15 +1531,16 @@ def test_sparse_candidate_materializes_invocation_admission_toolkit(tmp_path: Pa
     inventory = json.loads((toolkit / "toolkit.json").read_text(encoding="utf-8"))
     assert inventory["files"]
     assert all((toolkit / relative).is_file() for relative in inventory["files"])
-    resource = Path("plugins") / "agent-containers" / "setup.py"
-    assert (toolkit / resource).read_bytes() == (
-        snapshot / resource
-    ).read_bytes()
+    assert all((snapshot / relative).is_file() for relative in inventory["files"])
+    resource = Path("services/pr/setup.py")
+    retained = (toolkit / resource).read_bytes()
+    assert retained == (snapshot / resource).read_bytes()
     (snapshot / resource).unlink()
     refused = materialize_payload_invocation_into(
         source_consumer_dir=consumer, dest_consumer_dir=consumer, canonical_root=snapshot,
     )
     assert len(refused) == 1 and refused[0].startswith("SKIP Invocation materialization:")
+    assert (toolkit / resource).read_bytes() == retained
 
 
 def test_unreaped_error_preserves_enclosing_sandboxes_and_original_exception(

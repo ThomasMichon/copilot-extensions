@@ -3,6 +3,68 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-17 - Fleet receiving refinements and remote configuration scope](journal/2026/11.17-fleet-refinements-and-remote-scope.md)
+
+- [2026-11-17 - Finite lifecycle receiving and accepted timeout tracking](journal/2026/11.17-lifecycle-receiving-and-timeout-retirement.md)
+
+- [2026-11-17 - Credential receipt, callback receiving and protected contracts](journal/2026/11.17-credential-receipt-and-protected-contracts.md)
+
+- [2026-11-17 - Operation-credential receiving receipt and canonical keepers](journal/2026/11.17-operation-credential-receiving-receipt.md)
+
+- [2026-11-17 - Current create-credential qualification and whole receiving proposal](journal/2026/11.17-current-create-credential-qualification.md)
+
+- [2026-11-17 - Manager receipt and native/transport retentions](journal/2026/11.17-manager-receipt-and-native-transport-retentions.md)
+
+- [2026-11-17 - Registry/lifecycle receipt and manager mechanisms](journal/2026/11.17-registry-lifecycle-receipt-and-manager-mechanisms.md)
+
+- [2026-11-17 - Authentication/baseline receipt and overlay proposals](journal/2026/11.17-auth-baseline-receipt-and-overlay-proposals.md)
+
+- [2026-11-17 - Authentication, finite baseline and engine receiving](journal/2026/11.17-authentication-baseline-and-engine-receiving.md)
+
+- [2026-11-17 - Webhook and host-teardown receipt, with receiving correction](journal/2026/11.17-webhook-receipt-and-receiving-correction.md)
+
+- [2026-11-17 - Webhook and host-teardown receiving, with five retained contracts](journal/2026/11.17-webhook-and-host-teardown-receiving.md)
+
+- [2026-11-17 - Composition receipt and client-only installation inflow](journal/2026/11.17-composition-receipt-and-client-only-inflow.md)
+
+- [2026-11-17 - Fork receipt and composition gate clarification](journal/2026/11.17-fork-receipt-and-composition-gate-clarification.md)
+
+- [2026-11-17 - Attention receipt and whole fork/composition proposals](journal/2026/11.17-attention-receipt-and-whole-domain-proposals.md)
+
+- [2026-11-17 - Complete attention receiving and seven retained contracts](journal/2026/11.17-attention-receiving-and-seven-contracts.md)
+
+- [2026-11-17 - Hosted-session receipt and retained control contracts](journal/2026/11.17-hosted-session-receipt-and-control-contracts.md)
+
+- [2026-11-17 - Hosted-session receiving and condition provenance](journal/2026/11.17-hosted-session-receiving-and-condition-provenance.md)
+
+- [2026-11-17 - Shared-core receipt and retained runtime contracts](journal/2026/11.17-shared-core-receipt-and-runtime-contracts.md)
+
+- [2026-11-17 - Complete shared-core receiving proposal](journal/2026/11.17-complete-shared-core-receiving.md)
+
+- [2026-11-17 - Platform contracts and citation-stop cause](journal/2026/11.17-platform-contracts-and-citation-cause.md)
+
+- [2026-11-17 - Ten source deltas and gate provenance](journal/2026/11.17-ten-source-deltas-and-gate-provenance.md)
+
+- [2026-11-17 - Ten current contracts and receiving boundaries](journal/2026/11.17-ten-current-contracts-and-receiver-boundaries.md)
+
+- [2026-11-17 - Auth-lifetime receiving and twelve contract discriminators](journal/2026/11.17-auth-lifetime-and-contract-discriminators.md)
+
+- [2026-11-17 - Cleanup delta and unchanged-source discriminators](journal/2026/11.17-cleanup-and-unchanged-source-discriminator.md)
+
+- [2026-11-17 - Generic-review intake receipt and parked acceptance](journal/2026/11.17-generic-review-intake-receipt.md)
+
+- [2026-11-17 - Conditional cadence guidance and the idle-wake discriminator](journal/2026/11.17-cadence-guidance-and-idle-wake-discriminator.md)
+
+- [2026-11-17 - Build-isolation wiring and retained native acceptance](journal/2026/11.17-build-isolation-and-native-acceptance.md)
+
+- [2026-11-17 - Hygiene engine and Index custody](journal/2026/11.17-hygiene-engine-and-index-custody.md)
+
+- [2026-11-17 - Lifecycle and cache-owner acceptance](journal/2026/11.17-lifecycle-and-cache-owner-acceptance.md)
+
+- [2026-11-17 - SDK release, cache adoption and transport observation](journal/2026/11.17-sdk-release-cache-adoption-and-transport-observation.md)
+
+- [2026-11-17 - Serving convergence and canonical typing boundaries](journal/2026/11.17-serving-convergence-and-canonical-typing.md)
+
 - [2026-11-17 - Bootstrap, reporting and daemon-generation contracts](journal/2026/11.17-bootstrap-reporting-and-generation-contracts.md)
 
 - [2026-11-17 - Finite reviewer comparison and provider-first delivery boundaries](journal/2026/11.17-provider-first-delivery-boundaries.md)

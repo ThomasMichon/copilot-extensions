@@ -103,9 +103,16 @@
     },
     {
       "name": "copilot-extensions-harness",
-      "description": "Operator harness for the copilot-extensions repo. Primary: help any consumer identify which local scripts/processes belong to this suite and enforce never-monkey-patch (file a bug upstream or auto-update instead). Secondary: portable contribution, deployment, and clean-room validation guidance plus an ambient pointer to the general-purpose, organization-neutral contribution boundary.",
+      "description": "Consumer awareness and diagnosis for copilot-extensions. Identifies artifact ownership and separates authorized installer-equivalent repair from prohibited package-code patches. Dependency failures do not authorize source contributions or upstream publication.",
       "version": "0.1.0-dev47",
       "source": "plugins/copilot-extensions-harness"
+    },
+    {
+      "name": "copilot-extensions-maintainer",
+      "description": "Opt-in contribution, review, release-triage and clean-room procedures for explicitly assigned copilot-extensions source work. Availability does not expand the operator's charter.",
+      "version": "0.1.0",
+      "source": "plugins/copilot-extensions-maintainer",
+      "defaultEnabled": false
     },
     {
       "name": "wsl-setup",

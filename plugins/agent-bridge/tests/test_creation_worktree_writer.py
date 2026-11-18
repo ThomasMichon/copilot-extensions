@@ -110,11 +110,13 @@ def writer_creation(creation_rig: Any, monkeypatch: pytest.MonkeyPatch, tmp_path
     monkeypatch.setattr(acquisition_authority, "worktree_command", command)
     monkeypatch.setattr(workspace_creation, "worktree_command", command)
     from agent_bridge import worktree_lineage
+    registrations = []
 
     def register(*_args: Any, **_kwargs: Any) -> Any:
         active = writers.current()
         assert active is not None and isinstance(active.request, creation.CreationWriterScope)
         assert rig.db.execute_read("SELECT creation_writer_json FROM workspace_embodiments")[0][0]
+        registrations.append((_args, _kwargs))
         return True
 
     monkeypatch.setattr(worktree_lineage, "register_session", register)
@@ -123,6 +125,23 @@ def writer_creation(creation_rig: Any, monkeypatch: pytest.MonkeyPatch, tmp_path
 
     async def host_connect(*args: Any, **kwargs: Any) -> Any:
         result = await connect(*args, **kwargs)
+        owner = kwargs.get("recovery_operation")
+        if owner is not None:
+            from agent_bridge import retained_load_acceptance as acceptance
+            from agent_bridge.session_host.host_index import HostRecord
+
+            # The fake connector represents an acknowledged load; real RPC
+            # ordering and physical custody have separate Host controls.
+            owner.host_record = HostRecord(
+                session_id=owner.session_id, host_pid=90000001, child_pid=90000002,
+                port=1234, nonce="fixture-nonce", state_file="fixture-state",
+                extra={"host_process_start": "100", "child_process_start": "100"},
+            )
+            owner.host_process = SimpleNamespace(pid=90000001, poll=lambda: None)
+            owner.socket, owner.streams = object(), object()
+            result[0].session_host_client = owner.socket
+            owner.session.client = result[0]
+            acceptance.record(owner, acceptance.prepare(owner, result[0]))
         starts.append(result[1])
         return result
 
@@ -130,7 +149,7 @@ def writer_creation(creation_rig: Any, monkeypatch: pytest.MonkeyPatch, tmp_path
     rig.target = replace(rig.target, worktree_id=rig.row["id"])
     return SimpleNamespace(
         rig=rig, requirement=requirement, selected=selected, command=command, starts=starts,
-        executing_identity=executing_identity,
+        executing_identity=executing_identity, registrations=registrations,
     )
 
 
@@ -179,8 +198,15 @@ async def test_keyed_creation_writer_retains_original_scope_and_strict_resume(wr
 
 async def recovery_fixture(writer_creation: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
     from agent_bridge import creation_writer_inspection as inspection
+    from agent_bridge import retained_load_acceptance
     from agent_bridge.models import RetainedRecoveryRequest
 
+    monkeypatch.setattr(retained_load_acceptance, "epoch", lambda: {
+        "platform": "linux", "environment_id": "a" * 32, "boot_id": "original-boot",
+    })
+    monkeypatch.setattr(retained_load_acceptance, "process", lambda pid: {
+        "pid": pid, "start_time": "100", "parent_pid": 90000001 if pid == 90000002 else 1,
+    })
     fixture, rig = writer_creation, writer_creation.rig
     session, _receipt = await workspace_creation.start(
         rig.manager, rig.target, key="original-key", worktree_writer=fixture.requirement,
@@ -204,6 +230,7 @@ async def recovery_fixture(writer_creation: Any, monkeypatch: pytest.MonkeyPatch
         result = await command(args, project, owner_prefix=owner_prefix)
         if args[0] == "resource-relationship":
             result["retained_native_resume"] = 1
+            result["retained_hosted_activation"] = 1
         return result
 
     monkeypatch.setattr(acquisition_authority, "worktree_command", recovery_command)
@@ -252,6 +279,10 @@ async def test_retained_recovery_resumes_same_native_once_without_prompt_drain(w
         rig.manager, session.session_id, request, fixture.requirement, lambda: True,
     )
     assert resumed is session and result["state"] == "complete"
+    args, registered = fixture.registrations[-1]
+    assert args == (session.target.worktree_id, request.native_session_id)
+    assert registered["hosted_activation"] == session._retained_recovery_owner.accepted_load["activation"]
+    assert registered["pid"] == registered["hosted_activation"]["child"]["pid"] == 90000002
     assert result["native_session_id"] == session.acp_session_id == request.native_session_id
     assert result["bridge_session_id"] == session.session_id
     assert session.background_recovery_enabled is False
@@ -428,7 +459,8 @@ async def test_native_stop_race_retains_hold_and_records_no_native_entry(writer_
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("boundary", [
-    "host", "inventory", "native", "capability", "installation", "not-ready", "gate", "stop",
+    "host", "inventory", "native", "capability", "hosted-capability",
+    "installation", "not-ready", "gate", "stop",
 ])
 async def test_retained_recovery_denies_unconfirmed_native_owners_before_invocation(
     writer_creation: Any, monkeypatch: pytest.MonkeyPatch, boundary: Any,
@@ -446,10 +478,11 @@ async def test_retained_recovery_denies_unconfirmed_native_owners_before_invocat
         request = request.model_copy(update={"native_session_id": "another-native"})
     elif boundary == "installation":
         request = request.model_copy(update={"bridge_installation": "another-installation"})
-    elif boundary == "capability":
+    elif boundary in {"capability", "hosted-capability"}:
         async def unsupported(*args: Any, **kwargs: Any) -> Any:
             result = await command(*args, **kwargs)
-            result.pop("retained_native_resume", None)
+            result.pop("retained_native_resume" if boundary == "capability"
+                       else "retained_hosted_activation", None)
             return result
         monkeypatch.setattr(acquisition_authority, "worktree_command", unsupported)
     elif boundary == "gate":

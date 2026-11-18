@@ -13,6 +13,7 @@ from pathlib import Path
 
 from . import config as cfg
 from . import git_ops, tracking
+from .observation_progress import observation_boundary
 
 
 def apply_tracking_override(
@@ -56,6 +57,7 @@ def compute(
     short-circuit git disposition before that fetch. A missing finalized
     checkout retains the list contract's COMPLETED state.
     """
+    observation_boundary()
     if record.worktree_path and Path(record.worktree_path).exists():
         deadline_args = (
             {"observation_deadline": git_ops._observation_deadline()}

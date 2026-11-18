@@ -42,15 +42,22 @@ agent-chat-driven flow).
 
 ## Coordination
 
-The proposed #5452 finite waiter transport family stays with existing
-task/waiter/bulk-lookup/coordinator/board/relay/source/UI and native custodians.
-Preserve #2453/#2802 and all earlier source-specific holds. #5410's actually
-governed constructed-header/transmission question remains separately owned,
-not an auth intake or new per-agent credential policy here. Normal review,
+The proposed #5452 whole authentication-and-waiter transport family stays
+with existing task/waiter/bulk-lookup/coordinator/board/client/relay/source/UI
+and native custodians. #11166 already delivered #5410's complete reviewed
+tracking intake into the OPEN #5452 parent; this proposal receives that WHOLE
+parent, not only its older transport slice. Authentication construction/
+transmission and data threading remain distinct technical mechanisms under
+their actual custodians, not separate exclusions from this receiving scope.
+The 2026-10-30 transport-only boundary remains historical in the Journal.
+Preserve #2453/#2802 and all earlier actual source-specific holds; the finite
+authentication lane creates no per-agent credential policy. Normal review,
 complete actual direct Plan/local AND global Validation/Coordination/
 Journal delivery and permitted whole-current source/receiver/custody
 readback precede a separate administrative judgment; missing fit/clauses/
-custody means KEEP #5452. No new actor, blanket ACK, expiry or resource effect.
+custody means KEEP #5452. That receiving condition is not a requirement to
+implement or natively prove the defects before a tracking-only judgment.
+No new actor, blanket ACK, expiry, appointment or resource effect.
 
 The direct #2802 all-producer choice/multichoice family stays with this existing UX host
 and backend/source custodians. Preserve the same #2453 actual native
@@ -1607,25 +1614,50 @@ universal ACK, every-host or whole-parent completion gate is introduced.
   and terminal cases, absent claimed_at/created_at, restart/reclaim, future/skew and
   narrow display at the original finite tier; no unrelated all-host programme.
 
-### Proposed finite same-waiter transport visibility from #5452
+<a id="proposed-finite-same-waiter-transport-visibility-from-5452"></a>
+
+### Proposed whole authentication and same-waiter receiving from #5452
 
 _(Agent-recommended additive tracking proposal; #5400's local Tasks/
-Claims/bulk-endpoint delivery remains credited, not missing implementation.)_
+Claims/bulk-endpoint delivery and #11166's reviewed #5410 tracking intake
+remain credited, not missing implementation or renewed source judgments.)_
+
+Receive the current BW-A1/A2, BW-B1/B2/B3 and BW-V1-V7 union directly here.
+All technical rows remain unchecked until their actual acceptance; this
+proposal supplies no implementation, test, authentication, native or rollout
+result. Preserve the author's withdrawn universal-placeholder claim as
+withdrawn: the accepted finite defect is the run-waiter bulk-fetch consumer,
+not every token-referencing expression in the affected modules. Prior source
+study is retained evidence, not a new current implementation audit.
+
+- [ ] **P5452-A1:** Correct the finite run-waiter authenticated request
+  boundary and audit ALL header-callsite classes in the affected board AND
+  client modules. Preserve the author's correction and working token-aware
+  paths; do not infer literal bytes from masked display.
+- [ ] **P5452-A2:** Add actual constructed/sent-header VALUE regressions for
+  at least one affected consumer in EACH module, including the finite
+  run-waiter bulk-fetch consumer. Keep construction inside the tested path;
+  header presence or a mock bypassing construction is not acceptance.
 
 - [ ] **P5452-1:** Carry `run_waiters` AND the exact suspended-wait command
   phrase from the SAME durable waiter through delegated CROSS-MACHINE
   boards AND relay/subscribe INITIAL AND CACHED rebuilds. Preserve existing
-  full-detail views and reuse the shared bulk lookup/row builder rather
-  than generic suspended badges or per-transport competing truth.
+  Tasks/Claims enrichment and full-detail views, and reuse the shared bulk
+  lookup/row builder rather than generic suspended badges or per-transport
+  competing truth.
 - [ ] **P5452-2:** Keep no-waiter/missing/unknown/failed/changed/stale
   observations truthful and bounded under the actual task/waiter/source
   authority. Rendering cannot clear exclusions, renew/release leases,
   resume/replace workers or reinterpret an active external wait as death.
-- [ ] **P5452-3:** Keep #5410 authentication construction/transmission
-  separate from data threading. Header presence, no-token loopback success
-  or endpoint existence proves neither the governed auth case nor both
-  remaining data consumers. Preserve legitimate user-local no-token mode;
-  no new token, credentials, auth repair code or universal-placeholder claim.
+- [ ] **P5452-3:** Keep authentication construction/transmission and data
+  threading technically distinct within the WHOLE #5452 receiving scope,
+  under their actual existing custodians. The older transport-only exclusion
+  of auth repair is historical, not a restriction on P5452-A1/A2. Header
+  presence, successful no-token loopback or endpoint existence proves
+  neither authenticated transmission nor both remaining data consumers.
+  Preserve legitimate user-local no-token mode, missing-token behavior and
+  existing authorization/error contracts; no new token, credential policy
+  or universal-placeholder claim follows from this tracking intake.
 - [ ] **V5452-1:** At actual board/transport consumer boundaries, feed one
   durable active waiter and assert the SAME exact wait command/detail on
   the local positive control, delegated peer flow, relay INITIAL rebuild
@@ -1636,6 +1668,17 @@ Claims/bulk-endpoint delivery remains credited, not missing implementation.)_
   full views, not another store/poller or display-driven ownership refresh.
   Keep actually governed auth controls separate and original finite
   source/consumer/native tiers; no new every-host or whole-parent gate.
+- [ ] **V5452-A1:** Observe the actual constructed/sent header VALUE for the
+  finite bulk-fetch consumer AND at least one affected client consumer.
+  Synthetic assertions need no real token or coordinator; presence-only
+  checks, mocks bypassing construction, masked output and successful
+  no-token loopback are not substitutes.
+- [ ] **V5452-A2:** Complete the affected board/client module callsite audit,
+  distinguishing actual constants from display masking while retaining
+  working token-aware expressions. Cover missing-token behavior and the
+  existing authorization/error contracts, including legitimate no-token
+  mode. Failed authentication or unavailable enrichment must not fabricate
+  successful waiter evidence.
 
 ## Validation Plan
 
@@ -1702,13 +1745,27 @@ Claims/bulk-endpoint delivery remains credited, not missing implementation.)_
   implementation, current defect proof, native/release/installed acceptance, custody
   transfer or parent completion.
 
-- [ ] **G5452:** Resolve EVERY P5452/local Validation/continuing Coordination
-  clause for the complete delegated AND relay/subscribe initial/cached
-  waiter path union: SAME durable source, `run_waiters` AND exact phrase,
-  shared lookup/full views and bounded truthful unknowns without lifecycle/
-  lease/exclusion effects. Preserve local #5400 credit, independent #5410
-  and existing #2453/#2802/source/native holders. Documentary intake is
-  not auth/data implementation, native parity or custody/parent completion.
+- [ ] **G5452:** Resolve EVERY P5452-A1/A2, P5452-1/2/3, V5452-A1/A2,
+  V5452-1/2 and continuing Coordination clause for the WHOLE current
+  BW-A1/A2 + BW-B1/B2/B3 + BW-V1-V7 union. Retain the finite authenticated
+  bulk-fetch boundary, complete affected board/client audit and actual
+  constructed/sent-header VALUE regressions in BOTH modules, alongside
+  delegated AND relay/subscribe INITIAL AND CACHED waiter paths: SAME
+  durable source, `run_waiters` AND exact command, shared lookup, local
+  Tasks/Claims/full views and bounded truthful unknown/error outcomes.
+  Preserve missing-token/legitimate no-token/authorization/error behavior;
+  do not invent waiter success from authentication failure or cause
+  lifecycle/lease/exclusion effects. Required PR/promotion CI stays
+  unit-only and change-scoped at the original finite evidence tiers, not a
+  new live-authentication, every-host/native, deployed-consumer or
+  publication-evidence programme. Preserve #5400's local delivery and
+  #11166's reviewed tracking intake, separate technical custodians and
+  existing #2453/#2802/source/native holders. Retain BW-V7's complete
+  current eligible #5452 body/discussion readback after actual delivery
+  and separate #5410 administrative judgment; this amendment neither
+  repeats, reopens nor claims that judgment. Technical rows stay unchecked
+  until actual acceptance. Documentary intake is not auth/data
+  implementation, native parity or custody/parent completion.
 
 ## Proposal
 
@@ -1724,6 +1781,28 @@ delegated peer and relay initial/cached consumers retain the same durable
 waiter and exact display contract. #5410 stays independently owned.
 No peer/subscription/auth probe, source implementation, reviewed receiving
 acceptance, assignment, issue closure or custody/resource release occurred.
+
+### 2026-11-17 - Proposed whole #5452 authentication and transport receiving
+
+The 2026-10-30 entry above records the then-transport-only proposal, including
+its statement that #5410 stayed independently owned. Preserve that historical
+statement, #5400's local Tasks/Claims/bulk delivery and every incumbent checked
+credit. #11166 subsequently delivered the complete reviewed #5410 tracking
+contract into #5452. Prospectively reconcile the former outside-auth
+Coordination boundary, P5452-3's transport-only auth-repair exclusion and
+G5452's independent-#5410 wording with that WHOLE current parent: separate
+technical mechanisms and actual custodians remain, but authentication is not
+excluded from this proposed receiving scope. The historical Journal entry is
+not a current scope exclusion.
+
+Added agent-recommended unchecked auth Plan/local Validation and expanded the
+actual global Validation union, preserving all incumbent checkbox states,
+transport axes, withdrawn universal claim and existing source/resource holds.
+Normal reviewed actual delivery and whole-current eligible source/discussion
+and receiving/custody readback precede any separate administrative judgment;
+implementation or native proof is not a new prerequisite for that documentary
+judgment. This is a proposed amendment, not an accepted source transfer,
+implementation, test/native result, assignment, closure or resource release.
 
 ### 2026-10-22 - Direct retained acceptance from #2802
 

@@ -15,6 +15,7 @@ GET_KEYS: dict[str, str] = {
     "execution-identity": "Versioned configured execution identity (JSON)",
     "checkout-relocation": "Selected runtime's inactive checkout relocation contract (JSON)",
     "finalize-recovery": "Selected runtime's explicit finalization recovery contract (JSON)",
+    "finalize-retention": "Selected runtime's non-removing finalization contract (JSON)",
     "platform": "Platform (win/wsl/linux)",
     "project": "Project name",
     "update-controller": "Configured project update controller (empty when absent)",

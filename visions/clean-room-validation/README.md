@@ -168,5 +168,5 @@ the thing under test.
   [`plugin-services`](../plugin-services/README.md) (the self-provisioning service
   model the solo self-sufficiency contract enforces)
 - Guidance: the **`validating-in-clean-room`** skill (run / evaluate / author more)
-  and the **`clean-room-judge`** sub-agent, both in the `copilot-extensions-harness`
+  and the **`clean-room-judge`** sub-agent, both in the optional `copilot-extensions-maintainer`
   plugin.

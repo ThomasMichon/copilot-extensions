@@ -217,13 +217,76 @@ contracts separately advertise `retained-native-recovery`.
 The receiver requalifies its original keyed writer and installation, requires
 a stopped local session and owner-confirmed native loss, then writes the
 operation before one exact native load. Worktrees must advertise
-`retained_native_resume: 1` and enforces the original workspace incarnation
-and native head revision inside its process-creation fence. An older owner
-does not silently receive an ordinary unfenced resume.
+`retained_native_resume: 1` and `retained_hosted_activation: 1` from the actual
+selected executor. The native-resume fence enforces the original workspace
+incarnation and head revision. Missing hosted-activation support or an
+unqualified local Linux/WSL execution epoch refuses before Host creation;
+an older owner does not silently receive an ordinary unfenced resume.
+
+The original RPC owner records `retained_native_load_accepted` in the same
+operation-tagged event journal immediately after `session/load` acknowledges.
+It binds the original recovery request and selected writer to the actual local
+Host transport, process births and execution epoch, then flushes before
+returning to preference application or registration. The association stores a
+nonce digest, not the Host's attach credential. A timeout without an
+acknowledgement never manufactures this event. A stop arriving during the RPC
+does not erase an acknowledgement, grant permission or complete registration.
+The additive configuration snapshot retains the load response's advertised
+options and original preference intent, including resolved caller settings.
+It is not proof that subsequent configuration succeeded.
+The recovery row's request/state schema remains unchanged, so an older reader
+preserves unknown custody and rejects accepted-load evidence as a no-load
+failure.
+
+After a successful load, registration rechecks that acknowledgement against
+the current original operation, executing writer, Host transport, process
+births and epoch. It sends the recorded child PID and explicit
+`--retained-hosted-activation` through Worktrees' qualified registration
+command. It neither creates nor requires a CLI hold for this hosted source.
+A missing acknowledgement, changed association or unconfirmed write retains
+the original recovery gate instead of reporting success. Ordinary CLI-native
+registration still uses its existing hold witness.
+
+Original-operation status reconciliation can finish a load interrupted before
+registration. It requires the complete operation-tagged acknowledgement history,
+the original local Host, unchanged process births/epoch and native head, a
+compatible current writer and an unassociated stopped session. It claims the
+Host through its existing generation owner and authenticates a current idle
+child separately from the historical load acknowledgement. Reattachment only
+initializes the transport and adopts that same conversation: no new Host,
+native load, new conversation, prompt or queue drain.
+
+For a durable acknowledgement, missing terminal progress or a later failed
+configuration phase does not negate the accepted load. If configuration did
+not finish, reconciliation requires its original response snapshot and applies
+that original intent through the reattached client's existing configuration
+owner. Target-settings mode forces fresh configuration readback rather than
+treating old advertised values as current; missing required confirmation stays
+held. Only configuration events advance the checked history during this step;
+unrelated concurrent activity, stops and ownership changes refuse completion.
+An older acknowledgement without the snapshot can finish only when its original
+history affirmatively records completed configuration.
+
+On the original frontend, a failed resume can still retain its ACP client.
+Completion first qualifies that inactive RPC owner's client, Host socket,
+acknowledgement and idle operation state under the existing ownership locks,
+then detaches only that frontend before reattaching. An unassociated client
+stays untouched. A configuration-timeout diagnostic is accepted only after the
+same durable acknowledgement, never as independent load evidence.
+
+An older writer's affirmative tagged load-finished history can be adapted only
+when the retained Host's immutable state and birth evidence associate its launch
+with that original event span. Missing or conflicting history, a foreign live
+frontend, changed head/incarnation, a stop hold or unavailable transport stays
+held. Reattachment failure never prunes or reaps this unknown original Host.
+Registration response loss retries the same hosted activation idempotently,
+not the load. Completion atomically records the original operation complete,
+removes its launch gate and marks the session idle; task acceptance, permission
+holds, policy clocks and pending prompts remain independent.
 
 The same journal retains completed and uncertain operation IDs. A same-ID
 request reads that outcome, never relaunches. Pending/unknown recovery blocks
-other resumes; transport mutation retries are disabled. The read-only
+other resumes; transport mutation retries are disabled. The original-operation
 `GET /api/v1/sessions/{exact-id}/retained-recovery/{operation-id}` route, or
 `status <exact-id> --recovery-operation <id> --json`, reconciles the original
 operation without a new launch. A lost reply after committed acceptance
@@ -232,8 +295,36 @@ live status by itself cannot invent acceptance of that operation.
 Preparation is retained before native qualification. A refused preparation
 or an automatic admission that never entered native launch records
 `not-started`; a preparing request or uncertain native entry remains unknown.
-Read-only reconciliation can settle that exact no-effect outcome without
-reusing its ID. A non-complete same-ID CLI replay reports
+Inspection can settle that exact no-effect outcome without reusing its ID.
+Recovery now durably tags its startup event span with the original operation
+before entering native preparation. Status reconciliation requires a stopped
+original owner, unchanged compatible writer/workspace/head,
+and the retained local Host record with both birth-matched processes
+confirmed exited. It commits `not-started` and removes that operation's
+launch gate atomically; it does not remove the Host record, change the
+request/history, clear a stop token, drain prompts or start native work.
+An in-memory failed initialization transport can be detached only through its
+inactive original recovery owner, before any native RPC and without pending
+permission or elicitation state, after the same process-exit proof. Only that
+owner's retained streams and socket are closed; no process is signaled and no
+generic client shutdown runs. Startup pruning and ordinary dead-client
+settlement preserve Host evidence while the original recovery is unresolved,
+so inspection also works after frontend restart.
+Completed handoff predecessors are retained history, not competing live
+owners. Reconciliation excludes such a row only after following the completed
+keyed handoff chain and verifying its stopped state, original native/workspace
+binding, absence of an active in-memory transport or turn, and exited
+birth-matched processes for any retained predecessor Host. Uncompleted,
+foreign, live and ambiguous predecessor custody still blocks settlement;
+the historical row itself is never changed.
+For older writers without the explicit operation tag, only a complete fresh
+metadata-adoption epoch containing its sole recovery operation and the
+affirmative initialization/child-exit/terminal-resume failure sequence is
+eligible. Missing or ambiguous history, a possible native load, live or
+unknown Host custody, and changed ownership remain held. This is receiver-side
+completion of the existing version-1 inspection contract, not a new caller
+option or permission to replay an unknown operation.
+A non-complete same-ID CLI replay reports
 `verb: recovery-inspected`, not a successful resume.
 The existing native launch gate commits atomically with the operation journal.
 Its native-bound gate form also blocks legacy ordinary ACP resumes and fresh

@@ -108,6 +108,6 @@ reconciliation obligations. Neither an auto-merge label nor a controller
 result transfers those claims or finalizes the submitter's worktree.
 
 Focused contracts live in the repository-harness test suite:
-`plugins/copilot-extensions-harness/tests/test_maintainer_completion_*.py`.
+`plugins/copilot-extensions-maintainer/tests/test_maintainer_completion_*.py`.
 That existing suite owns the regression execution; no additional CI job is
 required.

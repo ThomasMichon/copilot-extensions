@@ -13,6 +13,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 import venv
 import zipfile
@@ -33,6 +34,45 @@ install_source: ModuleType = vars(importlib.import_module("local_install_profile
 from installer_wheel_snapshot import retain_wheel_inputs
 
 engine = install_source.engine
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows path-length boundary")
+@pytest.mark.parametrize("length", [251, 259])
+@pytest.mark.parametrize("fail_replace", [False, True])
+def test_application_atomic_write_preserves_ordinary_destination_headroom(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, length: int, fail_replace: bool,
+) -> None:
+    root = Path(str(tmp_path).removeprefix("\\\\?\\"))
+    name = "versioned_runtime_construction.py"
+    directory = root / ("p" * (length - len(str(root / name)) - 1))
+    directory.mkdir()
+    destination = directory / name
+    assert len(str(destination)) == length
+    destination.write_bytes(b"incumbent")
+    temporary_paths: list[Path] = []
+    mkstemp = tempfile.mkstemp
+
+    def create(**options: Any) -> tuple[int, str]:
+        descriptor, filename = mkstemp(**options)
+        temporary_paths.append(Path(filename))
+        return descriptor, filename
+
+    monkeypatch.setattr(tempfile, "mkstemp", create)
+
+    if fail_replace:
+        def refuse(_source: Path, _destination: Path) -> None:
+            raise PermissionError("fixture replacement refused")
+
+        monkeypatch.setattr(os, "replace", refuse)
+        with pytest.raises(PermissionError, match="fixture replacement refused"):
+            runtime_application_install._write(destination, b"incoming")
+    else:
+        runtime_application_install._write(destination, b"incoming")
+
+    assert destination.read_bytes() == (b"incumbent" if fail_replace else b"incoming")
+    assert list(directory.iterdir()) == [destination]
+    assert len(temporary_paths) == 1
+    assert len(str(temporary_paths[0])) < 260
 
 
 @pytest.mark.parametrize("abi,target", [
@@ -244,6 +284,96 @@ def test_install_callback_budgets_reach_actual_subprocess_boundary(
     assert [options["timeout"] for _, options in invocations] == expected
     assert [argv[-1] for argv, _ in invocations] == ["--setup", "--start"]
     assert (fixture.slot / "install-success.json").is_file()
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+def test_install_cli_selects_publication_without_changing_callbacks_or_default_commands(
+    install_transaction: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, explicit: bool,
+) -> None:
+    fixture = install_transaction
+    home = fixture.root / "home"
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    monkeypatch.setattr(runtime_application_install, "__file__", str(fixture.slot / "install.py"))
+    fixture.record["commands"].append("fixture-alias")
+    (fixture.slot / "application.json").write_text(json.dumps(fixture.record))
+    default = home / ".local" / "bin"
+    default.mkdir(parents=True)
+    sentinel = default / "fixture-app"
+    sentinel.write_bytes(b"incumbent default command\n")
+    selected = fixture.global_bin if explicit else default
+    calls: list[list[str]] = []
+
+    def run(_record: dict[str, Any], arguments: list[str], *_args: Any, **_kw: Any) -> None:
+        if arguments:
+            calls.append(arguments)
+
+    monkeypatch.setattr(runtime_application_install, "_run", run)
+    argv = [
+        *(["--global-bin", str(selected)] if explicit else []),
+        "--", "--global-bin", "application-owned-value",
+    ]
+    assert runtime_application_install.main(argv) == 0
+    assert runtime_application_install.main(argv) == 0
+    assert calls == [["--start", "--global-bin", "application-owned-value"]] * 2
+    for command in fixture.record["commands"]:
+        for name, text in global_binstubs(
+            command, fixture.record["root_environment"], fixture.record["default_directory"],
+            root=fixture.root,
+        ).items():
+            assert (selected / name).read_bytes() == text.encode()
+    if explicit:
+        assert sentinel.read_bytes() == b"incumbent default command\n"
+    assert (fixture.slot / "install-success.json").is_file()
+
+
+@pytest.mark.parametrize("invalid", [
+    "relative", "control", "file", "stage", "manager", "current-slot", "retained-slot",
+])
+def test_explicit_publication_refuses_before_materialization_or_callbacks(
+    install_transaction: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, invalid: str,
+) -> None:
+    fixture = install_transaction
+    selected = fixture.global_bin
+    if invalid == "relative":
+        selected = Path("relative")
+    elif invalid == "control":
+        selected = fixture.root / "bad\nname"
+    elif invalid == "file":
+        selected.write_text("not a directory")
+        selected /= "commands"
+    elif invalid in {"current-slot", "retained-slot"}:
+        selected = fixture.slot if invalid == "current-slot" else fixture.root / "versions" / "1.0"
+        selected.mkdir(exist_ok=True)
+        (selected / "fixture-app.sh").write_bytes(b"owned slot-local launcher\n")
+    if invalid == "manager":
+        fixture.record["name"] = "worktree-manager"
+        fixture.record["commands"] = ["worktree-manager"]
+        (fixture.slot / "application.json").write_text(json.dumps(fixture.record))
+        monkeypatch.setattr(runtime_application_install, "_run", lambda *_a, **_kw: pytest.fail(
+            "Manager must retain its owned publication directory",
+        ))
+    else:
+        monkeypatch.setattr(
+            runtime_application_install, "_materialize_interpreter",
+            lambda *_: pytest.fail("invalid publication selection reached interpreter preparation"),
+        )
+    with pytest.raises(ValueError, match="command directory"):
+        runtime_application_install.install(
+            fixture.slot, stage=invalid == "stage", global_bin=selected,
+        )
+    assert not (fixture.slot / "install-success.json").exists()
+    assert (fixture.root / "current-version").read_bytes() == b"1.0\n"
+    if invalid in {"current-slot", "retained-slot"}:
+        assert (selected / "fixture-app.sh").read_bytes() == b"owned slot-local launcher\n"
+
+
+def test_stage_cli_rejects_publication_selection_before_install(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(runtime_application_install, "install", lambda *_a, **_kw: pytest.fail(
+        "invalid stage selection reached install",
+    ))
+    with pytest.raises(SystemExit) as error:
+        runtime_application_install.main(["--stage", "--global-bin", "/commands"])
+    assert error.value.code == 2
 
 
 def test_emitted_application_retains_callback_budget_contract(tmp_path: Path) -> None:
@@ -908,6 +1038,28 @@ def test_install_transaction_last_good_follows_start_acknowledgement(
     assert json.loads((fixture.slot / "install-success.json").read_text())["state"] == "installed"
 
 
+@pytest.mark.skipif(os.name != "nt", reason="native Windows application dispatch")
+@pytest.mark.parametrize("name", ["worktree-manager", "fixture-app"])
+def test_native_manager_dispatch_uses_app_root_not_long_slot_cwd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str], name: str,
+) -> None:
+    root = tmp_path / "app"
+    slot = root / "versions" / ("1.0+" + "a" * 180)
+    slot.mkdir(parents=True)
+    (slot / (name + ".py")).write_text(
+        "import os\nprint(os.getcwd())\n", encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        runtime_application_install, "_resources", lambda _slot: (None, engine),
+    )
+    runtime_application_install._run({
+        "name": name, "module": "fixture_app:main", "root_environment": "FIXTURE_APP_HOME",
+    }, ["--fixture"], root, slot)
+    actual = capfd.readouterr().out.strip()
+    assert Path(actual).samefile(root if name == "worktree-manager" else slot)
+
+
 @pytest.mark.parametrize("stage,failure", [(True, False), (False, False), (False, True)])
 def test_manager_regular_install_routes_to_its_owner_before_generic_publication(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stage: bool, failure: bool,
@@ -1083,6 +1235,11 @@ def application(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest
     if getattr(request, "param", None) == "long-asset":
         member = "/".join(["fixture_assets", *["nested-resources" * 2] * 5, "operational.txt"])
         files[member] = b"retained operational asset\n"
+    if getattr(request, "param", None) == "wheel-data":
+        for scheme in ("data", "purelib", "platlib"):
+            files[f"{wheel_prefix}.data/{scheme}/share/fixture-app/{scheme}.txt"] = (
+                f"retained {scheme} asset\n".encode()
+            )
     if getattr(request, "param", None) == "selector-lock":
         files["fixture_app.py"] = files["fixture_app.py"].replace(
             b"def cli():\n",
@@ -1390,6 +1547,93 @@ def test_regular_install_runs_setup_publishes_then_starts(application: tuple[Pat
     assert json.loads(followup.stdout)["args"] == ["--fail", "", "\u03b1", "100% ready!"]
     alias = invoke(globals_root / ("fixture-alias" + extension), ["--fail"], caller, environment)
     assert alias.returncode == 17, alias.stderr
+
+
+@pytest.mark.parametrize("application", ["wheel-data"], indirect=True)
+def test_generated_install_verifies_relocated_wheel_data(
+    application: tuple[Path, Path, Path, dict[str, str]],
+) -> None:
+    root, slot, caller, environment = application
+    result = invoke(slot / ("install.ps1" if os.name == "nt" else "install.sh"),
+                    [], caller, environment)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout.splitlines()[-1])["state"] == "installed"
+    assert (root / "current-version").read_text().strip() == slot.name
+    assert (slot / "install-success.json").is_file()
+    receipt = json.loads((slot / ".runtime-input-origins.json").read_text())
+    wheels = engine.WheelReuseInputs(
+        slot.name, json.dumps(receipt["wheel_inputs"], sort_keys=True, separators=(",", ":")),
+        time.monotonic() + 60,
+    )
+    python = slot / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+
+    def run(arguments: list[str]) -> None:
+        subprocess.run(
+            arguments, cwd=caller, env=environment, capture_output=True, text=True,
+            timeout=30, check=True,
+            creationflags=vars(subprocess)["CREATE_NO_WINDOW"] if os.name == "nt" else 0,
+        )
+
+    def verify() -> None:
+        engine.verify_installed_inputs(
+            slot, python, "fixture_app", origins=receipt["packages"], extras=(),
+            local_packages=tuple(receipt["local_packages"]), excluded_packages=[],
+            wheel_inputs=wheels, require_frozen_origin=False, run=run,
+        )
+
+    verify()
+    for scheme in ("data", "purelib", "platlib"):
+        asset = next((slot / ".venv").rglob(f"{scheme}.txt"))
+        contents = asset.read_bytes()
+        assert contents == f"retained {scheme} asset\n".encode()
+        asset.write_bytes(b"X" + contents[1:])
+        with pytest.raises(engine.DependencyPolicyError, match="input evidence differs"):
+            verify()
+        asset.write_bytes(contents)
+        retained = asset.with_suffix(".missing")
+        asset.rename(retained)
+        with pytest.raises(engine.DependencyPolicyError, match="input evidence differs"):
+            verify()
+        retained.rename(asset)
+    verify()
+
+
+@pytest.mark.parametrize("application", ["wheel-data"], indirect=True)
+@pytest.mark.parametrize("damage", [
+    "tamper", "missing",
+    pytest.param("escape", marks=pytest.mark.skipif(os.name == "nt", reason="POSIX symlink control")),
+])
+def test_relocated_wheel_data_damage_blocks_completion(
+    application: tuple[Path, Path, Path, dict[str, str]], damage: str,
+) -> None:
+    root, slot, caller, environment = application
+    entry = slot / ("install.ps1" if os.name == "nt" else "install.sh")
+    staged = invoke(entry, ["--stage"], caller, environment)
+    assert staged.returncode == 0, staged.stdout + staged.stderr
+    asset = slot / ".venv/share/fixture-app/data.txt"
+    if damage == "tamper":
+        contents = asset.read_bytes()
+        asset.write_bytes(b"X" + contents[1:])
+    else:
+        outside = caller / "outside.txt"
+        asset.rename(outside)
+        if damage == "escape":
+            asset.symlink_to(outside)
+    result = invoke(entry, [], caller, environment)
+    assert result.returncode != 0, result.stdout + result.stderr
+    expected = {
+        "tamper": "installed content differs from its wheel",
+        "missing": "FileNotFoundError",
+        "escape": "installed member differs from its wheel",
+    }
+    assert expected[damage] in result.stderr
+    if damage == "missing":
+        assert repr(str(asset))[1:-1] in result.stderr
+    assert not (root / "current-version").exists()
+    assert not (root / "setup.json").exists()
+    assert not (root / "started.json").exists()
+    assert not (slot / "install-success.json").exists()
+    assert not (slot / engine.runtime.COMPLETE_MARKER).exists()
 
 
 @pytest.mark.parametrize("application", ["selector-lock"], indirect=True)

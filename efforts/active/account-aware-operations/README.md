@@ -25,6 +25,17 @@ switch or leaking one operation's credentials into another.
 
 ## Coordination
 
+The proposed #4756 fork-consent lane below is distinct from #5791 credential
+dispatch. It directly receives the WHOLE durable target/account/remote,
+existence-before-creation and confirmation outcome, not only its residual
+edge. Earlier campaign whole-OPEN recommendations remain historical until
+normal reviewed complete receiving, current whole ROOT/source/custody readback
+and a separate source-specific judgment; they are not an original requirement
+to retain duplicate tracking forever. Preserve this effort's Draft status,
+temporary coordination token, identity/command/source custodians and
+implementation restriction. No credential lookup, fork operation or remote
+rewrite follows from planned receiving; #5904 and #1043 stay independent.
+
 The finite #4199 push-race intake below remains with the existing identity,
 command and actual push-consumer owners. Keep the WHOLE #4199 outcome
 independently OPEN until actual implementation OR exact complete authorized
@@ -304,6 +315,48 @@ diagnostic, not another identity resolver or a replacement for #5791/#810.
   correctly.
 - [ ] Keep examples synthetic and repository-neutral.
 
+### Proposed finite #4756 durable fork-consent and publish lane
+
+This is the complete original and refined consent/publish contract, not
+additional #5791 credential-dispatch coverage. Credit the existing durable
+atomic catalog, account isolation, actual/displayed-owner separation,
+automatic remote repair and visible persistence errors at their actual scope.
+Their presence does not establish missing-target reauthorization.
+
+- [ ] **FC4756-P1:** Persist the confirmed fork owner/repository and approved
+  remote per actual operator/account plus normalized repository in private
+  user/machine state, never the shareable harness. Reuse that deliberate choice
+  across future worktrees and new PR branches without repeated confirmation
+  when the target, authority and approved mapping remain valid. Preserve
+  actual-login versus displayed-owner isolation and the delivered catalog.
+- [ ] **FC4756-P2:** Establish existence and identity of the recorded target
+  BEFORE silent reuse can reach effectful create-or-read POST. First use,
+  changed actor/target or a deleted/renamed/missing/404 confirmed target
+  requires fresh deliberate confirmation; a successful POST is not proof of
+  prior existence. Unknown or unavailable verification must not silently
+  authorize creation or substitute another account/target. Preserve existing
+  legitimate known-target reuse and scoped authority.
+- [ ] **FC4756-P3:** Keep the local fork remote exactly aligned with the
+  confirmed target, repairing missing/stale wiring automatically through the
+  existing serialized publish path rather than re-asking merely because a
+  later worktree lacks the remote. Preserve atomic catalog persistence,
+  concurrency and visible persistence/remote failures; saving a catalog or
+  repairing a remote does not itself satisfy reauthorization.
+- [ ] **FC4756-LV1:** With synthetic account/repository catalogs and future
+  worktrees/new branches, prove valid confirmed reuse, private persistence,
+  actual/displayed-owner and account isolation without global selection,
+  repeated confirmation or loss of the delivered baseline.
+- [ ] **FC4756-LV2:** At the actual publish decision BEFORE POST, distinguish
+  recorded existing from deleted/renamed/missing/404 targets, first use,
+  changed actor/target, wrong authority and unavailable/uncertain verification.
+  Prove required deliberate confirmation/refusal precedes creation; a mocked
+  successful ensure-fork response cannot substitute for prior-existence proof.
+- [ ] **FC4756-LV3:** Exercise correct/missing/stale remote mapping,
+  future-worktree reuse, concurrent catalog publication, persistence and remote
+  failure while preserving exact approved target and scoped authority.
+  Qualify the entire P1..3 union, not only a missing-credential leaf.
+  No real auth query, fork lookup/create or remote rewrite is authorized here.
+
 ### Finite Windows scoped-command argument fidelity from #810
 
 **Agent-recommended tracking amendment.** This finite contract enters the
@@ -329,6 +382,15 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
   - `<project> --version` mis-routing is exactly this effort's `project-addressed-not-cwd-bound` scope.
 
 ## Validation Plan
+
+- [ ] **FC4756-G:** Complete EVERY FC4756-P1..3/LV1..3 clause at its original
+  source/consumer tier: durable private target/account/remote consent and reuse,
+  existence/reauthorization before effectful POST, and automatic exact remote
+  repair with serialized persistence and honest failures. Preserve current
+  source credit, owners, Draft and temporary-token implementation restriction,
+  #5791 separation and independent #5904/#1043 boundaries. Reviewed planned
+  receiving, any later redundant-tracking judgment and actual technical
+  delivery remain separate; no new ACK or credential authority is introduced.
 
 - [ ] **AA4199-G:** Qualify the ordinary AND pinned push-consumer correction
   with controlled selection-change and same-account helper/scope/rotation
@@ -388,6 +450,18 @@ adopt it incrementally across commands that currently inherit ambient account
 state.
 
 ## Journal
+
+### 2026-11-17 - Whole durable fork-consent receiving proposed
+
+Added three unchecked Plan, three local Validation and one actual global
+Validation rows for the complete #4756 contract. Durable known-target reuse
+and remote repair retain credit; prior target existence and fresh missing/
+changed-target confirmation before POST remain actual technical obligations.
+The historical campaign whole-OPEN recommendation is prospectively reconciled
+only after complete reviewed receiving/readback and separate judgment, not
+by partial #5791 coverage. Draft, temporary token, every incumbent check,
+original owner/resource boundary and separate #5904/#1043 work remain.
+No implementation, credential operation, provider effect or tracker change.
 
 ### 2026-11-14 - #69 account-to-provider receiving proposal
 

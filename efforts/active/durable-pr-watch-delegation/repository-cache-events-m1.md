@@ -1,8 +1,8 @@
 # M1: standalone repository PR cache and events
 
 Back to the [canonical effort](README.md), umbrella #6007 and bounded planning
-claim #11779. This is a review-first milestone amendment, not runtime delivery
-or operational authority. The effort's existing integration owner retains
+claim #11779. This is the reviewed milestone contract and evidence map, not
+operational authority. The effort's existing integration owner retains
 completion and assigns implementation slices; provider/native, credential,
 Gateway/SDK, replay, workspace, publication and lifecycle owners remain.
 
@@ -272,9 +272,11 @@ interface does not select them.
 The source vertical's operating flow is documented in
 [TESTING.md](../../../TESTING.md#optional-pr-service-lifecycle).
 Whole Fleet strict typing remains separately tracked by #9807; the focused
-standalone strict result is not a whole-project claim. Release promotion,
-installation, running support and real read-only target/event evidence are
-**open stage-5 acceptance**, with the integration/operational owners. Dynamic
+standalone strict result is not a whole-project claim. Stage 5 has separately
+owned [GitHub](journal/2026/11.18%20GitHub%20shadow%20qualification.md) and
+[Gitea](journal/2026/11.18%20Gitea%20shadow%20qualification.md)
+released, installed-running evidence. This is not fleet or production
+hosting acceptance. Dynamic
 backend intake, Dispatch consumers/emission, full Author/Reviewer and CLI
 parity, fleet placement and production writes remain broader parent work.
 
@@ -318,13 +320,47 @@ parity, fleet placement and production writes remain broader parent work.
   release. Existing default watch/report/workspace controls remain valid,
   optional routes remain off unless selected, and strict standalone typing,
   focused affected tests and required review/CI pass.
-- [ ] Separately qualify released, installed and actually running read-only
+- [x] Separately qualify released, installed and actually running read-only
   shadow on authorized real GitHub and Gitea targets. Record executing contract,
   bounded footprint/configuration, inventory coverage/freshness, supported local
   query output and an actual continuing subscription with ACK/reconnect.
   Observe a real later event or controlled authorized read-only change source;
   no forge mutation is granted to manufacture one. An unobserved event remains
   an open qualification item, not success.
+
+### GitHub stage-5 lane
+
+The 2026-11-18 isolated Linux trial passes for the promoted
+`repository-local/v1` service, actual native reader and supported local clients.
+It observes a real GitHub PR, later controlled head changes, two independent
+continuing subscriptions, original-ID/payload replay across restart, ACK,
+cancellation and joined drain. Both foreground instances exit zero and their
+test-lifecycle receipts settle; the temporary credential binding joins without
+credential-bearing files. See the [dated qualification record](journal/2026/11.18%20GitHub%20shadow%20qualification.md)
+for exact released artifacts and the reproducible flow.
+
+The fixture writer had separate operator permission for synthetic changes in
+its dedicated repository. The observer remains read-only; this plan grants no
+fixture-write or deployment authority. This lane does not own the separately
+qualified Gitea hosting or target. Live ADO filtered populations,
+review actions and broader parent outcomes are also not qualified by this lane.
+
+### Gitea stage-5 lane and combined M1 acceptance
+
+The [Gitea qualification record](journal/2026/11.18%20Gitea%20shadow%20qualification.md)
+supplies the complementary released, installed-running Linux lane: complete
+real inventory and populated PR facts, installed local queries, continuing
+SSE/reconnect, a naturally arriving later PR and independent ACK without
+query-triggered forge acquisition. The same bounded service owner survives
+installer/caller cleanup. Its separate operational authority does not transfer
+to the GitHub lane or authorize a new run.
+
+The reviewed source vertical and these two real-target lanes meet the bounded
+M1 cache/query/continuing-event acceptance above. Native Windows, every
+provider/action permutation, full client migration, dynamic backend intake,
+fleet hosting, production consumers/writers and the full canonical effort
+remain open. Neither a source result nor this combined milestone retires a
+legacy operation or changes an operational hold.
 
 Source fixtures, merged code and healthy-but-empty readiness are not live M1
 completion. Release promotion is distinct from installation, which is distinct

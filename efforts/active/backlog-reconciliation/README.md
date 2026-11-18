@@ -3421,6 +3421,182 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [Fleet refinements and remote scope](journal/2026/11.17-fleet-refinements-and-remote-scope.md)
+  records complete current #6236 whole-product receiving coverage with only
+  two explicit documentary/finite-role refinements proposed, not another
+  duplicated product checklist. Its completed bounded #6513 claim is not an
+  inferred broader reservation. #6283's conditional remote intake remains
+  unaccepted under the current local-only scope; two agent-invented umbrella/
+  ACK gates were withdrawn while genuine source/ownership boundaries remain.
+  A [prospective #6137 tracking refinement](journal/2026/11.17-fleet-refinements-and-remote-scope.md#6137-positive-keeper-provenance-and-a-prospective-refinement)
+  has affirmative campaign-intake provenance and preserves every independent
+  condition: accepted review AND still-OPEN source reflection precede fresh
+  complete current readback and a separate judgment. No automatic closure.
+  The same journal's [delivery/inbox receiving](journal/2026/11.17-fleet-refinements-and-remote-scope.md#6394-whole-domain-receiving-without-a-second-protocol)
+  directly proposes seven Plan, seven local Validation and one actual global
+  Validation residuals in the existing delegation effort, reusing direct
+  identity/admission/audit and queued-steering gates. Actual source/publisher
+  conditions and bounded claims remain; the alternative file-drop design is
+  not selected implementation. #6394 also remains OPEN pending review, current
+  readback and separate judgment. All four sources stay OPEN.
+  The complete count remains 882 whole,
+  153 above 729.
+  The [reviewed lifecycle receiving receipt](journal/2026/11.17-lifecycle-receiving-and-timeout-retirement.md#reviewed-lifecycle-receiving-and-two-separate-tracker-retirements)
+  records #13185's actual merge, complete current #6143 receiving and
+  separately audited #6143/#6177 redundant-tracker retirements. Their
+  technical work, actual owners and Active receiving efforts remain.
+  #6137's explicit keeper conditions remain unresolved and it stays OPEN.
+  One eligible arrival offsets part of the two retirements: the complete
+  count is 882 whole, 153 above fixed 729. Standalone historical prose is
+  reconciled to public-neutral wording without changing any checkbox state.
+  The [finite lifecycle receiving and timeout tracking](journal/2026/11.17-lifecycle-receiving-and-timeout-retirement.md)
+  records #13184's actual merge, #6138's complete already-accepted portfolio
+  contract and separately audited redundant-tracker retirement. New complete
+  #6137 native-reconciliation and #6143 conditional/ordinary-routing receiving
+  remains proposed with all technical rows unchecked, actual owners and
+  literal keeper conditions preserved. The complete census is 882 whole,
+  153 above fixed 729; an evidence-handling exception grants no source clearance.
+  The [credential receipt, callback receiving and protected contracts](journal/2026/11.17-credential-receipt-and-protected-contracts.md)
+  records #13175's actual delivery and complete current #5963/#5993/#6030
+  comparisons: contributed-kind admission remains unassessed at its real
+  containing-source boundary, startup source credit does not complete whole
+  guidance acceptance, and the role/lifecycle receiver already contains its
+  finite cohort continuation while preserving #7192's named-owner condition.
+  All three remain canonical OPEN; an evidence-handling failure is retained
+  without source clearance. The [subsequent reviewed callback receipt](journal/2026/11.17-credential-receipt-and-protected-contracts.md#reviewed-callback-receiving-and-separate-tracker-retirement)
+  records #13178's complete direct domain acceptance, explicit prospective
+  tracking refinement reflected while #5947 remained OPEN, entire current
+  ROOT/source/discussion/custody readback and separate audited `NOT_PLANNED`
+  retirement. All twelve callback technical rows remain unchecked; #6019's
+  credit, actual owners and operational holds remain. One excluded arrival
+  offsets that retirement: 883 whole issues remain, 154 above fixed 729.
+  The [operation-credential receiving receipt](journal/2026/11.17-operation-credential-receiving-receipt.md)
+  records #13171's actual reviewed whole-domain acceptance and #5763's
+  separately audited redundant-tracker retirement after complete current
+  ROOT/source/custody readback. All three technical rows remain unchecked;
+  owners, #5760 and #954/P3 remain. The complete census is 883 whole,
+  154 above fixed 729, with one audited campaign retirement and no arrivals
+  or unrelated departures. The earlier whole safe comparisons retained #5947's
+  callback, #5952's settings-choice and #5953's cleanup/Restore contracts
+  independently OPEN at that observation; #5956's architecture decision retains its actual
+  copied-source qualification boundary.
+  The [current create-credential qualification](journal/2026/11.17-current-create-credential-qualification.md)
+  records #13168's actual reviewed receipt and #5763's corrected current
+  gate/create/SSH-source credit. A three-row whole venue-domain proposal
+  retains the operation-wide same-credential union and precise availability/
+  status seam, preserving actual custodians and #5760 rather than claiming
+  a different-token reproduction. Three independent canonical contracts
+  remain OPEN; a recovered containing-source boundary required withdrawal
+  of #356's earlier whole-ROOT qualification and restoration to OPEN.
+  The complete census is 884 whole, 155 above fixed 729; #5763 remains
+  OPEN at proposal and the earlier invalid closure credit is withdrawn.
+  The [manager receipt and native/transport retentions](journal/2026/11.17-manager-receipt-and-native-transport-retentions.md)
+  records #13165's actual reviewed delivery and #5655's separate tracking
+  retirement without technical completion or custody transfer. #5708's
+  reservation, #5716's complete canonical OPEN contract and #5761's genuine
+  source-author exclusion remain distinct; #13164/#13166 retain their
+  unfinished original scopes and owners. The complete census is 882 whole,
+  153 above fixed 729.
+  The [registry/lifecycle receipt and manager mechanisms](journal/2026/11.17-registry-lifecycle-receipt-and-manager-mechanisms.md)
+  records #13158's actual delivery and separate #5559/#5579/#5616 tracking
+  retirements, preserving every technical obligation and actual custodian.
+  #5655 receives a three-row mechanism proposal and explicit pattern-debt
+  home; #5641/#5665 retain their conditional/final-OPEN keeper boundaries.
+  The complete census is 880 whole, 151 above fixed 729.
+  The [authentication/baseline receipt and overlay proposals](journal/2026/11.17-auth-baseline-receipt-and-overlay-proposals.md)
+  records #13153's actual delivery and separate #5452/#5518/#5549 tracking
+  retirements, with only the evidenced #5518 documentary routing row checked.
+  #5616 receives a finite selected-remedy proposal; #5559/#5579 receive
+  prospective administrative clarifications preserving actual ownership and
+  technical gates. The complete census is 884 whole, 155 above fixed 729.
+  The [authentication, baseline and engine receiving checkpoint](journal/2026/11.17-authentication-baseline-and-engine-receiving.md)
+  records #13150's actual receipt merge, #5512's separate same-canonical
+  tracking retirement and six current contracts. Whole #5452 authentication/
+  transport and finite #5518 baseline amendments add twelve unchecked rows;
+  #5549's parent-OPEN condition receives a prospective clarification, not
+  silent waiver. The complete census is 887 whole, 158 above fixed 729.
+  The [webhook receipt and receiving correction](journal/2026/11.17-webhook-receipt-and-receiving-correction.md)
+  records #13148's reviewed delivery and separate #5319/#5427 tracking
+  retirements, retaining all unfinished acceptance and custodians. #5340's
+  current whole receiving is now qualified without inventing a source hold;
+  its explicit OPEN condition remains. New #13147 retains its bounded
+  claimant. The complete census is 888 whole, 159 above fixed 729.
+  The [webhook and host-teardown receiving proposal](journal/2026/11.17-webhook-and-host-teardown-receiving.md)
+  directly retains whole #5319/#5427 contracts with six new unchecked
+  Plan/local/global rows and unchanged custodians. Five other outcomes
+  distinguish same-canonical coverage, different-domain fit and precise
+  current or historical source gaps. All sources remain open; the latest
+  complete census is 890 whole, 161 above fixed 729.
+  The [composition receipt and client-only inflow](journal/2026/11.17-composition-receipt-and-client-only-inflow.md)
+  records #13139's reviewed clarification, complete current whole receiving
+  readback and #4959's separate tracking retirement. Its Active technical
+  effort, all acceptance and actual custodians remain; #13140 retains its
+  bounded claimant. The complete census is 890 whole, 161 above fixed 729.
+  The [fork receipt and composition gate clarification](journal/2026/11.17-fork-receipt-and-composition-gate-clarification.md)
+  records reviewed whole-domain receiving and #4756's separate retirement,
+  retains newly claimed #13135 and keeps #4959 open through an explicit
+  prospective umbrella-versus-effort completion clarification.
+  The [attention receipt and whole fork/composition proposals](journal/2026/11.17-attention-receipt-and-whole-domain-proposals.md)
+  record reviewed complete #4681 receiving and separate redundant-tracking
+  retirement, reconcile the omitted-five receipt, and propose whole #4756
+  and #4959 domain contracts without technical completion or new custody.
+  The [hosted-session receipt and retained control contracts](journal/2026/11.17-hosted-session-receipt-and-control-contracts.md)
+  record reviewed complete #4229 receiving, its separate redundant-tracking
+  retirement, ten retained outcomes and prospective #4477 cause reconciliation.
+  The [complete attention receiving and seven contracts](journal/2026/11.17-attention-receiving-and-seven-contracts.md)
+  directly proposes all three #4681 lanes in the existing delegation domain,
+  retains six whole outcomes and queues the #4756/#4959 domain amendments
+  without accepting them or reopening completed attention credit.
+  The [hosted-session receiving and condition-provenance proposal](journal/2026/11.17-hosted-session-receiving-and-condition-provenance.md)
+  maps every literal #4229 component into the existing Draft AHP receiver
+  without duplicate rows. It corrects the campaign-origin receipt recommendation,
+  not actual assignee custody, and retains review/readback/separate judgment.
+  The [shared-core receipt and retained runtime contracts](journal/2026/11.17-shared-core-receipt-and-runtime-contracts.md)
+  record reviewed complete #4227 receiving, its separate redundant-tracking
+  retirement, nine remaining contracts and the prospective #4195 cause recovery.
+  The [complete shared-core receiving proposal](journal/2026/11.17-complete-shared-core-receiving.md)
+  maps #4227's six responsibilities into the existing venue-parity ROOT,
+  retaining affected-P3 reconciliation, inherited policy alternatives and
+  every incumbent gate before any separate source disposition.
+  The [platform contracts and citation-stop cause](journal/2026/11.17-platform-contracts-and-citation-cause.md)
+  retain ten whole outcomes while prospectively correcting the actual
+  #4163 citation-classifier barrier without releasing linked-source custody.
+  The [ten source deltas and gate-provenance checkpoint](journal/2026/11.17-ten-source-deltas-and-gate-provenance.md)
+  preserves actual source conditions without inventing operator vetoes,
+  distinguishes partial receiving and records independently owned inflow.
+  The [ten current contracts and receiving boundaries](journal/2026/11.17-ten-current-contracts-and-receiver-boundaries.md)
+  distinguish four changed source deltas, unchanged independent obligations
+  and the expanded #3761 contract without claiming whole-ROOT receiving.
+  The [auth-lifetime and twelve-contract checkpoint](journal/2026/11.17-auth-lifetime-and-contract-discriminators.md)
+  records reviewed complete #3442 receiving through venue-parity and its
+  separate redundant-tracking retirement, not technical completion.
+  Its subsequent #3444/#3556 receiving checks retain the full independent
+  contracts: existing recovery and worker-handoff plans are partial homes,
+  not accepted whole-contract transfers.
+  The [cleanup and unchanged-source discriminator](journal/2026/11.17-cleanup-and-unchanged-source-discriminator.md)
+  credits #3179's finite checkpoint/guard changes while retaining its whole
+  incident and stops #1742/#3115 at unchanged decisive sources.
+  The [generic-review intake receipt](journal/2026/11.17-generic-review-intake-receipt.md)
+  records #2887's already-reviewed Phase 11 route without resuming its parked
+  owner, closing the canonical issue or repeating #2899's historical retirement.
+  The [cadence and idle-wake discriminator](journal/2026/11.17-cadence-guidance-and-idle-wake-discriminator.md)
+  distinguishes #2908's conditional cadence from existing merge guidance and
+  stops #2879 research at unchanged decisive entrypoints without closure credit.
+  The [build-isolation and native-acceptance checkpoint](journal/2026/11.17-build-isolation-and-native-acceptance.md)
+  establishes the retained #1838 case's actual current installer/policy wiring
+  and credits #13074/#13096 source delivery without claiming native acceptance.
+  The [hygiene-engine and Index-custody checkpoint](journal/2026/11.17-hygiene-engine-and-index-custody.md)
+  distinguishes #1544's engine from current privacy adapters and verifies
+  #1843's complete planned receiving without releasing its assigned coordination.
+  The [lifecycle and cache-owner checkpoint](journal/2026/11.17-lifecycle-and-cache-owner-acceptance.md)
+  preserves #78's finite source gap, #84's complete accepted canonical and new
+  #9532/#12900 owner deltas without equating source delivery with adoption.
+  The [SDK, cache and transport delta](journal/2026/11.17-sdk-release-cache-adoption-and-transport-observation.md)
+  credits new source deliveries while retaining actual release, adoption and
+  unclassified transport-observation boundaries.
+  The [serving and typing checkpoint](journal/2026/11.17-serving-convergence-and-canonical-typing.md)
+  preserves #6389's complete canonical acceptance, credits delivered slices
+  and separates #10931's canonical-source and consumer-fixture qualification.
   The [bootstrap, reporting and generation checkpoint](journal/2026/11.17-bootstrap-reporting-and-generation-contracts.md)
   retains three complete canonical contracts without mistaking partial owner
   evidence, eventual transport or consolidated tracking for whole acceptance.
@@ -4577,6 +4753,12 @@ closure credit, resource release or parent checkbox change follows.
   normal publication flow.
 
 ## Validation Plan
+
+The [whole fork/composition receiving proposal](journal/2026/11.17-attention-receipt-and-whole-domain-proposals.md)
+preserves every existing domain/campaign check state, actual original
+consent/publish and RC1..4/RCV1..3 obligation, completed source reservation
+and independent owner. Reviewed delivery, full current ROOT/source/custody
+readback and separate source-specific judgment remain distinct gates.
 
 The [cold-bootstrap completion audit](journal/2026/11.16-cold-bootstrap-source-completion.md#12824---completed-narrow-recovery-bootstrap-correction)
 retains the complete original-to-delivery crosswalk, qualified description

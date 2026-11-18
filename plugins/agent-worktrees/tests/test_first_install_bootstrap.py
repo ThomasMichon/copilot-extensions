@@ -13,8 +13,9 @@ import subprocess
 import sys
 import uuid
 import zipfile
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
+from typing import Any, NoReturn
 
 import pytest
 
@@ -455,6 +456,7 @@ def test_windows_binstub_self_provisions_from_a_direct_install_layout(tmp_path: 
     env = os.environ.copy()
     env["USERPROFILE"] = str(home)
     env["AGENT_WORKTREES_NO_SELFPROVISION"] = ""
+    assert _PWSH is not None
 
     proc = subprocess.run(
         [_PWSH, "-NoProfile", "-File", str(harness)],
@@ -465,6 +467,87 @@ def test_windows_binstub_self_provisions_from_a_direct_install_layout(tmp_path: 
 
     assert "DIRECT_INSTALL_SENTINEL" in proc.stdout, proc.stderr
     assert "DECOY_SENTINEL_MUST_NOT_RUN" not in proc.stdout, proc.stderr
+
+
+@pytest.mark.skipif(os.name != "nt" or _PWSH is None, reason="Windows PowerShell entry")
+@pytest.mark.parametrize("selection", ["manifest", "legacy-pointer", "missing"])
+def test_published_windows_binstub_finds_the_selected_terminal_host(
+    tmp_path: Path, selection: str,
+) -> None:
+    """The user-bin copy has no sibling plugin.json; it must still hand the
+    launch to the selected payload's terminal host instead of leaving Python
+    resident as the parent of the Manager session, and say so when it can't."""
+    home = tmp_path / "home"
+    user_bin = home / ".local" / "bin"
+    user_bin.mkdir(parents=True)
+    shutil.copy2(PLUGIN / "bin" / "agent-worktrees-update-entry.ps1", user_bin)
+    launcher = user_bin / "agent-worktrees.ps1"
+    source = (PLUGIN / "bin" / "agent-worktrees.ps1").read_text(encoding="utf-8")
+    predicate = "-not [Console]::IsInputRedirected"
+    assert predicate in source
+    # Captured test stdio is never an interactive console; force the predicate.
+    launcher.write_text(source.replace(predicate, "$true"), encoding="utf-8")
+
+    def payload(name: str) -> Path:
+        root = tmp_path / name
+        (root / "bin").mkdir(parents=True)
+        (root / "plugin.json").write_text("{}", encoding="utf-8")
+        (root / "bin" / "terminal-launch.ps1").write_text(
+            "function Invoke-WorktreeTerminalLaunch {\n"
+            "    param([string]$Executable, [string[]]$Arguments,\n"
+            "          [string[]]$QueryArguments, [string]$Package)\n"
+            f"    [Console]::Out.WriteLine('host={name} package=' + $Package)\n"
+            "    & $Executable @Arguments\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        return root
+
+    runtime = home / ".agent-worktrees"
+    (runtime / "bin").mkdir(parents=True)
+    (runtime / "bin" / "resolve-runtime.ps1").write_text(
+        "$AwPy = '" + sys.executable.replace("'", "''") + "'\n", encoding="utf-8",
+    )
+    if selection == "manifest":
+        selected = payload("selected payload")
+        (runtime / "deploy-manifest.json").write_text(json.dumps({
+            "schema_version": 3,
+            "source": {"path": selected.as_posix()},
+            "commandBinding": {"payloadRoot": str(selected)},
+        }), encoding="utf-8")
+        # The retired snapshot pointer must not outrank the current binding.
+        (runtime / "payload-dir").write_text(str(payload("stale snapshot")), encoding="utf-8")
+    elif selection == "legacy-pointer":
+        (runtime / "payload-dir").write_text(str(payload("stale snapshot")), encoding="utf-8")
+    module = tmp_path / "agent_worktrees"
+    module.mkdir()
+    (module / "__init__.py").write_text("", encoding="utf-8")
+    (module / "__main__.py").write_text(
+        "import json, sys\nprint(json.dumps(sys.argv[1:]))\n", encoding="utf-8",
+    )
+    environment = {**os.environ, "USERPROFILE": str(home), "HOME": str(home)}
+    for name in (
+        "AGENT_WORKTREES_NO_SELFPROVISION", "COPILOT_EXTENSIONS_CONTEXT",
+        "AGENT_RT_ROOT", "CE_TERMINAL_LAUNCH",
+    ):
+        environment.pop(name, None)
+    assert _PWSH is not None
+    result = subprocess.run(
+        [_PWSH, "-NoProfile", "-File", str(launcher), "repos", "account", "list"],
+        cwd=tmp_path, env=environment, stdin=subprocess.DEVNULL,
+        capture_output=True, text=True, timeout=60, **no_window_kwargs(),
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    lines = result.stdout.splitlines()
+    assert json.loads(lines[-1]) == ["repos", "account", "list"]
+    expected = {
+        "manifest": ["host=selected payload package=agent_worktrees"],
+        "legacy-pointer": ["host=stale snapshot package=agent_worktrees"],
+        "missing": [],
+    }[selection]
+    assert lines[:-1] == expected
+    assert ("terminal launch host not found" in result.stderr) == (selection == "missing")
 
 
 def test_direct_posix_payload_entrypoints_are_tracked_executable() -> None:
@@ -718,9 +801,9 @@ def test_windows_stamp_reuses_immutable_version_snapshot() -> None:
 
 
 def _copy_bootstrap_payload(source: Path, payload: Path) -> None:
-    pending = []
+    pending: list[Future[Any]] = []
     with ThreadPoolExecutor(max_workers=16) as copies:
-        def queue_copy(source, destination):
+        def queue_copy(source: str, destination: str) -> str:
             pending.append(copies.submit(shutil.copy2, source, destination))
             return destination
 
@@ -766,12 +849,14 @@ def test_bootstrap_payload_copy_preserves_all_source_bytes_and_metadata(tmp_path
         assert before.st_mtime_ns == after.st_mtime_ns
 
 
-def test_bootstrap_payload_copy_propagates_worker_failure(tmp_path: Path, monkeypatch) -> None:
+def test_bootstrap_payload_copy_propagates_worker_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     source = tmp_path / "source"
     source.mkdir()
     (source / "bootstrap.py").write_bytes(b"fixture")
 
-    def fail_copy(*args, **kwargs):
+    def fail_copy(*args: object, **kwargs: object) -> NoReturn:
         raise OSError("fixture copy refused")
 
     monkeypatch.setattr(shutil, "copy2", fail_copy)
@@ -793,6 +878,7 @@ def _materialized_payload(tmp_path: Path) -> tuple[Path, Path]:
     spec = importlib.util.spec_from_file_location(
         "_bootstrap_materializer", repo / "tools" / "materialize_main.py",
     )
+    assert spec is not None and spec.loader is not None
     materializer = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(materializer)
     log = materializer.materialize_uv_editable_ref_into(
@@ -802,7 +888,9 @@ def _materialized_payload(tmp_path: Path) -> tuple[Path, Path]:
     return home, payload
 
 
-def test_bootstrap_payload_contains_closed_dependency_graph(tmp_path: Path, monkeypatch) -> None:
+def test_bootstrap_payload_contains_closed_dependency_graph(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _, payload = _materialized_payload(tmp_path)
     monkeypatch.syspath_prepend(str(payload / "scripts"))
     import installer_engine
@@ -836,7 +924,8 @@ def test_posix_lean_provision_installs_resolver_and_launchers_reenter_runtime(
     runtime_bin = home / ".agent-worktrees" / "bin"
     resolver = runtime_bin / "resolve-runtime.sh"
     assert resolver.read_bytes() == (payload / "scripts" / resolver.name).read_bytes()
-    assert resolver.stat().st_uid == os.getuid()
+    if sys.platform != "win32":
+        assert resolver.stat().st_uid == os.getuid()
     assert resolver.stat().st_mode & stat.S_IXUSR
 
     launchers = [
@@ -905,7 +994,7 @@ def test_windows_payload_first_use_stamps_and_provisions_under_driver(tmp_path: 
         PYTEST_CURRENT_TEST="isolated-worktrees-first-use", PYTHONUTF8="1",
         PYTHONDONTWRITEBYTECODE="1",
     )
-    cleanup = []
+    cleanup: list[Any] = []
     with daemon_test_lifecycle(
         owner="worktrees-first-use", registry_root=area / "instances", cleanup_results=cleanup,
     ) as lifecycle:
@@ -915,11 +1004,12 @@ def test_windows_payload_first_use_stamps_and_provisions_under_driver(tmp_path: 
                           / "agent-worktrees.ps1"), "--version"],
             cwd=home, env={**environment, **lifecycle}, capture_output=True, text=True,
             encoding="utf-8", errors="replace", timeout=540,
-            creationflags=subprocess.CREATE_NO_WINDOW,
+            **no_window_kwargs(),
         )
     assert not [item for item in cleanup if item.status == "held"]
     requests = core.status(root=home / ".copilot-extensions" / "update-driver")
-    diagnostic = []
+    assert isinstance(requests, tuple)
+    diagnostic: list[str] = []
     for item in requests:
         if item.log_path.is_file():
             lines = item.log_path.read_text(encoding="utf-8", errors="replace").splitlines()

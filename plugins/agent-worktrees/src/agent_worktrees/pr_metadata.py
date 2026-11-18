@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
+from .config import Config
+from .pr_publication_labels import PublicationOrigin
 from .providers.base import PullResult, ProviderError
 
 
@@ -10,10 +13,10 @@ from .providers.base import PullResult, ProviderError
 class MetadataPullResult(PullResult):
     """A created PR whose independently verified metadata may need repair."""
 
-    metadata: dict = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
-def draft_confirmation(observed) -> dict | None:
+def draft_confirmation(observed: object) -> dict[str, Any] | None:
     if observed is True:
         return None
     return {
@@ -22,8 +25,9 @@ def draft_confirmation(observed) -> dict | None:
     }
 
 
-def include_publication_metadata(result: dict, pull, *, requested_draft=False,
-                                 require_draft_observation=False) -> None:
+def include_publication_metadata(result: dict[str, Any], pull: PullResult, *,
+                                 requested_draft: bool = False,
+                                 require_draft_observation: bool = False) -> None:
     if type(getattr(pull, "draft", None)) is bool:
         result["draft"] = pull.draft
     if getattr(pull, "label_error", ""):
@@ -43,9 +47,11 @@ def include_publication_metadata(result: dict, pull, *, requested_draft=False,
             result["draft_unconfirmed"] = True
 
 
-def update_metadata(config, repo: str, number: int, *, title: str | None = None,
-                    body: str | None = None, reviewers=(), work_items=(),
-                    publication_origin=None, publication_labels=()) -> dict:
+def update_metadata(config: Config, repo: str, number: int, *, title: str | None = None,
+                    body: str | None = None, reviewers: tuple[str, ...] = (),
+                    work_items: tuple[str | int, ...] = (),
+                    publication_origin: str | None = None,
+                    publication_labels: tuple[str, ...] = ()) -> dict[str, Any]:
     """Apply explicitly selected origin policy and update an existing PR.
 
     ``publication_origin`` is the same origin ID accepted by the existing
@@ -60,9 +66,10 @@ def update_metadata(config, repo: str, number: int, *, title: str | None = None,
                   origin=labels.selected_for_config(config))
 
 
-def update(config, repo: str, number: int, *, title: str | None = None,
-           description: str | None = None, reviewers=(), work_items=(),
-           origin=None) -> dict:
+def update(config: Config, repo: str, number: int, *, title: str | None = None,
+           description: str | None = None, reviewers: tuple[str, ...] = (),
+           work_items: tuple[str | int, ...] = (),
+           origin: PublicationOrigin | None = None) -> dict[str, Any]:
     """Resolve target policy/auth and update metadata without pushing or creating.
 
     Reviewers are explicit ADO identity GUIDs; work items are organization-wide
@@ -75,7 +82,7 @@ def update(config, repo: str, number: int, *, title: str | None = None,
     if not repo or type(number) is not int or number < 1:
         raise ValueError("Metadata update requires --repo and a positive --number")
     resolution = pr_config.resolve_repo_config_for_slug(config, repo)
-    if not resolution.resolved:
+    if not resolution.resolved or resolution.repo_config is None:
         raise ValueError(resolution.error or "Metadata target needs a registered PR binding")
     prcfg = resolution.repo_config.pr
     if not prcfg.enabled:
@@ -84,9 +91,29 @@ def update(config, repo: str, number: int, *, title: str | None = None,
         pr_publication_labels.validate_policy(prcfg, origin)
     provider = providers.get_provider(prcfg.provider)
     operation = getattr(provider, "update_pull_metadata", None)
+    if prcfg.provider == "gitea" and operation is None:
+        from .providers import gitea_metadata
+        token = providers.account_token_for_slug(repo, prcfg)
+        return gitea_metadata.update(
+            provider, repo, number, title=title, description=description,
+            reviewers=reviewers, work_items=work_items, origin=origin,
+            api_base=prcfg.api_base, token=token,
+            wip_title_prefixes=prcfg.wip_title_prefixes,
+        )
+    if prcfg.provider == "github" and operation is None:
+        from .providers import github_metadata
+        token = providers.account_token_for_slug(repo, prcfg)
+        return github_metadata.update(
+            provider, repo, number, title=title, description=description,
+            reviewers=reviewers, work_items=work_items, origin=origin,
+            api_base=prcfg.api_base, token=token, run=providers.run_cli,
+        )
     if operation is None:
         raise ProviderError(f"{prcfg.provider} does not support author metadata updates")
     token = providers.account_token_for_slug(repo, prcfg)
-    return operation(repo, number, title=title, description=description,
-                     reviewers=reviewers, work_items=work_items, origin=origin,
-                     api_base=prcfg.api_base, token=token)
+    result: dict[str, Any] = operation(
+        repo, number, title=title, description=description,
+        reviewers=reviewers, work_items=work_items, origin=origin,
+        api_base=prcfg.api_base, token=token,
+    )
+    return result

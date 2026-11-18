@@ -30,7 +30,7 @@ def select_new_code(
         for path in touched
     )
     for name, needed in (
-        ("lib-payload-invocation", invocation), ("copilot-extensions-harness", harness),
+        ("lib-payload-invocation", invocation), ("copilot-extensions-maintainer", harness),
     ):
         if needed and name not in projects:
             raise SourceViewError(f"{name}: changed program inputs lack their physical owner")
@@ -44,12 +44,27 @@ def select_new_code(
                 require_bootstrap_version(
                     "strict", (project.python_version, *project.additional_python_versions),
                 )
-        elif name == "copilot-extensions-harness":
+        elif name == "copilot-extensions-maintainer":
             complete = bool(changed) or harness
         if INSTALLATION_ENTRY in files and changed:
             complete = True
         if complete:
             changed = files
+        selected_paths = set(changed)
+        for entry in files:
+            if not entry.endswith(("/installation_context.py", "/_installation_context.py")):
+                continue
+            prefix = entry.rsplit("/", 1)[0] + "/"
+            members = {
+                path for path in files if path == entry or (
+                    path.startswith(prefix + "_installation_context_")
+                    and "/" not in path[len(prefix):]
+                    and not path.endswith("_installation_context_worker.py")
+                )
+            }
+            if touched.intersection(members):
+                selected_paths.update(members)
+        changed = tuple(path for path in files if path in selected_paths)
         if changed:
             for path in changed:
                 _reject_directives(path, root.joinpath(*path.split("/")).read_bytes())

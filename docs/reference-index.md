@@ -64,7 +64,8 @@ mechanics. Plugin-local guides and skills own their current commands.
 - [Componentizing modules](../plugins/customizing-copilot/skills/componentizing-modules/SKILL.md).
 - [Setting up instruction sync](../plugins/customizing-copilot/skills/setting-up-instruction-sync-worker/SKILL.md).
 - [Toolkit harness overview](../plugins/copilot-extensions-harness/README.md),
-  [contribution workflow](../plugins/copilot-extensions-harness/skills/contributing-to-copilot-extensions/SKILL.md),
+  [optional maintainer procedures](../plugins/copilot-extensions-maintainer/README.md),
+  [contribution workflow](../plugins/copilot-extensions-maintainer/skills/contributing-to-copilot-extensions/SKILL.md),
   and [toolkit diagnosis](../plugins/copilot-extensions-harness/skills/diagnosing-copilot-extensions/SKILL.md).
 
 ## Planning material, not installation promises

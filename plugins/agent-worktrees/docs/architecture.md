@@ -1,5 +1,45 @@
 # Agent Worktrees -- Architecture
 
+For the execution path, see [the worktree in an automated task](../../../docs/agent-lifecycle/worktree.md).
+Worktrees can allocate a checkout before any Copilot process exists. The
+[review snapshots](../../../docs/agent-lifecycle/review-snapshots.md) show
+which records appear at allocation, launch and native session registration.
+
+## Git and resident launch environments
+
+The Git wrapper and checkout-anchor probe select an absolute executable through
+the shared `plugin_resolve.git` resolver. `AGENT_GIT_EXECUTABLE` explicitly
+selects an installation; invalid explicit selection fails rather than falling
+back. Process PATH precedes Windows fresh user/system PATH and Git installation
+registry fallbacks. Positive discovery is reused while the file remains present;
+missing discovery is not retained forever. No Git command is retried after a
+launch failure, timeout or unknown outcome.
+
+The wrapper preserves binary output when binary input is supplied; diagnostic
+`GitError.stderr` remains UTF-8 text with replacement for invalid bytes.
+
+On Windows, future resident-monitor launches build a per-child fresh OS user
+environment. Only explicit `AGENT_`, `COPILOT_`, mux, UV and Python runtime
+selectors are overlaid from the launching context; stale PATH is not.
+The explicit Manager root and non-secret `GH_CONFIG_DIR`/`GH_HOST` selectors
+are also retained. The selected GitHub CLI directory is anchored and retained
+alongside fresh OS PATH so account acquisition and bare-`gh` Git credential
+helpers keep working with portable installations; unrelated launcher PATH
+entries are discarded. Git is resolved before
+refreshing the environment: portable process-PATH-only selections travel as
+an absolute soft discovery hint, while explicit Git configuration retains its
+explicit-selection semantics. A vanished soft hint can be rediscovered.
+Path-valued relative Git selections are anchored before changing the child's
+CWD; bare command names remain searchable. The existing credential and session-ID exclusions apply after that merge,
+including values originating in the OS environment. POSIX inheritance is
+unchanged. Contained tests retain their existing private roots/environment
+rather than escaping into the production user's roots.
+
+This changes dependency selection and launch context, not registration policy,
+the wire protocol or runtime replacement authority. The native Git/Copilot
+mapping model remains the governing intent; registration-policy work retains
+its separate contributor and acceptance gates.
+
 ## Required-application New admission
 
 An opted-in repository's `require_application_readiness` extends the existing
@@ -349,7 +389,8 @@ hooks/extensions consult the session-binding env (see
 
 ## The Worktree Record -- Single-Writer Contract (invariant)
 
-The per-worktree tracking YAML (`~/.{project}/worktrees/{id}.yaml`) is the
+The per-worktree tracking YAML (`worktrees/{id}.yaml` in the resolved project
+state directory; `~/.{project}/worktrees/{id}.yaml` in the legacy layout) is the
 **ground-layer state** of the agent fabric (see the `agent-fabric` vision in
 this repo's `visions/`). Two invariants keep the layers composable -- *enhancing,
 never overriding* one another -- as new orthogonal fields accrue on the record
@@ -633,6 +674,13 @@ currently catches (it flags raw `call_from_thread`, not unmarshalled
 shared-state mutation).
 
 ## Session Lifecycle
+
+The diagram below is the interactive Manager/CLI launch path. Hosted ACP uses
+Bridge and Session Host instead of a terminal pane. A session activation,
+the worktree's current head and the checkout's Git status are separate facts.
+See [startup records and boundaries](../../../docs/agent-lifecycle/startup-boundaries.md)
+for the two paths and [worktree lifecycle](worktree-lifecycle.md#the-lifecycle-at-a-glance)
+for source landing, finalization and cleanup.
 
 ```
 {project}                         # launch binstub

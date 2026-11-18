@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterator
-from collections import OrderedDict
-from concurrent.futures import ThreadPoolExecutor
 import contextlib
-from dataclasses import dataclass, field, replace
+import os
 import threading
 import time
+from collections import OrderedDict
+from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
 from . import cache_sources, cache_targets, config
@@ -42,6 +43,7 @@ class WarmRequest:
     token: object
     deadline: float
     configuration_root: str
+    native_default: bool = False
     sources: tuple[cache_sources.CacheSource, ...] = ()
     progress: WarmState = field(default_factory=lambda: WarmState("queued"))
 
@@ -107,7 +109,8 @@ class CacheWarmQueue:
             if current is not None and current.stamp == stamp and current.token is token:
                 return replace(current.progress)
             try:
-                root = config.configuration_root()
+                selected, native_default = config.configuration_selection()
+                root = selected or os.getcwd()
             except (OSError, RuntimeError, ValueError):
                 state = WarmState("not-queued", "configuration-unavailable")
                 self._refused = key, state
@@ -139,6 +142,7 @@ class CacheWarmQueue:
                 token,
                 time.monotonic() + WARM_SECONDS,
                 root,
+                native_default=native_default,
             )
             self._records[key] = self._pending[key] = request
             self._records.move_to_end(key)
@@ -298,7 +302,9 @@ class CacheWarmRuntime:
                 clock=time.monotonic,
             )
             try:
-                with use_configuration_root(request.configuration_root):
+                with use_configuration_root(
+                    request.configuration_root, native_default=request.native_default,
+                ):
                     group = (
                         request.group if request.group is not None
                         else config.load_config().group or ""

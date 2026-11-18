@@ -4,6 +4,7 @@ from __future__ import annotations
 import ast
 import importlib.util
 import json
+import os
 from pathlib import Path
 import shutil
 from typing import Any
@@ -80,6 +81,18 @@ def test_pinned_invocation_owner_refuses_corrupted_actual_write(
     assert any(line.startswith("SKIP Invocation materialization:") for line in log), log
     assert b"corrupt actual candidate output" in target.read_bytes()
     assert not any(line.startswith("MATERIALIZE Invocation ") for line in log), log
+
+
+def test_pinned_invocation_owner_preserves_hardlinked_candidate_output(tmp_path: Path) -> None:
+    source, candidate, plugin = _candidate(tmp_path)
+    original = tmp_path / "unrelated-command"
+    original.write_bytes(b"preserve unrelated command\n")
+    output = plugin / "bin" / "sample.ps1"
+    output.parent.mkdir()
+    os.link(original, output)
+    log = owner.materialize(candidate, canonical_root=source)
+    assert len(log) == 1 and log[0].startswith("SKIP Invocation materialization:") and "custody" in log[0], log
+    assert output.read_bytes() == original.read_bytes() == b"preserve unrelated command\n"
 
 
 @pytest.mark.parametrize("blocked", ["output-directory", "parent-file"])

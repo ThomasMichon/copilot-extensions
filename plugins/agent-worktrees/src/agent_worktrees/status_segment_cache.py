@@ -8,8 +8,16 @@ import threading
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from collections.abc import Callable, Iterator
+from typing import Any, Protocol, TypeVar
 
 from . import config as cfg, git_ops, push_timeout
+
+_T = TypeVar("_T")
+
+
+class _WorkRuntime(Protocol):
+    def active_work_count(self) -> int: ...
 
 
 @dataclass(eq=False)
@@ -19,12 +27,12 @@ class _ObservationTicket:
     path: str | None
     cleanup: push_timeout.ObservationCleanupError | None = None
     settling: bool = False
-    additional: list = field(default_factory=list)
+    additional: list[push_timeout.ObservationCleanupError] = field(default_factory=list)
     revision: int = 0
 
 
 class _StatusSegmentCache:
-    def __init__(self, ttl: float = 60.0):
+    def __init__(self, ttl: float = 60.0) -> None:
         self.ttl = max(15.0, float(ttl))
         self._entries: dict[str, tuple[float, str]] = {}
         self._aliases: dict[str, str] = {}
@@ -87,7 +95,7 @@ class _StatusSegmentCache:
             return self._blocked(project, path)
 
     @contextmanager
-    def observation_scope(self, project: str):
+    def observation_scope(self, project: str) -> Iterator[bool]:
         """Linearize short cache mutations with admission and retained custody."""
         with self._lock:
             yield git_ops._windows_observation() and self._blocked(project)
@@ -95,7 +103,7 @@ class _StatusSegmentCache:
     def project_for_observation_path(self, path: str) -> str | None:
         target = self._key(path)
         with self._lock:
-            candidates = [(key, project) for key, project in self._entry_projects.items()]
+            candidates: list[tuple[str | None, str]] = list(self._entry_projects.items())
             for ticket in self._observations.values():
                 candidates.append((ticket.path, ticket.project))
             for project, scopes in self._project_scopes.items():
@@ -114,7 +122,7 @@ class _StatusSegmentCache:
                         pass
             return next(iter(matches)) if len(matches) == 1 else None
 
-    def activate_hook_project(self, path, activate):
+    def activate_hook_project(self, path: str, activate: Callable[..., object]) -> None:
         if not git_ops._windows_observation():
             activate(path, force=True)
             return
@@ -137,7 +145,9 @@ class _StatusSegmentCache:
             project = next(iter(matches)) if len(matches) == 1 else None
         cfg.set_active_project(project)
 
-    def begin_observation(self, project: str, anchor: str | None, path: str | None):
+    def begin_observation(
+        self, project: str, anchor: str | None, path: str | None,
+    ) -> _ObservationTicket:
         key = ("anchor", self._key(anchor)) if anchor else ("project", project)
         with self._lock:
             self._project_scopes.setdefault(project, set()).add(key)
@@ -147,7 +157,9 @@ class _StatusSegmentCache:
             self._observations[key] = ticket
             return ticket
 
-    def retain_cleanup(self, ticket, error):
+    def retain_cleanup(
+        self, ticket: _ObservationTicket, error: push_timeout.ObservationCleanupError,
+    ) -> None:
         with self._lock:
             if self._observations.get(ticket.key) is not ticket:
                 raise RuntimeError("observation custody ticket changed") from error
@@ -159,10 +171,13 @@ class _StatusSegmentCache:
             if self._cancellation is None and isinstance(cause, (KeyboardInterrupt, SystemExit)):
                 self._cancellation = cause
             ticket.revision += 1
-            if ticket.path is None and getattr(error, "observation_path", None):
-                ticket.path = self._key(error.observation_path)
+            observation_path: str | None = getattr(error, "observation_path", None)
+            if ticket.path is None and observation_path:
+                ticket.path = self._key(observation_path)
 
-    def retain_unclaimed_cleanup(self, project, path, error):
+    def retain_unclaimed_cleanup(
+        self, project: str, path: str | None, error: push_timeout.ObservationCleanupError,
+    ) -> None:
         try:
             with self._lock:
                 if getattr(error, "_settled", False):
@@ -170,23 +185,25 @@ class _StatusSegmentCache:
                 for ticket in self._observations.values():
                     if ticket.cleanup is error or any(item is error for item in ticket.additional):
                         return
-                ticket = next(
+                selected = next(
                     (item for item in self._observations.values() if item.project == project), None,
                 )
-                if ticket is None:
+                if selected is None:
                     key = ("project", project)
-                    ticket = _ObservationTicket(key, project, self._key(path) if path else None)
-                    self._observations[key] = ticket
-                self.retain_cleanup(ticket, error)
+                    selected = _ObservationTicket(key, project, self._key(path) if path else None)
+                    self._observations[key] = selected
+                self.retain_cleanup(selected, error)
         finally:
             self._raise_pending_cancellation()
 
-    def finish_observation(self, ticket):
+    def finish_observation(self, ticket: _ObservationTicket) -> None:
         with self._lock:
             if self._observations.get(ticket.key) is ticket and ticket.cleanup is None:
                 self._observations.pop(ticket.key)
 
-    def run_observation(self, project, anchor, path, compute):
+    def run_observation(
+        self, project: str, anchor: str | None, path: str | None, compute: Callable[[], _T],
+    ) -> _T:
         if not git_ops._windows_observation():
             return compute()
         ticket = self.begin_observation(project, anchor, path)
@@ -246,7 +263,7 @@ class _StatusSegmentCache:
         with self._lock:
             self._closing_observations = False
 
-    def custody_observations(self, runtime=None) -> dict[str, int]:
+    def custody_observations(self, runtime: _WorkRuntime | None = None) -> dict[str, int]:
         if not git_ops._windows_observation():
             return {}
         active, pending = self.observation_counts()
@@ -255,13 +272,13 @@ class _StatusSegmentCache:
             "worktree-status-compute": runtime.active_work_count() if runtime is not None else 0,
         }
 
-    def custody_busy_reasons(self, runtime=None) -> list[str]:
+    def custody_busy_reasons(self, runtime: _WorkRuntime | None = None) -> list[str]:
         return [name for name, count in self.custody_observations(runtime).items() if count]
 
-    def observation_busy(self, runtime=None) -> bool:
+    def observation_busy(self, runtime: _WorkRuntime | None = None) -> bool:
         return any(self.custody_observations(runtime).values())
 
-    def finish_custody(self, runtime, wait):
+    def finish_custody(self, runtime: _WorkRuntime | None, wait: Callable[[], None]) -> None:
         if not git_ops._windows_observation():
             return
         self.close_observation_admission()
@@ -270,12 +287,14 @@ class _StatusSegmentCache:
             if self.observation_busy(runtime):
                 wait()
 
-    def degraded_bundle(self, project, worktree_id, previous=None):
+    def degraded_bundle(
+        self, project: str, worktree_id: str, previous: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         if not isinstance(previous, dict) or (
             previous.get("project") != project or previous.get("worktree_id") != worktree_id
         ):
             previous = None
-        bundle = copy.deepcopy(previous) if previous is not None else {
+        bundle: dict[str, Any] = copy.deepcopy(previous) if previous is not None else {
             "project": project, "worktree_id": worktree_id, "machine": "",
             "started_at": 0.0, "as_of": 0.0,
             "facts": {
@@ -305,7 +324,9 @@ class _StatusSegmentCache:
             key = self._aliases.get(input_key, input_key)
             if key in self._invalidated or self._closing_observations:
                 return None
-            project = self._entry_projects.get(key) or self.project_for_observation_path(path) or ""
+            project = self._entry_projects.get(key)
+            if project is None:
+                project = self.project_for_observation_path(path) or ""
             if self._blocked(project, path, cleanup_only=True):
                 return None
             cached = self._entries.get(key)
@@ -327,9 +348,9 @@ class _StatusSegmentCache:
         from . import status_bar_cli
 
         if git_ops._windows_observation():
-            cached = self.get_cached(path)
-            if cached is not None:
-                return cached
+            completed = self.get_cached(path)
+            if completed is not None:
+                return completed
         project = cfg.project_name() if git_ops._windows_observation() else ""
         input_key = self._key(path)
         with self._lock:
@@ -353,7 +374,9 @@ class _StatusSegmentCache:
                 self._aliases[input_key] = key
                 return cached[1]
         try:
-            render = core._self_override("_render_status_segment", status_bar_cli._render_status_segment)
+            render: Callable[..., str] = core._self_override(
+                "_render_status_segment", status_bar_cli._render_status_segment,
+            )
             anchor = None
             if git_ops._windows_observation():
                 try:

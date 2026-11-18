@@ -55,6 +55,47 @@ the proposed ownership, failure boundaries, identity, quotas, and recovery.
   README's current Plan/Journal state first; no other coordination channel
   is needed for a single-driver effort like this one.
 
+### Proposed source-specific #5559 tracking clarification
+
+The recorded decisions after #5562 and #5697 retained #5559 OPEN because
+reviewed planning and architecture did not implement the registry or qualify
+its measured acceptance. The later campaign recommendation retained that
+technical distinction. Preserve those decisions as history; this proposal
+does not retrospectively change their meaning.
+
+Agent-recommended prospective clarification: a SEPARATE #5559-specific
+NOT_PLANNED judgment may retire redundant issue tracking after this
+clarification and complete planned receiving have actually merged through
+normal review, and current WHOLE eligible original/discussion and receiver
+readback confirms every original/refined obligation in the owning Plan,
+actual global Validation, Coordination, Proposal and Journal. Reconcile
+current source/receiver state, eligibility, claims, custody and actual holds.
+A proposal, link, partial receipt or campaign-only record is insufficient.
+
+Once that reviewed clarification and complete receiving/readback are
+established, it prospectively supersedes ONLY the campaign's administrative
+requirement to retain #5559 as an OPEN tracking token. It does not require
+finishing engineering, settling the pending design choices, measuring the
+proposed budgets or checking any technical Plan/Validation item first.
+The Draft status, phase handoffs, design review, implementation and measured
+completion requirements keep their technical meaning; planning milestones
+alone still establish none of them. NOT_PLANNED is not COMPLETED, effort
+completion or release of an implementation obligation.
+
+Retain the optional designated-operator-account registry, single shared
+host-owned broker and existing invoker/in-process file check-ins. No
+subprocess exists solely to report a process, and no caller starts its own
+broker. Preserve the no-formal-telemetry-sink/export boundary.
+These qualifiers neither universally prohibit nor approve producer-triggered
+startup/ensure of the shared host-owned broker; lifecycle selection remains
+unsettled design work. All original identity, privacy, quota, recovery,
+snapshot and adopter-coverage obligations
+remain; #5557/#5558 root-cause work stays separate. This clarification settles
+no design choice and appoints neither Worktree Manager nor another lifecycle
+owner. Existing source/resource custody and actual operator holds remain.
+It adds no generic owner-contact/ACK or native-operation prerequisite to
+administrative judgment and grants no operational authority.
+
 ## Context
 
 `agent-*` runtime plugins each spawn and supervise their own long-lived
@@ -218,6 +259,17 @@ retirement/version-skew defects. The literal inception record is
 [here](inception-transcript.md).
 
 ## Journal
+
+### 2026-11-17 - Administrative versus technical #5559 clarification proposed
+
+Proposed a prospective distinction between the recorded parent-OPEN decision
+after planning milestones and a separate judgment about redundant tracking.
+Coordination requires actual reviewed complete receiving and current whole
+source/receiver and claims/custody readback, not completion of pending
+engineering, design review or measured budgets. Historical decisions, every
+technical checkbox, Draft status, existing ownership and actual holds remain
+unchanged. No receiving merge, source disposition, technical proof, design
+selection or custody transfer is established by this proposal.
 
 ### 2026-10-06 — Kickoff
 - Effort created from a live diagnosis session: auditing a reported

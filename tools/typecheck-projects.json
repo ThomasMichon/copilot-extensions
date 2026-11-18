@@ -25,11 +25,13 @@
         "tools/cache_directory_paths.py",
         "tools/test_typecheck.py",
         "tools/test_typecheck_programs.py",
+        "tools/promotion_unit_tests/test_typecheck.py",
         "tools/promotion_unit_tests/test_typecheck_catalog.py",
         "tools/promotion_unit_tests/test_typecheck_new_code.py"
       ],
       "exclude": [],
-      "level": "strict"
+      "level": "strict",
+      "requirements": "tools/typecheck-yaml-requirements.txt"
     },
     {
       "name": "devcontainer",
@@ -350,6 +352,7 @@
     },
     {
       "name": "lib-versioned-runtime",
+      "requirements": "tools/typecheck-build-requirements.txt",
       "include": [
         "libs/versioned-runtime"
       ],
@@ -425,16 +428,19 @@
         "plugins/agent-conduct-guidance"
       ],
       "exclude": [],
-      "level": "pending"
+      "level": "pending",
+      "import_roots": [
+        "plugins/customizing-copilot/skills/reviewing-customizations/scripts"
+      ]
     },
     {
       "name": "agent-containers",
+      "requirements": "tools/typecheck-build-requirements.txt",
       "include": [
         "plugins/agent-containers"
       ],
       "exclude": [],
-      "level": "pending",
-      "requirements": "tools/typecheck-yaml-requirements.txt"
+      "level": "pending"
     },
     {
       "name": "agent-dispatch",
@@ -526,7 +532,20 @@
       ],
       "import_roots": [
         "fleet-manager/tests",
-        "plugins/agent-vault"
+        "plugins/agent-vault",
+        "plugins/agent-vault/scripts",
+        "libs/agent-procutil/src"
+      ],
+      "program_roots": [
+        {
+          "root": "plugins/agent-vault",
+          "import_roots": [
+            "plugins/agent-vault/tests",
+            "plugins/agent-vault/scripts",
+            "plugins/agent-vault/src",
+            "plugins/agent-vault/scripts/configuration-layers/src"
+          ]
+        }
       ],
       "exclude": [],
       "level": "pending",
@@ -534,12 +553,34 @@
     },
     {
       "name": "agent-worktrees",
+      "requirements": "tools/typecheck-worktrees-requirements.txt",
       "include": [
         "plugins/agent-worktrees"
       ],
+      "exclude": [
+        "plugins/agent-worktrees/scripts/_runtime_admission"
+      ],
+      "level": "pending",
       "import_roots": [
+        "plugins/agent-worktrees/scripts/_runtime_admission/tools",
+        "plugins/agent-worktrees/scripts/_runtime_admission/worktree-manager/src",
+        "plugins/agent-worktrees/scripts/_runtime_admission/libs/agent-procutil/src",
+        "plugins/agent-worktrees/scripts/_runtime_admission/libs/installation-context",
+        "plugins/agent-worktrees/scripts/_runtime_admission/libs/installer-engine",
+        "plugins/agent-worktrees/scripts/_runtime_admission/libs/plugin-resolve/src",
+        "plugins/agent-worktrees/scripts/_runtime_admission/libs/single-instance-lease/src",
+        "plugins/agent-worktrees/scripts/_runtime_admission/libs/update-driver/src",
+        "plugins/agent-worktrees/scripts/_runtime_admission/libs/update-telemetry/src",
+        "plugins/agent-worktrees/scripts/_runtime_admission/libs/versioned-runtime",
+        "plugins/agent-worktrees/scripts/_runtime_admission/libs/zdd/src",
         "worktree-manager/tests",
         "plugins/agent-worktrees/tests"
+      ]
+    },
+    {
+      "name": "agent-worktrees-admission-toolkit",
+      "include": [
+        "plugins/agent-worktrees/scripts/_runtime_admission"
       ],
       "program_roots": [
         {
@@ -561,7 +602,23 @@
       ],
       "exclude": [],
       "level": "pending",
-      "requirements": "tools/typecheck-yaml-requirements.txt"
+      "requirements": "tools/typecheck-worktrees-requirements.txt",
+      "additional_python_versions": [
+        "3.11"
+      ],
+      "import_roots": [
+        "plugins/agent-worktrees/scripts/_runtime_admission/tools",
+        "plugins/agent-worktrees/scripts/_runtime_admission/worktree-manager/src",
+        "plugins/agent-worktrees/scripts/_runtime_admission/libs/agent-procutil/src",
+        "plugins/agent-worktrees/scripts/_runtime_admission/libs/installation-context",
+        "plugins/agent-worktrees/scripts/_runtime_admission/libs/installer-engine",
+        "plugins/agent-worktrees/scripts/_runtime_admission/libs/plugin-resolve/src",
+        "plugins/agent-worktrees/scripts/_runtime_admission/libs/single-instance-lease/src",
+        "plugins/agent-worktrees/scripts/_runtime_admission/libs/update-driver/src",
+        "plugins/agent-worktrees/scripts/_runtime_admission/libs/update-telemetry/src",
+        "plugins/agent-worktrees/scripts/_runtime_admission/libs/versioned-runtime",
+        "plugins/agent-worktrees/scripts/_runtime_admission/libs/zdd/src"
+      ]
     },
     {
       "name": "ai-attribution",
@@ -588,15 +645,15 @@
       "level": "strict"
     },
     {
-      "name": "copilot-extensions-harness",
+      "name": "copilot-extensions-maintainer",
       "include": [
-        "plugins/copilot-extensions-harness"
+        "plugins/copilot-extensions-maintainer"
       ],
       "exclude": [],
       "level": "pending",
       "import_roots": [
         "tools",
-        "plugins/copilot-extensions-harness/scripts",
+        "plugins/copilot-extensions-maintainer/scripts",
         "plugins/customizing-copilot/skills/reviewing-customizations/scripts",
         "libs/agent-procutil/src"
       ]
@@ -709,7 +766,8 @@
         "tools",
         "libs/installer-engine",
         "libs/versioned-runtime",
-        "worktree-manager/tests"
+        "worktree-manager/tests",
+        "libs/installation-context/tests"
       ],
       "exclude": [
         "tools/typecheck.py",
@@ -721,9 +779,19 @@
         "tools/cache_directory_paths.py",
         "tools/test_typecheck.py",
         "tools/test_typecheck_programs.py",
+        "tools/promotion_unit_tests/test_typecheck.py",
         "tools/promotion_unit_tests/test_typecheck_catalog.py",
         "tools/promotion_unit_tests/test_typecheck_new_code.py"
       ],
+      "level": "pending",
+      "requirements": "tools/typecheck-tools-requirements.txt"
+    },
+    {
+      "name": "worktree-manager-application",
+      "include": [
+        "apps/worktree-manager"
+      ],
+      "exclude": [],
       "level": "pending",
       "requirements": "tools/typecheck-runner-requirements.txt"
     },
@@ -741,7 +809,7 @@
         "worktree-manager/tests",
         "worktree-manager/tests/native"
       ],
-      "requirements": "tools/typecheck-runner-requirements.txt"
+      "requirements": "tools/typecheck-build-requirements.txt"
     }
   ]
 }

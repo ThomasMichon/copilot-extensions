@@ -19,11 +19,9 @@ models and returns per-model ranked results plus a fused ranking.
 from __future__ import annotations
 
 import logging
-import os
-import re
-from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ParamSpec, Protocol, TypeVar, cast
 
 import numpy as np
 
@@ -32,11 +30,27 @@ from agent_index.store.item_repr import ItemRepresentation as ItemRepresentation
 from agent_index.store.item_repr import item_content_hash as item_content_hash
 from agent_index.store.item_repr import pool_vectors as pool_vectors
 from agent_index.store.model_item_representation import _ItemRepresentationMixin
+from agent_index.store.rank_fusion import (
+    _DEFAULT_FTS_WEIGHT as _DEFAULT_FTS_WEIGHT,
+    _DEFAULT_VECTOR_WEIGHT as _DEFAULT_VECTOR_WEIGHT,
+    _EXACT_MATCH_BONUS as _EXACT_MATCH_BONUS,
+    _EXACT_MATCH_MAX_QUERY_LEN as _EXACT_MATCH_MAX_QUERY_LEN,
+    _exact_phrase_bonus as _exact_phrase_bonus,
+    _multi_list_rrf as _multi_list_rrf,
+    _reciprocal_rank_fusion as _reciprocal_rank_fusion,
+    _RRF_K as _RRF_K,
+)
 from agent_index.store.repo_filter import repo_matches
+from agent_index.store.result_filters import (
+    SearchFilters,
+    _apply_filters as _apply_filters,
+    _FACET_KEYS as _FACET_KEYS,
+    _facet_values as _facet_values,
+)
 from agent_index.store.source_layout import (
-    source_fts_read,
-    source_read,
-    source_write,
+    source_fts_read as _source_fts_read,
+    source_read as _source_read,
+    source_write as _source_write,
 )
 from agent_index.store.store import SearchResult
 from agent_index.store.vector_table import VectorHit, VectorTable
@@ -49,60 +63,18 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# RRF constant - higher values flatten rank differences
-_RRF_K = 60
-
-# Default weights for hybrid search fusion.
-#
-# agent-index's primary goal is semantic ("search by meaning") search, supplemented
-# by keyword. The vector signal must therefore outweigh BM25/FTS: otherwise a
-# document that merely contains the query string verbatim (e.g. a session log
-# that quotes the query) outranks the authoritative semantic match (#880).
-# Vector is weighted above FTS so meaning wins and lexical matches only break
-# ties / surface exact-token hits. Tunable via env for ops experimentation.
-_DEFAULT_VECTOR_WEIGHT = float(os.environ.get("AGENT_INDEX_VECTOR_WEIGHT", "2.0"))
-_DEFAULT_FTS_WEIGHT = float(os.environ.get("AGENT_INDEX_FTS_WEIGHT", "1.0"))
-
-# Exact-keyword rescue (#890). The blanket vector>FTS weight flip (#880) fixed
-# query-echo but can over-correct: a vector candidate at rank ~50
-# (2/(60+51) = 0.018) can out-rank a *top* FTS-only exact hit at rank 1
-# (1/(60+1) = 0.016), burying exact lexical matches that have no strong semantic
-# signal -- issue IDs, filenames, symbols, config keys. When such an
-# identifier-like query appears verbatim (token-bounded) in a result, add a
-# bonus in units of one top-rank RRF position so the hit isn't out-ranked by a
-# merely mid-rank vector candidate. Deliberately scoped to *single-token*
-# queries: multi-word phrases are where query-echo session logs live (#880), so
-# boosting a verbatim phrase there would re-break that fix. `0` disables.
-_EXACT_MATCH_BONUS = float(os.environ.get("AGENT_INDEX_EXACT_MATCH_BONUS", "1.0"))
-# Skip the verbatim check for long queries -- a whole-phrase match by a long NL
-# question is vanishingly rare and would only add cost/noise.
-_EXACT_MATCH_MAX_QUERY_LEN = 80
+_P = ParamSpec("_P")
+_T = TypeVar("_T")
 
 
-def _exact_phrase_bonus(query: str, result: SearchResult, bonus: float) -> float:
-    """RRF score bonus when an *identifier-like* query appears verbatim
-    (token-bounded) in a result's file path or content -- the exact-keyword
-    rescue for #890.
+class _SourceGuard(Protocol):
+    def __call__(self, func: Callable[_P, _T]) -> Callable[_P, _T]: ...
 
-    Only **single-token** queries are rescued (issue IDs, filenames, symbols,
-    config keys, dotted/underscored identifiers). Multi-word queries are
-    deliberately excluded: a natural-language phrase quoted verbatim is exactly
-    the query-echo session log #880 pushed *down*, so boosting it here would
-    re-introduce that bug. Returns one top-rank RRF unit
-    (``bonus / (_RRF_K + 1)``) on a match, so an exact hit gains roughly the
-    ground a rank-1 position would; ``0.0`` otherwise.
-    """
-    if bonus <= 0:
-        return 0.0
-    needle = query.strip().lower()
-    if len(needle) < 3 or len(needle) > _EXACT_MATCH_MAX_QUERY_LEN:
-        return 0.0
-    if len(needle.split()) != 1:  # multi-word -> query-echo territory, skip
-        return 0.0
-    haystack = f"{result.file_path}\n{result.content}".lower()
-    if re.search(rf"(?<!\w){re.escape(needle)}(?!\w)", haystack):
-        return bonus / (_RRF_K + 1)
-    return 0.0
+
+# The shared guards forward the wrapped callable's arguments and return unchanged.
+source_read: _SourceGuard = _source_read
+source_fts_read: _SourceGuard = _source_fts_read
+source_write: _SourceGuard = _source_write
 
 # Vector results are post-filtered by source/repo, so when such a filter is
 # set we widen the candidate pool to avoid a small repo's matches never
@@ -130,8 +102,13 @@ class MultiModelStore(_ItemRepresentationMixin):
         db_path: str | Path,
         *,
         content_table: str = "chunks",
+        content_store_type: type[ContentStore] = ContentStore,
+        repo_matcher: Callable[[str, str], bool] = repo_matches,
+        exact_match_bonus: float = _EXACT_MATCH_BONUS,
     ) -> None:
-        self._content = ContentStore(db_path, table_name=content_table)
+        self._content = content_store_type(db_path, table_name=content_table)
+        self._repo_matcher = repo_matcher
+        self._exact_match_bonus = exact_match_bonus
         self._source_domain = self._content._source_domain
         self._vector_tables: dict[str, VectorTable] = {}
         self._db_path = db_path
@@ -188,13 +165,13 @@ class MultiModelStore(_ItemRepresentationMixin):
     @source_write
     def upsert_content(self, chunks: list[Chunk], *, skip_identical: bool = False) -> int:
         """Store chunk content in the global content table."""
-        return self._content.upsert(chunks, skip_identical=skip_identical)
+        return cast(int, self._content.upsert(chunks, skip_identical=skip_identical))
 
     def upsert_vectors(
         self,
         model_id: str,
         chunks: list[Chunk],
-        vectors: np.ndarray,
+        vectors: np.ndarray[Any, Any],
         *,
         bounded_provenance: bool = False,
         bounded_input: bool = False,
@@ -212,17 +189,17 @@ class MultiModelStore(_ItemRepresentationMixin):
         self,
         model_id: str,
         chunks: list[Chunk],
-        vectors: np.ndarray,
+        vectors: np.ndarray[Any, Any],
     ) -> int:
         """Store content + vectors in one call (convenience)."""
         self.upsert_content(chunks)
         return self.upsert_vectors(model_id, chunks, vectors)
 
     @source_write
-    def delete_by_source(self, source: str) -> None:
-        """Remove all data for a source from content and all vector tables."""
+    def delete_by_source(self, source: str) -> int | None:
+        """Remove source data; source-aware stores return the deleted content count."""
         if self._source_domain is not None:
-            return self._content.delete_by_source(source)
+            return cast(int, self._content.delete_by_source(source))
         # Get chunk_ids before deleting content
         chunk_ids = self._get_chunk_ids_for_source(source)
         self._content.delete_by_source(source)
@@ -230,6 +207,7 @@ class MultiModelStore(_ItemRepresentationMixin):
         for vt in self._vector_tables.values():
             if chunk_ids:
                 vt.delete_by_chunk_ids(chunk_ids)
+        return None
 
     @source_write
     def delete_by_source_exact(self, source: str) -> int:
@@ -242,7 +220,7 @@ class MultiModelStore(_ItemRepresentationMixin):
         prefix.
         """
         if self._source_domain is not None:
-            return self._content.delete_by_source_exact(source)
+            return cast(int, self._content.delete_by_source_exact(source))
         chunk_ids = self._content.get_chunk_ids_by_source_exact(source)
         self._content.delete_by_source_exact(source)
         for vt in self._vector_tables.values():
@@ -253,17 +231,17 @@ class MultiModelStore(_ItemRepresentationMixin):
     @source_read
     def distinct_sources(self) -> set[str]:
         """Return the set of distinct ``source`` values present in the store."""
-        return self._content.distinct_sources()
+        return cast(set[str], self._content.distinct_sources())
 
     @source_read
     def source_counts(self) -> dict[str, int]:
         """Return ``{source: chunk_count}`` actually stored (truthful status)."""
-        return self._content.source_counts()
+        return cast(dict[str, int], self._content.source_counts())
 
     @source_read
     def get_document(self, source: str, file_path: str) -> ChunkRecord | None:
         """Reconstruct a file's full indexed text (delegates to ContentStore)."""
-        return self._content.get_document(source, file_path)
+        return cast(ChunkRecord | None, self._content.get_document(source, file_path))
 
     @source_read
     def distinct_items(self) -> list[tuple[str, str]]:
@@ -272,7 +250,7 @@ class MultiModelStore(_ItemRepresentationMixin):
         The unit the similarity-cluster pass groups by — one issue, one quip,
         one doc, one source file.  Delegates to ContentStore.
         """
-        return self._content.distinct_items()
+        return cast(list[tuple[str, str]], self._content.distinct_items())
 
 
 
@@ -284,9 +262,9 @@ class MultiModelStore(_ItemRepresentationMixin):
         and all VectorTables - no orphaned vectors.
         """
         if self._source_domain is not None:
-            return self._content.delete_by_file(source, file_path)
+            return cast(list[str], self._content.delete_by_file(source, file_path))
         # Retain canonical IDs until every vector deletion succeeds, for retry.
-        chunk_ids = self._content.get_chunk_ids_by_file(source, file_path)
+        chunk_ids = cast(list[str], self._content.get_chunk_ids_by_file(source, file_path))
         for vt in self._vector_tables.values():
             if chunk_ids:
                 vt.delete_by_chunk_ids(chunk_ids)
@@ -314,7 +292,7 @@ class MultiModelStore(_ItemRepresentationMixin):
         ``indexed_at`` timestamp, old chunks are cleaned up here.
         """
         if self._source_domain is not None:
-            return self._content.delete_stale_by_file(source, file_path, before=before)
+            return cast(int, self._content.delete_stale_by_file(source, file_path, before=before))
         # Get stale chunk_ids from content store
         stale_ids = self._content.get_stale_chunk_ids_by_file(
             source, file_path, before=before,
@@ -331,8 +309,8 @@ class MultiModelStore(_ItemRepresentationMixin):
     def delete_stale(self, source: str, *, before: float) -> int:
         """Remove stale chunks from content store and all vector tables."""
         if self._source_domain is not None:
-            return self._content.delete_stale(source, before=before)
-        removed = self._content.delete_stale(source, before=before)
+            return cast(int, self._content.delete_stale(source, before=before))
+        removed = cast(int, self._content.delete_stale(source, before=before))
         for vt in self._vector_tables.values():
             vt.delete_stale(before=before)
         return removed
@@ -373,7 +351,7 @@ class MultiModelStore(_ItemRepresentationMixin):
     # -- FTS -----------------------------------------------------------------
 
     def ensure_fts_index(self) -> bool:
-        return self._content.ensure_fts_index()
+        return cast(bool, self._content.ensure_fts_index())
 
     def mark_fts_dirty(self) -> None:
         self._content.mark_fts_dirty()
@@ -399,7 +377,7 @@ class MultiModelStore(_ItemRepresentationMixin):
     def search(
         self,
         model_id: str,
-        vector: np.ndarray,
+        vector: np.ndarray[Any, Any],
         *,
         limit: int = 10,
         source: str | None = None,
@@ -424,13 +402,13 @@ class MultiModelStore(_ItemRepresentationMixin):
         results = _apply_filters(
             results, source=source, language=language,
             file_path_glob=file_path_glob, repo=repo, labels=labels,
-            camera=camera, voice=voice,
+            camera=camera, voice=voice, repo_matcher=self._repo_matcher,
         )
         return results[:limit]
 
     def _vector_table_for_chunk(
         self, chunk_id: str,
-    ) -> tuple[str, VectorTable, np.ndarray] | None:
+    ) -> tuple[str, VectorTable, np.ndarray[Any, Any]] | None:
         """Locate the model table that holds *chunk_id* and its vector.
 
         A chunk lives in exactly one model table (code vs prose), chosen at
@@ -501,7 +479,7 @@ class MultiModelStore(_ItemRepresentationMixin):
         results = _apply_filters(
             results, source=source, language=language,
             file_path_glob=file_path_glob, repo=repo, labels=labels,
-            camera=camera, voice=voice,
+            camera=camera, voice=voice, repo_matcher=self._repo_matcher,
         )
         return results[:limit]
 
@@ -509,7 +487,7 @@ class MultiModelStore(_ItemRepresentationMixin):
     def hybrid_search(
         self,
         model_id: str,
-        vector: np.ndarray,
+        vector: np.ndarray[Any, Any],
         query_text: str,
         *,
         limit: int = 10,
@@ -530,7 +508,7 @@ class MultiModelStore(_ItemRepresentationMixin):
         candidate_limit = max(limit * 5, 50)
         if source or repo or labels or camera or voice:
             candidate_limit *= _FILTER_CANDIDATE_BOOST
-        filter_kwargs = {
+        filter_kwargs: SearchFilters = {
             "source": source,
             "language": language,
             "file_path_glob": file_path_glob,
@@ -546,7 +524,7 @@ class MultiModelStore(_ItemRepresentationMixin):
 
         if not self.fts_available:
             results = self._hydrate_hits(vector_hits)
-            results = _apply_filters(results, **filter_kwargs)
+            results = _apply_filters(results, repo_matcher=self._repo_matcher, **filter_kwargs)
             deduped = _deduplicate_by_content(results)
             return deduped[:limit]
 
@@ -561,7 +539,7 @@ class MultiModelStore(_ItemRepresentationMixin):
 
         if not fts_hits:
             results = self._hydrate_hits(vector_hits)
-            results = _apply_filters(results, **filter_kwargs)
+            results = _apply_filters(results, repo_matcher=self._repo_matcher, **filter_kwargs)
             deduped = _deduplicate_by_content(results)
             return deduped[:limit]
 
@@ -578,12 +556,14 @@ class MultiModelStore(_ItemRepresentationMixin):
 
         # Build SearchResult lists for RRF
         vector_results = _apply_filters(
-            _hits_to_results(vector_hits, records), **filter_kwargs
+            _hits_to_results(vector_hits, records),
+            repo_matcher=self._repo_matcher, **filter_kwargs,
         )
         # FTS SQL filters don't cover post-filter-only facets (e.g. labels),
         # so re-apply the full filter set to the FTS branch too.
         fts_results = _apply_filters(
-            _fts_to_results(fts_hits, records), **filter_kwargs
+            _fts_to_results(fts_hits, records),
+            repo_matcher=self._repo_matcher, **filter_kwargs,
         )
 
         merged = _reciprocal_rank_fusion(
@@ -592,6 +572,7 @@ class MultiModelStore(_ItemRepresentationMixin):
             vector_weight=vector_weight,
             fts_weight=fts_weight,
             query=query_text,
+            exact_match_bonus=self._exact_match_bonus,
         )
         deduped = _deduplicate_by_content(merged)
         normalized = _normalize_scores(deduped)
@@ -600,7 +581,7 @@ class MultiModelStore(_ItemRepresentationMixin):
     @source_fts_read
     def search_all(
         self,
-        vectors_by_model: dict[str, np.ndarray],
+        vectors_by_model: dict[str, np.ndarray[Any, Any]],
         query_text: str,
         *,
         limit: int = 10,
@@ -635,7 +616,7 @@ class MultiModelStore(_ItemRepresentationMixin):
             results = _apply_filters(
                 results, source=source, language=language,
                 file_path_glob=file_path_glob, repo=repo, labels=labels,
-            camera=camera, voice=voice,
+                camera=camera, voice=voice, repo_matcher=self._repo_matcher,
             )
             result_lists.append(results)
             weights.append(vector_weight)
@@ -657,7 +638,7 @@ class MultiModelStore(_ItemRepresentationMixin):
                     _fts_to_results(fts_hits, records),
                     source=source, language=language,
                     file_path_glob=file_path_glob, repo=repo, labels=labels,
-            camera=camera, voice=voice,
+                    camera=camera, voice=voice, repo_matcher=self._repo_matcher,
                 )
                 result_lists.append(fts_results)
                 weights.append(fts_weight)
@@ -671,7 +652,10 @@ class MultiModelStore(_ItemRepresentationMixin):
             normalized = _normalize_scores(deduped)
             return normalized[:limit]
 
-        fused = _multi_list_rrf(result_lists, weights=weights, query=query_text)
+        fused = _multi_list_rrf(
+            result_lists, weights=weights, query=query_text,
+            exact_match_bonus=self._exact_match_bonus,
+        )
         deduped = _deduplicate_by_content(fused)
         normalized = _normalize_scores(deduped)
         return normalized[:limit]
@@ -709,7 +693,7 @@ class MultiModelStore(_ItemRepresentationMixin):
     @source_fts_read
     def compare_search(
         self,
-        vectors_by_model: dict[str, np.ndarray],
+        vectors_by_model: dict[str, np.ndarray[Any, Any]],
         query_text: str,
         *,
         limit: int = 10,
@@ -739,7 +723,7 @@ class MultiModelStore(_ItemRepresentationMixin):
     @source_read
     def stats(self) -> dict[str, Any]:
         """Combined statistics across content and vector tables."""
-        content_stats = self._content.stats()
+        content_stats = cast(dict[str, Any], self._content.stats())
         vector_stats = {}
         for model_id, vt in self._vector_tables.items():
             vector_stats[model_id] = {
@@ -806,7 +790,8 @@ class MultiModelStore(_ItemRepresentationMixin):
 
     def _get_chunk_ids_for_source(self, source: str) -> list[str]:
         """Get all chunk_ids for a source (exact + prefix match)."""
-        table = self._content._get_or_create_table()
+        get_table: Callable[[], Any] = self._content._get_or_create_table
+        table = get_table()
         try:
             rows = (
                 table.search()
@@ -873,160 +858,6 @@ def _fts_to_results(
             metadata=getattr(rec, "metadata", {}),
         ))
     return results
-
-
-def _reciprocal_rank_fusion(
-    vector_results: list[SearchResult],
-    fts_results: list[SearchResult],
-    *,
-    vector_weight: float = _DEFAULT_VECTOR_WEIGHT,
-    fts_weight: float = _DEFAULT_FTS_WEIGHT,
-    query: str | None = None,
-) -> list[SearchResult]:
-    """Merge two ranked lists using weighted Reciprocal Rank Fusion."""
-    scores: dict[str, float] = defaultdict(float)
-    results_by_id: dict[str, SearchResult] = {}
-
-    for rank, r in enumerate(vector_results):
-        scores[r.chunk_id] += vector_weight / (_RRF_K + rank + 1)
-        results_by_id[r.chunk_id] = r
-
-    for rank, r in enumerate(fts_results):
-        scores[r.chunk_id] += fts_weight / (_RRF_K + rank + 1)
-        if r.chunk_id not in results_by_id:
-            results_by_id[r.chunk_id] = r
-
-    if query and _EXACT_MATCH_BONUS > 0:
-        for cid, r in results_by_id.items():
-            scores[cid] += _exact_phrase_bonus(query, r, _EXACT_MATCH_BONUS)
-
-    ranked_ids = sorted(scores, key=scores.__getitem__, reverse=True)
-
-    return [
-        SearchResult(
-            chunk_id=r.chunk_id,
-            score=scores[r.chunk_id],
-            source=r.source,
-            file_path=r.file_path,
-            chunk_type=r.chunk_type,
-            language=r.language,
-            content=r.content,
-            content_hash=r.content_hash,
-            line_start=r.line_start,
-            line_end=r.line_end,
-            metadata=r.metadata,
-        )
-        for cid in ranked_ids
-        if (r := results_by_id[cid])
-    ]
-
-
-def _multi_list_rrf(
-    result_lists: list[list[SearchResult]],
-    *,
-    weights: list[float] | None = None,
-    query: str | None = None,
-) -> list[SearchResult]:
-    """Weighted Reciprocal Rank Fusion across N ranked lists."""
-    if weights is None:
-        weights = [1.0] * len(result_lists)
-
-    scores: dict[str, float] = defaultdict(float)
-    results_by_id: dict[str, SearchResult] = {}
-
-    for result_list, weight in zip(result_lists, weights, strict=False):
-        for rank, r in enumerate(result_list):
-            scores[r.chunk_id] += weight / (_RRF_K + rank + 1)
-            if r.chunk_id not in results_by_id:
-                results_by_id[r.chunk_id] = r
-
-    if query and _EXACT_MATCH_BONUS > 0:
-        for cid, r in results_by_id.items():
-            scores[cid] += _exact_phrase_bonus(query, r, _EXACT_MATCH_BONUS)
-
-    ranked_ids = sorted(scores, key=scores.__getitem__, reverse=True)
-
-    return [
-        SearchResult(
-            chunk_id=r.chunk_id,
-            score=scores[r.chunk_id],
-            source=r.source,
-            file_path=r.file_path,
-            chunk_type=r.chunk_type,
-            language=r.language,
-            content=r.content,
-            content_hash=r.content_hash,
-            line_start=r.line_start,
-            line_end=r.line_end,
-            metadata=r.metadata,
-        )
-        for cid in ranked_ids
-        if (r := results_by_id[cid])
-    ]
-
-
-def _facet_values(metadata: dict | None, key: str) -> set[str]:
-    """Return a metadata facet's value(s) as a string set.
-
-    Facets are stored either as a scalar (``camera``) or a list (``labels``,
-    ``voice``, ``tags``); normalize both to a set so matching is uniform.
-    """
-    if not metadata:
-        return set()
-    val = metadata.get(key)
-    if val is None:
-        return set()
-    if isinstance(val, list):
-        return {str(v) for v in val}
-    return {str(val)}
-
-
-# Metadata facets filtered with OR semantics, keyed by request param name.
-# ``camera`` / ``voice`` are treated exactly like ``labels`` — a multi-valued
-# facet match — they just read a different metadata key.
-_FACET_KEYS = ("labels", "camera", "voice")
-
-
-def _apply_filters(
-    results: list[SearchResult],
-    *,
-    source: str | None = None,
-    language: str | None = None,
-    file_path_glob: str | None = None,
-    repo: str | None = None,
-    labels: list[str] | None = None,
-    camera: list[str] | None = None,
-    voice: list[str] | None = None,
-) -> list[SearchResult]:
-    """Post-filter search results by metadata fields.
-
-    ``source`` matches exactly or as a subtype prefix (``git:odsp-web-harness``
-    matches its own ``:commits`` byproduct too). ``repo`` matches ANY source
-    (any type prefix/byproduct) for a given repo -- see ``repo_matches``.
-    ``labels``/``camera``/``voice`` are OR-matched multi-valued facets.
-    """
-    facets = {"labels": labels, "camera": camera, "voice": voice}
-    if not any((source, language, file_path_glob, repo, *facets.values())):
-        return results
-
-    filtered = results
-    if source:
-        filtered = [r for r in filtered if r.source == source or r.source.startswith(f"{source}:")]
-    if language:
-        filtered = [r for r in filtered if r.language == language]
-    if file_path_glob:
-        import fnmatch
-        filtered = [r for r in filtered if fnmatch.fnmatchcase(r.file_path, file_path_glob)]
-    if repo:
-        filtered = [r for r in filtered if repo_matches(r.source, repo)]
-    for key in _FACET_KEYS:
-        wanted = facets[key]
-        if wanted:
-            wanted_set = set(wanted)
-            filtered = [
-                r for r in filtered if wanted_set & _facet_values(r.metadata, key)
-            ]
-    return filtered
 
 
 def _deduplicate_by_content(results: list[SearchResult]) -> list[SearchResult]:

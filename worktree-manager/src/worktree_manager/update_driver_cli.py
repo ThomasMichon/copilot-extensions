@@ -307,8 +307,10 @@ def self_install_request(operation: Callable[[], int]) -> int:
             if custody is not None:
                 return operation()
             argv, environment = driver.runtime_command("worktree_manager", ["self-install", "--apply"])
-            workspace = running_application_slot() or running_payload_dir()
+            application_slot = running_application_slot()
+            workspace = application_slot or running_payload_dir()
             root = str(default_root().expanduser().resolve())
+            execution_directory = root if application_slot is not None else str(workspace)
             context = {**request_context(), "WORKTREE_MANAGER_ROOT": root}
             selected = _current_authority(
                 driver, context=context.get("COPILOT_EXTENSIONS_CONTEXT", ""), cwd=str(workspace),
@@ -320,7 +322,7 @@ def self_install_request(operation: Callable[[], int]) -> int:
                     authority="standalone" if selected.configured and selected.mode == "standalone" else "",
                 ),
                 runner=driver.TrustedRunner(
-                    argv, str(workspace), env=tuple(environment.items()), context_keys=_RUNNER_CONTEXT_KEYS,
+                    argv, execution_directory, env=tuple(environment.items()), context_keys=_RUNNER_CONTEXT_KEYS,
                 ),
             )
             driver.drain()

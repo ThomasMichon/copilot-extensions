@@ -636,6 +636,63 @@ ref, artifact or runtime selection. Changefiles are removed only from its
 owned scratch checkout; the input checkout and pending bump intent remain
 unchanged. Main version metadata is read in bounded raw-blob batches, and
 inherited Git repository/index/config selectors do not redirect composition.
+
+Manager's `application-source.json` opts its source project into an additional
+promotion output, `apps/worktree-manager`. After the existing reference and
+packaged-asset expansion, `tools/materialize_source_applications.py` uses the
+canonical standalone build inventory to embed Python packages, runtime assets,
+package data and license notices under the application's own `src/`. Generated
+project metadata removes the embedded first-party dependency group and its
+development source mappings, while retaining external requirements and their
+project-local inputs, including the existing vendor archive. The input project
+and its version declarations are unchanged. No prebuilt Manager wheel is
+committed as a replacement for this source representation.
+
+The local composer retains that generated directory when its corresponding
+Manager source root is selected for export. Main and local composition therefore
+use the same source emitter, not a second local vendoring implementation.
+After emission, promotion associates the selected Git commit/tree and emitted
+source bytes through the existing `SourceIdentity` and local-runtime-version
+owner. Package versions remain unchanged by local composition. This records
+the pre-construction source inputs; it is not completion evidence for a later
+lock, environment, service or public release.
+The emitter uses the canonical data-only identity and fingerprint components,
+not the installed runtime's activation or resource loader. Runtime packaging,
+retained constructor/guardian resources and copied client bootstraps carry those
+same components; the identity format and fingerprint framing are unchanged.
+An app-local Git attributes file preserves emitted bytes through checkout and
+archive transport instead of inheriting repository text conversion. The
+repository's normal source-file line-ending policy remains unchanged.
+Promotion stages the complete emitted app as one unit, including required
+source shims that match development-only ignore patterns. It does not change
+the repository's ordinary development ignore rules.
+This output is independently buildable after relocation and carries generated
+slot-local setup/command frontdoors. Command paths that collide with project
+inputs or required directories are rejected before creating the output.
+Generated names also satisfy the existing portable-path contract, including
+Windows device-name refusal, before any destination directory is created.
+`bin/setup --stage` uses PATH UV with
+managed Python selected from the project's declaration. Initial setup creates
+a missing UV lock, then uses locked, non-editable environment synchronization;
+subsequent setup requires that lock. Ordinary commands do not synchronize or
+acquire an environment: missing staged inputs are refused before UV runs, and
+Python downloads are disabled for ordinary invocation. Staging does not publish current selection, neutral
+commands or a live service. Initial locking still needs the declared package
+metadata and build inputs from the selected feed or cache.
+
+The source-project output does not yet provide the complete retained
+Source/profile construction association for full setup or qualify cold
+bootstrap, installed adoption or the full application-footprint reference.
+Those remaining gates stay in the
+[Manager footprint plan](../efforts/active/source-managed-runtime-installs/app-footprint-transition.md).
+
+For an explicitly prepared source app, the opt-in
+`tools/test_materialize_source_applications.py::test_actual_promoted_manager_source_app_stages_without_activation`
+reads `MANAGER_SOURCE_APPLICATION`, copies the app into an isolated fixture and
+qualifies first/repeated staging with unchanged slot, input, legacy selector
+and global-command bytes. It starts no Manager service and does not qualify
+full setup or an unprovisioned host.
+
 The version writer admits all manifest, fallback, projection-template and catalog
 destinations before its first write. Linked changefile directories/files are
 rejected before version seeding or consumption, not left for later materialization.
@@ -1336,6 +1393,7 @@ contributions do not restart an executing source-admission run.
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
 | `ci.yml` | `pull_request` (all bases except `main`), `push` (`main`/`dev`), `workflow_dispatch` | Operational source guards, impact-conditional admitted units with single-pass coverage, and the fixed-name required PR aggregate. Pushes do not duplicate promotion's unit execution; manual CI remains unit-only. |
+| `unit-effect-guard-native.yml` | Path-gated `pull_request` → `dev`, `workflow_dispatch` | Fixed Linux/Windows routes qualify real audit-guard thread interleaving under a 120-second caller-owned boundary, with exact-source and cleanup checks. Ordinary units still refuse thread starts. |
 | `copilot-code-review.yml` | `workflow_dispatch`; official Copilot Code Review setup after default-branch publication | The `copilot-setup-steps` job preserves hosted review capacity with literal `ubuntu-latest`, with no checkout or dependency setup; Copilot supplies its own checkout afterward. It does not change the coding-agent fallback. The independently guarded `copilot-extensions-review` ARC role remains available only for an explicit reviewed route change, not additive overflow. A default-branch selector change requires an activation decision and an observed managed-review canary. |
 | `workflow-lockdown-guard.yml` | `pull_request_target` → `dev` (including body/label edits), `push` → `main`, `workflow_dispatch` | Independent trusted jobs host the existing required `workflow-lockdown-guard` check, separate `source-attribution`, Maintainer-only review fallback, and synchronize-only departed-head refresh. Default-branch push/manual runs retain existing source refresh for open `dev` PRs; job-scoped permissions/concurrency preserve their boundaries. Source changes need qualified trusted-default delivery. No PR code executes. |
 | `source-attribution-departures.yml` | `pull_request_target` (`closed`, `edited`) | Trusted metadata-only refresh for closed dev PRs and retargets away from dev, without a new-base filter. Synchronize refresh shares the existing trusted Dev entrypoint. Publishes no required-context skipped jobs and never executes PR content. |

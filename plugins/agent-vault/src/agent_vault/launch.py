@@ -13,6 +13,10 @@ import subprocess
 import sys
 from collections.abc import Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from agent_procutil.daemon_broker import WindowsDaemonProcess
 
 from agent_procutil import spawn_daemon, windowless_python, windowless_python_env
 
@@ -42,7 +46,7 @@ def service_root() -> Path:
     return root
 
 
-def spawn_service(args: Sequence[str]) -> subprocess.Popen:
+def spawn_service(args: Sequence[str]) -> subprocess.Popen[bytes] | WindowsDaemonProcess:
     """Start the trusted ``agent_vault.service`` package as a detached daemon.
 
     Launched through ``agent_procutil.spawn_daemon``: it runs from the vault
@@ -58,6 +62,7 @@ def spawn_service(args: Sequence[str]) -> subprocess.Popen:
     from .configuration import service_configuration_root
 
     configuration_root = service_configuration_root()
+    native_default = config.configuration_selection()[1]
     python = sys.executable
     root = service_root()
     overrides = dict(windowless_python_env(python))
@@ -72,15 +77,19 @@ def spawn_service(args: Sequence[str]) -> subprocess.Popen:
         if value:
             # Resolved exactly as its readers resolve it: only ``KPDB`` is
             # expanded (``~``, ``$VAR``); every other reader takes the raw path.
-            overrides[name] = (
+            resolved = (
                 config._expand_kpdb(value) if name == "KPDB" else os.path.abspath(value)
             )
+            assert resolved is not None
+            overrides[name] = resolved
     return spawn_daemon(
         [
             windowless_python(python), "-B", "-c", _SERVICE_BOOTSTRAP,
             str(Path(__file__).resolve().parent.parent), *args,
-            *([] if "--configuration-root" in args else
-              ["--configuration-root", configuration_root]),
+            *([] if "--configuration-root" in args else [
+                "--configuration-root", configuration_root,
+                *(["--native-default-owner"] if native_default else []),
+            ]),
         ],
         cwd=root,
         instance=DaemonInstanceSpec("agent-vault", root, Path(__file__).resolve()),

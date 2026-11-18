@@ -18,14 +18,20 @@ precisely so a sessionStart hook is never made to wait on a daemon boot.
 from __future__ import annotations
 
 import time
+import socket
 from pathlib import Path
 from types import SimpleNamespace
+from collections.abc import Iterator
+from typing import Any, cast
 
 import pytest
+import yaml
 
 from agent_worktrees import (
     config as cfg,
+    config_acquisition,
     config_authority,
+    registry_paths,
     tracking,
     tracking_session_registration_write,
     tracking_write,
@@ -33,8 +39,12 @@ from agent_worktrees import (
 from agent_worktrees.tracking import WorktreeRecord, save_record
 
 
+class FixtureRecord(WorktreeRecord):
+    _loaded_record_subject: tuple[object, ...] | None = None
+
+
 @pytest.fixture(autouse=True)
-def _clean_verb_registry():
+def _clean_verb_registry() -> Iterator[None]:
     before_verbs = dict(tracking_write._VERBS)
     yield
     tracking_write._VERBS.clear()
@@ -42,11 +52,13 @@ def _clean_verb_registry():
 
 
 @pytest.fixture
-def record_path(tmp_tracking_dir: Path, monkeypatch, monkeypatch_config) -> Path:
-    monkeypatch.setattr(cfg.socket, "gethostname", lambda: "test")
+def record_path(
+    tmp_tracking_dir: Path, monkeypatch: pytest.MonkeyPatch, monkeypatch_config: Any,
+) -> Path:
+    monkeypatch.setattr(socket, "gethostname", lambda: "test")
     monkeypatch.setattr(cfg, "project_dir", lambda name=None: tmp_tracking_dir.parent)
     config = cfg.Config(
-        srcroot=str(tmp_tracking_dir), machine="test", platform=cfg.detect_platform(), repo_name="test-repo",
+        srcroot=str(tmp_tracking_dir), machine="test", platform=getattr(cfg, "detect_platform")(), repo_name="test-repo",
         repos={"test-repo": cfg.RepoConfig(
             anchor=str(tmp_tracking_dir), worktree_root=str(tmp_tracking_dir / "trees"),
         )},
@@ -57,7 +69,7 @@ def record_path(tmp_tracking_dir: Path, monkeypatch, monkeypatch_config) -> Path
     )
     monkeypatch.setattr(cfg, "load_project_config", lambda name, **_kwargs: config)
     path = tmp_tracking_dir / "wt-reg.yaml"
-    rec = WorktreeRecord(
+    rec = FixtureRecord(
         worktree_id="wt-reg", branch="worktree/wt-reg",
         worktree_path=str(tmp_tracking_dir / "trees" / "wt-reg"),
         repo="test-repo", machine="test", platform=config.platform,
@@ -69,7 +81,7 @@ def record_path(tmp_tracking_dir: Path, monkeypatch, monkeypatch_config) -> Path
     return path
 
 
-def test_importing_the_module_registers_the_verb():
+def test_importing_the_module_registers_the_verb() -> None:
     assert "session_register" in tracking_write.registered_verbs()
 
 
@@ -83,7 +95,7 @@ def test_registration_derives_reporter_independently_of_configured_key(
     from agent_worktrees.worktree_machine_identity import WorktreeMachineIdentity
 
     monkeypatch.setattr(cfg, "detect_platform", lambda: platform)
-    monkeypatch.setattr(cfg.socket, "gethostname", lambda: "raw-host")
+    monkeypatch.setattr(socket, "gethostname", lambda: "raw-host")
     anchor = tmp_path / "anchor"
     anchor.mkdir()
     (anchor / "machines.yaml").write_text(
@@ -100,7 +112,7 @@ def test_registration_derives_reporter_independently_of_configured_key(
     }
     if binding == "project":
         machine_config["machine"] = "selected-space"
-    (project_root / "config.yaml").write_text(cfg.yaml.safe_dump(machine_config))
+    (project_root / "config.yaml").write_text(yaml.safe_dump(machine_config))
     global_path = tmp_path / "global.yaml"
     if binding == "global":
         global_path.write_text("machine: selected-space\n")
@@ -119,7 +131,7 @@ def test_registration_derives_reporter_independently_of_configured_key(
         WorktreeMachineIdentity("desk", platform, "selected-space")
         if tuple_record else None
     )
-    record = tracking.create_new_record(
+    record = getattr(tracking, "create_new_record")(
         "local", "worktree/local", str(tmp_path / "trees" / "local"), "project",
         identity.machine if identity else "selected-space",
         platform, cfg.tracking_dir("project"), machine_identity=identity,
@@ -139,7 +151,7 @@ def test_registration_derives_reporter_independently_of_configured_key(
         WorktreeMachineIdentity("another-desk", platform, "other-space")
         if tuple_record else None
     )
-    foreign = tracking.create_new_record(
+    foreign = getattr(tracking, "create_new_record")(
         "foreign", "worktree/foreign", str(tmp_path / "foreign-space" / "foreign"), "project",
         foreign_identity.machine if foreign_identity else "other-space",
         platform, cfg.tracking_dir("project"), machine_identity=foreign_identity,
@@ -153,7 +165,7 @@ def test_registration_derives_reporter_independently_of_configured_key(
     assert foreign.yaml_path.read_bytes() == before
 
 
-def test_apply_session_register_creates_a_new_session_entry(record_path):
+def test_apply_session_register_creates_a_new_session_entry(record_path: Path) -> None:
     result = tracking_session_registration_write.apply_session_register(
         {
             "worktree_id": "wt-reg",
@@ -166,7 +178,7 @@ def test_apply_session_register_creates_a_new_session_entry(record_path):
     assert record.session_entry("sess-1") is not None
 
 
-def test_source_bound_bind_is_idempotent_but_new_source_opens_interval(record_path):
+def test_source_bound_bind_is_idempotent_but_new_source_opens_interval(record_path: Path) -> None:
     args = {
         "worktree_id": "wt-reg", "yaml_path": str(record_path),
         "session_id": "sess-1", "source": "bind", "started_at": "first",
@@ -177,6 +189,7 @@ def test_source_bound_bind_is_idempotent_but_new_source_opens_interval(record_pa
         **args, "started_at": "repeat",
     })["ok"]
     entry = tracking.load_record(record_path).session_entry("sess-1")
+    assert entry is not None
     assert len(entry.activations) == 1
     assert entry.activations[0].source_identity == "native:first"
 
@@ -184,6 +197,7 @@ def test_source_bound_bind_is_idempotent_but_new_source_opens_interval(record_pa
         **args, "source_identity": "native:replacement",
     })["ok"]
     entry = tracking.load_record(record_path).session_entry("sess-1")
+    assert entry is not None
     assert len(entry.activations) == 2
     assert entry.activations[0].end_source == "inferred:next-start"
     assert entry.activations[1].source_identity == "native:replacement"
@@ -200,8 +214,8 @@ def test_source_bound_bind_is_idempotent_but_new_source_opens_interval(record_pa
 
 
 def test_retained_writer_attaches_only_to_the_open_identified_activation(
-    record_path, monkeypatch,
-):
+    record_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_worktrees import retained_record_writer, tracking_session_deregistration_write
 
     args = {
@@ -216,6 +230,7 @@ def test_retained_writer_attaches_only_to_the_open_identified_activation(
     monkeypatch.setattr(retained_record_writer, "active", lambda: True)
     assert tracking_session_registration_write.apply_session_register(retained)["ok"]
     entry = tracking.load_record(record_path).session_entry("sess-1")
+    assert entry is not None
     assert [(item.source_identity, item.ended_at) for item in entry.activations] == [
         ("native:first", None),
     ]
@@ -229,7 +244,7 @@ def test_retained_writer_attaches_only_to_the_open_identified_activation(
     assert record_path.read_bytes() == before
 
 
-def test_source_registration_reactivates_claim_after_old_end(record_path):
+def test_source_registration_reactivates_claim_after_old_end(record_path: Path) -> None:
     from agent_worktrees import obligations, tracking_session_deregistration_write
 
     args = {
@@ -243,19 +258,20 @@ def test_source_registration_reactivates_claim_after_old_end(record_path):
     })
     assert result["lifecycle"] == "ended"
     record = tracking.load_record(record_path)
-    ref = tracking.format_claim_ref(
-        record.machine, record.repo, record.worktree_id, session="sess-1",
+    ref = getattr(tracking, "format_claim_ref")(
+        record.execution_machine, record.repo, record.worktree_id, session="sess-1",
     )
     assert next(item for item in record.resources if item.ref == ref).state == obligations.RELEASED
     assert tracking_session_registration_write.apply_session_register({
         **args, "started_at": "replacement", "source_identity": "native:replacement",
     })["ok"]
     record = tracking.load_record(record_path)
-    assert record.session_entry("sess-1").ended_at is None
+    entry = record.session_entry("sess-1")
+    assert entry is not None and entry.ended_at is None
     assert next(item for item in record.resources if item.ref == ref).state == obligations.ACTIVE
 
 
-def test_delayed_duplicate_start_does_not_reactivate_ended_claim(record_path):
+def test_delayed_duplicate_start_does_not_reactivate_ended_claim(record_path: Path) -> None:
     from agent_worktrees import obligations, tracking_session_deregistration_write
 
     args = {
@@ -273,7 +289,9 @@ def test_delayed_duplicate_start_does_not_reactivate_ended_claim(record_path):
     assert all(item.state == obligations.RELEASED for item in record.resources)
 
 
-def test_reused_physical_source_ambiguity_survives_history_pruning(record_path, monkeypatch):
+def test_reused_physical_source_ambiguity_survives_history_pruning(
+    record_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_worktrees import tracking_session_deregistration_write
 
     monkeypatch.setattr(tracking, "_MAX_SESSION_ACTIVATIONS", 1)
@@ -287,6 +305,7 @@ def test_reused_physical_source_ambiguity_survives_history_pruning(record_path, 
         **args, "started_at": "second",
     })["ok"]
     entry = tracking.load_record(record_path).session_entry("sess-1")
+    assert entry is not None
     assert len(entry.activations) == 1
     assert entry.activations[0].ordinal == 2
     assert entry.activations[0].source_ambiguous is True
@@ -299,7 +318,9 @@ def test_reused_physical_source_ambiguity_survives_history_pruning(record_path, 
 
 
 @pytest.mark.parametrize("timestamp", [None, "not-a-timestamp", True])
-def test_uncertain_start_replay_cannot_reacquire_released_claim(record_path, timestamp):
+def test_uncertain_start_replay_cannot_reacquire_released_claim(
+    record_path: Path, timestamp: object,
+) -> None:
     from agent_worktrees import __main__ as main, obligations, tracking_session_deregistration_write
 
     args = {
@@ -318,12 +339,15 @@ def test_uncertain_start_replay_cannot_reacquire_released_claim(record_path, tim
     assert "timestamp" in replay["message"]
     assert record_path.read_bytes() == before
     record = tracking.load_record(record_path)
+    assert record.sessions is not None
     assert len(record.sessions[0].activations) == 1
     assert record.sessions[0].ended_at == "2026-10-19T10:00:00"
     assert all(claim.state == obligations.RELEASED for claim in record.resources)
 
 
-def test_timestamped_same_source_logical_resume_remains_explicitly_ambiguous(record_path):
+def test_timestamped_same_source_logical_resume_remains_explicitly_ambiguous(
+    record_path: Path,
+) -> None:
     from agent_worktrees import obligations, tracking_session_deregistration_write
 
     args = {
@@ -339,18 +363,21 @@ def test_timestamped_same_source_logical_resume_remains_explicitly_ambiguous(rec
         **args, "started_at": "2026-10-19T12:00:00",
     })["ok"]
     record = tracking.load_record(record_path)
+    assert record.sessions is not None
     assert record.sessions[0].ended_at is None
     assert all(item.source_ambiguous for item in record.sessions[0].activations)
     assert all(claim.state == obligations.ACTIVE for claim in record.resources)
 
 
-def test_source_changing_linked_handoff_advances_revision_and_survives_stale_save(record_path):
+def test_source_changing_linked_handoff_advances_revision_and_survives_stale_save(
+    record_path: Path,
+) -> None:
     assert tracking_session_registration_write.apply_session_register({
         "worktree_id": "wt-reg", "yaml_path": str(record_path),
         "session_id": "old", "source_identity": "native:old",
     })["ok"]
     record = tracking.load_record(record_path)
-    tracking.open_handoff(record, "old", "token", save=False)
+    getattr(tracking, "open_handoff")(record, "old", "token", save=False)
     tracking.save_record(record, record_path)
     args = {
         "worktree_id": "wt-reg", "yaml_path": str(record_path), "session_id": "sess-1",
@@ -363,10 +390,12 @@ def test_source_changing_linked_handoff_advances_revision_and_survives_stale_sav
     })
     assert result["ok"] and result["linked_handoff"] is None
     current = tracking.load_record(record_path)
+    assert current.sessions is not None and stale.sessions is not None
     assert current.lifecycle_revision > stale.lifecycle_revision
     assert current.sessions[-1].activations[-1].source_identity == "native:replacement"
     tracking.save_record(stale, record_path)
     retained = tracking.load_record(record_path)
+    assert retained.sessions is not None
     assert retained.sessions[-1].activations[-1].source_identity == "native:replacement"
     assert tracking_session_registration_write.apply_session_register({
         **args, "source_identity": "native:replacement",
@@ -374,7 +403,9 @@ def test_source_changing_linked_handoff_advances_revision_and_survives_stale_sav
     assert tracking.load_record(record_path).lifecycle_revision == retained.lifecycle_revision
 
 
-def test_pruned_physical_source_cannot_regain_unambiguous_end_authority(record_path, monkeypatch):
+def test_pruned_physical_source_cannot_regain_unambiguous_end_authority(
+    record_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_worktrees import obligations, tracking_session_deregistration_write
 
     monkeypatch.setattr(tracking, "_MAX_SESSION_ACTIVATIONS", 2)
@@ -390,6 +421,7 @@ def test_pruned_physical_source_cannot_regain_unambiguous_end_authority(record_p
             **args, "source_identity": source, "started_at": timestamp,
         })["ok"]
     record = tracking.load_record(record_path)
+    assert record.sessions is not None
     assert len(record.sessions[0].activations) == 2
     assert all(item.source_identity == "native:B" for item in record.sessions[0].activations)
     replay = tracking_session_registration_write.apply_session_register({
@@ -397,7 +429,7 @@ def test_pruned_physical_source_cannot_regain_unambiguous_end_authority(record_p
         "source": "bind",
     })
     assert replay.get("ok") or replay.get("error") == "lifecycle"
-    stops = []
+    stops: list[str] = []
     monkeypatch.setattr(tracking_session_deregistration_write, "stop_fsmonitor_daemon", stops.append)
     old_end = tracking_session_deregistration_write.apply_session_deregister({
         **args, "source_identity": "native:A", "ended_at": "old-A-exit",
@@ -405,6 +437,7 @@ def test_pruned_physical_source_cannot_regain_unambiguous_end_authority(record_p
     })
     assert old_end["lifecycle"] == "unconfirmed"
     current = tracking.load_record(record_path)
+    assert current.sessions is not None
     assert current.sessions[0].ended_at is None
     assert current.sessions[0].activations[-1].ended_at is None
     assert all(claim.state == obligations.ACTIVE for claim in current.resources)
@@ -413,8 +446,8 @@ def test_pruned_physical_source_cannot_regain_unambiguous_end_authority(record_p
 
 @pytest.mark.parametrize("equal_revision", [False, True])
 def test_pruning_fence_roundtrips_and_survives_stale_save(
-    record_path, monkeypatch, equal_revision,
-):
+    record_path: Path, monkeypatch: pytest.MonkeyPatch, equal_revision: bool,
+) -> None:
     monkeypatch.setattr(tracking, "_MAX_SESSION_ACTIVATIONS", 1)
     args = {
         "worktree_id": "wt-reg", "yaml_path": str(record_path),
@@ -426,11 +459,13 @@ def test_pruning_fence_roundtrips_and_survives_stale_save(
         **args, "source_identity": "native:B",
     })["ok"]
     current = tracking.load_record(record_path)
+    assert current.sessions is not None
     assert current.sessions[0].pruned_sources == ["native:A"]
     if equal_revision:
         stale.lifecycle_revision = current.lifecycle_revision
     tracking.save_record(stale, record_path)
     saved = tracking.load_record(record_path)
+    assert saved.sessions is not None
     assert "native:A" in saved.sessions[0].pruned_sources
     if equal_revision:
         assert "native:B" in saved.sessions[0].pruned_sources
@@ -439,8 +474,8 @@ def test_pruning_fence_roundtrips_and_survives_stale_save(
 
 
 def test_pruning_source_budget_saturates_stickily_and_refuses_before_claim(
-    record_path, monkeypatch,
-):
+    record_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_worktrees import tracking_session_activations as history
     from agent_worktrees import tracking_session_deregistration_write
 
@@ -455,21 +490,24 @@ def test_pruning_source_budget_saturates_stickily_and_refuses_before_claim(
             **args, "source_identity": source,
         })["ok"]
     current = tracking.load_record(record_path)
+    assert current.sessions is not None
     assert len(current.sessions[0].pruned_sources) == 2
     assert current.sessions[0].source_history_saturated is True
     stale = tracking.load_record(record_path)
+    assert stale.sessions is not None
     stale.sessions[0].source_history_saturated = False
     stale.sessions[0].pruned_sources = []
     tracking.save_record(stale, record_path)
-    assert tracking.load_record(record_path).sessions[0].source_history_saturated is True
+    saved = tracking.load_record(record_path)
+    assert saved.sessions is not None and saved.sessions[0].source_history_saturated is True
     before = record_path.read_bytes()
-    for source in ("A", "D", "E", None):
+    for retained_source in ("A", "D", "E", None):
         assert tracking_session_registration_write.apply_session_register({
-            **args, "source_identity": source,
+            **args, "source_identity": retained_source,
         })["error"] == "lifecycle"
         assert record_path.read_bytes() == before
         assert tracking_session_deregistration_write.apply_session_deregister({
-            **args, "source_identity": source, "end_reason": "user_exit",
+            **args, "source_identity": retained_source, "end_reason": "user_exit",
         })["lifecycle"] == "unconfirmed"
         assert record_path.read_bytes() == before
 
@@ -479,7 +517,7 @@ def test_pruning_source_budget_saturates_stickily_and_refuses_before_claim(
     {"pruned_sources": [None]}, {"pruned_sources": [True]},
     {"source_history_saturated": 1}, {"source_history_saturated": "true"},
 ])
-def test_invalid_pruning_fence_is_rejected(metadata):
+def test_invalid_pruning_fence_is_rejected(metadata: dict[str, Any]) -> None:
     from agent_worktrees.tracking_session_activations import parse_pruning_fence
     with pytest.raises(ValueError):
         parse_pruning_fence(metadata)
@@ -487,18 +525,21 @@ def test_invalid_pruning_fence_is_rejected(metadata):
 
 @pytest.mark.parametrize("source_identity", [None, "native:replacement"])
 def test_v2_daemon_cannot_downgrade_registration(
-    record_path, monkeypatch, monkeypatch_config, source_identity,
-):
+    record_path: Path, monkeypatch: pytest.MonkeyPatch, monkeypatch_config: Any,
+    source_identity: str | None,
+) -> None:
     from agent_worktrees import locks, status_monitor_runtime
 
     assert tracking_session_registration_write.apply_session_register({
         "worktree_id": "wt-reg", "yaml_path": str(record_path),
         "session_id": "sess-1", "source_identity": "native:original",
     })["ok"]
-    requests = []
-    server = tracking_write.start_server(
-        lambda kind, payload: requests.append(payload) or {"ok": True},
-    )
+    requests: list[Any] = []
+    def answer(kind: str, payload: dict[str, Any]) -> dict[str, Any]:
+        requests.append(payload)
+        return {"ok": True}
+
+    server = tracking_write.start_server(answer)
     server.start()
     try:
         fields = tracking_write.rendezvous_fields(server)
@@ -507,12 +548,13 @@ def test_v2_daemon_cannot_downgrade_registration(
         monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: False)
         if source_identity is None:
             before = record_path.read_bytes()
-            with pytest.raises(tracking.SessionLifecycleError, match="source"):
-                tracking.register_session("wt-reg", "sess-1")
+            with pytest.raises(getattr(tracking, "SessionLifecycleError"), match="source"):
+                getattr(tracking, "register_session")("wt-reg", "sess-1")
             assert record_path.read_bytes() == before
         else:
-            tracking.register_session("wt-reg", "sess-1", source_identity=source_identity)
+            getattr(tracking, "register_session")("wt-reg", "sess-1", source_identity=source_identity)
             entry = tracking.load_record(record_path).session_entry("sess-1")
+            assert entry is not None
             assert entry.activations[-1].source_identity == source_identity
         assert requests == []
     finally:
@@ -520,8 +562,8 @@ def test_v2_daemon_cannot_downgrade_registration(
 
 
 def test_apply_session_register_new_session_branch_feeds_claim_history(
-    record_path,
-):
+    record_path: Path,
+) -> None:
     """worktree-claims-transitive-finalization Phase 3b: linking a
     handoff_token for a session NOT yet tracked (the "new session" branch)
     must feed claim_history for any ACTIVE pr-kind claim the worktree
@@ -529,11 +571,12 @@ def test_apply_session_register_new_session_branch_feeds_claim_history(
     from agent_worktrees import claim_history, obligations
 
     record = tracking.load_record(record_path)
+    assert record.sessions is not None
     record.sessions.append(tracking.SessionEntry("old", "2026-06-01T10:00:00"))
     record.resources = [
-        tracking.ResourceClaim(kind="pr", ref="o/r#1", state=obligations.ACTIVE),
+        getattr(tracking, "ResourceClaim")(kind="pr", ref="o/r#1", state=obligations.ACTIVE),
     ]
-    tracking.open_handoff(record, "old", "tok", save=False)
+    getattr(tracking, "open_handoff")(record, "old", "tok", save=False)
     tracking.save_record(record, record_path)
 
     result = tracking_session_registration_write.apply_session_register(
@@ -551,8 +594,8 @@ def test_apply_session_register_new_session_branch_feeds_claim_history(
 
 
 def test_apply_session_register_existing_session_branch_feeds_claim_history(
-    record_path,
-):
+    record_path: Path,
+) -> None:
     """Same Phase 3b wiring, for the "existing session" branch (the
     successor is already tracked, e.g. a pre-associated handoff
     candidate) -- the loop branch in apply_session_register, distinct from
@@ -560,12 +603,13 @@ def test_apply_session_register_existing_session_branch_feeds_claim_history(
     from agent_worktrees import claim_history, obligations
 
     record = tracking.load_record(record_path)
+    assert record.sessions is not None
     record.sessions.append(tracking.SessionEntry("old", "2026-06-01T10:00:00"))
     record.sessions.append(tracking.SessionEntry("new", "2026-06-01T10:00:00"))
     record.resources = [
-        tracking.ResourceClaim(kind="pr", ref="o/r#1", state=obligations.ACTIVE),
+        getattr(tracking, "ResourceClaim")(kind="pr", ref="o/r#1", state=obligations.ACTIVE),
     ]
-    tracking.open_handoff(record, "old", "tok", save=False)
+    getattr(tracking, "open_handoff")(record, "old", "tok", save=False)
     tracking.save_record(record, record_path)
 
     result = tracking_session_registration_write.apply_session_register(
@@ -583,14 +627,14 @@ def test_apply_session_register_existing_session_branch_feeds_claim_history(
 
 
 def test_apply_session_register_rejects_a_terminal_managed_worktree(
-    tmp_tracking_dir: Path, monkeypatch,
-):
+    tmp_tracking_dir: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import agent_worktrees.config as cfg
 
-    monkeypatch.setattr(cfg.socket, "gethostname", lambda: "test")
+    monkeypatch.setattr(socket, "gethostname", lambda: "test")
     monkeypatch.setattr(cfg, "project_dir", lambda name=None: tmp_tracking_dir.parent)
     config = cfg.Config(
-        srcroot=str(tmp_tracking_dir), machine="test", platform=cfg.detect_platform(), repo_name="test-repo",
+        srcroot=str(tmp_tracking_dir), machine="test", platform=getattr(cfg, "detect_platform")(), repo_name="test-repo",
         repos={"test-repo": cfg.RepoConfig(
             anchor=str(tmp_tracking_dir), worktree_root=str(tmp_tracking_dir / "trees"),
         )},
@@ -600,7 +644,7 @@ def test_apply_session_register_rejects_a_terminal_managed_worktree(
         lambda name, **_kwargs: config,
     )
     path = tmp_tracking_dir / "wt-terminal.yaml"
-    rec = WorktreeRecord(
+    rec = FixtureRecord(
         worktree_id="wt-terminal", branch="worktree/wt-terminal",
         worktree_path=str(tmp_tracking_dir / "trees" / "wt-terminal"), repo="test-repo", machine="test",
         platform=config.platform, started_at="2026-06-01T10:00:00",
@@ -642,10 +686,10 @@ def test_apply_session_register_rejects_a_terminal_managed_worktree(
     ],
 )
 def test_session_register_uses_knowledge_backed_receiving_authority(
-    tmp_path: Path, monkeypatch, default_branch, machine_remote,
-    available_remotes, remote_ref_available, declared_branch,
-    committed_remote, expected_refs, expected_probes,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, default_branch: str, machine_remote: str | None,
+    available_remotes: tuple[str, ...], remote_ref_available: bool, declared_branch: str,
+    committed_remote: str, expected_refs: tuple[str, ...], expected_probes: int,
+) -> None:
     """Registration skips full project policy while preserving its authority."""
     from agent_worktrees import git_ops, repos as repos_mod
 
@@ -688,8 +732,8 @@ def test_session_register_uses_knowledge_backed_receiving_authority(
     )
     monkeypatch.setattr(repos_mod, "read_registry", lambda **kwargs: registry)
     committed_path = cfg.inrepo_config_path(Path()).as_posix()
-    git_calls = []
-    shown_refs = []
+    git_calls: list[tuple[str, ...]] = []
+    shown_refs: list[str] = []
     selected_remote = (
         machine_remote
         if machine_remote is not None
@@ -700,7 +744,7 @@ def test_session_register_uses_knowledge_backed_receiving_authority(
         )
     )
 
-    def committed_config(*args, **kwargs):
+    def committed_config(*args: str, **kwargs: Any) -> SimpleNamespace:
         git_calls.append(args)
         assert "timeout" not in kwargs
         assert kwargs["isolated_repository"] is True
@@ -754,7 +798,7 @@ def test_session_register_uses_knowledge_backed_receiving_authority(
 
     monkeypatch.setattr(git_ops, "git", committed_config)
     monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
-    monkeypatch.setattr(cfg.socket, "gethostname", lambda: "workstation")
+    monkeypatch.setattr(socket, "gethostname", lambda: "workstation")
     project_root = tmp_path / ".harness"
     project_root.mkdir()
     (project_root / "config.yaml").write_text(
@@ -788,7 +832,7 @@ def test_session_register_uses_knowledge_backed_receiving_authority(
         (foreign_path, "foreign", "workstation-wsl", "wsl"),
     ):
         save_record(
-            WorktreeRecord(
+            FixtureRecord(
                 worktree_id=worktree_id,
                 branch=f"worktree/{worktree_id}",
                 worktree_path=str(tmp_path / "trees" / worktree_id) if worktree_id == "local" else str(tmp_path / worktree_id),
@@ -837,7 +881,7 @@ def test_session_register_uses_knowledge_backed_receiving_authority(
     ("failure", "message"),
     [
         ("nonzero", "cannot read committed authority"),
-        ("absent", "committed authority config is absent"),
+        ("absent", "config-free registration requires a proven local checkout"),
         ("remote_error", "cannot verify committed authority ref"),
         ("head_error", "cannot resolve committed authority HEAD"),
         ("head_malformed", "committed authority HEAD is malformed"),
@@ -845,8 +889,8 @@ def test_session_register_uses_knowledge_backed_receiving_authority(
     ],
 )
 def test_registration_authority_fails_closed_when_committed_config_is_unreadable(
-    tmp_path: Path, monkeypatch, failure, message,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str, message: str,
+) -> None:
     from agent_worktrees import git_ops, repos
     from agent_worktrees.execution_spaces import ExecutionSpaceError
 
@@ -882,7 +926,7 @@ def test_registration_authority_fails_closed_when_committed_config_is_unreadable
     monkeypatch.setattr(
         cfg, "global_config_path", lambda: tmp_path / "missing-global.yaml",
     )
-    def failed_git(*_args, **kwargs):
+    def failed_git(*_args: str, **kwargs: Any) -> SimpleNamespace:
         assert kwargs["isolated_repository"] is True
         assert "timeout" not in kwargs
         if _args[0] == "symbolic-ref":
@@ -913,11 +957,230 @@ def test_registration_authority_fails_closed_when_committed_config_is_unreadable
 
     with pytest.raises(ExecutionSpaceError, match=message):
         config_authority.require_registration_record_mutation(
-            SimpleNamespace(repo="harness"),
+            cast(WorktreeRecord, SimpleNamespace(repo="harness")),
         )
 
 
-def test_register_session_reaches_a_live_daemon(record_path, monkeypatch, monkeypatch_config):
+@pytest.fixture
+def config_free_checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
+    from agent_worktrees import git_ops
+    from agent_worktrees.worktree_machine_identity import WorktreeMachineIdentity
+
+    anchor = tmp_path / "anchor"
+    anchor.mkdir()
+    git_ops.git("init", "-b", "main", cwd=anchor)
+    git_ops.git(
+        "-c", "user.name=Example", "-c", "user.email=example@example.invalid",
+        "commit", "--allow-empty", "-m", "fixture", cwd=anchor,
+    )
+    checkout = tmp_path / "worktrees" / "example"
+    git_ops.git("worktree", "add", "-b", "worktree/example", str(checkout), cwd=anchor)
+    project = tmp_path / "project"
+    records = project / "worktrees"
+    records.mkdir(parents=True)
+    monkeypatch.setattr(cfg, "project_dir", lambda name=None: project)
+    monkeypatch.setattr(cfg, "tracking_dir", lambda name=None: records)
+    monkeypatch.setattr(cfg, "global_config_path", lambda: tmp_path / "global.yaml")
+    monkeypatch.setattr(socket, "gethostname", lambda: "example-host")
+    monkeypatch.setattr(registry_paths, "installation_context_call", lambda *_args: None)
+    platform = getattr(cfg, "detect_platform")()
+    settings = {
+        "machine": "example-host",
+        "platform": platform,
+        "repos": {"project": {"anchor": str(anchor), "remote": ""}},
+    }
+    (project / "config.yaml").write_text(yaml.safe_dump(settings), encoding="utf-8")
+    identity = WorktreeMachineIdentity("example-host", platform, "example-host")
+    record = getattr(tracking, "create_new_record")(
+        "example", "worktree/example", str(checkout), "project", identity.machine,
+        platform, records, machine_identity=identity,
+    )
+    return SimpleNamespace(
+        anchor=anchor, checkout=checkout, project=project, record=record, settings=settings,
+    )
+
+
+def _register_config_free(fixture: SimpleNamespace) -> dict[str, Any]:
+    return tracking_session_registration_write.apply_session_register({
+        "worktree_id": "example", "yaml_path": str(fixture.record.yaml_path),
+        "session_id": "session",
+    })
+
+
+def test_config_free_registration_accepts_proven_local_checkout(config_free_checkout: SimpleNamespace) -> None:
+    result = _register_config_free(config_free_checkout)
+    assert result == {"ok": True, "linked_handoff": None}
+    assert tracking.load_record(config_free_checkout.record.yaml_path).session_entry("session")
+
+
+def test_config_free_registration_uses_remote_tracking_default(config_free_checkout: SimpleNamespace) -> None:
+    from agent_worktrees import git_ops
+
+    fixture = config_free_checkout
+    git_ops.git("update-ref", "refs/remotes/origin/main", "refs/heads/main", cwd=fixture.anchor)
+    git_ops.git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main", cwd=fixture.anchor)
+    fixture.settings["repos"]["project"]["remote"] = "origin"
+    (fixture.project / "config.yaml").write_text(yaml.safe_dump(fixture.settings), encoding="utf-8")
+    assert _register_config_free(fixture) == {"ok": True, "linked_handoff": None}
+
+
+def test_config_free_registration_rejects_missing_remote_tracking_ref(config_free_checkout: SimpleNamespace) -> None:
+    from agent_worktrees import git_ops
+
+    fixture = config_free_checkout
+    git_ops.git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main", cwd=fixture.anchor)
+    fixture.settings["repos"]["project"]["remote"] = "origin"
+    (fixture.project / "config.yaml").write_text(yaml.safe_dump(fixture.settings), encoding="utf-8")
+    before = fixture.record.yaml_path.read_bytes()
+    result = _register_config_free(fixture)
+    assert result["error"] == "execution_space"
+    assert "remote tracking ref" in result["message"]
+    assert fixture.record.yaml_path.read_bytes() == before
+
+
+def test_config_free_registration_through_real_daemon(
+    config_free_checkout: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_worktrees import locks, status_monitor_runtime
+
+    fixture = config_free_checkout
+    server = tracking_write.start_server(tracking_write.compute)
+    server.start()
+    try:
+        monkeypatch.setattr(locks, "read_lock", lambda _path: tracking_write.rendezvous_fields(server))
+        monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: False)
+        monkeypatch.setattr(tracking, "_owning_tracking_dir", lambda *_args: fixture.record.yaml_path.parent)
+        getattr(tracking, "register_session")("example", "daemon-session")
+    finally:
+        server.close()
+    assert tracking.load_record(fixture.record.yaml_path).session_entry("daemon-session")
+
+
+@pytest.mark.parametrize("obstacle", [
+    "working-config", "marketplace-config", "overlay-unreadable", "stateless",
+    "malformed-policy", "foreign-checkout", "missing-checkout", "bad-global",
+])
+def test_config_free_registration_refuses_unproven_authority(
+    config_free_checkout: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, obstacle: str,
+) -> None:
+    fixture = config_free_checkout
+    if obstacle == "working-config":
+        path = cfg.inrepo_config_path(fixture.anchor)
+        path.parent.mkdir(parents=True)
+        path.write_text("stateless: true\n", encoding="utf-8")
+    elif obstacle == "marketplace-config":
+        monkeypatch.setattr(
+            registry_paths, "installation_context_call",
+            lambda *_args: {"marketplaceId": "example"},
+        )
+        path = fixture.anchor / cfg.MARKETPLACE_OVERLAYS_DIR / "example" / cfg.GLOBAL_CONFIG_FILENAME
+        path.parent.mkdir(parents=True)
+        path.write_text("stateless: true\n", encoding="utf-8")
+    elif obstacle == "overlay-unreadable":
+        monkeypatch.setattr(
+            registry_paths, "installation_context_call",
+            lambda *_args: {"marketplaceId": "example"},
+        )
+        original = config_acquisition.source_exists
+
+        def inaccessible(path: Path, stage: str, **kwargs: Any) -> bool:
+            if "marketplaces" in path.parts:
+                raise OSError("overlay is unavailable")
+            return original(path, stage, **kwargs)
+
+        monkeypatch.setattr(config_acquisition, "source_exists", inaccessible)
+    elif obstacle == "stateless":
+        fixture.settings["repos"]["project"]["stateless"] = True
+        (fixture.project / "config.yaml").write_text(yaml.safe_dump(fixture.settings), encoding="utf-8")
+    elif obstacle == "malformed-policy":
+        fixture.settings["repos"]["project"]["stateless"] = ""
+        (fixture.project / "config.yaml").write_text(yaml.safe_dump(fixture.settings), encoding="utf-8")
+    elif obstacle == "foreign-checkout":
+        from agent_worktrees import git_ops
+
+        foreign = fixture.anchor.parent / "foreign-anchor"
+        foreign.mkdir()
+        git_ops.git("init", "-b", "main", cwd=foreign)
+        git_ops.git(
+            "-c", "user.name=Example", "-c", "user.email=example@example.invalid",
+            "commit", "--allow-empty", "-m", "fixture", cwd=foreign,
+        )
+        checkout = foreign.parent / "foreign-checkout"
+        git_ops.git("worktree", "add", "-b", "worktree/example", str(checkout), cwd=foreign)
+        data = yaml.safe_load(fixture.record.yaml_path.read_text(encoding="utf-8"))
+        data["worktree_path"] = str(checkout)
+        fixture.record.yaml_path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    elif obstacle == "missing-checkout":
+        data = yaml.safe_load(fixture.record.yaml_path.read_text(encoding="utf-8"))
+        data["worktree_path"] = str(fixture.checkout.parent / "missing")
+        fixture.record.yaml_path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    elif obstacle == "bad-global":
+        cfg.global_config_path().write_text("machine: [\n", encoding="utf-8")
+    before = fixture.record.yaml_path.read_bytes()
+    result = _register_config_free(fixture)
+    assert result["error"] == "execution_space"
+    assert fixture.record.yaml_path.read_bytes() == before
+
+
+@pytest.mark.parametrize("versioned", [False, True])
+@pytest.mark.parametrize("topology", ["missing", "malformed", "mis-mapped"])
+@pytest.mark.parametrize("stale_platform", [False, True])
+def test_config_free_registration_retains_local_checkout_after_machine_change(
+    config_free_checkout: SimpleNamespace, versioned: bool, topology: str, stale_platform: bool,
+) -> None:
+    fixture = config_free_checkout
+    platform = getattr(cfg, "detect_platform")()
+    if topology == "malformed":
+        (fixture.anchor / "machines.yaml").write_text("machines: [\n", encoding="utf-8")
+    elif topology == "mis-mapped":
+        (fixture.anchor / "machines.yaml").write_text(yaml.safe_dump({
+            "machines": {"wrong-space": {
+                "hostname": "example-host", "physical_host": "other-host",
+                "execution_platform": platform,
+            }},
+        }), encoding="utf-8")
+    data = yaml.safe_load(fixture.record.yaml_path.read_text(encoding="utf-8"))
+    data.update(machine="old-host", execution_machine="old-execution")
+    if stale_platform:
+        other = "wsl" if platform != "wsl" else "windows"
+        data.update(platform=other, environment=other)
+    if not versioned:
+        for field in ("machine_identity_version", "environment", "execution_machine"):
+            data.pop(field, None)
+    fixture.record.yaml_path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    assert _register_config_free(fixture) == {"ok": True, "linked_handoff": None}
+
+
+def test_absent_optional_branch_does_not_erase_committed_policy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_worktrees import git_ops
+
+    committed_path = cfg.inrepo_config_path(Path()).as_posix()
+
+    def git(*args: str, **_kwargs: Any) -> SimpleNamespace:
+        if args[0] == "symbolic-ref":
+            return SimpleNamespace(returncode=0, stdout="refs/heads/main\n")
+        if args[0] == "show-ref":
+            return SimpleNamespace(returncode=0, stdout="")
+        if args[0] == "ls-tree":
+            return SimpleNamespace(
+                returncode=0, stdout=f"{committed_path}\n" if args[3].endswith("/main") else "",
+            )
+        if args[0] == "show":
+            return SimpleNamespace(returncode=0, stdout="default_branch: dev\nstateless: true\n")
+        raise AssertionError(args)
+
+    monkeypatch.setattr(git_ops, "git", git)
+    authority, _remote = config_authority._load_state_root_authority(
+        "project", str(tmp_path), getattr(cfg, "detect_platform")(), "",
+    )
+    assert authority is not None and authority["stateless"] is True
+
+
+def test_register_session_reaches_a_live_daemon(
+    record_path: Path, monkeypatch: pytest.MonkeyPatch, monkeypatch_config: Any,
+) -> None:
     """End-to-end: proves ``tracking.register_session`` reaches
     ``apply_session_register`` via an actual ``CoalescingServer`` (the
     two-process-shaped path real production traffic will use)."""
@@ -931,7 +1194,7 @@ def test_register_session_reaches_a_live_daemon(record_path, monkeypatch, monkey
         monkeypatch.setattr(_locks, "read_lock", lambda path: lock_data)
         monkeypatch.setattr(_smr, "_status_monitor_enabled", lambda: False)
 
-        linked = tracking.register_session("wt-reg", "sess-daemon", pid=123)
+        linked = getattr(tracking, "register_session")("wt-reg", "sess-daemon", pid=123)
     finally:
         server.close()
 
@@ -943,8 +1206,8 @@ def test_register_session_reaches_a_live_daemon(record_path, monkeypatch, monkey
 
 
 def test_register_session_never_waits_for_a_cold_daemon_boot(
-    record_path, monkeypatch, monkeypatch_config,
-):
+    record_path: Path, monkeypatch: pytest.MonkeyPatch, monkeypatch_config: Any,
+) -> None:
     """The operative concern for this cluster (operator direction,
     2026-09-27): a sessionStart hook must never block on
     ``tracking_write``'s normal 4s boot-wait. Simulates the cold/
@@ -955,7 +1218,7 @@ def test_register_session_never_waits_for_a_cold_daemon_boot(
     from agent_worktrees import locks as _locks
     from agent_worktrees import status_monitor_runtime as _smr
 
-    ensure_monitor_calls = []
+    ensure_monitor_calls: list[bool] = []
 
     def _spy_ensure_monitor() -> bool:
         ensure_monitor_calls.append(True)
@@ -966,7 +1229,7 @@ def test_register_session_never_waits_for_a_cold_daemon_boot(
     monkeypatch.setattr(_smr, "_ensure_status_monitor", _spy_ensure_monitor)
 
     started = time.time()
-    linked = tracking.register_session("wt-reg", "sess-cold", pid=456)
+    linked = getattr(tracking, "register_session")("wt-reg", "sess-cold", pid=456)
     elapsed = time.time() - started
 
     assert linked is None

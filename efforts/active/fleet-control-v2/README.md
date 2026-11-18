@@ -509,6 +509,21 @@ All detailed slices are **agent-recommended** and remain subject to review.
   identified admission, distinct acceptance/effect receipts, UNKNOWN and actual
   resource fencing/release, retaining the already-appointed narrow manager seam.
 
+- [ ] `P.6236.surface-alignment`: Retain the documentation-only alignment
+  recorded in comment 6260650998: shared conversational/CLI/web control
+  surfaces, qualified current-state and resumable activity handles, and
+  portable service API/UX extension seams. Existing authority-migration,
+  provider, deployment, Gateway/index and observation-store owners remain
+  unchanged. This records documentation intent, not a new runtime assignment
+  or selection of the optional Gateway-control/console scheme.
+- [ ] `P.6236.finite-role-credit`: Retain the #7257/#7343 contribution to this
+  existing product: desired service slots/live configuration, authenticated
+  outbound service transport and isolated container proof. Credit the
+  completed finite initial campaign without treating it as integrated-product
+  completion or deployment. Preserve its excluded production-adoption/HA
+  packaging boundary and retained native-architecture, provider, lifecycle
+  and adopter gates; no implementation or ownership is reassigned.
+
 ## Validation Plan
 
 All entries are **agent-recommended implementation gates**, not completed tests.
@@ -590,11 +605,47 @@ All entries are **agent-recommended implementation gates**, not completed tests.
   tenancy or owner/source/claim transfer. This is interface acceptance only,
   not a generic ACK or all-parent completion gate.
 
+- [ ] `V.6236.surface-alignment`: Complete
+  `LV.6236.surface-alignment` and verify the corresponding direct ROOT Plan
+  clause retains the documentation-only three-surface/portable/resumable
+  intent without appointing runtime work or changing existing owners.
+- [ ] `V.6236.finite-role-credit`: Complete
+  `LV.6236.finite-role-credit` and verify the corresponding direct ROOT Plan
+  clause preserves #7343's finite completion credit and original exclusions
+  separately from integrated-product, platform/provider and adoption proof.
+
 ## Proposal
 
 [Architecture and migration contract](architecture.md).
 
 ## Journal
+
+### 2026-11-17 - Proposed two finite whole-source receiving refinements
+
+The complete #6236 original and all eleven discussions were compared with
+this entire current ROOT and its Gateway/index, retained-contract and
+federation/console contracts. Existing direct Plan/local/global Validation
+already covers eight substantive product, lifecycle, operation, Gateway/index,
+observation, migration, PR-service and adoption families; do not duplicate them.
+
+Proposed only the two missing explicit refinements: documentation-only
+three-surface/portable/resumable alignment and the finite #7257/#7343 role
+contribution with its completion credit and excluded production/HA boundary.
+Two direct Plan, two local Validation and two actual global Validation rows
+remain unchecked. These receiving checks do not reopen completed #7343 work.
+All incumbent clauses, checked credit, alternatives, Requests, custodians
+and actual technical agreements remain unchanged.
+
+The earlier continuing-claim statement expressly described the Phase 3
+SOURCE-only inventory/proposal delivered in #6513; unfinished parent work
+alone does not establish a broader unfinished reservation. No generic owner
+ACK or universal reservation-clearance ceremony is added. Existing migration/
+adoption and serving/provider/transaction custody agreements retain their
+actual effect/wiring boundaries; owned-module source contributions retain
+normal review and non-blocking consultation. None becomes a documentary-
+intake gate. #6236 remains OPEN during this proposal; reviewed complete
+receiving/current readback and a separate source/custody judgment precede any
+later tracking disposition. No implementation, adoption or resource release.
 
 ### 2026-11-15 - Direct Windows provider and enrollment receiving contract
 

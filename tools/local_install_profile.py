@@ -5,8 +5,8 @@ These are construction inputs, not release approval or runtime activation.
 from __future__ import annotations
 
 import argparse
-from contextlib import nullcontext, redirect_stdout
-from collections.abc import Callable
+from contextlib import contextmanager, nullcontext, redirect_stdout
+from collections.abc import Callable, Iterator, Sequence
 import hashlib
 import json
 import os
@@ -14,33 +14,43 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
+from urllib.parse import urlsplit
 import zipfile
 from typing import TYPE_CHECKING, Any
-from packaging.requirements import Requirement
+
+sys.dont_write_bytecode = True
 
 from packaging.utils import canonicalize_name
 from packaging.version import Version
+from packaging.requirements import Requirement
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "worktree-manager" / "scripts"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(SCRIPTS))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "libs" / "installer-engine"))
-import install_source as source_inputs
+import install_source as install_source
+source_inputs = install_source
 from installer_wheel_inputs import WheelLimits, _check_deadline, inspect_archive
-from installer_wheel_snapshot import WheelInstallInputs, WheelSnapshot, retain_wheel_inputs
+from installer_wheel_snapshot import WheelInstallInputs, WheelSnapshot, retain_wheel_inputs as retain_wheel_inputs
 
 from build_toolchain_lock import _query_marker_environment
 from application_sources import application_sources
 from promotion_python_artifacts import validate_manifest, validate_wheel_sources
-from artifact_source_build import PromotionArtifactError
-from standalone_python_artifacts import project_key
-from runtime_profile import SCHEMA, ProfileError, _reachable, _requirement, validate_profile
+from artifact_source_build import PromotionArtifactError as PromotionArtifactError
+from standalone_python_artifacts import project_key as project_key
+from runtime_profile import SCHEMA, ProfileError as ProfileError, _reachable, _requirement, validate_profile
 from runtime_profile_wheels import profile_wheel_inputs
 from runtime_source_lock import _wheel_pins
 from standalone_build import embedded_projects as _embedded_projects
-import installer_dependency_policy as dependencies
-import installer_engine as engine
-import versioned_runtime_source as sources
+import installer_dependency_policy as installer_dependency_policy
+import installer_engine as installer_engine
+import versioned_runtime_source as versioned_runtime_source
+
+dependencies = installer_dependency_policy
+engine = installer_engine
+sources = versioned_runtime_source
 
 if TYPE_CHECKING:
     from installer_native_feed import NativeFeedInputs
@@ -116,7 +126,7 @@ def _associated_first_party(
     if manifest.get("component", manifest.get("plugin")) != component:
         raise ProfileError("source wheel manifest has a foreign component")
     entries = manifest["wheels"]
-    declared = {}
+    declared: dict[str, Version] = {}
     package_roots: dict[str, Path] = {}
     for package in engine._package_roots(selected.payload):
         metadata = dependencies._toml(package / "pyproject.toml")["project"]
@@ -246,7 +256,7 @@ def complete_profile(
         expanded += facts.unpacked_size
         if expanded > limits.max_expanded_bytes or name in wheels:
             raise ProfileError("native wheel closure exceeds its inspection budget")
-        wheel = {
+        wheel: dict[str, Any] = {
             "name": name, "version": facts.version, "filename": filename,
             "sha256": retained.digests[filename], "requires_python": facts.requires_python,
             "provides_extras": list(facts.provides_extras), "selected_extras": [],
@@ -294,8 +304,8 @@ def _write_snapshot(
     for filename, archive in retained.archives.items():
         _check_deadline(deadline)
         archive.seek(0)
-        with (wheels / filename).open("xb") as destination:
-            shutil.copyfileobj(archive, destination, 1 << 20)
+        with (wheels / filename).open("xb") as archive_output:
+            shutil.copyfileobj(archive, archive_output, 1 << 20)
     profile_path = prepared / "profiles" / (component + ".json")
     profile_path.parent.mkdir()
     profile_path.write_bytes(profile.canonical)
@@ -348,21 +358,7 @@ def _write_snapshot(
                   if row["name"] not in root_names),
             ],
         )
-        isolated = {
-            key: value for key, value in os.environ.items()
-            if key not in {
-                "UV_PROJECT", "UV_PROJECT_ENVIRONMENT", "UV_NO_SYNC", "UV_NO_PROJECT",
-                "UV_WORKING_DIR", "UV_FROZEN", "PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV",
-            }
-        }
-        result = subprocess.run(
-            [uv, "lock", "--offline", "--python", sys.executable],
-            cwd=application, env=isolated, capture_output=True, text=True,
-            timeout=max(0.1, deadline - time.monotonic()),
-            creationflags=_HEADLESS,
-        )
-        if result.returncode:
-            raise ProfileError(f"application uv lock failed: {result.stderr}")
+        _lock_application(application, uv=uv, deadline=deadline)
         project["application"] = application.relative_to(prepared).as_posix()
     (prepared / source_inputs.MANIFEST).write_text(
         json.dumps(record, sort_keys=True, indent=2) + "\n", encoding="utf-8",
@@ -374,15 +370,38 @@ def _write_snapshot(
     return prepared
 
 
+def _lock_application(application: Path, *, uv: str, deadline: float) -> None:
+    isolated = {
+        key: value for key, value in os.environ.items()
+        if key not in {
+            "UV_PROJECT", "UV_PROJECT_ENVIRONMENT", "UV_NO_SYNC", "UV_NO_PROJECT",
+            "UV_WORKING_DIR", "UV_FROZEN", "PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV",
+        }
+    }
+    command = [uv, "lock", "--offline", "--python", sys.executable]
+    if os.name == "nt":
+        # UV's relative wheel paths are not relocatable with a deep verbatim project operand.
+        project = str(application)
+        project = "\\\\" + project[8:] if project.startswith("\\\\?\\UNC\\") else project.removeprefix("\\\\?\\")
+        command.extend(["--project", project])
+    result = subprocess.run(
+        command, cwd=Path(application.anchor) if os.name == "nt" else application,
+        env=isolated, capture_output=True, text=True,
+        timeout=max(0.1, deadline - time.monotonic()), creationflags=_HEADLESS,
+    )
+    if result.returncode:
+        raise ProfileError(f"application uv lock failed: {result.stderr}")
+
+
 def _profile_policy(
     selected: source_inputs.ProjectSource, environment: dict[str, str],
     download_origins: tuple[str, ...],
 ) -> tuple[tuple[str, str | None], dict[str, Any]]:
-    from governed_feed_trust import _opaque_index_identity, _validated_trusted_index_url
+    from governed_feed_trust import _effective_default_index_url, _opaque_index_identity
 
-    trusted = _validated_trusted_index_url(environment)
-    if trusted is None:
-        raise ProfileError("native profile acquisition needs a configured, affirmatively trusted governed feed")
+    trusted = _effective_default_index_url(environment) or ("https://pypi.org/simple", None)
+    if urlsplit(trusted[0]).scheme != "https":
+        raise ProfileError("native profile acquisition needs an HTTPS default feed")
     return trusted, {
         "policyId": "sha256:" + _opaque_index_identity(json.dumps({
             "source": selected.identity.document(), "index": trusted,
@@ -394,7 +413,7 @@ def _profile_policy(
 
 def _profile_feed(
     selected: source_inputs.ProjectSource, transaction: dependencies.RetainedUVInstall,
-    projections: list[str], *, uv: str, download_origins: tuple[str, ...],
+    projections: Sequence[str], *, uv: str, download_origins: tuple[str, ...],
     wheels: list[dict[str, Any]] | None, deadline: float,
     excluded_local_packages: tuple[str, ...] = (),
 ) -> tuple[dict[str, Any], NativeFeedInputs]:
@@ -406,6 +425,7 @@ def _profile_feed(
         transaction, projections[1], projections[0], None, policy, uv, deadline,
         wheels=wheels, profile_policy="native-source-profile",
         opaque_identity=_opaque_index_identity, excluded_local_packages=excluded_local_packages,
+        allow_public_indexes=True,
     )
     if (
         {item.index_url for item in feed.feeds} != {trusted[0]}
@@ -418,7 +438,7 @@ def _profile_feed(
 def _prepare_profile(
     snapshot: Path, selected: source_inputs.ProjectSource, wheels: dict[str, dict[str, Any]],
     record: dict[str, Any], output: Path, transaction: dependencies.RetainedUVInstall,
-    projections: list[str], *,
+    projections: Sequence[str], *,
     uv: str, download_origins: tuple[str, ...], deadline: float,
 ) -> Path:
     from installer_wheel_acquisition import AcquisitionLimits, acquire_wheel_inputs
@@ -494,7 +514,7 @@ def prepare_registry_lock(
     environment = _query_marker_environment(Path(sys.executable), deadline=deadline)
     from packaging.tags import sys_tags
 
-    target = {"environment": environment, "tags": [str(tag) for tag in sys_tags()], "device": "cpu"}
+    target: dict[str, Any] = {"environment": environment, "tags": [str(tag) for tag in sys_tags()], "device": "cpu"}
     name = engine._package_name(selected.payload)
     if name not in wheels:
         raise ProfileError("associated closure has no selected project wheel")
@@ -655,9 +675,27 @@ def prepare_applications(
     return snapshots
 
 
+@contextmanager
+def _reuse_configuration(
+    uv: str, *, deadline: float,
+) -> Iterator[tuple[dependencies.RetainedUVInstall, list[str]]]:
+    """Validate and retain current native settings without executing a resolution."""
+    with tempfile.TemporaryDirectory(prefix="ce-profile-config-") as directory:
+        requirements = Path(directory) / "requirements.in"
+        requirements.write_text("", encoding="utf-8")
+        projections: list[str] = []
+        with dependencies.retain_uv_compile(
+            uv, [str(requirements), "--python", sys.executable, "--only-binary", ":all:",
+                 "--no-python-downloads", "--system-certs"],
+            cwd=Path.cwd(), env=dict(os.environ), deadline=deadline, native_target=True,
+            _projection=projections,
+        ) as transaction:
+            yield transaction, projections
+
+
 def reuse_applications(
     snapshot: Path, previous: Path, components: list[str], *, extras: dict[str, list[str]],
-    deadline: float, source_record_sha256: str, toolchain_record: dict[str, Any],
+    deadline: float, source_record_sha256: str, toolchain_record: dict[str, Any], uv: str = "uv",
 ) -> dict[str, str]:
     from packaging.tags import sys_tags
     from governed_feed_trust import ArtifactBuildError
@@ -694,41 +732,49 @@ def reuse_applications(
             "tags": [str(tag) for tag in sys_tags()], "device": "cpu",
         }
         old_record = source_inputs._read(previous / "inputs" / source_inputs.MANIFEST)
-        for component, path in expected.items():
-            prepared = Path(path)
-            with source_inputs.project_inputs(prepared, component, deadline=deadline) as (observed, inputs):
-                if observed.identity != identities[
-                    "standalone:" + component if component in COMPONENTS else component
-                ] or observed.project["artifact"] != old_record["projects"][observed.project_key]["artifact"]:
-                    raise ProfileError("prior application differs from its selected source/wheels")
-                profile = validate_profile(inputs.receipt()["binding"], deadline=deadline)
-                profile_record = profile.record()
-                selected_extras = engine._selected_extras(
-                    observed.payload, tuple(extras.get(component, ())),
-                )
-                name = engine._package_name(observed.payload)
-                root = name + ("[" + ",".join(selected_extras) + "]" if selected_extras else "")
-                root += "==" + inputs.receipt()["distributions"][name]["version"]
-                _trusted, policy = _profile_policy(observed, dict(os.environ), ())
-                if (
-                    profile_record["target"] != target or profile_record["roots"] != [root]
-                    or profile_record["approval_source"] != policy["policyId"]
-                ):
-                    raise ProfileError("prior application target, extras or source policy changed")
-                checked = profile_wheel_inputs(
-                    profile, inputs.snapshot, max_archive_bytes=512 << 20,
-                    max_unpacked_bytes=1 << 30, max_metadata_bytes=4 << 20,
-                    limits=wheel_limits(), deadline=deadline,
-                )
-                _verify_application(prepared, component, old_record, observed, inputs)
-                checked.verify()
-                inputs.verify()
+        with _reuse_configuration(uv, deadline=deadline) as (transaction, projections):
+            for component, path in expected.items():
+                prepared = Path(path)
+                with source_inputs.project_inputs(prepared, component, deadline=deadline) as (observed, inputs):
+                    if observed.identity != identities[
+                        "standalone:" + component if component in COMPONENTS else component
+                    ] or observed.project["artifact"] != old_record["projects"][observed.project_key]["artifact"]:
+                        raise ProfileError("prior application differs from its selected source/wheels")
+                    profile = validate_profile(inputs.receipt()["binding"], deadline=deadline)
+                    profile_record = profile.record()
+                    selected_extras = engine._selected_extras(
+                        observed.payload, tuple(extras.get(component, ())),
+                    )
+                    name = engine._package_name(observed.payload)
+                    root = name + ("[" + ",".join(selected_extras) + "]" if selected_extras else "")
+                    root += "==" + inputs.receipt()["distributions"][name]["version"]
+                    policy, feed = _profile_feed(
+                        observed, transaction, projections, uv=uv, download_origins=(),
+                        wheels=None, deadline=deadline,
+                    )
+                    if (
+                        profile_record["target"] != target or profile_record["roots"] != [root]
+                        or profile_record["approval_source"] != policy["policyId"]
+                        or profile_record["acquisition_policy"] != feed.policy_id
+                    ):
+                        raise ProfileError("prior application target, extras or source policy changed")
+                    checked = profile_wheel_inputs(
+                        profile, inputs.snapshot, max_archive_bytes=512 << 20,
+                        max_unpacked_bytes=1 << 30, max_metadata_bytes=4 << 20,
+                        limits=wheel_limits(), deadline=deadline,
+                    )
+                    _verify_application(prepared, component, old_record, observed, inputs)
+                    checked.verify()
+                    inputs.verify()
         if (
             _application_completion(expected, deadline=deadline) != completion
             or source_inputs._read(previous / "applications.json") != completion
         ):
             raise ProfileError("prior completion changed during application reuse")
-    except (OSError, ValueError, KeyError, TypeError, PromotionArtifactError, ArtifactBuildError) as error:
+    except (
+        OSError, ValueError, KeyError, TypeError, PromotionArtifactError, ArtifactBuildError,
+        dependencies.DependencyPolicyError,
+    ) as error:
         raise ProfileUnavailable(f"prior complete application outputs are not reusable: {error}") from error
     finally:
         verify_record()
@@ -786,7 +832,7 @@ def main(argv: list[str] | None = None) -> int:
                         args.install_source, args.reuse_applications, args.application_components,
                         extras={} if args.application_extras is None else args.application_extras,
                         deadline=deadline, source_record_sha256=args.source_record_sha256,
-                        toolchain_record=args.toolchain_record,
+                        toolchain_record=args.toolchain_record, uv=args.uv,
                     )
                 except ProfileUnavailable as error:
                     print(str(error), file=sys.stderr)

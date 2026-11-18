@@ -4,11 +4,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import subprocess
+from typing import Any
 
 from .native_command import run_command
 
 
-def add_parsers(subparsers, *, repo_type, handler):
+def add_parsers(subparsers: Any, *, repo_type: Any, handler: Any) -> None:
     from .native_cli import validate_selector
     from .native_source_complete import add_parser as add_complete_parser
 
@@ -58,7 +59,7 @@ def add_parsers(subparsers, *, repo_type, handler):
             author.add_argument("--expected-remote-head", default=None)
 
 
-def config_options(args) -> list[str]:
+def config_options(args: Any) -> list[str]:
     path = getattr(args, "config", None)
     if path is None:
         return []
@@ -67,7 +68,7 @@ def config_options(args) -> list[str]:
     return [f"--config={Path(path).resolve()}"]
 
 
-def capability(args, prefix: list[str], operation: str | None = None) -> dict:
+def capability(args: Any, prefix: list[str], operation: str | None = None) -> dict[str, Any]:
     options = config_options(args)
     try:
         response = run_command(
@@ -88,7 +89,7 @@ def capability(args, prefix: list[str], operation: str | None = None) -> dict:
         or type(body.get("version")) is not int or body["version"] != 1
         or body.get("repo") != args.repo or not isinstance(body.get("operations"), dict)
         or operation is not None and body["operations"].get(operation) is not True
-        or operation in ("draft-ready", "reviewer-request") and (
+        or operation in ("draft-ready", "reviewer-request", "metadata-update") and (
             not isinstance(body.get("provider"), str) or not body["provider"].strip()
         )
         or operation == "reviewer-request" and body.get("provider") != "github"
@@ -102,7 +103,7 @@ def capability(args, prefix: list[str], operation: str | None = None) -> dict:
     return body
 
 
-def create_options(args, prefix: list[str]) -> list[str]:
+def create_options(args: Any, prefix: list[str]) -> list[str]:
     workspace = getattr(args, "source_workspace", None)
     expected = getattr(args, "expected_head", None)
     if bool(workspace) != bool(expected):
@@ -116,7 +117,7 @@ def create_options(args, prefix: list[str]) -> list[str]:
 
 
 def readiness_failure(repo: str, number: int, error: str, *,
-                      provider: str | None = None, status: str = "not-attempted") -> dict:
+                      provider: str | None = None, status: str = "not-attempted") -> dict[str, Any]:
     """Keep synthesized outcomes on the same versioned readiness wire contract."""
     return {
         "schema": "agent-worktrees.pr-ready", "version": 1,
@@ -125,7 +126,16 @@ def readiness_failure(repo: str, number: int, error: str, *,
     }
 
 
-def run(args, prefix: list[str]) -> tuple[int, dict]:
+def run(args: Any, prefix: list[str]) -> tuple[int, dict[str, Any]]:
+    try:
+        return _run(args, prefix)
+    except (ValueError, OSError, RuntimeError, subprocess.SubprocessError, UnicodeError) as exc:
+        if args.command != "update":
+            raise
+        return 1, {"repo": args.repo, "number": args.number, "error": str(exc)}
+
+
+def _run(args: Any, prefix: list[str]) -> tuple[int, dict[str, Any]]:
     if args.command == "author-capabilities":
         return 0, {**capability(args, prefix), "frontend": {"worker-policy-config": True}}
     if args.command == "ready" and args.number < 1:
@@ -164,6 +174,9 @@ def run(args, prefix: list[str]) -> tuple[int, dict]:
     try:
         return _execute(args, prefix, argv, support)
     except (OSError, RuntimeError, subprocess.SubprocessError, UnicodeError) as exc:
+        if args.command == "update" and support.get("provider") in ("github", "gitea"):
+            from .native_metadata import failure
+            return 1, failure(args, str(exc), provider=support["provider"])
         if args.command != "ready":
             raise
         return 1, readiness_failure(
@@ -171,7 +184,8 @@ def run(args, prefix: list[str]) -> tuple[int, dict]:
         )
 
 
-def _execute(args, prefix: list[str], argv: list[str], support: dict) -> tuple[int, dict]:
+def _execute(args: Any, prefix: list[str], argv: list[str],
+             support: dict[str, Any]) -> tuple[int, dict[str, Any]]:
     try:
         result = run_command([*prefix, *argv], timeout=90.0)
     except (OSError, RuntimeError, subprocess.SubprocessError, UnicodeError):
@@ -184,7 +198,9 @@ def _execute(args, prefix: list[str], argv: list[str], support: dict) -> tuple[i
         raise RuntimeError(
             "Native author response is unconfirmed; reconcile the same source/PR before retrying"
         ) from None
-    if (args.command != "ready" and isinstance(payload, dict) and result.returncode
+    if (args.command != "ready"
+            and not (args.command == "update" and support.get("provider") in ("github", "gitea"))
+            and isinstance(payload, dict) and result.returncode
             and payload.get("error") and "repo" not in payload):
         return result.returncode, payload
     if not isinstance(payload, dict) or payload.get("repo") != args.repo:
@@ -215,6 +231,9 @@ def _execute(args, prefix: list[str], argv: list[str], support: dict) -> tuple[i
             or payload["ok"] and payload.get("error")
         ):
             raise RuntimeError("Native readiness response is unconfirmed; reconcile this PR before retrying")
+    if args.command == "update" and support.get("provider") in ("github", "gitea"):
+        from .native_metadata import validate
+        validate(args, payload, result.returncode, provider=support["provider"])
     if result.returncode or payload.get("ok") is not True:
         return result.returncode or 1, payload
     if args.command == "push" and (

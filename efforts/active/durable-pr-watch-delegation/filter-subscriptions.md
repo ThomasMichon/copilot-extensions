@@ -136,50 +136,78 @@ refuse before effect and never fall back to a broader sweep or process waiter.
   required CI before runtime implementation.
 - [x] Add the bounded expression parser, canonical immutable definition
   resolution, capability validation and three-valued driver evaluation.
-- [ ] Extend the existing native provider seam with bounded selected-population
+- [x] Extend the existing native provider seam with bounded selected-population
   acquisition and initial ADO semantics; preserve read credential ownership and
-  existing GitHub/Gitea/default paths.
-- [ ] Extend the existing replay/projection/subscription owner with positively
+  existing GitHub/Gitea/default paths (#12184).
+- [x] Extend the existing replay/projection/subscription owner with positively
   selected filter demand, independent membership, original-ID retry, finite
-  renewal, cancellation and pending-delivery protection.
-- [ ] Compose startup sponsorship and authenticated dynamic CLI/service
-  consumers through the same selected observer, without per-filter pollers.
-- [ ] Land runtime slices with documentation, focused qualification, normal
-  review/CI and changefiles; record release separately from rollout.
-- [ ] Record the remaining adopter-specific host, credential, population and
+  renewal, cancellation and pending-delivery protection (#12200).
+- [x] Compose startup sponsorship and authenticated dynamic CLI/service
+  consumers through the same selected observer, without per-filter pollers
+  (#12200).
+- [x] Land runtime slices with documentation, focused qualification, normal
+  review/CI and changefiles (#12166, #12184, #12200); release and rollout
+  remain distinct from these source merges.
+- [x] Record the remaining adopter-specific host, credential, population and
   live-event acceptance in the existing parent rather than claiming source
-  controls complete it.
+  controls complete it (see Completion and remaining adoption below).
 
 ## Validation plan
 
-- [ ] Parser and actual CLI controls reject malformed/unknown/oversized
+- [x] Parser and actual CLI controls reject malformed/unknown/oversized
   expressions, unsupported leaves and out-of-scope nested selections.
-- [ ] Synthetic driver controls exercise all six filter families, users/groups,
+- [x] Synthetic driver controls exercise all six filter families, users/groups,
   explicit assignment semantics, age boundaries without source changes,
   group-resolution loss and incomplete provider pages.
-- [ ] Real native process fixtures preserve selected configuration/credential
+- [x] Real native process fixtures preserve selected configuration/credential
   scope and bounded capture; no ambient fallback or arbitrary query execution.
-- [ ] Existing-store tests prove two overlapping consumers share reads but
+- [x] Existing-store tests prove two overlapping consumers share reads but
   retain independent membership/events/ACK; cancellation/expiry/renewal and
   restart never reset original intent or lose delivered unsettled identities.
-- [ ] Actual foreground host and supported CLI qualify inert definitions,
+- [x] Actual foreground host and supported CLI qualify inert definitions,
   startup sponsorship, dynamic subscribe/query/events/ACK/cancel, provider
   outage, scope refusal and joined drain using synthetic provider data.
-- [ ] Prior/current client and storage controls prove explicit unsupported
+- [x] Prior/current client and storage controls prove explicit unsupported
   outcomes and unchanged unselected defaults, including rollback refusal.
-- [ ] Required static/type/packaging checks and each changed surface's selected
+- [x] Required static/type/packaging checks and each changed surface's selected
   tests pass; independent current-head review and required CI precede merge.
 
 ## Completion and remaining adoption
 
-Source completion requires all implementation and validation items above, with
-actual supported consumer evidence, not an unwired library. Native Windows
-local ingress, real service placement, existing production-state migration,
-provider enrollment, live traffic and review/Dispatch automation remain
-separately authorized acceptance; no synthetic fixture passes those gates.
-The canonical parent remains Active until its own full Plan/Validation resolves.
+The finite source implementation and validation items above are complete through
+#12166, #12184 and #12200, including supported foreground/client consumers with
+synthetic provider data. Driver capabilities remain explicit: the initial native
+ADO driver rejects groups and activity age rather than claiming their support
+from the generic evaluator's tests.
+
+Promotion #13048 includes this source in `main`; see the dated source journal
+for the distinct promotion evidence. Installed/running qualification, native
+Windows local ingress, real service
+placement, existing production-state migration, provider enrollment, selected
+live-population/event evidence and review/Dispatch automation remain separately
+authorized acceptance in the [canonical parent](README.md#validation-plan).
+No synthetic fixture passes those gates. The canonical parent remains Active
+until its own full Plan/Validation resolves; no runtime adoption, credential
+change or retained-resource disposition follows from these source merges.
+
+The later [GitHub M1 operational trial](journal/2026/11.18%20GitHub%20shadow%20qualification.md)
+qualifies the ordinary `repository-local/v1` host with real GitHub observations.
+It does not exercise the generation-three filtered ADO profile, group support,
+the selected real ADO population or review-consumer actions. Those gates remain.
 
 ## Journal
+
+### 2026-11-17 - Filtered service source merged; operational gates retained
+
+#12200 merged into `dev` at
+`a6143faa8f12f1930ee77a1e17a7b04b89f940e9`, from reviewed head
+`ec2f776036976c6696dc8286564da3d95b1402a1`. Independent current-head approval,
+resolved review threads and successful required CI preceded managed completion.
+The existing Maintainer review-rule exception was used, not a CI bypass.
+The [source qualification journal](journal/2026/11.17%20Filtered%20source%20completion.md)
+records the hosted source, later compatibility evidence and remaining gates.
+Earlier failed runs below remain failures, not retroactively passing results;
+their retained fixture custody is unchanged.
 
 ### 2026-11-15 - Preserve Windows qualification fixture custody
 

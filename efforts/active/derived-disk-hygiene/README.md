@@ -39,6 +39,7 @@ exclusive mutation lock.
 | Track B PR driver | Bytecode namespace reuse and explicit cache pruning | #11122 |
 | Track C claim-engine driver | Derived claim engine; producer integration remains separate | #11103, #10967 |
 | Track D PR driver | Scratch ownership, cleanup and lock compatibility | #11125 |
+| Retained-resource driver | Explicit retained finalization, child discovery and test environment/source lifetime | #10968; [bounded subplan](retained-resources.md) |
 
 ## Coordination
 
@@ -91,6 +92,12 @@ The next bounded runtime build-out follows the
 external allocation custody, safe retained disposition, and a real Windows/Linux
 runner flow. This proposal must clear source review before behavior changes; cache eviction,
 installed rollout and legacy-data cleanup are outside the pilot.
+
+The next retained-resource continuation follows the
+[retained-resource subplan](retained-resources.md): explicit non-removing
+finalization, settled-child discovery and test environment/source lifetime.
+Its source review precedes runtime implementation. It preserves the other
+tracks and each resource owner's independent effect authority.
 
 ### Track A — Reclaim legacy `.test-venvs` (#10965)
 - [x] Standalone `tools/reclaim_legacy_test_dirs.py`: inventory root

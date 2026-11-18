@@ -217,6 +217,10 @@ access can reach independently granted children below a private directory,
 the provider additionally checks existing bytecode descendants' ownership and
 DACLs. This metadata-only admission stops at 256 entries or 50 ms between
 filesystem/security calls; exhaustion selects `-B` without changing the cache.
+Cache roots and metadata retain exact user ownership. Interpreter-created
+bytecode descendants may also use the current process's TokenOwner when that
+SID is already a trusted privileged writer; this handles elevated Windows
+launchers without admitting a foreign owner or relaxing any DACL check.
 Large Windows caches therefore currently lose reuse rather than bypass
 protection. POSIX private traversal needs no descendant walk.
 macOS additionally reads extended
@@ -907,6 +911,29 @@ Consumers must retain the error independently of exception translation and
 settle it before launching another attempt; this API never replays the child
 command or asserts that an interrupted mutation failed.
 
+`OwnedCleanupError.diagnostics` is an immutable creation-time snapshot.
+`error.diagnostics.public_fields()` returns schema `1` and only fixed scalar
+fields: `phase`, `native_error_kind` (`errno`, `winerror`, or `unknown`),
+`native_error_code` (an already-recorded integer or `null`), process/Job/output
+`*_settlement` (`confirmed`, `unconfirmed`, or `unknown`), reference-custody
+booleans `process_retained`, `job_retained`, `resources_retained`, and
+`cleanup_complete`. `unconfirmed` means an attempted confirmation failed, not
+proof that a resource remains live. Reference custody does not assert that a
+native handle is open. Missing evidence stays unknown; reading or rendering
+the snapshot performs no native query, cleanup, retry or custody transfer.
+The snapshot does not change after a subsequent cleanup retry.
+
+Windows bounded capture and failed startup record the failed cleanup phase,
+including Job retirement, process wait, pipe completion/join, stream closure
+and process-handle closure. Legacy/unannotated producers report `unknown`.
+Unknown phase/state values and nonnumeric codes are discarded. No exception
+message, chain, command, path, output, environment, resource object or handle
+is included. Consumers should render only `public_fields()`, not serialize
+the exception or its retained resources. Detect `diagnostics` on the actual
+exception to support older providers; absence means unavailable diagnostics,
+not confirmed settlement. Provider metadata alone does not establish that a
+consumer's error renderer adopted this contract or identify an earlier failure.
+
 POSIX retirement, group-confirmation and process-wait failures also retain a
 complete retry over the original unreaped leader and remaining streams/output.
 The leader is reaped only after the selected confirmation succeeds. Once this
@@ -1376,6 +1403,11 @@ For a manually controlled spawn, use `reserve_instance`, `instance_environment`,
 and `bind_instance`; cancel only a **positively refused** creation through
 `cancel_instance_reservation(..., creation_refused=True)`. Lost responses and
 uncertain cleanup retain the original record.
+
+On Windows, runtime and registry roots accept native DOS short-name aliases
+for the same plain directories. Name expansion does not follow junctions or
+symbolic links: redirected roots or ancestors and parent traversal remain
+refused before creation below them. This does not grant cleanup authority.
 
 An automatic executable provenance is never a library-file fallback. POSIX
 lookup uses the actual child environment's `PATH` (including its default when

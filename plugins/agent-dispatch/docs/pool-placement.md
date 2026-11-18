@@ -3,9 +3,9 @@
 The coordinator's explicit `POST /pool-placements` operation implements one
 allocator-owned claim transaction. It requires the configured control
 credential and accepts version `1`, `task_id`, `reserved_by`, `catalog_revision` and an
-optional `driver: "cli"` (the only qualified startup driver in this provider).
-Other drivers, including ordinary and restricted Bridge, are rejected before
-claiming; callers must inspect `supported_drivers` in the executing contract.
+optional driver (default `cli`). The [provider contract](../src/agent_dispatch/queue_pool_placement.py)
+lists `cli` and `ordinary-bridge`. Restricted Bridge is not a placement driver.
+Callers must inspect `supported_drivers` in the executing contract.
 It does not accept a preferred pool subset,
 winner or available-slot count.
 
@@ -309,12 +309,12 @@ existing behavior. A pool-assigned task cannot bypass placement with the old
 reservation or direct-claim API. Suspended re-embodiment and CI-repair admission
 remain with their existing owners; this operation does not adopt either lane.
 
-Complete-source publication, admitted lane migration, bounded startup attempts,
-decision nudges, exhaustion/cooldown and suspended recovery must still be
-integrated through the existing supervisor before the full pool-owned lifecycle
-is qualified. No running adoption or failure root cause follows from unit/API
-coverage. The [canonical amendment](../../../efforts/active/agent-dispatch-monitor-and-confirmed-state/assignment-startup-amendment.md)
-retains those requirements.
+The [opt-in caller](pool-claim-start.md) uses the published catalog,
+bounded startup attempts, decision nudges, cooldown on exhaustion and
+same-worker suspended recovery. Support for these steps does not claim a
+complete retry policy, automatic migration or installed end-to-end acceptance.
+The [canonical amendment](../../../efforts/active/agent-dispatch-monitor-and-confirmed-state/assignment-startup-amendment.md)
+records the broader qualification requirements.
 
 See [spawn supervisor](spawn-supervisor.md) for orchestration ownership and
 [pool publication](pool-publication.md) for the configured catalog boundary.

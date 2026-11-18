@@ -1323,6 +1323,15 @@ function Register-AgentVaultTask {
     $serviceConfiguration = ([string]$serviceConfigurationJson) | ConvertFrom-Json -ErrorAction Stop
     $serviceConfigurationRoot = [string]$serviceConfiguration.root
     $serviceConfigurationPath = [string]$serviceConfiguration.config
+    $nativeDefaultDirective = ''
+    if ($serviceConfiguration.PSObject.Properties['native_default_owner'] -and
+        $serviceConfiguration.native_default_owner -ceq '1') {
+        $nativeDefaultDirective = @'
+& $_py -I -B -c "from agent_vault.invocation import invocation_contract; import sys; sys.exit(0 if 'native-default-owner-v1' in invocation_contract()['capabilities'] else 1)"
+if ($LASTEXITCODE -ne 0) { throw 'Selected Vault runtime cannot retain its native default owner' }
+$_serviceArguments += '--native-default-owner'
+'@
+    }
     $portDirective = if ($installationId) {
         "`$env:AGENT_VAULT_PORT = '0'"
     } else {
@@ -1364,6 +1373,7 @@ if (`$LASTEXITCODE -ne 0) { throw 'Vault service argument capability could not b
 if (([string]`$_supportsContext).Trim() -ceq '1') {
     `$_serviceArguments += @('--configuration-root', '$($serviceConfigurationRoot -replace "'","''")')
 }
+$nativeDefaultDirective
 & `$_py @_cacheArguments -m agent_vault.service @_serviceArguments @args
 `$_exitCode = `$LASTEXITCODE
 exit `$_exitCode

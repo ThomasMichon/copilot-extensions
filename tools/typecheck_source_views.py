@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import ast
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 import io
 import hashlib
@@ -10,12 +12,16 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import tokenize
+from typing import Callable
+
+from tools.typecheck_programs import IdentityReader, ProgramInputs
 
 INSTALLATION_ENTRY = "libs/installation-context/installation_context.py"
-GUARD_ENTRY = "plugins/copilot-extensions-harness/scripts/copilot-mention-guard.py"
+GUARD_ENTRY = "plugins/copilot-extensions-maintainer/scripts/copilot-mention-guard.py"
 GUARD_MODULE = "copilot_mention_guard"
-HARNESS_PREFIX = "plugins/copilot-extensions-harness/"
+HARNESS_PREFIX = "plugins/copilot-extensions-maintainer/"
 HARNESS_DECLARATION = HARNESS_PREFIX + "python-emitted-inputs.json"
 _WRAPPER = r'''
 """Resolve, validate, and explicitly mutate marketplace installation context."""
@@ -48,6 +54,125 @@ class SourceViewError(ValueError):
 
 
 @dataclass(frozen=True)
+class InstallerProgramView:
+    root: Path
+    paths: tuple[str, ...]
+    verify: Callable[[], None]
+
+
+@contextmanager
+def installer_program_view(
+    root: Path, program: str, paths: tuple[str, ...], shared: tuple[str, ...],
+    stage_factory: Callable[[], Path], identity: IdentityReader,
+) -> Iterator[InstallerProgramView | None]:
+    """Qualify declared installer consumers through the production materializer."""
+    from tools import materialize_installer_engine as materializer
+    from tools import installer_engine_ref, uv_editable_ref
+
+    consumer = root / program
+    plan = materializer.derived_file_pairs(
+        root, root, copied_consumer=(consumer, consumer),
+    )
+    if not plan:
+        yield None
+        return
+    stage = stage_factory()
+
+    def members(base: Path, directory: str) -> tuple[str, ...]:
+        found: list[str] = []
+        for parent, directories, files in os.walk(base / directory, followlinks=False):
+            current = Path(parent)
+            identity(current, directory=True)
+            directories[:] = [
+                name for name in directories
+                if name not in {"__pycache__", ".pytest_cache", ".ruff_cache"}
+            ]
+            for name in directories:
+                identity(current / name, directory=True)
+            for name in sorted(files):
+                if not name.endswith((".pyc", ".pyo")):
+                    found.append((current / name).relative_to(base).as_posix())
+        return tuple(sorted(found))
+
+    directories = (program, *shared, "libs/installer-engine")
+    membership = tuple((directory, members(root, directory)) for directory in directories)
+    source_paths = {path for _directory, entries in membership for path in entries}
+    owner_root = Path(__file__).resolve().parents[1]
+    owner_paths: list[str] = []
+    for module in (materializer, installer_engine_ref, uv_editable_ref):
+        location = module.__file__
+        if not isinstance(location, str):
+            raise SourceViewError("Installer composition owner has no physical source")
+        owner_paths.append(Path(location).relative_to(owner_root).as_posix())
+    owner_inputs = ProgramInputs.capture(owner_root, tuple(owner_paths), identity)
+    inputs = ProgramInputs.capture(root, tuple(sorted(source_paths)), identity)
+
+    def verify_sources() -> None:
+        owner_inputs.verify()
+        inputs.verify()
+        if membership != tuple((directory, members(root, directory)) for directory in directories):
+            raise SourceViewError("Installer composition source membership changed")
+
+    stage.parent.mkdir(parents=True, exist_ok=True)
+    if stage.exists() or stage.is_symlink():
+        raise SourceViewError("Installer checker candidate must be a fresh directory")
+    stage.mkdir()
+    stage_identity = identity(stage, directory=True)
+    outputs: ProgramInputs | None = None
+    output_members: tuple[str, ...] = ()
+    try:
+        for directory in (program, *shared):
+            destination = stage / directory
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(
+                root / directory, destination, symlinks=True,
+                ignore=shutil.ignore_patterns("__pycache__", ".pytest_cache", ".ruff_cache", "*.pyc", "*.pyo"),
+            )
+        verify_sources()
+        log = materializer.materialize_ref_into(
+            source_consumer_dir=consumer, dest_consumer_dir=stage / program,
+            canonical_root=root, dest_root=stage,
+            human_sources=materializer.validate_human_output_sources(root, consumers=(consumer,)),
+        )
+        if not any(line.startswith("SKIP") for line in log):
+            log.extend(materializer.materialize_derived_files(
+                stage, canonical_root=root, copied_consumer=(consumer, stage / program),
+            ))
+        refusals = [line for line in log if line.startswith("SKIP")]
+        if refusals:
+            raise SourceViewError("Installer checker composition refused:\n" + "\n".join(refusals))
+        verify_sources()
+        output_members = members(stage, "")
+        outputs = ProgramInputs.capture(stage, output_members, identity)
+
+        def verify() -> None:
+            verify_sources()
+            assert outputs is not None
+            outputs.verify()
+            if output_members != members(stage, ""):
+                raise SourceViewError("Installer checker candidate membership changed")
+            for source, target in plan:
+                if source.suffix == ".py":
+                    provider = stage / target.relative_to(root)
+                    if provider.with_suffix(".pyi").exists() or provider.with_suffix("").is_dir():
+                        raise SourceViewError("Competing provider for a materialized installer module")
+
+        inventory = tuple(sorted(set(paths) | {
+            path for path in output_members if path.endswith(".py")
+        }))
+        yield InstallerProgramView(stage, inventory, verify)
+        verify()
+    finally:
+        if identity(stage, directory=True) != stage_identity:
+            raise SourceViewError("Installer checker candidate directory was replaced")
+        if outputs is not None:
+            outputs.verify()
+            if output_members != members(stage, ""):
+                raise SourceViewError("Installer checker candidate membership changed; retained")
+        shutil.rmtree(stage)
+
+
+@dataclass(frozen=True)
 class SourceLine:
     path: str
     number: int
@@ -63,7 +188,7 @@ class SourceView:
 
     def verify(self, root: Path) -> None:
         """Do not credit changed inputs or a changed checker view."""
-        prefix = INSTALLATION_ENTRY.rsplit("/", 1)[0] + "/"
+        prefix = self.inputs[0][0].rsplit("/", 1)[0] + "/"
         present = {
             prefix + path.name
             for path in (root / prefix).glob("_installation_context_*.py")
@@ -118,6 +243,30 @@ class GuardAliasView(SourceView):
         ):
             raise SourceViewError("Guard alias requires its exact single-source binding")
         self._verify_bytes(root)
+
+
+@dataclass(frozen=True)
+class SetupProgramView(SourceView):
+    def verify(self, root: Path) -> None:
+        if len(self.inputs) != 1 or not self.inputs[0][0].endswith("/setup.py"):
+            raise SourceViewError("Setup view requires one complete physical program")
+        self._verify_bytes(root)
+
+
+def setup_program_view(root: Path, paths: tuple[str, ...], output: Path) -> SetupProgramView:
+    """Keep independent build entrypoints separate without rewriting their code."""
+    if len(paths) != 1 or not paths[0].endswith("/setup.py"):
+        raise SourceViewError("Setup view requires one complete physical program")
+    source = paths[0]
+    content = _read(root, source)
+    _parse(content, source)
+    _reject_directives(source, content)
+    identity = _write_view(output, content)
+    return SetupProgramView(
+        output, content, ((source, content),),
+        tuple(SourceLine(source, number) for number in range(1, len(content.splitlines()) + 1)),
+        identity,
+    )
 
 
 def _write_view(output: Path, content: bytes) -> tuple[int, int]:
@@ -190,10 +339,12 @@ def _parse(
         ) from exc
 
 
-def installation_view(root: Path, paths: tuple[str, ...], output: Path) -> SourceView:
+def installation_view(
+    root: Path, paths: tuple[str, ...], output: Path, *, entry_path: str = INSTALLATION_ENTRY,
+) -> SourceView:
     """Inline only the literal loader's actual call, without importing product code."""
-    entry = _read(root, INSTALLATION_ENTRY)
-    tree = _parse(entry, INSTALLATION_ENTRY)
+    entry = _read(root, entry_path)
+    tree = _parse(entry, entry_path)
     declarations = [
         node
         for node in tree.body
@@ -229,7 +380,7 @@ def installation_view(root: Path, paths: tuple[str, ...], output: Path) -> Sourc
     fragments = tuple(name for name in value if isinstance(name, str))
     if len(set(fragments)) != len(fragments):
         raise SourceViewError("Installation-context fragment list contains duplicates")
-    prefix = INSTALLATION_ENTRY.rsplit("/", 1)[0] + "/"
+    prefix = entry_path.rsplit("/", 1)[0] + "/"
     members = tuple(prefix + name for name in fragments)
     physical = {
         path
@@ -239,12 +390,12 @@ def installation_view(root: Path, paths: tuple[str, ...], output: Path) -> Sourc
         and path.rsplit("/", 1)[-1].startswith("_installation_context_")
         and path != prefix + "_installation_context_worker.py"
     }
-    if set(members) != physical or INSTALLATION_ENTRY not in paths:
+    if set(members) != physical or entry_path not in paths:
         raise SourceViewError(
             "Installation-context fragment membership differs from physical inventory"
         )
     inputs = (
-        (INSTALLATION_ENTRY, entry),
+        (entry_path, entry),
         *((name, _read(root, name)) for name in members),
     )
     lines: list[SourceLine] = []
@@ -282,12 +433,12 @@ def installation_view(root: Path, paths: tuple[str, ...], output: Path) -> Sourc
             lines.append(SourceLine(path, number))
 
     entry_lines = entry.splitlines(keepends=True)
-    append(INSTALLATION_ENTRY, b"".join(entry_lines[: call.lineno - 1]))
-    append(INSTALLATION_ENTRY, b"\n", start=call.lineno)
+    append(entry_path, b"".join(entry_lines[: call.lineno - 1]))
+    append(entry_path, b"\n", start=call.lineno)
     for name, content in inputs[1:]:
         append(name, content, fragment=True)
     append(
-        INSTALLATION_ENTRY,
+        entry_path,
         b"".join(entry_lines[call.end_lineno or call.lineno :]),
         start=(call.end_lineno or call.lineno) + 1,
     )
@@ -333,7 +484,7 @@ def _shape(node: ast.AST) -> str:
 _WITNESSES = {
     "pid_file": "/__harness_typing_witness__/descendant.pid",
     "procutil_src": "/__harness_typing_witness__/repo/libs/agent-procutil/src",
-    "source": "/__harness_typing_witness__/repo/plugins/copilot-extensions-harness/scripts/copilot-mention-guard.py",
+    "source": "/__harness_typing_witness__/repo/plugins/copilot-extensions-maintainer/scripts/copilot-mention-guard.py",
 }
 
 

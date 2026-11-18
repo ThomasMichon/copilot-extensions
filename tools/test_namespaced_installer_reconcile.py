@@ -23,7 +23,9 @@ def _native_path(path: Path, style: str) -> str:
 @pytest.mark.parametrize(
     "state", ("fresh", "healthy", "missing-context", "wrong-mode", "denied-receipt", "bad-cutover"),
 )
-def test_actual_machines_cell_provision_reconciles_only_after_admission(tmp_path, style, state):
+def test_actual_machines_cell_provision_reconciles_only_after_admission(
+    tmp_path: Path, style: str, state: str,
+) -> None:
     shell = _bash() if style == "sh" else (
         str(Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe")
         if os.name == "nt" else shutil.which("pwsh")
@@ -46,7 +48,10 @@ def test_actual_machines_cell_provision_reconciles_only_after_admission(tmp_path
     shutil.copyfile(
         REPO / "plugins/agent-machines/scripts/cell_installer.py", scripts / "cell_installer.py",
     )
-    for name in ("versioned_runtime.py", "versioned_runtime_source.py", "versioned_runtime_leases.py"):
+    for name in (
+        "versioned_runtime.py", "versioned_runtime_source.py", "versioned_runtime_leases.py",
+        "versioned_runtime_identity.py", "versioned_runtime_fingerprint.py",
+    ):
         shutil.copyfile(REPO / "libs/versioned-runtime" / name, scripts / name)
     if style == "ps1":
         shutil.copyfile(
@@ -76,7 +81,8 @@ def test_actual_machines_cell_provision_reconciles_only_after_admission(tmp_path
     context = cell / "install.json"
     context.write_text("private synthetic receipt\n", encoding="utf-8")
     calls = tmp_path / "calls"
-    native = lambda path: _native_path(path, style)
+    def native(path: Path) -> str:
+        return _native_path(path, style)
     validated = {
         "pluginRoot": native(cell), "snapshotsRoot": native(cell / "snapshots"),
         "versionsRoot": native(cell / "versions"), "namespaceGeneration": 1, "generation": 1,
@@ -168,7 +174,7 @@ function Invoke-DaemonInstanceReconcile {
         calls.unlink(missing_ok=True)
         result = subprocess.run(
             command + options, env=env, text=True, capture_output=True, timeout=30,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
         )
         events = calls.read_text(encoding="utf-8-sig").splitlines() if calls.exists() else []
         if state in {"fresh", "healthy"}:

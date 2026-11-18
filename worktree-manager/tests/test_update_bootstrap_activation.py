@@ -1,5 +1,8 @@
 """Fresh bootstrap retains candidate custody through transactional daemon activation."""
 
+from __future__ import annotations
+
+from collections.abc import Iterator
 from contextlib import contextmanager, nullcontext
 from contextlib import redirect_stdout
 import io
@@ -10,6 +13,7 @@ import runpy
 import subprocess
 import sys
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -24,7 +28,8 @@ class CommandDispatched(BaseException):
 
 
 @pytest.fixture
-def constructed_update(tmp_path, monkeypatch):
+def constructed_update(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / "scripts"))
     installer = self_install._runtime_installer()
     root = tmp_path / "manager"
     previous = "1.2.2"
@@ -49,7 +54,7 @@ def constructed_update(tmp_path, monkeypatch):
     )
 
     @contextmanager
-    def candidate(*args, **kwargs):
+    def candidate(*args: Any, **kwargs: Any) -> Iterator[SimpleNamespace]:
         state.active = True
         try:
             yield SimpleNamespace(slot=slot, reused=False)
@@ -68,7 +73,7 @@ def constructed_update(tmp_path, monkeypatch):
         SimpleNamespace(validate_manager_ownership=lambda *args, **kwargs: None),
     )
 
-    def dispatch(arguments):
+    def dispatch(arguments: list[str]) -> None:
         state.dispatch.append((arguments[0], arguments))
         raise CommandDispatched
 
@@ -79,13 +84,13 @@ def constructed_update(tmp_path, monkeypatch):
 @pytest.mark.skipif(os.name != "nt", reason="native Windows rollback-backup permissions")
 @pytest.mark.parametrize("failure", [False, True], ids=["repeat-install", "rollback"])
 def test_selector_backups_stay_private_under_a_writable_parent(
-    constructed_update, monkeypatch, failure,
-):
+    constructed_update: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, failure: bool,
+) -> None:
     state = constructed_update
     publication = state.installer.runtime._runtime_component("versioned_runtime_publication")
     directory = state.root / ".installer-inputs"
     directory.mkdir()
-    flags = subprocess.CREATE_NO_WINDOW
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     grant = subprocess.run(
         ["icacls", str(directory), "/grant", "*S-1-5-11:(OI)(CI)(M)"],
         capture_output=True, text=True, creationflags=flags, timeout=15,
@@ -102,7 +107,7 @@ def test_selector_backups_stay_private_under_a_writable_parent(
     original_directory = state.installer.tempfile.TemporaryDirectory
 
     @contextmanager
-    def inherited_workspace(*args, **kwargs):
+    def inherited_workspace(*args: Any, **kwargs: Any) -> Iterator[str]:
         with original_directory(*args, **kwargs) as workspace:
             inherited = subprocess.run(
                 ["icacls", workspace, "/grant", "*S-1-5-11:(OI)(CI)(M)"],
@@ -113,7 +118,7 @@ def test_selector_backups_stay_private_under_a_writable_parent(
 
     monkeypatch.setattr(state.installer.tempfile, "TemporaryDirectory", inherited_workspace)
 
-    def refused():
+    def refused() -> None:
         raise RuntimeError("activation refused")
 
     if failure:
@@ -138,11 +143,12 @@ def test_selector_backups_stay_private_under_a_writable_parent(
 @pytest.mark.parametrize("cutover_ok", [True, False], ids=["running-daemon", "failed-cutover"])
 @pytest.mark.parametrize("repair", [False, True], ids=["normal", "repair"])
 def test_bootstrap_activates_before_releasing_candidate(
-    constructed_update, monkeypatch, cutover_ok, repair,
-):
+    constructed_update: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+    cutover_ok: bool, repair: bool,
+) -> None:
     state = constructed_update
 
-    def activate(**kwargs):
+    def activate(**kwargs: Any) -> dict[str, Any]:
         assert state.active
         assert (state.root / "current-version").read_text().strip() == state.previous
         state.cutovers.append(kwargs)
@@ -153,14 +159,15 @@ def test_bootstrap_activates_before_releasing_candidate(
             "result": {"ok": cutover_ok, **({"error": "health-timeout"} if not cutover_ok else {})},
         }
 
-    def popen(arguments, **kwargs):
+    def popen(arguments: list[str], **kwargs: Any) -> SimpleNamespace:
         from worktree_manager import bootstrap_activation, mux_daemon_cutover
 
-        assert arguments[:2] == [str(state.python), "-I"]
+        assert Path(arguments[0]).samefile(state.python) and arguments[1] == "-I"
         assert arguments[2:6] == ["-S", "-B", "-X", "utf8"]
-        assert Path(arguments[6]).parent == state.slot / ".runtime-bootstrap"
+        assert Path(arguments[6]).parent.samefile(state.slot / ".runtime-bootstrap")
         assert arguments[7:9] == ["-m", "worktree_manager.bootstrap_activation"]
         assert kwargs["stdin"] == subprocess.DEVNULL
+        assert kwargs["cwd"] == (state.slot.anchor if os.name == "nt" else None)
         output = io.StringIO()
         with monkeypatch.context() as child, redirect_stdout(output):
             child.setattr(sys, "prefix", str(state.slot))
@@ -197,7 +204,9 @@ def test_bootstrap_activates_before_releasing_candidate(
     {"action": "legacy-cutover", "reason": "legacy-lock-invalid"},
     {"action": "noop", "result": {}},
 ])
-def test_activation_refuses_unrecognized_result(constructed_update, monkeypatch, result):
+def test_activation_refuses_unrecognized_result(
+    constructed_update: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, result: Any,
+) -> None:
     from worktree_manager import bootstrap_activation, mux_daemon_cutover
 
     state = constructed_update
@@ -216,7 +225,10 @@ def test_activation_refuses_unrecognized_result(constructed_update, monkeypatch,
     ({"action": "refused"}, 1),
 ])
 @pytest.mark.parametrize("nested", [False, True])
-def test_activation_preserves_daemon_owner_outcome(constructed_update, monkeypatch, result, code, nested):
+def test_activation_preserves_daemon_owner_outcome(
+    constructed_update: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+    result: dict[str, Any], code: int, nested: bool,
+) -> None:
     from worktree_manager import bootstrap_activation, mux_daemon_cutover
 
     state = constructed_update
@@ -225,7 +237,7 @@ def test_activation_preserves_daemon_owner_outcome(constructed_update, monkeypat
     assert bootstrap_activation.main(["--root", str(state.root)]) == code
 
 
-def test_activation_refuses_a_base_interpreter(constructed_update):
+def test_activation_refuses_a_base_interpreter(constructed_update: SimpleNamespace) -> None:
     from worktree_manager import bootstrap_activation
 
     with pytest.raises(RuntimeError, match="constructed Manager slot"):
@@ -236,18 +248,22 @@ def test_activation_refuses_a_base_interpreter(constructed_update):
 @pytest.mark.parametrize("alias", ["root", "prefix"])
 @pytest.mark.parametrize("foreign", [False, True])
 def test_activation_binds_physical_root_across_native_path_aliases(
-    constructed_update, monkeypatch, alias, foreign,
-):
+    constructed_update: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+    alias: str, foreign: bool,
+) -> None:
     from worktree_manager import bootstrap_activation, mux_daemon_cutover
 
     state = constructed_update
     root = state.root / "foreign" if foreign else state.root
     prefix = state.slot / ".venv"
     monkeypatch.setattr(sys, "prefix", "\\\\?\\" + str(prefix) if alias == "prefix" else str(prefix))
-    activate = []
-    monkeypatch.setattr(mux_daemon_cutover, "activate_after_update", lambda **options: (
-        activate.append(options) or {"action": "noop", "reason": "no-live-daemon"}
-    ))
+    activate: list[dict[str, Any]] = []
+
+    def observe(**options: Any) -> dict[str, str]:
+        activate.append(options)
+        return {"action": "noop", "reason": "no-live-daemon"}
+
+    monkeypatch.setattr(mux_daemon_cutover, "activate_after_update", observe)
     arguments = ["--root", "\\\\?\\" + str(root) if alias == "root" else str(root)]
     if foreign:
         with pytest.raises(RuntimeError, match="constructed Manager slot"):
@@ -260,21 +276,22 @@ def test_activation_binds_physical_root_across_native_path_aliases(
 
 @pytest.mark.parametrize("start,ready", [(False, False), (True, False), (True, True)])
 def test_explicit_application_start_preserves_update_noop_and_checks_startup(
-    constructed_update, monkeypatch, start, ready,
-):
+    constructed_update: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, start: bool, ready: bool,
+) -> None:
     from worktree_manager import bootstrap_activation, mux_daemon, mux_daemon_cutover
 
     state = constructed_update
     monkeypatch.setattr(sys, "prefix", str(state.slot / ".venv"))
-    activations, starts = [], []
+    activations: list[dict[str, Any]] = []
+    starts: list[Path] = []
 
-    def activate(**options):
+    def activate(**options: Any) -> dict[str, str]:
         activations.append(options)
         return {"action": "noop", "reason": (
             "already-active-version" if starts and ready else "no-live-daemon"
         )}
 
-    def ensure(root):
+    def ensure(root: Path) -> bool:
         assert root == state.root
         starts.append(root)
         return ready
@@ -293,17 +310,17 @@ def test_explicit_application_start_preserves_update_noop_and_checks_startup(
 
 @pytest.mark.parametrize("repair", [False, True], ids=["normal", "repair"])
 def test_interrupted_acknowledged_activation_keeps_the_serving_generation_selected(
-    constructed_update, monkeypatch, repair,
-):
+    constructed_update: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, repair: bool,
+) -> None:
     state = constructed_update
-    calls = []
+    calls: list[str] = []
     outcome = json.dumps({
         "action": "cutover", "root": str(state.root),
         "runtime_generation": state.slot.name,
         "result": {"ok": True, "new_pid": 123, "retirement": "self-observed"},
     })
 
-    def communicate():
+    def communicate() -> tuple[str, str]:
         assert state.active
         calls.append("communicate")
         if len(calls) == 1:
@@ -327,16 +344,18 @@ def test_interrupted_acknowledged_activation_keeps_the_serving_generation_select
 
 @pytest.mark.parametrize("failure", [KeyboardInterrupt, OSError], ids=["cancel", "io-error"])
 def test_v2_start_is_not_replayed_or_rolled_back_by_publication_failure(
-    constructed_update, monkeypatch, failure,
-):
+    constructed_update: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+    failure: type[BaseException],
+) -> None:
     state = constructed_update
-    launches, publications = [], []
+    launches: list[str] = []
+    publications: list[str] = []
     outcome = json.dumps({
         "action": "cutover", "runtime_generation": state.slot.name,
         "result": {"ok": True},
     })
 
-    def communicate():
+    def communicate() -> tuple[str, str]:
         launches.append(state.slot.name)
         state.resident = state.slot.name
         return outcome, ""
@@ -347,7 +366,7 @@ def test_v2_start_is_not_replayed_or_rolled_back_by_publication_failure(
     )
     activate = state.installer.runtime._activate
 
-    def publish(*args, **kwargs):
+    def publish(*args: Any, **kwargs: Any) -> Any:
         publications.append(state.slot.name)
         result = activate(*args, **kwargs)
         if len(publications) == 1:
@@ -373,7 +392,9 @@ def test_v2_start_is_not_replayed_or_rolled_back_by_publication_failure(
     {"action": "cutover", "runtime_generation": "1.2.2", "result": {"ok": True}},
     {"action": "noop", "runtime_generation": "1.2.3", "reason": "no-live-daemon"},
 ])
-def test_v1_state_cannot_authorize_v2_publication(constructed_update, monkeypatch, outcome):
+def test_v1_state_cannot_authorize_v2_publication(
+    constructed_update: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, outcome: dict[str, Any],
+) -> None:
     state = constructed_update
     monkeypatch.setattr(
         state.installer.subprocess, "Popen",
@@ -389,11 +410,13 @@ def test_v1_state_cannot_authorize_v2_publication(constructed_update, monkeypatc
         assert (state.root / name).read_bytes() == before
 
 
-def test_unconfirmed_interruption_settles_without_publishing_selection(constructed_update, monkeypatch):
+def test_unconfirmed_interruption_settles_without_publishing_selection(
+    constructed_update: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     state = constructed_update
-    calls = []
+    calls: list[str] = []
 
-    def communicate():
+    def communicate() -> tuple[str, str]:
         assert state.active
         assert (state.root / "current-version").read_text().strip() == state.previous
         calls.append("communicate")
@@ -418,14 +441,14 @@ def test_unconfirmed_interruption_settles_without_publishing_selection(construct
 
 @pytest.mark.parametrize("apply", [False, True], ids=["plan", "apply"])
 def test_self_install_command_uses_the_same_incoming_start_boundary(
-    constructed_update, monkeypatch, apply,
-):
+    constructed_update: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, apply: bool,
+) -> None:
     from worktree_manager import __main__ as cli
 
     state = constructed_update
-    starts = []
+    starts: list[tuple[Path, Path, bool]] = []
 
-    def install(**options):
+    def install(**options: Any) -> self_install.SelfInstallResult:
         assert options["dry_run"] is not apply
         if apply:
             assert options["_transactional_activation"] is True
@@ -439,12 +462,13 @@ def test_self_install_command_uses_the_same_incoming_start_boundary(
 
     monkeypatch.setattr(cli, "self_install", install)
     monkeypatch.setattr(cli, "self_status", lambda: SimpleNamespace(installed_version=state.previous))
-    monkeypatch.setattr(
-        state.installer, "_activate_after_bootstrap_update",
-        lambda root, slot: starts.append((root, slot)),
-    )
+    def start(root: Path, slot: Path, *, start_if_missing: bool) -> dict[str, Any]:
+        starts.append((root, slot, start_if_missing))
+        return {"action": "noop", "reason": "already-active-version"}
+
+    monkeypatch.setattr(state.installer, "_activate_after_bootstrap_update", start)
     assert cli._render_self_install(["--apply"] if apply else []) == 0
-    assert starts == ([(state.root, state.slot)] if apply else [])
+    assert starts == ([(state.root, state.slot, True)] if apply else [])
 
 
 @pytest.mark.skipif(
@@ -453,8 +477,9 @@ def test_self_install_command_uses_the_same_incoming_start_boundary(
 )
 @pytest.mark.parametrize("changed_owner", ["manager-command", "provider"])
 def test_repair_revalidates_ownership_after_construction_before_publication(
-    constructed_update, repair_case, monkeypatch, changed_owner,
-):
+    constructed_update: SimpleNamespace, repair_case: Any,
+    monkeypatch: pytest.MonkeyPatch, changed_owner: str,
+) -> None:
     state, case = constructed_update, repair_case
     state.payload = case.source / "worktree-manager"
     package = state.payload / "src/worktree_manager"
@@ -480,10 +505,10 @@ def test_repair_revalidates_ownership_after_construction_before_publication(
         "provider_root": str(state.root), "command": [str(local_bin / primary)],
     }), encoding="utf-8")
     candidate = state.installer.candidate
-    changed = []
+    changed: list[tuple[Path, bytes]] = []
 
     @contextmanager
-    def change_while_constructing(*args, **kwargs):
+    def change_while_constructing(*args: Any, **kwargs: Any) -> Iterator[Any]:
         with candidate(*args, **kwargs) as ready:
             if changed_owner == "provider":
                 document = json.loads(provider.read_text())
@@ -495,7 +520,7 @@ def test_repair_revalidates_ownership_after_construction_before_publication(
             changed.append((path, content))
             yield ready
 
-    def publication_forbidden(*args, **kwargs):
+    def publication_forbidden(*args: Any, **kwargs: Any) -> None:
         pytest.fail("ownership changed during construction; publication must not run")
 
     monkeypatch.setattr(state.installer, "candidate", change_while_constructing)

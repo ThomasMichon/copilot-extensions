@@ -115,6 +115,34 @@ and invalid layouts refuse before setup rather than falling back to an old
 installer. This manifest's edges order already selected apps, not Python
 packages or a second version-resolution service.
 
+For a prepared Manager application, full setup publishes every declared command
+in both the app's version-neutral `bin/` and the global command directory.
+The app also exposes `bin/setup.ps1`, `bin/setup.cmd` and `bin/setup.sh`, which
+follow the current selection to that version's own `bin/setup` frontdoor.
+These outputs share the existing publication leases and recovery tracking;
+staging publishes none of them. Missing or edited neutral/secondary commands
+are installation gaps, not an already-current result.
+An older selected launcher helper without neutral-setup rendering is likewise
+a replacement gap, not a status exception that blocks the incoming version.
+An application-root self-update repairs missing or invalid installed application
+metadata or an unusable slot-local launcher renderer in a distinct
+`.repair.<id>` generation, leaving the damaged slot untouched. An unchanged
+repeat reuses the selected repair generation; missing/edited global or neutral
+commands alone do not allocate another generation. Incoming
+declarations remain strict, and a valid but conflicting installed declaration
+is not treated as corruption. Conflict classification uses the constructor's
+Source/profile metadata checks without reading old construction artifacts or
+requiring the installed source/profile to match the incoming selection.
+Incomplete or inconsistent construction metadata is a repair gap, not a conflict.
+Matching metadata also requires every incoming copied path to remain present
+with its file/directory kind before reusing a snapshot. Missing setup, project,
+lock, Source-sidecar or payload inputs require a distinct repair; the existing
+tree walks supply this presence check without hashing or rewriting old inputs.
+Ordinary renderer exceptions require selected replacement or a structured
+incoming error; process-control exceptions such as user interrupts propagate.
+Missing metadata alone does not redirect an
+application installation or its configuration to the legacy installer/root.
+
 ## Explicit Sync progress
 
 Local paired Sync reads `agent_worktrees/sync-progress-v1.json` beside the exact
@@ -2713,7 +2741,7 @@ and immutable prepared payloads live below
 `[runtime_source]` selection. The ordinary versioned installer, global commands,
 data root and mux cutover owner are unchanged. Acquisition, preparation or
 receipt failures are reported without an unqualified fallback; this mode
-requires Git. Main and other refs retain their existing Git/GitHub-tarball
+requires Git. Legacy-root Main and other refs retain their existing Git/GitHub-tarball
 path and are not yet source-qualified by this contract. Dev self-update now
 prepares a complete application snapshot once through the packaged canonical
 composition/build/profile owners, carrying one Main seed and deadline. Acquisition
@@ -2735,6 +2763,28 @@ does not select the engine's build source; the independent service-source
 repair contract below owns that choice.
 Source/actor controls cover this handoff; actual cold-bootstrap and installed-host
 qualification remain open.
+
+An application-root Manager instead prepares a complete footprint with its
+packaged promotion provider, then uses the same whole-slot copy and app-local
+stage/full setup as `worktree-manager-install`. It never calls the legacy
+source constructor or publishes legacy-format launchers into that root.
+The physical running application or selected `application.json` identifies this
+mode, including explicitly named roots. Main, merged Dev, Main-reachable exact
+commits and release tags use canonical source acquisition; named unmerged
+branches are not substituted for tags or granted frozen-WIP admission.
+Git is required and acquisition/preparation failures do not fall back to a
+legacy tarball. Source preparation and setup share one finite deadline.
+App-root acquisition uses `s/<compact-repository-key>` beneath
+its preparation root; the full repository owner record remains authoritative
+and rejects key collisions. That root is a private, caller-owned temporary
+directory, held through complete setup and removed on success or failure.
+Both acquired source and produced footprint stay outside the installation
+root, preserving the consumer's no-overlap contract. On Windows this also
+gives Git's worktree metadata ordinary-path headroom independently of
+application and version-slot names. Legacy source caches keep their existing
+layout.
+The Manager-only `update --target worktree-manager` entry does not load or
+repair the Worktrees installer. Service source policy remains independent.
 
 `worktree-manager update` owns the update run's telemetry: it records the
 self-update as the `manager_self_update` phase, exports the run identity to the

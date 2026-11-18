@@ -173,14 +173,47 @@ the worker otherwise parks hinted tasks before invoking an unsupported adapter.
 The default SQL repo filter matches generic source identities such as
 `github:owner/repo:issues`. A consumer retaining another canonical naming scheme
 may subclass `ContentStore` and override its pure `repo_filter_sql(repo)` method.
-Escape user-supplied values with the existing SQL literal/pattern helpers and
-keep the consumer's vector post-filter semantics consistent.
+Pass that subclass as `MultiModelStore(..., content_store_type=ConsumerContentStore)`
+and the matching pure `(source, repo) -> bool` callable as `repo_matcher=...`.
+The subclass must retain the base `(db_path, *, table_name)` constructor contract;
+the facade constructs it once and derives the database, table and source domain
+for every registered vector model from that instance. Escape user-supplied
+values with the existing SQL literal/pattern helpers and keep the SQL and Python
+predicates equivalent. Both injections are instance-local and optional; omitted
+arguments preserve the generic identity-first naming policy.
 
 The shared `fts_search` still owns currentness guards, query sanitization,
 source/language filters and execution before the candidate limit. Do not copy
 the FTS loop, replace a process-global helper or fetch an unbounded candidate
-set to filter in Python. `tests/test_consumer_repo_filter.py` exercises the real
-native indexed query with wildcard, quote and backslash controls.
+set to filter in Python. Hydrated vector, similarity, hybrid and cross-model
+paths use the injected matcher, including unavailable/empty-FTS fallback paths.
+In an explicitly selected source-aware store, `SearchEngine.search_authorized`
+uses the content store's SQL policy in native vector, FTS and hydration queries.
+It retains canonical family authorization, language filtering and pre-limit
+selection; the repository policy does not grant access to another family.
+`tests/test_consumer_repo_filter.py` exercises the real native queries with
+wildcard, quote, backslash, metadata and independent-default-instance controls.
+Publish this expanded provider before migrating a consumer; an older provider's
+unknown-keyword error is not permission to silently use the wrong repo policy.
+
+### Instance-local retrieval ranking
+
+`MultiModelStore(..., exact_match_bonus=...)` sets the identifier-only rescue
+bonus for that facade's hybrid, cross-model and authorized-source fusion.
+It uses the same top-rank RRF units as `AGENT_INDEX_EXACT_MATCH_BONUS`; zero
+disables the rescue. Omitting the argument retains that environment-derived
+default. Instances sharing a database can select different bonuses without
+changing process-global state or copying the fusion implementation.
+Direct vector/FTS queries, hybrid vector-only fallbacks and existing single-list
+shortcuts do not apply a bonus. Multi-list fusion can apply it even without an
+FTS branch, including cross-model `search_all` and multi-model authorized
+`mode="vector"` queries.
+The existing per-query `vector_weight` and `fts_weight` arguments on
+`hybrid_search` and `search_all` remain independent.
+
+Publish this expanded constructor before migrating a consumer. A consumer
+retaining its own configuration names should pass their resolved values
+explicitly and qualify its actual native retrieval path.
 
 `tests/test_consumer_runtime.py` qualifies single- and dual-model injected
 consumers through the actual shared engine, native metadata-only reuse,

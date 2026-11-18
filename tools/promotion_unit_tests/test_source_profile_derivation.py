@@ -2,25 +2,33 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from collections.abc import Iterator
 import hashlib
 import json
 from pathlib import Path, PureWindowsPath
 import subprocess
 import time
 from types import SimpleNamespace
+from typing import Any, NoReturn, cast
+from ssl import SSLContext
 
 import pytest
 
 import runtime_source_wheels as source
+from runtime_profile import ProfileError
+from installer_wheel_acquisition import AcquisitionUnavailable
+from build_toolchain_lock import ToolchainLock
+from installer_wheel_snapshot import WheelInstallInputs
+from installer_dependency_policy import RetainedUVInstall
 from promotion_unit_tests.test_runtime_profile_wheels import _ENVIRONMENT
 
 
 @pytest.fixture(autouse=True)
-def _synthetic_host_defaults(monkeypatch):
+def _synthetic_host_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("packaging.markers.default_environment", lambda: dict(_ENVIRONMENT))
 
 
-def _native_file_lock(files):
+def _native_file_lock(files: list[tuple[str, dict[str, str]]]) -> bytes:
     return (
         'lock-version="1.0"\ncreated-by="uv"\nrequires-python=">=3.11"\n'
         '[[packages]]\nname="app"\nversion="1.0"\n'
@@ -35,7 +43,7 @@ def _native_file_lock(files):
 
 @pytest.mark.parametrize("reverse_files", [False, True])
 @pytest.mark.parametrize("reverse_tags", [False, True])
-def test_native_file_matching_uses_recorded_target_priority(reverse_files, reverse_tags):
+def test_native_file_matching_uses_recorded_target_priority(reverse_files: bool, reverse_tags: bool) -> None:
     from runtime_source_lock import _wheel_pins
 
     tags = ["cp311-cp311-win_amd64", "py3-none-any"]
@@ -56,7 +64,7 @@ def test_native_file_matching_uses_recorded_target_priority(reverse_files, rever
 
 
 @pytest.mark.parametrize("fault", ["tie", "incompatible", "name", "version"])
-def test_native_file_matching_refuses_ambiguous_or_mismatched_files(fault):
+def test_native_file_matching_refuses_ambiguous_or_mismatched_files(fault: str) -> None:
     from runtime_source_lock import _wheel_pins
 
     filenames = {
@@ -65,7 +73,7 @@ def test_native_file_matching_refuses_ambiguous_or_mismatched_files(fault):
         "name": ["other-1.0-py3-none-any.whl"],
         "version": ["app-2.0-py3-none-any.whl"],
     }[fault]
-    with pytest.raises(source.ProfileError):
+    with pytest.raises(ProfileError):
         _wheel_pins(
             _native_file_lock([(name, {"sha256": "1" * 64}) for name in filenames]),
             {"environment": dict(_ENVIRONMENT), "tags": ["py3-none-any"]},
@@ -80,7 +88,9 @@ def test_native_file_matching_refuses_ambiguous_or_mismatched_files(fault):
     ({"sha256": "1" * 64, "md5": "invalid"}, False),
     ({"sha256": "1" * 64, "unknown": "2" * 32}, False),
 ], ids=["strong-plus-md5", "md5-only", "malformed-sha256", "malformed-md5", "unknown-algorithm"])
-def test_native_file_matching_requires_strong_hash_and_valid_auxiliary_metadata(hashes, admitted):
+def test_native_file_matching_requires_strong_hash_and_valid_auxiliary_metadata(
+    hashes: dict[str, str], admitted: bool,
+) -> None:
     from runtime_source_lock import _wheel_pins
 
     content = _native_file_lock([("app-1.0-py3-none-any.whl", hashes)])
@@ -90,19 +100,19 @@ def test_native_file_matching_requires_strong_hash_and_valid_auxiliary_metadata(
             content, target, time.monotonic() + 5, prefer_target_tags=True,
         )[0]["sha256"] == "sha256:" + "1" * 64
     else:
-        with pytest.raises(source.ProfileError):
+        with pytest.raises(ProfileError):
             _wheel_pins(content, target, time.monotonic() + 5, prefer_target_tags=True)
 
 
 @pytest.mark.parametrize("multiple", [False, True])
-def test_native_file_matching_default_remains_strict(multiple):
+def test_native_file_matching_default_remains_strict(multiple: bool) -> None:
     from runtime_source_lock import _wheel_pins
 
     files = [("app-1.0-py3-none-any.whl", {"sha256": "1" * 64, "md5": "2" * 32})]
     if multiple:
         files = [(name, {"sha256": "1" * 64}) for name in
                  ("app-1.0-py3-none-any.whl", "app-1.0-cp311-cp311-win_amd64.whl")]
-    with pytest.raises(source.ProfileError):
+    with pytest.raises(ProfileError):
         _wheel_pins(
             _native_file_lock(files),
             {"environment": dict(_ENVIRONMENT), "tags": ["cp311-cp311-win_amd64", "py3-none-any"]},
@@ -110,7 +120,7 @@ def test_native_file_matching_default_remains_strict(multiple):
         )
 
 
-def test_native_local_witness_requires_the_held_file(monkeypatch):
+def test_native_local_witness_requires_the_held_file(monkeypatch: pytest.MonkeyPatch) -> None:
     from runtime_source_lock import _wheel_pins
 
     filename = "app-1.0-py3-none-any.whl"
@@ -120,19 +130,19 @@ def test_native_local_witness_requires_the_held_file(monkeypatch):
     original = _native_file_lock([(filename, {"sha256": "1" * 64})])
     target = {"environment": dict(_ENVIRONMENT), "tags": ["py3-none-any"]}
 
-    def content(url):
+    def content(url: str) -> bytes:
         return original.replace(
             ("https://example.invalid/" + filename).encode(), url.encode(),
         )
 
-    with pytest.raises(source.ProfileError):
+    with pytest.raises(ProfileError):
         _wheel_pins(content(held.as_uri()), target, time.monotonic() + 5)
     assert _wheel_pins(
         content(held.as_uri()), target, time.monotonic() + 5,
         local_wheels={filename: held},
     )[0]["filename"] == filename
     for url in (other.as_uri(), held.as_uri() + "?query=1", "https://example.invalid/" + filename):
-        with pytest.raises(source.ProfileError):
+        with pytest.raises(ProfileError):
             _wheel_pins(
                 content(url), target, time.monotonic() + 5,
                 local_wheels={filename: held},
@@ -145,7 +155,7 @@ def test_native_local_witness_requires_the_held_file(monkeypatch):
     ('"not a marker"', False),
     ("42", False),
 ], ids=["applicable", "inapplicable", "malformed", "non-string"])
-def test_native_file_matching_requires_package_marker_to_apply(marker, admitted):
+def test_native_file_matching_requires_package_marker_to_apply(marker: str, admitted: bool) -> None:
     from runtime_source_lock import _wheel_pins
 
     content = _native_file_lock([("app-1.0-py3-none-any.whl", {"sha256": "1" * 64})])
@@ -156,13 +166,15 @@ def test_native_file_matching_requires_package_marker_to_apply(marker, admitted)
             content, target, time.monotonic() + 5, prefer_target_tags=True,
         )[0]["name"] == "app"
     else:
-        with pytest.raises(source.ProfileError):
+        with pytest.raises(ProfileError):
             _wheel_pins(content, target, time.monotonic() + 5, prefer_target_tags=True)
-    with pytest.raises(source.ProfileError):
+    with pytest.raises(ProfileError):
         _wheel_pins(content, target, time.monotonic() + 5)
 
 
-def _native_exclusion_inputs(tmp_path, monkeypatch):
+def _native_exclusion_inputs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> tuple[dict[str, str], dict[str, str], SimpleNamespace, Path]:
     import installer_native_feed as native
 
     # Native handle/share-mode behavior belongs to the separate native packet.
@@ -190,15 +202,17 @@ def _native_exclusion_inputs(tmp_path, monkeypatch):
     return outer, settings, transaction, constraints
 
 
-def test_native_feed_accepts_only_independently_selected_exact_exclusions(tmp_path, monkeypatch):
+def test_native_feed_accepts_only_independently_selected_exact_exclusions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import installer_native_feed as native
 
     outer, settings, transaction, _path = _native_exclusion_inputs(tmp_path, monkeypatch)
     wheels = [{"name": "external"}]
-    with pytest.raises(native.AcquisitionUnavailable):
-        native._machine_constraints(outer, settings, transaction, wheels)
+    with pytest.raises(AcquisitionUnavailable):
+        native._machine_constraints(outer, settings, cast(RetainedUVInstall, transaction), wheels)
     assert native._machine_constraints(
-        outer, settings, transaction, wheels, excluded_local_packages=("App",),
+        outer, settings, cast(RetainedUVInstall, transaction), wheels, excluded_local_packages=("App",),
     ) == ("app",)
 
 
@@ -206,11 +220,13 @@ def test_native_feed_accepts_only_independently_selected_exact_exclusions(tmp_pa
     "version", "marker", "direct", "missing", "extra", "duplicate", "wrong-argv",
     "outside", "remote", "selected", "unselected-wheels", "override", "workspace",
 ])
-def test_native_feed_exact_exclusions_never_relax_other_constraints(tmp_path, monkeypatch, fault):
+def test_native_feed_exact_exclusions_never_relax_other_constraints(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str,
+) -> None:
     import installer_native_feed as native
 
     outer, settings, transaction, path = _native_exclusion_inputs(tmp_path, monkeypatch)
-    wheels = [{"name": "external"}]
+    wheels: list[dict[str, str]] | None = [{"name": "external"}]
     if fault in ("version", "marker", "direct", "missing", "extra", "duplicate"):
         path.write_text({
             "version": "app<1\n", "marker": "app<0,>=0; sys_platform == 'win32'\n",
@@ -234,22 +250,24 @@ def test_native_feed_exact_exclusions_never_relax_other_constraints(tmp_path, mo
         outer["overrides"] = outer["constraints"]
     else:
         outer["constraints_from_workspace"] = outer["constraints"]
-    with pytest.raises((native.NativeFeedError, native.AcquisitionUnavailable)):
+    with pytest.raises((native.NativeFeedError, AcquisitionUnavailable)):
         native._machine_constraints(
-            outer, settings, transaction, wheels, excluded_local_packages=("app",),
+            outer, settings, cast(RetainedUVInstall, transaction), wheels, excluded_local_packages=("app",),
         )
 
 
 @pytest.mark.parametrize("operation", ["compile", "source-compile"])
-def test_native_compile_generated_exclusions_use_supported_constraint_spelling(tmp_path, monkeypatch, operation):
+def test_native_compile_generated_exclusions_use_supported_constraint_spelling(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str,
+) -> None:
     import installer_dependency_config as configuration
 
     @contextmanager
-    def temporary(_parent):
+    def temporary(_parent: Path | None) -> Iterator[str]:
         yield str(tmp_path)
 
     @contextmanager
-    def retain(_uv, arguments, **options):
+    def retain(uv: str, arguments: list[str], **options: Any) -> Iterator[object]:
         assert arguments[0] == "--constraints"
         assert options["_generated_constraints"] == (Path(arguments[1]),)
         assert Path(arguments[1]).read_text() == "app<0,>=0\n"
@@ -268,7 +286,7 @@ def test_native_compile_generated_exclusions_use_supported_constraint_spelling(t
     (r"\\?\UNC\server\share\demo.whl", "file://server/share/demo.whl"),
     (r"C:\held wheels\demo.whl", "file:///C:/held%20wheels/demo.whl"),
 ], ids=["extended-drive", "extended-unc", "ordinary-drive"])
-def test_closed_wheel_file_uri_never_emits_an_extended_path_authority(path, uri):
+def test_closed_wheel_file_uri_never_emits_an_extended_path_authority(path: str, uri: str) -> None:
     from installer_dependency_config import file_uri
 
     assert file_uri(PureWindowsPath(path)) == uri
@@ -277,36 +295,40 @@ def test_closed_wheel_file_uri_never_emits_an_extended_path_authority(path, uri)
 @pytest.mark.parametrize("certificates", [
     ["b", "a"], ["a", "b", "a"], ["b", "b", "a", "a"],
 ], ids=["order", "duplicate", "repeated"])
-def test_native_transport_identity_canonicalizes_only_certificate_multiplicity(monkeypatch, certificates):
+def test_native_transport_identity_canonicalizes_only_certificate_multiplicity(
+    monkeypatch: pytest.MonkeyPatch, certificates: list[str],
+) -> None:
     import installer_native_feed as native
 
     original = list(certificates)
     record = {"certificates": certificates, "minimum": 771, "verify_flags": 32, "ciphers": "selected"}
     monkeypatch.setattr(native, "_tls_record", lambda _context: dict(record))
-    assert native._transport_identity(object()) == {
+    assert native._transport_identity(cast(SSLContext, object())) == {
         **record, "certificates": ["a", "b"],
     }
     assert record["certificates"] == original
 
 
 @pytest.mark.parametrize("change", ["added", "removed", "verify-flags"])
-def test_native_transport_identity_preserves_real_trust_and_transport_changes(monkeypatch, change):
+def test_native_transport_identity_preserves_real_trust_and_transport_changes(
+    monkeypatch: pytest.MonkeyPatch, change: str,
+) -> None:
     import installer_native_feed as native
 
-    record = {"certificates": ["a", "b"], "verify_flags": 32}
+    record: dict[str, Any] = {"certificates": ["a", "b"], "verify_flags": 32}
     monkeypatch.setattr(native, "_tls_record", lambda _context: dict(record))
-    original = native._transport_identity(object())
+    original = native._transport_identity(cast(SSLContext, object()))
     if change == "added":
         record["certificates"] = ["a", "b", "c"]
     elif change == "removed":
         record["certificates"] = ["a"]
     else:
         record["verify_flags"] += 1
-    assert native._transport_identity(object()) != original
+    assert native._transport_identity(cast(SSLContext, object())) != original
 
 
-def test_source_closure_propagates_transitive_extras_and_marker_cycles():
-    wheels = {
+def test_source_closure_propagates_transitive_extras_and_marker_cycles() -> None:
+    wheels: dict[str, dict[str, Any]] = {
         "app": {"requires_dist": ["helper[metrics]>=1", "unused; python_version < '2'"]},
         "helper": {"requires_dist": ["leaf; extra == 'metrics'", "app"]},
         "leaf": {"requires_dist": []},
@@ -317,13 +339,13 @@ def test_source_closure_propagates_transitive_extras_and_marker_cycles():
 
 
 @pytest.mark.parametrize("requirement", ["missing", "other @ https://example.invalid/package.whl"])
-def test_source_closure_never_resolves_missing_or_direct_dependencies(requirement):
-    with pytest.raises(source.ProfileError):
+def test_source_closure_never_resolves_missing_or_direct_dependencies(requirement: str) -> None:
+    with pytest.raises(ProfileError):
         source._extras({"app": {"requires_dist": [requirement]}}, ["app"],
                        dict(_ENVIRONMENT), time.monotonic() + 5)
 
 
-def test_source_build_selection_keeps_later_extra_expansion_and_excludes_unused_source(tmp_path):
+def test_source_build_selection_keeps_later_extra_expansion_and_excludes_unused_source(tmp_path: Path) -> None:
     projects = []
     for name, dependencies, extras in (
         ("app", ["helper", "helper[metrics]"], {}),
@@ -346,12 +368,12 @@ def test_source_build_selection_keeps_later_extra_expansion_and_excludes_unused_
     assert {path.name for path in selected} == {"app", "helper", "leaf"}
 
 
-def test_invalid_budget_refuses_before_build_or_source_read(monkeypatch):
+def test_invalid_budget_refuses_before_build_or_source_read(monkeypatch: pytest.MonkeyPatch) -> None:
     from build_toolchain_lock import ToolchainLock
     from runtime_source_lock import SourceLockCandidate
 
     monkeypatch.setattr(source, "build_wheel", lambda *args, **kwargs: pytest.fail("no build allowed"))
-    with pytest.raises(source.ProfileError, match="positive"):
+    with pytest.raises(ProfileError, match="positive"):
         with source.retain_source_profile(
             SourceLockCandidate(b"{}", b"", Path("absent")), third_party={},
             uv="unused", toolchain=ToolchainLock(Path("unused"), {}),
@@ -362,25 +384,29 @@ def test_invalid_budget_refuses_before_build_or_source_read(monkeypatch):
             pytest.fail("invalid source construction admitted")
 
 
-def test_source_build_deadline_and_exact_uv_cover_all_child_boundaries(tmp_path, monkeypatch):
+def test_source_build_deadline_and_exact_uv_cover_all_child_boundaries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import build_python_artifacts as builder
     import build_toolchain_lock as locks
 
     (tmp_path / "pyproject.toml").write_text("[build-system]\nrequires=[]\n", encoding="utf-8")
     toolchain = locks.ToolchainLock(tmp_path / "python", {"setuptools": "0"})
-    calls = []
+    calls: list[tuple[list[str], dict[str, Any]]] = []
     uv = str(tmp_path / "selected-uv")
 
-    def run(command, **options):
+    def run(command: list[str], **options: Any) -> subprocess.CompletedProcess[str]:
         calls.append((command, options))
         if command[0] == uv:
             (Path(command[command.index("-o") + 1]) / "demo-1.0-py3-none-any.whl").write_bytes(b"wheel")
             return subprocess.CompletedProcess(command, 0, "", "")
-        value = dict(_ENVIRONMENT) if command[-1] == locks._MARKER_ENV_QUERY_SCRIPT else {"ok": True}
+        value: dict[str, Any] = dict(_ENVIRONMENT) if command[-1] == locks._MARKER_ENV_QUERY_SCRIPT else {"ok": True}
         return subprocess.CompletedProcess(command, 0, json.dumps(value), "")
 
-    monkeypatch.setattr(builder.subprocess, "run", run)
-    def build_child(command, environment, deadline):
+    monkeypatch.setattr(subprocess, "run", run)
+    def build_child(
+        command: list[str], environment: dict[str, str], deadline: float,
+    ) -> subprocess.CompletedProcess[str]:
         return run(command, env=environment, timeout=deadline - time.monotonic())
     monkeypatch.setattr(builder, "_build_child", build_child)
     wheel = builder.build_wheel(
@@ -394,7 +420,9 @@ def test_source_build_deadline_and_exact_uv_cover_all_child_boundaries(tmp_path,
 
 
 @pytest.mark.parametrize("fault", ["source-after-health", "interpreter-before-construction"])
-def test_source_and_target_fences_refuse_before_exposing_candidate(tmp_path, monkeypatch, fault):
+def test_source_and_target_fences_refuse_before_exposing_candidate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str,
+) -> None:
     from runtime_source_lock import SourceLockCandidate
 
     payload = tmp_path / "source"
@@ -406,16 +434,16 @@ def test_source_and_target_fences_refuse_before_exposing_candidate(tmp_path, mon
         "python": str(tmp_path / "python"), "source": {"runtime_version": "1"},
         "target": {"environment": dict(_ENVIRONMENT)},
         "extras": [], "requirements_sha256": "sha256:" + hashlib.sha256(b"").hexdigest(),
-        "retained_source_sha256": "sha256:" + source.runtime.fingerprint_source((manifest,)),
+        "retained_source_sha256": "sha256:" + getattr(source, "runtime").fingerprint_source((manifest,)),
     }
     candidate = SourceLockCandidate(json.dumps(record).encode(), b"", payload)
 
     @contextmanager
-    def inputs(*args, **kwargs):
+    def inputs(*args: Any, **kwargs: Any) -> Iterator[SimpleNamespace]:
         yield SimpleNamespace(local_packages=("app",), wheels=object())
 
     @contextmanager
-    def constructed(*args, **kwargs):
+    def constructed(*args: Any, **kwargs: Any) -> Iterator[object]:
         assert fault == "source-after-health", "wrong target must refuse before construction"
         manifest.write_text('[project]\nname="changed"\nversion="1"\n', encoding="utf-8")
         kwargs["validate_candidate"](tmp_path / "candidate-slot")
@@ -424,14 +452,14 @@ def test_source_and_target_fences_refuse_before_exposing_candidate(tmp_path, mon
     monkeypatch.setattr(source, "retain_source_profile", inputs)
     monkeypatch.setattr(source, "numbered_candidate", constructed)
     monkeypatch.setattr(source, "_select_uv_executable", lambda _: str(tmp_path / "selected-uv"))
-    monkeypatch.setattr(source.shutil, "which", lambda _: str(manifest))
+    monkeypatch.setattr(getattr(source, "shutil"), "which", lambda _: str(manifest))
     monkeypatch.setattr(
         source, "_query_marker_environment",
         lambda *_a, **_k: dict(_ENVIRONMENT) if fault == "source-after-health" else {},
     )
-    with pytest.raises(source.ProfileError, match="retained source differs|selected target"):
+    with pytest.raises(ProfileError, match="retained source differs|selected target"):
         with source.source_candidate(
-            candidate, third_party={}, uv="unused", toolchain=object(),
+            candidate, third_party={}, uv="unused", toolchain=cast(ToolchainLock, object()),
             health_module="app", limits=source.WheelLimits(1, 1, 1, 1, 1, 1, 1),
             max_wheels=1, max_total_bytes=1, max_snapshot_bytes=1,
             deadline=time.monotonic() + 5,
@@ -439,7 +467,9 @@ def test_source_and_target_fences_refuse_before_exposing_candidate(tmp_path, mon
             pytest.fail("changed source was exposed to a lifecycle owner")
 
 
-def test_owned_build_root_is_canonical_before_creating_wheel_paths(tmp_path, monkeypatch):
+def test_owned_build_root_is_canonical_before_creating_wheel_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from build_toolchain_lock import ToolchainLock
     from runtime_source_lock import SourceLockCandidate
 
@@ -449,7 +479,7 @@ def test_owned_build_root_is_canonical_before_creating_wheel_paths(tmp_path, mon
     manifest.write_text('[project]\nname="app"\nversion="1"\n', encoding="utf-8")
     record = {
         "requirements_sha256": "sha256:" + hashlib.sha256(b"").hexdigest(),
-        "retained_source_sha256": "sha256:" + source.runtime.fingerprint_source((manifest,)),
+        "retained_source_sha256": "sha256:" + getattr(source, "runtime").fingerprint_source((manifest,)),
         "extras": [], "pins": [], "target": {"environment": dict(_ENVIRONMENT)},
     }
     candidate = SourceLockCandidate(json.dumps(record).encode(), b"", payload)
@@ -457,18 +487,18 @@ def test_owned_build_root_is_canonical_before_creating_wheel_paths(tmp_path, mon
     canonical.mkdir()
 
     class OwnedAlias:
-        def resolve(self, *, strict):
+        def resolve(self, *, strict: bool) -> Path:
             assert strict is True
             return canonical
 
-        def __truediv__(self, name):
+        def __truediv__(self, name: str) -> NoReturn:
             pytest.fail("owned temporary root was not canonicalized")
 
     @contextmanager
-    def temporary(_parent):
+    def temporary(_parent: Path | None) -> Iterator[str]:
         yield str(canonical)
 
-    def build(_project, output, **_options):
+    def build(_project: Path, output: Path, **_options: Any) -> NoReturn:
         assert output == canonical / "built"
         raise RuntimeError("canonical build path observed")
 
@@ -490,7 +520,7 @@ def test_owned_build_root_is_canonical_before_creating_wheel_paths(tmp_path, mon
             pytest.fail("test builder must stop before construction")
 
 
-def test_compressed_filename_tags_refuse_before_packaging_expansion(monkeypatch):
+def test_compressed_filename_tags_refuse_before_packaging_expansion(monkeypatch: pytest.MonkeyPatch) -> None:
     import runtime_profile
     from installer_wheel_inputs import WheelError
 
@@ -505,7 +535,9 @@ def test_compressed_filename_tags_refuse_before_packaging_expansion(monkeypatch)
         )
 
 
-def test_source_digest_refuses_nonordinary_input_before_open(tmp_path, monkeypatch):
+def test_source_digest_refuses_nonordinary_input_before_open(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from installer_wheel_inputs import WheelError
 
     path = tmp_path / "directory-1.0-py3-none-any.whl"
@@ -516,13 +548,13 @@ def test_source_digest_refuses_nonordinary_input_before_open(tmp_path, monkeypat
 
 
 @pytest.mark.parametrize("returncode", [0, 2])
-def test_deadline_build_uses_existing_installer_supervision(monkeypatch, returncode):
+def test_deadline_build_uses_existing_installer_supervision(monkeypatch: pytest.MonkeyPatch, returncode: int) -> None:
     import os
     import sys
     import build_python_artifacts as builder
 
-    calls = []
-    def owned(command, **options):
+    calls: list[tuple[list[str], dict[str, Any]]] = []
+    def owned(command: list[str], **options: Any) -> subprocess.CompletedProcess[str]:
         assert os.fstat(options["construction_fd"])
         calls.append((command, options))
         if returncode:
@@ -531,7 +563,7 @@ def test_deadline_build_uses_existing_installer_supervision(monkeypatch, returnc
     procutil = SimpleNamespace()
     monkeypatch.setitem(sys.modules, "agent_procutil", procutil)
     monkeypatch.setitem(sys.modules, "installer_engine_process", SimpleNamespace(run_owned=owned))
-    monkeypatch.setattr(builder.subprocess, "run", lambda *_a, **_k: pytest.fail("unsupervised build"))
+    monkeypatch.setattr(subprocess, "run", lambda *_a, **_k: pytest.fail("unsupervised build"))
     result = builder._build_child(["selected-uv", "build"], {"SAFE": "value"}, time.monotonic() + 5)
     assert result.stdout == "built"
     assert result.returncode == returncode
@@ -542,14 +574,14 @@ def test_deadline_build_uses_existing_installer_supervision(monkeypatch, returnc
     assert calls[0][1]["deadline"] > time.monotonic()
 
 
-def test_marker_probe_disables_site_initialization(monkeypatch):
+def test_marker_probe_disables_site_initialization(monkeypatch: pytest.MonkeyPatch) -> None:
     import build_toolchain_lock as locks
 
-    calls = []
-    def run(command, **options):
+    calls: list[tuple[list[str], dict[str, Any]]] = []
+    def run(command: list[str], **options: Any) -> subprocess.CompletedProcess[str]:
         calls.append((command, options))
         return subprocess.CompletedProcess(command, 0, json.dumps(_ENVIRONMENT), "")
-    monkeypatch.setattr(locks.subprocess, "run", run)
+    monkeypatch.setattr(subprocess, "run", run)
     assert locks._query_marker_environment(Path("selected-python"), deadline=time.monotonic() + 5) == _ENVIRONMENT
     assert calls[0][0][1:4] == ["-I", "-S", "-c"]
     assert 0 < calls[0][1]["timeout"] <= 5
@@ -557,8 +589,8 @@ def test_marker_probe_disables_site_initialization(monkeypatch):
 
 @pytest.mark.parametrize("layout", ["application", "legacy", "missing-application-resource"])
 def test_numbered_constructor_retains_the_selected_bootstrap_without_payload_fallback(
-    tmp_path, monkeypatch, layout,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, layout: str,
+) -> None:
     from contextlib import nullcontext
     import shutil
     import installer_engine as engine
@@ -574,6 +606,7 @@ def test_numbered_constructor_retains_the_selected_bootstrap_without_payload_fal
     helpers = (
         "runtime_launcher.py", "versioned_runtime.py", "versioned_runtime_leases.py",
         "versioned_runtime_source.py", "versioned_runtime_construction.py",
+        "versioned_runtime_identity.py", "versioned_runtime_fingerprint.py",
         "versioned_runtime_publication.py",
         "versioned_runtime_cache.py", "daemon_instance_runtime.pyz",
     )
@@ -588,35 +621,35 @@ def test_numbered_constructor_retains_the_selected_bootstrap_without_payload_fal
         deadline = time.monotonic() + 30
         distributions = ()
 
-        def verify(self):
+        def verify(self) -> None:
             pass
 
-        def receipt(self):
+        def receipt(self) -> dict[str, object]:
             return {}
 
     class HealthBoundaryReached(Exception):
         pass
 
-    def construct(inputs, slot, *_args):
+    def construct(inputs: Any, slot: Path, *_args: Any) -> Path:
         slot.mkdir(parents=True, exist_ok=True)
         if application is not None:
             shutil.copytree(inputs.application / "runtime", slot / "runtime")
         return slot / "fixture-python"
 
-    health_calls = []
+    health_calls: list[bool] = []
 
-    def verify(*_args, **_kwargs):
+    def verify(*_args: Any, **_kwargs: Any) -> NoReturn:
         health_calls.append(True)
         raise HealthBoundaryReached
 
     monkeypatch.setattr(engine, "WheelInstallInputs", ObservedWheels)
-    monkeypatch.setattr(engine.runtime, "construction_lease", lambda *_a, **_k: nullcontext(123))
+    monkeypatch.setattr(getattr(engine, "runtime"), "construction_lease", lambda *_a, **_k: nullcontext(123))
     monkeypatch.setattr(engine, "_retained_inputs", lambda inputs, *_a, **_k: nullcontext(inputs))
     monkeypatch.setattr(engine, "_construct", construct)
     monkeypatch.setattr(engine, "_input_origins", lambda *_a: {})
     monkeypatch.setattr(engine, "_verify_installed", verify)
     monkeypatch.setattr(
-        engine.runtime, "mark_complete",
+        getattr(engine, "runtime"), "mark_complete",
         lambda *_a, **_k: pytest.fail("unverified fixture must not become complete"),
     )
     root = tmp_path / "runtime"
@@ -624,7 +657,7 @@ def test_numbered_constructor_retains_the_selected_bootstrap_without_payload_fal
     with pytest.raises(FileNotFoundError if missing else HealthBoundaryReached):
         with engine.numbered_candidate(
             root, "1.2.3", plugin=plugin, uv=tmp_path / "uv", base_python=tmp_path / "python",
-            health_module="fixture", local_packages=(), wheel_inputs=ObservedWheels(),
+            health_module="fixture", local_packages=(), wheel_inputs=cast(WheelInstallInputs, ObservedWheels()),
             application=application, process_retention=True, expected_payload_hash="a" * 64,
         ):
             pytest.fail("unqualified fixture must not become a ready candidate")

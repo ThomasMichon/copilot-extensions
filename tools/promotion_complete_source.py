@@ -7,8 +7,11 @@ import json
 import re
 import zipfile
 from collections import deque
+from typing import Any, TypeAlias
 
 from promotion_unit_contract import MAX_PACKET_FILE_BYTES
+
+_Tree: TypeAlias = dict[str, "_Tree | tuple[str, bytes]"]
 
 SCHEMA = "copilot-extensions.complete-promotion-source"
 MAX_SOURCE_BYTES = 512 << 20
@@ -29,7 +32,7 @@ def canonical_bytes(value: object) -> bytes:
     return (json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False) + "\n").encode()
 
 
-def validate_identity(identity: dict) -> None:
+def validate_identity(identity: dict[str, Any]) -> None:
     if not isinstance(identity, dict) or set(identity) != IDENTITY_FIELDS or any(
         not isinstance(value, str) or not re.fullmatch(
             r"[0-9a-f]{64}" if key.endswith(("sha256", "digest")) else r"[0-9a-f]{40}", value,
@@ -38,7 +41,7 @@ def validate_identity(identity: dict) -> None:
         raise ValueError("invalid complete-source generation identity")
 
 
-def source_asset_name(kind: str, identity: dict, digest: str) -> str:
+def source_asset_name(kind: str, identity: dict[str, Any], digest: str) -> str:
     validate_identity(identity)
     if kind not in ("complete-source", "source-manifest") or not re.fullmatch(r"[0-9a-f]{64}", digest):
         raise ValueError("invalid complete-source asset identity")
@@ -72,6 +75,7 @@ def _validate_links(links: dict[str, str]) -> None:
     canonical = {name.casefold(): name for name in links}
     for name in links:
         pending = deque([*name.split("/")[:-1], *targets[name]])
+        resolved: list[str]
         resolved, hops = [], 1
         while pending:
             part = pending.popleft()
@@ -95,9 +99,13 @@ def _validate_links(links: dict[str, str]) -> None:
                 pending.extendleft(reversed(targets[link]))
 
 
-def _inventory(files: dict[str, tuple[str, bytes]]) -> tuple[list[dict], str]:
+def _inventory(files: dict[str, tuple[str, bytes]]) -> tuple[list[dict[str, Any]], str]:
     if not isinstance(files, dict) or not 1 <= len(files) <= MAX_SOURCE_FILES:
         raise ValueError("complete-source inventory is empty or oversized")
+    root: _Tree
+    aliases: dict[str, str]
+    inventory: list[dict[str, Any]]
+    links: dict[str, str]
     root, aliases, inventory, links, total = {}, {}, [], {}, 0
     for name, entry in sorted(files.items()):
         parts = _path(name)
@@ -120,9 +128,10 @@ def _inventory(files: dict[str, tuple[str, bytes]]) -> tuple[list[dict], str]:
                     raise ValueError("conflicting complete-source file and directory")
                 node[part] = (mode, _object("blob", raw))
             else:
-                node = node.setdefault(part, {})
-                if not isinstance(node, dict):
+                child = node.setdefault(part, {})
+                if not isinstance(child, dict):
                     raise ValueError("complete-source file is an ancestor")
+                node = child
         if mode == "120000":
             if not 0 < len(raw) <= MAX_LINK_BYTES:
                 raise ValueError("complete-source link exceeds its byte bound")
@@ -137,11 +146,11 @@ def _inventory(files: dict[str, tuple[str, bytes]]) -> tuple[list[dict], str]:
             "path": name, "mode": mode, "size": len(raw), "sha256": hashlib.sha256(raw).hexdigest(),
         })
 
-    def tree(node: dict) -> bytes:
-        records = []
+    def tree(node: _Tree) -> bytes:
+        records: list[tuple[bytes, bytes]] = []
         for name, value in node.items():
             directory = isinstance(value, dict)
-            mode, digest = ("40000", tree(value)) if directory else value
+            mode, digest = ("40000", tree(value)) if isinstance(value, dict) else value
             encoded = name.encode("utf-8")
             records.append((encoded + (b"/" if directory else b""), mode.encode() + b" " + encoded + b"\0" + digest))
         return _object("tree", b"".join(record for _key, record in sorted(records)))
@@ -150,7 +159,7 @@ def _inventory(files: dict[str, tuple[str, bytes]]) -> tuple[list[dict], str]:
     return inventory, tree(root).hex()
 
 
-def tree_archive(files: dict[str, tuple[str, bytes]], *, tree: str) -> tuple[bytes, list[dict]]:
+def tree_archive(files: dict[str, tuple[str, bytes]], *, tree: str) -> tuple[bytes, list[dict[str, Any]]]:
     """Ignore export attributes: every admitted Git blob is retained without substitution."""
     inventory, actual_tree = _inventory(files)
     if actual_tree != tree:
@@ -169,7 +178,9 @@ def tree_archive(files: dict[str, tuple[str, bytes]], *, tree: str) -> tuple[byt
     return raw, inventory
 
 
-def source_archive(files: dict[str, tuple[str, bytes]], *, identity: dict) -> tuple[bytes, dict]:
+def source_archive(
+    files: dict[str, tuple[str, bytes]], *, identity: dict[str, Any],
+) -> tuple[bytes, dict[str, Any]]:
     validate_identity(identity)
     raw, inventory = tree_archive(files, tree=identity["tree"])
     manifest = {
@@ -181,7 +192,9 @@ def source_archive(files: dict[str, tuple[str, bytes]], *, identity: dict) -> tu
     return raw, manifest
 
 
-def verify_source_archive(raw: bytes, manifest: dict, *, identity: dict) -> dict[str, tuple[str, bytes]]:
+def verify_source_archive(
+    raw: bytes, manifest: dict[str, Any], *, identity: dict[str, Any],
+) -> dict[str, tuple[str, bytes]]:
     """Prove complete reconstruction without extracting files or following source links."""
     validate_identity(identity)
     if (
@@ -199,7 +212,7 @@ def verify_source_archive(raw: bytes, manifest: dict, *, identity: dict) -> dict
 
 
 def verify_tree_archive(
-    raw: bytes, inventory: list[dict], *, tree: str,
+    raw: bytes, inventory: list[dict[str, Any]], *, tree: str,
 ) -> dict[str, tuple[str, bytes]]:
     """Read a bounded full tree as data, independently of its admission profile."""
     if (
@@ -208,6 +221,7 @@ def verify_tree_archive(
         or len(canonical_bytes(inventory)) > MAX_PACKET_FILE_BYTES
     ):
         raise ValueError("invalid complete-source archive inventory or byte bound")
+    files: dict[str, tuple[str, bytes]]
     files, total = {}, 0
     try:
         with zipfile.ZipFile(io.BytesIO(raw)) as archive:

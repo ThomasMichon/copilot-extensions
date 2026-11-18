@@ -17,7 +17,7 @@ _SPEC.loader.exec_module(sync_bootstrap_killswitch)
 
 
 @pytest.fixture
-def fake_repo(tmp_path, monkeypatch):
+def fake_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     canonical_dir = tmp_path / "libs" / "bootstrap-killswitch"
     canonical_dir.mkdir(parents=True)
     (canonical_dir / "bootstrap-killswitch-guard.sh").write_text("canonical sh\n", encoding="utf-8")
@@ -26,7 +26,7 @@ def fake_repo(tmp_path, monkeypatch):
     (canonical_dir / "pretool_killswitch.py").write_text("canonical pretool\n", encoding="utf-8")
     for entry, marker in (
         ("plugins/agent-worktrees/scripts/hook_client.py", "switch.is_active()"),
-        ("plugins/copilot-extensions-harness/scripts/copilot-mention-guard.py", "switch.is_active()"),
+        ("plugins/copilot-extensions-maintainer/scripts/copilot-mention-guard.py", "switch.is_active()"),
         ("plugins/agent-machines/src/agent_machines/__main__.py", "pretool_killswitch.register_parser(sub)"),
     ):
         target = tmp_path / entry
@@ -60,7 +60,7 @@ def _mk_non_adopter(repo: Path, name: str) -> Path:
     return plugin_dir
 
 
-def test_adopter_detection_requires_bootstrap_check(fake_repo):
+def test_adopter_detection_requires_bootstrap_check(fake_repo: Path) -> None:
     _mk_adopter(fake_repo, "has-hook")
     _mk_non_adopter(fake_repo, "no-hook")
     plugins = sync_bootstrap_killswitch._adopter_plugins()
@@ -68,7 +68,7 @@ def test_adopter_detection_requires_bootstrap_check(fake_repo):
     assert names == ["has-hook"]
 
 
-def test_sync_writes_both_guard_files_for_each_adopter(fake_repo):
+def test_sync_writes_both_guard_files_for_each_adopter(fake_repo: Path) -> None:
     scripts = _mk_adopter(fake_repo, "agent-example")
     rc = sync_bootstrap_killswitch.main([])
     assert rc == 0
@@ -76,7 +76,7 @@ def test_sync_writes_both_guard_files_for_each_adopter(fake_repo):
     assert (scripts / "bootstrap-killswitch-guard.ps1").read_text() == "canonical ps1\n"
 
 
-def test_standalone_manager_ships_controllers_without_a_bootstrap_hook(fake_repo):
+def test_standalone_manager_ships_controllers_without_a_bootstrap_hook(fake_repo: Path) -> None:
     _mk_adopter(fake_repo, "agent-example")
     manager = fake_repo / "worktree-manager"
     manager.mkdir()
@@ -92,21 +92,21 @@ def test_standalone_manager_ships_controllers_without_a_bootstrap_hook(fake_repo
     assert sync_bootstrap_killswitch.main(["--check"]) == 1
 
 
-def test_plugin_only_fixture_does_not_create_a_manager(fake_repo):
+def test_plugin_only_fixture_does_not_create_a_manager(fake_repo: Path) -> None:
     _mk_adopter(fake_repo, "agent-example")
     assert sync_bootstrap_killswitch.main([]) == 0
     assert not (fake_repo / "worktree-manager").exists()
 
 
 @pytest.mark.skipif(os.name == "nt", reason="Windows does not expose POSIX executable mode bits")
-def test_sh_guard_is_made_executable(fake_repo):
+def test_sh_guard_is_made_executable(fake_repo: Path) -> None:
     scripts = _mk_adopter(fake_repo, "agent-example")
     sync_bootstrap_killswitch.main([])
     mode = (scripts / "bootstrap-killswitch-guard.sh").stat().st_mode
     assert mode & 0o111
 
 
-def test_check_passes_when_already_in_sync(fake_repo, capsys):
+def test_check_passes_when_already_in_sync(fake_repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     _mk_adopter(fake_repo, "agent-example")
     assert sync_bootstrap_killswitch.main([]) == 0
     capsys.readouterr()
@@ -116,7 +116,7 @@ def test_check_passes_when_already_in_sync(fake_repo, capsys):
     assert "in sync" in out.out
 
 
-def test_check_fails_when_drifted(fake_repo, capsys):
+def test_check_fails_when_drifted(fake_repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     scripts = _mk_adopter(fake_repo, "agent-example")
     sync_bootstrap_killswitch.main([])
     (scripts / "bootstrap-killswitch-guard.sh").write_text("drifted!\n", encoding="utf-8")
@@ -127,7 +127,7 @@ def test_check_fails_when_drifted(fake_repo, capsys):
     assert "drifted" in out.err
 
 
-def test_check_fails_when_missing(fake_repo, capsys):
+def test_check_fails_when_missing(fake_repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     _mk_adopter(fake_repo, "agent-example")
 
     rc = sync_bootstrap_killswitch.main(["--check"])
@@ -136,7 +136,7 @@ def test_check_fails_when_missing(fake_repo, capsys):
     assert "missing" in out.err
 
 
-def test_check_fails_when_call_site_not_wired(fake_repo, capsys):
+def test_check_fails_when_call_site_not_wired(fake_repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     _mk_adopter(fake_repo, "agent-example", wired=False)
     sync_bootstrap_killswitch.main([])
     capsys.readouterr()
@@ -147,7 +147,7 @@ def test_check_fails_when_call_site_not_wired(fake_repo, capsys):
     assert "agent-example" in out.err
 
 
-def test_check_passes_when_call_site_wired(fake_repo, capsys):
+def test_check_passes_when_call_site_wired(fake_repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     _mk_adopter(fake_repo, "agent-example", wired=True)
     sync_bootstrap_killswitch.main([])
     capsys.readouterr()
@@ -164,8 +164,8 @@ def test_check_passes_when_call_site_wired(fake_repo, capsys):
      "New-Item state"),
 ])
 def test_inert_compatibility_hook_requires_guard_after_any_added_command(
-    fake_repo, hook, body, effect,
-):
+    fake_repo: Path, hook: str, body: str, effect: str,
+) -> None:
     scripts = _mk_adopter(fake_repo, "agent-example")
     path = scripts / hook
     path.write_text(body, encoding="utf-8")
@@ -176,7 +176,7 @@ def test_inert_compatibility_hook_requires_guard_after_any_added_command(
     assert sync_bootstrap_killswitch.main(["--check"]) == 1
 
 
-def test_index_metadata_stamp_requires_guard_call_site(fake_repo, capsys):
+def test_index_metadata_stamp_requires_guard_call_site(fake_repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     _mk_adopter(fake_repo, "agent-index", wired=False)
     sync_bootstrap_killswitch.main([])
     capsys.readouterr()
@@ -188,7 +188,7 @@ def test_index_metadata_stamp_requires_guard_call_site(fake_repo, capsys):
     assert "does not call its vendored guard" in out.err
 
 
-def test_write_mode_warns_but_does_not_fail_on_call_site_gap(fake_repo, capsys):
+def test_write_mode_warns_but_does_not_fail_on_call_site_gap(fake_repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     _mk_adopter(fake_repo, "agent-example", wired=False)
     rc = sync_bootstrap_killswitch.main([])
     out = capsys.readouterr()
@@ -196,7 +196,7 @@ def test_write_mode_warns_but_does_not_fail_on_call_site_gap(fake_repo, capsys):
     assert "does not call its vendored guard" in out.err
 
 
-def test_main_fails_when_canonical_missing(tmp_path, monkeypatch):
+def test_main_fails_when_canonical_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     plugins_dir = tmp_path / "plugins"
     plugins_dir.mkdir()
     monkeypatch.setattr(sync_bootstrap_killswitch, "REPO", tmp_path)
@@ -207,10 +207,12 @@ def test_main_fails_when_canonical_missing(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("target", [
     "plugins/agent-worktrees/scripts/pretool_killswitch.py",
-    "plugins/copilot-extensions-harness/scripts/pretool_killswitch.py",
+    "plugins/copilot-extensions-maintainer/scripts/pretool_killswitch.py",
     "plugins/agent-machines/src/agent_machines/pretool_killswitch.py",
 ])
-def test_pretool_helper_copies_are_checked_for_drift(fake_repo, capsys, target):
+def test_pretool_helper_copies_are_checked_for_drift(
+    fake_repo: Path, capsys: pytest.CaptureFixture[str], target: str,
+) -> None:
     _mk_adopter(fake_repo, "agent-example")
     assert sync_bootstrap_killswitch.main([]) == 0
     path = fake_repo / target
@@ -222,10 +224,12 @@ def test_pretool_helper_copies_are_checked_for_drift(fake_repo, capsys, target):
 
 @pytest.mark.parametrize("entry", [
     "plugins/agent-worktrees/scripts/hook_client.py",
-    "plugins/copilot-extensions-harness/scripts/copilot-mention-guard.py",
+    "plugins/copilot-extensions-maintainer/scripts/copilot-mention-guard.py",
     "plugins/agent-machines/src/agent_machines/__main__.py",
 ])
-def test_pretool_control_must_be_wired_not_merely_copied(fake_repo, capsys, entry):
+def test_pretool_control_must_be_wired_not_merely_copied(
+    fake_repo: Path, capsys: pytest.CaptureFixture[str], entry: str,
+) -> None:
     _mk_adopter(fake_repo, "agent-example")
     assert sync_bootstrap_killswitch.main([]) == 0
     (fake_repo / entry).write_text("no call site", encoding="utf-8")

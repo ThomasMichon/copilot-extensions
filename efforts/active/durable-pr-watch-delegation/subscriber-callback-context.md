@@ -1,0 +1,364 @@
+# Subscriber-owned callback working directory
+
+Back to the [canonical effort](README.md#subscriber-callback-context-and-truthful-legacy-outcomes-from-5947).
+
+**Status:** Original contract reviewed and merged in #13228. Subsequent
+operator-selected map/version amendment is proposed for review; local runtime
+WIP and historical-reader audit do not resolve transition/consumer acceptance.
+**Scope:** P5947-3/4, V5947-3/4 and G5947-3/4. This does not complete those
+items, expiry acceptance, M1, or the parent effort.
+**Vision reconciliation:** Closes the existing
+[centralized watcher and registrar](../../../visions/plugins/agent-pull-requests/README.md#centralized-watcher-and-registrar)
+intent while preserving independent subscriber context. Applies the
+[service-contract evolution pattern](../../../docs/patterns/service-contract-evolution.md).
+No new supervisor, callback destination or remote-execution interface.
+
+## Operator direction
+
+The operator selected this design after the historical-reader risk was
+explained, verbatim:
+
+> Operator decision: avoid assigning singleton slots. Store a map of subscription ids to callback commands (each entry carrying its cwd), and add an explicit contract version to the state so older engines refuse/leave untouched any data with a newer version instead of reading it as empty or overwriting it. Proceed with that design through normal review and CI.
+
+This supersedes the proposed choice between governed-only initial support and
+legacy-home support. It does not select a governed-only restriction. One
+existing watch owner continues to multiplex independent subscriptions; neither
+callback directories nor compatibility protection allocate singleton slots.
+The map replaces the collection encoding, not the existing observation,
+delivery, storage, launch or installation owners.
+
+The realization details below are **agent-recommended**. Normal review and CI
+are authorized source procedures, not installation, service replacement,
+credential, fleet rollout or retained-resource authority. The parent effort
+and its other gates remain open.
+
+## Current boundary and the compatibility gap
+
+The existing local callback owner is `WatchDaemon`, not the repository-cache
+service's pull/replay API. The relevant source seams are:
+
+| Seam | Current behavior |
+|------|------------------|
+| `watch_subscription.subscribe` | Negotiates acknowledged/native capabilities; does not capture caller cwd. |
+| `watch_notification.validate_notify` | Acknowledged notify accepts only `argv` and `timeout`; legacy notify tolerates other keys. |
+| `watch_notification.default_notify` | Neither callback launch path supplies cwd. An absolute executable does not fix a relative script argument. |
+| `watch_state.RegistryState` | Serializes per-subscriber notify. Legacy restore can ignore unknown entry fields; adding a field is not a downgrade fence. |
+| `watch_storage.read_subscriptions_state` | Requires a top-level JSON list. It rejects a versioned object before registry restoration. |
+| `WatchDaemon._reattach_from_disk` / `reload_state` | Reads before resuming callbacks/pollers; lifecycle reload builds a separate strict registry before installing it. |
+| `agent_procutil.owned_process.run_owned` | Already accepts explicit cwd and owns bounded child lifetime. No process-runner API extension is needed. |
+
+This is source analysis of the current boundary, not a passed mixed-version
+test or a claim that every historically released reader has the same behavior.
+Implementation must enumerate and exercise the actually supported rollback
+readers. Neither a package-version comparison nor an unknown legacy field
+establishes enforcement.
+
+### Historical-reader finding: activation remains blocked
+
+The local history identifies an earlier inline durable reader (last changed
+in `24b79724ac`, #5691, following #5618) that returns an empty collection for
+any non-list JSON document. The later extracted reader (`a936d3b39f`, #6019)
+rejects non-lists; `3c62c9442c` (#7160) adds the explicit-root/governed
+reader family. These are source lineage references, not a newly invented
+support floor or a complete native qualification result.
+
+The inline family can treat the proposed envelope as no subscriptions and
+subsequently overwrite it. It also predates explicit notification-protocol
+refusal. The envelope alone therefore does not establish safety across all
+historical legacy-home executors. Provider expansion is local WIP; do not
+publish its capability or enable context writes until the applicable support
+window and transition protection have cleared review. Existing callbacks,
+installation readiness and current selection remain unchanged.
+
+An unpublished local prototype audit reproduces that empty
+cold-start/overwrite with the actual historical daemon source and exercises
+pre-effect cold refusal for the extracted readers plus governed reload refusal.
+It substitutes their unrelated imports with the current source closure; it is
+not qualification of complete historical released installations or the whole
+support window. The same Windows packet runs real relative callbacks in two
+retained directories for both delivery modes. All five cases pass, documenting
+the gap rather than crediting the inline reader as safe. The focused current
+provider/legacy suite passes 213 cases; its six changed Python files pass
+whole-file strict checking for Linux and Windows plus Ruff. That prototype and
+its audit tests are not delivered by this design-only amendment. Native Linux, complete
+historical-runtime/transition protection and client migration remain open.
+
+The operator has now selected the per-subscription map and explicit version
+refusal above, rather than a governed-only initial scope. A version field does
+not retroactively change the inline reader's executable code. The revised
+design must therefore establish and qualify version-aware admission through
+the existing owner/activation boundary before enabling the new writes. Do not
+strip state, block ordinary runtime replacement, or declare that unsafe family
+unsupported merely to avoid qualification.
+
+## Selected contract
+
+### Caller capture and legacy selection
+
+Expand the provider first. After that expansion is qualified, migrate the
+subscribe CLI in a separate source change: for callbacks with a nonempty argv,
+capture the registering process's absolute current directory once, before
+registration. Do not use the daemon's state directory, executable directory,
+the daemon-starter's directory, or another subscriber's directory.
+
+The migrated CLI defaults to caller context. A proposed strict
+`--notify-context caller|legacy` selector makes the deliberate compatibility
+choice explicit; these flags are **not implemented by this proposal**.
+`legacy` preserves the old request/response and execution semantics and sends
+no cwd fields or new protocol. It is suitable only when the caller's callback
+is genuinely independent of cwd and its executable and file arguments use
+absolute paths. Absolute paths alone do not prove that the callback does not
+read relative configuration or data. No automatic legacy fallback is allowed
+when caller context is required.
+
+An empty/no-callback registration retains its current meaning and does not
+acquire a cwd requirement. Existing callers, including existing Worktrees
+callback producers, retain their wire contract until individually migrated.
+Do not silently migrate an independent consumer as part of this lane.
+Direct local registration callers may supply their own absolute cwd through
+the same negotiated contract. The CLI's structured notify input must not
+silently override its captured caller cwd; conflicting input is rejected.
+No shell interpolation, environment capture or daemon-wide `chdir`.
+
+### Runtime capability and wire admission
+
+The actual running owner advertises `subscriber_cwd/v1` through existing
+health only when it can validate, persist, restore and execute that contract.
+The new CLI requires it before sending cwd. Missing support produces a
+specific unsupported-subscriber-cwd error before registration, with the
+explicit legacy option described as a semantic choice, not a retry.
+
+For caller-context requests, `notify.cwd` is a nonempty absolute native path
+without NUL. The receiver validates it and requires an existing directory at
+registration. It does not create, repair or substitute a directory. Validation
+uses the owner host's path rules; this remains a same-host local callback
+contract, not a portable or remotely forwarded path.
+
+Two wire forms retain the delivery distinction:
+
+| Delivery | Required wire | Prior-owner protection |
+|----------|---------------|------------------------|
+| Legacy one-attempt | `notification_protocol: "legacy_callback_cwd/v1"` plus `notify.cwd` | The current prior owner rejects an unrecognized explicit notification protocol before registry mutation or provider fetch. |
+| Acknowledged | Existing `notification_protocol: "acknowledged_notifications/v1"` plus `notify.cwd` | The current strict prior notify validator rejects cwd; ACK/event identity is not versioned or reinterpreted. |
+
+`legacy_callback_cwd/v1` means best-effort delivery with required cwd, **not**
+acknowledged delivery. The receiver must not infer `acknowledged=True` merely
+from the presence of a protocol key, as the present restore path does.
+Unrecognized explicit protocols and invalid combinations refuse before
+registration, fetch, persistence or callback effects. There is no timeout-field
+sentinel, ignored top-level extension or forced ACK migration.
+
+Success echoes `callback_context_protocol: "subscriber_cwd/v1"` and the
+accepted cwd. Acknowledged responses additionally retain their existing
+notification protocol and nonempty registration identity; legacy responses
+echo their new legacy protocol without inventing an ACK identity. A missing
+or mismatched echo after a possibly accepted registration is ambiguous:
+reconcile the original subscriber/registration through its owner. Do not
+replay, cancel a replacement, or retry the legacy form automatically.
+Health is discovery, not a lock on the executing generation; prior-owner
+wire refusal and response validation must also cover owner replacement
+between discovery and registration.
+
+### Persistence and rollback
+
+Use the existing `watch-subscriptions.json` and atomic-write owner. New readers
+continue to accept the existing list with its original meanings. The
+operator-selected new representation is an explicitly versioned map:
+
+```json
+{
+  "schema": "agent-pull-requests.watch-subscriptions",
+  "version": 2,
+  "subscriptions": {
+    "<subscription-id>": {
+      "repo": "example/project",
+      "number": 42,
+      "subscriber_id": "consumer-1",
+      "until": ["merged"],
+      "notify": {
+        "argv": ["callback", "relative-script"],
+        "cwd": "<absolute-native-directory>"
+      },
+      "notification_protocol": "legacy_callback_cwd/v1",
+      "baseline": null,
+      "remaining_timeout": null
+    }
+  }
+}
+```
+
+The example's path and identity are placeholders, not actual registration
+inputs. Map keys identify individual subscriptions, not singleton callback or
+installation slots. Each value carries its callback command/cwd and the
+existing target, baseline, deadline and delivery metadata. Use a stable
+per-registration storage identity; caller-facing subscriber labels may repeat
+on different targets and must not overwrite one another. Retain the identity
+across restart and retry. A legacy storage key is not an ACK or event identity.
+Do not infer acknowledged delivery from a map key or the existence of cwd.
+Reject duplicate/malformed keys, inconsistent identities and malformed values
+before installing any entry.
+
+Version 2 contains the complete subscription map, not a second store.
+It is required whenever any retained subscription has caller-context
+semantics, whether legacy, acknowledged, pending, or continuous. Each such
+entry retains `notify.cwd` and the selected notification protocol. The
+envelope and per-entry validation reject unknown versions and inconsistent
+context/protocol combinations; do not skip a malformed entry and resume
+others. Validate the entire candidate collection before installing it or
+starting effects. The in-memory restore API must enforce the same context
+rules, not merely rely on the storage wrapper.
+
+Retain all existing baseline/deadline, original registration/event identity,
+pending immutable payload, queued event, attempts and next-attempt metadata.
+Cwd belongs to the subscription, not to an added field in the immutable
+event payload. Restart/retry uses that same retained subscription context;
+re-registration is not a mechanism for rewriting a pending event.
+
+A writer may keep the old list format while no record requires context.
+Writing a context-bearing collection must atomically replace the whole list
+with version 2, using the existing definite-failure/uncertain-commit recovery
+semantics. No context sidecar: an unaware writer could ignore it and overwrite
+or deliver the associated subscription without context.
+
+Contract-aware engines compare the explicit state contract version before
+restoring entries, fetching, scheduling callbacks or writing. An unsupported
+newer version is **explicit pre-effect refusal**, with byte-for-byte unchanged
+state, not an empty collection or a best-effort partial import. Unknown
+schema/version combinations also refuse. Existing strict extracted readers
+reject a top-level object before returning any entries; the historical inline
+family does not. Its current audit result is a transition blocker, not safe
+rollback credit.
+
+**Version-awareness expansion and transition protection precede writes.**
+First release the version-aware owner/activation guard through the existing
+launch and state-adoption boundaries, without enabling new context writes or
+caller defaults. The selected executor must support the retained state
+contract before it can consume that state or receive context registrations.
+Missing support from an actual historical executor is not guessed support.
+Use contract support from the exact executing candidate, not package-version
+comparisons, a new payload's stamp or a callback/installation slot assignment.
+Keep this enforcement separate from installation readiness/current selection:
+an incompatible state executor refuses activation while installation may
+complete, preserving the state and existing lifecycle custody.
+
+Before a later release enables version-2 writes, prove that the ordinary
+supported startup, rollback and health/register replacement paths cannot
+expose the map or context registrations to an unaware inline executor. If the
+existing boundaries cannot enforce that, keep writes disabled and amend the
+transition design through review; a version tag alone is not the guard. Do not
+silently retire the inline family or assume that a completed source PR updates
+an installed launcher. Installed adoption retains its separate authority.
+Include a pre-version owner already holding writer custody: a cold-reader check
+does not stop a previously admitted writer from replacing newer state. Preserve
+that owner's actual custody and require the existing guarded transition, not
+an unverified stale-owner deletion or a second writer.
+
+The intended supported rollback result for context-bearing state remains
+**explicit pre-effect refusal**, not successful old-owner delivery.
+Qualify that result through the real startup and governed reload boundaries,
+not only by calling a JSON parser. Preserve the file bytes and pending event;
+do not reset, rewrite to an empty list, downgrade a protocol, start a poller,
+invoke a callback or activate an incompatible successor. Existing installation
+custody/recovery owns a failed transition; this proposal does not claim that
+reader refusal itself restores a route or permits restarting another owner.
+This is refusal to consume incompatible callback state, not an installer
+replacement veto: preserve
+[authoritative runtime replacement](../../../visions/installer/README.md#authoritative-runtime-replacement).
+Incoming installation readiness and current selection remain distinct from
+state activation and outgoing retirement. Retain the subscription state for
+a compatible executor; do not make installation success depend on repairing
+an incumbent or cleaning up its retained resources.
+
+New readers continue to restore old lists with their original meanings. If
+the last context-bearing subscription is explicitly removed through normal
+admission, a complete remaining snapshot may again use the old list only if
+no retained pending/queued/context-bearing record is lost. No lossy export or
+automatic stripping to make a rollback pass. Test every schema family in the
+actual supported upgrade/rollback window; if a supported reader does not
+refuse safely, add a reviewed expansion/transition guard before enabling
+context writes. Do not redefine that reader as unsupported to avoid the test.
+
+### Execution and missing directories
+
+Use the existing owned-child runner with explicit `cwd` for new
+caller-context callbacks in both delivery modes. Never change the parent
+process's cwd. Keep the existing timeout, headless launch, bounded cleanup
+and callback concurrency owners. Do not add a subprocess per health check
+or a cwd-resolution daemon.
+
+Directory existence at admission is not a promise of future existence.
+If it disappears or ceases to be a directory, refuse that launch with no
+fallback or directory creation. Preserve the existing sanitized
+`callback_error` outcome: legacy remains one attempt with an inspectable
+unknown result, while acknowledged delivery retains its original durable
+pending event and bounded-backoff retry. A callback may already have effects
+on other launch failures; do not label every error effect-free. The executable
+launch boundary must also handle a directory disappearing after validation.
+
+Keep old no-context callback behavior unchanged. Path values are ordinary
+private local configuration, not credentials: persist only the required
+cwd with existing subscriber metadata, never an environment snapshot,
+credential material, callback output or raw exceptions. Do not expand
+public diagnostic/history fields to disclose callback paths.
+
+## Serial realization and qualification
+
+1. **Expand and qualify version-aware admission first.** Review this amendment,
+   add explicit state contract/version refusal under the existing
+   callback/storage/lifecycle owners, and qualify the actual historical
+   families plus the ordinary startup/activation guard. Do not enable new
+   map/context writes, advertise subscriber-cwd support or migrate callers in
+   this release. Old callers remain unchanged.
+2. **Qualify current/prior transition behavior before client migration.**
+   Record the supported reader versions/contract families and use their
+   actual reader/startup code in isolated fixtures. A mock that rejects an
+   object, or an arbitrarily selected old commit, is not the rollback proof.
+   Exercise cold restore and governed reload, preserving existing
+   writer/route custody on refusal. Fix or guard the actual unsafe family
+   before proceeding. After that prerequisite is released and its required
+   activation protection is qualified, expand the existing provider with the
+   per-subscription map, strict context protocols and explicit-cwd execution.
+   Gate capability advertisement on complete support, not just parsing.
+3. **Migrate the CLI conditionally.** Implement the proposed context selector,
+   default caller capture, actual-health negotiation, strict response
+   validation and ambiguity behavior. Publish the release that establishes
+   provider support separately from the release that enables caller defaults.
+   Keep the explicit legacy baseline; this lane retires no old wire form.
+4. **Resolve the canonical gates only with consumer evidence.** Qualify two
+   subscribers registering from different directories, with relative callback
+   scripts, while the daemon uses a third directory. Prove actual child cwd,
+   persistence/restart, missing-directory outcomes and cleanup for legacy and
+   acknowledged modes. Then resolve P/V/G5947-3/4 as applicable. Installed
+   rollout and unrelated parent/resource gates remain separately authorized.
+
+The focused validation matrix must include:
+
+- Old caller/new owner and explicit sufficient legacy baseline; unchanged
+  legacy stdin/response, no fabricated ACK or new legacy retry.
+- New caller/new owner for both delivery modes; capture once, strict path
+  validation, conflicting structured input, exact response echo and no
+  cross-subscriber cwd inheritance.
+- New caller/prior owner and health/register generation change; required
+  cwd refuses, no registration/fetch/write/callback on definite rejection,
+  and ambiguous responses do not trigger fallback or blind replay.
+- Actual current/prior saved-state restore with mixed old/context entries,
+  pending acknowledged and continuous queued events; byte-for-byte unchanged
+  state and zero effects on refusal, original identities on compatible
+  restart, and unknown/malformed envelope refusal.
+- Version-aware entry/activation refusal for an unaware candidate and the
+  already-running pre-version writer case; no overwrite, implicit owner
+  replacement or new slot allocation. A missing transition guarantee keeps
+  context writes disabled without blocking installation readiness.
+- Definite write failure before scheduling and uncertain post-replacement
+  recovery, retaining the existing atomic persistence owner and no duplicate
+  event or legacy replay.
+- Real child cwd, missing/removed directory, callback timeout and descendant
+  cleanup through existing opt-in contained Windows/Linux process lanes,
+  including any focused smoke subset. Required PR/promotion CI stays unit-only
+  with coverage and no real-child/process smoke fallback; no new fleet-wide
+  or hosted-workflow prerequisite.
+
+No live forge request is necessary to test this local callback contract.
+Use temporary test-owned roots and synthetic snapshots. This proposal grants
+no installation, service replacement, credential action, provider mutation,
+resource cleanup, new hosted run or production consumer activation.

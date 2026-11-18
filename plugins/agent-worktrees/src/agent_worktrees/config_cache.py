@@ -42,7 +42,8 @@ import contextlib
 import contextvars
 import threading
 import time
-from typing import Any, Callable, TypeVar
+from typing import Any, Callable, TypeVar, cast
+from collections.abc import Iterator
 
 _T = TypeVar("_T")
 
@@ -77,7 +78,7 @@ class ConfigCacheSession:
         self._entries: dict[Any, tuple[float, Any]] = {}
 
     @contextlib.contextmanager
-    def scope(self):
+    def scope(self) -> Iterator[ConfigCacheSession]:
         """Make this session the active memoization target on this thread."""
         token = _current_session.set(self)
         try:
@@ -92,7 +93,7 @@ class ConfigCacheSession:
             if hit is not None:
                 stamp, value = hit
                 if self._ttl is None or (now - stamp) < self._ttl:
-                    return value
+                    return cast(_T, value)
         value = compute()
         with self._lock:
             self._entries[key] = (now, value)
@@ -105,7 +106,7 @@ class ConfigCacheSession:
 
 
 @contextlib.contextmanager
-def cached_load_config_scope():
+def cached_load_config_scope() -> Iterator[ConfigCacheSession]:
     """A one-off :class:`ConfigCacheSession` scoped to this ``with`` block.
 
     Memoizes every :func:`memoize_in_scope` call made on THIS thread while
@@ -145,7 +146,9 @@ def memoize_in_scope(
     return session.get_or_compute(key, lambda: fn(*args, **kwargs))
 
 
-def project_scope(cache_for_project, project):
+def project_scope(
+    cache_for_project: Callable[[str], ConfigCacheSession] | None, project: str | None,
+) -> contextlib.AbstractContextManager[ConfigCacheSession | None]:
     """``cache_for_project(project).scope()``, or a no-op when either is absent."""
     if callable(cache_for_project) and project:
         return cache_for_project(project).scope()

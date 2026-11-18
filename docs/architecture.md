@@ -6,6 +6,10 @@ harness or a future-feature catalog. New adopters can start with
 [adoption](adoption.md); the [documentation index](README.md) maps the reading
 path. Exact commands and schemas remain owned by the linked components.
 
+For the execution path rather than the installation layout, see
+[How an automated task runs](agent-lifecycle/README.md): who assigns work,
+where the agent runs, how it returns a result, and who cleans up.
+
 How the plugins fit together: installation topology, runtimes, endpoints, and
 credential relay. Runtime-backed plugins deploy a plugin-owned Python package
 with `uv`, generated payload-local commands, and session command glossaries.
@@ -100,7 +104,8 @@ managed cutover; those remain separate slices of the
 | [visions](../plugins/visions/) | North-star skills (`envisioning`, `visions-setup`) | Marketplace payload (skills + assets) | Loaded on demand when a skill matches; no runtime to install |
 | [context-handoff](../plugins/context-handoff/) | Ambient continuity hook + session **extension** + `/handoff` skill | Marketplace payload (hook, scripts, extension, and skill) | Hook injects a concise owner-marked continuity kernel; extension is auto-discovered from the enabled plugin's `extensions/` dir; no copy to `~/.copilot/extensions/`, no deploy manifest |
 | [customizing-copilot](../plugins/customizing-copilot/) | Customization and CLI-diagnostics skills (authoring skills, sub-agents, MCP servers, plugins, harnesses, review, startup hangs, module decomposition, agent hoisting, instruction-sync automation) | Marketplace payload (skills) | Loaded on demand when a CLI customization or startup-diagnostics prompt matches; no runtime to install |
-| [copilot-extensions-harness](../plugins/copilot-extensions-harness/) | Operator-harness skills, `clean-room-judge` evaluator agent, and two ambient static instruction projections (contribution-boundary, cross-repo-debug-tracking) | Marketplace payload (skills + agent + static instruction projections) | No `sessionStart` hook; both projections are checked-in static fallbacks synced by `customizing-copilot:reviewing-customizations`; detailed skills/agent load on demand; no runtime to install |
+| [copilot-extensions-harness](../plugins/copilot-extensions-harness/) | Consumer diagnosis, release checks and canonical repair boundary | Payload-only skills and static consumer projection | No hooks, agents or runtime; unrelated product tasks do not acquire source-maintenance scope |
+| [copilot-extensions-maintainer](../plugins/copilot-extensions-maintainer/) | Optional contribution, review, release-triage and clean-room procedures | Payload-only skills, agents, static maintenance projections and scoped publication guard | `defaultEnabled: false`; enablement is availability, not authority; explicit source assignments can use repository docs without enabling it |
 | [wsl-setup](../plugins/wsl-setup/) | WSL2 setup / troubleshooting skills | Marketplace payload (skills) | Loaded on demand when a WSL-setup prompt matches; no runtime to install |
 | [harness-knowledge](../plugins/harness-knowledge/) | Stateless-harness → knowledge-repo binding skill (`binding-knowledge`) | Marketplace payload (skill + configurator script) | Loaded on demand when a harness-setup prompt matches; no runtime to install |
 | [ai-attribution](../plugins/ai-attribution/) | Ambient publication-policy hook + publication/setup skills | Marketplace payload (hooks + dependency-free scripts + skills/docs/examples) | The hook emits a concise payload-cwd-gated policy kernel at session start; setup reconciles the static fallback; detailed publication workflow loads on demand; no runtime to install |
@@ -519,8 +524,9 @@ explicit pinning and compatibility fallbacks.
 The word **harness** lands in two unrelated places; keep them apart:
 
 1. **A harness _plugin_** — a payload-only `<repo>-harness` plugin whose skills
-   teach an agent how to work *on one specific repo* (contribute, deploy,
-   diagnose). `copilot-extensions-harness` is the reference implementation:
+   teach an agent how to consume *one specific repo* safely.
+   `copilot-extensions-harness` is the reference implementation, with optional
+   source procedures in `copilot-extensions-maintainer`:
    enable it in a control repo instead of hand-writing a per-repo narrative.
    Authoring one is the **`customizing-copilot:authoring-harness-plugins`** skill's job.
 2. **A control-_harness_ repo** — *your own* control-plane repo (a dotfiles-style

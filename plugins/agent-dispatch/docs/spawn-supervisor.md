@@ -74,8 +74,9 @@ identity is fabricated at claim time. `STARTED` requires an affirmative current
 worker request matching the retained workspace, execution machine, native
 identity and task generation. Recording a spawn or delivering a prompt leaves
 the task `CLAIMED`. See [pool placement](pool-placement.md) for the supported
-API and compatibility boundary. Existing lane callers have not been switched
-to this operation; this source support is not an installed allocation guarantee.
+API and compatibility boundary. A configured worker lane can select this path
+when pool allocation is enabled. That opt-in is not automatic migration of
+legacy lanes or a guarantee about a particular installation.
 
 The installer manages the coordinator and supervisor daemon as separate local
 services. Coordinator cutover deliberately leaves the supervisor running;
@@ -143,29 +144,18 @@ does not establish their availability in a particular deployed runtime.
 
 ## Assignment lifecycle: current versus target
 
-The [explicit pool claim/start provider and callers](pool-claim-start.md)
-support atomic allocator claims and current-worker acceptance separately from
-the ordinary lane. They do not automatically migrate the supervisor described
-below or implement its selected retry policy.
+The [worker-lane cycle](../src/agent_dispatch/supervisor_cycle.py) supports two
+startup orders:
 
-The [pool-owned startup vision](../../../visions/plugins/agent-dispatch/README.md#pool-owned-assignment-startup)
-changes the intended meaning of supervised `CLAIMED`. It is not the behavior
-of the current reservation and worker-claim operations:
+| Boundary | Legacy reservation-first path | Configured-pool path |
+|---|---|---|
+| Before launch | Reserve a queued task; the worker claims it later. | Select an eligible pool instance with capacity. Commit the task's `claimed` state, reservation and assignment together. The worker and native ID can still be unknown. |
+| After launch | A worker holds the claim and calls `start`. | The worker checks the assignment and calls `start` with its workspace identity, native ID and current generation. |
+| Recovery | Admission checks due time, earlier attempts and unresolved effects. | Startup attempts and decision nudges belong to the selected assignment. Exhaustion can requeue the task with a cooldown without freeing its earlier reservation. |
 
-| Boundary | Current implementation | Target, not yet implemented |
-|----------|------------------------|-----------------------------|
-| Pool selection | Each lane sweeps its own candidates and capacity; no universal ordered all-pool sweep | The allocator selects the first priority-ordered matching machine/environment instance with capacity, or waits for the task's retained instance |
-| Spawn reservation | `reserve_spawn` reserves a queued, unowned task separately from its execution claim | `QUEUED -> CLAIMED` commits pool binding, reservation creation/reuse and occupied capacity atomically |
-| Worker identity | `claim_one` requires a worker identity; the embodied worker claims later | Initial placement needs no worktree/native identity; startup attaches the actual identities afterward |
-| `STARTED` | A later worker-owned transition | Startup has succeeded and the worker has explicitly accepted and begun the assignment |
-| Retry eligibility | Supervisor selection, transactional `claim_one` and fresh queued `reserve_spawn` admission check task `not_before` | Every new selection/reservation/claim enforces the applicable retry decision, including any future scoped policy |
-
-These are source-level statements, not evidence about a particular installed
-runtime. The relevant owners are `Supervisor._eligible`,
-`QueueClaimQueriesMixin.claim_one` and
-`SpawnReservationMixin.reserve_spawn`. Existing startup revisions,
-workspace allocation identity and effect-custody checks remain separate
-correctness constraints; the target must compose them, not replace them.
+On the configured path an eligible cold worker waiting to resume gets a
+freed slot before fresh work in the same pool. See [pool wake order](../../../docs/agent-lifecycle/pool-wake-order.md)
+for the corresponding task and reservation values.
 
 Fresh queued reservations refuse with `TaskError` (HTTP 409) before the stored
 `not_before`, admit exactly at that deadline, and never change the scheduled
@@ -173,22 +163,11 @@ timestamp. Existing active/exclusive reservations still return `reserved=false`
 as custody evidence without admitting another spawn. Suspended re-embodiment
 retains its existing owned-workspace path; it is not new queued admission.
 
-The [assignment/startup repair amendment](../../../efforts/active/agent-dispatch-monitor-and-confirmed-state/assignment-startup-amendment.md)
-owns the target transition ordering, decline closeout, retry-policy choices,
-compatibility sequence and validation matrix. It retains bounded startup
-attempts under the selected pool, periodic decision nudges through existing
-supervision, and return to `QUEUED` on exhaustion without prematurely freeing
-capacity or replaying unresolved effects. Its selected startup/decision budgets,
-task-wide cooldown sequence and successful-`STARTED` counter resets are
-**implementation-pending policy**, not current provider behavior. There is no new retry
-timer or pool-owned `CLAIMED` transition in the due-time admission fix, and
-source support does not establish installed adoption.
-The amendment's [pool scope and ordering](../../../efforts/active/agent-dispatch-monitor-and-confirmed-state/assignment-startup-amendment.md#selected-pool-scope-and-ordering)
-also remain implementation-pending: the current raw registration view does not
-carry the complete effective pool definitions required by atomic placement.
-The registrar's [pool-instance definitions](pool-instances.md) preserve priority
-and effective filters in-process; they do not yet publish or enforce that
-placement contract.
+[Pool publication](pool-publication.md) supplies the catalog used by placement;
+[pool claim and start](pool-claim-start.md) describes the caller opt-in,
+budgets, worker acceptance and recovery. The [assignment/startup amendment](../../../efforts/active/agent-dispatch-monitor-and-confirmed-state/assignment-startup-amendment.md)
+is the design and validation plan, not evidence that an installation has
+enabled the complete flow.
 
 ## Retained startup and process capacity
 

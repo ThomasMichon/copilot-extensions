@@ -1,0 +1,9 @@
+{
+  "comment": "Include all runtime admission toolkit sources in the sparse installed Manager qualification fixture.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "dev"
+    }
+  ]
+}

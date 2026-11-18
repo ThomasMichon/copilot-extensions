@@ -250,7 +250,7 @@
       "observed": {"status": "emitted", "unicodeCharacters": 428, "utf8Bytes": 428, "estimatedTokens": 107}
     },
     {
-      "owner": "copilot-extensions-harness",
+      "owner": "copilot-extensions-maintainer",
       "id": "contribution-boundary",
       "order": 130,
       "declaredMaxBytes": 448,

@@ -1,0 +1,17 @@
+{
+  "comment": "Release the synchronized installer and deployment-helper updates carried by the retained artifact consumer integration.",
+  "changes": [
+    {
+      "plugin": "budget-guidance",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-conduct-guidance",
+      "type": "patch"
+    }
+  ]
+}

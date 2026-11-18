@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
+import sqlite3
 import time
 import uuid
-from typing import Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from .status_schema import MAX_SUBSCRIPTIONS, RETENTION
+
+if TYPE_CHECKING:
+    from .db import Database
 
 StatusKind = Literal[
     "question_pending", "permission_pending", "idle", "message_consumed", "stalled", "error",
@@ -30,7 +35,7 @@ class Selection(BaseModel):
     include_nested: bool = False
 
 
-def matches(selection: Selection, event: dict) -> bool:
+def matches(selection: Selection, event: dict[str, Any]) -> bool:
     return (
         event["kind"] in selection.events
         and (selection.include_nested or event["scope"] == "root")
@@ -40,16 +45,16 @@ def matches(selection: Selection, event: dict) -> bool:
 
 
 class StatusGap(ValueError):
-    def __init__(self, info: dict):
+    def __init__(self, info: dict[str, Any]) -> None:
         self.info = {"code": "status_replay_gap", "action": "reconcile", **info}
         super().__init__("Host status continuity is unavailable; reconcile before acknowledging")
 
 
 class StatusStore:
-    def __init__(self, db):
+    def __init__(self, db: Database) -> None:
         self.db = db
 
-    def bounds(self, conn) -> dict:
+    def bounds(self, conn: sqlite3.Connection) -> dict[str, Any]:
         floor = conn.execute("SELECT id FROM bridge_status_events ORDER BY id LIMIT 1").fetchone()
         head = conn.execute("SELECT id FROM bridge_status_events ORDER BY id DESC LIMIT 1").fetchone()
         return {
@@ -61,8 +66,15 @@ class StatusStore:
         self, session_id: str, kind: StatusKind, key: str, *,
         source: str = "local", scope: str = "root",
         observed_at: float | None = None, evidence: str = "observed",
+        transaction: sqlite3.Connection | None = None,
     ) -> int | None:
-        with self.db._runtime_transaction(write=True, full_sync=False) as conn:
+        """Publish atomically with an existing update, or own a standalone transaction."""
+        if transaction is not None and (
+            self.db.read_only or transaction is not self.db._get_conn() or not transaction.in_transaction
+        ):
+            raise ValueError("Status publication requires an active transaction on this database")
+        with (self.db._runtime_transaction(write=True, full_sync=False)
+              if transaction is None else nullcontext(transaction)) as conn:
             cur = conn.execute(
                 "INSERT OR IGNORE INTO bridge_status_events "
                 "(source,source_key,session_id,kind,scope,observed_at,evidence) VALUES (?,?,?,?,?,?,?)",
@@ -72,6 +84,8 @@ class StatusStore:
             if not cur.rowcount:
                 return None
             event_id = cur.lastrowid
+            if event_id is None:
+                raise RuntimeError("Inserted status event has no row ID")
             event = {"source": source, "session_id": session_id, "kind": kind, "scope": scope}
             for sub in conn.execute("SELECT * FROM bridge_status_subscriptions").fetchall():
                 if matches(Selection.model_validate_json(sub["selection"]), event):
@@ -86,7 +100,7 @@ class StatusStore:
             )
         return event_id
 
-    def subscribe(self, subscription_id: str, selection: Selection) -> dict:
+    def subscribe(self, subscription_id: str, selection: Selection) -> dict[str, Any]:
         encoded = selection.model_dump_json()
         with self.db._runtime_transaction(write=True) as conn:
             old = conn.execute(
@@ -112,7 +126,8 @@ class StatusStore:
                 "SELECT * FROM bridge_status_subscriptions WHERE id=?", (subscription_id,),
             ).fetchone())
 
-    def page(self, *, after: int, epoch: str | None, limit: int = 100, subscription_id: str | None = None) -> dict:
+    def page(self, *, after: int, epoch: str | None, limit: int = 100,
+             subscription_id: str | None = None) -> dict[str, Any]:
         with self.db._runtime_transaction(write=False) as conn:
             info = self.bounds(conn)
             if epoch not in (None, info["epoch"]) or after < info["floor"] - 1 or after > info["head"]:
@@ -140,7 +155,7 @@ class StatusStore:
                 "reason": "Historical transitions are not current attention or liveness",
             }
 
-    def acknowledge(self, subscription_id: str, through: int, epoch: str) -> dict:
+    def acknowledge(self, subscription_id: str, through: int, epoch: str) -> dict[str, Any]:
         with self.db._runtime_transaction(write=True) as conn:
             info = self.bounds(conn)
             if epoch != info["epoch"] or not info["floor"] - 1 <= through <= info["head"]:
@@ -161,7 +176,7 @@ class StatusStore:
                 "SELECT * FROM bridge_status_subscriptions WHERE id=?", (subscription_id,),
             ).fetchone())
 
-    def pending(self) -> list[dict]:
+    def pending(self) -> list[dict[str, Any]]:
         return [dict(row) for row in self.db.execute_read(
             "SELECT * FROM bridge_status_subscriptions WHERE unread>acked AND notice_id IS NULL",
         )]

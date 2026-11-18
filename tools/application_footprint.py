@@ -98,22 +98,11 @@ def _ordinary_tree(root: Path, *, deadline: float) -> None:
 
 
 def _setup_frontdoors(application: Path) -> None:
+    from runtime_application_binstubs import setup_binstubs
+
     directory = application / "bin"
     directory.mkdir(exist_ok=True)
-    entries = {
-        "setup.ps1": (
-            "$ErrorActionPreference = 'Stop'\n"
-            "& (Join-Path (Split-Path -Parent $PSScriptRoot) 'install.ps1') @args\n"
-            "exit $LASTEXITCODE\n"
-        ),
-        "setup.cmd": '@echo off\r\n"%~dp0..\\install.cmd" %*\r\n',
-        "setup.sh": (
-            "#!/bin/sh\n"
-            'slot=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd) || exit\n'
-            'exec "$slot/install.sh" "$@"\n'
-        ),
-    }
-    for name, content in entries.items():
+    for name, content in setup_binstubs().items():
         path = directory / name
         with path.open("x", encoding="utf-8", newline="") as stream:
             stream.write(content)
@@ -281,6 +270,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--main-head", required=True)
     parser.add_argument("--branch", choices=("main", "dev", "wip"), required=True)
     parser.add_argument("--dev-head", help="Fetched Dev ancestor of an explicitly frozen WIP commit")
+    parser.add_argument("--source-descriptor", help="Existing installation source descriptor as JSON")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--timeout", type=float, default=600.0)
     args = parser.parse_args(argv)
@@ -288,6 +278,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--timeout must be finite seconds in (0, 7200]")
     if (args.branch == "wip") != (args.dev_head is not None):
         parser.error("--dev-head is required only with --branch wip")
+    if args.branch == "wip" and args.source_descriptor is not None:
+        parser.error("--source-descriptor applies to Main/Dev acquisition, not frozen WIP")
     uv = shutil.which("uv")
     if uv is None:
         parser.error("application preparation requires uv on PATH")
@@ -302,6 +294,8 @@ def main(argv: list[str] | None = None) -> int:
             snapshots = preparation.prepare_applications(
                 args.source_checkout, args.source_commit, args.main_head, args.output,
                 components=("worktree-manager",), branch=args.branch, uv=uv, deadline=deadline,
+                **({"source_descriptor": json.loads(args.source_descriptor)}
+                   if args.source_descriptor is not None else {}),
             )
         destination = export(
             {name: Path(path) for name, path in snapshots.items()},

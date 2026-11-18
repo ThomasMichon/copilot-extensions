@@ -25,7 +25,26 @@ roots as its runtime inventory. The owner's remaining selected files form the
 ordinary program; no selected file is excluded or reassigned to another owner.
 Each program retains the existing requirements, strictness, Python versions and
 platforms. Failures aggregate across all programs and targets. Ordinary
-single-program checks are unchanged.
+non-installer checks are unchanged.
+
+Project-level `import_roots` may additionally supply shared dependencies only
+when the root contains no inventoried Python file owned by that project.
+Owned roots are not inherited across independent programs; each program's own
+`import_roots` remains confined to its root. This uses the existing manifest
+fields rather than a new shared-root declaration.
+
+Declared installer consumers are checked in fresh candidates composed through
+the existing guarded installer materializer. Developer mirrors remain untouched.
+Composition refusals, source/preimage changes, candidate identity changes and
+membership drift fail qualification. Materialization preserves the caller's
+selected physical scope; it does not promote every refreshed dependency into
+strict admission.
+
+This includes ordinary standalone consumers and the ordinary outer program of
+a mixed project. Each consumer candidate is reused across its declared target
+matrix while source and candidate verification remain active. SDK imports bind
+the actual materialized consumer, not a stale developer helper or a canonical
+module substituted for the consumer.
 
 Grouped checks capture every selected physical file's bytes and file/directory
 identities before the first program and verify them across program boundaries.
@@ -47,8 +66,22 @@ inventoried separately as pending consumers. They do not inherit service
 admission merely because promotion places them below that service's path.
 Service-owned source and tests remain strict, and each canonical library keeps
 its own declared admission; this does not qualify every shipped copy.
+Worktrees' self-contained admission toolkit also has its own pending checker
+owner and declared import roots, separate from the outer installer. Their
+reused module names do not describe one Python program. Physical inventory
+still assigns every file exactly once; toolkit analysis retains Python 3.10
+and additionally checks its full Python 3.11 runtime body on both platforms.
+The outer installer resolves its admission imports through the toolkit's same
+declared roots; these imports do not merge the two sets of analysis targets.
 An `--all` probe reports absent pending scopes without trying to check them;
 explicit scope checks and admitted empty scopes still refuse qualification.
+
+The promotion-produced `apps/worktree-manager` source tree has its own pending
+consumer owner, separate from the canonical Manager source and embedded
+libraries. Its build helper, package code and runtime resources remain in the
+physical inventory; other undeclared application trees still refuse. This is
+ownership accounting, not strict admission or an exclusion from `--new-code`:
+changed physical application files retain the whole-file strict ratchet.
 
 ## Local commands
 
@@ -102,6 +135,12 @@ not checked. PR CI selects changes between the actual PR head and its merge
 base with the target branch, rather than comparing an older base with the
 synthetic merge commit. The selected files are checked in the integration
 checkout; unrelated upstream changes must not enter this PR's ratchet cohort.
+The checker project also owns its admitted
+`tools/promotion_unit_tests/test_typecheck.py` fixture. It uses the checker's
+canonical type namespace rather than combining checker imports with unrelated
+tool execution namespaces. The file remains selected and strictly checked;
+its removal from the generic tools owner is ownership accounting, not an
+exemption.
 For a busy shared local clone,
 pin the synchronization/merge-base commit instead of a moving `origin/dev`
 reference while checking a fixed feature tip, so unrelated base-only files are not treated as
@@ -110,6 +149,10 @@ compositions expand to their existing complete checker programs and declared
 analysis targets; changed shell/template inputs cannot omit those views.
 Missing physical owners refuse selection, and Invocation requires a full-body
 Python 3.11-or-later analysis target rather than only its Python 3.10 exit guard.
+Copied Installation Context fragments expand to their own complete, fixed
+loader composition; their diagnostics name the copied physical inputs.
+Independent `setup.py` build programs retain their exact bytes in distinct
+checker views, so their shared filename does not combine unrelated modules.
 Module-wide checker directives are refused. A successful ratchet qualifies
 these files only, without admitting their unchanged project or certifying
 unmodeled emitted programs. `--enforced` remains the independent admitted-cohort
@@ -121,13 +164,32 @@ route and consumer-contract files checkable without admitting the full plugin
 or changing its runtime dependencies.
 Dispatch's pending project uses the service-index profile for its selected recovery
 route, client and test files; the remaining project is not thereby admitted.
+Worktrees' pending project uses the build checker pins plus CommonMark and its
+third-party declarations in `typecheck-worktrees-requirements.txt`, so selected
+metadata/source-attribution files are checked against the real Markdown parser.
+This does not admit the unchanged Worktrees project.
 
 `--prepare` explicitly installs the checked-in hash-locked checker dependencies
 using the existing seven-day seasoning policy and environment-scoped admission.
+The base checker lock includes the same seasoned Setuptools stubs used by
+build-bearing service projects, so standalone build helpers and their shipped
+copies retain checked third-party command-class contracts.
+The existing TOML fallback is installed in checker environments regardless of
+the host Python version, because analysis still targets Python 3.10.
+Repository tooling uses a separate flat lock with YAML support and Coverage's
+typed plugin API. Its declared `tools` and Versioned Runtime import roots bind
+the actual first-party source rather than treating local helpers as missing
+third-party modules. Canonical installer helpers and Installation Context test
+fixtures are bound through their own real roots as well; these declarations
+do not add runtime dependencies or execute fixture code.
 Environments are private repository test-cache entries keyed by requirements,
 host platform and interpreter version. A check never silently installs packages
 or falls back to another interpreter; missing preparation prints the exact
 command to run.
+The interpreter running these commands is the checker host, not the declared
+analysis target. Use an installed host compatible with the complete selected
+lock, and use the same executable for preparation and checks. Project Python
+versions and platforms remain the targets declared in the manifest.
 Each check uses an invocation-private source-view directory for emitted files,
 the target list and MyPy configuration, under the existing environment lease.
 Successful cleanup removes only that invocation's verified outputs and empty
@@ -480,6 +542,12 @@ remains an independent input. The adapter includes the Windows native-read
 helper while keeping compiled filenames in their original lexical spelling;
 the helper itself remains in the checked source.
 
+Changed generated consumer copies use the same composition for both
+`installation_context.py` and `_installation_context.py` entrypoints. A changed
+loader or shared-namespace fragment selects its complete local fragment group,
+not unrelated consumer files or the independent worker. Each view retains its
+own physical membership, source bytes and diagnostic mapping.
+
 When that canonical loader is in the physical inventory, every project also
 receives the faithful view as an import root. A consumer can therefore import
 the public flat `installation_context` module without selecting its loader or
@@ -489,14 +557,21 @@ the canonical project retains its separate strict check. Imported views use
 the same byte/membership verification, source mapping and lease-bound cleanup;
 no stub, private-fragment import or missing-import suppression is substituted.
 
+A copied Installation Context entry directly at a declared import root retains
+its importable module basename in the checker view, so consumers resolve its
+complete composed API. Conflicting bindings require independent programs.
+Closed fragment membership, source mapping and physical-inventory-only
+composition remain enforced.
+
 The view preserves physical source lines, normalizing line endings to LF and
 replacing the loader call and standalone `from __future__ import annotations`
 declarations with blank mapped lines. It refuses other future imports, changed
 loader semantics, missing/extra fragments and file-wide checker directives.
-Product code is never imported or executed. Each original source first passes
-non-executing compilation, so AST-only acceptance cannot hide runtime syntax
-errors. Directive scanning uses Python's universal-newline interpretation,
-including CR-only sources. Checker diagnostics point back to original loader and
+Checked loader and fragment code are never imported or executed. Each original
+source first passes non-executing compilation, so AST-only acceptance cannot
+hide runtime syntax errors. Directive scanning uses Python's universal-newline
+interpretation, including CR-only sources. Checker diagnostics point back to
+original loader and
 fragment paths and line numbers. Input and emitted-view bytes are revalidated
 before a result is credited; temporary views are removed while holding the
 checker lease. Views live beside, not inside, the prepared venv because MyPy
@@ -523,8 +598,8 @@ package/module environments remain separate campaign work.
 
 ### Fixed guard module alias
 
-Only the `copilot-extensions-harness` project substitutes its owned
-`plugins/copilot-extensions-harness/scripts/copilot-mention-guard.py` target
+Only the `copilot-extensions-maintainer` project substitutes its owned
+`plugins/copilot-extensions-maintainer/scripts/copilot-mention-guard.py` target
 with a derived `copilot_mention_guard.py` view. The alias contains exactly the
 original bytes: no header, newline normalization, annotations, stub or runtime
 loader change. Every diagnostic line and column maps to the original source.
@@ -589,7 +664,7 @@ project does not activate these views.
 ## Exact-candidate release enforcement
 
 The pending Harness project additionally declares its fixed emitted Python
-inputs in `plugins/copilot-extensions-harness/python-emitted-inputs.json`.
+inputs in `plugins/copilot-extensions-maintainer/python-emitted-inputs.json`.
 Within each verification pass, emitted views with identical member, asset and
 input-byte bindings share one binding verification. Every generated output's
 identity and bytes remain independently checked; nothing is cached across passes.

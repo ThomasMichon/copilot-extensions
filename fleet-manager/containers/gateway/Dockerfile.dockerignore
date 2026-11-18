@@ -21,6 +21,8 @@ libs/versioned-runtime/**
 !libs/versioned-runtime/versioned_runtime_construction.py
 !libs/versioned-runtime/versioned_runtime_publication.py
 !libs/versioned-runtime/versioned_runtime_source.py
+!libs/versioned-runtime/versioned_runtime_identity.py
+!libs/versioned-runtime/versioned_runtime_fingerprint.py
 !libs/versioned-runtime/versioned_runtime_cache.py
 !libs/installer-engine/
 libs/installer-engine/**

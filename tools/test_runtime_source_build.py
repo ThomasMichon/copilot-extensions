@@ -1,6 +1,40 @@
 """Actual source acquisition, build-tool admission, build and closed health."""
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from typing import TypedDict
+    from installer_wheel_snapshot import WheelInstallInputs
+    class _CandidateOptions(TypedDict):
+        plugin: Path
+        uv: Path
+        base_python: Path
+        health_module: str
+        wheel_inputs: WheelInstallInputs
+        local_packages: tuple[str, ...]
+        expected_source_identity: dict[str, Any]
+
+if TYPE_CHECKING:
+    from typing import Any, Callable, Mapping, Protocol
+    class _LegacyWheelBytes(Protocol):
+        def __call__(self, *, metadata: bytes | None = None, wheel: bytes | None = None, extra: Mapping[str, bytes] | None = None, record_mutator: Callable[[list[list[str]]], object] | None = None, compression: int = ..., prefix: str = "demo_pkg-1.0.dist-info/", name: str = "demo_pkg") -> bytes: ...
+
+from typing import cast
+
+from typing import ContextManager, Iterator
+
+if TYPE_CHECKING:
+    from runtime_source_lock import SourceLockCandidate
+    from runtime_source_wheels import SourceProfileInputs
+    from installer_wheel_acquisition import AcquiredWheels
+
+from typing import Any, Callable
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from test_runtime_profile_policy import _Adopter
+    from worktree_manager.runtime_source_config import RuntimeSource
+
 import hashlib
 import importlib.metadata
 import json
@@ -8,16 +42,19 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import zipfile
 from pathlib import Path
 from dataclasses import replace
+from contextlib import contextmanager, nullcontext
 
 import pytest
 import runtime_feed_configuration as configuration
 import runtime_source_build as builds
 import runtime_source_wheels as completion
 import installer_wheel_acquisition as acquisition
+from installer_dependency_policy import _write_toml
 from installer_wheel_acquisition import AcquisitionLimits
 from installer_wheel_inputs import WheelLimits
 from test_installer_wheel_acquisition import CERTIFICATE, FILENAME, acquisition_arguments, listed, project
@@ -33,9 +70,60 @@ from test_runtime_source_lock import target as target  # noqa: PLC0414
 from wheel_input_fixture import wheel_bytes
 
 
+@pytest.mark.timeout(60)
+@pytest.mark.parametrize("tied", [False, True])
+def test_native_union_lock_selects_target_wheel_and_still_refuses_ties(
+    adopter: _Adopter, configured_source: tuple[Path, Path, str, RuntimeSource], target: dict[str, Any], feeds: Callable[..., dict[str, Any]], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tied: bool,
+) -> None:
+    from runtime_source_lock import retain_source_wheel_lock
+    from packaging.tags import sys_tags
+
+    native_tag = next(
+        tag for tag in sys_tags()
+        if tag.interpreter == "py3" and tag.abi == "none" and tag.platform != "any"
+    )
+    target["tags"] = [str(native_tag), "py3-none-any"]
+    source_with_process_owner(configured_source, build_only=True)
+    state = feeds(certificate=CERTIFICATE.with_name("wheel-feed-localhost-leaf.pem"))
+    packaging_feed(state)
+    build_only_feed(state)
+    status, headers, body = state["routes"]["/simple/packaging/"]
+    metadata = json.loads(body)
+    original = metadata["files"][0]
+    original["hashes"]["md5"] = hashlib.md5(
+        state["routes"][original["url"]][2], usedforsecurity=False,
+    ).hexdigest()
+    alternative = json.loads(json.dumps(original))
+    alternative["filename"] = original["filename"].replace(
+        "py3-none-any", "py2.py3-none-any" if tied else str(native_tag),
+    )
+    alternative["url"] = "/files/" + alternative["filename"]
+    state["routes"][alternative["url"]] = state["routes"][original["url"]]
+    metadata["files"].append(alternative)
+    state["routes"]["/simple/packaging/"] = status, headers, json.dumps(metadata).encode()
+    env = environment(adopter, state, tmp_path)
+    selected = plan(adopter)
+    deadline = time.monotonic() + 55
+    monkeypatch.setattr(configuration, "_opaque_index_identity", lambda value: hashlib.sha256(value.encode()).hexdigest())
+    with builds.retain_authenticated_source(
+        selected, installation=adopter[1], deadline=deadline,
+    ) as authenticated:
+        with pytest.raises(ValueError, match="tied target") if tied else nullcontext():
+            with retain_source_wheel_lock(
+                selected, payload=authenticated.payload, expected_source=authenticated.identity,
+                target=target, component="fixture", uv=cast(str, shutil.which("uv")), python=Path(sys.executable),
+                deadline=deadline, env=env, include_build_tools=True,
+                installation=adopter[1], max_lock_bytes=65536,
+            ) as locked:
+                assert alternative["filename"].encode() in cast(bytes, locked.native_lock)
+                chosen = next(item for item in locked.record()["files"] if item["name"] == "packaging")
+                assert chosen["filename"] == alternative["filename"]
+                assert chosen["sha256"] == "sha256:" + original["hashes"]["sha256"]
+
+
 def test_native_source_configuration_rechecks_without_resolving_or_contacting_feed(
-    adopter, configured_source, target, feeds, tmp_path, monkeypatch,
-):
+    adopter: _Adopter, configured_source: tuple[Path, Path, str, RuntimeSource], target: dict[str, Any], feeds: Callable[..., dict[str, Any]], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from runtime_source_lock import retain_source_configuration
 
     source_with_process_owner(configured_source, build_only=True)
@@ -45,7 +133,7 @@ def test_native_source_configuration_rechecks_without_resolving_or_contacting_fe
     monkeypatch.setattr(configuration, "_opaque_index_identity", lambda value: hashlib.sha256(value.encode()).hexdigest())
     actual_run = subprocess.run
 
-    def without_resolution(argv, *args, **kwargs):
+    def without_resolution(argv: list[str], *args: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:
         if len(argv) > 2 and list(argv[1:3]) == ["pip", "compile"] and "--show-settings" not in argv:
             pytest.fail("settings-only source capture executed dependency resolution")
         return actual_run(argv, *args, **kwargs)
@@ -61,7 +149,7 @@ def test_native_source_configuration_rechecks_without_resolving_or_contacting_fe
             selected, installation=adopter[1], deadline=time.monotonic() + 60,
         ) as authenticated, retain_source_configuration(
             selected, payload=authenticated.payload, expected_source=authenticated.identity,
-            target=target, component="fixture", uv=shutil.which("uv"), python=Path(sys.executable),
+            target=target, component="fixture", uv=cast(str, shutil.which("uv")), python=Path(sys.executable),
             deadline=time.monotonic() + 60, env=env, wheel_witness=True,
             include_build_tools=True, installation=adopter[1],
         ) as captured:
@@ -82,8 +170,8 @@ def test_native_source_configuration_rechecks_without_resolving_or_contacting_fe
 
 @pytest.mark.parametrize("denied_package", ["packaging", "fixture-build-input"])
 def test_current_build_input_revocation_refuses_before_tools_installation_or_backend(
-    adopter, configured_source, target, feeds, tmp_path, monkeypatch, denied_package,
-):
+    adopter: _Adopter, configured_source: tuple[Path, Path, str, RuntimeSource], target: dict[str, Any], feeds: Callable[..., dict[str, Any]], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, denied_package: str,
+) -> None:
     project = source_with_process_owner(configured_source)
     if denied_package == "fixture-build-input":
         manifest = project / "pyproject.toml"
@@ -113,9 +201,9 @@ def test_current_build_input_revocation_refuses_before_tools_installation_or_bac
 
 
 @pytest.mark.parametrize("hint,accepted", [(">= 3.9", True), (">=3.8", False)])
-def test_retained_feed_hint_is_checked_against_inspected_wheel_metadata(feeds, tmp_path, hint, accepted):
+def test_retained_feed_hint_is_checked_against_inspected_wheel_metadata(feeds: Callable[..., dict[str, Any]], tmp_path: Path, hint: str, accepted: bool) -> None:
     state = feeds()
-    content = wheel_bytes(
+    content = cast("_LegacyWheelBytes", wheel_bytes)(
         name="fixture", prefix="fixture-1.0.dist-info/",
         metadata=b"Metadata-Version: 2.4\nName: fixture\nVersion: 1.0\nRequires-Python: >=3.9\n\n",
     )
@@ -154,11 +242,62 @@ def test_retained_feed_hint_is_checked_against_inspected_wheel_metadata(feeds, t
 
 
 @pytest.fixture
-def tmp_path(tmp_path_factory):
+def tmp_path(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return tmp_path_factory.mktemp("src")
 
 
-def source_with_process_owner(configured_source, *, build_only=False):
+@pytest.mark.parametrize("stage", ["acquisition", "runtime"])
+def test_current_source_configuration_refuses_before_construction_and_live_consumption(
+    adopter: _Adopter, configured_source: tuple[Path, Path, str, RuntimeSource], target: dict[str, Any], feeds: Callable[..., dict[str, Any]], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stage: str,
+) -> None:
+    source_with_process_owner(configured_source, build_only=True)
+    state = feeds(certificate=CERTIFICATE.with_name("wheel-feed-localhost-leaf.pem"))
+    packaging_feed(state)
+    build_only_feed(state)
+    env = environment(adopter, state, tmp_path)
+    certificate = tmp_path / "selected-ca.pem"
+    certificate.write_bytes(Path(env["SSL_CERT_FILE"]).read_bytes())
+    env["SSL_CERT_FILE"] = str(certificate)
+    monkeypatch.setattr(configuration, "_opaque_index_identity", lambda value: hashlib.sha256(value.encode()).hexdigest())
+    selected = plan(adopter)
+    original = certificate.read_bytes()
+
+    def change() -> None:
+        certificate.write_bytes(b"not a certificate")
+
+    actual_acquire = builds.acquire_wheel_inputs
+
+    @contextmanager
+    def changed_after_acquisition(*args: list[dict[str, Any]], **kwargs: Any) -> Iterator[AcquiredWheels]:
+        with actual_acquire(*args, **kwargs) as acquired:
+            change()
+            yield acquired
+
+    if stage == "acquisition":
+        monkeypatch.setattr(builds, "acquire_wheel_inputs", changed_after_acquisition)
+        monkeypatch.setattr(builds.engine, "numbered_candidate", lambda *args, **kwargs: pytest.fail(
+            "changed acquisition inputs reached the tools constructor",
+        ))
+        monkeypatch.setattr(builds, "retain_source_profile", lambda *args, **kwargs: pytest.fail(
+            "changed acquisition inputs reached a backend",
+        ))
+    try:
+        if stage == "acquisition":
+            with pytest.raises(ValueError, match="native feed configuration|certificate"):
+                with builds.retain_source_runtime_inputs(selected, **options(adopter, target, env)):
+                    pytest.fail("changed acquisition inputs reached runtime construction")
+        else:
+            with builds.retain_source_runtime_inputs(selected, **options(adopter, target, env)) as source:
+                change()
+                with pytest.raises(ValueError, match="native feed configuration|certificate"):
+                    source.verify()
+                certificate.write_bytes(original)
+                source.verify()
+    finally:
+        certificate.write_bytes(original)
+
+
+def source_with_process_owner(configured_source: tuple[Path, Path, str, RuntimeSource], *, build_only: bool=False) -> Path:
     repository = configured_source[1]
     project = repository / "plugins" / "agent-example"
     procutil = project / "_vendor" / "procutil"
@@ -194,7 +333,7 @@ def source_with_process_owner(configured_source, *, build_only=False):
     return project
 
 
-def select_source(configured_source):
+def select_source(configured_source: tuple[Path, Path, str, RuntimeSource]) -> None:
     from worktree_manager import runtime_source_config
 
     root, repository, _, _ = configured_source
@@ -208,8 +347,8 @@ def select_source(configured_source):
 
 
 def test_source_acquisition_and_preparation_share_literal_checkout_semantics(
-    adopter, configured_source, monkeypatch,
-):
+    adopter: _Adopter, configured_source: tuple[Path, Path, str, RuntimeSource], monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from test_runtime_source_authentication import retain
 
     project = source_with_process_owner(configured_source)
@@ -222,17 +361,17 @@ def test_source_acquisition_and_preparation_share_literal_checkout_semantics(
         assert (authenticated.payload / relative).read_bytes() == (project / relative).read_bytes()
 
 
-def packaging_feed(state, *, hint=">=3.9", bad_record=False):
+def packaging_feed(state: dict[str, Any], *, hint: str=">=3.9", bad_record: bool=False) -> None:
     distribution = importlib.metadata.distribution("packaging")
     version = distribution.version
     extra = {
-        str(item).replace("\\", "/"): distribution.locate_file(item).read_bytes()
-        for item in distribution.files
+        str(item).replace("\\", "/"): cast(Path, distribution.locate_file(item)).read_bytes()
+        for item in cast(list[importlib.metadata.PackagePath], distribution.files)
         if str(item).startswith("packaging/") and item.suffix in (".py", ".typed")
     }
     assert "packaging/requirements.py" in extra
     filename = f"packaging-{version}-py3-none-any.whl"
-    content = wheel_bytes(
+    content = cast("_LegacyWheelBytes", wheel_bytes)(
         name="packaging", prefix=f"packaging-{version}.dist-info/",
         metadata=(
             f"Metadata-Version: 2.4\nName: packaging\nVersion: {version}\nRequires-Python: >=3.9\n\n"
@@ -252,9 +391,9 @@ def packaging_feed(state, *, hint=">=3.9", bad_record=False):
     state["routes"]["/files/" + filename] = 200, {}, content
 
 
-def build_only_feed(state):
+def build_only_feed(state: dict[str, Any]) -> str:
     filename = "fixture_build_input-1.0-py3-none-any.whl"
-    content = wheel_bytes(
+    content = cast("_LegacyWheelBytes", wheel_bytes)(
         name="fixture_build_input", prefix="fixture_build_input-1.0.dist-info/",
         metadata=b"Metadata-Version: 2.4\nName: fixture-build-input\nVersion: 1.0\n\n",
     )
@@ -271,7 +410,7 @@ def build_only_feed(state):
     return filename
 
 
-def options(adopter, target, env):
+def options(adopter: _Adopter, target: dict[str, Any], env: dict[str, str]) -> dict[str, Any]:
     return {
         "installation": adopter[1], "target": target, "component": "fixture", "uv": shutil.which("uv"),
         "python": Path(sys.executable), "env": env, "max_lock_bytes": 65536, "max_snapshot_bytes": 4 << 20,
@@ -289,9 +428,104 @@ def options(adopter, target, env):
     }
 
 
+@pytest.mark.timeout(180)
+def test_native_library_builds_overlap_before_serial_application_and_closed_profile(
+    adopter: _Adopter, configured_source: tuple[Path, Path, str, RuntimeSource], target: dict[str, Any], feeds: Callable[..., dict[str, Any]], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = source_with_process_owner(configured_source, build_only=True)
+    declaration = completion._toml(project / "pyproject.toml")
+    names = {"agent-procutil"}
+    for index in range(4):
+        name = f"fixture-helper-{index}"
+        names.add(name)
+        package = project / "_vendor" / name
+        module = package / "src" / name.replace("-", "_")
+        module.mkdir(parents=True)
+        (module / "__init__.py").write_text("VALUE = 1\n")
+        (package / "pyproject.toml").write_text(
+            '[build-system]\nrequires=[]\nbuild-backend="fixture_backend"\nbackend-path=["."]\n'
+            f'[project]\nname="{name}"\nversion="1.0.0"\ndependencies=[]\n',
+        )
+        shutil.copyfile(project / "fixture_backend.py", package / "fixture_backend.py")
+        declaration["project"]["dependencies"].append(name)
+        declaration["tool"]["uv"]["sources"][name] = {"path": "_vendor/" + name}
+    _write_toml(project / "pyproject.toml", declaration)
+    backend_starts = tmp_path / "backend-starts"
+    backend_starts.mkdir()
+    monkeypatch.setenv("CE_TEST_LIBRARY_OVERLAP_ROOT", str(backend_starts))
+    for package in completion._package_roots(project):
+        if package == project:
+            continue
+        backend = package / "fixture_backend.py"
+        backend.write_text(backend.read_text().replace(
+            "    project = tomllib.loads",
+            "    import os, time\n"
+            "    starts = Path(os.environ['CE_TEST_LIBRARY_OVERLAP_ROOT'])\n"
+            "    name = tomllib.loads(Path('pyproject.toml').read_text())['project']['name']\n"
+            "    (starts / (name + '.started')).write_text(str(os.getpid()))\n"
+            "    deadline = time.monotonic() + 5\n"
+            "    while len(list(starts.glob('*.started'))) < 4:\n"
+            "        if time.monotonic() >= deadline:\n"
+            "            raise RuntimeError('actual library backends were serialized')\n"
+            "        time.sleep(0.01)\n"
+            "    project = tomllib.loads",
+        ))
+    select_source(configured_source)
+    state = feeds(certificate=CERTIFICATE.with_name("wheel-feed-localhost-leaf.pem"))
+    packaging_feed(state)
+    build_only_feed(state)
+    env = environment(adopter, state, tmp_path)
+    monkeypatch.setattr(configuration, "_opaque_index_identity", lambda value: hashlib.sha256(value.encode()).hexdigest())
+    native_build = completion.build_wheel
+    owner = threading.get_ident()
+    fourth_started = threading.Event()
+    lock = threading.Lock()
+    started: set[str] = set()
+    settled: set[str] = set()
+    active, peak = 0, 0
+
+    def observed_build(path: Path, output: Path, **kwargs: Any) -> Path:
+        nonlocal active, peak
+        name = completion._toml(path / "pyproject.toml")["project"]["name"]
+        kwargs["deadline"] = min(kwargs["deadline"], time.monotonic() + 30)
+        if name == "agent-example":
+            assert threading.get_ident() == owner
+            assert settled == names and active == 0
+            return native_build(path, output, **kwargs)
+        with lock:
+            started.add(name)
+            active += 1
+            peak = max(peak, active)
+            if len(started) == 4:
+                fourth_started.set()
+        try:
+            assert fourth_started.wait(5), "native library backends were serialized"
+            return native_build(path, output, **kwargs)
+        except subprocess.CalledProcessError as error:
+            print(error.stderr, file=sys.stderr)
+            print("Backend starts: " + repr(sorted(
+                marker.stem for marker in backend_starts.glob("*.started")
+            )), file=sys.stderr)
+            raise
+        finally:
+            with lock:
+                settled.add(name)
+                active -= 1
+
+    monkeypatch.setattr(completion, "build_wheel", observed_build)
+    with builds.retain_source_runtime_inputs(
+        plan(adopter), **options(adopter, target, env),
+    ) as selected:
+        selected.verify()
+        assert set(selected.local_packages) == names | {"agent-example"}
+        assert {item["name"] for item in selected.profile.record()["wheels"]} == names | {"agent-example"}
+    assert peak == 4 and active == 0 and settled == names
+    assert {path.stem for path in backend_starts.glob("*.started")} == names
+
+
 def test_native_exact_source_wheels_reuse_across_fresh_retention_and_invalidate_body_edit(
-    adopter, configured_source, target, feeds, tmp_path, monkeypatch, record_property,
-):
+    adopter: _Adopter, configured_source: tuple[Path, Path, str, RuntimeSource], target: dict[str, Any], feeds: Callable[..., dict[str, Any]], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, record_property: Callable[[str, object], None],
+) -> None:
     project = source_with_process_owner(configured_source, build_only=True)
     state = feeds(certificate=CERTIFICATE.with_name("wheel-feed-localhost-leaf.pem"))
     packaging_feed(state)
@@ -301,7 +535,7 @@ def test_native_exact_source_wheels_reuse_across_fresh_retention_and_invalidate_
     native_build = completion.build_wheel
     built = []
 
-    def observed_build(*args, **kwargs):
+    def observed_build(*args: Path, **kwargs: Any) -> Path:
         built.append(args[0].name)
         return native_build(*args, **kwargs)
 
@@ -336,8 +570,8 @@ def test_native_exact_source_wheels_reuse_across_fresh_retention_and_invalidate_
     pytest.param("mode", marks=pytest.mark.skipif(os.name == "nt", reason="POSIX source permissions")),
 ])
 def test_backend_source_mutation_refuses_before_cache_publication_and_retry_rebuilds(
-    adopter, configured_source, target, feeds, tmp_path, monkeypatch, mutation,
-):
+    adopter: _Adopter, configured_source: tuple[Path, Path, str, RuntimeSource], target: dict[str, Any], feeds: Callable[..., dict[str, Any]], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutation: str,
+) -> None:
     source_with_process_owner(configured_source, build_only=True)
     state = feeds(certificate=CERTIFICATE.with_name("wheel-feed-localhost-leaf.pem"))
     packaging_feed(state)
@@ -346,10 +580,14 @@ def test_backend_source_mutation_refuses_before_cache_publication_and_retry_rebu
     monkeypatch.setattr(configuration, "_opaque_index_identity", lambda value: hashlib.sha256(value.encode()).hexdigest())
     native_build = completion.build_wheel
     calls = []
+    mutated = False
 
-    def mutating_build(project, *args, **kwargs):
+    def mutating_build(project: Path, *args: Path, **kwargs: Any) -> Path:
+        nonlocal mutated
         calls.append(project)
-        if len(calls) == 1:
+        if (not mutated
+                and builds.dependencies._toml(project / "pyproject.toml")["project"]["name"] == "agent-example"):
+            mutated = True
             module = project / "src" / "agent_example" / "__init__.py"
             if mutation == "body":
                 module.write_text('VALUE = "poisoned"\n')
@@ -362,7 +600,11 @@ def test_backend_source_mutation_refuses_before_cache_publication_and_retry_rebu
         with builds.retain_source_runtime_inputs(plan(adopter), **options(adopter, target, env)):
             pytest.fail("mutated compact source reached construction")
     root = Path(plan(adopter).policy()["owner"]["runtimeRoot"])
-    assert not list((root / ".source-wheel-cache" / "inputs").glob("*/wheel.json"))
+    cached = list((root / ".source-wheel-cache" / "inputs").glob("*/wheel.json"))
+    assert cached and all(
+        json.loads(receipt.read_text())["filename"].startswith("agent_procutil-")
+        for receipt in cached
+    )
     with builds.retain_source_runtime_inputs(plan(adopter), **options(adopter, target, env)) as selected:
         assert len(calls) == 3
         filename = next(
@@ -374,8 +616,8 @@ def test_backend_source_mutation_refuses_before_cache_publication_and_retry_rebu
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX executable source modes require a POSIX host")
 def test_native_mode_only_source_change_invalidates_cached_wheel_permissions(
-    adopter, configured_source, target, feeds, tmp_path, monkeypatch,
-):
+    adopter: _Adopter, configured_source: tuple[Path, Path, str, RuntimeSource], target: dict[str, Any], feeds: Callable[..., dict[str, Any]], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     project = source_with_process_owner(configured_source, build_only=True)
     backend = project / "fixture_backend.py"
     backend.write_text(backend.read_text().replace(
@@ -410,8 +652,8 @@ def test_native_mode_only_source_change_invalidates_cached_wheel_permissions(
 
 
 def test_authenticated_source_builds_and_reuses_independent_closed_environments(
-    adopter, configured_source, target, feeds, tmp_path, monkeypatch,
-):
+    adopter: _Adopter, configured_source: tuple[Path, Path, str, RuntimeSource], target: dict[str, Any], feeds: Callable[..., dict[str, Any]], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     source_with_process_owner(configured_source, build_only=True)
     state = feeds(certificate=CERTIFICATE.with_name("wheel-feed-localhost-leaf.pem"))
     packaging_feed(state)
@@ -421,9 +663,23 @@ def test_authenticated_source_builds_and_reuses_independent_closed_environments(
     arguments = options(adopter, target, env)
     selected = plan(adopter)
     completed = []
+    verification_depths = []
+    verification_depth = 0
+    actual_verify = completion.SourceLockCandidate.verify
+
+    def observe_verify(self: SourceLockCandidate, **kwargs: Any) -> None:
+        nonlocal verification_depth
+        verification_depth += 1
+        verification_depths.append(verification_depth)
+        try:
+            return actual_verify(self, **kwargs)
+        finally:
+            verification_depth -= 1
+
+    monkeypatch.setattr(completion.SourceLockCandidate, "verify", observe_verify)
     actual_completion = builds.retain_source_profile
 
-    def observe_completion(*args, **kwargs):
+    def observe_completion(*args: SourceLockCandidate, **kwargs: Any) -> ContextManager[SourceProfileInputs]:
         completed.append(kwargs)
         return actual_completion(*args, **kwargs)
 
@@ -454,7 +710,7 @@ def test_authenticated_source_builds_and_reuses_independent_closed_environments(
         monkeypatch.setenv("UV_CONFIG_FILE", str(tmp_path / "missing-config"))
         runtime = Path(selected.policy()["owner"]["runtimeRoot"])
         version = source.runtime_version
-        candidate_options = {
+        candidate_options: _CandidateOptions = {
             "plugin": source.payload, "uv": Path(arguments["uv"]), "base_python": Path(sys.executable),
             "health_module": "agent_example", "wheel_inputs": source.wheels,
             "local_packages": source.local_packages,
@@ -469,7 +725,7 @@ def test_authenticated_source_builds_and_reuses_independent_closed_environments(
                  "assert agent_example.VALUE == 'from-authenticated-source'; "
                  "assert {d.metadata['Name'] for d in m.distributions()} == {'agent-example', 'agent-procutil'}")],
                 capture_output=True, text=True, check=True, timeout=20,
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
             )
             assert proof.returncode == 0
             receipt = (candidate.slot / ".runtime-input-origins.json").read_bytes()
@@ -487,18 +743,19 @@ def test_authenticated_source_builds_and_reuses_independent_closed_environments(
         assert (build_marker.read_bytes(), build_marker.stat().st_mtime_ns) == before
         with builds.engine.numbered_candidate(
             runtime, repeated.runtime_version,
-            **(candidate_options | {"plugin": repeated.payload, "wheel_inputs": repeated.wheels}),
+            **candidate_options | {"plugin": repeated.payload, "wheel_inputs": repeated.wheels},
         ) as reused:
             assert reused.reused
             assert (reused.slot / ".runtime-input-origins.json").read_bytes() == receipt
     assert len(completed) == 2
     assert all(call["offline"] and call["build_profile"] is not None for call in completed)
+    assert max(verification_depths) == 1
 
 
 @pytest.mark.parametrize("reuse", [False, True])
 def test_tools_interpreter_target_drift_refuses_before_backend(
-    adopter, configured_source, target, feeds, tmp_path, monkeypatch, reuse,
-):
+    adopter: _Adopter, configured_source: tuple[Path, Path, str, RuntimeSource], target: dict[str, Any], feeds: Callable[..., dict[str, Any]], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reuse: bool,
+) -> None:
     source_with_process_owner(configured_source)
     state = feeds(certificate=CERTIFICATE.with_name("wheel-feed-localhost-leaf.pem"))
     packaging_feed(state)
@@ -512,7 +769,7 @@ def test_tools_interpreter_target_drift_refuses_before_backend(
     actual = builds._query_marker_environment
     observed = []
 
-    def different_target(python, **kwargs):
+    def different_target(python: Path, **kwargs: Any) -> dict[str, str]:
         assert ".source-build-tools" in python.parts
         observed.append(python)
         return {**actual(python, **kwargs), "platform_machine": "different-target"}
@@ -528,8 +785,8 @@ def test_tools_interpreter_target_drift_refuses_before_backend(
 
 @pytest.mark.parametrize("fault", ["foreign", "packages", "file", "online"])
 def test_shared_completion_refuses_changed_build_role_before_backend(
-    adopter, configured_source, target, feeds, tmp_path, monkeypatch, fault,
-):
+    adopter: _Adopter, configured_source: tuple[Path, Path, str, RuntimeSource], target: dict[str, Any], feeds: Callable[..., dict[str, Any]], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str,
+) -> None:
     source_with_process_owner(configured_source)
     state = feeds(certificate=CERTIFICATE.with_name("wheel-feed-localhost-leaf.pem"))
     packaging_feed(state)
@@ -537,7 +794,7 @@ def test_shared_completion_refuses_changed_build_role_before_backend(
     monkeypatch.setattr(configuration, "_opaque_index_identity", lambda value: hashlib.sha256(value.encode()).hexdigest())
     actual = builds.retain_source_profile
 
-    def changed(*args, **kwargs):
+    def changed(*args: SourceLockCandidate, **kwargs: Any) -> ContextManager[SourceProfileInputs]:
         profile = kwargs["build_profile"]
         record = profile.record()
         if fault == "foreign":
@@ -561,8 +818,8 @@ def test_shared_completion_refuses_changed_build_role_before_backend(
 
 @pytest.mark.parametrize("failure", ["hint", "record", "build-url"])
 def test_unadmitted_source_build_inputs_never_execute_a_backend(
-    adopter, configured_source, target, feeds, tmp_path, monkeypatch, failure,
-):
+    adopter: _Adopter, configured_source: tuple[Path, Path, str, RuntimeSource], target: dict[str, Any], feeds: Callable[..., dict[str, Any]], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str,
+) -> None:
     project = source_with_process_owner(configured_source)
     if failure == "build-url":
         manifest = project / "pyproject.toml"
@@ -591,8 +848,8 @@ def test_unadmitted_source_build_inputs_never_execute_a_backend(
     ("proxy", "proxy"),
 ])
 def test_rejected_native_source_settings_never_execute_compiler_or_request_packages(
-    adopter, configured_source, target, feeds, tmp_path, monkeypatch, setting, message,
-):
+    adopter: _Adopter, configured_source: tuple[Path, Path, str, RuntimeSource], target: dict[str, Any], feeds: Callable[..., dict[str, Any]], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, setting: str, message: str,
+) -> None:
     monkeypatch.setattr(configuration, "_opaque_index_identity", lambda value: hashlib.sha256(value.encode()).hexdigest())
     source_with_process_owner(configured_source)
     state = feeds(certificate=CERTIFICATE.with_name("wheel-feed-localhost-leaf.pem"))
@@ -611,7 +868,7 @@ def test_rejected_native_source_settings_never_execute_compiler_or_request_packa
         env["HTTPS_PROXY"] = "http://127.0.0.1:1"
     actual = subprocess.run
 
-    def guarded(argv, **kwargs):
+    def guarded(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         if list(argv)[1:3] == ["pip", "compile"] and "--show-settings" not in argv:
             pytest.fail("rejected native settings reached an effectful compiler")
         return actual(argv, **kwargs)
@@ -626,8 +883,8 @@ def test_rejected_native_source_settings_never_execute_compiler_or_request_packa
 
 
 def test_built_metadata_must_match_authenticated_static_declarations(
-    adopter, configured_source, target, feeds, tmp_path, monkeypatch,
-):
+    adopter: _Adopter, configured_source: tuple[Path, Path, str, RuntimeSource], target: dict[str, Any], feeds: Callable[..., dict[str, Any]], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     project = source_with_process_owner(configured_source)
     backend = project / "fixture_backend.py"
     backend.write_text(backend.read_text().replace(
@@ -647,8 +904,8 @@ def test_built_metadata_must_match_authenticated_static_declarations(
 
 
 def test_backend_timeout_settles_descendants_before_releasing_source_custody(
-    adopter, configured_source, target, feeds, tmp_path, monkeypatch,
-):
+    adopter: _Adopter, configured_source: tuple[Path, Path, str, RuntimeSource], target: dict[str, Any], feeds: Callable[..., dict[str, Any]], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import installer_engine_process
 
     project = source_with_process_owner(configured_source)
@@ -676,7 +933,7 @@ def test_backend_timeout_settles_descendants_before_releasing_source_custody(
     monkeypatch.setattr(configuration, "_opaque_index_identity", lambda value: hashlib.sha256(value.encode()).hexdigest())
     actual = installer_engine_process.run_owned
 
-    def bounded(argv, **kwargs):
+    def bounded(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         if argv[1:3] == ["build", "--wheel"]:
             kwargs = kwargs | {"deadline": time.monotonic() + 5}
         try:
@@ -697,8 +954,8 @@ def test_backend_timeout_settles_descendants_before_releasing_source_custody(
 
 
 def test_revoked_source_policy_refuses_before_returning_built_inputs(
-    adopter, configured_source, target, feeds, tmp_path, monkeypatch,
-):
+    adopter: _Adopter, configured_source: tuple[Path, Path, str, RuntimeSource], target: dict[str, Any], feeds: Callable[..., dict[str, Any]], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from test_runtime_profile_policy import owned_policy
 
     source_with_process_owner(configured_source)
@@ -709,7 +966,7 @@ def test_revoked_source_policy_refuses_before_returning_built_inputs(
     actual = completion.build_wheel
     calls = []
 
-    def revoke(*args, **kwargs):
+    def revoke(*args: Path, **kwargs: Any) -> Path:
         calls.append(args[0])
         built = actual(*args, **kwargs)
         owned_policy(adopter[0], adopter[1], allowSourceFallback=False)

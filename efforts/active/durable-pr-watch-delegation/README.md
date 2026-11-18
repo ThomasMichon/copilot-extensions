@@ -27,6 +27,14 @@ and production writer/merge cutover; it does not replace the broader Guiding
 Intent or any original, refined or inherited Plan/Validation outcome.
 This effort remains Active under its existing integration and domain owners.
 
+For subscriber callback context, the operator selected a map of subscription
+IDs to callback commands, each retaining its own cwd, with an explicit state
+contract version that incompatible engines refuse without changing the data.
+Do not assign singleton slots. The [callback-context amendment](subscriber-callback-context.md#operator-direction)
+preserves the verbatim direction and the required historical-reader transition
+protection; take the revised design through normal review and CI before
+enabling context-bearing state writes.
+
 The requested read-only extension is a reviewer-perspective status/current-PR/
 priority-next-action feed backed by PR activity, subscribable through SSE or
 WebSockets. The [reviewer-action feed contract](reviewer-action-feeds.md),
@@ -35,12 +43,16 @@ defines inert round-robin/Dispatch consumers plus observational comparison.
 It adds no consumer activation or production-write authority, and does not
 replace M1 or the full retained parent acceptance.
 
-The [M1 source evidence map](repository-cache-events-m1.md#source-evidence-map)
-separates the standalone synthetic vertical from still-open release,
-installed/running and authorized real-target qualification. Completing that
-source slice does not complete M1 or this effort. The reviewed source stages
-1–4 have landed; the combined Plan and Validation items below remain open
-because they also require the separate live qualification.
+The [M1 evidence map](repository-cache-events-m1.md#source-evidence-map)
+separates the standalone synthetic vertical from release, installed/running
+and authorized real-target qualification. The reviewed source stages 1–4 have
+landed. The [GitHub installed-running lane](journal/2026/11.18%20GitHub%20shadow%20qualification.md)
+passes on an isolated Linux installation, including real continuing events,
+ACK and restart. The separately owned
+[Gitea installed-running lane](journal/2026/11.18%20Gitea%20shadow%20qualification.md)
+also passes with actual later entry, reconnect and explicit ACK. Together with
+the source vertical these meet bounded M1 acceptance, not the broader Goal,
+Guiding Intent or retained parent Plan/Validation.
 
 ### Delegation driver's completion charter
 
@@ -65,11 +77,15 @@ because they also require the separate live qualification.
   Plan/Validation item is resolved or transferred to a named tracked objective,
   owned PRs are terminal, and resource obligations have been settled or
   accepted by their rightful owners through the normal guarded flow.
-- **Now:** Finish the owned filtered-population source and qualification
-  gates. The Windows registry snapshot correction is a bounded lifecycle
-  prerequisite, not a new root objective.
-- **Return:** After that slice, resume the remaining M1 integration,
-  installed/running and consumer-owned acceptance under this same effort.
+- **Now:** The filtered-population source and synthetic qualification are
+  complete through #12200, including the bounded Windows registry snapshot
+  prerequisite. Promotion #13048 includes that source, and the separately
+  authorized GitHub M1 installed-running lane passes. The complementary Gitea
+  evidence above completes bounded M1 acceptance while retaining each
+  operational owner and every broader outcome.
+- **Return:** Continue filtered-ADO and consumer-owned acceptance under this
+  same effort within their separate authority and existing holds. The GitHub
+  repository-local trial is not live filtered-ADO or posted-review proof.
   Existing MCP follow-through, domain custody, operational holds and separate
   spending, deployment, credential and retained-resource authority remain.
 
@@ -206,6 +222,46 @@ The PR-perspectives steward may realize a reviewed, finite inert domain slice;
 existing source reservations, provider, workspace, Dispatch and operational
 custody remain unchanged. No production review, merge or deployment is granted.
 
+### Subscriber callback context and truthful legacy outcomes
+
+The delegation driver receives the finite #5947 callback-contract lane through
+this existing PR-watch programme. The PR-watch registry/delivery owner retains
+subscription state, expiry and notification semantics; existing subprocess
+owners retain bounded child execution, and consumer/source/resource owners
+retain their effects and claims. This is proposed additive acceptance tracking,
+not implementation assignment, live subscription migration or custody transfer.
+
+Preserve #6019's delivered outage-independent expiry and acknowledged delivery
+credit. Legacy one-attempt best-effort delivery and acknowledged durable
+pending/retry/replay remain distinct supported contracts.
+
+Existing M1 stage-5 released/installed/running/read-only-shadow qualification,
+integration custody and operational holds remain with their current owners.
+This finite lane neither clears those conditions nor turns them into a new
+whole-parent native, installation or fleet prerequisite for callback source work.
+Resolve concrete overlaps through ordinary review and existing coordination,
+without a new generic owner-ACK ceremony.
+
+Keep #5947 OPEN until its own full WC1-WC4/WCV1-WCV4 acceptance is resolved,
+as recorded when it received #6723. This proposal and merging twelve unchecked
+rows do not resolve that currently published source-specific condition.
+
+This proposes a prospective refinement of the administrative tracking wording
+introduced by this campaign's #6723 intake. It revises no independent owner,
+operator, resource or operational condition. After normal review explicitly
+accepts this refinement, it must first be explicitly reflected in #5947 while
+that issue remains OPEN. Its complete unfinished WC1-WC4/WCV1-WCV4 union may
+then remain planned here under the same actual owners, without requiring the
+old tracking identity to remain open until implementation. All twelve
+technical rows remain unchecked; #6723 retirement is NOT completion of either
+callback feature.
+
+Only after accepted refinement and that source reflection, actual complete
+receiving, current whole-ROOT and complete source/discussion/unchanged-custody
+readback permit a later, separate administrative supersession judgment.
+Neither proposal, review nor merge automatically closes #5947, transfers
+custody or releases a hold. No generic owner-ACK requirement is introduced.
+
 ## Context
 
 The delegation implementation was split out of #5701 after review identified
@@ -238,6 +294,12 @@ existing PR-watch service; it does not introduce a parallel watch owner,
 fleet controller or credential issuer.
 
 ## Request
+
+The callback-state direction is preserved verbatim in
+[subscriber-callback-context.md#operator-direction](subscriber-callback-context.md#operator-direction).
+It selects a versioned per-subscription command/cwd map, not a restriction to
+governed owners or a singleton-slot allocation. Operational authority and the
+parent's other acceptance gates remain unchanged.
 
 The selected first milestone's verbatim public-safe Request and separately
 labelled recommendations are in [repository-cache-events-m1.md#request](repository-cache-events-m1.md#request).
@@ -374,13 +436,15 @@ its implementation or authorizing production activation.
 
 - [x] Review and land the filter/subscription contract before implementing it
   (#12161; approved current head and green required CI).
-- [ ] Deliver the linked expression, driver, demand/storage and actual
-  service/client slices with their complete validation plan; source completion
-  does not close the parent service/fleet or live-provider acceptance.
+- [x] Deliver the linked expression, driver, demand/storage and actual
+  service/client slices with their finite source validation plan (#12166,
+  #12184, #12200). The [source completion record](journal/2026/11.17%20Filtered%20source%20completion.md)
+  distinguishes hosted qualification from final-head compatibility checks;
+  parent service/fleet, installed and live-provider acceptance remain open.
 
 ### First integrated repository cache and event milestone
 
-- [ ] Deliver [M1's serial standalone discovery/projection/query/subscription stages](repository-cache-events-m1.md#serial-implementation-roster), then separately qualify authorized read-only live shadow; retain all broader outcomes.
+- [x] Deliver [M1's serial standalone discovery/projection/query/subscription stages](repository-cache-events-m1.md#serial-implementation-roster), then separately qualify authorized read-only live shadow; both separately owned real-target lanes pass, while all broader outcomes and operational ownership remain.
 
 ### Author/Reviewer service perspectives
 
@@ -701,6 +765,97 @@ _Agent-recommended implementation requirements._
 - [x] Recover pending deliveries across daemon restart and supported cutover. Guard acknowledgement against unregister/re-register races so an old delivery cannot remove a newer registration.
 - [x] Validate notification specifications and timeout inputs explicitly. Report delivery failures and pending retry state without logging credentials.
 - [x] Land and verify the notification-contract PR before enabling dispatch delegation.
+
+### Subscriber callback context and truthful legacy outcomes from #5947
+
+[The subscriber-context contract](subscriber-callback-context.md), reviewed in
+#13228, specifies concrete wire, saved-state and rollback boundaries for
+P5947-3/4. The subsequent operator-selected map/version amendment is proposed
+for review there after an unsafe historical inline reader was reproduced.
+Runtime expansion is local WIP, not published or activated; passing current
+tests does not resolve transition protection or consumer acceptance.
+
+#6019 already delivered outage-independent expiry and the acknowledged-delivery
+foundation. Preserve that positive credit; the unchecked rows below retain
+whole-contract acceptance and residual work, not a claim that the repaired
+outage-expiry defect remains unfixed.
+
+#### Direct callback Plan
+
+- [ ] **P5947-1:** Preserve expiry independently of successful provider fetch,
+  subscriber-specific filters/deadlines, legitimate terminal transitions,
+  unknown-baseline handling and ordinary synchronous waits. Keep removal and
+  outcomes under existing registry/persistence ownership, with no duplicate
+  terminal outcomes or departed pollers. Persist expiry removal/outcome before
+  scheduling notifications. Definite write failure prevents scheduling;
+  uncertain durability after replacement follows the existing owner's recovery
+  path without adding legacy replay. Do not reopen #6019's delivered repair.
+- [x] **P5947-2:** Expose bounded, honest, inspectable failure/unknown outcomes
+  for failed or indeterminate attempts on the retained legacy callback path.
+  Successful callback completion remains a positive control, not a required
+  failure/unknown result or proof of consumer acknowledgement.
+  Generation or attempt is not delivery
+  acknowledgement. Preserve its one-attempt best-effort wire compatibility:
+  no reliable-legacy-delivery promise or forced migration. Preserve the
+  distinct acknowledged contract's durable pending failures, retry with bounded
+  backoff rather than an attempt-count cap, immutable event identity and replay
+  semantics. Attempt count alone must not discard a pending acknowledged event.
+- [ ] **P5947-3:** Capture each registering caller's working directory, durably
+  retain it with that subscription and execute its callback with that explicit
+  cwd. Define the fallback/refusal when the directory no longer exists.
+  Daemon state cwd is not subscriber context; subscribers cannot inherit
+  whichever caller started the daemon.
+- [ ] **P5947-4:** Negotiate the cwd extension through the actual owner health
+  capability before sending new fields to a strict existing acknowledged
+  owner. Use a documented, tested legacy baseline only when its semantics
+  suffice; otherwise report required subscriber cwd as unsupported before
+  registration, rather than silently dropping it. Preserve strict old-owner
+  parsing, legacy compatibility,
+  acknowledgement/replay identity, bounded owned-child lifetime and
+  secret-free persistence. Put the interim absolute-callback-path requirement
+  in callback registration documentation; an attributable executable alone
+  does not resolve a relative callback script.
+  Preserve saved-subscription and pending-delivery compatibility across the
+  supported upgrade/rollback window, not only registration negotiation. A prior
+  owner must restore the retained contract correctly, or the transition must
+  refuse before durable-state mutation or effects, preserving the original
+  state and pending event. Do not silently drop cwd, discard pending delivery
+  or relabel a supported rollback as unsupported.
+
+#### Local callback Validation
+
+- [ ] **V5947-1:** Cover sustained provider outage, recovery, unknown baseline,
+  unchanged/terminal precedence, filters and deadlines. Verify exactly one
+  terminal outcome, correct poller retirement and preserved ordinary
+  synchronous waits. Verify persistence precedes scheduling, definite write
+  failure prevents notification scheduling, and uncertain post-replacement
+  durability follows the existing owner path without introducing legacy replay.
+  Subscription deadlines never expire resource/worktree claims.
+- [x] **V5947-2:** Through the actual delivery owner, exercise applicable legacy
+  success, exception, nonzero and timeout cases. Use successful callback
+  completion as a positive control; require honest inspectable failure/unknown
+  results for failed or indeterminate attempts, not successful ones. Preserve
+  the one-attempt best-effort wire without fabricated acknowledgement.
+  Verify acknowledged failures remain durably pending/retryable with original
+  event/replay identity and bounded backoff, not discarded at an attempt-count
+  ceiling.
+- [ ] **V5947-3:** Use separate subscribers with caller-relative callback paths
+  and different registration directories while the daemon uses its state cwd.
+  Cover persistence/restart, missing directories and the selected
+  fallback/refusal. Assert each callback's actual cwd, not only schema acceptance.
+- [ ] **V5947-4:** Cover actual new/old owner capability negotiation, strict
+  unknown-field rejection, legacy/acknowledged compatibility, original replay
+  identity, bounded child cleanup and secret-free durable metadata. Cover
+  the sufficient documented legacy-baseline positive control and reject a
+  required unsupported subscriber cwd before registration without silently
+  dropping the field. Verify the interim registration-documentation warning.
+  Persist new-owner subscriptions with cwd and pending acknowledged delivery,
+  then exercise prior-owner restore across the supported rollback window.
+  Verify preserved context and original pending event/replay identity, or an
+  explicit pre-effect transition refusal that leaves the original state intact.
+  Registration success alone is not rollback/restore qualification.
+  Preserve finite source/consumer qualification and existing operational holds; add no
+  native-all-host, installed-rollout or fleet prerequisite.
 
 ### Fleet-hosted PR service expansion
 
@@ -1203,6 +1358,14 @@ or silently expanding a bounded source claim.
 
 ## Validation Plan
 
+- [x] Qualify the finite [filtered-population source controls](filter-subscriptions.md#validation-plan):
+  hosted run 44001919435 passes both disposable platforms at its recorded source;
+  later source-preserving rebase compatibility and final-head review/required CI
+  pass before #12200 merges. See the [qualification record](journal/2026/11.17%20Filtered%20source%20completion.md).
+  Promotion #13048 separately includes this source; synthetic
+  native/foreground/client evidence does not establish installed/running,
+  live-provider or review-consumer acceptance.
+
 - [ ] Resolve the [reviewer-action feed validation](reviewer-action-feeds.md#validation-plan)
   under #12947, keeping actual cache/client/stream behavior, inert consumer
   controls and separately authorized provider/operational proof distinct.
@@ -1215,7 +1378,7 @@ or silently expanding a bounded source claim.
   required check. Legacy source behavior and broader
   installed/provider/HTTP/resource/effort acceptance remain independent.
 
-- [ ] Prove [M1's synthetic foreground/client/persistence/subscriber vertical and separate released/installed/running qualification](repository-cache-events-m1.md#validation-and-acceptance); neither fixtures nor a healthy empty host close M1 or this effort.
+- [x] Prove [M1's synthetic foreground/client/persistence/subscriber vertical and separate released/installed/running qualification](repository-cache-events-m1.md#validation-and-acceptance); separately owned real GitHub and Gitea lanes pass. This bounded M1 result does not close the full effort or its other Plan/Validation outcomes.
 
 - [x] Qualify the finite source [selected native reopening refinement](native-thread-resolution.md#reopening-source-controls-after-review)
   after independent contract review (#11741): exact resolved-to-active transition,
@@ -1568,6 +1731,43 @@ All items below are **agent-recommended** acceptance checks.
   retaining original holders, exact actual conditions and #7778's
   nonblocking-consultation rule before separately supported tracker disposition.
 
+### Subscriber callback contract - global acceptance
+
+- [ ] **G5947-1:** Resolve P5947-1/V5947-1 through the existing registry/
+  persistence and delivery owners: preserve credited #6019 outage-independent
+  expiry, filters/deadlines, unknown baseline, recovery, unchanged/terminal
+  precedence, ordinary waits, exactly one terminal outcome and correct poller
+  retirement. Verify persistence before scheduling, definite write-failure
+  refusal and existing-owner handling of uncertain replacement durability
+  without legacy replay. Subscription expiry cannot release resource/worktree claims.
+- [x] **G5947-2:** Resolve P5947-2/V5947-2 through actual legacy and acknowledged
+  delivery consumers. Successful legacy callback completion is a positive
+  control, not a required failure/unknown outcome or consumer acknowledgement.
+  Applicable exception, nonzero, timeout or indeterminate attempts must expose
+  bounded truthful failure/unknown evidence without fabricated acknowledgement
+  or guaranteed delivery; preserve one-attempt best-effort compatibility.
+  Acknowledged failures remain durably pending/retryable with immutable
+  original event/replay identity and bounded backoff, not an attempt-count cap
+  that discards the event.
+- [ ] **G5947-3:** Resolve P5947-3/V5947-3 through persisted subscriptions and
+  actual callback execution: independent registration directories,
+  caller-relative paths, daemon-neutral cwd, restart and missing-directory
+  fallback/refusal. Schema acceptance or executable attribution alone is
+  insufficient.
+- [ ] **G5947-4:** Resolve P5947-4/V5947-4 through actual owner health negotiation
+  and strict old/new peers, preserving legacy wire behavior, acknowledged
+  identity, bounded owned-child cleanup and secret-free metadata. Verify
+  sufficient documented legacy-baseline use versus required-cwd refusal before
+  registration, without silent field dropping. Retain the interim absolute-path
+  warning in registration documentation, current domain/resource owners, real M1
+  stage-5 custody/qualification conditions and operational holds without adding
+  a generic ACK or whole-parent native/installed/fleet gate to this finite lane.
+  Separately qualify new-writer/prior-reader saved-state restore and pending
+  delivery across the supported rollback window: preserve cwd and original
+  event identity, or refuse the transition before mutation/effects with the
+  original state retained. No silent context loss, pending-event discard or
+  unsupported relabeling substitutes for that acceptance.
+
 ## Proposal
 
 Reliable delivery is a prerequisite, not an optional follow-up. The watch
@@ -1585,6 +1785,37 @@ callback an implicit credential store.
 
 ## Journal
 
+- [2026-11-18 - Released Gitea shadow and combined M1 qualification](journal/2026/11.18%20Gitea%20shadow%20qualification.md)
+- **2026-11-18 - Subscriber callback context contract reviewed.** #13228
+  specifies actual-owner cwd negotiation, separate best-effort/ACK semantics,
+  complete versioned subscription state and pre-effect rollback refusal.
+  Current documentation now states the absolute executable AND script/file
+  requirement. Required CI and current-head Copilot approval passed; all real
+  child qualification remains in opt-in lanes. Next: expand the provider
+  without migrating caller defaults. P/V/G5947-3/4 and the parent remain open;
+  no runtime, installation, provider or resource effect is credited.
+- **2026-11-18 - Native Gitea metadata contract proposed.** Continuing the
+  bounded #10923 source-preservation work after GitHub source #13199;
+  [Gitea title/body contract](native-gitea-metadata.md) retains the existing
+  target/account/provider/frontend owners and adds explicit native draft/WIP
+  preservation qualification. This is review-first planning, not delivered
+  Gitea metadata support, installation or live mutation. Full A4-A5 and all
+  other parent Plan/Validation gates remain open.
+- [2026-11-18 - Bounded legacy callback outcome visibility qualified](journal/2026/11.18%20Legacy%20callback%20outcomes.md)
+- [2026-11-18 - Released GitHub shadow and continuing events qualified](journal/2026/11.18%20GitHub%20shadow%20qualification.md)
+- **2026-11-17 - Complete subscriber callback receiving proposed.** Added
+  unchecked P5947-1..4/V5947-1..4/actual global G5947-1..4 and continuing
+  Coordination in this existing shared PR-watch subscription domain.
+  Preserve credited #6019, legacy one-attempt versus acknowledged durable
+  delivery, subscriber cwd and actual owner capability/compatibility, with
+  unchanged M1 integration/domain/resource custody. #5947's published full-
+  acceptance OPEN condition remains until an explicitly accepted prospective
+  tracking refinement is reflected in that still-OPEN source. Planned-row
+  delivery alone does not resolve it. Actual reviewed whole receiving and
+  current whole source/ROOT/custody readback still precede any separate
+  administrative judgment. No implementation,
+  native operation, source disposition or resource transfer was performed.
+- [2026-11-17 - Filtered source completion; parent acceptance retained](journal/2026/11.17%20Filtered%20source%20completion.md)
 - [2026-11-16 - Reviewer-action feed contract reviewed](journal/2026/11.16%20Reviewer%20action%20feed%20contract.md)
 - [2026-11-09 - First integrated cache/event milestone selected](journal/2026/11.09%20Repository%20cache%20events%20milestone.md)
 - [2026-11-09 - Selected native thread-resolution source implementation](journal/2026/11.09%20Selected%20native%20resolution%20implementation.md)

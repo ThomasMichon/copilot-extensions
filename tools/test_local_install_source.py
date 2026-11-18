@@ -17,7 +17,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import local_install_source as local
 import promote_release
@@ -32,6 +32,23 @@ native_retained_path = cast(Callable[[str | Path], str], untyped_native_retained
 preparation: ModuleType = vars(local)["preparation"]
 materialization: ModuleType = vars(local)["materialization"]
 preparation_process: ModuleType = vars(local)["preparation_process"]
+
+if TYPE_CHECKING:
+    from typing import Mapping, Protocol, TypedDict
+    from build_toolchain_lock import ToolchainLock
+    from standalone_python_artifacts import ArtifactBuilder
+    from install_source import ProjectSource
+    from installer_dependency_policy import RetainedUVInstall
+
+    class _ExecutionOptions(TypedDict, total=False):
+        uv: Path
+        deadline: float
+
+    class _ExtractionOptions(TypedDict, total=False):
+        include_paths: tuple[str, ...]
+
+    class _LegacyWheelBytes(Protocol):
+        def __call__(self, *, metadata: bytes | None = None, wheel: bytes | None = None, extra: Mapping[str, bytes] | None = None, record_mutator: Callable[[list[list[str]]], object] | None = None, compression: int = ..., prefix: str = "demo_pkg-1.0.dist-info/", name: str = "demo_pkg") -> bytes: ...
 
 
 def _required_executable(command: str) -> str:
@@ -101,10 +118,10 @@ def test_profile_timeout_settles_the_actual_descendant_writer(tmp_path: Path, mo
     original = preparation_process.run
     deadlines = []
 
-    def run(argv: list[str], **options: Any) -> Any:
+    def run(argv: list[str], **options: Any) -> subprocess.CompletedProcess[bytes]:
         argv[1] = str(worker)
         deadlines.append(options["deadline"])
-        return original(argv, **options)
+        return cast("subprocess.CompletedProcess[bytes]", original(argv, **options))
 
     monkeypatch.setattr(preparation_process, "run", run)
     monkeypatch.setattr(locks, "_query_marker_environment", lambda *a, **kw: {})
@@ -112,7 +129,7 @@ def test_profile_timeout_settles_the_actual_descendant_writer(tmp_path: Path, mo
     with pytest.raises(subprocess.TimeoutExpired):
         local._prepare_profiles(
             tmp_path, {}, tmp_path / "output", ("demo",), {},
-            SimpleNamespace(venv_python=Path(sys.executable), record={}),
+            cast("ToolchainLock", SimpleNamespace(venv_python=Path(sys.executable), record={})),
             uv="unused", deadline=deadline,
         )
     assert deadlines == [deadline]
@@ -130,7 +147,7 @@ def test_profile_timeout_settles_the_actual_descendant_writer(tmp_path: Path, mo
     b"<!--" + b" " * 16384 + b"VENDOR_POINTER: source=canonical.txt kind=file -->\n",
 ])
 def test_extraction_candidates_match_full_scan_without_reopening_nonmarkers(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, line: bytes | Any,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, line: bytes,
 ) -> None:
     archive = tmp_path / "source.tar"
     contents = {
@@ -196,7 +213,7 @@ def test_extraction_candidate_collection_still_refuses_unsafe_members(tmp_path: 
     with pytest.raises(preparation.SourcePreparationError):
         preparation._extract_archive(
             archive, destination, file_pointer_candidates=candidates,
-            **({"include_paths": ("selected",)} if scoped else {}),
+            **cast("_ExtractionOptions", {"include_paths": ("selected",)} if scoped else {}),
         )
     assert candidates == []
     assert list(destination.iterdir()) == []
@@ -368,8 +385,7 @@ def test_cli_refuses_public_age_override_before_governed_source_preparation(
 @pytest.mark.parametrize("reuse", [False, True])
 def test_cli_prepares_only_the_selected_core_projects(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], reuse: bool) -> None:
     seen, composed = [], []
-
-    def compose(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    def compose(*args: object, **kwargs: Any) -> dict[str, Any]:
         composed.append(kwargs["projects"])
         return {"projects": {}}
 
@@ -440,7 +456,7 @@ def test_native_build_workspace_binds_repository_declaration_even_without_compac
     declaration.write_text('[tool.copilot-extensions.python-projects]\nexample="apps/example"\n')
     monkeypatch.setattr(local, "os", SimpleNamespace(name="posix"))
     with pytest.raises(ValueError, match="project declaration changed"):
-        with local._build_workspace(source, tmp_path / "output", ("example",), None):
+        with local._build_workspace(source, tmp_path / "output", ("example",), cast("ArtifactBuilder", None)):
             declaration.write_text('[tool.copilot-extensions.python-projects]\nexample="apps/other"\n')
 
 
@@ -520,7 +536,7 @@ def test_source_materializes_declared_project_assets_and_libraries(repository: t
     ).read_bytes()
     metadata = tomllib.loads((payload / "pyproject.toml").read_text())
     assert metadata["tool"]["uv"]["sources"]["shared"] == {"path": "libs/shared"}
-    assert materialization.uer.materialized_local_source_problems(payload) == []
+    assert cast('Callable[[Path], list[str]]', getattr(getattr(materialization, 'uer'), 'materialized_local_source_problems'))(payload) == []
 
 
 @pytest.fixture
@@ -544,7 +560,7 @@ def test_cli_keeps_explicit_uv_and_one_budget_across_source_and_build(
 ) -> None:
     calls = []
     monkeypatch.setattr(time, "monotonic", lambda: 100.0)
-    def compose(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    def compose(*args: object, **kwargs: Any) -> dict[str, Any]:
         calls.append(("source", kwargs))
         return {"projects": {}}
 
@@ -645,27 +661,42 @@ def test_main_snapshot_uses_portable_archive_eol_and_keeps_explicit_crlf(reposit
     assert (output / "source" / "binary.bin").read_bytes() == bytes(range(256))
 
 
-@pytest.mark.parametrize("relative", [False, True])
+@pytest.mark.parametrize("spelling", [
+    "absolute", "relative",
+    pytest.param("extended", marks=pytest.mark.skipif(os.name != "nt", reason="Windows namespace")),
+])
 def test_native_archive_writes_owned_file_without_captured_binary(
-    repository: tuple[Path, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, relative: bool,
+    repository: tuple[Path, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, spelling: str,
 ) -> None:
+    from native_test_paths import native_test_path
+
     repo, commit = repository
-    output = tmp_path / "archive"
-    preparation._private_output_directory(output)
-    monkeypatch.chdir(output)
-    archive = Path("native.tar") if relative else output / "native.tar"
+    monkeypatch.chdir(tmp_path)
+    directory = tmp_path / "owned"
+    if spelling == "extended":
+        while len(str(directory / "native.tar")) < 280:
+            directory /= "native-archive-output"
+        directory = native_test_path(directory)
+    preparation._private_output_directory(directory)
+    archive = (
+        Path("owned/native.tar") if spelling == "relative"
+        else directory / "native.tar"
+    )
     original = preparation_process.run
     observed = []
     deadline = time.monotonic() + 30
 
-    def run(argv: list[str], **options: Any) -> Any:
-        assert "--output=" + str(archive.absolute()) in argv
+    def run(argv: list[str], **options: Any) -> subprocess.CompletedProcess[bytes]:
+        output = next(argument.removeprefix("--output=") for argument in argv
+                      if argument.startswith("--output="))
+        assert Path(output).is_absolute()
+        assert Path(output).samefile(archive)
         assert "stdout" not in options and options["capture_output"] is True
         assert options["deadline"] == deadline
         result = original(argv, **options)
         assert not result.stdout
         observed.append(result.returncode)
-        return result
+        return cast("subprocess.CompletedProcess[bytes]", result)
 
     monkeypatch.setattr(preparation_process, "run", run)
     preparation._archive(repo, commit, archive, deadline=deadline)
@@ -698,14 +729,14 @@ def test_source_staging_uses_private_creation_and_cleans_failed_preparation(
     create = owner.mkdir_private
     created = []
 
-    def private(path: Path, **options: Any) -> None:
+    def private(path: Path, **options: object) -> None:
         create(path, **options)
         created.append(path)
 
     class ArchiveBoundary(Exception):
         pass
 
-    def archive(_source: Path, _commit: str, path: Path, **_options: Any) -> None:
+    def archive(_source: Path, _commit: str, path: Path, **_options: object) -> None:
         assert path.parent in created
         permissions.check(path.parent, private=True)
         raise ArchiveBoundary
@@ -802,7 +833,7 @@ def test_extended_source_paths_validate_each_dependency_component(tmp_path: Path
     (first / "pyproject.toml").write_text(f'[tool.uv.sources]\nsecond = {{path = "{reference}"}}\n')
     (second / "pyproject.toml").write_text('[project]\nname = "second"\nversion = "1"\n')
     extended = Path(vars(os.path)["_getfinalpathname"](consumer))
-    problems = materialization.uer.materialized_local_source_problems(extended)
+    problems = cast('Callable[[Path], list[str]]', getattr(getattr(materialization, 'uer'), 'materialized_local_source_problems'))(extended)
     if problem is None:
         assert problems == []
     else:
@@ -853,7 +884,7 @@ def test_development_snapshot_materializes_without_seeding_or_consuming_changefi
         lambda *a, **kw: pytest.fail("local deployment must not accumulate release versions"),
     )
 
-    def materialize(source: Path, **options: Any) -> list[str]:
+    def materialize(source: Path, **options: object) -> list[str]:
         assert (source / "version.txt").read_text(encoding="utf-8") == "released-version\n"
         assert options == {"canonical_root": source, "file_pointer_candidates": []}
         seen.append("materialization")
@@ -1025,9 +1056,9 @@ def test_suite_build_preserves_roster_versions_and_uses_one_toolchain(
     admitted_toolchain = toolchain
     uv = tmp_path / "uv.exe"
     deadline = time.monotonic() + (remaining or 240)
-    execution: dict[str, Any] = {"uv": uv, "deadline": deadline} if remaining is not None else {}
+    execution: _ExecutionOptions = {"uv": uv, "deadline": deadline} if remaining is not None else {}
 
-    def build(component: str, *, out_dir: Path, toolchain: SimpleNamespace, builder: SimpleNamespace=builder, **options: Any) -> Any:
+    def build(component: str, *, out_dir: Path, toolchain: SimpleNamespace, builder: SimpleNamespace=builder, **options: object) -> dict[str, Any]:
         assert options == execution
         assert toolchain is admitted_toolchain
         builder.build_wheel(component, out_dir, toolchain=toolchain)
@@ -1077,7 +1108,7 @@ def test_suite_build_preserves_roster_versions_and_uses_one_toolchain(
         with local._built_projects(
             output, record, retain_toolchain=retain_toolchain, **execution,
         ) as (observed, borrowed):
-            assert observed is record and borrowed is toolchain
+            assert observed is record and borrowed is cast("ToolchainLock", toolchain)
             assert build_roots[0].is_dir()
             assert json.loads((native_output / local.MANIFEST).read_text()) == record
     else:
@@ -1147,7 +1178,7 @@ def test_local_builder_load_keeps_controller_and_module_state_independent(tmp_pa
     builder = local._load_module(
         Path(build_python_artifacts.__file__), "_local_install_artifact_builder",
     )
-    builder.REPO = tmp_path
+    setattr(builder, "REPO", tmp_path)
     assert build_python_artifacts.REPO == original_root
     assert builder.resolve_vendored_libs is not build_python_artifacts.resolve_vendored_libs
 
@@ -1208,7 +1239,7 @@ def test_suite_refuses_changed_compact_or_retained_source(tmp_path: Path, monkey
     monkeypatch.setattr(local, "_load_module", lambda *a: builder)
     builds = []
 
-    def build(component: str, *, out_dir: Path, toolchain: SimpleNamespace) -> Any:
+    def build(component: str, *, out_dir: Path, toolchain: SimpleNamespace) -> dict[str, Any]:
         builds.append(component)
         if not change.startswith("profile-"):
             target = payload if change == "retained" else builder.REPO / "plugins" / component
@@ -1219,7 +1250,7 @@ def test_suite_refuses_changed_compact_or_retained_source(tmp_path: Path, monkey
     if change == "copy":
         copytree = shutil.copytree
 
-        def altered_copy(src: Any, dst: Any, *args: Any, **kwargs: Any) -> Any:
+        def altered_copy(src: str | Path, dst: str | Path, *args: Any, **kwargs: Any) -> str | Path:
             result = copytree(src, dst, *args, **kwargs)
             if Path(src) == payload:
                 (Path(dst) / "runtime-source.json").write_text("changed")
@@ -1343,7 +1374,7 @@ def reusable_install_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, req
                     "".join(f"{name} = {target}\n" for name, target in metadata["scripts"].items())
                 ).encode()
             module = next(path.split("/")[0] for path in members if path.endswith("/__init__.py"))
-            archive = wheel_bytes(
+            archive = cast("_LegacyWheelBytes", wheel_bytes)(
                 name=module, prefix=prefix, metadata=("\n".join(headers) + "\n\n").encode(),
                 wheel=(
                     "Wheel-Version: 1.0\nGenerator: setuptools (80.9.0)\n"
@@ -1402,9 +1433,12 @@ def test_local_prepared_wheel_reuse_retains_exact_inputs_without_another_build(r
 
 
 @pytest.mark.parametrize("reusable_install_source", [True], indirect=True)
+@pytest.mark.skipif(sys.platform == "darwin", reason="native certificate provider is unsupported on macOS")
 @pytest.mark.parametrize("fault", [
     None, "completion", "wheel", "application", "extras", "target", "policy",
-    "toolchain", "selected-source",
+    "toolchain", "selected-source", "malformed-config", "unreadable-config", "malformed-config-env",
+    "default-string", "url-integer", "supplemental-env", "supplemental-config", "supplemental-project",
+    "strengthened-cutoff", "strengthened-package-cutoff",
 ])
 def test_complete_application_reuse_revalidates_outputs_without_constructing(
     reusable_install_source: tuple[Path, Path, dict[str, Any], dict[str, Any]], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: None | str,
@@ -1425,15 +1459,41 @@ def test_complete_application_reuse_revalidates_outputs_without_constructing(
     deadline = time.monotonic() + 60
     target: dict[str, Any] = {"environment": default_environment(), "tags": [str(tag) for tag in sys_tags()], "device": "cpu"}
     monkeypatch.setattr(native, "_query_marker_environment", lambda *args, **kwargs: target["environment"])
-    policy = {"policyId": "fixture-policy"}
-    monkeypatch.setattr(native, "_profile_policy", lambda *args: (("fixture", None), policy))
+    import governed_feed_trust
+
+    for key in tuple(os.environ):
+        if key.startswith(("UV_", "PIP_")) or key.upper() in {
+            "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
+        }:
+            monkeypatch.delenv(key)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    monkeypatch.setenv("UV_CREDENTIALS_DIR", str(tmp_path / "credentials"))
+    monkeypatch.chdir(tmp_path)
+    config = tmp_path / "current-uv.toml"
+    config.write_text("")
+    monkeypatch.setenv("UV_CONFIG_FILE", str(config))
+    monkeypatch.setattr(
+        governed_feed_trust, "_opaque_index_identity",
+        lambda value: hashlib.sha256(value.encode()).hexdigest(),
+    )
+    trusted, policy = native._profile_policy(selected, dict(os.environ), ())
+    with native._reuse_configuration("uv", deadline=deadline) as (transaction, projections):
+        _, feed = native._profile_feed(
+            selected, transaction, projections, uv="uv", download_origins=(),
+            wheels=None, deadline=deadline,
+        )
+    if fault == "policy":
+        monkeypatch.setattr(native, "_profile_policy", lambda *args: (trusted, policy))
     with native.retain_wheel_inputs(
         archives, expected, max_wheels=256, max_archive_bytes=128 << 20,
         max_total_bytes=512 << 20, max_snapshot_bytes=1 << 30, deadline=deadline,
     ) as retained:
         profile = native.complete_profile(
             selected, target, ["demo==1.0.0"], retained,
-            policy_id=policy["policyId"], acquisition_id="fixture-acquisition", deadline=deadline,
+            policy_id=policy["policyId"], acquisition_id=feed.policy_id, deadline=deadline,
         )
         snapshot = native._write_snapshot(
             selected, completed / "profiles" / "demo", profile, retained, deadline=deadline,
@@ -1476,7 +1536,7 @@ def test_complete_application_reuse_revalidates_outputs_without_constructing(
         policy["policyId"] = "changed-policy"
     if fault == "selected-source":
         reuse = local._reuse_projects
-        def changed(*args: Any, **kwargs: Any) -> Any:
+        def changed(*args: Any, **kwargs: Any) -> dict[str, Any]:
             result = reuse(*args, **kwargs)
             (output / "source" / "plugins" / "demo" / "src" / "demo" / "__init__.py").write_text("changed")
             return result
@@ -1484,15 +1544,61 @@ def test_complete_application_reuse_revalidates_outputs_without_constructing(
     monkeypatch.setattr(native, "prepare_registry_lock", lambda *a, **k: pytest.fail(
         "complete reuse must not resolve or prepare another native profile",
     ))
+    uv = _required_executable("uv")
+    run = subprocess.run
+    settings_probes: list[list[str]] = []
+    def settings_only(argv: list[str], *args: Any, **kwargs: Any) -> Any:
+        if argv[0] == uv:
+            if argv[1:3] != ["auth", "token"]:
+                assert "--show-settings" in argv, "reuse must not execute a solver or download"
+                settings_probes.append(argv)
+        return run(argv, *args, **kwargs)
+    monkeypatch.setattr(subprocess, "run", settings_only)
     options: dict[str, Any] = dict(
         extras={"demo": ["bootstrap"]} if fault == "extras" else {}, deadline=deadline,
-        source_record_sha256=digest, toolchain_record=toolchain_record,
+        source_record_sha256=digest, toolchain_record=toolchain_record, uv=uv,
     )
+    configuration_faults = {
+        "malformed-config", "unreadable-config", "malformed-config-env", "default-string",
+        "url-integer", "supplemental-env", "supplemental-config", "supplemental-project",
+        "strengthened-cutoff", "strengthened-package-cutoff",
+    }
+    if fault in configuration_faults:
+        assert native.reuse_applications(output, completed, ["demo"], **options) == snapshots
+        if fault == "malformed-config-env":
+            monkeypatch.setenv("UV_DEFAULT_INDEX", "https://pypi.org/simple")
+        if fault in {"malformed-config", "malformed-config-env"}:
+            config.write_text("[index")
+        elif fault == "unreadable-config":
+            open_file = Path.open
+            def unavailable(path: Path, *args: Any, **kwargs: Any) -> Any:
+                if path == config:
+                    raise PermissionError("fixture configuration is unreadable")
+                return open_file(path, *args, **kwargs)
+            monkeypatch.setattr(Path, "open", unavailable)
+        elif fault == "default-string":
+            config.write_text('[[index]]\ndefault="true"\nurl="https://pypi.org/simple"\n')
+        elif fault == "url-integer":
+            config.write_text('[[index]]\nurl=42\n')
+        elif fault == "supplemental-env":
+            monkeypatch.setenv("UV_INDEX", "https://packages.example/simple")
+        elif fault == "supplemental-config":
+            config.write_text('[[index]]\nurl="https://packages.example/simple"\nauthenticate="never"\n')
+        elif fault == "strengthened-cutoff":
+            config.write_text('exclude-newer="2024-01-01T00:00:00Z"\n')
+        elif fault == "strengthened-package-cutoff":
+            config.write_text('[exclude-newer-package]\ndemo="2024-01-01T00:00:00Z"\n')
+        else:
+            monkeypatch.delenv("UV_CONFIG_FILE")
+            (tmp_path / "uv.toml").write_text(
+                '[[index]]\nurl="https://packages.example/simple"\nauthenticate="never"\n',
+            )
     if fault:
         with pytest.raises(native.ProfileError if fault == "selected-source" else ProfileUnavailable):
             native.reuse_applications(output, completed, ["demo"], **options)
     else:
         assert native.reuse_applications(output, completed, ["demo"], **options) == snapshots
+        assert len(settings_probes) == 2
         assert json.loads((completed / "applications.json").read_text()) == completion
         assert native.source_inputs.select_project(snapshot, "demo").identity == selected.identity
     assert not (output / "wheels").exists()
@@ -1546,11 +1652,11 @@ def test_complete_output_reuse_uses_one_provider_without_replaying_worker_failur
     calls = []
     deadline = time.monotonic() + 30
 
-    def admit(*args: Any, **kwargs: Any) -> tuple[str, str]:
+    def admit(*args: object, **kwargs: object) -> tuple[str, str]:
         calls.append("admit")
         return ("e" * 40 if phase == "late-source" and calls.count("admit") > 1 else "d" * 40, "b" * 40)
 
-    def compose(_repository: Path, _commit: str, _main: str, built: Path, **kwargs: Any) -> dict[str, Any]:
+    def compose(_repository: Path, _commit: str, _main: str, built: Path, **kwargs: object) -> dict[str, Any]:
         calls.append("compose")
         (built / "source").mkdir(parents=True)
         return dict(record)
@@ -1586,7 +1692,7 @@ def test_complete_output_reuse_uses_one_provider_without_replaying_worker_failur
         pass
 
     @contextmanager
-    def build(*args: Any, **kwargs: Any) -> Iterator[Any]:
+    def build(*args: object, **kwargs: object) -> Iterator[None]:
         calls.append("fresh")
         raise FreshConstructionSelected
         yield
@@ -1903,7 +2009,7 @@ def _embedded_profile_wheel(directory: Path, manifest: dict[str, Any], members: 
         "filename": "copilot_extensions_worktree_manager-1.0.0-py3-none-any.whl",
     })
     archive = directory / row["filename"]
-    archive.write_bytes(wheel_bytes(
+    archive.write_bytes(cast("_LegacyWheelBytes", wheel_bytes)(
         name="worktree_manager", prefix="copilot_extensions_worktree_manager-1.0.0.dist-info/",
         metadata=b"Metadata-Version: 2.4\nName: copilot-extensions-worktree-manager\nVersion: 1.0.0\n\n",
         extra=members,
@@ -2050,7 +2156,7 @@ def test_native_registry_lock_selects_declared_application_extras(tmp_path: Path
     compiled = []
 
     @contextmanager
-    def compile_probe(uv: str, arguments: list[str], **kwargs: Any) -> Iterator[Any]:
+    def compile_probe(uv: str, arguments: list[str], **kwargs: Any) -> Iterator[None]:
         compiled.append(Path(arguments[0]).read_text())
         raise RuntimeError("compiler boundary")
         yield
@@ -2101,7 +2207,7 @@ def test_native_engine_profile_projects_declared_fleet_ssh_sdk(
 
     root = Path(__file__).resolve().parent.parent
     payload = root / "plugins/agent-worktrees"
-    wheels = {}
+    wheels: dict[str, dict[str, Any]] = {}
     for directory in (payload, root / "fleet-manager", root / "plugins/agent-ssh"):
         metadata = tomllib.loads((directory / "pyproject.toml").read_text())
         project = metadata["project"]
@@ -2140,7 +2246,7 @@ def test_native_engine_profile_projects_declared_fleet_ssh_sdk(
     compiled = []
 
     @contextmanager
-    def compiler(uv: str, arguments: list[str], **kwargs: Any) -> Iterator[Any]:
+    def compiler(uv: str, arguments: list[str], **kwargs: Any) -> Iterator[None]:
         compiled.extend(Path(arguments[0]).read_text().splitlines())
         raise RuntimeError("native compiler boundary")
         yield
@@ -2291,15 +2397,15 @@ def test_complete_native_profile_inspects_bytes_and_writes_independent_source_sn
 
 
 @pytest.mark.parametrize("trusted,indexes", [
-    (None, ["primary"]), (("primary", None), ["primary", "foreign"]),
-    (("primary", None), ["primary", "primary"]),
+    (None, ["primary"]), (("https://primary.example/simple", None), ["primary", "foreign"]),
+    (("https://primary.example/simple", None), ["primary", "primary"]),
 ])
-def test_native_profile_feed_refuses_untrusted_or_supplemental_indexes(monkeypatch: pytest.MonkeyPatch, trusted: None | tuple[str | None, ...], indexes: list[str]) -> None:
+def test_native_profile_feed_refuses_untrusted_or_supplemental_indexes(monkeypatch: pytest.MonkeyPatch, trusted: None | tuple[str, None], indexes: list[str]) -> None:
     native: ModuleType = importlib.import_module("local_install_profile")
     import governed_feed_trust
     import installer_native_feed
 
-    monkeypatch.setattr(governed_feed_trust, "_validated_trusted_index_url", lambda env: trusted)
+    monkeypatch.setattr(governed_feed_trust, "_effective_default_index_url", lambda env, **options: trusted)
     monkeypatch.setattr(governed_feed_trust, "_opaque_index_identity", lambda text: "1" * 64)
     monkeypatch.setattr(
         installer_native_feed, "capture_native_feed_inputs",
@@ -2309,8 +2415,8 @@ def test_native_profile_feed_refuses_untrusted_or_supplemental_indexes(monkeypat
     )
     with pytest.raises(native.ProfileError, match="configured|indexes"):
         native._profile_feed(
-            SimpleNamespace(identity=SimpleNamespace(document=lambda: {})),
-            SimpleNamespace(environment={}), ["original", "retained"],
+            cast("ProjectSource", SimpleNamespace(identity=SimpleNamespace(document=lambda: {}))),
+            cast("RetainedUVInstall", SimpleNamespace(environment={})), ["original", "retained"],
             uv="uv", download_origins=(), wheels=None, deadline=time.monotonic() + 5,
         )
 
@@ -2328,12 +2434,12 @@ def test_native_profile_preserves_duplicate_selected_feed_evidence(monkeypatch: 
         installer_native_feed, "capture_native_feed_inputs", lambda *a, **kw: feeds,
     )
     _, captured = native._profile_feed(
-        SimpleNamespace(identity=SimpleNamespace(document=lambda: {})),
-        SimpleNamespace(environment={"UV_DEFAULT_INDEX": url}), ["original", "retained"],
+        cast("ProjectSource", SimpleNamespace(identity=SimpleNamespace(document=lambda: {}))),
+        cast("RetainedUVInstall", SimpleNamespace(environment={"UV_DEFAULT_INDEX": url})), ["original", "retained"],
         uv="uv", download_origins=(), wheels=None, deadline=time.monotonic() + 5,
     )
-    assert captured is feeds
-    assert [item.role for item in captured.feeds] == ["default", "configured"]
+    assert cast("SimpleNamespace", captured) is feeds
+    assert [item.role for item in cast("SimpleNamespace", captured).feeds] == ["default", "configured"]
 
 
 @pytest.fixture
@@ -2435,6 +2541,7 @@ def prepare_native_source_inputs(tmp_path: Path, request: pytest.FixtureRequest)
     )
     for name in (
         "versioned_runtime.py", "versioned_runtime_leases.py", "versioned_runtime_source.py",
+        "versioned_runtime_identity.py", "versioned_runtime_fingerprint.py",
         "versioned_runtime_construction.py", "versioned_runtime_publication.py",
     ):
         if not standalone:
@@ -2458,7 +2565,7 @@ def prepare_native_source_inputs(tmp_path: Path, request: pytest.FixtureRequest)
     }))
     selected = native.source_inputs.select_project(original, "demo-app")
     archive = tmp_path / "demo_app-1.0.0-py3-none-any.whl"
-    archive.write_bytes(wheel_bytes(
+    archive.write_bytes(cast("_LegacyWheelBytes", wheel_bytes)(
         name="demo_app", prefix="demo_app-1.0.0.dist-info/",
         extra={"demo_app/__init__.py": content.encode(), **callback},
         metadata=(
@@ -2479,7 +2586,7 @@ def prepare_native_source_inputs(tmp_path: Path, request: pytest.FixtureRequest)
     expected = {archive.name: "sha256:" + hashlib.sha256(archive.read_bytes()).hexdigest()}
     if dependency:
         counter = tmp_path / "counter-1.0.0-py3-none-any.whl"
-        counter.write_bytes(wheel_bytes(
+        counter.write_bytes(cast("_LegacyWheelBytes", wheel_bytes)(
             name="counter", prefix="counter-1.0.0.dist-info/",
             metadata=b"Metadata-Version: 2.4\nName: counter\nVersion: 1.0.0\n\n",
         ))
@@ -2582,6 +2689,7 @@ def test_application_candidate_retains_its_admitted_runtime_helpers(native_sourc
             for name in (
                 "runtime_launcher.py", "versioned_runtime.py", "versioned_runtime_leases.py",
                 "versioned_runtime_source.py", "versioned_runtime_construction.py",
+                "versioned_runtime_identity.py", "versioned_runtime_fingerprint.py",
                 "versioned_runtime_publication.py",
             ):
                 assert (candidate.slot / ".runtime-bootstrap" / name).read_bytes() == (
@@ -2774,7 +2882,7 @@ def test_native_profile_with_only_associated_wheels_does_not_acquire_registry_in
     prepared = native._prepare_profile(
         snapshot, selected, wheels,
         {"files": [], "target": profile["target"], "roots": profile["roots"]},
-        output, None, [], uv=shutil.which("uv") or pytest.skip("a real uv is required"),
+        output, cast("RetainedUVInstall", None), [], uv=shutil.which("uv") or pytest.skip("a real uv is required"),
         download_origins=(), deadline=time.monotonic() + 120,
     )
     with source.project_inputs(prepared, "demo-app") as (observed, inputs):
@@ -2817,8 +2925,8 @@ def test_associated_application_supplies_the_acquisition_process_owner(native_so
     monkeypatch.setattr(installer_wheel_acquisition, "acquire_wheel_inputs", acquire)
     with pytest.raises(OwnerObserved):
         native._prepare_profile(
-            snapshot, selected, {"demo-app": {"wheel_directory": application.project["wheels"]}},
-            {"files": [{"fixture": "selected-external-wheel"}]}, tmp_path, None, [],
+            snapshot, cast("ProjectSource", selected), {"demo-app": {"wheel_directory": application.project["wheels"]}},
+            {"files": [{"fixture": "selected-external-wheel"}]}, tmp_path, cast("RetainedUVInstall", None), [],
             uv="unused", download_origins=(), deadline=time.monotonic() + 30,
         )
 
@@ -2873,13 +2981,13 @@ def test_complete_application_preparation_uses_existing_owners(
     deadline = time.monotonic() + 30
     calls = []
 
-    def admit(repository: Path, commit: str, branch: str, **options: Any) -> tuple[str, str]:
+    def admit(repository: Path, commit: str, branch: str, **options: object) -> tuple[str, str]:
         assert repository == repo and commit == "a" * 40 and branch == "dev"
         assert options == {"deadline": deadline}
         calls.append("admit")
         return ("c" * 40 if failure == "late" and calls.count("admit") > 1 else "d" * 40, "b" * 40)
 
-    def compose(repository: Path, commit: str, main: str, destination: Path, **options: Any) -> dict[str, Any]:
+    def compose(repository: Path, commit: str, main: str, destination: Path, **options: object) -> dict[str, Any]:
         assert repository == repo and commit == "a" * 40 and main == "c" * 40
         assert options == {
             "deadline": deadline, "finalized_main": False, "source_descriptor": None,
@@ -2892,7 +3000,7 @@ def test_complete_application_preparation_uses_existing_owners(
     held = []
 
     @contextmanager
-    def build(destination: Path, record: dict[str, Any], **options: Any) -> Iterator[Any]:
+    def build(destination: Path, record: dict[str, Any], **options: object) -> Iterator[tuple[dict[str, Any], SimpleNamespace]]:
         assert destination.name == "inputs"
         assert options == {
             "projects": ("demo-app",), "uv": "selected-uv", "deadline": deadline,
@@ -2907,7 +3015,7 @@ def test_complete_application_preparation_uses_existing_owners(
             held.clear()
             calls.append("release")
 
-    def profile(built: Path, destination: Path, **options: Any) -> dict[str, Any]:
+    def profile(built: Path, destination: Path, **options: object) -> dict[str, Any]:
         assert built.name == "inputs"
         assert options == {
             "uv": "selected-uv", "deadline": deadline, "prepare_profile": True,
@@ -2932,7 +3040,7 @@ def test_complete_application_preparation_uses_existing_owners(
             "source": {} if failure == "source" else selected.identity.document(),
         }
 
-    def query(python: Path, **options: Any) -> dict[str, str]:
+    def query(python: Path, **options: object) -> dict[str, str]:
         assert held == [True]
         assert options == {"deadline": deadline}
         return {"python_full_version": "3.11.0", "sys_platform": (
@@ -2977,7 +3085,7 @@ def test_complete_application_preparation_uses_existing_owners(
             pytest.fail("cold preparation borrowed an incumbent Packaging dependency")
         return importer(name, *args, **kwargs)
 
-    def isolated_worker(*args: Any, **kwargs: Any) -> Any:
+    def isolated_worker(*args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         in_worker.append(True)
         try:
             return worker(*args, **kwargs)
@@ -3060,7 +3168,7 @@ def test_single_profile_cli_keeps_selected_component_and_budget(tmp_path: Path, 
 
     calls = []
 
-    def profile(snapshot: Path, output: Path, **options: Any) -> dict[str, Any]:
+    def profile(snapshot: Path, output: Path, **options: object) -> dict[str, Any]:
         calls.append((snapshot, output, options))
         return {"phase": "registry-locked", "install_ready": False, "files": []}
 
@@ -3090,7 +3198,7 @@ def test_complete_reuse_cli_distinguishes_cache_misses_from_selected_input_failu
     monkeypatch.setattr(native, "_query_marker_environment", lambda *a, **k: (
         {"fixture": "foreign"} if phase == "target" else target
     ))
-    def reuse(snapshot: Path, previous: Path, components: tuple[str, ...], **options: Any) -> dict[str, str]:
+    def reuse(snapshot: Path, previous: Path, components: tuple[str, ...], **options: object) -> dict[str, str]:
         calls.append((snapshot, previous, components, options))
         if phase == "miss":
             raise ProfileUnavailable("prior output is unavailable")
@@ -3121,6 +3229,8 @@ def test_complete_reuse_cli_distinguishes_cache_misses_from_selected_input_failu
     else:
         assert captured.out == ""
     assert len(calls) == int(phase != "target")
+    if calls:
+        assert calls[0][3]["uv"] == "unused-uv"
     assert not (tmp_path / "unused").exists()
 
 
@@ -3139,14 +3249,15 @@ def test_profile_batch_refuses_invalid_selection_before_reading_source(
     ))
     with pytest.raises(ValueError, match="bounded unique"):
         native.prepare_applications(
-            tmp_path / "source", tmp_path / "output", components, extras=extras,
+            tmp_path / "source", tmp_path / "output", components, extras=cast(dict[str, Any], extras),
             uv="unused", deadline=time.monotonic() + 30, source_record_sha256="a" * 64,
         )
     assert not (tmp_path / "output").exists()
 
 
 @pytest.mark.parametrize("repair", [False, True])
-def test_application_cli_forwards_selection_and_callback_arguments(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], repair: bool) -> None:
+@pytest.mark.parametrize("explicit", [False, True])
+def test_application_cli_forwards_selection_and_callback_arguments(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], repair: bool, explicit: bool) -> None:
     local_install_profile: ModuleType = importlib.import_module("local_install_profile")
     source = local_install_profile.source_inputs
     snapshot, payload, root, uv, python = (
@@ -3156,7 +3267,7 @@ def test_application_cli_forwards_selection_and_callback_arguments(tmp_path: Pat
     monkeypatch.setattr(source, "select_project", lambda *args: selected)
     monkeypatch.setattr(source.sources, "read_source_identity", lambda *args, **kwargs: selected.identity)
     calls = []
-    def install(*args: Any, **kwargs: Any) -> dict[str, str]:
+    def install(*args: object, **kwargs: object) -> dict[str, str]:
         calls.append((args, kwargs))
         return {"state": "installed", "slot": str(root / "versions" / "selected")}
     monkeypatch.setattr(source, "install_application", install)
@@ -3166,6 +3277,7 @@ def test_application_cli_forwards_selection_and_callback_arguments(tmp_path: Pat
         "--base-python", str(python), "--health-module", "demo_app",
         "--expected-runtime-version", "selected", "--expected-payload-hash", "a" * 64,
         "--install-application", *(["--repair"] if repair else []),
+        *(["--global-bin", str(root / "commands")] if explicit else []),
         "--", "--root", "callback root", "--repair", "--",
     ]
     assert source.main(arguments) == 0
@@ -3173,6 +3285,7 @@ def test_application_cli_forwards_selection_and_callback_arguments(tmp_path: Pat
         "uv": uv, "base_python": python, "health_module": "demo_app",
         "expected_version": "selected", "expected_hash": "a" * 64,
         "arguments": ("--root", "callback root", "--repair", "--"), "repair": repair,
+        **({"global_bin": root / "commands"} if explicit else {}),
     })]
     assert json.loads(capsys.readouterr().out) == {
         "state": "installed", "slot": str(root / "versions" / "selected"),
@@ -3185,6 +3298,7 @@ def test_application_cli_forwards_selection_and_callback_arguments(tmp_path: Pat
     ["--repair"],
     ["--", "--callback"],
     ["--install-application", "unseparated"],
+    ["--native-inputs", "--global-bin", "/commands"],
 ])
 def test_application_cli_refuses_invalid_modes_before_source_access(monkeypatch: pytest.MonkeyPatch, arguments: list[str]) -> None:
     local_install_profile: ModuleType = importlib.import_module("local_install_profile")
@@ -3240,7 +3354,7 @@ def application_adapter(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Simp
     )
 
     @contextmanager
-    def project_inputs(*_: Any, **_options: Any) -> Iterator[tuple[SimpleNamespace, SimpleNamespace]]:
+    def project_inputs(*_: object, **_options: object) -> Iterator[tuple[SimpleNamespace, SimpleNamespace]]:
         yield selected, inputs
 
     @contextmanager
@@ -3265,6 +3379,7 @@ def application_adapter(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Simp
     def child(_argv: list[str], **options: Any) -> None:
         slot = options["candidate"]
         fixture.children.append(slot.name)
+        fixture.argv = _argv
         fixture.child_options.append(options)
         if fixture.child_error:
             raise fixture.child_error
@@ -3286,6 +3401,66 @@ def application_adapter(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Simp
         expected_version=version, expected_hash=selection["payload_hash"], **options,
     )
     return fixture
+
+
+@pytest.mark.parametrize("receiver", ["current", "old", "malformed", "rolled-back", "slot-directory"])
+def test_application_adapter_selects_actual_helper_before_construction_and_dispatch(
+    application_adapter: SimpleNamespace, receiver: str,
+) -> None:
+    fixture = application_adapter
+    capable = (
+        "APPLICATION_INSTALL_CAPABILITIES = ('global-bin/v1',)\n"
+        "raise AssertionError('capability discovery must not execute this helper')\n"
+    )
+    (fixture.application / "install.py").write_text(
+        "APPLICATION_INSTALL_CAPABILITIES = (\n" if receiver == "malformed"
+        else "pass\n" if receiver == "old" else capable,
+    )
+    (fixture.old / "install.py").write_text("pass\n" if receiver == "rolled-back" else capable)
+    selected = fixture.old if receiver == "slot-directory" else fixture.root / "isolated commands"
+    if receiver == "current":
+        assert Path(fixture.install(global_bin=selected, arguments=("--fixture",))["slot"]) == fixture.old
+        command = fixture.argv[fixture.argv.index(str(fixture.old / "install.py")):]
+        assert command == [
+            str(fixture.old / "install.py"), "--global-bin", str(selected), "--", "--fixture",
+        ]
+    else:
+        message = (
+            "cannot overlap runtime version slots" if receiver == "slot-directory"
+            else "selected application helper lacks global-bin/v1"
+        )
+        with pytest.raises(ValueError, match=message):
+            fixture.install(global_bin=selected)
+        assert fixture.children == []
+        assert fixture.versions == ([fixture.old.name] if receiver == "rolled-back" else [])
+    assert (fixture.old / "preserved").read_bytes() == b"incumbent bytes"
+
+
+def test_application_adapter_reuse_checks_selected_publication_directory(
+    application_adapter: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import runtime_application_install as application
+
+    fixture = application_adapter
+    helper = application.__file__
+    assert helper is not None
+    for location in (fixture.application, fixture.old):
+        declaration = json.loads((location / "application.json").read_text())
+        declaration.update(setup=[], start=[])
+        (location / "application.json").write_text(json.dumps(declaration))
+        (location / "install.py").write_bytes(Path(helper).read_bytes())
+    selected = fixture.root / "commands"
+    observed: list[Path | None] = []
+
+    def current(_slot: Path, _record: dict[str, Any], *, global_bin: Path | None = None) -> bool:
+        observed.append(global_bin)
+        return len(observed) > 1
+
+    monkeypatch.setattr(application, "_publication_current", current)
+    result = fixture.install(global_bin=selected)
+    assert fixture.install(global_bin=selected) == result
+    assert observed == [selected, selected]
+    assert fixture.children == [fixture.old.name]
 
 
 @pytest.mark.parametrize("declared,expected", [
@@ -3518,12 +3693,12 @@ def test_application_adapter_runs_real_install_repeat_and_retains_failed_start(
     run_owned = source.engine.run_owned
     activation_calls = []
 
-    def observed_child(argv: list[str], **options: Any) -> Any:
+    def observed_child(argv: list[str], **options: Any) -> subprocess.CompletedProcess[str]:
         activation = any(Path(argument).name == "install.py" for argument in argv)
         assert options.get("allow_breakaway", False) is activation
         if activation:
             activation_calls.append(tuple(argv))
-        return run_owned(argv, **options)
+        return cast("subprocess.CompletedProcess[str]", run_owned(argv, **options))
 
     monkeypatch.setattr(source.engine, "run_owned", observed_child)
     with source.project_inputs(snapshot, "demo-app") as (selected, inputs):
@@ -3562,6 +3737,7 @@ def test_application_adapter_runs_real_install_repeat_and_retains_failed_start(
     assert {helper.name for helper in helpers} == {
         "runtime_launcher.py", "versioned_runtime.py", "versioned_runtime_leases.py",
         "versioned_runtime_source.py", "versioned_runtime_construction.py",
+        "versioned_runtime_identity.py", "versioned_runtime_fingerprint.py",
         "versioned_runtime_publication.py", "versioned_runtime_cache.py",
     }
     for helper in helpers:
@@ -3788,7 +3964,7 @@ def test_native_source_shell_handoff(native_source: tuple[ModuleType, Path], tmp
         (tmp_path / "current-version").write_text(selection["runtime_version"], encoding="utf-8")
         old_files = {path.name: path.read_bytes() for path in incumbent.iterdir()}
 
-    def quote(value: str | Path) -> str:
+    def quote(value: object) -> str:
         return "'" + str(value).replace("'", "''") + "'"
 
     script = tmp_path / "handoff.ps1"

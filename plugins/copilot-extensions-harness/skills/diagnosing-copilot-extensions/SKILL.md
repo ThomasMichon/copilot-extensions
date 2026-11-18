@@ -78,19 +78,18 @@ the suite, whether or not they ever contribute:
    not manual-update permission gates. Report actual blockers precisely.
 
 For a genuine code defect:
-   - **File at the established tracker destination** — when that destination is
-     this upstream suite, open/find its GitHub issue in generic terms: no
-     PII, internal paths/hostnames, account details, or proprietary/downstream
-     context (see `contributing-to-copilot-extensions`'s *Sanitization* rule
-     and its worked examples in
-     [`references/sanitization-examples.md`](../../references/sanitization-examples.md)). This is the right move even if
-     you never intend to fix it yourself; dependency ownership alone must not
-     redirect a consumer's already-established report destination.
+   - **Report and offer to file at the established tracker destination.**
+     Obtain reporting authority before publication. Keep the report generic:
+     no credentials, identifying paths, private links or downstream context.
+     Dependency ownership does not redirect an established destination.
    - **Replace from authentic source** if the deployed software is stale or
      corrupted, through authorized update or the canonical repair boundary above.
-   - **Contribute a versioned fix** through
-     `contributing-to-copilot-extensions`'s source worktree/PR flow, never by
-     editing the deployed package.
+   - **Do not start a source contribution to unblock another product's task.**
+     Treat this suite's source as frozen unless the operator explicitly assigns
+     that work. A separate source-change request follows the repository's own
+     `CONTRIBUTING.md`, with or without the optional maintainer plugin.
+     Do not wait for an upstream review, merge, promotion or rollout. Continue
+     independent task work or return the exact unrecoverable blocker.
 
 ## Where things live
 
@@ -98,7 +97,7 @@ For a genuine code defect:
 |------|------|
 | Installed plugin payloads | `~/.copilot/installed-plugins/copilot-extensions/<plugin>/` |
 | Runtime roots | `~/.agent-*` (for example `~/.agent-worktrees/`, `~/.agent-bridge/`, `~/.agent-codespaces/`, `~/.agent-containers/`, `~/.agent-mcp/`, `~/.agent-logger/`, `~/.agent-dispatch/`, `~/.agent-index/`, `~/.agent-vault/`) <!-- marketplace-isolation: allow deployed-runtime-diagnostics --> |
-| **Writable source checkout** | Resolve it, don't assume it's undocumented -- run `<agent-worktrees catalog argv[0]> related resolve copilot-extensions` (the exact `argv[0]` from the session command catalog, never a bare PATH lookup; or the equivalent for another plugin-suite repo). A runtime-only path above is never the only copy; concluding a source-location gap without running this first is the mistake, not a real gap. <!-- marketplace-isolation: allow deployed-runtime-diagnostics --> |
+| **Source checkout** | For authorized source research or an explicit contribution, resolve it with `<agent-worktrees catalog argv[0]> related resolve copilot-extensions` (the exact session-catalog command). Resolution is not edit authority and is not required merely to offer a failure report. <!-- marketplace-isolation: allow deployed-runtime-diagnostics --> |
 | Versioned slots | Resolved legacy roots or explicitly activated core installation cells; historical flat environments and modern nested `.venv` applications coexist. See the footprint reference for owners, selectors and preserved state. |
 | Binstubs | `~/.local/bin/agent-*` (`.ps1` primary + `.cmd` fallback on Windows) <!-- marketplace-isolation: allow deployed-runtime-diagnostics --> |
 | Enablement | Effective user/repo Copilot settings (`enabledPlugins` / `extraKnownMarketplaces`); ordinary payload loading and user-level session-extension activation have distinct gates in `docs/installation.md` |
@@ -108,7 +107,7 @@ For a genuine code defect:
 
 | Symptom | Likely cause | Action |
 |---------|--------------|--------|
-| `copilot plugin update` says **"already at latest"** but the code is stale | Version not bumped before merge (marketplace compares versions) | Check the plugin's `plugins[N].version` in the repo vs the deployed `plugin.json`; the fix is a version bump on the *source* side (see `contributing-to-copilot-extensions`). |
+| `copilot plugin update` says **"already at latest"** but the code is stale | Release metadata or selected payload may be stale | Compare selected release and deployed metadata. Use authorized recovery if available; otherwise report the discrepancy. Do not start a version-bump PR during another task. |
 | `plugin update` **succeeded** but the runtime behaves unchanged | Payload refreshed, **runtime not redeployed** — the CLI's "updated" message is payload-only | Use the unified deploy path: `<repo> update` (normally `agent-worktrees update`) on the machine. If the payload/runtime have the same version but content drift is suspected, use `<repo> update --force`. Per-plugin `install.*` / `init.*` is only a local-testing or recovery path. <!-- marketplace-isolation: allow deployment-management --> |
 | `agent-worktrees` / `agent-bridge` **command not found** | Runtime not installed, `~/.local/bin` not on PATH, or an earlier PATH entry shadows the binstub | Check `Get-Command agent-worktrees -All` / `which -a agent-worktrees`; ensure `~/.local/bin` wins; run `<repo> update` to reconcile missing runtime/binstubs. <!-- marketplace-isolation: allow deployed-runtime-diagnostics --> |
 | A **skill won't load** in a session | Plugin not enabled, repository not trusted, or session not restarted | Confirm effective enablement/trust and **restart the session**. Ordinary skill loading does not require experimental mode; session extensions have a separate activation gate. |
