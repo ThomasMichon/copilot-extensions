@@ -133,28 +133,34 @@ class LocalClient:
 
     def _select(self) -> None:
         if self.binding is None:
-            selected = self._http("GET", "capabilities")
-            if selected.get("continuing") is not True or selected.get("storage") != self.storage or (
-                selected.get("forge_writes") is not False or selected.get("task_emissions") is not False
-            ):
-                raise LocalClientError("selected local continuing profile unsupported")
-            self.binding = {
-                name: selected[name] for name in ("protocol", "namespace", "repository_key")
-            }
-            feature = selected.get("reviewer_actions")
-            self.reviewer_actions = isinstance(feature, dict) and (
-                feature.get("protocol") == "agent-pull-requests.reviewer-actions/v1"
-                and feature.get("storage") == "repository_activity_version:1"
-                and feature.get("effects") == "none"
-                and feature.get("page_cursor") == "projection-sha256"
-            )
-            feature = selected.get("stream")
-            self.streaming = isinstance(feature, dict) and (
-                feature.get("protocol") == "agent-pull-requests.repository-stream/v1"
-                and feature.get("transport") == "local-sse"
-                and feature.get("ack_on_write") is False
-                and feature.get("resume") == "registration-scoped-current-views"
-            )
+            self._accept_selection(self._http("GET", "capabilities"))
+
+    def _accept_selection(self, selected: dict[str, Any]) -> None:
+        if selected.get("continuing") is not True or selected.get("storage") != self.storage or (
+            selected.get("forge_writes") is not False or selected.get("task_emissions") is not False
+        ):
+            raise LocalClientError("selected local continuing profile unsupported")
+        self.binding = {
+            name: selected[name] for name in ("protocol", "namespace", "repository_key")
+        }
+        feature = selected.get("reviewer_actions")
+        self.reviewer_actions = isinstance(feature, dict) and (
+            feature.get("protocol") == "agent-pull-requests.reviewer-actions/v1"
+            and feature.get("storage") == "repository_activity_version:1"
+            and feature.get("effects") == "none"
+            and feature.get("page_cursor") == "projection-sha256"
+        )
+        feature = selected.get("stream")
+        self.streaming = isinstance(feature, dict) and (
+            feature.get("protocol") == "agent-pull-requests.repository-stream/v1"
+            and feature.get("transport") == "local-sse"
+            and feature.get("ack_on_write") is False
+            and feature.get("resume") == "registration-scoped-current-views"
+        )
+
+    def _envelope(self, payload: dict[str, Any]) -> dict[str, Any]:
+        assert self.binding is not None
+        return {**self.binding, "request": payload}
 
     def request(self, operation: str, payload: dict[str, Any]) -> dict[str, Any]:
         """Select running support and retain namespace/backend binding through every request."""
@@ -162,7 +168,7 @@ class LocalClient:
         assert self.binding is not None
         if operation == "next-actions" and not self.reviewer_actions:
             raise LocalClientError("selected local reviewer-action profile unsupported")
-        value = self._http("POST", operation, {**self.binding, "request": payload})
+        value = self._http("POST", operation, self._envelope(payload))
         result = value.get("result")
         if value.get("repository_key") != self.binding["repository_key"] or not isinstance(result, dict):
             raise LocalClientError("local binding/result differs")
@@ -191,7 +197,7 @@ class LocalClient:
                 headers["last-event-id"] = last_event_id
             connection.request(
                 "POST", f"/v1/{self.route}/{self.target}/stream",
-                body=json.dumps({**self.binding, "request": payload}, allow_nan=False).encode(),
+                body=json.dumps(self._envelope(payload), allow_nan=False).encode(),
                 headers=headers,
             )
             response = connection.getresponse()
