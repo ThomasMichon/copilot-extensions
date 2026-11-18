@@ -3421,6 +3421,14 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [reviewed lifecycle receiving receipt](journal/2026/11.17-lifecycle-receiving-and-timeout-retirement.md#reviewed-lifecycle-receiving-and-two-separate-tracker-retirements)
+  records #13185's actual merge, complete current #6143 receiving and
+  separately audited #6143/#6177 redundant-tracker retirements. Their
+  technical work, actual owners and Active receiving efforts remain.
+  #6137's explicit keeper conditions remain unresolved and it stays OPEN.
+  One eligible arrival offsets part of the two retirements: the complete
+  count is 882 whole, 153 above fixed 729. Standalone historical prose is
+  reconciled to public-neutral wording without changing any checkbox state.
   The [finite lifecycle receiving and timeout tracking](journal/2026/11.17-lifecycle-receiving-and-timeout-retirement.md)
   records #13184's actual merge, #6138's complete already-accepted portfolio
   contract and separately audited redundant-tracker retirement. New complete

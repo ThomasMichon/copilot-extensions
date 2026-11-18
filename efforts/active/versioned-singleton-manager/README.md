@@ -915,6 +915,29 @@ requirements or permission to weaken the existing vision.
 
 ## Journal
 
+### 2026-11-17 - Conditional receiving reviewed; tracker separately retired
+
+#13185 merged as `09e81891ff64e197addbfc39c7691ca7b9db9d64` after
+current-head Copilot approval, no findings or threads and all required CI.
+All 21 new acceptance entries remain unchecked. Subsequent fresh qualification
+and entire current 1,021-line ROOT/source/discussion/custody readback confirm
+the complete conditional protocol AND separately scored ordinary routing
+contract remain directly planned under their original custodians.
+
+The inherited #1986 final-open/full-readback condition governed its earlier
+supersession. Its qualified actual retirement explanation records all five
+unchecked clauses accepted/read back while #6143 was OPEN. That historical
+receipt is not technical completion or a general waiver. The subsequent
+separate #6143 judgment rests on complete reviewed same-domain receiving and
+current readback, not component merges or absence alone.
+
+[#6143's exact explanation](https://github.com/ThomasMichon/copilot-extensions/issues/6143#issuecomment-6968395495)
+was audited before its `NOT_PLANNED` closure at 03:45:49 UTC on 2026-11-18.
+Original body, all five prior discussions, labels and assignments remain
+unchanged. Protocol, Worktrees, Bridge, native-validation, manager/reader and
+resource owners retain their actual scopes and holds. No implementation,
+native result, source-claim expiry or resource transfer is implied.
+
 ### 2026-11-17 - Proposed complete conditional-protocol receiving
 
 Proposed the complete #6143 conditional former-configuration/identity/control

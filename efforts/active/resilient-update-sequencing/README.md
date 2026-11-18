@@ -475,6 +475,22 @@ achieved by rearranging today's combined installer invocations.
 
 ## Journal
 
+### 2026-11-17 - Finite native-reconciliation Plan reviewed; keeper retained
+
+#13185 merged as `09e81891ff64e197addbfc39c7691ca7b9db9d64` after
+current-head Copilot approval with no findings or threads and all required CI.
+All 15 new direct Plan/local/global Validation entries remain unchecked;
+all 1,243 incumbent lines and 47 incumbent checkbox lines were preserved.
+This is reviewed planning, not implementation or a native/installed result.
+
+#6137 remains OPEN. Its explicit final-OPEN/OPEN-keeper and inherited
+all-source/readback/custody conditions remain binding pending source-specific
+origin/authority reconciliation and current whole readback. The campaign's
+earlier #6218/#6294 intake receipts preserve those original unfinished scopes,
+not permission to waive the keeper. The #3453 condition's origin is not yet
+fully reconciled. No generic ACK, resource release or ordinary incoming-
+completion veto replaces these actual conditions.
+
 ### 2026-11-17 - Proposed complete finite native-reconciliation receiving
 
 Proposed the complete #6137 original/refined union, including independently
