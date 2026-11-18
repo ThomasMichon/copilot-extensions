@@ -46,6 +46,36 @@ waiting for a complete installer redesign.
 
 ## Coordination
 
+### Proposed finite native-reconciliation receiving from #6137
+
+Retain the original #6137 observability/native-lifetime claimant, #3453
+coordinator lifecycle custodians, #6218 retirement/result and #6294 master-
+reconciliation owners. #6820 retains integration/sequencing; #6812 retains
+observability; installer/construction owners retain mechanisms. Preserve
+#5574's separate complete native restart-loop/rollout acceptance, #7711's
+actual operational hold and #9096's pending release/authorized-rollout owner.
+This amendment neither appoints this effort's driver to those distinct lanes
+nor introduces a generic owner-ACK, every-host witness or automatic activation.
+
+The current #6137 body explicitly requires the complete independent #3453
+family in final-OPEN #6137, actual eligible OPEN/unlocked receiving and full
+current body readback with every incumbent requirement/claim/hold preserved.
+It says to keep #6137 OPEN and retain #3453 if scope/custody is not accepted.
+Its #6218/#6294 intake likewise states this keeper remains OPEN and requires
+all original/refined requirements in the eligible OPEN keeper, full current
+body readback, preserved original/claimed/#3453 obligations and separate fresh
+source/actor/custody judgments. Retain a source independently if its complete
+scope or custody cannot be preserved.
+
+Preserve these actual administrative conditions separately from the owner's
+technical-status statements about partial auditing and unknown historical
+requester. This proposal leaves #6137 OPEN through receiving delivery;
+neither planned-row acceptance nor a later source-status judgment silently
+revises its final-OPEN/OPEN-keeper conditions. Their actual origin, authority
+and continuing applicability must be reconciled before any subsequent #6137
+retirement. No source condition or independent owner/resource/operational hold
+is waived here.
+
 The [installation convergence map](../source-managed-runtime-installs/installation-convergence.md)
 connects this effort's remaining Phase3 sequencing to the common incoming
 installation path. Prepare the complete required set before activation;
@@ -270,7 +300,132 @@ complete repair is newly claimed. Preserve all ten direct 3491
 Plan/Validation/Coordination clauses and current best-effort
 cold-recovery/candidate-health/verified-retained-good-generation semantics.
 
+### Proposed finite native-reconciliation family from #6137
+
+_Additive planned acceptance under the existing domain custodians. Preserve
+every incumbent row, first unresolved gate and checked credit. These rows add
+no execution authority or new whole-parent prerequisite._
+
+- [ ] **R6137-1 - Historical diagnosis:** Retain the Linux/WSL observation:
+  default supervisor disabled/inactive, Result=success, NRestarts=0, named
+  profile still native-managed, later default selection MODE=serve with
+  nonempty labels. Resolve the initiating automatic updater invocation,
+  resolved installation root, primary/named selection fields AT reconciliation
+  and actual stop/disable requester only from attributable evidence. Keep
+  unavailable inputs explicitly unresolved. An inert-primary reproduction
+  matches the shape but does not establish cause. Capture sanitized selection/
+  lifecycle facts, never credentials or full environments.
+- [ ] **R6137-2 - Delivered evidence and limits:** Credit the original lifecycle
+  investigation, four-case fixture and reported regressions, and #6148's
+  source-owned auditing and separately demonstrated native restart-ownership
+  correction. Historical results are not newly executed validation. Slot
+  completion precedes activation/reconciliation; successor-spawn/coordinator/
+  supervisor timing and adjacent stop jobs establish chronology/correlation,
+  not requester identity. POSIX retirement's published no-op and current
+  dependency observations do not reconstruct the caller. Contained cgroup
+  cleanup after exits 0 AND 42 with fixture Restart=no does not qualify the
+  full Restart=on-failure loop or rollout.
+- [ ] **R6137-3 - Bounded observability and policy:** Retain the original
+  claimant's bounded source-owned action/reason records, safe invocation
+  correlation, effective scope/selection facts, runtime version, exact unit,
+  prior native enabled/active state and initiating lifecycle verb. Distinguish
+  runtime-ready from service-reconcile completion. Preserve independent
+  default/named scope, durable runtime-slot resolution, disabled/masked/client-
+  only/no-service/no-supervisor intent and budget pauses; fail visibly on
+  unrecoverable activation errors. No broad watchdog, automatic re-enable,
+  override reset or speculative outage fix follows.
+- [ ] **R6137-4 - Low documentation follow-up:** Retain the serve() return
+  documentation and supervisor_registration.py overview correction: exit 42
+  is not exclusively a spawned-successor result. Credit the already-correct
+  implementation/canonical lifecycle documentation. This finite documentation
+  item neither reopens lifecycle policy nor proves historical/native completion.
+- [ ] **R3453 - Independent coordinator disablement:** Retain this distinct
+  coordinator install/update/refresh defect, not #6137's established cause.
+  Capture the exact coordinator unit's prior effective registration/enablement
+  and selected installation ownership BEFORE rewriting. Preserve deliberate
+  disabled/masked intent through a clear retained-choice notice OR skipping
+  re-enable under existing lifecycle policy. Distinguish permitted fresh
+  registration and already-enabled behavior from incumbent refresh; unavailable/
+  unreadable/ambiguous state authorizes no enable/start/restart. Preserve
+  --no-restart across the WHOLE unit-effect boundary: a later return does not
+  protect an earlier unconditional enable. Retain explicit re-enable authority,
+  alternate coordinator launch owners, profile/budget-pause boundaries and
+  actionable error/refusal/unknown reporting. Supervisor fixtures and restart-
+  rate limits are partial neighboring credit, not this repair.
+- [ ] **R6218 - Retirement action versus update outcome:** Credit the delivered
+  non-reserved processId correction, exact process snapshot/native-handle
+  protection, native PowerShell regression and complete typed-JSON parsing.
+  Preserve failed inventory versus partial termination. Qualify the current
+  caller/callee result boundary before choosing a correction: failed/partial
+  retirement or fallback must remain distinguishable from genuine no-selection
+  and successful fallback, even when counts are zero, a later coordinator is
+  healthy or incoming update completion is independently justified. Preserve
+  diagnostics, process-reuse/query-failure refusals and exact identities. Later
+  PID absence does not prove retirement success. MCP #5785 remains separately
+  owned; no rename/parser redo, broad reaping, marker clearing or forced update.
+- [ ] **R6294 - Denied enable versus actual master readiness:** Retain denied
+  action failure separately from independently established current-runtime/
+  liveness evidence. An existing Limited/Interactive Running task, selected-
+  runtime records or healthy incoming coordinator alone is not complete master
+  proof; denial alone proves neither unavailability nor a need for elevation.
+  Reconcile already-enabled/running incumbents through the supported seam
+  separately from disabled/absent tasks, preserving native principal, profiles,
+  installation ownership and disabled/masked/client/no-service policy. Report
+  any genuinely necessary elevation and preserve existing tasks; do not replace
+  permissions, enroll an elevated task or restart unrelated workers automatically.
+- [ ] **R6137-5 - Latest Windows residual:** Retain the ordinary non-elevated
+  0.18.295-dev1 receipt: failed generation termination, denied enable, unconfirmed
+  master reconciliation with per-profile tasks preserved, successful incoming
+  coordinator cutover, and later absence of old recorded processes without
+  retirement-success attribution. Preserve 166.7 seconds for the Dispatch
+  installer and 482.234 seconds for the seven-component runtime phase. The
+  five-minute target was missed; do not attribute all time to the permission
+  failure or claim the independently blocked MCP whole-suite result passed.
+
+#### Local validation
+
+- [ ] **RV-HISTORY:** Resolve historical initiating-input/requester gaps only
+  through attributable evidence; unavailable evidence remains explicitly
+  unresolved, not an alternative technical pass. Qualify R6137-2/R6137-3 at
+  their actual scopes, retaining delivered credit and fixture limits. Later
+  service state, slot receipts or future auditing do not reconstruct the
+  historical requester or satisfy #5574's separate native-loop/rollout duty.
+- [ ] **RV-3453:** Through separately authorized contained executable/fake-manager
+  consumers, prove disabled/masked refresh issues NO enable/start/restart;
+  --no-restart has no earlier forbidden enablement; permitted fresh/already-
+  enabled paths retain behavior; unknown/unavailable/denied state is explicit.
+  Preserve existing default/named supervisor regressions. Add no mandatory
+  live-native witness to this finite fixture contract.
+- [ ] **RV-6218:** Through the separately authorized fixture-only native
+  PowerShell consumer, retain the built-in read-only PID variable and exercise
+  the actual retirement/enclosing reporting boundary with successful,
+  no-selection, failed AND partial controls, complete typed JSON, exact native
+  identities and query/reuse refusals. Historical results are partial credit,
+  not new installed acceptance.
+- [ ] **RV-6294:** Cover denied enable with already-enabled/running AND genuinely
+  disabled/absent tasks; retain principal/profile preservation and exact refusal/
+  reporting outcomes. Any separately approved activation requires independent
+  current-runtime/liveness evidence afterward. Documentary intake authorizes
+  no activation, elevation, task query or native trial.
+- [ ] **RV-DOCS:** Correct and review both narrow stale exit-42 descriptions
+  without changing lifecycle policy or representing documentation as
+  incident/native completion.
+
 ## Validation Plan
+
+- [ ] Resolve EVERY R6137/R3453/R6218/R6294 Plan and local-validation clause
+  at its original finite boundary and evidence tier. Preserve alternatives,
+  delivery credit, historical unknowns, action-versus-readiness distinctions,
+  policy and exact-identity safeguards. Incoming completion must not erase a
+  failed retirement action; outgoing uncertainty must not become a new blanket
+  incoming-completion veto.
+- [ ] Verify complete direct #6137 ROOT Plan/local/global Validation and
+  continuing Coordination after normal review and actual merge, preserving
+  all incumbent obligations, original custodians and explicit final-OPEN/
+  OPEN-keeper and inherited source/readback/custody conditions. Planned receipt
+  is not technical completion, native/release/rollout acceptance, source
+  retirement or resource release. #6137 remains OPEN through receiving delivery;
+  no prospective waiver or amendment of its keeper conditions is made here.
 
 - [ ] Qualify the relevant [L1-L6 boundaries](../source-managed-runtime-installs/update-service-lifetimes.md#validation-and-completion)
   before/during/after accepted activation, including caller/ancestor cleanup,
@@ -319,6 +474,24 @@ preparation barrier requires actual installer adapter support; it is not
 achieved by rearranging today's combined installer invocations.
 
 ## Journal
+
+### 2026-11-17 - Proposed complete finite native-reconciliation receiving
+
+Proposed the complete #6137 original/refined union, including independently
+scored #3453 coordinator disablement, #6218 retirement-result reporting and
+#6294 current-master readiness, through direct Plan/local AND actual global
+Validation/Coordination. Every new row remains unchecked. Preserve historical
+unknowns, source/native/installed evidence tiers, exact alternatives, original
+owners, #5574's separate native-loop/rollout duty, #7711's operational hold and
+#9096's release/authorized-rollout ownership. This is additive domain planning,
+not an implementation assignment or another ordinary replacement veto.
+
+The current #6137 body has explicit final-OPEN/OPEN-keeper and inherited
+all-source/readback/custody conditions. This proposal retains them without
+waiver; #6137 stays OPEN through receiving delivery. A later source-specific
+judgment must reconcile their actual origin and continuing authority rather
+than treating technical-status prose or a merged plan as their release.
+No native operation, test, service action, deployment or resource effect occurred.
 
 ### 2026-10-23 - Direct retained acceptance from #3491
 

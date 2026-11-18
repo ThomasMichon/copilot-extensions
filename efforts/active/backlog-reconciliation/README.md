@@ -3421,6 +3421,13 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [finite lifecycle receiving and timeout tracking](journal/2026/11.17-lifecycle-receiving-and-timeout-retirement.md)
+  records #13184's actual merge, #6138's complete already-accepted portfolio
+  contract and separately audited redundant-tracker retirement. New complete
+  #6137 native-reconciliation and #6143 conditional/ordinary-routing receiving
+  remains proposed with all technical rows unchecked, actual owners and
+  literal keeper conditions preserved. The complete census is 882 whole,
+  153 above fixed 729; an evidence-handling exception grants no source clearance.
   The [credential receipt, callback receiving and protected contracts](journal/2026/11.17-credential-receipt-and-protected-contracts.md)
   records #13175's actual delivery and complete current #5963/#5993/#6030
   comparisons: contributed-kind admission remains unassessed at its real
