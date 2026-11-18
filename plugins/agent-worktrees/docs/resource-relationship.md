@@ -231,6 +231,51 @@ required operation without dropping its scope or retrying through a resident.
 This capability does not qualify unrelated participating writers or authorize
 installer inhibition.
 
+### Hosted ACP activation
+
+The executing writer separately advertises `retained_hosted_activation: 1`
+on Linux/WSL, or `0` on platforms whose physical source is not qualified.
+Only after negotiating it, an existing qualified ACP owner may add
+`--retained-hosted-activation '<JSON>'` to `register-session`, together with
+its unchanged `--retained-record-writer`, explicit workspace/native IDs and
+`--pid` identifying the original Host's direct child. This is provider-first
+support; it does not migrate Bridge callers or reconcile an unknown load.
+
+The strict document is at most 8 KiB and contains:
+
+| Field | Meaning |
+|-------|---------|
+| `version` | Integer `1` |
+| `operation_id` | Original accepted-load operation, nonempty and at most 1,024 characters |
+| `session_id` | Original native conversation UUID |
+| `head_revision` | Positive original authoritative head revision |
+| `epoch` | Actual `platform`, `environment_id` and `boot_id` from the existing native source observer |
+| `host`, `child` | Distinct `{pid, start_time}` physical identities of the local Host and its direct child |
+
+The trusted transport owner supplies the accepted ACP conversation association;
+these fields alone are not a credential, load receipt or authority grant.
+Worktrees cannot infer ACP semantics from a process. It corroborates physical
+epoch, live process births and parentage twice inside the canonical record
+lock, after checking the qualified executing writer and original workspace
+incarnation. The replayed transition ledger, never its repairable revision
+cache, must retain the same active native head/revision, without a pending
+handoff or saturated or ambiguous activation history. Fresh sources refuse
+pruned history.
+An exited/zombie process cannot supply a new source.
+
+The hosted source identity binds the physical activation, native UUID and
+workspace incarnation, not an arbitrary operation ID. A new accepted source
+appends an identified `retained-hosted-acp` interval after the original ended
+interval. Repeating that same open source is byte-idempotent; a closed source
+cannot be reopened by changing only the operation ID. Another open source
+refuses. A strictly verified same-open-source retry remains valid if the first
+save pruned older intervals; it cannot reopen a pruned source or append a new
+one through that fence. This explicit route does not run hook/profile-assignment side effects,
+start infrastructure, accept handoff/hook inputs or create a CLI hold file.
+Omitting it retains the existing CLI-native hold and ordinary registration
+semantics. Old receivers must not receive the new flag; a caller must negotiate
+before native effects rather than load first and fall back after refusal.
+
 ### Retained native process creation
 
 The same executing-owner capability response advertises

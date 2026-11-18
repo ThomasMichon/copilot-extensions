@@ -8,6 +8,7 @@ import logging
 import os
 import sys
 from pathlib import Path
+from typing import Any
 from uuid import UUID
 
 
@@ -77,9 +78,11 @@ def epoch() -> dict[str, str]:
     return {"platform": platform, "environment_id": environment, "boot_id": boot}
 
 
-def process(pid: int) -> dict:
+def process(pid: int, *, require_live: bool = False) -> dict[str, Any]:
     """Read one PID/birth/parent observation, never its command line or environment."""
     fields = _text(f"/proc/{pid}/stat").rsplit(")", 1)[1].split()
+    if require_live and fields[0] in {"Z", "X", "x"}:
+        raise ValueError("Native process has exited")
     birth = fields[19]
     parent = int(fields[1])
     if not birth.isdecimal() or len(birth) > 32 or parent < 0:
@@ -87,7 +90,7 @@ def process(pid: int) -> dict:
     return {"pid": pid, "start_time": birth, "parent_pid": parent}
 
 
-def capture() -> dict:
+def capture() -> dict[str, Any]:
     """Capture the original hook ancestry before crossing any resident boundary."""
     try:
         observed_epoch = epoch()
@@ -116,7 +119,7 @@ def capture() -> dict:
         return {"version": 1, "qualified": False, "reason": "native-source-unavailable"}
 
 
-def identity(session_id: str, pid: int, start_time: str, observed_epoch: dict) -> str:
+def identity(session_id: str, pid: int, start_time: str, observed_epoch: dict[str, Any]) -> str:
     """Bind an opaque source to one native UUID and physical execution epoch."""
     if (
         str(UUID(session_id)) != session_id or type(pid) is not int or pid <= 0
