@@ -189,3 +189,25 @@ Documentation impact: the CLI reference and closeout/reclamation guide now
 name the explicit selection, runtime support check and retained discovery
 boundary. No install or configuration default changes. Inventory is an explicit
 bounded local read; it adds no launch-time work or background scan.
+
+The exact R1/R2 candidate also passed all 80 focused cases on disposable native
+Windows in [the hosted qualification run](https://github.com/ThomasMichon/copilot-extensions/actions/runs/44402600631).
+This qualifies that packet, not the complete cross-repository cleanup flow.
+
+### 2026-11-18 - Test-environment retirement candidate
+
+The R3 candidate adds a selected source/target/native-platform preview and apply
+owner. It reuses the runner's environment-identity lease and preserves the
+leased directory. A terminal marker blocks preparation and `--reinstall`, so
+an admitted waiter cannot recreate source-dependent imports after retirement.
+Partial or interrupted work keeps that fence and requires a fresh preview.
+Success applies only to the selected environment; sibling caches and other
+source consumers remain independent gates.
+
+The contained Linux cache packet passes 63 cases with one Windows-only skip.
+It exercises the actual CLI, a separate busy lease holder, interrupted owner
+recovery, partial failure, preview staleness and actual source-dependent imports
+after process exit. Fatal-error lint and whole-file strict typing pass for
+both target platforms. Native Windows qualification of R3 is still pending.
+The [source-lifetime reference](../../../docs/retained-test-environments.md)
+documents the terminal selection and the separate source-cleanup decision.
