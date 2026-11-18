@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from copy import deepcopy
 import json
+from pathlib import Path
 import subprocess
 import sys
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -15,7 +17,7 @@ from agent_pull_requests import native_author
 REPO = "example/project"
 
 
-def arguments(**kwargs) -> SimpleNamespace:
+def arguments(**kwargs: Any) -> SimpleNamespace:
     return SimpleNamespace(
         command="update",
         repo=REPO,
@@ -32,7 +34,7 @@ def arguments(**kwargs) -> SimpleNamespace:
     )
 
 
-def support() -> dict:
+def support() -> dict[str, Any]:
     return {
         "schema": "agent-worktrees.pr-author-capabilities",
         "version": 1,
@@ -42,7 +44,7 @@ def support() -> dict:
     }
 
 
-def result(status: str = "confirmed") -> dict:
+def result(status: str = "confirmed") -> dict[str, Any]:
     return {
         "schema": "agent-worktrees.pr-metadata",
         "version": 1,
@@ -59,10 +61,12 @@ def result(status: str = "confirmed") -> dict:
 
 
 @pytest.mark.parametrize("status", ["confirmed", "not_attempted", "failed", "unknown"])
-def test_native_metadata_keeps_every_owner_outcome(monkeypatch, status) -> None:
-    calls = []
+def test_native_metadata_keeps_every_owner_outcome(
+    monkeypatch: pytest.MonkeyPatch, status: str,
+) -> None:
+    calls: list[list[str]] = []
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         calls.append(argv)
         value = support() if len(calls) == 1 else result(status)
         return subprocess.CompletedProcess(
@@ -91,10 +95,12 @@ def test_native_metadata_keeps_every_owner_outcome(monkeypatch, status) -> None:
         {"publication_retained": False},
     ],
 )
-def test_malformed_owner_result_is_unconfirmed_and_never_replayed(monkeypatch, damage) -> None:
-    calls = []
+def test_malformed_owner_result_is_unconfirmed_and_never_replayed(
+    monkeypatch: pytest.MonkeyPatch, damage: dict[str, Any],
+) -> None:
+    calls: list[list[str]] = []
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         calls.append(argv)
         value = support() if len(calls) == 1 else {**result(), **damage}
         return subprocess.CompletedProcess(argv, 0, json.dumps(value), "")
@@ -117,23 +123,26 @@ def test_malformed_owner_result_is_unconfirmed_and_never_replayed(monkeypatch, d
         {"repo": "other/project"},
     ],
 )
-def test_old_or_rolled_back_owner_refuses_before_update(monkeypatch, damage) -> None:
-    calls = []
+def test_old_or_rolled_back_owner_refuses_before_update(
+    monkeypatch: pytest.MonkeyPatch, damage: dict[str, Any],
+) -> None:
+    calls: list[list[str]] = []
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         calls.append(argv)
         return subprocess.CompletedProcess(argv, 0, json.dumps({**support(), **damage}), "")
 
     monkeypatch.setattr(native_author, "run_command", run)
-    with pytest.raises(ValueError, match="does not advertise"):
-        native_author.run(arguments(), ["selected-owner"])
+    code, value = native_author.run(arguments(), ["selected-owner"])
+    assert code == 1 and value["repo"] == REPO and value["number"] == 7
+    assert "does not advertise" in value["error"]
     assert len(calls) == 1
 
 
-def test_response_lost_after_dispatch_does_not_retry(monkeypatch) -> None:
-    calls = []
+def test_response_lost_after_dispatch_does_not_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[list[str]] = []
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         calls.append(argv)
         if len(calls) == 1:
             return subprocess.CompletedProcess(argv, 0, json.dumps(support()), "")
@@ -147,7 +156,7 @@ def test_response_lost_after_dispatch_does_not_retry(monkeypatch) -> None:
     assert len(calls) == 2
 
 
-def test_actual_process_boundary_keeps_body_file_as_a_file(tmp_path) -> None:
+def test_actual_process_boundary_keeps_body_file_as_a_file(tmp_path: Path) -> None:
     body = tmp_path / "description.md"
     text = '# "quoted" \u03bb\r\n' * 200
     body.write_bytes(text.encode("utf-8"))

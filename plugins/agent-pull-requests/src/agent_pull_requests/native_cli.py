@@ -147,8 +147,6 @@ def run(
             )
     except (ValueError, RuntimeError, OSError, subprocess.SubprocessError) as exc:
         code, payload = 1, {"error": str(exc), "repo": args.repo}
-        if args.command == "update":
-            payload["number"] = args.number
         if args.command == "ready":
             from .native_author import readiness_failure
             payload = readiness_failure(args.repo, args.number, str(exc))

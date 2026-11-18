@@ -36,14 +36,14 @@ def update(
     token: str | None = None,
     title: str | None = None,
     description: str | None = None,
-    reviewers: tuple = (),
-    work_items: tuple = (),
+    reviewers: tuple[str, ...] = (),
+    work_items: tuple[str | int, ...] = (),
     origin: Any = None,
-    run: Callable[..., Any],
+    run: Callable[..., subprocess.CompletedProcess[str]],
 ) -> dict[str, Any]:
     """Update selected existing fields, never replaying an uncertain dispatch."""
     host = provider.authority_endpoint(api_base)
-    actions = {
+    actions: dict[str, dict[str, Any]] = {
         key: {"status": "not_attempted"}
         for key, value in (("title", title), ("description", description))
         if value is not None
@@ -83,6 +83,9 @@ def update(
         return result
     endpoint = f"repos/{repo}/pulls/{number}"
     environment = provider._env(token, host=host)
+    if token:
+        for alias in ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"):
+            environment[alias] = token
 
     def request(method: str, payload: dict[str, str] | None = None) -> tuple[int, dict[str, Any]]:
         args = ["gh", "api", "--hostname", host, "--include", "-X", method, endpoint]
@@ -121,7 +124,9 @@ def update(
 
     try:
         initial = pull()
-        desired = {"title": title}
+        desired: dict[str, str] = {}
+        if title is not None:
+            desired["title"] = title
         if description is not None:
             desired["description"] = preserve_description(initial.get("body") or "", description)
     except _FAILURES as exc:

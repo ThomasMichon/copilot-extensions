@@ -31,7 +31,10 @@ def published_marker(body: str) -> str | None:
             continue
         marker = literal.strip()
         match = _MARKER.fullmatch(marker)
-        if node.t != "html_block" or node.parent.t != "document" or match is None:
+        if (
+            node.t != "html_block" or node.parent is None
+            or node.parent.t != "document" or match is None
+        ):
             raise ValueError("Source attribution is not a standalone supported comment")
         fields: dict[str, str] = {}
         for token in match[1].split():

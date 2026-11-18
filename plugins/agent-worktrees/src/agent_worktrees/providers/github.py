@@ -160,11 +160,6 @@ class GitHubProvider:
             raise ProviderError("Malformed publication-label response")
         return tuple(item["name"] for item in data)
 
-    def update_pull_metadata(self, repo, number, **kwargs):
-        """Verify title/body updates while retaining the PR's original source."""
-        from .github_metadata import update
-        return update(self, repo, number, run=run_cli, **kwargs)
-
     def add_publication_labels(self, repo, number, labels, *, api_base="", token=None):
         args = ["gh", "api", "--method", "POST", f"repos/{repo}/issues/{number}/labels"]
         for label in labels:

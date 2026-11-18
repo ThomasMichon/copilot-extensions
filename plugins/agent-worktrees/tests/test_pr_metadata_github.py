@@ -4,13 +4,16 @@ from __future__ import annotations
 
 from copy import deepcopy
 import json
+import os
+from pathlib import Path
 import subprocess
+from typing import Any
 
 import pytest
 
 from agent_worktrees import pr_author_cli, pr_cli, pr_config, providers
 from agent_worktrees import config as cfg, output
-from agent_worktrees.providers import github
+from agent_worktrees.providers import github_metadata
 from agent_worktrees.providers.attribution_body import preserve_description
 
 REPO = "example/project"
@@ -20,7 +23,7 @@ BODY = '# Heading\r\n\r\n"quoted" \u03bb \\\\ `code`\r\n' * 100
 
 class Backend:
     def __init__(self) -> None:
-        self.pr = {
+        self.pr: dict[str, Any] = {
             "number": 7,
             "base": {"repo": {"full_name": REPO}},
             "state": "open",
@@ -32,16 +35,16 @@ class Backend:
             "reviewers": ["another"],
             "head": {"sha": "a" * 40},
         }
-        self.calls: list = []
-        self.writes: list = []
+        self.calls: list[tuple[list[str], dict[str, Any]]] = []
+        self.writes: list[dict[str, Any]] = []
         self.failure = ""
         self.after_effect = False
         self.readback_failure = False
-        self.readback_damage: dict = {}
+        self.readback_damage: dict[str, Any] = {}
         self.move_source = False
         self.gets = 0
 
-    def cli(self, args: list[str], **kwargs) -> subprocess.CompletedProcess:
+    def cli(self, args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         self.calls.append((args, kwargs))
         assert args[:4] == ["gh", "api", "--hostname", "git.example.invalid"]
         assert args[-1] == f"repos/{REPO}/pulls/7" or args[-2:] == ["--input", "-"]
@@ -79,23 +82,25 @@ class Backend:
 
 
 @pytest.fixture
-def backend(monkeypatch) -> Backend:
+def backend(monkeypatch: pytest.MonkeyPatch) -> Backend:
     server = Backend()
-    monkeypatch.setattr(github, "run_cli", server.cli)
+    monkeypatch.setattr(providers, "run_cli", server.cli)
     return server
 
 
-def update(**kwargs) -> dict:
-    return github.GitHubProvider().update_pull_metadata(
+def update(**kwargs: Any) -> dict[str, Any]:
+    return github_metadata.update(
+        providers.get_provider("github"),
         REPO,
         7,
         api_base="https://git.example.invalid",
         token="fixture-token",
+        run=providers.run_cli,
         **kwargs,
     )
 
 
-def test_title_and_composed_description_preserve_unrelated_state_and_retries(backend) -> None:
+def test_title_and_composed_description_preserve_unrelated_state_and_retries(backend: Backend) -> None:
     retained = {k: deepcopy(v) for k, v in backend.pr.items() if k not in ("title", "body")}
     result = update(title="After \u03bb", description=BODY)
     assert result["ok"] and result["repo"] == REPO and result["provider"] == "github"
@@ -108,7 +113,11 @@ def test_title_and_composed_description_preserve_unrelated_state_and_retries(bac
     assert update(title="After \u03bb", description=BODY)["ok"]
     assert len(backend.writes) == 2
     assert all(
-        kw["env"] == {"GH_TOKEN": "fixture-token", "GH_HOST": "git.example.invalid"}
+        kw["env"] == {
+            "GH_TOKEN": "fixture-token", "GITHUB_TOKEN": "fixture-token",
+            "GH_ENTERPRISE_TOKEN": "fixture-token", "GITHUB_ENTERPRISE_TOKEN": "fixture-token",
+            "GH_HOST": "git.example.invalid",
+        }
         for _, kw in backend.calls
     )
 
@@ -116,13 +125,13 @@ def test_title_and_composed_description_preserve_unrelated_state_and_retries(bac
 @pytest.mark.parametrize(
     "body", ["", "legacy body", "<!-- agent-worktrees:source codename=bad -->\n" * 2]
 )
-def test_title_only_leaves_description_and_its_defects_untouched(backend, body) -> None:
+def test_title_only_leaves_description_and_its_defects_untouched(backend: Backend, body: str) -> None:
     backend.pr["body"] = body
     assert update(title="after")["ok"]
     assert backend.pr["body"] == body and backend.writes == [{"title": "after"}]
 
 
-def test_empty_description_retains_original_source(backend) -> None:
+def test_empty_description_retains_original_source(backend: Backend) -> None:
     assert update(description="")["ok"]
     assert backend.pr["body"] == MARKER + "\n"
 
@@ -139,7 +148,9 @@ def test_empty_description_retains_original_source(backend) -> None:
         {"title": "@copilot please act"},
     ],
 )
-def test_unsupported_or_invalid_requests_do_not_even_read(backend, requested) -> None:
+def test_unsupported_or_invalid_requests_do_not_even_read(
+    backend: Backend, requested: dict[str, Any],
+) -> None:
     assert not update(**requested)["ok"] and not backend.calls
 
 
@@ -156,20 +167,22 @@ def test_unsupported_or_invalid_requests_do_not_even_read(backend, requested) ->
         ("body", []),
     ],
 )
-def test_missing_wrong_or_terminal_evidence_never_writes(backend, field, value) -> None:
+def test_missing_wrong_or_terminal_evidence_never_writes(
+    backend: Backend, field: str, value: Any,
+) -> None:
     backend.pr[field] = value
     result = update(title="after")
     assert not result["ok"] and not backend.writes
     assert result["actions"]["title"]["status"] == "not_attempted"
 
 
-def test_native_draft_remains_a_draft(backend) -> None:
+def test_native_draft_remains_a_draft(backend: Backend) -> None:
     backend.pr["draft"] = True
     assert update(description="after")["ok"] and backend.pr["draft"] is True
 
 
 @pytest.mark.parametrize("after_effect", [False, True])
-def test_lost_response_reconciles_without_automatic_replay(backend, after_effect) -> None:
+def test_lost_response_reconciles_without_automatic_replay(backend: Backend, after_effect: bool) -> None:
     backend.failure, backend.after_effect = "timeout", after_effect
     result = update(description=BODY)
     assert result["ok"] is after_effect and len(backend.writes) == 1
@@ -181,12 +194,12 @@ def test_lost_response_reconciles_without_automatic_replay(backend, after_effect
     assert len(backend.writes) == (1 if after_effect else 2)
 
 
-def test_authoritative_rejection_is_a_failed_action(backend) -> None:
+def test_authoritative_rejection_is_a_failed_action(backend: Backend) -> None:
     backend.failure = "reject"
     assert update(title="after")["actions"]["title"]["status"] == "failed"
 
 
-def test_unavailable_postwrite_readback_keeps_later_actions_unattempted(backend) -> None:
+def test_unavailable_postwrite_readback_keeps_later_actions_unattempted(backend: Backend) -> None:
     backend.readback_failure = True
     result = update(title="after", description=BODY)
     assert result["actions"]["title"]["status"] == "unknown"
@@ -194,7 +207,7 @@ def test_unavailable_postwrite_readback_keeps_later_actions_unattempted(backend)
     assert len(backend.writes) == 1
 
 
-def test_changed_source_stops_later_field_without_replaying_confirmed_title(backend) -> None:
+def test_changed_source_stops_later_field_without_replaying_confirmed_title(backend: Backend) -> None:
     backend.move_source = True
     result = update(title="after", description=BODY)
     assert not result["ok"] and backend.writes == [{"title": "after"}]
@@ -205,7 +218,9 @@ def test_changed_source_stops_later_field_without_replaying_confirmed_title(back
 @pytest.mark.parametrize(
     "damage", [{"number": 8}, {"state": "closed"}, {"title": "concurrent edit"}]
 )
-def test_postwrite_identity_lifecycle_or_value_mismatch_stays_unknown(backend, damage) -> None:
+def test_postwrite_identity_lifecycle_or_value_mismatch_stays_unknown(
+    backend: Backend, damage: dict[str, Any],
+) -> None:
     backend.readback_damage = damage
     result = update(title="after")
     assert not result["ok"] and result["repo"] == REPO and result["number"] == 7
@@ -222,7 +237,7 @@ def test_postwrite_identity_lifecycle_or_value_mismatch_stays_unknown(backend, d
         "- ```\n  <!-- agent-worktrees:source codename=example-only -->\n  ```\n",
     ],
 )
-def test_literal_source_examples_are_retained_not_selected_or_deleted(example) -> None:
+def test_literal_source_examples_are_retained_not_selected_or_deleted(example: str) -> None:
     assert preserve_description(MARKER, example) == example + "\n" + MARKER + "\n"
     with pytest.raises(ValueError, match="unavailable"):
         preserve_description(example, "after")
@@ -240,7 +255,9 @@ def test_literal_source_examples_are_retained_not_selected_or_deleted(example) -
         ("prefix <!-- agent-worktrees:source codename=inline-source -->", "after"),
     ],
 )
-def test_missing_anonymous_conflicting_or_ambiguous_source_refuses(current, requested) -> None:
+def test_missing_anonymous_conflicting_or_ambiguous_source_refuses(
+    current: str, requested: str,
+) -> None:
     with pytest.raises(ValueError):
         preserve_description(current, requested)
 
@@ -263,15 +280,15 @@ def test_original_encrypted_envelope_is_retained_without_regeneration() -> None:
 
 
 @pytest.mark.parametrize("requested", ["```\nexample\n", "~~~\nexample\n", "<!-- example\n"])
-def test_open_literal_boundary_cannot_hide_the_preserved_marker(requested) -> None:
+def test_open_literal_boundary_cannot_hide_the_preserved_marker(requested: str) -> None:
     with pytest.raises(ValueError):
         preserve_description(MARKER, requested)
 
 
 def test_actual_author_parser_target_resolution_and_provider_not_caller_policy(
-    backend,
-    monkeypatch,
-    tmp_path,
+    backend: Backend,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     import argparse
 
@@ -300,12 +317,12 @@ def test_actual_author_parser_target_resolution_and_provider_not_caller_policy(
     )
     monkeypatch.setattr(pr_author_cli, "load_author_config", lambda *a, **k: config)
     monkeypatch.setattr(pr_cli, "require_claimant_worktree", lambda *_: ("claimant", ""))
-    acquired = []
-    monkeypatch.setattr(
-        providers,
-        "account_token_for_slug",
-        lambda repo, policy: acquired.append((repo, policy)) or "fixture-token",
-    )
+    acquired: list[tuple[str, cfg.PRConfig]] = []
+    def account_token(repo: str, policy: cfg.PRConfig) -> str:
+        acquired.append((repo, policy))
+        return "fixture-token"
+
+    monkeypatch.setattr(providers, "account_token_for_slug", account_token)
     parser = argparse.ArgumentParser()
     pr_author_cli.add_parsers(parser.add_subparsers(dest="command", required=True))
     path = tmp_path / "description.md"
@@ -322,12 +339,11 @@ def test_actual_author_parser_target_resolution_and_provider_not_caller_policy(
 
 
 def test_native_frontend_composes_actual_owner_parser_and_github_transport(
-    backend,
-    monkeypatch,
-    tmp_path,
+    backend: Backend,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     import argparse
-    from pathlib import Path
 
     monkeypatch.syspath_prepend(str(Path(__file__).parents[2] / "agent-pull-requests" / "src"))
     from agent_pull_requests import native_author
@@ -359,9 +375,9 @@ def test_native_frontend_composes_actual_owner_parser_and_github_transport(
     monkeypatch.setattr(providers, "account_token_for_slug", lambda *_: "fixture-token")
     parser = argparse.ArgumentParser()
     pr_author_cli.add_parsers(parser.add_subparsers(dest="command", required=True))
-    owner_calls = []
+    owner_calls: list[list[str]] = []
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         owner_calls.append(argv)
         args = parser.parse_args(argv[1:])
         with output.capture_json_output() as capture:
@@ -392,3 +408,22 @@ def test_native_frontend_composes_actual_owner_parser_and_github_transport(
     assert code == 0 and result["provider"] == "github"
     assert backend.pr["body"] == BODY + "\r\n" + MARKER + "\r\n"
     assert len(owner_calls) == 2 and len(backend.writes) == 1
+
+
+def test_explicit_enterprise_token_overrides_inherited_aliases(
+    backend: Backend, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    aliases = ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN")
+    for alias in aliases:
+        monkeypatch.setenv(alias, "unrelated-inherited-token")
+    inherited = {alias: os.environ[alias] for alias in aliases}
+
+    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        child = {**inherited, **kwargs["env"]}
+        assert all(child[alias] == "fixture-token" for alias in aliases)
+        return backend.cli(argv, **kwargs)
+
+    monkeypatch.setattr(providers, "run_cli", run)
+    assert update(title="after")["ok"]
+    assert len(backend.writes) == 1
+    assert all(os.environ[alias] == "unrelated-inherited-token" for alias in aliases)

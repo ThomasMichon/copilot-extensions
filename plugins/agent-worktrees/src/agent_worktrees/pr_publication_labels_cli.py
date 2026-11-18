@@ -1,18 +1,21 @@
 """Metadata-only publication-label attachment and repair."""
+from __future__ import annotations
+
+import argparse
 from pathlib import Path
 
 from . import config as cfg, output, pr_config, providers, tracking, worktree_identity
 from . import pr_publication_labels as labels
 
 
-def add_options(parser):
+def add_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--publication-origin", default=None,
                         help="Explicitly select the publication-origin policy for this operation")
     parser.add_argument("--publication-label", action="append", default=[],
                         help="Add an origin label (repeatable; requires --publication-origin)")
 
 
-def add_parser(sub):
+def add_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     parser = sub.add_parser("pr-publication-labels", help="Attach/repair origin labels without creating or pushing")
     parser.add_argument("worktree_id", nargs="?")
     parser.add_argument("--repo")
@@ -22,7 +25,7 @@ def add_parser(sub):
     add_options(parser)
 
 
-def cmd_publication_labels(args):
+def cmd_publication_labels(args: argparse.Namespace) -> int:
     try:
         config = cfg.load_config(Path(args.config) if args.config else None)
         config = labels.activate(config, args.publication_origin, args.publication_label)
@@ -33,7 +36,7 @@ def cmd_publication_labels(args):
             if origin is None:
                 raise ValueError("Explicit repair requires --publication-origin")
             resolution = pr_config.resolve_repo_config_for_slug(config, args.repo)
-            if not resolution.resolved:
+            if not resolution.resolved or resolution.repo_config is None:
                 raise ValueError("Repair target must have a registered PR binding")
             prcfg = resolution.repo_config.pr
             labels.validate_policy(prcfg, origin)
@@ -55,4 +58,7 @@ def cmd_publication_labels(args):
         output._json_output(result) if args.json else print(result)
         return 0 if result["ok"] else 1
     except (ValueError, OSError, providers.ProviderError) as exc:
-        return output._json_error(str(exc)) if args.json else (output.err(str(exc)) or 1)
+        if args.json:
+            return output._json_error(str(exc))
+        output.err(str(exc))
+        return 1

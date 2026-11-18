@@ -4,11 +4,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import subprocess
+from typing import Any
 
 from .native_command import run_command
 
 
-def add_parsers(subparsers, *, repo_type, handler):
+def add_parsers(subparsers: Any, *, repo_type: Any, handler: Any) -> None:
     from .native_cli import validate_selector
     from .native_source_complete import add_parser as add_complete_parser
 
@@ -58,7 +59,7 @@ def add_parsers(subparsers, *, repo_type, handler):
             author.add_argument("--expected-remote-head", default=None)
 
 
-def config_options(args) -> list[str]:
+def config_options(args: Any) -> list[str]:
     path = getattr(args, "config", None)
     if path is None:
         return []
@@ -67,7 +68,7 @@ def config_options(args) -> list[str]:
     return [f"--config={Path(path).resolve()}"]
 
 
-def capability(args, prefix: list[str], operation: str | None = None) -> dict:
+def capability(args: Any, prefix: list[str], operation: str | None = None) -> dict[str, Any]:
     options = config_options(args)
     try:
         response = run_command(
@@ -102,7 +103,7 @@ def capability(args, prefix: list[str], operation: str | None = None) -> dict:
     return body
 
 
-def create_options(args, prefix: list[str]) -> list[str]:
+def create_options(args: Any, prefix: list[str]) -> list[str]:
     workspace = getattr(args, "source_workspace", None)
     expected = getattr(args, "expected_head", None)
     if bool(workspace) != bool(expected):
@@ -116,7 +117,7 @@ def create_options(args, prefix: list[str]) -> list[str]:
 
 
 def readiness_failure(repo: str, number: int, error: str, *,
-                      provider: str | None = None, status: str = "not-attempted") -> dict:
+                      provider: str | None = None, status: str = "not-attempted") -> dict[str, Any]:
     """Keep synthesized outcomes on the same versioned readiness wire contract."""
     return {
         "schema": "agent-worktrees.pr-ready", "version": 1,
@@ -125,7 +126,16 @@ def readiness_failure(repo: str, number: int, error: str, *,
     }
 
 
-def run(args, prefix: list[str]) -> tuple[int, dict]:
+def run(args: Any, prefix: list[str]) -> tuple[int, dict[str, Any]]:
+    try:
+        return _run(args, prefix)
+    except (ValueError, OSError, RuntimeError, subprocess.SubprocessError, UnicodeError) as exc:
+        if args.command != "update":
+            raise
+        return 1, {"repo": args.repo, "number": args.number, "error": str(exc)}
+
+
+def _run(args: Any, prefix: list[str]) -> tuple[int, dict[str, Any]]:
     if args.command == "author-capabilities":
         return 0, {**capability(args, prefix), "frontend": {"worker-policy-config": True}}
     if args.command == "ready" and args.number < 1:
@@ -174,7 +184,8 @@ def run(args, prefix: list[str]) -> tuple[int, dict]:
         )
 
 
-def _execute(args, prefix: list[str], argv: list[str], support: dict) -> tuple[int, dict]:
+def _execute(args: Any, prefix: list[str], argv: list[str],
+             support: dict[str, Any]) -> tuple[int, dict[str, Any]]:
     try:
         result = run_command([*prefix, *argv], timeout=90.0)
     except (OSError, RuntimeError, subprocess.SubprocessError, UnicodeError):

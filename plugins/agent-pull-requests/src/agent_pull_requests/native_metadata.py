@@ -43,7 +43,7 @@ def validate_github(args: Any, payload: dict[str, Any], returncode: int) -> None
         and isinstance(actions, dict)
         and set(actions) == expected
     )
-    if valid:
+    if valid and isinstance(actions, dict):
         for action in actions.values():
             if (
                 not isinstance(action, dict)
@@ -53,7 +53,7 @@ def validate_github(args: Any, payload: dict[str, Any], returncode: int) -> None
             ):
                 valid = False
                 break
-    if valid:
+    if valid and isinstance(actions, dict):
         confirmed = bool(actions) and all(
             action["status"] == "confirmed" for action in actions.values()
         )
