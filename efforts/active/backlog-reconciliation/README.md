@@ -3429,7 +3429,9 @@ sources, transferring owners or turning partial/planning gains into completion.
   unaccepted under the current local-only scope; two agent-invented umbrella/
   ACK gates were withdrawn while genuine source/ownership boundaries remain.
   The [reviewed receiving and separate judgments](journal/2026/11.17-fleet-refinements-and-remote-scope.md#reviewed-receiving-and-three-separate-tracker-retirements)
-  record #13193's actual merge and audited NOT_PLANNED retirement of #6236.
+  record #13193's actual merge and three withdrawn tracker-retirement attempts.
+  #6236 was restored OPEN after its inherited #6804 retirement receipt's
+  affirmative OPEN-parent representation was recovered and verified.
   #6137's campaign-owned keeper refinement was reviewed and reflected in the
   STILL-OPEN source, but that did not resolve the original owner's intentional-
   OPEN condition. Its unsupported judgment was withdrawn and #6137 restored
@@ -3439,15 +3441,15 @@ sources, transferring owners or turning partial/planning gains into completion.
   the bounded queued contributor claim/plan does not establish the retained
   source/publisher owner's actual BT4 decision. That specific condition remains
   unresolved; no generic ACK is added. File-drop remains unaccepted and #6283
-  remains OPEN. The fresh complete two-pass count is 881 whole, 152 above 729,
-  with one net audited reduction and all 24 parent items open.
+  remains OPEN. The fresh complete two-pass count is 882 whole, 153 above 729,
+  with zero net new reductions from this unit and all 24 parent items open.
   The same [whole Gateway/index comparison](journal/2026/11.17-fleet-refinements-and-remote-scope.md#whole-gatewayindex-receiving-and-an-explicit-keeper-continuation)
   finds complete existing direct #6443/#6383 receiving without another
   technical checklist. The affirmative campaign-owned #6383 OPEN-parent
-  representation is preserved, not dismissed. A proposed explicit tracking
-  continuation requires reviewed acceptance, STILL-OPEN #6443 reflection,
-  fresh complete current readback and separate judgment. #6443 stays OPEN;
-  no source/resource or technical condition is waived.
+  representation is preserved, not dismissed. An unaccepted future tracking
+  continuation is retained in the campaign journal, not adopted in Fleet
+  Coordination or Validation. #6443 stays OPEN;
+  a separate focused amendment and its actual gates remain necessary.
   **Historical receipt summaries below retain statuses and counts at their
   stated observations; the current summary above supersedes them.**
   The [reviewed lifecycle receiving receipt](journal/2026/11.17-lifecycle-receiving-and-timeout-retirement.md#reviewed-lifecycle-receiving-and-two-separate-tracker-retirements)
