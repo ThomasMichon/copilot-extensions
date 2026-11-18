@@ -1222,42 +1222,43 @@ provider refresh of the published head. Owners therefore never
 need an operator form to republish their own rebased PR. See
 [owner rewrite](../../../docs/cli-reference.md#owner-rewrite-of-a-private-pr-branch).
 
-#### Operator-confirmed break glass
+#### Owning-worktree PR history recovery
 
 Prefer source-owning CWD when available. If the original context or historical
 ownership/replay proof cannot be recovered, use the selected recovery worktree
-and project configuration explicitly:
+and project configuration explicitly. Recovery of the author's own existing
+numbered PR from its owning worktree is line-of-business and needs no operator
+approval:
 
 ```text
 <agent-worktrees catalog argv[0]> push-changes <recovery-worktree-id> --config <project-config> --break-glass-reason "<reason>" --json
 ```
 
-The unconfirmed invocation refuses and previews the exact existing PR,
-destination fingerprint, immutable source commit, original saved head and
-current provider/ref-agreed expected remote commit, without changing Git refs,
-tracking, audits or the remote. Saved publication authority, action and any
-validated backed-sync proof are also fingerprint-bound. **Stop for real
-per-PR operator sign-off** on that previewed operation. A reason, discovered
-flag, broad policy approval or previous refusal does not authorize the push.
-Only then repeat with the same inputs and
-`--confirm-break-glass <preview-fingerprint>`. Agents must not generate consent
-on their own. A changed source (including an amend), destination, reason,
-saved publication, expected head, action or evidence requires a new preview
-and sign-off.
+The command computes the exact existing PR, destination fingerprint, immutable
+source commit, original saved head and current provider/ref-agreed expected
+remote commit, binds that preview automatically, revalidates it immediately
+before taking effect and then proceeds. Saved publication authority, action and
+any validated backed-sync proof are also fingerprint-bound. Add `--dry-run` to
+see the bound operation and its preview fingerprint (returned as
+`recovery_preview` with `--json`) without changing Git refs,
+tracking, audits or the remote. Passing `--confirm-break-glass
+<preview-fingerprint>` is optional pinning: a changed source (including an
+amend), destination, reason, saved publication, expected head, action or
+evidence makes a pinned call refuse with the new preview. Re-preview and retry;
+never reuse a stale fingerprint.
 
 The preview prefers `settle-publication` when an existing completed backed-sync
 checkpoint independently proves its exact result is already the current
 provider/ref-agreed head. Confirmation then settles only local bookkeeping:
 no push, PR attribution edit or publication of later local work. Equal SHAs or
-patches without that checkpoint are not proof. Otherwise `rewrite` requires
-explicit confirmation of the exact source and agreed live CAS lease. The
-original saved lease is retained as evidence, never silently replaced before
-approval in this override flow; outside routine backed reconciliation, normal
+patches without that checkpoint are not proof. Otherwise `rewrite` binds the
+exact source and agreed live CAS lease. The original saved lease is retained as
+evidence, never silently replaced in this override flow; outside routine backed reconciliation, normal
 publication and ordinary `--rewrite-pr` still refuse it.
 Corrupt, unreadable or dangling optional checkpoints mark settlement evidence
 `unusable` in the preview and audit. They disable settlement, not an explicit
 rewrite preview; their bytes/available file identity and referenced-ref state
-remain bound to confirmation and are never silently repaired.
+remain bound to the preview and are never silently repaired.
 
 The exception waives historical original-owner, suffix and replay proof, not
 provider authentication, exact source/destination validation, an unchanged
@@ -1277,8 +1278,8 @@ reviewed, merged and no rollback is needed. Inspect without mutation using
 `git show <reported-ref>` or `git diff <published-ref> <source-ref>`. To revisit
 a retained commit, first preserve current work and obtain approval for checkout
 changes, then use `git switch --detach <reported-ref>`. Restoring local content
-does **not** restore the provider head: any remote rollback needs its own new
-preview, current exact lease and per-operation approval. No plain force push.
+does **not** restore the provider head: any remote rollback needs its own
+recovery run against the current exact lease. No plain force push.
 
 Private `agent-worktrees-pr-break-glass-<id>.json` audits live in the selected
 worktree's Git metadata, with original saved publication evidence,

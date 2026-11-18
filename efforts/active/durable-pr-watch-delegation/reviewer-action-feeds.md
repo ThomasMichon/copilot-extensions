@@ -114,8 +114,12 @@ erase existing CI/follow-up/merge distinctions.
   enqueue/steer/nudge only when separately authorized and materially justified.
   The shared [consumer contract](../../../services/pr/CONSUMERS.md) identifies
   the actual task/recipe/steering owners. The bounded source reference and five
-  cache-backed controls merged in #13055; actual task-owner adapter and durable
-  request-owner interoperability remain separate qualification.
+  cache-backed controls merged in #13055. Native recipe, SDK HTTP and actual
+  isolated task-owner route controls subsequently merged in #13270, #13274,
+  #13283 and #13284. Durable request-owner interoperability remains separate:
+  the [repository-feed waiter refinement](repository-feed-waiters.md) selects
+  the existing native waiter/wake/replay owners instead of a new request ledger.
+  Review that contract before new protocol or storage behavior.
 - [ ] **Qualify observational comparison.** Supply a bounded evaluator path
   comparing current state and causes with independently admitted provider
   reads, distinguishing disagreement from stale/unavailable evidence. Runtime
@@ -176,5 +180,6 @@ observations remain NoOp rather than repeated nudges.
 - [Canonical effort and retained acceptance](README.md)
 - [Repository cache/event milestone](repository-cache-events-m1.md)
 - [Filter definitions and owned population demand](filter-subscriptions.md)
+- [Repository-feed waits through the native task owner](repository-feed-waiters.md)
 - [Author/Reviewer perspectives](author-reviewer-perspectives.md)
 - [Local service interface](../../../services/pr/LOCAL.md)
