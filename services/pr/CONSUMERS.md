@@ -237,6 +237,16 @@ preparation, and cache bytes remain unchanged. No production coordinator,
 task creation, notification submission or durable consumer owner is
 qualified by that isolated transport proof.
 
+The same opt-in file also sends the adapter's reads through the real
+coordinator handlers over an isolated native `TaskQueue`. It obtains the
+queue/installation/machine scope from the owner's actual task detail, then
+checks retained suspension, a pending operator form and exact-key absence.
+Task state, events, steer log, wake outbox and the cache remain unchanged.
+These controls construct the existing app without entering its lifespan;
+no coordinator service, maintenance loop or worker is started. Actual route/
+storage qualification still does not enroll a production consumer or supply
+its durable request owner.
+
 ## Inert qualification and operational exits
 
 Consumer examples/tests must exercise actual cache views with synthetic
