@@ -23,12 +23,7 @@ def refresh_inherited_sessions(manager: SessionManager) -> None:
         return
     manager._host_index.refresh(strict=True)
     for session in pending:
-        if manager._session_metadata_in_use(session):
-            continue
-        if manager.db.get_session(session.session_id) is None:
-            continue
-        manager._rehydrate(merge=True, session_id=session.session_id)
-        session.awaiting_maintenance_refresh = False
+        manager._rehydrate(merge=True, session_id=session.session_id, promote_inherited=True)
 
 
 async def passive_maintenance_ready(app: FastAPI) -> bool:

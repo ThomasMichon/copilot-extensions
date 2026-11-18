@@ -865,6 +865,19 @@ class Session:
     def touch(self) -> None:
         self.updated_at = time.time()
 
+    def metadata_in_use(self, *, include_readers: bool = True) -> bool:
+        return (
+            self.client is not None
+            or self._local_launch_owner is not None
+            or self._native_turn_transport is not None
+            or self._handoff_in_progress
+            or (include_readers and self.subscriber_count > 0)
+            or self._lifecycle_lock.locked()
+            or self._codespace_ownership_lock.locked()
+            or self._turn_start_lock.locked()
+            or self._prompt_task is not None and not self._prompt_task.done()
+        )
+
     def note_heartbeat(self, now: float | None = None) -> None:
         """Record that the transport was confirmed alive (periodic beat)."""
         self.last_heartbeat_at = now if now is not None else time.time()

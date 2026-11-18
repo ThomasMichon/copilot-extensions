@@ -78,6 +78,7 @@ class EventLog:
         self._next_id = 1
         self._waiters: list[tuple[asyncio.AbstractEventLoop, asyncio.Event]] = []
         self._observation_revision = 0
+        self._tool_statistics: ToolStartCounter | None
         self._reset_tool_statistics()
         #: Set when this log was merged into another: (target log, old id -> new id).
         self.merged_into: tuple[EventLog, dict[int, int]] | None = None
@@ -157,6 +158,18 @@ class EventLog:
             max_id = db.get_max_event_id(session_id)
             log._next_id = max_id + 1
         return log
+
+    def refresh_subscribed_history(self, hydrated: EventLog) -> None:
+        """Publish the predecessor's committed history without replacing this reader handle."""
+        if self._db is not hydrated._db or self._session_id != hydrated._session_id:
+            raise ValueError("Cannot refresh a different session's event history")
+        with self._lock:
+            self._events = hydrated._events
+            self._next_id = hydrated._next_id
+            self._open_tool_calls = hydrated._open_tool_calls
+            self._tool_statistics = hydrated._tool_statistics
+            self._telemetry = hydrated._telemetry
+        self.wake_observers()
 
     def append(
         self, event_type: str, data: dict[str, Any], *, timestamp: float | None = None,
@@ -455,7 +468,7 @@ class EventLog:
         return self._telemetry.log_epoch or None, floor, head, list(self._events[start:end])
 
     def _reset_tool_statistics(self) -> None:
-        self._tool_statistics: ToolStartCounter | None = None
+        self._tool_statistics = None
         try:
             self._tool_statistics = ToolStartCounter()
         except Exception:
