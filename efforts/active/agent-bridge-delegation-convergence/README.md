@@ -132,13 +132,15 @@ additive-phase OR separately accepted follow-up/publication decision before
 closure. Reconcile that recorded condition; do not invent a generic re-ACK.
 The current queued-steering claim is bounded, not custody of this whole union.
 No live reservation was inspected or cleared; zero assignees proves neither
-absence of claims nor source/resource release. #6394 stayed OPEN during the
-proposal. Normal review, complete current receiving/readback and a separate
-source-specific judgment preceded its NOT_PLANNED retirement after #13193.
-The bounded queued claim and next provider/API gate explicitly record the
-accepted-follow-up choice; actual publisher/recovery/qualification and
-source/resource custody remain. All fifteen TD6394 acceptance rows below are
-still unchecked.
+absence of claims nor source/resource release. #6394 is OPEN after withdrawal
+of an unsupported retirement judgment. The bounded queued claim and reviewed
+plan establish that contributor's scope and next gate, not that the retained
+inbox/receipt source and publisher owner made BT4's choice. Affirmative evidence
+of that actual owner's decision and next public gate remains required before
+fresh complete source/receiver/eligibility and actual condition readback and a
+separate judgment. This is the existing specific condition, not a generic ACK.
+All fifteen TD6394 acceptance rows below remain unchecked; planned receiving
+does not waive publisher/recovery/qualification or source/resource custody.
 
 ## Context
 
@@ -722,12 +724,14 @@ ownership.
 ### 2026-11-18 - Reviewed delivery receiving and separate tracker judgment
 
 #13193 accepted the complete #6394 receiving contract after current-head
-Copilot approval and all required CI. Complete current source/receiving and
-eligibility readback preceded the
-[separate NOT_PLANNED retirement](https://github.com/ThomasMichon/copilot-extensions/issues/6394#issuecomment-6970133060).
-The literal BT4 phase OR accepted-follow-up choice is evidenced by the recorded
-bounded queued claim, reviewed queued plan and next supported provider/API gate,
-not inferred from common identity or merge alone.
+Copilot approval and all required CI. The subsequent
+[retirement explanation](https://github.com/ThomasMichon/copilot-extensions/issues/6394#issuecomment-6970133060)
+incorrectly equated a bounded contributor claim and reviewed plan with the
+retained source/publisher owner's BT4 decision. That attribution was not
+established. The judgment was explicitly
+[withdrawn and #6394 restored OPEN](https://github.com/ThomasMichon/copilot-extensions/issues/6394#issuecomment-6970492016);
+its reduction credit is removed. Actual owner-decision evidence remains the
+next discriminator; complete planned receiving is not a waiver.
 
 All fifteen new Plan/local/global rows remain unchecked. Existing original
 acceptance, queued/compatibility/subscription/registration/publisher owners,

@@ -92,9 +92,13 @@ waives it.
 This proposal refines only that campaign-authored tracking convention.
 After explicit reviewed acceptance AND reflection in STILL-OPEN #6443,
 complete fresh permitted readback of its whole original and ALL discussions,
-the inherited #6383 contract, this whole Fleet ROOT/Gateway slice and the
-standalone Index ROOT/integration, eligibility and actual source-specific
-claim/resource/custody conditions. A SEPARATE administrative judgment may
+the inherited #6383 contract, and current Goal/scope, Coordination, Plan/local
+Validation and actual global Validation in Fleet and standalone Index.
+Reconcile the complete Gateway/index slice and Index/Fleet integration
+contracts and relevant changed Journal entries using the effort digests;
+reuse unchanged whole-read coverage after current binding checks rather than
+rereading unrelated historical Journals. Verify eligibility and actual
+source-specific claim/resource/custody conditions. A SEPARATE judgment may
 then continue the complete planned receiving in these existing Active domain
 efforts. Draft, merge, reflection or a link alone does not retire #6443.
 
@@ -646,8 +650,9 @@ All entries are **agent-recommended implementation gates**, not completed tests.
 
 - [ ] `V.6443.tracking-continuation`: Verify explicit reviewed acceptance and
   reflection of the campaign-owned keeper refinement in STILL-OPEN #6443,
-  THEN fresh complete permitted source/inherited/receiver/discussion/
-  eligibility and actual source-specific claim/resource/custody readback,
+  THEN fresh complete permitted source/inherited/discussion readback and the
+  current receiving sections/contracts named in Coordination, eligibility
+  and actual source-specific claim/resource/custody readback,
   THEN a separate administrative judgment. Preserve every directly received
   technical Plan/local/actual-global clause and independent owner condition;
   unresolved applicability retains the tracker OPEN.

@@ -3423,22 +3423,23 @@ sources, transferring owners or turning partial/planning gains into completion.
   for discovering thematic alignment.
   The [Fleet refinements and remote scope](journal/2026/11.17-fleet-refinements-and-remote-scope.md)
   records complete current #6236 whole-product receiving coverage with only
-  two explicit documentary/finite-role refinements proposed, not another
+  two explicit documentary/finite-role refinements accepted, not another
   duplicated product checklist. Its completed bounded #6513 claim is not an
   inferred broader reservation. #6283's conditional remote intake remains
   unaccepted under the current local-only scope; two agent-invented umbrella/
   ACK gates were withdrawn while genuine source/ownership boundaries remain.
   The [reviewed receiving and separate judgments](journal/2026/11.17-fleet-refinements-and-remote-scope.md#reviewed-receiving-and-three-separate-tracker-retirements)
   record #13193's actual merge and audited NOT_PLANNED retirements of
-  #6236/#6137/#6394. #6137's campaign-owned keeper refinement was explicitly
+  #6236/#6137. #6137's campaign-owned keeper refinement was explicitly
   reviewed, reflected in the STILL-OPEN source and followed by fresh complete
   readback and a separate judgment; no independent condition was waived.
   #6394's seven Plan, seven local and actual global Validation rows remain
-  unchecked. The recorded bounded queued follow-up and next provider/API gate
-  answer its actual phase-choice condition, not technical completion or
-  publisher/custody release. File-drop remains unaccepted; #6283 remains OPEN.
-  The complete two-pass count is 879 whole, 150 above 729; all 24 parent
-  items remain open.
+  unchecked. Its unsupported retirement was withdrawn and #6394 restored OPEN:
+  the bounded queued contributor claim/plan does not establish the retained
+  source/publisher owner's actual BT4 decision. That specific condition remains
+  unresolved; no generic ACK is added. File-drop remains unaccepted and #6283
+  remains OPEN. The fresh complete two-pass count is 880 whole, 151 above 729,
+  with two net audited reductions and all 24 parent items open.
   The same [whole Gateway/index comparison](journal/2026/11.17-fleet-refinements-and-remote-scope.md#whole-gatewayindex-receiving-and-an-explicit-keeper-continuation)
   finds complete existing direct #6443/#6383 receiving without another
   technical checklist. The affirmative campaign-owned #6383 OPEN-parent
@@ -3446,20 +3447,22 @@ sources, transferring owners or turning partial/planning gains into completion.
   continuation requires reviewed acceptance, STILL-OPEN #6443 reflection,
   fresh complete current readback and separate judgment. #6443 stays OPEN;
   no source/resource or technical condition is waived.
+  **Historical receipt summaries below retain statuses and counts at their
+  stated observations; the current summary above supersedes them.**
   The [reviewed lifecycle receiving receipt](journal/2026/11.17-lifecycle-receiving-and-timeout-retirement.md#reviewed-lifecycle-receiving-and-two-separate-tracker-retirements)
   records #13185's actual merge, complete current #6143 receiving and
   separately audited #6143/#6177 redundant-tracker retirements. Their
   technical work, actual owners and Active receiving efforts remain.
-  #6137's explicit keeper conditions remain unresolved and it stays OPEN.
-  One eligible arrival offsets part of the two retirements: the complete
-  count is 882 whole, 153 above fixed 729. Standalone historical prose is
+  At that earlier receipt, #6137's keeper conditions were unresolved and it
+  remained OPEN. One eligible arrival offset part of the two retirements:
+  the complete count then was 882 whole, 153 above fixed 729. Historical prose is
   reconciled to public-neutral wording without changing any checkbox state.
   The [finite lifecycle receiving and timeout tracking](journal/2026/11.17-lifecycle-receiving-and-timeout-retirement.md)
   records #13184's actual merge, #6138's complete already-accepted portfolio
   contract and separately audited redundant-tracker retirement. New complete
   #6137 native-reconciliation and #6143 conditional/ordinary-routing receiving
-  remains proposed with all technical rows unchecked, actual owners and
-  literal keeper conditions preserved. The complete census is 882 whole,
+  remained proposed with all technical rows unchecked, actual owners and
+  literal keeper conditions preserved. That complete census was 882 whole,
   153 above fixed 729; an evidence-handling exception grants no source clearance.
   The [credential receipt, callback receiving and protected contracts](journal/2026/11.17-credential-receipt-and-protected-contracts.md)
   records #13175's actual delivery and complete current #5963/#5993/#6030

@@ -92,9 +92,12 @@ until the specifically reviewed and reflected refinement became effective.
 
 Drafting or receiver merge alone is insufficient. Normal reviewed explicit
 acceptance AND explicit reflection in STILL-OPEN #6137 must precede fresh
-complete permitted readback of the whole current receiver, original and ALL
-then-current discussions, eligibility and actual source-specific claim/
-resource/custody conditions. A separate administrative judgment follows.
+complete permitted readback of the original and ALL then-current discussions,
+current receiving Goal/scope, Coordination, Plan/local and actual global
+Validation, and relevant changed contract/Journal sections via the effort
+digest. Reuse unchanged whole-read coverage after current binding checks;
+verify eligibility and actual source-specific claim/resource/custody conditions.
+A separate administrative judgment follows.
 #6137 remained OPEN through proposal, receiving delivery and reconciliation;
 no automatic disposition is authorized.
 
