@@ -5,7 +5,10 @@ import os
 from pathlib import Path
 import sys
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from versioned_runtime_publication import CopyBinding
 
 import versioned_runtime as runtime
 
@@ -19,7 +22,7 @@ HOOKS = (
     "register-nudge.ps1", "register-nudge.sh", "register-session.ps1", "register-session.sh",
     "deregister-session.ps1", "deregister-session.sh", "anchor-hygiene-check.ps1",
     "anchor-hygiene-check.sh", "provision-check.ps1", "provision-check.sh", "statelessness_guard.py",
-    "guarded_anchor_map.py", "cross_repo_guard.py", "anchor_shell_parser.py", "anchor_write_guard.py", "pr_supersede_guard.py",
+    "guarded_anchor_map.py", "cross_repo_guard.py", "anchor_shell_parser.py", "anchor_registry.py", "anchor_write_guard.py", "pr_supersede_guard.py",
     "registry_root.py", "nudge_status.py", "bind_nudge.py", "hook_runtime.py", "hook_process_identity.py", "hook_pre_relevance.py", "hook_pre_policy.py", "hook_policy_process.py",
     "hook_lifecycle_runtime.py", "native_source_context.py", "pretool_killswitch.py", "hook_client.py",
     "managed_session.py", "tool_call_forms.py", "managed-session.ps1", "managed-session.sh", "execution_platform.py",
@@ -45,7 +48,9 @@ TOOLS = (
 )
 
 
-def declared_copies(content: Path, root: Path, scope: str, shell: str, contextual: bool) -> list[dict]:
+def declared_copies(
+    content: Path, root: Path, scope: str, shell: str, contextual: bool,
+) -> list[dict[str, Any]]:
     """The owner's allowlist, not authority inferred from callback output."""
     publication = runtime._runtime_component("versioned_runtime_publication")
     result = []
@@ -90,7 +95,7 @@ def declared_copies(content: Path, root: Path, scope: str, shell: str, contextua
     return result
 
 
-def parse_copies(plan: dict) -> list:
+def parse_copies(plan: dict[str, Any]) -> list[CopyBinding]:
     publication = runtime._runtime_component("versioned_runtime_publication")
     raw = Path(plan["copies"]).read_bytes()
     fields = raw.decode("utf-8").split("\0")
@@ -163,7 +168,7 @@ class HelperPublication:
 
 
 def publish(
-    plan: dict, directory: Path, metadata: dict[Path, tuple[int, int]],
+    plan: dict[str, Any], directory: Path, metadata: dict[Path, tuple[int, int]],
     validate_inputs: Callable[[], None],
 ) -> HelperPublication:
     publication = runtime._runtime_component("versioned_runtime_publication")

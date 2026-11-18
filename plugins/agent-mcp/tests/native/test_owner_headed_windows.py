@@ -1,5 +1,7 @@
 """Opt-in actual copied headed receiver and actual native CLI overlay reader."""
 
+from __future__ import annotations
+
 import asyncio
 import importlib
 import json
@@ -8,7 +10,7 @@ from pathlib import Path
 import subprocess
 import sys
 from types import SimpleNamespace
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol, cast
 from uuid import uuid4
 
 import pytest
@@ -29,6 +31,14 @@ class _Mux(Protocol):
     target: str
 
     def query(self, *args: str) -> subprocess.CompletedProcess[str]: ...
+
+
+class _PaneMux(_Mux, Protocol):
+    def capture_original_pane(self, identity: str) -> subprocess.CompletedProcess[str]: ...
+
+
+class _StartupInfo(Protocol):
+    lpAttributeList: dict[str, list[int]]
 
 
 async def _settle_mux(mux: _Mux, identity: str | None) -> None:
@@ -56,8 +66,8 @@ async def _settle_mux(mux: _Mux, identity: str | None) -> None:
     pytest.fail("Exact fixture mux settlement remains unconfirmed")
 
 
-def _inherit(transfer: OverlayPipe) -> Any:
-    startup = getattr(subprocess, "STARTUPINFO")()
+def _inherit(transfer: OverlayPipe) -> _StartupInfo:
+    startup = cast(_StartupInfo, getattr(subprocess, "STARTUPINFO")())
     startup.lpAttributeList = {"handle_list": [transfer.inherited_handle]}
     return startup
 
@@ -104,6 +114,7 @@ def test_wrong_native_reader_cannot_receive_overlay_bytes() -> None:
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             **no_window_kwargs(),
         )
+        assert job is not None
         owners.append((expected, job))
         other, job = spawn_sync_in_kill_on_close_job(
             [getattr(sys, "_base_executable"), "-I", "-S", "-c",
@@ -113,6 +124,7 @@ def test_wrong_native_reader_cannot_receive_overlay_bytes() -> None:
             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             **no_window_kwargs(),
         )
+        assert job is not None
         owners.append((other, job))
         with pytest.raises(PrivateIPCError) as refused:
             transfer.send()
@@ -198,14 +210,19 @@ async def test_actual_retained_headed_receiver_publishes_client_not_coordinator(
     monkeypatch.syspath_prepend(str(driver_tests))
     monkeypatch.syspath_prepend(str(Path(__file__).parent))
     bootstrap = importlib.import_module("test_owner_bootstrap_copilot_windows")
+    environment_for = cast(Callable[[Path], dict[str, str]], bootstrap._environment)
+    provider_for = cast(Callable[[Path], Path], bootstrap._provider)
     monkeypatch.syspath_prepend(str(driver_tests.parent))
-    fixture_mux = importlib.import_module("headed_mux_fixture").FixtureMux
+    fixture_mux = cast(
+        Callable[[str, Path, dict[str, str]], _PaneMux],
+        importlib.import_module("headed_mux_fixture").FixtureMux,
+    )
     from agent_remote_driver.session_host.client import SessionHostClient
     from agent_remote_driver.session_host.osutil import pid_alive
 
     home, workspace = tmp_path / "home", tmp_path / "workspace"
     workspace.mkdir()
-    environment = bootstrap._environment(home)
+    environment = environment_for(home)
     assert os.environ.get("COPILOT_EXTENSIONS_TEST_CONTAINED") == "1"
     environment["COPILOT_EXTENSIONS_TEST_CONTAINED"] = "1"
     copilot_home = Path(environment["COPILOT_HOME"])
@@ -216,7 +233,7 @@ async def test_actual_retained_headed_receiver_publishes_client_not_coordinator(
         executable=executable, home=copilot_home, workspace=workspace,
         env=environment, logs=tmp_path / "logs",
     )
-    mux: _Mux | None = None
+    mux: _PaneMux | None = None
     identity: str | None = None
     state: dict[str, Any] | None = None
     try:
@@ -226,7 +243,7 @@ async def test_actual_retained_headed_receiver_publishes_client_not_coordinator(
         (native.home / "config.json").write_text(
             json.dumps({"trustedFolders": [str(native.workspace)]}), encoding="utf-8",
         )
-        provider = bootstrap._provider(tmp_path / "provider")
+        provider = provider_for(tmp_path / "provider")
         configuration = tmp_path / "mcp.json"
         receipt = tmp_path / "mcp-owner.json"
         configuration.write_text(json.dumps({"mcpServers": {"owner-fixture": {
@@ -291,6 +308,8 @@ async def test_actual_retained_headed_receiver_publishes_client_not_coordinator(
         assert observed["owner_birth"] == "windows:" + state["child_process_start_time"]
         assert observed["context"] == "retained-private-overlay"
         assert observed["initialized"] == 1
+        pane = await asyncio.to_thread(mux.capture_original_pane, identity)
+        assert pane.returncode == 0, pane.stderr
         for archive in (tmp_path / "original-attempt" / "runtime").glob("*.pyz"):
             assert b"retained-private-overlay" not in archive.read_bytes()
         client = await SessionHostClient.connect(port=state["port"])

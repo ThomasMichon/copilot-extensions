@@ -25,7 +25,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from functools import wraps
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Any, Callable, Iterator, Mapping, cast
 
 from . import config as cfg
 from . import launch_wrapper_assets as lwa
@@ -391,7 +391,7 @@ def deploy_wrappers(repo_dir: str | Path) -> bool:
                  "session-machine.ps1", "session-machine.sh",
                  "bootstrap-killswitch-guard.ps1", "bootstrap-killswitch-guard.sh",
                  "bootstrap-check.ps1", "bootstrap-check.sh",
-                 "statelessness_guard.py", "guarded_anchor_map.py", "cross_repo_guard.py", "anchor_shell_parser.py",
+                 "statelessness_guard.py", "guarded_anchor_map.py", "cross_repo_guard.py", "anchor_shell_parser.py", "anchor_registry.py",
                  "anchor_write_guard.py", "pr_supersede_guard.py", "registry_root.py",
                  "nudge_status.py", "bind_nudge.py", "hook_runtime.py", "hook_process_identity.py", "hook_pre_relevance.py", "hook_pre_policy.py", "hook_policy_process.py", "hook_lifecycle_runtime.py",
                  "versioned_runtime.py", "versioned_runtime_leases.py", "versioned_runtime_construction.py",
@@ -627,7 +627,7 @@ def _receipt_path(project: str) -> Path:
     return _command_arbitration_dir() / f"{key}.json"
 
 
-def _read_receipt(project: str) -> dict | None:
+def _read_receipt(project: str) -> dict[str, Any] | None:
     path = _receipt_path(project)
     if path.is_symlink():
         raise BinstubOwnershipError(f"project command receipt is linked for {project}: {path}")
@@ -658,11 +658,11 @@ def _read_receipt(project: str) -> dict | None:
     return data
 
 
-def _same_identity(left: dict, right: dict, fields: tuple[str, ...]) -> bool:
+def _same_identity(left: Mapping[str, object], right: Mapping[str, object], fields: tuple[str, ...]) -> bool:
     return all(left.get(field, "") == right.get(field, "") for field in fields)
 
 
-def _write_receipt(project: str, data: dict) -> None:
+def _write_receipt(project: str, data: dict[str, Any]) -> None:
     path = _receipt_path(project)
     path.parent.mkdir(parents=True, exist_ok=True)
     content = json.dumps(data, indent=2, sort_keys=True) + "\n"
@@ -683,8 +683,8 @@ def _stub_key(name: str) -> str:
     return name.casefold() if platform.system() == "Windows" else name
 
 
-def _stub_hash(receipt: dict, path: Path) -> str | None:
-    hashes = receipt.get("stubs", {})
+def _stub_hash(receipt: dict[str, Any], path: Path) -> str | None:
+    hashes = cast(dict[str, str], receipt.get("stubs", {}))
     key = _stub_key(path.name)
     if key in hashes:
         return hashes[key]
@@ -716,7 +716,7 @@ def _binstub_process_lock(key: str) -> threading.RLock:
 
 
 @contextmanager
-def _binstub_lock(project: str):
+def _binstub_lock(project: str) -> Iterator[None]:
     """Hold the sidecar arbitration lock for ``project``.
 
     Windows ``msvcrt.locking`` is not reentrant *within a process*: a
@@ -748,19 +748,19 @@ def _binstub_lock(project: str):
                     import msvcrt
 
                     stream.seek(0)
-                    msvcrt.locking(stream.fileno(), msvcrt.LK_LOCK, 1)
+                    getattr(msvcrt, "locking")(stream.fileno(), getattr(msvcrt, "LK_LOCK"), 1)
                 else:
                     import fcntl
 
-                    fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+                    getattr(fcntl, "flock")(stream.fileno(), getattr(fcntl, "LOCK_EX"))
                 try:
                     yield
                 finally:
                     if os.name == "nt":
                         stream.seek(0)
-                        msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+                        getattr(msvcrt, "locking")(stream.fileno(), getattr(msvcrt, "LK_UNLCK"), 1)
                     else:
-                        fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+                        getattr(fcntl, "flock")(stream.fileno(), getattr(fcntl, "LOCK_UN"))
         finally:
             _binstub_lock_depth[resolved_key] -= 1
             if _binstub_lock_depth[resolved_key] == 0:
@@ -811,7 +811,7 @@ def _project_binstub_context(
     *,
     repo_dir: str | Path | None = None,
     transfer: bool = False,
-    registry: dict | None = None,
+    registry: dict[str, Any] | None = None,
     admitted: CommandAdmission | None = None,
 ) -> tuple[dict[str, str], dict[str, str], list[tuple[Path, str]], CommandAdmission]:
     if not project or not cfg._PROJECT_NAME_RE.fullmatch(project):
@@ -862,7 +862,7 @@ def _deploy_project_binstub_unlocked(
     *,
     repo_dir: str | Path | None = None,
     transfer: bool = False,
-    registry: dict | None = None,
+    registry: dict[str, Any] | None = None,
     admitted: CommandAdmission | None = None,
 ) -> int:
     """Write a single project's receipt-gated binstub file(s)."""
@@ -884,7 +884,7 @@ def project_binstub_registration(
     project: str,
     *,
     repo_dir: str | Path | None,
-):
+) -> Iterator[ProjectBinstubRegistration]:
     """Hold ownership from registry preflight through launcher publication."""
     with _binstub_lock("__registries__"), _binstub_lock(project):
         registration = ProjectBinstubRegistration()
@@ -948,8 +948,8 @@ def _discover_project_binstubs() -> dict[str, list[Path]]:
     return found
 
 
-@pr_authority.registry_transaction
-def _prune_reserved_projects_unlocked(registry: dict | None = None) -> list[str]:
+@cast(Callable[[Callable[..., list[str]]], Callable[..., list[str]]], pr_authority.registry_transaction)
+def _prune_reserved_projects_unlocked(registry: dict[str, Any] | None = None) -> list[str]:
     """Remove any reserved-name entries from projects.yaml (self-heal).
 
     The runtime's own name (``agent-worktrees``) is not a project. A prior buggy
@@ -1004,7 +1004,7 @@ def _project_is_knowledge_only(project: str) -> bool:
         return False
 
 
-def _projects_snapshot_for_mutation() -> dict:
+def _projects_snapshot_for_mutation() -> dict[str, Any]:
     """Require authoritative target input before pruning or command mutation."""
     from . import project_command_migration as migration
 
@@ -1061,7 +1061,7 @@ def setup_application() -> int:
         return 0
 
 
-def _reconcile_binstubs_unlocked() -> dict:
+def _reconcile_binstubs_unlocked() -> dict[str, Any]:
     """Reconcile project binstubs against the projects registry.
 
     Deploys receipt-owned binstubs for registered projects and removes stale
@@ -1188,7 +1188,7 @@ def _retire_project_binstub_unlocked(
     return paths
 
 
-def reconcile_binstubs() -> dict:
+def reconcile_binstubs() -> dict[str, Any]:
     """Reconcile project commands while excluding concurrent registrations."""
     with _binstub_lock("__registries__"):
         return _reconcile_binstubs_unlocked()
@@ -1468,7 +1468,7 @@ def projects_yaml_path() -> Path:
     return registry_paths.registry_path("projects.yaml", legacy_root=install_dir())
 
 
-def read_projects_registry(*, strict: bool = False) -> dict:
+def read_projects_registry(*, strict: bool = False) -> dict[str, Any]:
     """Read projects.yaml and return a dict with a 'projects' key.
 
     Returns ``{"projects": {}}`` if the file is missing, and if it can't be read
@@ -1493,7 +1493,7 @@ def _format_yaml_value(v: object) -> str:
     return f'"{escaped}"'
 
 
-def write_projects_registry(registry: dict, path: Path | None = None) -> None:
+def write_projects_registry(registry: dict[str, Any], path: Path | None = None) -> None:
     """Write the projects registry back to projects.yaml.
 
     ``path`` defaults to :func:`projects_yaml_path`; callers that resolve the
@@ -1562,7 +1562,7 @@ def _hosting_admitted(function: Callable[..., None]) -> Callable[..., None]:
 
 
 @_hosting_admitted
-@pr_authority.registry_transaction
+@cast(Callable[[Callable[..., None]], Callable[..., None]], pr_authority.registry_transaction)
 def register_project(
     project: str,
     repo_dir: Path | str | None = None,
@@ -1668,7 +1668,7 @@ def register_project(
         if project_state.namespaced()
         else f"~/.{project}"
     )
-    entry: dict = {
+    entry: dict[str, Any] = {
         "config_dir": config_dir,
         "expose_agent": eff_expose,
         "registered_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -1688,7 +1688,7 @@ def register_project(
 
     # Build WSL metadata block
     if wsl_state:
-        wsl_info: dict = {"state": wsl_state}
+        wsl_info: dict[str, Any] = {"state": wsl_state}
         if wsl_distro:
             wsl_info["distro"] = wsl_distro
         if wsl_path:
