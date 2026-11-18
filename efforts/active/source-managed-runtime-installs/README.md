@@ -911,6 +911,11 @@ onto one branch.
 
 ## Journal
 
+- 2026-11-18: [Manager source-app staging and complete identity/resource closure](journal/2026/11.17%20manager-footprint-consumer.md#merged-source-app-staging)
+  merged in #13149 after exact-head approval, required Linux unit/coverage CI
+  and all nine external bootstrap/composition jobs. Its source workspace is
+  finalized. Full source-profile construction, installed-origin qualification
+  and cold bootstrap remain open under F1-F3; no rollout is inferred.
 - 2026-11-17: [Promotion-produced Manager source project](journal/2026/11.17%20manager-footprint-consumer.md#promotion-produced-manager-source-project)
   merged in #13121 after exact-head approval, required CI and real Linux
   production-composition qualification. Its source worktree is finalized;
