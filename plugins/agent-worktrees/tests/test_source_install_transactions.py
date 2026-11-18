@@ -120,6 +120,7 @@ INSTALL_DIR={_sh(tmp_path / "runtime")}
 VENV_DIR=$INSTALL_DIR/absent
 ACTION=dev
 OWNER_ARG=''
+INSTALL_SOURCE_ARG=''
 CONTEXTUAL_INSTALL=false
 _bootstrap_python() {{ printf '%s\\n' {_sh(sys.executable)}; }}
 _ensure_uv() {{ :; }}
@@ -173,6 +174,9 @@ $RuntimeInputPlugin = $ScriptDir
 $InstallDir = {_ps(tmp_path / 'runtime')}
 $VenvDir = Join-Path $InstallDir 'absent'
 $Action = 'repair'
+$WheelProfile = $null
+$BootstrapPython = $null
+$InstallSource = $null
 $Owner = $null
 $ContextualInstall = $false
 $SourceRuntimeIdentity = $null
@@ -212,6 +216,125 @@ Write-Output 'caller-finished'
         assert process.returncode != 0 and b"caller-finished" not in output
         assert b"Python runtime lifecycle failed (exit 7)" in diagnostic.read_bytes()
     assert diagnostic.read_bytes().count(b"native-progress") == 1
+
+
+@pytest.mark.parametrize("committed,valid", [(False, True), (True, True), (True, False)])
+def test_bash_lifecycle_refusal_detail_survives_frontend_cleanup(tmp_path, committed, valid):
+    assert _BASH is not None, "native frontend qualification requires Bash"
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    result = {
+        "runtime_version": "fixture",
+        "installation_refused": {
+            "version": 1 if valid else 2, "settled": True,
+            "publication_committed": committed, "error": "fixture ownership refusal",
+        },
+    }
+    (scripts / "runtime_install.py").write_text(
+        "import json,pathlib,sys\n"
+        f"result={result!r}\n"
+        "pathlib.Path(sys.argv[sys.argv.index('--result')+1]).write_text(json.dumps(result))\n"
+        "raise SystemExit(1)\n",
+        encoding="utf-8",
+    )
+    script = f"""
+set -euo pipefail
+SCRIPT_DIR={_sh(scripts)}
+PLUGIN_DIR=$SCRIPT_DIR
+INSTALL_DIR={_sh(tmp_path / "runtime")}
+VENV_DIR=$INSTALL_DIR/absent
+ACTION=repair
+OWNER_ARG=''
+INSTALL_SOURCE_ARG=''
+CONTEXTUAL_INSTALL=false
+_bootstrap_python() {{ printf '%s\\n' {_sh(sys.executable)}; }}
+_ensure_uv() {{ :; }}
+_ensure_uv_index() {{ :; }}
+_assert_source_runtime() {{ :; }}
+ok() {{ return 90; }}
+err() {{ printf '%s\\n' "$*" >&2; }}
+{_function("_deploy_python_runtime", "sh")}
+if _deploy_python_runtime; then exit 91; else exit "$?"; fi
+"""
+    completed = _run([str(_BASH), "-c", script], tmp_path)
+    assert completed.returncode == 1, completed.stdout + completed.stderr
+    assert "Python runtime lifecycle failed (exit 1)" in completed.stderr
+    if valid:
+        assert "fixture ownership refusal" in completed.stderr
+        assert f"publication_committed={str(committed).lower()}" in completed.stderr
+    else:
+        assert "fixture ownership refusal" not in completed.stderr
+    assert not list((tmp_path / "runtime" / ".installer-inputs").iterdir())
+
+
+@pytest.mark.parametrize("host", HOSTS or [None])
+@pytest.mark.parametrize("committed,valid", [(False, True), (True, True), (True, False)])
+def test_python_lifecycle_refusal_detail_survives_frontend_cleanup(tmp_path, host, committed, valid):
+    if not host:
+        pytest.skip("PowerShell unavailable")
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    result = {
+        "runtime_version": "fixture",
+        "installation_refused": {
+            "version": 1 if valid else 2, "settled": True,
+            "publication_committed": committed, "error": "fixture ownership refusal",
+        },
+    }
+    (scripts / "runtime_install.py").write_text(
+        "import json,pathlib,sys\n"
+        f"result={result!r}\n"
+        "pathlib.Path(sys.argv[sys.argv.index('--result')+1]).write_text(json.dumps(result))\n"
+        "raise SystemExit(1)\n",
+        encoding="utf-8",
+    )
+    script = tmp_path / "refusal.ps1"
+    script.write_text(f"""
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+. {_ps(SCRIPTS / 'versioned_runtime_native.ps1')}
+$ScriptDir = {_ps(scripts)}
+$PluginDir = $ScriptDir
+$RuntimeInputPlugin = $ScriptDir
+$InstallDir = {_ps(tmp_path / 'runtime')}
+$VenvDir = Join-Path $InstallDir 'absent'
+$Action = 'repair'
+$WheelProfile = $null
+$BootstrapPython = $null
+$InstallSource = $null
+$Owner = $null
+$ContextualInstall = $false
+$SourceRuntimeIdentity = $null
+function Get-SignedBasePython {{ return {_ps(sys.executable)} }}
+function Get-ApplicationPath {{ param($Name) return {_ps(sys.executable)} }}
+function Ensure-Uv {{ return $true }}
+function Ensure-UvIndex {{ }}
+function Ensure-InstallDir($Path) {{ [void][IO.Directory]::CreateDirectory($Path) }}
+function Assert-SourceRuntime {{ }}
+function Write-ServiceOk {{ param($Message) throw 'Refusal became successful' }}
+{_function('Deploy-PythonRuntime', 'ps1')}
+try {{
+    Deploy-PythonRuntime
+    throw 'Lifecycle refusal was ignored'
+}} catch {{
+    $diagnostic = $_.Exception.Message
+    $code = $global:LASTEXITCODE
+    $remaining = @(Get-ChildItem (Join-Path $InstallDir '.installer-inputs') -File).Count
+    @{{diagnostic=$diagnostic; native_exit=$code; remaining_results=$remaining}} |
+        ConvertTo-Json -Compress
+}}
+exit 0
+""", encoding="utf-8")
+    completed = _run([host, "-NoProfile", "-File", str(script)], tmp_path)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    observed = json.loads(completed.stdout)
+    assert observed["native_exit"] == 1 and observed["remaining_results"] == 0
+    assert "Python runtime lifecycle failed (exit 1)" in observed["diagnostic"]
+    if valid:
+        assert "fixture ownership refusal" in observed["diagnostic"]
+        assert f"publication_committed={str(committed).lower()}" in observed["diagnostic"]
+    else:
+        assert "fixture ownership refusal" not in observed["diagnostic"]
 
 
 def _ps_setup(payload: Path, root: Path, *, real_bootstrap: bool = False) -> str:
