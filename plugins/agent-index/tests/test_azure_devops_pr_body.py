@@ -329,9 +329,12 @@ def test_repeated_description_reads_do_not_request_bodyless_304() -> None:
 def test_description_reads_follow_window_and_duplicate_filtering() -> None:
     selected = {
         "pullRequestId": 7,
+        "title": "Listed title",
+        "status": "active",
+        "sourceRefName": "refs/heads/listed",
         "description": "x" * 400,
         "creationDate": "2026-01-03T00:00:00Z",
-        "repository": {"id": "repo-1"},
+        "repository": {"id": "repo-1", "name": "listed-repo"},
     }
     requests: list[str] = []
 
@@ -342,7 +345,17 @@ def test_description_reads_follow_window_and_duplicate_filtering() -> None:
             stale = selected | {"pullRequestId": 8, "creationDate": "2026-01-01T00:00:00Z"}
             return httpx.Response(200, json={"value": [selected, selected, stale]})
         if path.endswith("/pullrequests/7"):
-            return httpx.Response(200, json=selected)
+            return httpx.Response(
+                200,
+                json=selected
+                | {
+                    "description": "Complete description tail",
+                    "title": "Conflicting detail title",
+                    "status": "completed",
+                    "sourceRefName": "refs/heads/conflicting",
+                    "repository": {"id": "repo-1", "name": "conflicting-repo"},
+                },
+            )
         assert path.endswith("/pullRequests/7/threads")
         return httpx.Response(200, json={"value": []})
 
@@ -357,6 +370,12 @@ def test_description_reads_follow_window_and_duplicate_filtering() -> None:
     try:
         entries = connector.discover_changed("2026-01-02T00:00:00Z")
         assert [entry.path for entry in entries] == ["pulls/7.md"]
+        assert "Complete description tail" in entries[0].content
+        assert entries[0].content.startswith("# Listed title\n")
+        assert "Status: active\n" in entries[0].content
+        assert "Source: refs/heads/listed\n" in entries[0].content
+        assert "Repository: listed-repo\n" in entries[0].content
+        assert "conflicting" not in entries[0].content.casefold()
     finally:
         connector._http.client.close()
     assert requests == [
