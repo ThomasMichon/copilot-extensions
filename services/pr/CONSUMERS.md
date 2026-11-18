@@ -226,6 +226,17 @@ The HTTP boundary remains a GET-only double; these controls do not qualify a
 live coordinator transport, a deployed target configuration, durable request-owner
 storage or consumer activation.
 
+The additional [native HTTP controls](tests/test_reviewer_dispatch_native.py)
+require an explicitly selected `PR_DISPATCH_NATIVE_PYTHON` whose declared
+Dispatch development closure is already prepared. Without it they skip and
+provide no native-SDK evidence. They run the actual `DispatchClient` in a
+bounded child against a caller-owned loopback HTTP fixture, exercising its
+real transport, decoder, exact lookup, task detail and preparation. The
+fixture accepts GET only; missing support and foreign scope cannot reach
+preparation, and cache bytes remain unchanged. No production coordinator,
+task creation, notification submission or durable consumer owner is
+qualified by that isolated transport proof.
+
 ## Inert qualification and operational exits
 
 Consumer examples/tests must exercise actual cache views with synthetic
