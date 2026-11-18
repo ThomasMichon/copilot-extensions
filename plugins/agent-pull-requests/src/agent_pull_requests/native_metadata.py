@@ -1,11 +1,11 @@
-"""Validate the selected GitHub metadata owner's per-action evidence."""
+"""Validate the selected source-preserving metadata owner's per-action evidence."""
 
 from __future__ import annotations
 
 from typing import Any
 
 
-def failure(args: Any, error: str) -> dict[str, Any]:
+def failure(args: Any, error: str, *, provider: str = "github") -> dict[str, Any]:
     """Retain the selected PR after an unavailable or invalid owner response."""
     actions = {}
     if args.title is not None:
@@ -15,7 +15,7 @@ def failure(args: Any, error: str) -> dict[str, Any]:
     return {
         "schema": "agent-worktrees.pr-metadata",
         "version": 1,
-        "provider": "github",
+        "provider": provider,
         "repo": args.repo,
         "number": args.number,
         "publication_retained": True,
@@ -25,7 +25,7 @@ def failure(args: Any, error: str) -> dict[str, Any]:
     }
 
 
-def validate_github(args: Any, payload: dict[str, Any], returncode: int) -> None:
+def validate(args: Any, payload: dict[str, Any], returncode: int, *, provider: str) -> None:
     """Keep malformed or partial native metadata responses unconfirmed."""
     expected = set()
     if args.title is not None:
@@ -37,7 +37,7 @@ def validate_github(args: Any, payload: dict[str, Any], returncode: int) -> None
         payload.get("schema") == "agent-worktrees.pr-metadata"
         and type(payload.get("version")) is int
         and payload["version"] == 1
-        and payload.get("provider") == "github"
+        and payload.get("provider") == provider
         and payload.get("publication_retained") is True
         and type(payload.get("ok")) is bool
         and isinstance(actions, dict)
@@ -64,5 +64,5 @@ def validate_github(args: Any, payload: dict[str, Any], returncode: int) -> None
         )
     if not valid:
         raise RuntimeError(
-            "Native GitHub metadata response is unconfirmed; reconcile this PR before retrying"
+            f"Native {provider} metadata response is unconfirmed; reconcile this PR before retrying"
         )
