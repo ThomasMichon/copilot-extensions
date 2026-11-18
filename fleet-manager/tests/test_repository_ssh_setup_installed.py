@@ -149,25 +149,36 @@ def test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop(
     )
     if os.name == "nt":
         clean.update(HOMEDRIVE=home.drive, HOMEPATH=str(home)[len(home.drive):])
+    from repository_ssh_cohort_fixture import original_engine_owner
+
+    command_owner = original_engine_owner(home)
+    monkeypatch.syspath_prepend(str(PROJECT.parent / "plugins" / "agent-worktrees" / "src"))
+    from agent_worktrees.update_runtime_application import PreparedApplication
+    from agent_worktrees.update_runtime_source import PIN_ENV
+
+    initialized = run(["git", "init", "-q", str(harness)], env=clean)
+    assert initialized.returncode == 0, initialized.stderr
+
     def install_engine(component: str) -> None:
-        source = source_inputs.select_project(cohort[component], "agent-worktrees")
+        prepared = PreparedApplication(cohort[component], "agent-worktrees", "null")
         construction = json.loads(
             (application_path(component) / "application.json").read_text(),
         )["construction"]
-        with monkeypatch.context() as installation:
-            for name in set(os.environ) - clean.keys():
-                installation.delenv(name)
-            for name, item in clean.items():
-                installation.setenv(name, item)
-            uv = shutil.which("uv")
-            assert uv is not None
-            source_inputs.install_application(
-                cohort[component], "agent-worktrees", source.payload,
-                home / ".agent-worktrees", uv=Path(uv),
-                base_python=Path(sys.executable), health_module="agent_worktrees",
-                expected_version=construction["runtime_version"],
-                expected_hash=construction["payload_hash"],
-            )
+        assert prepared.version == construction["runtime_version"]
+        assert command_owner != prepared.payload.resolve()
+        installation = {
+            **clean, PIN_ENV: prepared.identity,
+            "COPILOT_PLUGIN_STAGED_FROM": str(command_owner),
+            "COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT": str(harness.resolve()),
+        }
+        installed = run([
+            sys.executable, "-I", "-B", str(command_owner / "scripts" / "command_binding.py"),
+            "--payload-root", str(command_owner), "--source-payload-root", str(command_owner),
+            "--plugin-id", "agent-worktrees", "--legacy-root", str(home / ".agent-worktrees"),
+            "--project-root", str(harness), "--run-lifecycle", "--",
+            *prepared.argv(home / ".agent-worktrees", repair=False),
+        ], cwd=harness, env=installation, timeout=90)
+        assert installed.returncode == 0, installed.stdout + installed.stderr
         engine_root = home / ".agent-worktrees"
         slot = engine_root / "versions" / (engine_root / "current-version").read_text().strip()
         python = slot / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")

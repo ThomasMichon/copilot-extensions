@@ -2058,6 +2058,10 @@ product-cohort, provider, fresh-adopter or rollout proof. These jobs are
 sequenced after the retained explicit continuity cases, not parallel replacement
 coverage. Local helper/ordering controls and a packaged-API refusal probe do
 not substitute for their actual native outcomes.
+The engine application installer runs through the separately materialized
+original payload owner's declared command-binding lifecycle entry, with the
+selected Source pin and fixture repository context. Prepared application Source
+is never substituted as its own command owner.
 
 Only those normal-setup jobs select `--ephemeral-native-ssh-setup`. Admission
 keeps Source preparation in the ordinary runner-owned private scratch root;

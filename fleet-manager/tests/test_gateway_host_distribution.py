@@ -261,6 +261,37 @@ def test_cohort_native_workflow_retains_only_valid_selected_source(
         )]
 
 
+def test_original_engine_owner_runs_its_declared_lifecycle_in_private_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from repository_ssh_cohort_fixture import original_engine_owner
+
+    monkeypatch.syspath_prepend(str(PROJECT.parent / "tools"))
+    home, project = tmp_path / "home", tmp_path / "project"
+    project.mkdir()
+    owner = original_engine_owner(home)
+    assert owner.is_relative_to(home.resolve())
+    assert owner != (PROJECT.parent / "plugins" / "agent-worktrees").resolve()
+    environment = dict(os.environ)
+    environment.update(
+        HOME=str(home), USERPROFILE=str(home), AGENT_HOME=str(home),
+        LOCALAPPDATA=str(home / "local"), APPDATA=str(home / "roaming"),
+        COPILOT_PLUGIN_STAGED_FROM=str(owner),
+        COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT=str(project),
+    )
+    initialized = run(["git", "init", "-q", str(project)], env=environment)
+    assert initialized.returncode == 0, initialized.stderr
+    result = run([
+        sys.executable, "-I", "-B", str(owner / "scripts" / "command_binding.py"),
+        "--payload-root", str(owner), "--source-payload-root", str(owner),
+        "--plugin-id", "agent-worktrees", "--legacy-root", str(home / ".agent-worktrees"),
+        "--project-root", str(project), "--run-lifecycle", "--",
+        sys.executable, "-I", "-B", "-c", "print('owned-fixture')",
+    ], cwd=project, env=environment, timeout=60)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "owned-fixture" in result.stdout
+
+
 @pytest.mark.parametrize(("preparation_only", "prebuild_code"), [
     (False, 0), (True, 0), (True, 124),
 ])
@@ -286,6 +317,7 @@ def test_cohort_native_workflow_selects_lifecycle_and_settles_preparation(
     runner: dict[str, object] = {
         "default_python": lambda _component: tmp_path / "venv" / "Scripts" / "python.exe",
         "ordinary_cache_root": lambda path: path,
+        "runs_root": lambda _root: tmp_path,
         "acquire": lambda *_args: lease,
         "TestSandbox": lambda **_options: temporary,
         "run_prefix": lambda _name: "cohort",

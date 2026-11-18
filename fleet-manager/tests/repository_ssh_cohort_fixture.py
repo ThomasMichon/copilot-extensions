@@ -36,6 +36,18 @@ class RequiredDistribution(Protocol):
 DistributionT = TypeVar("DistributionT", bound=RequiredDistribution)
 
 
+def original_engine_owner(home: Path) -> Path:
+    from prepare_runtime_source import materialize_consumer
+
+    source = PROJECT.parent / "plugins" / "agent-worktrees"
+    owner = home / ".copilot" / "installed-plugins" / "copilot-extensions" / "agent-worktrees"
+    shutil.copytree(
+        source, owner, ignore=shutil.ignore_patterns("__pycache__", "build", "dist", "*.egg-info"),
+    )
+    materialize_consumer(PROJECT.parent, source, owner, deadline=time.monotonic() + 60)
+    return owner.resolve(strict=True)
+
+
 class ProfileBuilder(Protocol):
     def prepare_registry_lock(
         self, snapshot: Path, output: Path, *, uv: str, deadline: float,
