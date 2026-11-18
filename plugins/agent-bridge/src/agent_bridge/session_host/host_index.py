@@ -27,6 +27,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from typing import Any
 
 from single_instance_lease import AlreadyRunningError, SingleInstance
 from zdd.claims import ClaimConflict, decide_acquire
@@ -60,8 +61,8 @@ class HostRecord:
     # a frontend restart -- no live Spawner, no agent-codespaces import. Empty
     # for a local host. See
     # ``session_host.endpoints``.
-    endpoint: dict = field(default_factory=dict)
-    extra: dict = field(default_factory=dict)
+    endpoint: dict[str, Any] = field(default_factory=dict)
+    extra: dict[str, Any] = field(default_factory=dict)
     # Generation-scoped ownership claim (effort
     # agent-bridge-unified-zdd-cutover, Phase 2): which agent-bridge daemon
     # *generation* currently owns this session-host record, and the pid to
@@ -216,10 +217,17 @@ class HostIndex:
             lease.release()
 
     @contextmanager
-    def _locked_reload(self):
+    def _locked_reload(self, *, strict: bool = False) -> Iterator[None]:
         """Reload, mutate and flush under the existing cross-process mutex."""
         with self._locked_index():
-            self._load_or_raise()
+            if strict:
+                # Do not silently fill absent owner fields or drop unknown records on flush.
+                from .host_inventory import read_inventory
+
+                inventory = read_inventory(self._path.absolute(), storage_only=True)
+                self._records = {record.session_id: record for record in inventory.records}
+            else:
+                self._load_or_raise()
             yield
             self._flush()
 
@@ -239,7 +247,7 @@ class HostIndex:
             raise HostInventoryError("Host inventory changed after observation")
 
     # -- mutation ----------------------------------------------------------
-    def refresh(self) -> None:
+    def refresh(self, *, strict: bool = False) -> None:
         """Reload the in-memory cache from the latest on-disk state.
 
         Query methods (``get``/``all``/``live_records``/...) read this
@@ -254,7 +262,10 @@ class HostIndex:
         never observes a torn file, only possibly a slightly earlier or
         later complete version.
         """
-        self._load()
+        if strict:
+            self._load_or_raise()
+        else:
+            self._load()
 
     def register(self, record: HostRecord) -> None:
         """Register (or update the location/metadata of) a Session Host.
@@ -296,7 +307,9 @@ class HostIndex:
             yield True
             del self._records[expected.session_id]
 
-    def release_exited_local(self, expected: HostRecord) -> bool:
+    def release_exited_local(
+        self, expected: HostRecord, *, settle: Callable[[], bool] | None = None,
+    ) -> bool:
         """Settle only this exact local Host record after both original processes exited."""
         from zdd.process_exit import observe_original_exit
 
@@ -310,6 +323,8 @@ class HostIndex:
                     getattr(current, f"{name}_pid"), birth,
                 ):
                     return False
+            if settle is not None and not settle():
+                return False
             del self._records[expected.session_id]
         return True
 
@@ -345,6 +360,7 @@ class HostIndex:
         owner_pid: int,
         pid_alive: Callable[[int], bool],
         force: bool = False,
+        require_owner_fields: bool = False,
     ) -> HostRecord:
         """Claim ``session_id`` for ``generation``, or raise :class:`ClaimConflict`.
 
@@ -359,8 +375,18 @@ class HostIndex:
         (claiming is about taking over an *existing* record -- use
         :meth:`register` to create one).
         """
-        with self._locked_reload():
+        with self._locked_reload(strict=require_owner_fields):
             rec = self._records[session_id]
+            if require_owner_fields:
+                from .version_mux import is_compatible
+
+                if not is_compatible(rec.protocol_version):
+                    raise HostInventoryError("Incompatible Session Host is not eligible for recovery")
+            if require_owner_fields and (
+                bool(rec.owner_generation) != bool(rec.owner_pid) or rec.owner_pid > 0x7fff_ffff
+                or (rec.owner_generation == generation and rec.owner_pid != owner_pid)
+            ):
+                raise HostInventoryError("Incomplete or inconsistent Session Host owner claim")
             decide_acquire(
                 rec, key=session_id, generation=generation, owner_pid=owner_pid,
                 pid_alive=pid_alive, force=force,
@@ -423,6 +449,21 @@ class HostIndex:
         ]
 
     # -- query -------------------------------------------------------------
+    def independent_cache(self) -> HostIndex:
+        """Use the same locked durable index from an independent preparation thread."""
+        return HostIndex(self._path, load=False)
+
+    def accept_prepared(self, sid: str, expected: HostRecord | None, fresh: HostRecord | None) -> bool:
+        """Update only a still-current local projection. Never write a prepared snapshot to disk."""
+        current = self.get(sid)
+        if current != expected and current != fresh:
+            return False
+        if fresh is None:
+            self._records.pop(sid, None)
+        else:
+            self._records[sid] = fresh
+        return True
+
     def get(self, session_id: str) -> HostRecord | None:
         return self._records.get(session_id)
 

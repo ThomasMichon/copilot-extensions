@@ -174,6 +174,10 @@ class _HostLivenessMixin:
         if self._host_index is None:
             return
         for r in [r for r in self._host_index.all() if not self._rec_host_alive(r)]:
+            session = self._sessions.get(r.session_id)
+            if session is not None and session.awaiting_maintenance_refresh:
+                # The claimant needs the recorded Host and child identities to settle exit.
+                continue
             if self._db.retained_recovery_held(r.session_id):
                 continue
             with contextlib.suppress(Exception):

@@ -1,0 +1,9 @@
+{
+  "comment": "Keep open turns and session state intact when a passive cutover frontend starts.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
