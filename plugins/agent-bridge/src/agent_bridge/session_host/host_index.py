@@ -217,10 +217,22 @@ class HostIndex:
             lease.release()
 
     @contextmanager
-    def _locked_reload(self) -> Iterator[None]:
-        """Reload, mutate and flush under the existing cross-process mutex."""
+    def _locked_records(self, *, strict: bool = False) -> Iterator[None]:
+        """Reload under the existing mutex; the caller flushes only a committed change."""
         with self._locked_index():
-            self._load_or_raise()
+            if strict:
+                # Do not silently fill absent owner fields or drop unknown records on flush.
+                from .host_inventory import read_inventory
+
+                inventory = read_inventory(self._path.absolute(), storage_only=True)
+                self._records = {record.session_id: record for record in inventory.records}
+            else:
+                self._load_or_raise()
+            yield
+
+    @contextmanager
+    def _locked_reload(self) -> Iterator[None]:
+        with self._locked_records():
             yield
             self._flush()
 
@@ -299,14 +311,20 @@ class HostIndex:
 
     def release_exited_local(
         self, expected: HostRecord, *, settle: Callable[[HostRecord], bool] | None = None,
+        inherited_by: str | None = None,
     ) -> bool:
         """Settle only this exact local Host record after both original processes exited."""
+        from single_instance_lease.supersession import pid_alive
         from zdd.process_exit import observe_original_exit
 
-        with self._locked_reload():
+        with self._locked_records(strict=inherited_by is not None):
             current = self._records.get(expected.session_id)
             if current != expected or current.boundary != "local":
                 return False
+            if inherited_by is not None:
+                self._validate_inherited_owner(current, inherited_by, os.getpid())
+                decide_acquire(current, key=current.session_id, generation=inherited_by,
+                               owner_pid=os.getpid(), pid_alive=pid_alive)
             for name in ("host", "child"):
                 birth = current.extra.get(f"{name}_process_start")
                 if not isinstance(birth, str) or not birth or not observe_original_exit(
@@ -316,6 +334,7 @@ class HostIndex:
             if settle is not None and not settle(current):
                 return False
             del self._records[expected.session_id]
+            self._flush()
         return True
 
     def set_resume_flag(self, session_id: str, value: bool) -> bool:
@@ -342,6 +361,16 @@ class HostIndex:
 
     # -- generation-scoped claims (effort agent-bridge-unified-zdd-cutover,
     # Phase 2) --------------------------------------------------------------
+    @staticmethod
+    def _validate_inherited_owner(rec: HostRecord, generation: str, owner_pid: int) -> None:
+        from .version_mux import is_compatible
+
+        if not is_compatible(rec.protocol_version):
+            raise HostInventoryError("Incompatible Session Host is not eligible for recovery")
+        if (bool(rec.owner_generation) != bool(rec.owner_pid) or rec.owner_pid > 0x7fff_ffff
+                or (rec.owner_generation == generation and rec.owner_pid != owner_pid)):
+            raise HostInventoryError("Incomplete or inconsistent Session Host owner claim")
+
     def claim(
         self,
         session_id: str,
@@ -350,6 +379,9 @@ class HostIndex:
         owner_pid: int,
         pid_alive: Callable[[int], bool],
         force: bool = False,
+        require_owner_fields: bool = False,
+        on_acquired: Callable[[HostRecord], None] | None = None,
+        expected: HostRecord | None = None,
     ) -> HostRecord:
         """Claim ``session_id`` for ``generation``, or raise :class:`ClaimConflict`.
 
@@ -364,18 +396,29 @@ class HostIndex:
         (claiming is about taking over an *existing* record -- use
         :meth:`register` to create one).
         """
-        with self._locked_reload():
+        strict = require_owner_fields or expected is not None
+        if strict and force:
+            raise HostInventoryError("Inherited claims cannot override an existing owner")
+        with self._locked_records(strict=strict):
             rec = self._records[session_id]
+            if expected is not None and rec != expected:
+                raise HostInventoryError("Session Host changed before claim")
+            if strict:
+                self._validate_inherited_owner(rec, generation, owner_pid)
             decide_acquire(
                 rec, key=session_id, generation=generation, owner_pid=owner_pid,
                 pid_alive=pid_alive, force=force,
             )
-            if rec.owner_generation != generation or rec.owner_pid != owner_pid:
+            acquired = rec.owner_generation != generation or rec.owner_pid != owner_pid
+            if acquired:
                 rec.owner_generation = generation
                 rec.owner_pid = owner_pid
+                self._flush()
+        if acquired and on_acquired is not None:
+            on_acquired(rec)
         return rec
 
-    def release(self, session_id: str, generation: str) -> bool:
+    def release(self, session_id: str, generation: str, *, expected: HostRecord | None = None) -> bool:
         """Release ``session_id``'s claim, but only if ``generation`` holds it.
 
         This is the outgoing generation's exit-contract half of claim/release/
@@ -384,12 +427,13 @@ class HostIndex:
         racing an already-superseded release must not clobber the new
         owner). Returns True if a release happened.
         """
-        with self._locked_reload():
+        with self._locked_records(strict=expected is not None):
             rec = self._records.get(session_id)
-            if rec is None or rec.owner_generation != generation:
+            if rec is None or rec.owner_generation != generation or (expected is not None and rec != expected):
                 return False
             rec.owner_generation = ""
             rec.owner_pid = 0
+            self._flush()
         return True
 
     def release_all(self, generation: str) -> list[str]:

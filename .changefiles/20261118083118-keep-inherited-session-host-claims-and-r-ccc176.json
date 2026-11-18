@@ -1,0 +1,9 @@
+{
+  "comment": "Keep inherited Session Host claims and retirement retries bound to the observed record.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
