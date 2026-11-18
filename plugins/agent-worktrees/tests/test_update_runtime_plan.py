@@ -665,6 +665,26 @@ def test_index_multi_repository_role_failure_blocks_preflight(portfolio, monkeyp
     assert not calls and not step.argv
 
 
+def test_index_role_resolution_outlasts_nested_owner_read(tmp_path, monkeypatch):
+    from agent_worktrees import update_runtime_plan
+
+    payload = Path(__file__).resolve().parents[2] / "agent-index"
+    host, client = tmp_path / "host", tmp_path / "client"
+    nested_owner_read_s = 20  # configuration_context.read_owner_context bound
+
+    def slow_resolver(argv, **kwargs):
+        if kwargs["timeout"] <= nested_owner_read_s:
+            raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+        role = "host" if argv[argv.index("--repo") + 1] == str(host.resolve()) else "client"
+        return subprocess.CompletedProcess(argv, 0, stdout=f"{role}\n", stderr="")
+
+    monkeypatch.setattr(update_runtime_plan.subprocess, "run", slow_resolver)
+    selected = update_runtime_plan._index_repository(
+        payload, client, (client, host), {"AGENT_INDEX_MACHINE": "fixture"},
+    )
+    assert selected == host.resolve()
+
+
 def test_collected_environment_is_an_immutable_snapshot(portfolio, monkeypatch):
     from agent_worktrees import update_runtime_plan
 

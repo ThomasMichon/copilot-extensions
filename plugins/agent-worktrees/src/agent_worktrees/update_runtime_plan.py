@@ -28,6 +28,11 @@ if TYPE_CHECKING:
     from .update_runtime_source import PreparedRuntimeSource
     from .update_runtime_target import SourceRuntimeTarget
 
+# The Index role resolver nests a Worktrees `state-root --configuration` owner
+# read bounded at 20 seconds; the outer bound must leave room for that read
+# plus interpreter startup, or a loaded host fails the whole update preflight.
+INDEX_ROLE_RESOLVER_TIMEOUT_S = 60
+
 
 @dataclasses.dataclass(frozen=True)
 class RuntimeUpdateStep:
@@ -84,7 +89,7 @@ def _index_repository(
             [sys.executable, "-I", "-B", str(resolver), "--repo", str(candidate),
              "--machine", machine],
             cwd=payload, env=dict(environment), capture_output=True, text=True,
-            timeout=10, **no_window_kwargs(),
+            timeout=INDEX_ROLE_RESOLVER_TIMEOUT_S, **no_window_kwargs(),
         )
         role = result.stdout.strip()
         if result.returncode or role not in {"host", "client", "unconfigured"}:
