@@ -8,6 +8,7 @@ import socket
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 from . import registry_paths
 
@@ -15,7 +16,7 @@ BOOTSTRAP_ENV = "WORKTREE_MANAGER_RESIDENT_BOOTSTRAP"
 _MAX_RESPONSE = 64 * 1024
 
 
-def _request(root: Path, project: str) -> dict | None:
+def _request(root: Path, project: str) -> dict[str, Any] | None:
     deadline = time.monotonic() + 1.0
     from zdd import routing
 
