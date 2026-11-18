@@ -5,8 +5,10 @@ import ast
 import hashlib
 import sys
 from collections import Counter
+from collections.abc import Iterator
 from copy import deepcopy
 from pathlib import PurePosixPath
+from typing import NoReturn, cast
 
 from promotion_unit_contract import UnitEvidenceError, relative_file
 
@@ -19,14 +21,14 @@ _PRIVATE_BOUNDARIES = _ACTOR_PRIVATE | _RETAINED_PRIVATE
 _SENSITIVE = _UNSUPPORTED | _PRIVATE_BOUNDARIES | {
     "spec_from_file_location", "module_from_spec", "exec_module", "_load_module",
 }
-_ADAPTER = ast.parse(
+_ADAPTER = cast(ast.FunctionDef, ast.parse(
     "def _load_module(path, name):\n"
     "    spec = importlib.util.spec_from_file_location(name, path)\n"
     "    module = importlib.util.module_from_spec(spec)\n"
     "    assert spec.loader is not None\n"
     "    spec.loader.exec_module(module)\n"
     "    return module\n"
-).body[0]
+).body[0])
 _TOOL_ROOT = ast.parse('tool_root = (trusted_source or scratch) / "tools"').body[0]
 _ACTOR_SOURCE = "libs/installer-engine/installer_engine_process.py"
 _RETAINED_ACTOR_SHA256 = "689db795d0e738890462073d22aa6dac2a31f93be1c74b1d2fe483d1513ec4e7"
@@ -35,7 +37,8 @@ _RETAINED_STREAMING_ACTOR_SHA256 = "e35bbcb5168b98f4c2a9a1eaae287b6d671acf857135
 _RETAINED_PROGRESS_ACTOR_SHA256 = "7023003b6250a95a222ddf8db8ebd0182ce3b5ab687141fe24fb7de9a9207e74"
 _RETAINED_SCOPE_ACTOR_SHA256 = "b059d417bbb02f9018c22c86c00d62680d8ffbbf332db1ca478a5794f0896c71"
 _RETAINED_PROGRESS_SCOPE_ACTOR_SHA256 = "68c3d6ef5428d83748ec42aa0b9d62f501f36169818994c4275fa7f6598c7d60"
-_RESOURCE_ADAPTER = ast.parse(
+_RETAINED_PURE_COMPONENT_ACTOR_SHA256 = "1ba21cb3914ad97408bcd8e92d6fe9f36cb70f7eee53924b17a7336e2d6cc181"
+_RESOURCE_ADAPTER = cast(ast.FunctionDef, ast.parse(
     "def _load_resource(name, path):\n"
     "    spec = importlib.util.spec_from_file_location(name, path)\n"
     "    if spec is None or spec.loader is None:\n"
@@ -44,7 +47,7 @@ _RESOURCE_ADAPTER = ast.parse(
     "    sys.modules[name] = module\n"
     "    spec.loader.exec_module(module)\n"
     "    return module\n"
-).body[0]
+).body[0])
 # Product/runtime actors are not repository implementation edges. These are
 # the only resource calls admitted through the exact private adapter above.
 _EXTERNAL_RUNTIME_LOADS = tuple(
@@ -57,7 +60,7 @@ _OWNED_RUNTIME_MAIN = ast.parse(
     "_supervise_windows(args, args.command[1:])", mode="eval",
 ).body
 _MAIN_GUARD = ast.parse('__name__ == "__main__"', mode="eval").body
-_SUPERVISOR_ARGS = ast.parse("def _supervise_windows(args, argv): pass").body[0].args
+_SUPERVISOR_ARGS = cast(ast.FunctionDef, ast.parse("def _supervise_windows(args, argv): pass").body[0]).args
 _DYNAMIC_OPERATIONS = {
     "importlib.import_module", "builtins.__import__", "runpy.run_path",
     "runpy.run_module", "builtins.exec", "builtins.eval",
@@ -91,7 +94,7 @@ def _dump_ast(tree: ast.AST) -> str:
             and getattr(node, "type_params", None) == []
         ):
             # Python 3.12 added this empty field; nonempty type parameters stay pinned.
-            node._fields = tuple(field for field in node._fields if field != "type_params")
+            setattr(node, "_fields", tuple(field for field in node._fields if field != "type_params"))
     options = {"show_empty": True} if sys.version_info >= (3, 13) else {}
     return ast.dump(normalized, **options)
 
@@ -111,7 +114,7 @@ def _spelling(node: ast.AST) -> str:
     return ""
 
 
-def _scope_nodes(scope: ast.AST):
+def _scope_nodes(scope: ast.AST) -> Iterator[ast.AST]:
     """Keep bindings in their lexical scope, including definition-time inputs."""
     yield scope
     for child in ast.iter_child_nodes(scope):
@@ -162,7 +165,7 @@ class _Discovery:
             self.fail(self.tree, "installed runtime actor signature or body changed")
         self.installed_actor = definitions[0]
 
-    def fail(self, node: ast.AST, reason: str):
+    def fail(self, node: ast.AST, reason: str) -> NoReturn:
         raise UnitEvidenceError(
             f"unsupported file-loading release implementation: {self.relative}:"
             f"{getattr(node, 'lineno', 0)}: {reason}"
@@ -185,6 +188,7 @@ class _Discovery:
                 _RETAINED_PROGRESS_ACTOR_SHA256,
                 _RETAINED_SCOPE_ACTOR_SHA256,
                 _RETAINED_PROGRESS_SCOPE_ACTOR_SHA256,
+                _RETAINED_PURE_COMPONENT_ACTOR_SHA256,
             }:
                 self.fail(self.tree, "retained runtime actor source shape changed")
             # This exact actor transports a complete source bundle, not file
@@ -212,7 +216,7 @@ class _Discovery:
             )
         ):
             self.fail(self.tree, "private runtime boundary requires unique top-level functions")
-        adapter, supervisor = adapters[0], supervisors[0]
+        adapter, supervisor = cast(ast.FunctionDef, adapters[0]), cast(ast.FunctionDef, supervisors[0])
         if (
             ast.dump(ast.Module(body=adapter.body, type_ignores=[]))
             != ast.dump(ast.Module(body=_RESOURCE_ADAPTER.body, type_ignores=[]))
@@ -287,7 +291,7 @@ class _Discovery:
                 return current in value and value.index(binding) < value.index(current)
         return False
 
-    def binding(self, call: ast.Call, writes: Counter) -> tuple[str, ast.AST]:
+    def binding(self, call: ast.Call, writes: Counter[str]) -> tuple[str, ast.AST]:
         parent = self.parents.get(call)
         if isinstance(parent, ast.Assign) and parent.value is call and len(parent.targets) == 1:
             target = parent.targets[0]
@@ -356,7 +360,7 @@ class _Discovery:
         return aliases[root] + (separator + suffix if separator else "")
 
     def dynamic_modules(
-        self, nodes: list[ast.AST], writes: Counter,
+        self, nodes: list[ast.AST], writes: Counter[str],
         imports: dict[str, set[str]], inherited: dict[str, set[str]] | None,
     ) -> dict[str, set[str]]:
         """Refuse tools-only dynamic graphs while preserving parent-owned exec."""
@@ -507,6 +511,7 @@ class _Discovery:
             and scope.name == "_load_module" and self.parents.get(scope) is self.tree
         )
         if adapter:
+            scope = cast(ast.FunctionDef, scope)
             if (
                 ast.dump(ast.Module(body=scope.body, type_ignores=[]))
                 != ast.dump(ast.Module(body=_ADAPTER.body, type_ignores=[]))
