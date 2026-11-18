@@ -18,7 +18,8 @@
   hosts); extends the `out-of-plugin-delivery` behavior the
   [installer vision](../../../visions/installer/README.md) already names for
   `worktree-manager`.
-- **Umbrella issue:** [#6177](https://github.com/ThomasMichon/copilot-extensions/issues/6177)
+- **Umbrella issue:** [#6177](https://github.com/ThomasMichon/copilot-extensions/issues/6177);
+  administratively superseded by this Active effort, not technically completed
 - **Sub-issues:** None yet
 
 ## Guiding Intent
@@ -65,8 +66,9 @@ things beside it, reusing its runtime mechanics rather than duplicating them:
 - **Handoff:** Resume the first unresolved Plan item from this canonical README.
 - **Adjacent ownership:** [agent-index standalone service](../agent-index-standalone-service/README.md)
   (#5768) owns the analogous standalone-package + version-slot-installer pattern
-  for agent-index, and its own Phase 3 has an **open, undecided** "generic
-  Dockerfile" item. This effort does not block on or preempt that decision --
+  for agent-index. At this effort's 2026-10-11 kickoff, that effort's Phase 3
+  had an **open, undecided** "generic Dockerfile" item; its current status
+  remains with that owner. This effort does not block on or preempt that decision --
   it proves the pattern independently on agent-dispatch (a materially simpler
   service: one coordinator process, no embedding engine, no durable corpus,
   no model cache) and either package can later adopt whichever shared
@@ -96,9 +98,10 @@ things beside it, reusing its runtime mechanics rather than duplicating them:
 
 ## Context
 
-`tools/standalone_consumers.py` currently names the only two packages that
-participate in standalone repository releases: `worktree-manager` and
-`agent-index-service`. No existing effort or package addresses agent-dispatch.
+At the 2026-10-11 kickoff, `tools/standalone_consumers.py` named two packages
+participating in standalone repository releases: `worktree-manager` and
+`agent-index-service`. The initial survey found no existing effort or package
+addressing agent-dispatch. This is the planning baseline, not a current roster.
 
 `worktree-manager/bootstrap.sh` (and its `.ps1` twin) is the proven template:
 it auto-provisions `uv` (user-local, no admin), falls back to a GitHub tarball
@@ -189,9 +192,7 @@ for review before any implementation.
   from another container requires explicitly pairing `AGENT_DISPATCH_HOST=
   0.0.0.0` with `AGENT_DISPATCH_TOKEN`, documented in the package README.
 - [x] Prove a clean build + run + restart-persistence cycle on a throwaway
-  container host (mirroring the validation rigor the parallel
-  `harness-gateway-fleet` dotfiles-private effort already applied to its own
-  Gateway container: build, run, push/read persistence across `docker
+  container host (build, run, push/read persistence across `docker
   restart`, teardown). Done for real locally: built the image, ran it with
   an explicit bearer token, created a real task via the `agent-dispatch` CLI
   (`docker exec`), `docker restart`ed the container, and confirmed the same
@@ -347,6 +348,32 @@ _Pending._
 
 ## Journal
 
+### 2026-11-17 - Complete canonical receiving; umbrella tracker retired
+
+The entire current ROOT and complete #6177 original with all five discussions
+were read after fresh complete author/editor/roster qualification. All ten
+actual file-changing PRs qualify, and current local/live Dev bindings match.
+The original reviewed #6180 contract and later accepted Plan preserve the
+complete standalone/bootstrap/container union directly; this is planned
+receiving, not proof the remaining bare-bootstrap, plugin-flow or fallback-
+choice acceptance is complete.
+
+The separate [public explanation](https://github.com/ThomasMichon/copilot-extensions/issues/6177#issuecomment-6968402096)
+was audited before #6177 closed `NOT_PLANNED` at 03:46:12 UTC on 2026-11-18.
+Its original body, five prior comments, labels and assignments remain unchanged.
+This effort remains Active with every checkbox state retained, including the
+finite #3439 source/installed scenario. Original owners, independent Index,
+deferred Worktrees, fleet routing and actual adopter placement/credential/
+network/rollout responsibilities remain unchanged.
+
+The same documentary follow-up makes kickoff-only context explicit and
+minimizes historical organization-specific references to public-neutral
+descriptions, preserving recorded outcomes, limits and chronology. No new
+test, image, bootstrap, provisioning, service or deployment operation ran.
+The pre-existing unchecked Phase 0 review row and historical approved-draft
+Journal receipt remain for evidence reconciliation at final documentation
+review; no new operator approval or implementation authority is inferred here.
+
 ### 2026-11-16 - Complete Dispatch-only inbox/health receiving proposal
 
 - Proposed three direct S3439 Plan rows, two local Validation rows and actual
@@ -438,12 +465,11 @@ _Pending._
      `AGENT_DISPATCH_HOST=0.0.0.0` with `AGENT_DISPATCH_TOKEN`, documented
      in the README.
 - Also hit a real environment constraint, not a Dockerfile bug: this is a
-  Microsoft-managed developer machine with Central Feed Services PyPI
+  managed developer environment with configured package-feed
   enforcement, so the container's own (unconfigured) network egress to
   `files.pythonhosted.org` was network-blocked (`SSLV3_ALERT_HANDSHAKE_
-  FAILURE`) -- the exact symptom the `working-on-managed-machines` skill
-  documents for uv on an enforced box. Per that skill: never bake a
-  Microsoft-internal feed URL into this **public** repository's committed
+  FAILURE`). Preserve the configured feed policy: never bake a
+  private feed URL into this **public** repository's committed
   default (external consumers couldn't reach it, and it doesn't belong in a
   personal OSS repo); instead added a `PYTHON_INDEX_URL` build `ARG`
   defaulting to public PyPI (the correct, portable committed default) and
@@ -456,9 +482,8 @@ _Pending._
   via `agent-dispatch create` and captured its ID; `docker restart`ed the
   container; confirmed via `agent-dispatch show <id>` that the identical
   task was still present with its original `created_at`/`id` -- the task
-  database under the named volume survives a container recreate, the same
-  persistence guarantee this effort's parent `harness-gateway-fleet`
-  dotfiles-private effort already proved for its own Gateway container.
+  database under the named volume survives a container recreate. This local
+  observation is not broader fleet or production-deployment qualification.
   Test container, volume, and image removed after validation.
 - Added `tests/test_dockerfile_shape.py` (static content assertions -- no
   Docker dependency in ordinary CI): entrypoint shape, no hardcoded
@@ -466,8 +491,8 @@ _Pending._
   present, public-PyPI-default build arg. The real build+run+restart
   validation above was performed locally, not wired into per-PR CI (Docker
   is not otherwise used in this repo's CI; documented as a manually
-  validated gap, the same honest-gap convention the dotfiles-private
-  `agent-index-container` README already uses for its own untested tiers).
+  validated gap; static CI assertions and actual image execution remain
+  distinct evidence tiers).
 - Documented the full container usage contract (build command, run
   examples, the safe-bind/token-pairing requirement, the dynamic-port
   default, the package-index build-arg override) in
@@ -761,7 +786,7 @@ _Pending._
   this change since it also blocks `plugins/agent-dispatch`'s own tests
   identically). A real `docker build -f services/dispatch/Dockerfile`
   reached its network-dependent `pip install uv` step (blocked by this
-  managed machine's known CFS egress policy, the same pre-existing,
+  managed environment's configured-feed egress policy, the same pre-existing,
   already-documented Phase 2 limitation) -- confirmed the `COPY` path
   resolution specifically (the part this move could have broken) with a
   minimal smoke-test Dockerfile reusing the same `COPY` lines without the
