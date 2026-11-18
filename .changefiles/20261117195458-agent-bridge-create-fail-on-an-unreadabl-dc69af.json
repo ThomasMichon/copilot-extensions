@@ -1,0 +1,9 @@
+{
+  "comment": "agent-bridge create: fail on an unreadable --prompt-file before creating the session, so no orphan worker is left behind",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
