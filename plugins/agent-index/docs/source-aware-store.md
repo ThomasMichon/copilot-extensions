@@ -233,12 +233,17 @@ chunk-ID ordering within the native candidate window.
 Fusion uses the native configured vector/FTS weights, including
 `AGENT_INDEX_VECTOR_WEIGHT` and `AGENT_INDEX_FTS_WEIGHT`, rather than independent
 backend defaults.
-Repository prefilters use the same first colon-delimited identity as native
-`repo_matches`, before vector/FTS candidate selection and hydration. This
+By default, repository prefilters use the same first colon-delimited identity as
+native `repo_matches`, before vector/FTS candidate selection and hydration. This
 includes ADO/azure-devops project families and byproducts, bare project names,
 and exact owner/host-qualified identities. Repository names containing `%` or
 `_` remain literal; an omitted repo leaves the authorized families unchanged,
 while `all` is an ordinary repository name, not an authorization wildcard.
+
+A trusted content-store extension can retain another repository interpretation
+through the [consumer policy injection recipe](consumer-migration.md#repo-filtering-in-a-consumer-retrieval-facade).
+Scoped native candidates and hydration use that store's SQL policy; canonical
+family authorization remains an independent restriction.
 
 Ordinary scoped reads do not create tables, migrate columns or build indexes.
 Unprepared/mismatched projection fails closed. Native API/engine placement and

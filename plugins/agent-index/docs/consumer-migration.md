@@ -173,14 +173,28 @@ the worker otherwise parks hinted tasks before invoking an unsupported adapter.
 The default SQL repo filter matches generic source identities such as
 `github:owner/repo:issues`. A consumer retaining another canonical naming scheme
 may subclass `ContentStore` and override its pure `repo_filter_sql(repo)` method.
-Escape user-supplied values with the existing SQL literal/pattern helpers and
-keep the consumer's vector post-filter semantics consistent.
+Pass that subclass as `MultiModelStore(..., content_store_type=ConsumerContentStore)`
+and the matching pure `(source, repo) -> bool` callable as `repo_matcher=...`.
+The subclass must retain the base `(db_path, *, table_name)` constructor contract;
+the facade constructs it once and derives the database, table and source domain
+for every registered vector model from that instance. Escape user-supplied
+values with the existing SQL literal/pattern helpers and keep the SQL and Python
+predicates equivalent. Both injections are instance-local and optional; omitted
+arguments preserve the generic identity-first naming policy.
 
 The shared `fts_search` still owns currentness guards, query sanitization,
 source/language filters and execution before the candidate limit. Do not copy
 the FTS loop, replace a process-global helper or fetch an unbounded candidate
-set to filter in Python. `tests/test_consumer_repo_filter.py` exercises the real
-native indexed query with wildcard, quote and backslash controls.
+set to filter in Python. Hydrated vector, similarity, hybrid and cross-model
+paths use the injected matcher, including unavailable/empty-FTS fallback paths.
+In an explicitly selected source-aware store, `SearchEngine.search_authorized`
+uses the content store's SQL policy in native vector, FTS and hydration queries.
+It retains canonical family authorization, language filtering and pre-limit
+selection; the repository policy does not grant access to another family.
+`tests/test_consumer_repo_filter.py` exercises the real native queries with
+wildcard, quote, backslash, metadata and independent-default-instance controls.
+Publish this expanded provider before migrating a consumer; an older provider's
+unknown-keyword error is not permission to silently use the wrong repo policy.
 
 `tests/test_consumer_runtime.py` qualifies single- and dual-model injected
 consumers through the actual shared engine, native metadata-only reuse,
