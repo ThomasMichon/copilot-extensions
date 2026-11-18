@@ -1637,6 +1637,14 @@ The same participant custody and saved automatic-policy scope span construction
 and subsequent orchestration. Manual fence repair uses the existing explicit
 authorization and preserves prior failure history without claiming native
 cleanup settlement or overriding a live custodian.
+Worktrees distinguishes a refused monitor handover with a positively settled
+publication from an unfinished transition. After its actual owner completes
+selector/manifest restoration or publication and helper settlement, it returns
+a versioned `installation_refused` result and a nonzero exit status through
+ordinary, repair and dev-mode callers. That failed request completes without
+fencing later admissions; it does not certify runtime adoption. Missing or
+invalid results, pending publication, cancellation and unconfirmed cleanup keep
+their existing unknown-outcome fences. A failed dev release retains its claim.
 For an admitted partial shared installation, Manager requests the native
 update's private missing-runtime opt-in instead of running separate provision
 and update lifecycles. The opt-in requires an explicit legacy root and an

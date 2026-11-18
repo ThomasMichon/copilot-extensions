@@ -14,6 +14,9 @@ Identify the original allowed effects: discovery, static review, comments,
 official verdict, author notification and any specific normal merge backup.
 Review authority is not authoring, consent, resource transfer or merge authority.
 Bind each effect to its owner and repository policy.
+For explicitly adopted [Maintainer mode](maintainer-mode.md), capture the role/
+CODEOWNER and peer-posture sources and the coordinator's authorized completion
+responsibility; do not infer them from a permission name or bot review.
 
 When the operator requests a charter-refresh cadence, name one existing owner
 and reuse its authorized cadence. Do not add another timer or refresh loop.
@@ -249,6 +252,9 @@ required checks, thread resolution, mergeability, draft and holds separately.
 Negative/ambiguous evidence remains blocking where required. Only confirmed
 policy-compatible retained authority can avoid a redundant review; it never
 authorizes a new stale-candidate post.
+Retained source assessment and current native review authority are separate:
+apply the adopted mode's clean-rebase/current-authority procedure, including
+first official review on a requested newer head when required.
 
 Do not copy an adopter's timing, labels, exceptions or human roster. Approval
 is not consent; absence of a configured consent requirement is not permission.

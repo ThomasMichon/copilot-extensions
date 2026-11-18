@@ -3,6 +3,92 @@
   "description": "Synthetic static-contract walkthroughs, not executable decisions, model evaluation or live-provider qualification.",
   "cases": [
     {
+      "id": "maintainer-census-and-codeowner-gap",
+      "given": "A selected-base census spans three pages. A peer Maintainer authored one PR; another has only a bot COMMENTED review and an author-association label. One role lookup and the last page fail.",
+      "expected": "Include the peer author, exclude only drafts/self-review within this mode, keep census/roles unknown and inspect actual qualified current CODEOWNER coverage. Supply assigned missing review rather than exempt all Maintainers or trust bot/count evidence.",
+      "required_guidance": {
+        "references/maintainer-mode.md": [
+          "all open PRs targeting the selected bases",
+          "across all pages, excluding drafts and the acting reviewer's own PRs",
+          "Include other Maintainer authors.",
+          "Partial census and unknown roles remain unknown",
+          "not an author-association label or a globally assumed permission-to-role mapping",
+          "this role supplies the missing review unless another eligible Maintainer already provides valid coverage",
+          "A bot's COMMENTED review is not qualified Maintainer approval."
+        ],
+        "SKILL.md": ["reevaluate actual qualified current coverage and review blocks on every sweep"]
+      }
+    },
+    {
+      "id": "maintainer-peer-advisory-not-false-approval",
+      "given": "The adopted Maintainer role reviews a peer's PR. Native bot findings were already fixed; one governance recommendation remains, while required CI fails. No blocking-peer override is declared.",
+      "expected": "Verify fixes without reposting line findings, offer an advisory recommendation rather than CHANGE_REQUESTS, and leave the actual CI gate intact. Never fabricate approval; a different declared repository posture governs only when explicitly selected.",
+      "required_guidance": {
+        "references/maintainer-mode.md": [
+          "Generic reviewers do not inherit it.",
+          "advisory and nonblocking by default",
+          "An explicit repository/operator policy may select a blocking posture instead",
+          "Advisory posture never means fabricated approval or waived CI",
+          "complement native bot functional/line review with the adopted vision, architecture and governance lens",
+          "Verify whether existing findings were addressed"
+        ]
+      }
+    },
+    {
+      "id": "maintainer-completion-is-not-lane-authority",
+      "given": "A PR author lacks merge permission. One repository accepts ready submission as consent; another requires an additional signal. A static review lane has finished and the coordinator has an existing authorized completion adapter.",
+      "expected": "The coordinator performs normal authorized completion only after current policy gates and the applicable consent rule pass. Do not invent extra consent in the first repository or supply it in the second. The lane never merges, edits the author's branch or takes resources.",
+      "required_guidance": {
+        "references/maintainer-mode.md": [
+          "The Maintainer coordinator also owns normal authorized landing",
+          "classified using the repository's actual role vocabulary",
+          "Static reviewer lanes never become mergers, fix authors or resource owners.",
+          "refresh current head, required qualified reviews, CI, threads, mergeability, draft/hold/security state and author consent",
+          "Submission alone is not consent where additional consent is required",
+          "do not invent a universal extra approval or label",
+          "Preserve self-merge profiles and human-owned gates.",
+          "An adapter refusal is not permission for arbitrary administrative bypass."
+        ]
+      }
+    },
+    {
+      "id": "push-after-post-and-readback",
+      "given": "A review POST and GET both bind head A; the author then pushes B before the next sweep. The provider has no server freshness fence.",
+      "expected": "Retain the original effect and commit bindings as historical, refresh actual native opinion and qualified coverage on B, review the justified delta and supply required current review. Do not edit the receipt, manually rebind or blindly retry the write.",
+      "required_guidance": {
+        "references/maintainer-mode.md": [
+          "Every sweep reevaluates whether actual review authority is **current**",
+          "an author can push immediately after either",
+          "Keep immutable original POST responses and GET commit bindings.",
+          "Never manually rebind a review or rewrite its receipt to the newer head.",
+          "Refresh current head/discussion/check state and the native non-dismissed official opinion plus qualified coverage.",
+          "keep the effect historical",
+          "supply missing current review when actual gates require it",
+          "record the non-atomic race"
+        ]
+      }
+    },
+    {
+      "id": "clean-rebase-retained-assessment-new-official-head",
+      "given": "Lineage and patch/tree equivalence prove a clean rebase with unaffected dependencies, policy and discussion. The source finding is unchanged, but policy dismisses the old vote and the author explicitly requests review of the newer head, which has no official review yet.",
+      "expected": "Retain valid assessment without full analysis/reposted findings, but provide the first required official newer-head review through the retained reviewer. Mechanical rebase does not reset caps or authorize identical own votes on an unchanged current head.",
+      "required_guidance": {
+        "references/maintainer-mode.md": [
+          "Prove lineage and patch/tree equivalence",
+          "dependencies, policy and discussion",
+          "A SHA change alone is not changed intent.",
+          "Separately honor actual dismissal, latest-push, CODEOWNER and native-head requirements, and explicit author re-review requests.",
+          "A first official review on a requested newer head may be needed even when its finding is unchanged.",
+          "Never repeat an identical own vote on an unchanged current head without qualifying new input.",
+          "A mechanical rebase does not reset round, time or failure caps."
+        ],
+        "references/throughput-and-loops.md": [
+          "retain source assessment without a full rerun",
+          "fulfill actual newer-head gates or explicit re-review requests"
+        ]
+      }
+    },
+    {
       "id": "held-intake-not-auth-failure",
       "given": "The coordinator responds, discovery is absent, its queue is stale and activation is held. A manual review succeeded previously.",
       "expected": "Keep current discovery health unknown, not authenticated-empty or an auth outage. Escalate the concrete held dependency once; continue only supported authorized independent manual work.",

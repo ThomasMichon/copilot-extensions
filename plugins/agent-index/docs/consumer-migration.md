@@ -227,4 +227,10 @@ shared fixture, merged PR or published release is not proof that a consumer's
 running system uses this path. Deployment and live indexing retain the
 consumer's separate authorization and safety gates.
 
+Configuration annotation aliases such as `Composition` and `Layer` are not
+runtime prerequisites of the configuration facade. Consumers can retain an earlier
+configuration package exposing the required functional APIs without upgrading
+solely for annotation exports. Real functional API requirements still need
+their own compatibility qualification.
+
 See [architecture](architecture.md) for the engine's current guarantees.
