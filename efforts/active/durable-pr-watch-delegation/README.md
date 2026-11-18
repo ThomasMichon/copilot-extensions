@@ -1760,6 +1760,13 @@ callback an implicit credential store.
 
 ## Journal
 
+- **2026-11-18 - Native Gitea metadata contract proposed.** Continuing the
+  bounded #10923 source-preservation work after GitHub source #13199;
+  [Gitea title/body contract](native-gitea-metadata.md) retains the existing
+  target/account/provider/frontend owners and adds explicit native draft/WIP
+  preservation qualification. This is review-first planning, not delivered
+  Gitea metadata support, installation or live mutation. Full A4-A5 and all
+  other parent Plan/Validation gates remain open.
 - [2026-11-18 - Bounded legacy callback outcome visibility qualified](journal/2026/11.18%20Legacy%20callback%20outcomes.md)
 - [2026-11-18 - Released GitHub shadow and continuing events qualified](journal/2026/11.18%20GitHub%20shadow%20qualification.md)
 - **2026-11-17 - Complete subscriber callback receiving proposed.** Added
