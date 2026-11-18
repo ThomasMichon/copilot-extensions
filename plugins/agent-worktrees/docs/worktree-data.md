@@ -145,8 +145,12 @@ Batch reports and orphan/managed dry runs name the hold instead of claiming the
 checkout would be removed. A validated finalized display remains distinct from
 blocked deletion eligibility; its descriptor round trip does not turn the hold
 into an unsafe `FINAL` action or an unsupported-looking result.
-The guard probes only this documented fallback with `lstat`; it opens no database,
-follows no agenda link and performs no recursive search for arbitrary custom homes.
+The history guard probes this documented fallback with `lstat`; it opens no database
+and follows no agenda link. Disposal also inspects ignored paths through one bounded,
+repository-isolated Git observation. Ignored content is not classified as disposable
+from its name or Git-ignore status: its producer must preserve or explicitly reclaim
+it first. Failed or incomplete inspection retains the checkout. This read runs only
+on the existing explicit disposal path, not at launch or session start.
 Boundary rechecks cover late state before fallback/retry removal, but do not claim
 a filesystem transaction against an independently running external writer.
 
@@ -169,8 +173,8 @@ This slice provides no automatic relocation, descriptor rebinding, writer switch
 source deletion or restore command. Only the data owner may reconcile a supported
 rescue and explicitly retire its original source under the applicable permission
 and retention gates. Arbitrary custom checkout-local homes remain the adopter's
-explicit preservation responsibility; their absence from this bounded convention
-check is not a safety guarantee.
+explicit preservation responsibility; the ignored-data hold is not a complete
+domain inventory or proof of a supported writer cutover.
 
 The [reviewed lifetime and archival design](../../../efforts/active/mux-companion-manual-cutover-diagnostics/worktree-state-lifetime.md)
 retains the independent efforts, Manager, logger, rescue and operational

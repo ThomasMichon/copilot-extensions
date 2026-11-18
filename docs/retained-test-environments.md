@@ -28,8 +28,8 @@ second command. On other platforms use their path separator. The optional
 `--platform` must name the current native Python platform; this tool does not
 retire another operating system's environment.
 
-Apply recomputes the selected source/cache binding and checks the preview's
-directory identity and generation under the lease. A busy environment returns
+Apply recomputes the selected source/cache binding and checks both directory
+identities and the preview's cache generation under the lease. A busy environment returns
 exit code 3 without changing its contents. A replaced, stale, linked,
 unqualified or unreadable selection refuses before removal.
 

@@ -1,5 +1,5 @@
 {
-  "comment": "Add explicit retained finalization and bounded settled-child discovery",
+  "comment": "Add retained finalization, settled-child discovery and producer-safe cleanup",
   "changes": [
     {
       "plugin": "agent-worktrees",

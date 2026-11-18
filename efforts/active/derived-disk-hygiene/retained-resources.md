@@ -211,3 +211,33 @@ after process exit. Fatal-error lint and whole-file strict typing pass for
 both target platforms. Native Windows qualification of R3 is still pending.
 The [source-lifetime reference](../../../docs/retained-test-environments.md)
 documents the terminal selection and the separate source-cleanup decision.
+
+The exact R3 candidate passed all 64 selected cases on disposable native
+Windows in [run 44405932083](https://github.com/ThomasMichon/copilot-extensions/actions/runs/44405932083).
+A subsequent control also binds the source directory identity: replacing the
+checkout invalidates an earlier retirement preview.
+
+### 2026-11-18 - Independent cleanup and ignored-data protection
+
+The R4 consumer constructs a real Root -> child -> grandchild chain across
+three repositories, plus an independent sibling. All nodes finalize with
+retained checkouts. Settled relationships remain discoverable. A separate
+preview changes no bytes, and normal cleanup removes eligible nodes while
+retaining one grandchild's ignored evidence.
+
+Physical disposal now retains unclassified ignored content until its producer
+preserves or explicitly reclaims it. This intentionally tightens the old unsafe
+removal path; logical finalization and ordinary empty/clean checkout behavior
+remain separate. Inspection uses the existing caller-owned process primitive,
+five-second execution and hard stdout/stderr limits, repository-isolated Git
+configuration, and no new service or launch-time work. The native process-use
+check remains real in the cross-repository consumer.
+
+The current Linux lifecycle packet passes 90 cases. The existing late-agenda
+selection passes 17 cases, including data created during removal/registration
+inspection. The legacy hold is not a writer migration: existing complete-export
+support alone does not provide relocation or a safe new writer. Full agenda
+rescue/cutover and final exact-head native qualification remain open gates.
+The source-replacement cache control also passes in the updated Linux packet:
+64 passes and the same one Windows-only skip. Whole-file strict typing passes
+all 18 touched Python files for both target platforms.
