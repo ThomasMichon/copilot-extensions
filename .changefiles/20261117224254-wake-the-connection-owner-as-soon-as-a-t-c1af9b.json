@@ -1,0 +1,9 @@
+{
+  "comment": "Wake the Connection Owner as soon as a tenant places a new hold instead of waiting out the reconcile interval",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}
