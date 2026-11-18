@@ -297,6 +297,9 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     if independent_source or getattr(app.state, "passive", False):
         (db_path.parent / "hosts").mkdir(parents=True, exist_ok=True)
         mgr = session_manager_from_config(db, cfg, read_only_rehydrate=True)
+        if getattr(app.state, "passive", False):
+            for session in mgr.list_sessions():
+                session.awaiting_maintenance_refresh = True
     else:
         mgr = session_manager_from_config(db, cfg)
     app.state.session_manager = mgr
@@ -502,14 +505,14 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     app.state.adopt_relay = _adopt_relay
 
-    async def _session_maintenance_ready() -> bool:
+    def _session_maintenance_ready() -> bool:
         return (
             (previous_retire_task is None or previous_retire_task.done())
             and (
                 not independent_source
                 or (lifecycle_start_task is not None and lifecycle_start_task.done())
             )
-            and bool(app.state.cold_recovery_ready) and await passive_maintenance_ready(app)
+            and bool(app.state.cold_recovery_ready)
         )
 
     # Periodic GC sweep -- prune aged terminal/disconnected sessions and
@@ -535,7 +538,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
                         loop_name="periodic GC",
                     ):
                         continue
-                    if not await _session_maintenance_ready():
+                    if not _session_maintenance_ready() or not await passive_maintenance_ready(app):
                         continue
                     await asyncio.to_thread(mgr.gc, reason="sweep")
                 except Exception:
@@ -566,12 +569,11 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
                     loop_name="heartbeat loop",
                 ):
                     continue
-                if not await passive_maintenance_ready(app):
-                    continue
-                await _recover_owned_cold(app, published_endpoint, automatic=True)
+                if await passive_maintenance_ready(app):
+                    await _recover_owned_cold(app, published_endpoint, automatic=True)
             except Exception:
                 log.warning("Owned cold recovery failed", exc_info=True)
-            if not await _session_maintenance_ready():
+            if not _session_maintenance_ready():
                 continue
             try:
                 if await _governance_backoff(
@@ -735,7 +737,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
                         loop_name="idle reaper",
                     ):
                         continue
-                    if not await _session_maintenance_ready():
+                    if not _session_maintenance_ready():
                         continue
                     n = await mgr.sweep_idle_sessions()
                     if n:
@@ -780,7 +782,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
                     loop_name="live-session reaper",
                 ):
                     continue
-                if not await _session_maintenance_ready():
+                if not _session_maintenance_ready() or not await passive_maintenance_ready(app):
                     continue
                 n = await asyncio.to_thread(
                     db.reap_stale_live_sessions, now=time.time()

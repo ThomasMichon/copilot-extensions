@@ -26,7 +26,9 @@ from agent_bridge import passive_maintenance
 from agent_bridge.app import create_app
 from agent_bridge.db import Database
 from agent_bridge.models import ServiceConfig
-from agent_bridge.session_manager import SessionManager
+from agent_bridge.session_manager import Session, SessionManager
+from agent_bridge.session_status import SessionStatus
+from agent_bridge.transport import SpawnTarget
 
 
 @pytest.fixture(autouse=True)
@@ -100,7 +102,7 @@ def test_only_cold_start_concludes_an_open_turn(
         original_events = owner.get_events("active")
         app = create_app(config=cfg, token="test-token")
         app.state.passive = passive
-        denied, promoted, beat = Event(), Event(), Event()
+        denied, promoted, checked = Event(), Event(), Event()
 
         def ownership(root: Path, port: int | None) -> bool:
             if promoted.is_set():
@@ -108,19 +110,22 @@ def test_only_cold_start_concludes_an_open_turn(
             denied.set()
             return False
 
-        def note_heartbeat(self: SessionManager) -> int:
-            beat.set()
-            return 0
+        reconcile = SessionManager.reconcile_wedged_running
+
+        async def record_pass(self: SessionManager) -> int:
+            count = await reconcile(self)
+            checked.set()
+            return count
 
         resync = AsyncMock(return_value=0)
         monkeypatch.setattr("agent_bridge.app._HEARTBEAT_INTERVAL_S", .01)
         monkeypatch.setattr("agent_bridge.passive_maintenance.owns_session_maintenance", ownership)
-        monkeypatch.setattr(SessionManager, "note_heartbeats", note_heartbeat)
+        monkeypatch.setattr(SessionManager, "reconcile_wedged_running", record_pass)
         monkeypatch.setattr(SessionManager, "recover_disconnected_hosts", AsyncMock(return_value=0))
         monkeypatch.setattr(SessionManager, "resync_session", resync)
-        with TestClient(app):
+        with TestClient(app) as frontend:
             if passive:
-                assert denied.wait(3) and not beat.is_set()
+                assert denied.wait(3) and checked.wait(3)
                 resync.assert_not_awaited()
             turn = owner.get_turn("active", 0)
             session = owner.get_session("active")
@@ -129,13 +134,74 @@ def test_only_cold_start_concludes_an_open_turn(
                 assert session["status"] == "running"
                 assert turn == original_turn and turn["completed_at"] is None
                 assert owner.get_events("active") == original_events
+                owner.update_session_stopped("active", time.time(), False)
                 promoted.set()
-                assert beat.wait(3), "maintenance must resume after ownership transfers"
+                assert frontend.portal is not None
+
+                async def wait_for_refresh() -> None:
+                    async def wait() -> None:
+                        inherited = app.state.session_manager.get_session("active")
+                        while inherited.status != SessionStatus.STOPPED:
+                            await asyncio.sleep(.01)
+                        assert not inherited.background_recovery_enabled
+                    await asyncio.wait_for(wait(), 3)
+
+                frontend.portal.call(wait_for_refresh)
+                resync.assert_not_awaited()
             else:
                 assert session["status"] == "stopped"
                 assert turn["stop_reason"] == "interrupted" and turn["completed_at"] is not None
     finally:
         owner.close()
+
+
+@pytest.mark.asyncio
+async def test_owned_client_maintained_across_two_route_flips(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "runtime"
+    root.mkdir()
+    monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(root))
+    cfg = ServiceConfig(port=0, bind="127.0.0.1", db_path=str(root / "sessions.db"),
+                        enable_credential_relay=False)
+    app = create_app(config=cfg, token="test-token")
+    app.state.passive = True
+    app.state.bound_port = 12002
+    incumbent = routing.Endpoint("127.0.0.1", 12001, 42, process_start_time="100")
+    owner = routing.Endpoint("127.0.0.1", 12002, os.getpid(), process_start_time="200")
+    successor = routing.Endpoint("127.0.0.1", 12003, 43, process_start_time="300")
+    path = routing.routing_table_path(root)
+    path.write_text(json.dumps({"active": owner.to_dict(), "previous": incumbent.to_dict()}))
+    monkeypatch.setattr(passive_maintenance, "process_start_time", Mock(return_value="200"))
+    monkeypatch.setattr(process_exit, "observe_original_exit", Mock(return_value=False))
+    monkeypatch.setattr("agent_bridge.app._HEARTBEAT_INTERVAL_S", .01)
+    resync = AsyncMock(return_value=0)
+    monkeypatch.setattr(SessionManager, "resync_session", resync)
+
+    async with app.router.lifespan_context(app):
+        manager: SessionManager = app.state.session_manager
+        local = Session("owned", "owned", SpawnTarget(type="local", cwd=str(tmp_path)))
+        local.status = SessionStatus.RUNNING
+        transport = Mock(is_running=True, session_host_client=None)
+        local.client = transport
+        manager._sessions[local.session_id] = local
+        try:
+            async def wait_for_heartbeat() -> None:
+                while local.last_heartbeat_at is None:
+                    await asyncio.sleep(.01)
+            await asyncio.wait_for(wait_for_heartbeat(), 3)
+            path.write_text(json.dumps({"active": successor.to_dict(), "previous": owner.to_dict()}))
+            local.last_heartbeat_at = None
+            await asyncio.wait_for(wait_for_heartbeat(), 3)
+            transport.is_running = False
+
+            async def wait_for_recovery() -> None:
+                while not resync.await_count:
+                    await asyncio.sleep(.01)
+            await asyncio.wait_for(wait_for_recovery(), 3)
+            resync.assert_awaited_with("owned")
+        finally:
+            manager._sessions.pop(local.session_id)
 
 
 def test_passive_maintenance_requires_route_and_predecessor_exit(

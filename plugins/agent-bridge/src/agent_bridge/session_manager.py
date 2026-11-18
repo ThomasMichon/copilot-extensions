@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any
 from agent_procutil import no_window_flags
 
 from .events import EventLog
-from .models import SessionStatus
+from .session_status import SessionStatus
 from .provider_process import run_captured
 from .session_host_liveness import _HostLivenessMixin
 from .session_lifecycle_cli import _agent_worktrees_environment, _agent_worktrees_launch_prefix
@@ -302,10 +302,10 @@ def _codespace_claim_key(target: "SpawnTarget") -> tuple[str, str] | None:
     cs = getattr(target, "codespace", None)
     if isinstance(cs, dict) and cs.get("name"):
         name = cs["name"]
-    elif getattr(target, "spawn_command", None):
+    elif command := getattr(target, "spawn_command", None):
         from .session_host.codespace_transport import parse_codespace_target
 
-        parsed = parse_codespace_target(target.spawn_command)
+        parsed = parse_codespace_target(command)
         if parsed:
             name = parsed.get("name")
     if not name:
@@ -316,8 +316,10 @@ def _codespace_claim_key(target: "SpawnTarget") -> tuple[str, str] | None:
         identity = overrides["codespace_claim"]
         if not isinstance(identity, dict):
             return None
-        key = identity.get("name"), identity.get("owner")
-        return key if all(isinstance(value, str) and value for value in key) else None
+        claim_name, claim_owner = identity.get("name"), identity.get("owner")
+        if isinstance(claim_name, str) and claim_name and isinstance(claim_owner, str) and claim_owner:
+            return claim_name, claim_owner
+        return None
     owner = getattr(target, "caller_worktree", None)
     if not owner:
         return None
@@ -578,7 +580,7 @@ def _workspace_key(
     agent_name: str | None,
     target: SpawnTarget,
     caller_id: str | None,
-) -> tuple | None:
+) -> tuple[str, str] | None:
     """Compute the concurrency key for a session, or None if unguarded.
 
     A "workspace" is a checkout that can hold at most one active session.
@@ -745,6 +747,9 @@ _STALL_AFTER_S = 300.0
 class Session:
     """In-memory state for a single agent-bridge session."""
 
+    # Metadata inherited by a passive frontend is not a local recovery claim.
+    awaiting_maintenance_refresh: bool = False
+
     def __init__(
         self,
         session_id: str,
@@ -818,7 +823,7 @@ class Session:
         # `PROGRESS: key=value` lines (e.g. build=ok, commit=<sha>, pr=<id>) --
         # captured from agent_message text and surfaced in status (#46.3).
         self.progress: dict[str, str] = {}
-        self._prompt_task: asyncio.Task | None = None
+        self._prompt_task: asyncio.Task[None] | None = None
         self._lifecycle_lock = asyncio.Lock()
         self._codespace_ownership_lock = asyncio.Lock()
         self._turn_start_lock = asyncio.Lock()

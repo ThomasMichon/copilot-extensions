@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
-from .models import SessionStatus
+from .session_status import SessionStatus
 from .session_manager import SessionBusyError, log
+
+if TYPE_CHECKING:
+    from .session_manager import SessionManager
 
 
 class _SessionMonitoringMixin:
@@ -26,6 +29,7 @@ class _SessionMonitoringMixin:
         availability check on each pass, including venues skipped at startup.
         Returns the count reattached.
         """
+        self = cast("SessionManager", self)
         if self._host_index is None:
             return 0
         from .session_host.version_mux import HostDisposition, plan_host
@@ -36,6 +40,8 @@ class _SessionMonitoringMixin:
         for rec in list(self._live_host_records()):
             session = self._sessions.get(rec.session_id)
             if session is None or not session.acp_session_id:
+                continue
+            if session.awaiting_maintenance_refresh and session.client is None:
                 continue
             if session.status in {SessionStatus.FAILED, SessionStatus.ENDED}:
                 continue  # terminal sessions wait for explicit recovery (#2379)
@@ -128,9 +134,12 @@ class _SessionMonitoringMixin:
         per-session isolated; a single failure never stalls the sweep. Returns the
         count reconciled (resynced + interrupted).
         """
+        self = cast("SessionManager", self)
         now = now if now is not None else time.time()
         healed = 0
         for sid, session in list(self._sessions.items()):
+            if session.awaiting_maintenance_refresh and session.client is None:
+                continue
             if session.status != SessionStatus.RUNNING:
                 continue
             liveness = session.liveness_state(now)
@@ -215,6 +224,7 @@ class _SessionMonitoringMixin:
         are still pinned. Empty (the common case) unless a breaking host-layer
         change has left older hosts running.
         """
+        self = cast("SessionManager", self)
         if self._host_index is None:
             return []
         from .session_host.version_mux import is_compatible
@@ -235,6 +245,7 @@ class _SessionMonitoringMixin:
         is REAP_STOPPED or FORCE_REAP -- never touching a compatible host or a
         stranded host still within the bound. Returns the count reaped.
         """
+        self = cast("SessionManager", self)
         if self._host_index is None:
             return 0
         from .session_host.version_mux import HostDisposition, plan_host
@@ -264,6 +275,7 @@ class _SessionMonitoringMixin:
         the session is being watched. Paired with ``remove_subscriber`` in the
         SSE stream's teardown. No-op for an unknown session.
         """
+        self = cast("SessionManager", self)
         sid = self._resolve_ref(session_id) or session_id
         s = self._sessions.get(sid)
         if s is not None:
@@ -276,6 +288,7 @@ class _SessionMonitoringMixin:
         idle-reaper TTL clock starts from the moment it became unwatched (not
         from the last turn).
         """
+        self = cast("SessionManager", self)
         sid = self._resolve_ref(session_id) or session_id
         s = self._sessions.get(sid)
         if s is not None:
@@ -298,6 +311,7 @@ class _SessionMonitoringMixin:
         Forge) merely connect/disconnect and never reap for resource reasons.
         Returns the count reaped. No-op unless enabled + Session-Host mode.
         """
+        self = cast("SessionManager", self)
         ttl = self._idle_reap_ttl_seconds
         if not ttl or ttl <= 0:
             return 0
@@ -311,6 +325,8 @@ class _SessionMonitoringMixin:
         remote_host_sids = self._live_remote_host_sessions()
         reaped = 0
         for sid, s in list(self._sessions.items()):
+            if s.awaiting_maintenance_refresh and s.client is None:
+                continue
             if s.target.type == "remote-acp":
                 continue
             if s.status != SessionStatus.IDLE:
@@ -367,6 +383,7 @@ class _SessionMonitoringMixin:
         ``last_output_at`` means the agent stalled while the channel is up. In
         memory only; cheap (a process poll per session). Returns the count beat.
         """
+        self = cast("SessionManager", self)
         now = now if now is not None else time.time()
         beat = 0
         for s in list(self._sessions.values()):

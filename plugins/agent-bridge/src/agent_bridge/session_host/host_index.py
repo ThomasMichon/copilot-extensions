@@ -27,6 +27,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from typing import Any
 
 from single_instance_lease import AlreadyRunningError, SingleInstance
 from zdd.claims import ClaimConflict, decide_acquire
@@ -60,8 +61,8 @@ class HostRecord:
     # a frontend restart -- no live Spawner, no agent-codespaces import. Empty
     # for a local host. See
     # ``session_host.endpoints``.
-    endpoint: dict = field(default_factory=dict)
-    extra: dict = field(default_factory=dict)
+    endpoint: dict[str, Any] = field(default_factory=dict)
+    extra: dict[str, Any] = field(default_factory=dict)
     # Generation-scoped ownership claim (effort
     # agent-bridge-unified-zdd-cutover, Phase 2): which agent-bridge daemon
     # *generation* currently owns this session-host record, and the pid to
@@ -216,7 +217,7 @@ class HostIndex:
             lease.release()
 
     @contextmanager
-    def _locked_reload(self):
+    def _locked_reload(self) -> Iterator[None]:
         """Reload, mutate and flush under the existing cross-process mutex."""
         with self._locked_index():
             self._load_or_raise()
@@ -239,7 +240,7 @@ class HostIndex:
             raise HostInventoryError("Host inventory changed after observation")
 
     # -- mutation ----------------------------------------------------------
-    def refresh(self) -> None:
+    def refresh(self, *, strict: bool = False) -> None:
         """Reload the in-memory cache from the latest on-disk state.
 
         Query methods (``get``/``all``/``live_records``/...) read this
@@ -254,7 +255,10 @@ class HostIndex:
         never observes a torn file, only possibly a slightly earlier or
         later complete version.
         """
-        self._load()
+        if strict:
+            self._load_or_raise()
+        else:
+            self._load()
 
     def register(self, record: HostRecord) -> None:
         """Register (or update the location/metadata of) a Session Host.
