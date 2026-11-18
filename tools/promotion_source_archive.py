@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 import hashlib
@@ -11,7 +12,8 @@ from pathlib import Path
 import re
 import stat
 import subprocess
-import time
+import time as time
+from typing import Any, Protocol, cast
 
 from promotion_complete_source import (
     MAX_SOURCE_BYTES, MAX_SOURCE_FILES, canonical_bytes, source_archive, source_asset_name,
@@ -22,8 +24,14 @@ from promotion_unit_contract import MAX_PACKET_FILE_BYTES, decode_json
 _DEADLINE: ContextVar[float | None] = ContextVar("promotion_deadline", default=None)
 
 
+class _ArchiveVerifier(Protocol):
+    def __call__(
+        self, raw: bytes, manifest: dict[str, Any], *, identity: dict[str, str],
+    ) -> object: ...
+
+
 @contextmanager
-def composition_budget(deadline: float | None):
+def composition_budget(deadline: float | None) -> Iterator[None]:
     if deadline is not None and (
         isinstance(deadline, bool) or not isinstance(deadline, (float, int))
         or not math.isfinite(deadline)
@@ -58,7 +66,7 @@ def git_environment(**overrides: str) -> dict[str, str]:
     return {**environment, **overrides}
 
 
-def run_composition_child(argv, **options):
+def run_composition_child(argv: list[str], **options: Any) -> subprocess.CompletedProcess[Any]:
     deadline = _DEADLINE.get()
     if deadline is None:
         return subprocess.run(argv, **options)
@@ -87,12 +95,12 @@ def git_text(
          *args],
         cwd=str(repo), capture_output=True, env=environment,
         input=input_text.encode("utf-8") if input_text is not None else None,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=int(getattr(subprocess, "CREATE_NO_WINDOW", 0)) if os.name == "nt" else 0,
         **git_timeout_options(),
     )
     if check and result.returncode:
         raise ValueError(f"git {' '.join(args)} failed: {result.stderr.decode('utf-8').strip()}")
-    return result.stdout.decode("utf-8").strip()
+    return cast(str, result.stdout.decode("utf-8").strip())
 
 
 def _git(repo: Path, args: list[str], *, data: bytes | None = None) -> bytes:
@@ -101,11 +109,11 @@ def _git(repo: Path, args: list[str], *, data: bytes | None = None) -> bytes:
         ["git", "--no-replace-objects", "-c", "core.fsmonitor=false", *args],
         cwd=repo, env=env, input=data,
         capture_output=True, **git_timeout_options(30),
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=int(getattr(subprocess, "CREATE_NO_WINDOW", 0)) if os.name == "nt" else 0,
     )
     if result.returncode:
         raise ValueError(f"cannot read complete-source Git data: {result.stderr.decode(errors='replace')}")
-    return result.stdout
+    return cast(bytes, result.stdout)
 
 
 def is_ancestor(repo: Path, ancestor: str, descendant: str) -> bool:
@@ -113,7 +121,7 @@ def is_ancestor(repo: Path, ancestor: str, descendant: str) -> bool:
         ["git", "--no-replace-objects", "-c", "core.fsmonitor=false",
          "merge-base", "--is-ancestor", ancestor, descendant],
         cwd=str(repo), capture_output=True, text=True, env=git_environment(),
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=int(getattr(subprocess, "CREATE_NO_WINDOW", 0)) if os.name == "nt" else 0,
         **git_timeout_options(),
     )
     return result.returncode == 0
@@ -125,7 +133,7 @@ def changefile_existed_at(rev: str, name: str, *, repo: Path) -> bool:
         ["git", "--no-replace-objects", "-c", "core.fsmonitor=false",
          "cat-file", "-e", f"{rev}:.changefiles/{name}"],
         cwd=str(repo), capture_output=True, text=True, env=git_environment(),
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=int(getattr(subprocess, "CREATE_NO_WINDOW", 0)) if os.name == "nt" else 0,
         **git_timeout_options(),
     )
     return result.returncode == 0
@@ -163,7 +171,9 @@ def candidate_tree_and_parent(repo: Path, *, candidate_sha: str) -> tuple[str, s
     return headers[0][5:].decode("ascii"), parents[0].decode("ascii")
 
 
-def read_tree(repo: Path, *, candidate_sha: str, main_before: str, tree: str) -> dict:
+def read_tree(
+    repo: Path, *, candidate_sha: str, main_before: str, tree: str,
+) -> dict[str, tuple[str, bytes]]:
     """Batch raw blobs, not a worktree or git-archive's export-filtered representation."""
     if any(not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{40}", value)
            for value in (candidate_sha, main_before, tree)):
@@ -218,7 +228,8 @@ def read_blobs(repo: Path, requested: list[str]) -> dict[str, bytes]:
     ):
         raise ValueError("complete-source Git blobs exceed the existing source bounds")
     output = _git(repo, ["cat-file", "--batch"], data=request)
-    blobs, position = {}, 0
+    blobs: dict[str, bytes] = {}
+    position = 0
     for blob in identifiers:
         header = f"{blob} blob {sizes[blob]}\n".encode()
         if output[position:position + len(header)] != header:
@@ -234,7 +245,9 @@ def read_blobs(repo: Path, requested: list[str]) -> dict[str, bytes]:
     return blobs
 
 
-def source_identity(index_raw: bytes, receipt: dict, *, qualification_digest: str) -> dict:
+def source_identity(
+    index_raw: bytes, receipt: object, *, qualification_digest: str,
+) -> dict[str, str]:
     index = decode_json(index_raw)
     if (
         not isinstance(index, dict) or index.get("schema_version") != 2
@@ -253,14 +266,14 @@ def source_identity(index_raw: bytes, receipt: dict, *, qualification_digest: st
         qualification_digest=qualification_digest,
     )
     validate_identity(identity)
-    return identity
+    return cast(dict[str, str], identity)
 
 
 def _regular(path: Path, *, limit: int) -> bytes:
     info = path.lstat()
     if (
         not stat.S_ISREG(info.st_mode) or path.is_symlink()
-        or getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+        or getattr(info, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
         or info.st_size > limit
     ):
         raise ValueError("complete-source subject is indirect, nonregular or oversized")
@@ -270,7 +283,7 @@ def _regular(path: Path, *, limit: int) -> bytes:
     return raw
 
 
-def read_source_assets(directory: Path, *, identity: dict) -> dict[str, bytes]:
+def read_source_assets(directory: Path, *, identity: dict[str, str]) -> dict[str, bytes]:
     validate_identity(identity)
     return _read_source_assets(
         directory, identity=identity, name_for=source_asset_name, verify=verify_source_archive,
@@ -279,12 +292,14 @@ def read_source_assets(directory: Path, *, identity: dict) -> dict[str, bytes]:
 
 
 def _read_source_assets(
-    directory: Path, *, identity: dict, name_for, verify, archive_kind: str, manifest_kind: str,
+    directory: Path, *, identity: dict[str, str],
+    name_for: Callable[[str, dict[str, str], str], str], verify: _ArchiveVerifier,
+    archive_kind: str, manifest_kind: str,
 ) -> dict[str, bytes]:
     info = directory.lstat()
     if (
         directory.is_symlink() or not stat.S_ISDIR(info.st_mode)
-        or getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+        or getattr(info, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
     ):
         raise ValueError("complete-source subject directory is unavailable or indirect")
     paths = list(directory.iterdir())
@@ -293,7 +308,7 @@ def _read_source_assets(
     if len(paths) != 2 or len(manifests) != 1 or len(archives) != 1:
         raise ValueError("complete-source subjects have an unexpected inventory")
     manifest_raw = _regular(manifests[0], limit=MAX_PACKET_FILE_BYTES)
-    manifest = decode_json(manifest_raw)
+    manifest = cast(dict[str, Any], decode_json(manifest_raw))
     archive_raw = _regular(archives[0], limit=MAX_SOURCE_BYTES)
     if (
         manifest_raw != canonical_bytes(manifest)
@@ -305,7 +320,9 @@ def _read_source_assets(
     return {manifests[0].name: manifest_raw, archives[0].name: archive_raw}
 
 
-def prepare_source(directory: Path, *, repo: Path, index_raw: bytes, receipt: dict) -> dict:
+def prepare_source(
+    directory: Path, *, repo: Path, index_raw: bytes, receipt: object,
+) -> dict[str, Any]:
     identity = source_identity(
         index_raw, receipt, qualification_digest=hashlib.sha256(canonical_bytes(receipt)).hexdigest(),
     )
@@ -325,7 +342,7 @@ def prepare_source(directory: Path, *, repo: Path, index_raw: bytes, receipt: di
     return manifest
 
 
-def read_build_assets(directory: Path, *, identity: dict) -> dict[str, bytes]:
+def read_build_assets(directory: Path, *, identity: dict[str, str]) -> dict[str, bytes]:
     from promotion_build_source import asset_name, validate_identity, verify_build_archive
 
     validate_identity(identity)
@@ -337,7 +354,7 @@ def read_build_assets(directory: Path, *, identity: dict) -> dict[str, bytes]:
 
 def prepare_build_source(
     directory: Path, *, repo: Path, index_raw: bytes, candidate_sha: str,
-) -> dict:
+) -> dict[str, Any]:
     import promote_release as promotion
     from promotion_build_source import asset_name, build_archive, build_identity
 

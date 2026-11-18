@@ -89,8 +89,14 @@ Scoped credential probes and forge operations use the existing captured
 process-tree runner with a 30-second timeout per command. Timeout reaps the
 command's descendants; failures report a fixed command group and numeric exit
 code without echoing arguments or credential-bearing output.
-The command adapter forwards `cwd`, environment and timeout to the contained
-capture runner. That runner owns fixed text capture and headless process-tree
+The command adapter forwards `cwd`, environment, timeout and an optional
+`encoding` to the contained capture runner. GitHub GraphQL issue discovery
+selects UTF-8 explicitly in both authentication modes, so Unicode titles and
+comments do not depend on the host's default text encoding. Other command
+groups retain their previous encoding defaults. The capture helper forwards
+the codec to `Popen`; its Windows stdin path uses the existing owned binary
+capture and applies the selected codec after native cleanup.
+That runner owns fixed text capture and headless process-tree
 flags; incompatible or unknown process options refuse before execution.
 Authentication probe failures identify account selection, credential retrieval
 or identity verification even when the contained runner reports a timeout or

@@ -14,16 +14,22 @@ from datetime import datetime, timezone
 from importlib.metadata import distributions
 from importlib.metadata import version as distribution_version
 from pathlib import Path
+from collections.abc import Callable
+from types import ModuleType
+from typing import cast
 
 from packaging.version import Version
 
 # Installed control code must support the frozen-source mode-owner contract.
 MODE_OWNER_ABI = 1
+INPUT_VERIFIER_ABI = 1
 
 _LIFECYCLE_FILES = (
     "runtime_install.py", "runtime_install_governance.py", "runtime_install_modes.py",
     "runtime_install_publication.py", "installer_engine.py", "installer_engine_health.py",
     "runtime_install_driver.py",
+    "runtime_install_profiles.py",
+    "runtime_input_verifier.py",
     "installer_engine_process.py", "installer_dependency_policy.py",
     "installer_wheel_snapshot.py", "installer_wheel_inputs.py",
     "installer_dependency_config.py", "installer_dependency_arguments.py", "installer_retained_content.py",
@@ -188,7 +194,7 @@ def verify_installed_origins() -> None:
             raise RuntimeError("Closed wheel evidence cannot replace Source wheel evidence")
         from agent_worktrees.runtime_dev_cli import _lifecycle
 
-        inputs = _lifecycle().engine.WheelReuseInputs(
+        inputs = cast(Callable[[], ModuleType], _lifecycle)().engine.WheelReuseInputs(
             slot.name, json.dumps(receipt.get("wheel_inputs"), sort_keys=True, separators=(",", ":"), allow_nan=False),
             time.monotonic() + 30,
         )
@@ -229,7 +235,7 @@ def verify_installed_origins() -> None:
                 and str(origin.get("url", "")).endswith("#sha256=" + digest)
             )
         if (
-            not Path(distribution.locate_file("")).resolve().is_relative_to(slot)
+            not Path(cast("os.PathLike[str]", distribution.locate_file(""))).resolve().is_relative_to(slot)
             or not valid_origin or name in observed
         ):
             raise RuntimeError(f"{name} is not an attributable non-editable installation")

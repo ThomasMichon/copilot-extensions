@@ -408,7 +408,22 @@ $script:SkipPackageInstall = $false
 $script:SkipStamp = $false
 function ConvertTo-AgentLoggerVersionKey {
     param([string]$Value)
-    if ($Value -notmatch '^(\d+)\.(\d+)\.(\d+)(?:[.-]dev(\d+))?(?:\+[A-Za-z0-9][A-Za-z0-9._-]*)?$') { return $null }
+    if (-not $Value) { return $null }
+    $pattern = '^(\d+)\.(\d+)\.(\d+)(?:[.-]dev(\d+))?(?:\+[A-Za-z0-9][A-Za-z0-9._-]*)?$'
+    if ($Value -notmatch $pattern) {
+        $py = Get-BootstrapPython
+        if (-not $py) { return $null }
+        $project = 'import sys; sys.path.insert(0, sys.argv[1]); import versioned_runtime as runtime; print(runtime.package_version(sys.argv[2]))'
+        $nativeError = ''
+        $projected = Invoke-Hidden -FilePath $py -ArgList @(
+            '-I', '-S', '-B', '-c', $project, $ScriptDir, $Value
+        ) -ErrorOutput ([ref]$nativeError) -StreamErrorOutput
+        if ($LASTEXITCODE -ne 0) {
+            throw "Logger runtime version projection failed (exit ${LASTEXITCODE}): $nativeError"
+        }
+        $Value = $projected.Trim()
+        if ($Value -notmatch $pattern) { return $null }
+    }
     $build = if ($Matches[4]) { [int]$Matches[4] } else { [int]::MaxValue }
     return [Version]::new(
         [int]$Matches[1],

@@ -5,7 +5,10 @@ Production observation and creation readers remain real. These controls do not
 qualify whole-host PSMux census, full Picker/embody or lifecycle-fence parity.
 """
 
+from __future__ import annotations
+
 import base64
+from collections.abc import Callable, Sequence
 import json
 import hashlib
 import os
@@ -17,6 +20,8 @@ import time
 
 import pytest
 
+from agent_procutil import no_window_kwargs
+from agent_remote_driver import windows_mux_version
 from single_instance_lease import AlreadyRunningError, SingleInstance
 
 
@@ -205,12 +210,12 @@ if __name__ == "__main__":
 """
 
 
-def _function(source, name):
+def _function(source: str, name: str) -> str:
     start = source.index("function " + name + " {")
     return source[start:source.index("\n}\n", start) + 3]
 
 
-def _manager_driver(path, *, core):
+def _manager_driver(path: Path, *, core: bool) -> None:
     source = (ROOT / "worktree-manager/bin/launch-session.ps1").read_text("utf-8")
     helpers = "\n".join(_function(source, name) for name in (
         "Invoke-AwPsmuxFromHome", "Get-AwMuxObservation", "Test-AwMuxCreationSession", "Invoke-AwPsmuxCreation",
@@ -255,7 +260,11 @@ def _manager_driver(path, *, core):
     )
 
 
-def _wait(check, message, actors=(), *, timeout=15, diagnostic=None):
+def _wait(
+    check: Callable[[], bool], message: str,
+    actors: Sequence[subprocess.Popen[str]] = (), *, timeout: float = 15,
+    diagnostic: Callable[[], object] | None = None,
+) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         for actor in actors:
@@ -271,18 +280,21 @@ def _wait(check, message, actors=(), *, timeout=15, diagnostic=None):
 @pytest.mark.parametrize("first,second", [("manager", "engine"), ("engine", "manager")])
 @pytest.mark.parametrize("core", [False, True], ids=["legacy-manager", "core-manager"])
 def test_same_target_joins_at_discovery_while_other_target_creates_in_parallel(
-    tmp_path, first, second, core, request,
-):
+    tmp_path: Path, first: str, second: str, core: bool, request: pytest.FixtureRequest,
+) -> None:
     home = tmp_path / "home with spaces"
     home.mkdir()
     mux_source = tmp_path / "mux.cs"
-    mux_source.write_text(MUX, encoding="utf-8")
+    version = ".".join(map(str, windows_mux_version.MINIMUM_VERSION))
+    metadata = '[assembly: System.Reflection.AssemblyFileVersion("' + version + '")]\n'
+    mux_source.write_text(MUX.replace("class Mux {", metadata + "class Mux {", 1), encoding="utf-8")
     binary = tmp_path / "psmux.exe"
     compiled = subprocess.run(
         [str(CSC), "/nologo", "/target:exe", "/out:" + str(binary), str(mux_source)],
-        capture_output=True, text=True, timeout=30, creationflags=subprocess.CREATE_NO_WINDOW,
+        capture_output=True, text=True, timeout=30, **no_window_kwargs(),
     )
     assert compiled.returncode == 0, compiled.stdout + compiled.stderr
+    assert windows_mux_version.file_version(str(binary)) == windows_mux_version.MINIMUM_VERSION
     observer_binary = tmp_path / "fixture-observer.exe"
     shutil.copyfile(binary, observer_binary)
     (tmp_path / "observer-adapter.py").write_text(OBSERVER_ADAPTER, encoding="utf-8")
@@ -301,10 +313,10 @@ def test_same_target_joins_at_discovery_while_other_target_creates_in_parallel(
     (home / "server-key-prefix").write_text(os.urandom(16).hex(), encoding="ascii")
     observer = subprocess.Popen(
         [str(observer_binary), "server"], env=env, cwd=home, stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE, text=True, creationflags=subprocess.CREATE_NO_WINDOW,
+        stderr=subprocess.PIPE, text=True, **no_window_kwargs(),
     )
 
-    def stop_observer():
+    def stop_observer() -> None:
         (home / "server-stop").touch()
         try:
             stdout, stderr = observer.communicate(timeout=5)
@@ -316,13 +328,15 @@ def test_same_target_joins_at_discovery_while_other_target_creates_in_parallel(
 
     request.addfinalizer(stop_observer)
     _wait(lambda: (home / "server-port").is_file(), "Native observer did not start", [observer])
-    actors = []
-    identities = {}
+    actors: list[subprocess.Popen[str]] = []
+    identities: dict[subprocess.Popen[str], str] = {}
+    powershell = shutil.which("pwsh")
+    assert powershell is not None
 
-    def start(kind, wt):
+    def start(kind: str, wt: str) -> subprocess.Popen[str]:
         identity = kind + "-" + str(len(actors))
         argv = (
-            [shutil.which("pwsh"), "-NoLogo", "-NoProfile", "-File", str(driver),
+            [powershell, "-NoLogo", "-NoProfile", "-File", str(driver),
             str(binary), wt, str(home), sys.executable]
             if kind == "manager" else [sys.executable, str(engine), wt, str(home), str(binary)]
         )
@@ -332,7 +346,7 @@ def test_same_target_joins_at_discovery_while_other_target_creates_in_parallel(
                 "PSMUX_DATA_DIR": str(observations / identity),
             }, cwd=home,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, creationflags=subprocess.CREATE_NO_WINDOW,
+            text=True, **no_window_kwargs(),
         )
         actors.append(child)
         identities[child] = identity
@@ -380,7 +394,7 @@ def test_same_target_joins_at_discovery_while_other_target_creates_in_parallel(
         key = hashlib.sha256(b"wt-shared").hexdigest()
         lease = SingleInstance(home / ".psmux" / "launch-locks", lock_name=key + ".lock")
 
-        def released():
+        def released() -> bool:
             try:
                 lease.acquire()
             except AlreadyRunningError:
@@ -393,7 +407,7 @@ def test_same_target_joins_at_discovery_while_other_target_creates_in_parallel(
         assert (home / "entered-wt-shared").exists()
     finally:
         failing = sys.exc_info()[0] is not None
-        errors = []
+        errors: list[str] = []
         for wt in ("shared", "other"):
             (home / ("publish-wt-" + wt)).touch()
             (home / ("return-wt-" + wt)).touch()

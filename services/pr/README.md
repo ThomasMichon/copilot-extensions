@@ -540,7 +540,13 @@ before its first writer, crosses real Gateway TLS/PoP and the workspace CLI,
 then fully drains that writer before isolated owner-side compaction and
 populated-cache retirement. A fresh foreground reader recovers the exact compact
 metadata without another export or replay-store write; authoritative reopen
-uses the cleared cache's actual current state. This qualifies source behavior,
+uses the cleared cache's actual current state. The merged-PR case also retains
+an original unknown verdict attempt beside the confirmed comment: compaction
+must preserve its identity and unknown outcome without retaining message
+bodies or treating cache retirement as effect or delivery settlement. Restart
+and reopen preserve that compact recovery record and the original terminal
+event until its exact ACK. Closed-unmerged remains a distinct fixture outcome.
+This qualifies source behavior,
 not retained-host adoption, live provider enrollment, activation or rollout.
 
 ## Independently constructed container

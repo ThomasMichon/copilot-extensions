@@ -64,7 +64,7 @@ def _finite_float(value: str) -> float:
     return number
 
 
-def read_inventory(path: Path) -> HostInventory:
+def read_inventory(path: Path, *, storage_only: bool = False) -> HostInventory:
     from .host_index import HostRecord
 
     plain_parents(path)
@@ -111,7 +111,7 @@ def read_inventory(path: Path) -> HostInventory:
             or row["session_id"] != sid
             or any(type(row[key]) is not int or row[key] < 1
                    for key in ("port", "host_pid", "child_pid", "protocol_version"))
-            or row["port"] > 65535 or row["protocol_version"] != 1
+            or row["port"] > 65535 or (not storage_only and row["protocol_version"] != 1)
             or type(row["owner_pid"]) is not int or row["owner_pid"] < 0
             or type(row["created_at"]) not in (int, float)
             or not math.isfinite(row["created_at"]) or row["created_at"] < 0

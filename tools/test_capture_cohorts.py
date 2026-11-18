@@ -6,6 +6,8 @@ from collections import Counter
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+import sys
+import xml.etree.ElementTree as ET
 
 import pytest
 from _pytest.mark.expression import Expression
@@ -21,11 +23,17 @@ OWNERS = (
 )
 
 
+def _capture_context(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("BRIDGE_HTTP47_CAPTURE_REQUEST", "synthetic-capture-request")
+    monkeypatch.setenv("BRIDGE_HTTP47_CAPTURE_REQUEST_SHA256", "a" * 64)
+
+
 @pytest.mark.parametrize("windows", [False, True])
 @pytest.mark.parametrize("reverse", [False, True])
 def test_capture_pair_selects_every_case_once_in_separate_observers(
-    tmp_path: Path, windows: bool, reverse: bool,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, windows: bool, reverse: bool,
 ) -> None:
+    _capture_context(monkeypatch)
     files = [tmp_path / OWNER_FILE, tmp_path / REMAINING_FILE]
     if reverse:
         files.reverse()
@@ -52,16 +60,30 @@ def test_capture_pair_selects_every_case_once_in_separate_observers(
     ("other-plugin", [OWNER_FILE, REMAINING_FILE]),
 ])
 def test_capture_partition_does_not_change_other_file_selections(
-    tmp_path: Path, plugin: str, files: list[Path],
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, plugin: str, files: list[Path],
 ) -> None:
+    _capture_context(monkeypatch)
     group = [tmp_path / path for path in files]
     assert plan_test_groups(plugin, tmp_path, [group], windows=True) == [(group, None)]
+
+
+@pytest.mark.parametrize("missing", [
+    "BRIDGE_HTTP47_CAPTURE_REQUEST", "BRIDGE_HTTP47_CAPTURE_REQUEST_SHA256",
+])
+def test_capture_partition_requires_both_source_context_markers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, missing: str,
+) -> None:
+    _capture_context(monkeypatch)
+    monkeypatch.delenv(missing)
+    group = [tmp_path / OWNER_FILE, tmp_path / REMAINING_FILE]
+    assert plan_test_groups("agent-bridge", tmp_path, [group], windows=True) == [(group, None)]
 
 
 @pytest.mark.parametrize("expired", [False, True])
 def test_capture_cohorts_prepare_once_and_keep_original_deadline_and_resource_caps(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, expired: bool,
 ) -> None:
+    _capture_context(monkeypatch)
     tests = tmp_path / "tests"
     tests.mkdir()
     for relative in (OWNER_FILE, REMAINING_FILE):
@@ -108,3 +130,41 @@ def test_capture_cohorts_prepare_once_and_keep_original_deadline_and_resource_ca
     assert prepared == ["agent-bridge"]
     assert budgets == ([210] if expired else [210, 110])
     assert len(reports) == len(set(reports)) == (1 if expired else 2)
+
+
+@pytest.mark.parametrize(("kexpr", "expected"), [
+    (None, 5),
+    ("test_http52_capture_probes", 3),
+    ("not test_http52_owner_capture", 3),
+    ("test_http52_owner_capture", 2),
+])
+def test_ordinary_filename_filters_preserve_every_requested_node(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kexpr: str | None, expected: int,
+) -> None:
+    monkeypatch.delenv("BRIDGE_HTTP47_CAPTURE_REQUEST", raising=False)
+    monkeypatch.delenv("BRIDGE_HTTP47_CAPTURE_REQUEST_SHA256", raising=False)
+    (tmp_path / "tests").mkdir()
+    owner_source = "\n".join(f"def {name}(): pass" for name in OWNERS) + "\n"
+    (tmp_path / OWNER_FILE).write_text(owner_source, encoding="utf-8")
+    (tmp_path / REMAINING_FILE).write_text(
+        owner_source + "def test_remaining(): pass\n", encoding="utf-8",
+    )
+    monkeypatch.setattr(runner, "_plugin_dir", lambda name: tmp_path)
+    monkeypatch.setattr(runner, "_ensure_venv", lambda *args, **kwargs: Path(sys.executable))
+    reports = tmp_path / "ordinary-reports"
+    assert runner.run_plugin(
+        "agent-bridge", "unused", reinstall=False, kexpr=kexpr,
+        limits=runner.Limits(wall_seconds=60), plugin_timeout=60,
+        test_timeout=10, max_files_per_subsuite=25,
+        test_files=(OWNER_FILE.as_posix(), REMAINING_FILE.as_posix()),
+        junit_dir=reports,
+    ) == 0
+    cases = [
+        case for path in reports.rglob("*.xml")
+        for case in ET.parse(path).getroot().iter("testcase")
+    ]
+    assert len(cases) == expected
+    assert all(
+        all(case.find(tag) is None for tag in ("failure", "error", "skipped"))
+        for case in cases
+    )

@@ -216,7 +216,9 @@ else:
 """
 
 
-def _seed_confirmed_comment(path: Path, evidence: dict[str, Any]) -> dict[str, Any]:
+def _seed_confirmed_comment(
+    path: Path, evidence: dict[str, Any], *, unknown_verdict: bool = False,
+) -> dict[str, Any]:
     """Seed a synthetic original receipt before any foreground writer exists."""
     from agent_pull_requests.review_workspace import build_generation
     from agent_pull_requests_service.config import load_config
@@ -253,6 +255,10 @@ def _seed_confirmed_comment(path: Path, evidence: dict[str, Any]) -> dict[str, A
             "preparation": {"identity": prepared["identity"], "body_id": prepared["body_id"]},
         }],
     }
+    if unknown_verdict:
+        selected["actions"].append({
+            "id": "unknown-verdict", "kind": "verdict", "verdict": "APPROVED",
+        })
     store = config.store()
     expires_at = int(time.time()) + 60
     if config.workspaces.terminal_mapping_reads:
@@ -279,6 +285,10 @@ def _seed_confirmed_comment(path: Path, evidence: dict[str, Any]) -> dict[str, A
         {"origin": "response", "platform_ids": {"thread_id": 100, "comment_id": 1}, "proof": None},
         expires_at=expires_at, confirm=True,
     )
+    if unknown_verdict:
+        store.begin_review_action(
+            selected["operation_id"], selected["scope"], "unknown-verdict", expires_at=expires_at,
+        )
     if config.workspaces.terminal_mapping_reads:
         ConversationStore(store).observe_workspace(
             generation, expires_at=expires_at,
@@ -288,7 +298,9 @@ def _seed_confirmed_comment(path: Path, evidence: dict[str, Any]) -> dict[str, A
     return {"number": 42, "operation_id": selected["operation_id"], "action_id": "retained-finding"}
 
 
-def _compact_terminal_mapping(path: Path, scope: dict[str, Any], cursor: dict[str, int]) -> None:
+def _compact_terminal_mapping(
+    path: Path, scope: dict[str, Any], cursor: dict[str, int],
+) -> dict[str, Any]:
     from agent_pull_requests.attention import Cursor
     from agent_pull_requests_service.config import load_config
     from single_instance_lease import SingleInstance
@@ -311,22 +323,27 @@ def _compact_terminal_mapping(path: Path, scope: dict[str, Any], cursor: dict[st
             scope, Cursor(**cursor), policies, expires_at=expires_at,
             checkpoint=current, deadline=deadline, lifecycle_checkpoint=current,
         )
-        operations.retention.retire_cache(
+        result = operations.retention.retire_cache(
             scope, Cursor(**cursor), expires_at=expires_at,
             checkpoint=current, deadline=deadline, lifecycle_checkpoint=current,
         )
         assert not list(operations.cache.generations.glob("*.json"))
+        return cast(dict[str, Any], result)
 
 
-@pytest.mark.parametrize("workspace_enabled,preparation_enabled,missing_preparer,mapping_enabled,terminal_enabled,terminal_mapping_enabled", [
-    (False, False, False, False, False, False), (True, False, False, False, False, False),
-    (True, True, False, False, False, False), (True, True, True, True, False, False),
-    (True, False, False, False, True, False), (True, False, False, False, True, True),
+@pytest.mark.parametrize("workspace_enabled,preparation_enabled,missing_preparer,mapping_enabled,terminal_enabled,terminal_mapping_enabled,terminal_state", [
+    (False, False, False, False, False, False, None),
+    (True, False, False, False, False, False, None),
+    (True, True, False, False, False, False, None),
+    (True, True, True, True, False, False, None),
+    (True, False, False, False, True, False, "abandoned"),
+    (True, False, False, False, True, True, "abandoned"),
+    (True, False, False, False, True, True, "completed"),
 ])
 def test_installed_host_process_register_observe_reconnect_restart_and_ack(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
     workspace_enabled: bool, preparation_enabled: bool, missing_preparer: bool, mapping_enabled: bool,
-    terminal_enabled: bool, terminal_mapping_enabled: bool,
+    terminal_enabled: bool, terminal_mapping_enabled: bool, terminal_state: str | None,
 ) -> None:
     # The existing Fleet fixture owns issuer, policy and TLS; do not add a fake Gateway.
     root = Path(__file__).resolve().parents[3]
@@ -366,6 +383,9 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
         retained_request: dict[str, Any] = {}
         terminal_completion: dict[str, Any] = {}
         terminal_mapping: dict[str, Any] = {}
+        unknown_attempt: dict[str, Any] | None = None
+        compact_operation: dict[str, Any] | None = None
+        terminal_outcome = "merged" if terminal_state == "completed" else "closed-unmerged"
         snapshot = {
             "schema": "agent-worktrees.pr-snapshot", "version": 1,
             "repo": "example/project", "pr": 1, "provider": "github",
@@ -524,7 +544,15 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
             assert (await command("provision", "--config", str(path)))[0] == 0
             assert (await command("provision", "--config", str(path)))[0] == 1
             if mapping_enabled or terminal_mapping_enabled:
-                retained_request = _seed_confirmed_comment(path, evidence)
+                retained_request = _seed_confirmed_comment(
+                    path, evidence, unknown_verdict=terminal_state == "completed",
+                )
+                if terminal_state == "completed":
+                    operation = json.loads((state / "watch-replay.json").read_bytes())["reviews"][0]
+                    unknown_attempt = next(
+                        action for action in operation["actions"] if action["id"] == "unknown-verdict"
+                    )
+                    assert unknown_attempt["state"] == "unknown" and unknown_attempt["attempt_id"]
                 save_evidence(0)
             owner = await launch()
             try:
@@ -741,10 +769,12 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
                     if terminal_enabled:
                         terminal_original = {
                             "request_id": "workspace-close", "issued_at": time.time(),
-                            "number": 42, "until": ["closed"], "deadline_at": time.time() + 60,
+                            "number": 42,
+                            "until": ["merged" if terminal_state == "completed" else "closed"],
+                            "deadline_at": time.time() + 60,
                         }
                         terminal_receipt = await send("register", terminal_original)
-                        evidence["sections"]["pull_request"]["data"]["status"] = "abandoned"
+                        evidence["sections"]["pull_request"]["data"]["status"] = terminal_state
                         save_evidence(6)
                         terminal_result = (await workspace("load", {
                             "number": 42, "expected_current": generation_id, "budget_seconds": 10,
@@ -758,6 +788,7 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
                             if value["registration_id"] == terminal_receipt["registration_id"]
                         )
                         assert not terminal_event["timed_out"]
+                        assert terminal_event["merged"] is (terminal_state == "completed")
                         terminal_completion = {
                             "request_id": terminal_original["request_id"],
                             "issued_at": terminal_original["issued_at"],
@@ -768,7 +799,7 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
                             "number": 42, "after": None, "limit": 16,
                         }))["result"]
                         assert page["current"]["sections"] == {}
-                        assert page["current"]["state"] == "closed-unmerged"
+                        assert page["current"]["state"] == terminal_outcome
                     workspace_calls = evidence_path.with_suffix(".calls").read_text()
                     assert workspace_calls.splitlines() == ["capabilities", "read", "read", "read"] + (
                         ["read"] if terminal_enabled else []
@@ -793,7 +824,22 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
             settled_reads = calls.read_text()
             assert settled_reads.splitlines() and set(settled_reads.splitlines()) == {"read"}
             if terminal_mapping_enabled:
-                _compact_terminal_mapping(path, {**scope, "number": 42}, cursor)
+                retirement = _compact_terminal_mapping(path, {**scope, "number": 42}, cursor)
+                assert retirement["status"] == "complete" and not retirement["delivery_settled"]
+                if unknown_attempt is not None:
+                    assert not retirement["recovery_settled"]
+                    document = json.loads((state / "watch-replay.json").read_bytes())
+                    assert document["reviews"] == []
+                    compact_operation = document["terminal_recovery"]["operations"][0]
+                    compact_attempt = next(
+                        action for action in compact_operation["actions"]
+                        if action["id"] == unknown_attempt["id"]
+                    )
+                    assert compact_attempt == {
+                        **unknown_attempt, "kind": "verdict", "verdict": "APPROVED",
+                    }
+                    assert "Retained note." not in json.dumps(document)
+                    assert "Same-head dialogue" not in json.dumps(document)
             # Remounting the same namespace does not rebind the retained volume.
             # The real installed host must refuse before attachment/observation.
             retained = (state / "watch-replay.json").read_bytes()
@@ -866,7 +912,7 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
                         before_reopen = (await workspace("events", {
                             "number": 42, "after": None, "limit": 16,
                         }))["result"]
-                        assert before_reopen["current"]["state"] == "closed-unmerged"
+                        assert before_reopen["current"]["state"] == terminal_outcome
                         failures = len(workspace_errors)
                         with pytest.raises(AssertionError):
                             await workspace("materialize", {"number": 42, "generation_id": generation_id})
@@ -885,7 +931,11 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
                             "number": 42, "after": cursor, "limit": 16,
                         }))["result"]
                         assert stale["status"] == "resync_required"
+                        assert stale["previous_terminal"] == before_reopen["current"]
                         assert await send("pending") == pending
+                        if compact_operation is not None:
+                            document = json.loads((state / "watch-replay.json").read_bytes())
+                            assert document["terminal_recovery"]["operations"] == [compact_operation]
                     materialized = await workspace("materialize", {
                         "number": 42, "generation_id": generation_id,
                     })

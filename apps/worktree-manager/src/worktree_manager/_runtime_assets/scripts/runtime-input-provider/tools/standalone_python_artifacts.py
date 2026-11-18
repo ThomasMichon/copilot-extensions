@@ -2,10 +2,53 @@
 from __future__ import annotations
 
 import ast
+from collections.abc import Callable
 from pathlib import Path
 import sys
+from typing import Any, Protocol, TYPE_CHECKING, TypedDict, cast
 
-from standalone_consumers import standalone_build_resources
+from standalone_consumers import standalone_build_resources as standalone_build_resources
+
+if TYPE_CHECKING:
+    from build_toolchain_lock import ToolchainLock
+
+
+class _EditableRefs(Protocol):
+    def _find_symlinked_ancestor(self, path: Path, root: Path) -> Path | None: ...
+    def _find_symlink(self, tree: Path, *, skip_test_runs: bool = True) -> str | None: ...
+
+
+class SourceBuilder(Protocol):
+    @property
+    def uer(self) -> _EditableRefs: ...
+    def resolve_vendored_libs(self, consumer_dir: Path) -> list[tuple[str, Path]]: ...
+
+
+class HashBuilder(SourceBuilder, Protocol):
+    def compute_payload_hash(self, dirs: list[Path], *, workers: int = 1, root: Path | None = None) -> str: ...
+
+
+class ArtifactBuilder(HashBuilder, Protocol):
+    REPO: Path
+    PLUGINS_DIR: Path
+    LIBS_DIR: Path
+    @property
+    def ArtifactBuildError(self) -> type[Exception]: ...
+    # Injected builders wrap these keyword-forwarding callables in-place.
+    build_wheel: Callable[..., Path]
+    build_plugin_artifacts: Callable[..., dict[str, Any]]
+    build_source_artifacts: Callable[..., dict[str, Any]]
+    build_project_artifacts: Callable[..., dict[str, Any]]
+
+
+class _BuildOptions(TypedDict, total=False):
+    uv: str | Path
+    deadline: float | None
+
+
+if TYPE_CHECKING:
+    import build_python_artifacts as _default_builder
+    _builder_witness: ArtifactBuilder = _default_builder
 
 COMPONENTS = {
     "fleet-manager": "fleet-manager", "pr-service": "services/pr",
@@ -15,7 +58,7 @@ COMPONENTS = {
 }
 TRUSTED_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(TRUSTED_ROOT / "libs" / "versioned-runtime"))
-from standalone_build import embedded_members, embedded_projects
+from standalone_build import embedded_members as embedded_members, embedded_projects as embedded_projects
 
 _RESOURCE_PACKAGES = {
     "worktree-manager": "worktree_manager",
@@ -26,7 +69,7 @@ _RESOURCE_PACKAGES = {
 }
 
 
-def artifact_label(record: dict) -> str:
+def artifact_label(record: dict[str, Any]) -> str:
     """Keep standalone release names separate from unchanged plugin names."""
     if "composition" in record:
         if record["composition"] != "core" or "plugin" in record or "component" in record:
@@ -37,17 +80,17 @@ def artifact_label(record: dict) -> str:
         if not isinstance(component, str) or component not in COMPONENTS or "plugin" in record:
             raise ValueError("invalid standalone artifact identity")
         return f"standalone-{component}"
-    return record["plugin"]
+    return cast(str, record["plugin"])
 
 
-def project_key(record: dict) -> str:
+def project_key(record: dict[str, Any]) -> str:
     label = artifact_label(record)
     if "composition" in record:
         return "composition:core"
     return f"standalone:{record['component']}" if "component" in record else label
 
 
-def source_closure(component: str, root: Path, builder) -> tuple[Path, list, tuple[Path, ...]]:
+def source_closure(component: str, root: Path, builder: SourceBuilder) -> tuple[Path, list[tuple[str, Path]], tuple[Path, ...]]:
     """Only registered standalone projects can select resource-bearing builds."""
     from build_toolchain_lock import ArtifactBuildError
 
@@ -99,9 +142,9 @@ def injected_resources(component: str, root: Path) -> dict[str, Path]:
     ]
     if len(declarations) != 1:
         raise ArtifactBuildError("invalid trusted runtime resource declaration")
-    mapping = ast.literal_eval(declarations[0])
+    mapping: dict[str, str] = ast.literal_eval(declarations[0])
     package = _RESOURCE_PACKAGES[component] + "/"
-    result = {} if component == "pr-service" else {
+    result: dict[str, Path] = {} if component == "pr-service" else {
         package + destination: helper.parent / name for name, destination in mapping.items()
     }
     if component == "pr-service":
@@ -158,7 +201,7 @@ def injected_resources(component: str, root: Path) -> dict[str, Path]:
     return result
 
 
-def validate_build(source: Path, *, component: str, root: Path) -> dict:
+def validate_build(source: Path, *, component: str, root: Path) -> dict[str, Any]:
     from artifact_source_build import PromotionArtifactError, validate_static_build
     from build_toolchain_lock import ArtifactBuildError
 
@@ -180,15 +223,16 @@ def validate_build(source: Path, *, component: str, root: Path) -> dict:
 
 
 def build_standalone_artifacts(
-    component: str, *, out_dir: Path, python: str | None = None, toolchain=None,
-    builder=None, uv: str = "uv", deadline: float | None = None,
-) -> dict:
+    component: str, *, out_dir: Path, python: str | None = None, toolchain: ToolchainLock | None = None,
+    builder: ArtifactBuilder | None = None, uv: str | Path = "uv", deadline: float | None = None,
+) -> dict[str, Any]:
     if builder is None:
-        import build_python_artifacts as builder
+        import build_python_artifacts as default_builder
+        builder = default_builder
     source, dependencies, resources = source_closure(component, builder.REPO, builder)
     validate_build(source, component=component, root=builder.REPO)
     return builder.build_source_artifacts(
         identity={"component": component}, source_dir=source, dependencies=dependencies,
         resources=resources, out_dir=out_dir, python=python, toolchain=toolchain,
-        **({"uv": uv, "deadline": deadline} if uv != "uv" or deadline is not None else {}),
+        **cast(_BuildOptions, {"uv": uv, "deadline": deadline} if uv != "uv" or deadline is not None else {}),
     )

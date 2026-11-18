@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, ContextManager, Protocol, TypeVar, TypedDict, 
 if TYPE_CHECKING:
     import ctypes
     from installer_dependency_arguments import (
+        captured_environment as captured_environment,
         check_compile_projection as check_compile_projection,
         cutoff_arguments as cutoff_arguments,
         cutoff_value as cutoff_value,
@@ -161,6 +162,7 @@ argument_pairs = cast(_ArgumentPairs, _arguments.argument_pairs)
 balanced = cast(_RawBalanced, _arguments.balanced)
 uv_command = cast(_UVCommand, _arguments.uv_command)
 if not TYPE_CHECKING:
+    captured_environment = _arguments.captured_environment
     check_compile_projection = _arguments.check_compile_projection
     cutoff_arguments = _arguments.cutoff_arguments
     cutoff_value = _arguments.cutoff_value
@@ -238,8 +240,6 @@ def copy_retained_file(
     if on_progress is not None:
         on_progress()
     return result
-
-
 
 
 def prepare_uv_install(
@@ -694,12 +694,31 @@ def metadata_needs_caller_layout(value: object) -> bool:
 def source_compile_packages(
     projects: Iterable[Path], *, toml: _Toml, identity: Callable[[str], str], error_type: _Error,
 ) -> tuple[str, ...]:
-    names = []
-    omissions = set()
+    manifests = {}
     for path in projects:
         data = cast(_ProjectDocument, toml(path / "pyproject.toml"))
+        manifests[path] = data
+    names = [identity(data["project"]["name"]) for data in manifests.values()]
+    if not names or len(set(names)) != len(names):
+        raise error_type("source lock export needs an unambiguous owned project graph")
+    root_values: object = getattr(projects, "roots", ())
+    if not isinstance(root_values, (set, frozenset, list, tuple)):
+        raise error_type("source lock export lacks its actual project roots")
+    pending: list[Path] = []
+    for root in root_values:
+        if not isinstance(root, Path):
+            raise error_type("source lock export lacks its actual project roots")
+        pending.append(root)
+    if not pending or not set(pending) <= manifests.keys():
+        raise error_type("source lock export lacks its actual project roots")
+    active: set[Path] = set()
+    while pending:
+        path = pending.pop()
+        if path in active:
+            continue
+        active.add(path)
+        data = manifests[path]
         project = data["project"]
-        names.append(identity(project["name"]))
         required = {
             identity(match[1])
             for requirement in project.get("dependencies", [])
@@ -708,12 +727,23 @@ def source_compile_packages(
         }
         for name, mapping in data.get("tool", {}).get("uv", {}).get("sources", {}).items():
             if isinstance(mapping, dict) and "path" in mapping:
-                name = identity(name)
-                if name not in required:
-                    raise error_type("source lock export cannot omit a conditional or unselected local dependency")
-                omissions.add(name)
-    if not names or len(set(names)) != len(names):
-        raise error_type("source lock export needs an unambiguous owned project graph")
+                if identity(name) in required:
+                    relative = mapping["path"]
+                    if not isinstance(relative, str):
+                        raise error_type("source lock export has an invalid local dependency path")
+                    child = (path / relative).resolve()
+                    if child not in manifests:
+                        raise error_type("source lock export lacks an owned local dependency")
+                    pending.append(child)
+    selected = {identity(manifests[path]["project"]["name"]) for path in active}
+    omissions = {
+        identity(name)
+        for data in manifests.values()
+        for name, mapping in data.get("tool", {}).get("uv", {}).get("sources", {}).items()
+        if isinstance(mapping, dict) and "path" in mapping
+    }
+    if not omissions <= selected:
+        raise error_type("source lock export cannot omit a conditional or unselected local dependency")
     return tuple(sorted(omissions))
 
 
@@ -890,10 +920,7 @@ def private_retained_root(parent: Path, *, error_type: _Error, name: str = "inpu
     from ctypes import wintypes
 
     class SecurityAttributes(ctypes.Structure):
-        _fields_ = [
-            ("length", wintypes.DWORD), ("descriptor", wintypes.LPVOID),
-            ("inherit", wintypes.BOOL),
-        ]
+        _fields_ = [("length", wintypes.DWORD), ("descriptor", wintypes.LPVOID), ("inherit", wintypes.BOOL)]
 
     advapi = cast(_WindowsLibrary, getattr(ctypes, "WinDLL"))("advapi32", use_last_error=True)
     kernel = cast(_WindowsLibrary, getattr(ctypes, "WinDLL"))("kernel32", use_last_error=True)

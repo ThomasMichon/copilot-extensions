@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ntpath
 import os
+from collections.abc import Callable
 from pathlib import Path
 from typing import SupportsIndex
 from unittest.mock import Mock
@@ -12,16 +13,184 @@ import numpy as np
 import pytest
 
 from agent_index.chunking.base import Chunk
-from agent_index.index_config import ModelProfile
+from agent_index.index_config import IndexConfig, ModelProfile
+from agent_index.search.engine import SearchEngine
 from agent_index.store import multi_model_store
 from agent_index.store.content_store import ContentStore
 from agent_index.store.multi_model_store import MultiModelStore
 from agent_index.store.repo_filter import _like_pattern, path_glob_sql
+from agent_index.store.result_filters import SearchFilters
+from agent_index.store.source_layout import LAYOUT, initialize_source_store
 
 
 class CatalogStore(ContentStore):
     def repo_filter_sql(self, repo: str) -> str:
         return f"source LIKE '%:{_like_pattern(repo)}' ESCAPE '\\'"
+
+
+def catalog_repo_matches(source: str, repo: str) -> bool:
+    return bool(repo) and source.endswith(f":{repo}")
+
+
+@pytest.mark.parametrize("source_aware", [True, False])
+def test_facade_preserves_source_delete_return_and_remaining_rows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source_aware: bool,
+) -> None:
+    profile = ModelProfile("test", "test", table_name="vectors_test", dim=2)
+    if source_aware:
+        monkeypatch.setenv("AGENT_INDEX_STORE_LAYOUT", LAYOUT)
+        initialize: Callable[[IndexConfig], MultiModelStore] = initialize_source_store
+        store = initialize(IndexConfig(data_dir=tmp_path, model_profiles={"test": profile}))
+    else:
+        monkeypatch.delenv("AGENT_INDEX_STORE_LAYOUT", raising=False)
+        store = MultiModelStore(tmp_path / "lance")
+        store.register_model(profile)
+    chunks = [
+        Chunk(f"document {index}", f"{index}.md", "text", "markdown", 1, 1, source=source)
+        for index, source in enumerate(("git:alpha", "git:alpha:commits", "git:alphabet"))
+    ]
+    vectors = np.array([[1.0, 0.0]] * len(chunks), dtype=np.float32)
+    store.upsert("test", chunks, vectors)
+    assert store.delete_by_source("git:alpha") == (2 if source_aware else None)
+    assert store.delete_by_source("git:alpha") == (0 if source_aware else None)
+    assert [hit.chunk_id for hit in store.search("test", vectors[0])] == [chunks[2].chunk_id]
+
+
+@pytest.mark.parametrize("repo", ["owner/repo_under", "owner/repo'quoted"])
+def test_consumer_policy_scopes_authorized_native_queries_before_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, repo: str,
+) -> None:
+    monkeypatch.setenv("AGENT_INDEX_STORE_LAYOUT", LAYOUT)
+    profile = ModelProfile("test", "test", table_name="vectors_test", dim=2)
+    config = IndexConfig(data_dir=tmp_path, model_profiles={"test": profile})
+    initialize: Callable[[IndexConfig], MultiModelStore] = initialize_source_store
+    initialize(config)
+    store = MultiModelStore(
+        config.lance_dir, content_store_type=CatalogStore, repo_matcher=catalog_repo_matches,
+    )
+    store.register_model(profile)
+    sources = [
+        f"catalog:issues:{repo}",
+        *(["catalog:issues:owner/other"] * 51),
+        f"catalog:issues-extra:{repo}",
+        f"catalog:issues:{repo}",
+    ]
+    chunks = [
+        Chunk(
+            f"needle document {index}", f"docs/item-{index}.py", "code",
+            "markdown" if index == len(sources) - 1 else "python", 1, 1, source=source,
+        )
+        for index, source in enumerate(sources)
+    ]
+    vectors = np.array([[0.1, 0.9], *([[1.0, 0.0]] * (len(chunks) - 1))], dtype=np.float32)
+    store.upsert("test", chunks, vectors)
+    assert store.ensure_fts_index()
+    inference = Mock()
+    inference.embed_query.return_value = np.array([1.0, 0.0], dtype=np.float32)
+    engine = SearchEngine({"test": inference}, store)
+    assert store._source_domain is not None
+    before = store._source_domain.receipt()
+    for mode in ("vector", "fts", "hybrid"):
+        hits = engine.search_authorized(
+            "needle", families=("catalog:issues",), repo=repo, language="python",
+            mode=mode, limit=1,
+        )
+        assert [hit.chunk_id for hit in hits] == [chunks[0].chunk_id]
+        assert engine.search_authorized(
+            "needle", families=("catalog:issues",), repo="issues", mode=mode,
+        ) == []
+        assert engine.search_authorized("needle", families=(), repo=repo, mode=mode) == []
+    assert store._source_domain.receipt() == before
+
+    default = MultiModelStore(config.lance_dir)
+    default.register_model(profile)
+    default_engine = SearchEngine({"test": inference}, default)
+    for mode in ("vector", "fts", "hybrid"):
+        assert default_engine.search_authorized(
+            "needle", families=("catalog:issues",), repo=repo, mode=mode,
+        ) == []
+
+
+@pytest.mark.parametrize("with_fts", [True, False])
+@pytest.mark.parametrize("repo, sibling", [
+    ("owner/repo_under", "owner/repoXunder"),
+    ("owner/repo%percent", "owner/repoXpercent"),
+    ("owner/repo'quoted", "owner/repoquoted"),
+    ("owner/repo\\slash", "owner/reposlash"),
+])
+def test_multi_model_consumer_policy_scopes_all_retrieval_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    with_fts: bool, repo: str, sibling: str,
+) -> None:
+    monkeypatch.delenv("AGENT_INDEX_STORE_LAYOUT", raising=False)
+    store = MultiModelStore(
+        tmp_path / "lance", content_table="articles",
+        content_store_type=CatalogStore, repo_matcher=catalog_repo_matches,
+    )
+    profile = ModelProfile("test", "test", table_name="vectors_test", dim=2)
+    store.register_model(profile)
+    store.register_model(ModelProfile("other", "other", table_name="vectors_other", dim=2))
+    chunks = [
+        Chunk(
+            f"searchable phrase unique item {index}", f"docs/item-{index}.py",
+            "code", "python", 1, 1, source=f"catalog:issues:{name}",
+            metadata={"labels": ["kept"]},
+        )
+        for index, name in enumerate((repo, repo, sibling))
+    ]
+    vectors = np.array([[1.0, 0.0], [0.8, 0.6], [0.99, 0.1]], dtype=np.float32)
+    store.upsert("test", chunks, vectors)
+    store.upsert_vectors("other", chunks, vectors[::-1].copy())
+    if with_fts:
+        assert store.ensure_fts_index()
+    expected = {chunk.chunk_id for chunk in chunks[:2]}
+    filters: SearchFilters = {
+        "repo": repo, "source": "catalog:issues", "language": "python",
+        "file_path_glob": "docs/item-*.py", "labels": ["kept"],
+    }
+    fusion = Mock(wraps=multi_model_store._reciprocal_rank_fusion)
+    multi_fusion = Mock(wraps=multi_model_store._multi_list_rrf)
+    monkeypatch.setattr(multi_model_store, "_reciprocal_rank_fusion", fusion)
+    monkeypatch.setattr(multi_model_store, "_multi_list_rrf", multi_fusion)
+    assert {hit.chunk_id for hit in store.search("test", vectors[0], **filters)} == expected
+    for query in ("searchable phrase", "absentlexicaltoken"):
+        fusion.reset_mock()
+        multi_fusion.reset_mock()
+        has_fts_hits = with_fts and query == "searchable phrase"
+        assert {
+            hit.chunk_id for hit in store.hybrid_search("test", vectors[0], query, **filters)
+        } == expected
+        if has_fts_hits:
+            fusion.assert_called_once()
+            assert fusion.call_args is not None
+            assert {hit.chunk_id for hit in fusion.call_args.args[1]} == expected
+        else:
+            fusion.assert_not_called()
+        assert {
+            hit.chunk_id
+            for hit in store.search_all({"test": vectors[0], "other": vectors[0]}, query, **filters)
+        } == expected
+        multi_fusion.assert_called_once()
+        assert multi_fusion.call_args is not None
+        lists = multi_fusion.call_args.args[0]
+        assert len(lists) == (3 if has_fts_hits else 2)
+        if has_fts_hits:
+            assert {hit.chunk_id for hit in lists[-1]} == expected
+    assert {
+        hit.chunk_id for hit in store.find_similar(chunks[0].chunk_id, limit=1, **filters)
+    } == {chunks[1].chunk_id}
+    if with_fts:
+        assert {hit.chunk_id for hit in store.fts_search("searchable phrase", **filters)} == expected
+        assert {
+            hit.chunk_id for hit in store.search_all({}, "searchable phrase", **filters)
+        } == expected
+    assert store.search("test", vectors[0], repo=repo, labels=["missing"]) == []
+
+    # A default facade over the same rows must retain its independent policy.
+    default = MultiModelStore(tmp_path / "lance", content_table="articles")
+    default.register_model(profile)
+    assert default.search("test", vectors[0], repo=repo) == []
+    assert default.hybrid_search("test", vectors[0], "searchable phrase", repo=repo) == []
 
 
 @pytest.mark.parametrize("repo, sibling", [

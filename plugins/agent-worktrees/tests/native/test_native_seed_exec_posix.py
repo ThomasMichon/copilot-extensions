@@ -9,17 +9,17 @@ import os
 import signal
 from pathlib import Path
 import sys
-from machine_transport import detect_platform
 
 import pytest
 from agent_procutil.owned_process import run_caller_owned
+from machine_transport import detect_platform
 
 from agent_worktrees import config as cfg, launch_execution as audit
 from agent_worktrees import launch_seed_native as native
 from agent_worktrees import launch_seed_state as seeds, tracking
 from agent_worktrees import launch_seed_posix
-from agent_worktrees.sessions import LiveVerdict
 from agent_worktrees import sessions
+from agent_worktrees.sessions import LiveVerdict
 from agent_worktrees.tracking_lifecycle import create_new_record
 
 pytestmark = pytest.mark.skipif(os.name != "posix", reason="Native POSIX fork/exec contract")
@@ -32,7 +32,7 @@ def _peek(record: Path) -> seeds.LaunchSeed:
 
 
 @pytest.mark.parametrize("fault", ["truncated", "invalid-presence"])
-def test_backend_environment_pipe_refuses_invalid_frames_and_closes_its_descriptor(fault: Any) -> None:
+def test_backend_environment_pipe_refuses_invalid_frames_and_closes_its_descriptor(fault: str | None) -> None:
     fields = [
         b"agent-worktrees.backend-environment.v1",
         b"x", b"literal ' \n", b"", b"", b"x", b"", b"x", b"mac launcher",
@@ -56,7 +56,7 @@ def test_backend_environment_pipe_refuses_invalid_frames_and_closes_its_descript
 @pytest.mark.parametrize("name", [
     name for name in ("SIGPIPE", "SIGXFZ", "SIGXFSZ") if hasattr(signal, name)
 ])
-def test_non_python_backend_receives_default_spawn_signals(record: Path, tmp_path: Path, native_bash: str, name: Any) -> None:
+def test_non_python_backend_receives_default_spawn_signals(record: Path, tmp_path: Path, native_bash: str, name: str) -> None:
     signum = getattr(signal, name)
     _seed, _prepared, _correlation, _assets, result = _run(
         record, tmp_path, native_bash, ["/bin/sh", "-c", f"kill -{name[3:]} $$; exit 42"],
@@ -70,17 +70,17 @@ def record(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     project.mkdir(parents=True, exist_ok=True)
     (project / "config.yaml").write_text(json.dumps({
         "repo_name": "demo", "machine": "test",
+        "platform": detect_platform(),
         "repos": {"demo": {
-            "anchor": str(tmp_path), "worktree_root": str(tmp_path), "default_branch": "dev",
+            "anchor": str(tmp_path), "default_branch": "dev",
+            "worktree_root": str(tmp_path / "checkouts"),
         }},
     }), encoding="utf-8")
-    checkout = tmp_path / "wt-exec"
-    checkout.mkdir()
-    directory = project / "worktrees"
-    directory.mkdir(exist_ok=True)
+    checkout = tmp_path / "checkouts" / "wt-exec"
+    checkout.mkdir(parents=True)
     path = create_new_record(
         "wt-exec", "worktree/wt-exec", str(checkout), "demo", "test",
-        detect_platform(), directory,
+        detect_platform(), project / "worktrees",
     ).yaml_path
     monkeypatch.setattr(sessions, "verify_worktree_active", lambda *a: LiveVerdict())
     return path
@@ -131,7 +131,7 @@ raise SystemExit(code)
 '''
 
 
-def _run(record: Path, tmp_path: Path, native_bash: str, command: Any, *, fault: Any=None, admission_only: Any=False, retained: Any=None) -> Any:
+def _run(record: Path, tmp_path: Path, native_bash: str, command: list[str], *, fault: str | None=None, admission_only: bool=False, retained: dict[str, Any] | None=None) -> tuple[Any, dict[str, Any], audit.Correlation, Path, Any]:
     seed = seeds.stage(record, kind="new", text="literal prompt ' \" \u03a9\n") if not admission_only else None
     prepared = native.prepare(
         record, command, seed_id=seed.seed_id if seed else None, admission_only=admission_only,
@@ -298,7 +298,7 @@ def test_retained_native_exec_fences_head_writer_and_consumes_execution_hint(
     current.sessions = [tracking.SessionEntry("native-original", current.started_at)]
     tracking.save_record(current, record)
     current = tracking.load_record(record)
-    intent: Any = {
+    intent: dict[str, Any] = {
         "version": 1, "operation_id": "original-recovery",
         "writer": {
             "version": 1, "identity": {
@@ -366,7 +366,7 @@ def test_no_seed_exec_keeps_creation_fence_until_kernel_exec_and_refuses_new_int
     (0, None), (7, None), (-signal.SIGTERM, None), (7, "inherited-fd"),
 ])
 def test_foreground_exec_keeps_pid_birth_streams_and_actual_exit(
-    record: Path, tmp_path: Path, native_bash: str, exit_code: Any, fault: Any,
+    record: Path, tmp_path: Path, native_bash: str, exit_code: Any, fault: str | None,
 ) -> None:
     # The backend finds its launch-owned completion file without receiving
     # shell source or having a Python lifetime waiter above it.
@@ -448,7 +448,7 @@ def test_fast_success_is_spawned_or_unknown_never_restored(record: Path, tmp_pat
 
 @pytest.mark.parametrize("fault", ["interrupt", "encoding", "interrupt-success"])
 def test_catchable_pre_exec_loss_cannot_finish_or_restore(
-    record: Path, tmp_path: Path, native_bash: str, fault: Any,
+    record: Path, tmp_path: Path, native_bash: str, fault: str | None,
 ) -> None:
     seed, prepared, _correlation, assets, result = _run(
         record, tmp_path, native_bash, [sys.executable, "-c", "raise SystemExit(99)"], fault=fault,

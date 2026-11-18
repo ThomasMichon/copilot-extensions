@@ -6,26 +6,51 @@ The output is disposable build data, not a release or a source approval token.
 from __future__ import annotations
 
 import argparse
-from collections.abc import Callable
-from contextlib import contextmanager, nullcontext, redirect_stdout
+from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager, contextmanager, nullcontext, redirect_stdout
 import hashlib
 import importlib.util
 import json
 import os
 from pathlib import Path
-import shutil
-import sys
-import tempfile
-import time
+import shutil as shutil
+import sys as sys
+import tempfile as tempfile
+import time as time
+from types import ModuleType
+from typing import Any, Protocol, TYPE_CHECKING, TypedDict, cast
 from urllib.parse import urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "libs" / "installer-engine"))
-from installer_dependency_config import native_retained_path
+from installer_dependency_config import native_retained_path as native_retained_path
 
-import prepare_runtime_source as preparation
-import materialize_main as materialization
-import source_preparation_process as preparation_process
+import prepare_runtime_source as prepare_runtime_source
+import materialize_main as materialize_main
+import source_preparation_process as source_preparation_process
+if TYPE_CHECKING:
+    from build_toolchain_lock import ToolchainLock
+    from standalone_python_artifacts import ArtifactBuilder as _Builder
+    from versioned_runtime_source import SourceIdentity
+preparation, materialization, preparation_process = prepare_runtime_source, materialize_main, source_preparation_process
+
+
+class _NormalizedSource(Protocol):
+    @property
+    def kind(self) -> str: ...
+    @property
+    def canonical(self) -> str: ...
+    @property
+    def ref(self) -> str: ...
+
+
+class _Normalizer(Protocol):
+    def normalize_source(self, descriptor: dict[str, Any]) -> _NormalizedSource: ...
+
+
+_Execution = TypedDict("_Execution", {"uv": str | Path, "deadline": float}, total=False)
+_CompositionOptions = TypedDict("_CompositionOptions", {"select_inputs": Callable[[Path], tuple[str, ...]]}, total=False)
+_ExtractionOptions = TypedDict("_ExtractionOptions", {"include_paths": tuple[str, ...]}, total=False)
 
 MANIFEST = "install-source.json"
 SCHEMA = "copilot-extensions.install-source"
@@ -67,7 +92,14 @@ def _selected_project_paths(
         return None
     from promotion_python_artifacts import _PLUGIN
     from standalone_python_artifacts import COMPONENTS
-    from application_sources import project_locations, tomllib
+    from application_sources import project_locations
+    if TYPE_CHECKING:
+        if sys.version_info >= (3, 11):
+            import tomllib
+        else:
+            import tomli as tomllib
+    else:
+        from application_sources import tomllib
 
     if (
         not isinstance(projects, tuple) or not projects
@@ -105,7 +137,7 @@ def _selected_project_paths(
 @contextmanager
 def _source_phase(
     observer: Callable[[int, int, float], None] | None, phase: int, started: float,
-):
+) -> Iterator[None]:
     if observer is not None:
         observer(phase, 0, time.monotonic() - started)
     yield
@@ -113,7 +145,7 @@ def _source_phase(
         observer(phase, 1, time.monotonic() - started)
 
 
-def _load_module(path: Path, name: str):
+def _load_module(path: Path, name: str) -> ModuleType:
     spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
         raise ValueError("local artifact builder is unavailable")
@@ -122,7 +154,7 @@ def _load_module(path: Path, name: str):
     return module
 
 
-def repository_source(repository: Path, descriptor: dict | None, *, deadline: float) -> dict | None:
+def repository_source(repository: Path, descriptor: dict[str, Any] | None, *, deadline: float) -> dict[str, Any] | None:
     if descriptor is None:
         names = preparation._git(repository, "remote", deadline=deadline).splitlines()
         if "origin" not in names:
@@ -154,17 +186,17 @@ def repository_source(repository: Path, descriptor: dict | None, *, deadline: fl
     primitive = importlib.util.module_from_spec(spec)
     sys.modules[name] = primitive
     spec.loader.exec_module(primitive)
-    normalized = primitive.normalize_source(descriptor)
+    normalized = cast(_Normalizer, primitive).normalize_source(descriptor)
     return {"kind": normalized.kind, "canonical": normalized.canonical, "ref": normalized.ref}
 
 
 def compose(
     repository: Path, commit: str, main_head: str | None, output: Path, *,
     finalized_main: bool = False, deadline: float | None = None,
-    source_descriptor: dict | None = None,
+    source_descriptor: dict[str, Any] | None = None,
     projects: tuple[str, ...] | None = None,
     observer: Callable[[int, int, float], None] | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Materialize one Git object; only finalized Main selection needs ancestry."""
     started = time.monotonic()
     deadline = started + 600 if deadline is None else deadline
@@ -200,8 +232,8 @@ def compose(
 
         composition = compose_runtime(
             repository, source_commit=commit, main_seed=main_head, deadline=deadline,
-            **({"select_inputs": lambda source: _application_export_paths(source, projects)}
-               if projects is not None else {}),
+            **cast(_CompositionOptions, {"select_inputs": lambda source: _application_export_paths(source, projects)}
+                   if projects is not None else {}),
         )
         preparation._remaining(deadline)
     preparation._private_output_directory(output)
@@ -218,8 +250,8 @@ def compose(
         preparation._extract_archive(
             archive, source, deadline=deadline,
             file_pointer_candidates=file_pointer_candidates,
-            **({"include_paths": composition.export_paths}
-               if composition is not None and composition.export_paths is not None else {}),
+            **cast(_ExtractionOptions, {"include_paths": composition.export_paths}
+                   if composition is not None and composition.export_paths is not None else {}),
         )
     _verify_project_declaration(repository, commit, source, deadline)
     archive.unlink()
@@ -256,10 +288,10 @@ def compose(
 
 
 def build_manager(
-    output: Path, record: dict, *, source_policy: str = "governed",
+    output: Path, record: dict[str, Any], *, source_policy: str = "governed",
     min_age_days: int | None = None, reuse_source: Path | None = None,
     uv: str | Path | None = None, deadline: float | None = None,
-) -> dict:
+) -> dict[str, Any]:
     return build_projects(
         output, record, projects=("standalone:worktree-manager",),
         source_policy=source_policy, min_age_days=min_age_days, reuse_source=reuse_source,
@@ -267,13 +299,13 @@ def build_manager(
     )
 
 
-def _build_input_roots(source: Path, selected: tuple[str, ...], builder) -> tuple[Path, ...]:
+def _build_input_roots(source: Path, selected: tuple[str, ...], builder: _Builder) -> tuple[Path, ...]:
     if "composition:core" in selected:
         return (source,)
     from standalone_python_artifacts import source_closure
     from application_sources import canonical_application
 
-    roots = set()
+    roots: set[Path] = set()
     for key in selected:
         if key.startswith("standalone:"):
             project, dependencies, resources = source_closure(key.split(":", 1)[1], source, builder)
@@ -285,9 +317,9 @@ def _build_input_roots(source: Path, selected: tuple[str, ...], builder) -> tupl
             if (project / "setup.py").is_file():
                 from plugin_runtime_resources import build_inputs
 
-                _data, resources = build_inputs(project, root=source)
-                roots.update(path.parent for path in resources.values())
-    result = []
+                _data, injected = build_inputs(project, root=source)
+                roots.update(path.parent for path in injected.values())
+    result: list[Path] = []
     for path in sorted(roots, key=lambda value: (len(value.parts), str(value))):
         if not path.is_relative_to(source) or builder.uer._find_symlinked_ancestor(path, source):
             raise ValueError("local build input is linked or outside the retained source")
@@ -296,7 +328,7 @@ def _build_input_roots(source: Path, selected: tuple[str, ...], builder) -> tupl
     return tuple(result)
 
 
-def _build_input_fingerprint(roots: tuple[Path, ...]) -> tuple:
+def _build_input_fingerprint(roots: tuple[Path, ...]) -> tuple[tuple[str, ...], str | None]:
     from versioned_runtime import fingerprint_source
     from versioned_runtime_source import SOURCE_FILE, assembly_hash
 
@@ -321,9 +353,9 @@ def _application_export_paths(source: Path, projects: tuple[str, ...]) -> tuple[
             continue
         if not (canonical_application(source, key) / "pyproject.toml").is_file():
             raise ValueError("local source requires unique declared Python projects")
-    builder = _load_module(Path(builder.__file__), "_local_install_export_builder")
-    builder.REPO, builder.PLUGINS_DIR, builder.LIBS_DIR = source, source / "plugins", source / "libs"
-    roots = set(_build_input_roots(source, projects, builder))
+    builder_view = cast("_Builder", _load_module(Path(builder.__file__), "_local_install_export_builder"))
+    builder_view.REPO, builder_view.PLUGINS_DIR, builder_view.LIBS_DIR = source, source / "plugins", source / "libs"
+    roots = set(_build_input_roots(source, projects, builder_view))
     roots.update((source / "plugins").glob("*/pyproject.toml"))
     roots.update(directory / "pyproject.toml" for directory in declared_projects(source).values())
     roots.update(
@@ -335,9 +367,9 @@ def _application_export_paths(source: Path, projects: tuple[str, ...]) -> tuple[
         for relative in ("pyproject.toml", "bundle/core.json", ".github/plugin/marketplace.json")
         if (source / relative).exists() or (source / relative).is_symlink()
     )
-    selected = []
+    selected: list[Path] = []
     for path in sorted(roots, key=lambda value: (len(value.parts), str(value))):
-        if not path.is_relative_to(source) or builder.uer._find_symlinked_ancestor(path, source):
+        if not path.is_relative_to(source) or builder_view.uer._find_symlinked_ancestor(path, source):
             raise ValueError("application export input is linked or outside the retained source")
         if not any(path.is_relative_to(parent) for parent in selected):
             selected.append(path)
@@ -346,9 +378,9 @@ def _application_export_paths(source: Path, projects: tuple[str, ...]) -> tuple[
 
 @contextmanager
 def _build_workspace(
-    source: Path, output: Path, selected: tuple[str, ...], builder, *,
+    source: Path, output: Path, selected: tuple[str, ...], builder: _Builder, *,
     retain_toolchain: bool = False,
-):
+) -> Iterator[tuple[Path, Path, Callable[[], None]]]:
     """Keep Windows backend and interpreter paths short while binding their inputs."""
     declaration = source / "pyproject.toml"
     original_declaration = declaration.read_bytes() if declaration.exists() else None
@@ -374,7 +406,7 @@ def _build_workspace(
         staged_roots = tuple(staged / root.relative_to(source) for root in roots)
         if _build_input_fingerprint(staged_roots) != original_hash:
             raise ValueError("compact build source differs from the retained installation source")
-        def verify():
+        def verify() -> None:
             if _build_input_fingerprint(staged_roots) != original_hash:
                 raise ValueError("compact build source changed during artifact construction")
             if _build_input_fingerprint(roots) != original_hash:
@@ -391,10 +423,10 @@ def _build_workspace(
 
 
 def _reuse_projects(
-    snapshot: Path, output: Path, record: dict, selected: tuple[str, ...],
-    identities: dict, roster: dict, *, source_policy: str, min_age_days: int | None,
+    snapshot: Path, output: Path, record: dict[str, Any], selected: tuple[str, ...],
+    identities: dict[str, SourceIdentity], roster: dict[str, str], *, source_policy: str, min_age_days: int | None,
     copy_wheels: bool = True, deadline: float | None = None,
-) -> dict:
+) -> dict[str, dict[str, Any]]:
     """Revalidate explicitly selected prior inputs without reconstructing them."""
     from local_install_profile import source_inputs
     from installer_wheel_snapshot import retain_wheel_inputs
@@ -411,7 +443,8 @@ def _reuse_projects(
     )
     if any(previous.get(key) != record.get(key) for key in binding):
         raise ValueError("reused installation source/composition differs from the selected source")
-    manifests, shared_toolchain = {}, None
+    manifests: dict[str, dict[str, Any]] = {}
+    shared_toolchain: dict[str, Any] | None = None
     compatible_tags = frozenset(sys_tags())
     deadline = time.monotonic() + 600 if deadline is None else deadline
     for key in selected:
@@ -491,7 +524,7 @@ def _reuse_projects(
     return manifests
 
 
-def _source_projects(source: Path, record: dict, projects: tuple[str, ...] | None):
+def _source_projects(source: Path, record: dict[str, Any], projects: tuple[str, ...] | None) -> tuple[dict[str, str], tuple[str, ...], dict[str, Path], dict[str, SourceIdentity]]:
     from promotion_python_artifacts import candidate_projects
     from application_sources import canonical_application
     from versioned_runtime_source import (
@@ -527,14 +560,14 @@ def _source_projects(source: Path, record: dict, projects: tuple[str, ...] | Non
 
 @contextmanager
 def _built_projects(
-    output: Path, record: dict, *, projects: tuple[str, ...] | None = None,
+    output: Path, record: dict[str, Any], *, projects: tuple[str, ...] | None = None,
     source_policy: str = "governed", min_age_days: int | None = None,
     reuse_source: Path | None = None,
     uv: str | Path | None = None, deadline: float | None = None,
     retain_toolchain: bool = False,
-):
+) -> Iterator[tuple[dict[str, Any], ToolchainLock | None]]:
     """Keep one existing builder/toolchain alive through complete profile readback."""
-    import build_python_artifacts as builder
+    import build_python_artifacts as builder_module
     from build_toolchain_lock import resolve_toolchain_lock
     from promotion_python_artifacts import project_key
     from standalone_python_artifacts import build_standalone_artifacts
@@ -548,8 +581,8 @@ def _built_projects(
         reuse_source, output, record, selected, identities, roster,
         source_policy=source_policy, min_age_days=min_age_days, deadline=deadline,
     ) if reuse_source is not None else None
-    builder = _load_module(Path(builder.__file__), "_local_install_artifact_builder") if reused is None else None
-    execution = {}
+    builder = cast("_Builder", _load_module(Path(builder_module.__file__), "_local_install_artifact_builder")) if reused is None else None
+    execution: _Execution = {}
     if uv is not None:
         execution["uv"] = uv
     if deadline is not None:
@@ -557,7 +590,7 @@ def _built_projects(
     if execution and builder is not None:
         build_wheel = builder.build_wheel
 
-        def bounded_build_wheel(*args, **kwargs):
+        def bounded_build_wheel(*args: Any, **kwargs: Any) -> Path:
             if uv is not None:
                 kwargs["uv"] = str(uv)
             if deadline is not None:
@@ -566,7 +599,7 @@ def _built_projects(
             return build_wheel(*args, **kwargs)
 
         builder.build_wheel = bounded_build_wheel
-    workspace = nullcontext((source, output / "build-tools", lambda: None))
+    workspace: AbstractContextManager[tuple[Path, Path, Callable[[], None]]] = nullcontext((source, output / "build-tools", lambda: None))
     if builder is not None:
         builder.REPO, builder.PLUGINS_DIR, builder.LIBS_DIR = source, source / "plugins", source / "libs"
         workspace = _build_workspace(
@@ -575,8 +608,8 @@ def _built_projects(
     with workspace as (build_source, toolchain_dir, verify_workspace):
         toolchain = None
         if reused is None:
-            builder.REPO = build_source
-            builder.PLUGINS_DIR, builder.LIBS_DIR = build_source / "plugins", build_source / "libs"
+            cast("_Builder", builder).REPO = build_source
+            cast("_Builder", builder).PLUGINS_DIR, cast("_Builder", builder).LIBS_DIR = build_source / "plugins", build_source / "libs"
             toolchain = resolve_toolchain_lock(
                 toolchain_dir, python=getattr(sys, "_base_executable", sys.executable),
                 source_policy=source_policy, min_age_days=min_age_days,
@@ -603,7 +636,7 @@ def _built_projects(
                     build_standalone_artifacts(
                         component, out_dir=wheel_dir, toolchain=toolchain, builder=builder,
                         **execution,
-                    ) if standalone else builder.build_plugin_artifacts(
+                    ) if standalone else cast("_Builder", builder).build_plugin_artifacts(
                         component, out_dir=wheel_dir, toolchain=toolchain,
                         **execution,
                     )
@@ -635,11 +668,11 @@ def _built_projects(
 
 
 def build_projects(
-    output: Path, record: dict, *, projects: tuple[str, ...] | None = None,
+    output: Path, record: dict[str, Any], *, projects: tuple[str, ...] | None = None,
     source_policy: str = "governed", min_age_days: int | None = None,
     reuse_source: Path | None = None,
     uv: str | Path | None = None, deadline: float | None = None,
-) -> dict:
+) -> dict[str, Any]:
     with _built_projects(
         output, record, projects=projects, source_policy=source_policy,
         min_age_days=min_age_days, reuse_source=reuse_source, uv=uv, deadline=deadline,
@@ -648,8 +681,8 @@ def build_projects(
 
 
 def _prepare_profiles(
-    built: Path, record: dict, output: Path, components: tuple[str, ...], extras: dict,
-    toolchain, *, uv: str, deadline: float,
+    built: Path, record: dict[str, Any], output: Path, components: tuple[str, ...], extras: dict[str, tuple[str, ...]],
+    toolchain: ToolchainLock | None, *, uv: str, deadline: float,
     reuse_source: Path | None = None,
 ) -> dict[str, str] | None:
     from build_toolchain_lock import _query_marker_environment, sanitize_subprocess_env
@@ -668,7 +701,7 @@ def _prepare_profiles(
                 json.dumps(record, sort_keys=True).encode("utf-8"),
             ).hexdigest(),
             *(["--reuse-applications", str(reuse_source),
-               "--toolchain-record", json.dumps(toolchain.record, sort_keys=True)]
+               "--toolchain-record", json.dumps(cast("ToolchainLock", toolchain).record, sort_keys=True)]
               if reuse_source is not None else []),
         ],
         capture_output=True, text=True, env=sanitize_subprocess_env(),
@@ -684,10 +717,10 @@ def _prepare_profiles(
     expected = {name: str(expected_root / "profiles" / name / "snapshot") for name in components}
     if snapshots != expected:
         raise ValueError("application profile worker returned another selected snapshot")
-    return snapshots
+    return cast(dict[str, str], snapshots)
 
 
-def _application_completion(snapshots: dict[str, str], *, deadline: float) -> dict:
+def _application_completion(snapshots: dict[str, str], *, deadline: float) -> dict[str, Any]:
     from versioned_runtime import fingerprint_source
 
     return {
@@ -702,7 +735,7 @@ def _application_completion(snapshots: dict[str, str], *, deadline: float) -> di
 
 
 def _reused_applications(
-    built: Path, record: dict, output: Path, components: tuple[str, ...], extras: dict,
+    built: Path, record: dict[str, Any], output: Path, components: tuple[str, ...], extras: dict[str, tuple[str, ...]],
     *, uv: str, deadline: float,
 ) -> dict[str, str] | None:
     from build_toolchain_lock import ArtifactBuildError, resolve_toolchain_lock
@@ -783,7 +816,7 @@ def prepare_applications(
     repository: Path, commit: str, main_head: str, output: Path, *,
     components: tuple[str, ...], branch: str, uv: str, deadline: float,
     extras: dict[str, tuple[str, ...]] | None = None,
-    source_descriptor: dict | None = None,
+    source_descriptor: dict[str, Any] | None = None,
 ) -> dict[str, str]:
     """Prepare complete applications through the existing composition/profile owners."""
     from standalone_python_artifacts import COMPONENTS
@@ -849,12 +882,12 @@ def prepare_applications(
     if preparation._admit(repository, commit, branch, deadline=deadline) != admitted:
         raise ValueError("source checkout changed during application preparation")
     preparation._remaining(deadline)
-    completion = _application_completion(snapshots, deadline=deadline)
+    completion = _application_completion(cast(dict[str, str], snapshots), deadline=deadline)
     preparation._remaining(deadline)
     (output / "applications.json").write_text(
         json.dumps(completion, sort_keys=True) + "\n", encoding="utf-8",
     )
-    return snapshots
+    return cast(dict[str, str], snapshots)
 
 
 def main(argv: list[str] | None = None) -> int:

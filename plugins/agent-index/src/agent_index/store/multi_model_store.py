@@ -22,8 +22,9 @@ import logging
 import os
 import re
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ParamSpec, Protocol, TypeVar, cast
 
 import numpy as np
 
@@ -33,10 +34,16 @@ from agent_index.store.item_repr import item_content_hash as item_content_hash
 from agent_index.store.item_repr import pool_vectors as pool_vectors
 from agent_index.store.model_item_representation import _ItemRepresentationMixin
 from agent_index.store.repo_filter import repo_matches
+from agent_index.store.result_filters import (
+    SearchFilters,
+    _apply_filters as _apply_filters,
+    _FACET_KEYS as _FACET_KEYS,
+    _facet_values as _facet_values,
+)
 from agent_index.store.source_layout import (
-    source_fts_read,
-    source_read,
-    source_write,
+    source_fts_read as _source_fts_read,
+    source_read as _source_read,
+    source_write as _source_write,
 )
 from agent_index.store.store import SearchResult
 from agent_index.store.vector_table import VectorHit, VectorTable
@@ -48,6 +55,19 @@ if TYPE_CHECKING:
     from agent_index.index_config import ModelProfile
 
 logger = logging.getLogger(__name__)
+
+_P = ParamSpec("_P")
+_T = TypeVar("_T")
+
+
+class _SourceGuard(Protocol):
+    def __call__(self, func: Callable[_P, _T]) -> Callable[_P, _T]: ...
+
+
+# The shared guards forward the wrapped callable's arguments and return unchanged.
+source_read: _SourceGuard = _source_read
+source_fts_read: _SourceGuard = _source_fts_read
+source_write: _SourceGuard = _source_write
 
 # RRF constant - higher values flatten rank differences
 _RRF_K = 60
@@ -130,8 +150,11 @@ class MultiModelStore(_ItemRepresentationMixin):
         db_path: str | Path,
         *,
         content_table: str = "chunks",
+        content_store_type: type[ContentStore] = ContentStore,
+        repo_matcher: Callable[[str, str], bool] = repo_matches,
     ) -> None:
-        self._content = ContentStore(db_path, table_name=content_table)
+        self._content = content_store_type(db_path, table_name=content_table)
+        self._repo_matcher = repo_matcher
         self._source_domain = self._content._source_domain
         self._vector_tables: dict[str, VectorTable] = {}
         self._db_path = db_path
@@ -188,13 +211,13 @@ class MultiModelStore(_ItemRepresentationMixin):
     @source_write
     def upsert_content(self, chunks: list[Chunk], *, skip_identical: bool = False) -> int:
         """Store chunk content in the global content table."""
-        return self._content.upsert(chunks, skip_identical=skip_identical)
+        return cast(int, self._content.upsert(chunks, skip_identical=skip_identical))
 
     def upsert_vectors(
         self,
         model_id: str,
         chunks: list[Chunk],
-        vectors: np.ndarray,
+        vectors: np.ndarray[Any, Any],
         *,
         bounded_provenance: bool = False,
         bounded_input: bool = False,
@@ -212,17 +235,17 @@ class MultiModelStore(_ItemRepresentationMixin):
         self,
         model_id: str,
         chunks: list[Chunk],
-        vectors: np.ndarray,
+        vectors: np.ndarray[Any, Any],
     ) -> int:
         """Store content + vectors in one call (convenience)."""
         self.upsert_content(chunks)
         return self.upsert_vectors(model_id, chunks, vectors)
 
     @source_write
-    def delete_by_source(self, source: str) -> None:
-        """Remove all data for a source from content and all vector tables."""
+    def delete_by_source(self, source: str) -> int | None:
+        """Remove source data; source-aware stores return the deleted content count."""
         if self._source_domain is not None:
-            return self._content.delete_by_source(source)
+            return cast(int, self._content.delete_by_source(source))
         # Get chunk_ids before deleting content
         chunk_ids = self._get_chunk_ids_for_source(source)
         self._content.delete_by_source(source)
@@ -230,6 +253,7 @@ class MultiModelStore(_ItemRepresentationMixin):
         for vt in self._vector_tables.values():
             if chunk_ids:
                 vt.delete_by_chunk_ids(chunk_ids)
+        return None
 
     @source_write
     def delete_by_source_exact(self, source: str) -> int:
@@ -242,7 +266,7 @@ class MultiModelStore(_ItemRepresentationMixin):
         prefix.
         """
         if self._source_domain is not None:
-            return self._content.delete_by_source_exact(source)
+            return cast(int, self._content.delete_by_source_exact(source))
         chunk_ids = self._content.get_chunk_ids_by_source_exact(source)
         self._content.delete_by_source_exact(source)
         for vt in self._vector_tables.values():
@@ -253,17 +277,17 @@ class MultiModelStore(_ItemRepresentationMixin):
     @source_read
     def distinct_sources(self) -> set[str]:
         """Return the set of distinct ``source`` values present in the store."""
-        return self._content.distinct_sources()
+        return cast(set[str], self._content.distinct_sources())
 
     @source_read
     def source_counts(self) -> dict[str, int]:
         """Return ``{source: chunk_count}`` actually stored (truthful status)."""
-        return self._content.source_counts()
+        return cast(dict[str, int], self._content.source_counts())
 
     @source_read
     def get_document(self, source: str, file_path: str) -> ChunkRecord | None:
         """Reconstruct a file's full indexed text (delegates to ContentStore)."""
-        return self._content.get_document(source, file_path)
+        return cast(ChunkRecord | None, self._content.get_document(source, file_path))
 
     @source_read
     def distinct_items(self) -> list[tuple[str, str]]:
@@ -272,7 +296,7 @@ class MultiModelStore(_ItemRepresentationMixin):
         The unit the similarity-cluster pass groups by — one issue, one quip,
         one doc, one source file.  Delegates to ContentStore.
         """
-        return self._content.distinct_items()
+        return cast(list[tuple[str, str]], self._content.distinct_items())
 
 
 
@@ -284,9 +308,9 @@ class MultiModelStore(_ItemRepresentationMixin):
         and all VectorTables - no orphaned vectors.
         """
         if self._source_domain is not None:
-            return self._content.delete_by_file(source, file_path)
+            return cast(list[str], self._content.delete_by_file(source, file_path))
         # Retain canonical IDs until every vector deletion succeeds, for retry.
-        chunk_ids = self._content.get_chunk_ids_by_file(source, file_path)
+        chunk_ids = cast(list[str], self._content.get_chunk_ids_by_file(source, file_path))
         for vt in self._vector_tables.values():
             if chunk_ids:
                 vt.delete_by_chunk_ids(chunk_ids)
@@ -314,7 +338,7 @@ class MultiModelStore(_ItemRepresentationMixin):
         ``indexed_at`` timestamp, old chunks are cleaned up here.
         """
         if self._source_domain is not None:
-            return self._content.delete_stale_by_file(source, file_path, before=before)
+            return cast(int, self._content.delete_stale_by_file(source, file_path, before=before))
         # Get stale chunk_ids from content store
         stale_ids = self._content.get_stale_chunk_ids_by_file(
             source, file_path, before=before,
@@ -331,8 +355,8 @@ class MultiModelStore(_ItemRepresentationMixin):
     def delete_stale(self, source: str, *, before: float) -> int:
         """Remove stale chunks from content store and all vector tables."""
         if self._source_domain is not None:
-            return self._content.delete_stale(source, before=before)
-        removed = self._content.delete_stale(source, before=before)
+            return cast(int, self._content.delete_stale(source, before=before))
+        removed = cast(int, self._content.delete_stale(source, before=before))
         for vt in self._vector_tables.values():
             vt.delete_stale(before=before)
         return removed
@@ -373,7 +397,7 @@ class MultiModelStore(_ItemRepresentationMixin):
     # -- FTS -----------------------------------------------------------------
 
     def ensure_fts_index(self) -> bool:
-        return self._content.ensure_fts_index()
+        return cast(bool, self._content.ensure_fts_index())
 
     def mark_fts_dirty(self) -> None:
         self._content.mark_fts_dirty()
@@ -399,7 +423,7 @@ class MultiModelStore(_ItemRepresentationMixin):
     def search(
         self,
         model_id: str,
-        vector: np.ndarray,
+        vector: np.ndarray[Any, Any],
         *,
         limit: int = 10,
         source: str | None = None,
@@ -424,13 +448,13 @@ class MultiModelStore(_ItemRepresentationMixin):
         results = _apply_filters(
             results, source=source, language=language,
             file_path_glob=file_path_glob, repo=repo, labels=labels,
-            camera=camera, voice=voice,
+            camera=camera, voice=voice, repo_matcher=self._repo_matcher,
         )
         return results[:limit]
 
     def _vector_table_for_chunk(
         self, chunk_id: str,
-    ) -> tuple[str, VectorTable, np.ndarray] | None:
+    ) -> tuple[str, VectorTable, np.ndarray[Any, Any]] | None:
         """Locate the model table that holds *chunk_id* and its vector.
 
         A chunk lives in exactly one model table (code vs prose), chosen at
@@ -501,7 +525,7 @@ class MultiModelStore(_ItemRepresentationMixin):
         results = _apply_filters(
             results, source=source, language=language,
             file_path_glob=file_path_glob, repo=repo, labels=labels,
-            camera=camera, voice=voice,
+            camera=camera, voice=voice, repo_matcher=self._repo_matcher,
         )
         return results[:limit]
 
@@ -509,7 +533,7 @@ class MultiModelStore(_ItemRepresentationMixin):
     def hybrid_search(
         self,
         model_id: str,
-        vector: np.ndarray,
+        vector: np.ndarray[Any, Any],
         query_text: str,
         *,
         limit: int = 10,
@@ -530,7 +554,7 @@ class MultiModelStore(_ItemRepresentationMixin):
         candidate_limit = max(limit * 5, 50)
         if source or repo or labels or camera or voice:
             candidate_limit *= _FILTER_CANDIDATE_BOOST
-        filter_kwargs = {
+        filter_kwargs: SearchFilters = {
             "source": source,
             "language": language,
             "file_path_glob": file_path_glob,
@@ -546,7 +570,7 @@ class MultiModelStore(_ItemRepresentationMixin):
 
         if not self.fts_available:
             results = self._hydrate_hits(vector_hits)
-            results = _apply_filters(results, **filter_kwargs)
+            results = _apply_filters(results, repo_matcher=self._repo_matcher, **filter_kwargs)
             deduped = _deduplicate_by_content(results)
             return deduped[:limit]
 
@@ -561,7 +585,7 @@ class MultiModelStore(_ItemRepresentationMixin):
 
         if not fts_hits:
             results = self._hydrate_hits(vector_hits)
-            results = _apply_filters(results, **filter_kwargs)
+            results = _apply_filters(results, repo_matcher=self._repo_matcher, **filter_kwargs)
             deduped = _deduplicate_by_content(results)
             return deduped[:limit]
 
@@ -578,12 +602,14 @@ class MultiModelStore(_ItemRepresentationMixin):
 
         # Build SearchResult lists for RRF
         vector_results = _apply_filters(
-            _hits_to_results(vector_hits, records), **filter_kwargs
+            _hits_to_results(vector_hits, records),
+            repo_matcher=self._repo_matcher, **filter_kwargs,
         )
         # FTS SQL filters don't cover post-filter-only facets (e.g. labels),
         # so re-apply the full filter set to the FTS branch too.
         fts_results = _apply_filters(
-            _fts_to_results(fts_hits, records), **filter_kwargs
+            _fts_to_results(fts_hits, records),
+            repo_matcher=self._repo_matcher, **filter_kwargs,
         )
 
         merged = _reciprocal_rank_fusion(
@@ -600,7 +626,7 @@ class MultiModelStore(_ItemRepresentationMixin):
     @source_fts_read
     def search_all(
         self,
-        vectors_by_model: dict[str, np.ndarray],
+        vectors_by_model: dict[str, np.ndarray[Any, Any]],
         query_text: str,
         *,
         limit: int = 10,
@@ -635,7 +661,7 @@ class MultiModelStore(_ItemRepresentationMixin):
             results = _apply_filters(
                 results, source=source, language=language,
                 file_path_glob=file_path_glob, repo=repo, labels=labels,
-            camera=camera, voice=voice,
+                camera=camera, voice=voice, repo_matcher=self._repo_matcher,
             )
             result_lists.append(results)
             weights.append(vector_weight)
@@ -657,7 +683,7 @@ class MultiModelStore(_ItemRepresentationMixin):
                     _fts_to_results(fts_hits, records),
                     source=source, language=language,
                     file_path_glob=file_path_glob, repo=repo, labels=labels,
-            camera=camera, voice=voice,
+                    camera=camera, voice=voice, repo_matcher=self._repo_matcher,
                 )
                 result_lists.append(fts_results)
                 weights.append(fts_weight)
@@ -709,7 +735,7 @@ class MultiModelStore(_ItemRepresentationMixin):
     @source_fts_read
     def compare_search(
         self,
-        vectors_by_model: dict[str, np.ndarray],
+        vectors_by_model: dict[str, np.ndarray[Any, Any]],
         query_text: str,
         *,
         limit: int = 10,
@@ -739,7 +765,7 @@ class MultiModelStore(_ItemRepresentationMixin):
     @source_read
     def stats(self) -> dict[str, Any]:
         """Combined statistics across content and vector tables."""
-        content_stats = self._content.stats()
+        content_stats = cast(dict[str, Any], self._content.stats())
         vector_stats = {}
         for model_id, vt in self._vector_tables.items():
             vector_stats[model_id] = {
@@ -806,7 +832,8 @@ class MultiModelStore(_ItemRepresentationMixin):
 
     def _get_chunk_ids_for_source(self, source: str) -> list[str]:
         """Get all chunk_ids for a source (exact + prefix match)."""
-        table = self._content._get_or_create_table()
+        get_table: Callable[[], Any] = self._content._get_or_create_table
+        table = get_table()
         try:
             rows = (
                 table.search()
@@ -963,70 +990,6 @@ def _multi_list_rrf(
         for cid in ranked_ids
         if (r := results_by_id[cid])
     ]
-
-
-def _facet_values(metadata: dict | None, key: str) -> set[str]:
-    """Return a metadata facet's value(s) as a string set.
-
-    Facets are stored either as a scalar (``camera``) or a list (``labels``,
-    ``voice``, ``tags``); normalize both to a set so matching is uniform.
-    """
-    if not metadata:
-        return set()
-    val = metadata.get(key)
-    if val is None:
-        return set()
-    if isinstance(val, list):
-        return {str(v) for v in val}
-    return {str(val)}
-
-
-# Metadata facets filtered with OR semantics, keyed by request param name.
-# ``camera`` / ``voice`` are treated exactly like ``labels`` — a multi-valued
-# facet match — they just read a different metadata key.
-_FACET_KEYS = ("labels", "camera", "voice")
-
-
-def _apply_filters(
-    results: list[SearchResult],
-    *,
-    source: str | None = None,
-    language: str | None = None,
-    file_path_glob: str | None = None,
-    repo: str | None = None,
-    labels: list[str] | None = None,
-    camera: list[str] | None = None,
-    voice: list[str] | None = None,
-) -> list[SearchResult]:
-    """Post-filter search results by metadata fields.
-
-    ``source`` matches exactly or as a subtype prefix (``git:odsp-web-harness``
-    matches its own ``:commits`` byproduct too). ``repo`` matches ANY source
-    (any type prefix/byproduct) for a given repo -- see ``repo_matches``.
-    ``labels``/``camera``/``voice`` are OR-matched multi-valued facets.
-    """
-    facets = {"labels": labels, "camera": camera, "voice": voice}
-    if not any((source, language, file_path_glob, repo, *facets.values())):
-        return results
-
-    filtered = results
-    if source:
-        filtered = [r for r in filtered if r.source == source or r.source.startswith(f"{source}:")]
-    if language:
-        filtered = [r for r in filtered if r.language == language]
-    if file_path_glob:
-        import fnmatch
-        filtered = [r for r in filtered if fnmatch.fnmatchcase(r.file_path, file_path_glob)]
-    if repo:
-        filtered = [r for r in filtered if repo_matches(r.source, repo)]
-    for key in _FACET_KEYS:
-        wanted = facets[key]
-        if wanted:
-            wanted_set = set(wanted)
-            filtered = [
-                r for r in filtered if wanted_set & _facet_values(r.metadata, key)
-            ]
-    return filtered
 
 
 def _deduplicate_by_content(results: list[SearchResult]) -> list[SearchResult]:
