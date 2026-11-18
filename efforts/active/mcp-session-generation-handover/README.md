@@ -351,10 +351,16 @@ named tracked objective before the whole effort is Done.
   qualified owner, and preserve direct/resident preference parity without
   process-global cwd or environment changes. Refuse missing/mismatched context
   and isolate concurrent callers; unsupported peers retain a pre-effect direct fallback.
-- [ ] **Release open:** verify promotion of the source correction; a source
-  merge is not a released or running provider.
+- [x] **Released source verified:** Main
+  `9934a3413ff584dde9f182efe456dae8333d11c6` releases MCP `0.2.299-dev1`
+  from qualified source `3e8771975d44095c8cce6a310433cccc63e542ca`,
+  including #10969. All six current correction modules match that source.
 - [ ] **Authorized primary-consumer acceptance open:** verify installed
   direct/resident parity against the actual primary configuration owner.
+  HTTP/dynamic-auth configurations currently select direct execution under
+  the bounded sharing policy, so comparing default and `--no-serve` results
+  alone cannot prove resident parity. The existing warm-reuse follow-up owns
+  broader sharing; it is not an incoming-publication prerequisite.
 
 Old clients that omit the versioned caller-root context are not transparently
 compatible with the updated resident protocol. Update the affected client or
@@ -659,6 +665,15 @@ handover. Preserve held sessions and the separate pre-feature adoption hold.
     See the [bounded installed result](journal/2026/11.10-explicit-owner-cli.md#bounded-installed-linux-update-handover).
     Private namespace and contained lifetime only; default callers, payload
     wrapper selection, installed Windows and the broader matrix remain open.
+  - [x] **Bounded installed Windows baseline:** native Copilot `1.0.114-0`
+    consumes two real synthetic tool results through installed MCP
+    `0.2.293-dev1` after the creation-bound publisher exits. The original
+    client/keeper/upstream/backend identities survive both exchanges, all 56
+    measured pre-existing clients remain alive, and exact fixture settlement
+    passes. This is private, contained baseline acceptance with abrupt
+    native-client-owned MCP settlement, not graceful EOF, installed update
+    handover or default caller adoption. See the
+    [installed baseline result](journal/2026/11.18-installed-windows-baseline.md).
 - [ ] Resolve every plan and validation gate, or transfer an explicitly blocked
   legacy adoption item to its named tracked owner, before closing this effort.
 
@@ -818,6 +833,7 @@ migration already works.
 
 ## Journal
 
+- [2026-11-18 - Installed Windows native-client baseline](journal/2026/11.18-installed-windows-baseline.md)
 - [2026-11-18 - Settled update refusal and bounded Windows adoption](journal/2026/11.18-settled-update-refusal.md)
 - [2026-11-10 - Explicit originating-owner CLI handoff](journal/2026/11.10-explicit-owner-cli.md)
 
