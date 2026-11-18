@@ -265,6 +265,13 @@ exception text, or environment variables. The consumer owns authentication,
 idempotency and recovery of its own effects; there is no consumer-specific
 coordination dependency here.
 
+**Current cwd limitation:** callbacks inherit the watch owner's working
+directory, not the registering caller's. Until subscriber-owned cwd is
+implemented and negotiated, use absolute paths for both the executable and
+callback script/file arguments. Do not register a callback that requires the
+caller's relative configuration or data paths: an absolute executable alone
+does not provide that context.
+
 Before invoking a callback, the owner atomically persists an immutable fired
 JSON payload with `notification_protocol`, `event_id` and `registration_id`,
 alongside the legacy event fields. **Exit code 0 acknowledges that event**;

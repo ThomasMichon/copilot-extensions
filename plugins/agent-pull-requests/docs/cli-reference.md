@@ -231,6 +231,12 @@ numeric inputs and nonfinite timeouts are rejected. Do not persist secrets in
 argv. The consumer must handle ambiguous registration failures by reconciling
 its exact registration rather than arming two wait owners.
 
+The current owner does not capture a subscriber's working directory. Supply
+absolute executable and callback script/file paths; do not rely on the
+registering caller's relative configuration or data paths. An absolute
+executable does not resolve a relative script argument. `notify.cwd` and
+`--notify-context` are not currently supported registration options.
+
 The callback reads one JSON object from stdin, with:
 
 - `repo`, `number`, `subscriber_id`, `transitions`, `timed_out` (legacy fields).
