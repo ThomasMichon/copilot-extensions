@@ -88,7 +88,7 @@ def capability(args, prefix: list[str], operation: str | None = None) -> dict:
         or type(body.get("version")) is not int or body["version"] != 1
         or body.get("repo") != args.repo or not isinstance(body.get("operations"), dict)
         or operation is not None and body["operations"].get(operation) is not True
-        or operation in ("draft-ready", "reviewer-request") and (
+        or operation in ("draft-ready", "reviewer-request", "metadata-update") and (
             not isinstance(body.get("provider"), str) or not body["provider"].strip()
         )
         or operation == "reviewer-request" and body.get("provider") != "github"
@@ -164,6 +164,9 @@ def run(args, prefix: list[str]) -> tuple[int, dict]:
     try:
         return _execute(args, prefix, argv, support)
     except (OSError, RuntimeError, subprocess.SubprocessError, UnicodeError) as exc:
+        if args.command == "update" and support.get("provider") == "github":
+            from .native_metadata import failure
+            return 1, failure(args, str(exc))
         if args.command != "ready":
             raise
         return 1, readiness_failure(
@@ -184,7 +187,9 @@ def _execute(args, prefix: list[str], argv: list[str], support: dict) -> tuple[i
         raise RuntimeError(
             "Native author response is unconfirmed; reconcile the same source/PR before retrying"
         ) from None
-    if (args.command != "ready" and isinstance(payload, dict) and result.returncode
+    if (args.command != "ready"
+            and not (args.command == "update" and support.get("provider") == "github")
+            and isinstance(payload, dict) and result.returncode
             and payload.get("error") and "repo" not in payload):
         return result.returncode, payload
     if not isinstance(payload, dict) or payload.get("repo") != args.repo:
@@ -215,6 +220,9 @@ def _execute(args, prefix: list[str], argv: list[str], support: dict) -> tuple[i
             or payload["ok"] and payload.get("error")
         ):
             raise RuntimeError("Native readiness response is unconfirmed; reconcile this PR before retrying")
+    if args.command == "update" and support.get("provider") == "github":
+        from .native_metadata import validate_github
+        validate_github(args, payload, result.returncode)
     if result.returncode or payload.get("ok") is not True:
         return result.returncode or 1, payload
     if args.command == "push" and (

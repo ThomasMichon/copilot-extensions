@@ -23,6 +23,43 @@ The frontend checks that actual response before the dependent operation.
 Missing or older peers refuse: no raw forge fallback, automatic update,
 credential workaround or silent switch to GitHub.
 
+## GitHub title and description updates
+
+For an enabled GitHub target, `operations.metadata-update: true` admits the
+existing native `update` / Worktrees `pr-update` path for title and description
+changes. Supply at least one of `--title`, `--body` or `--body-file`; body and
+body-file are mutually exclusive. Files are read as UTF-8 by the owner without
+newline translation. GitHub reviewer, work-item and publication-origin/label
+options refuse on this path. Azure DevOps retains its existing broader metadata
+support.
+
+A description update preserves the selected PR's published source marker,
+including its original root/encrypted fields, rather than taking the updating
+caller's identity or current attribution configuration. Literal Markdown
+examples remain authored content. A conflicting, ambiguous, malformed or missing
+original marker refuses before description mutation. This includes anonymous
+PRs: this finite implementation does not infer opt-out or recover a missing
+marker from local tracking. Reconcile through the original source owner when
+needed. Title-only edits leave the description untouched, even when its marker
+needs separate repair.
+
+The GitHub provider reads the exact target before writing, updates requested
+fields only, then verifies authoritative readback. Drafts remain drafts;
+terminal or malformed targets refuse. The version-1
+`agent-worktrees.pr-metadata` result retains repository/PR identity and
+`actions.title` / `actions.description` with `not_attempted`, `confirmed`,
+`failed` or `unknown`. Only complete confirmation has `ok: true` and exit 0.
+Confirmed actions report whether the field changed. Partial failure leaves later
+actions unattempted; lost responses are reconciled by reading, not automatic
+replay. A lost or invalid native owner response retains the selected PR as
+unknown at the frontend too.
+
+No create, push, comment, reviewer request, readiness, hold/consent change, merge
+or claim settlement is performed. Readback is not atomic compare-and-swap and
+cannot prevent another participant from editing later. Existing callers remain
+usable; old or rolled-back selected runtimes refuse this optional GitHub feature
+before dispatch. Source support is not installed or live-provider qualification.
+
 ## Explicit worker policy
 
 After separately authorizing author work, use the existing

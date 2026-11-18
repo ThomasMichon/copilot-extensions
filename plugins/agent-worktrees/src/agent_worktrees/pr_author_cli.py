@@ -90,7 +90,8 @@ def capabilities(config, repository: str) -> dict:
     return {
         "schema": SCHEMA, "version": 1, "repo": repository, "provider": pr.provider,
         "operations": {
-            "qualified-create": supported, "metadata-update": supported,
+            "qualified-create": supported,
+            "metadata-update": pr.enabled and pr.provider in ("azure-devops", "github"),
             "source-push": supported, "remote-evidence": False,
             "worker-policy-config": pr.enabled and pr.provider in ("azure-devops", "github"),
             "worker-policy-export": True,
