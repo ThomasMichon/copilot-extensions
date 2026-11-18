@@ -41,9 +41,7 @@ async def test_acknowledged_hosted_load_registers_without_a_cli_hold(
     monkeypatch.syspath_prepend(str(root / "plugins/agent-worktrees/src"))
     for library in ("lazy-cli-dispatch", "work-coalescing-singleton", "update-telemetry"):
         monkeypatch.syspath_prepend(str(root / "libs" / library / "src"))
-    from agent_worktrees import tracking, session_liveness, config as cfg, config_authority
-    from agent_worktrees import tracking_session_registration_write as registration
-    from agent_worktrees import tracking_session_deregistration_write as deregistration
+    from agent_worktrees import tracking, session_liveness
 
     state = tmp_path / "authority"
     state.mkdir()
@@ -61,26 +59,11 @@ async def test_acknowledged_hosted_load_registers_without_a_cli_hold(
     )
     assert protected.returncode == 0, protected.stderr + protected.stdout
     path = state / "project/worktrees/host.yaml"
-    config = cfg.Config(
-        srcroot=str(state), machine="local", platform="linux", repo_name="example",
-        repos={"example": cfg.RepoConfig(
-            anchor=str(state), worktree_root=str(state / "trees"),
-        )},
+    seeded = subprocess.run(
+        [*prefix, "seed-ended-native", NATIVE],
+        capture_output=True, text=True, timeout=15, **no_window_kwargs(),
     )
-    monkeypatch.setattr(config_authority, "load_project_authority_config", lambda *_a, **_kw: config)
-    monkeypatch.setattr(cfg, "active_project", lambda: "example")
-    monkeypatch.setattr(cfg, "project_dir", lambda *_a, **_kw: state / "project")
-    monkeypatch.setattr(cfg, "tracking_dir", lambda *_a, **_kw: path.parent)
-    monkeypatch.setattr(cfg, "load_project_config", lambda *_a, **_kw: config)
-    monkeypatch.setattr(tracking, "_owning_tracking_dir", lambda _: path.parent)
-    original = {
-        "worktree_id": "host", "yaml_path": str(path), "session_id": NATIVE,
-        "source": "hook:new", "started_at": "first", "source_identity": "native:original",
-    }
-    assert registration.apply_session_register(original)["ok"]
-    assert deregistration.apply_session_deregister({
-        **original, "ended_at": "original-exit",
-    })["lifecycle"] == "ended"
+    assert seeded.returncode == 0, seeded.stderr + seeded.stdout
     before = tracking.load_record(path)
     checkout = Path(before.worktree_path)
     (checkout / ".git").mkdir()
