@@ -27,11 +27,20 @@ OPERATIONS = frozenset({
 })
 
 
+def _remaining(deadline: float) -> float:
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise LocalDeadlineExpired("finite polling window elapsed; original IDs retained")
+    return remaining
+
+
 async def _exchange(
     path: Path, target: str, method: str, operation: str, payload: dict[str, Any] | None,
+    *, deadline: float,
 ) -> tuple[int, dict[str, Any]]:
     if sys.platform != "linux":
         raise LocalClientError("Linux local transport required")
+    _remaining(deadline)
     reader, writer = await asyncio.open_unix_connection(str(path), limit=8192)
     try:
         peer = writer.get_extra_info("socket")
@@ -42,6 +51,7 @@ async def _exchange(
         body = json.dumps(payload, allow_nan=False).encode() if payload is not None else b""
         if len(body) > 32_768:
             raise LocalClientError("local request exceeds its byte budget")
+        _remaining(deadline)
         writer.write((
             f"{method} /v1/repositories/{target}/{operation} HTTP/1.1\r\n"
             "Host: localhost\r\nConnection: close\r\nContent-Type: application/json\r\n"
@@ -101,13 +111,18 @@ class AsyncBoundRepositoryClient:
         self._seconds = operation_seconds
         self.deadline: float | None = None
         self._busy = False
+        self._expires_at: float | None = None
 
     async def _http(
         self, method: str, operation: str, payload: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         selected = self._selection
         selected._check_transport()
-        status, value = await _exchange(selected.path, selected.target, method, operation, payload)
+        assert self._expires_at is not None
+        status, value = await _exchange(
+            selected.path, selected.target, method, operation, payload, deadline=self._expires_at,
+        )
+        _remaining(self._expires_at)
         selected._check_transport()
         if status != 200:
             raise LocalClientError(str(value.get("error", "local request unavailable")))
@@ -144,14 +159,15 @@ class AsyncBoundRepositoryClient:
             type(deadline) not in (int, float) or not math.isfinite(deadline)
         ):
             raise LocalClientError("invalid original local deadline")
-        remaining = self._seconds if deadline is None else min(
-            self._seconds, deadline - time.monotonic(),
-        )
-        if remaining <= 0:
-            raise LocalDeadlineExpired("finite polling window elapsed; original IDs retained")
+        expires_at = time.monotonic() + self._seconds
+        if deadline is not None:
+            expires_at = min(expires_at, deadline)
+        _remaining(expires_at)
         # Freeze caller-owned intent before yielding to negotiation or the socket.
         original = None if payload is None else json.loads(json.dumps(payload, allow_nan=False))
+        remaining = _remaining(expires_at)
         self._busy = True
+        self._expires_at = expires_at
         try:
             return await asyncio.wait_for(self._operation(operation, original), timeout=remaining)
         except asyncio.TimeoutError:
@@ -161,6 +177,7 @@ class AsyncBoundRepositoryClient:
             raise LocalClientError("local service unavailable; retain original request/registration IDs") from None
         finally:
             self._busy = False
+            self._expires_at = None
 
     async def negotiate(self) -> dict[str, Any]:
         """Check executing repository/consumer support without a subscription."""

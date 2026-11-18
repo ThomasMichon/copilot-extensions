@@ -128,6 +128,38 @@ def test_elapsed_original_deadline_refuses_before_socket_io(tmp_path: Path) -> N
     asyncio.run(scenario())
 
 
+@pytest.mark.parametrize("stage", ["prepare", "send"])
+def test_expiry_during_synchronous_preparation_cannot_start_an_exchange(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stage: str,
+) -> None:
+    async def scenario() -> None:
+        async with running(tmp_path) as host:
+            selected = client(host)
+            if stage == "send":
+                await selected.negotiate()
+            before = len(host.calls)
+            clock = [1000.0]
+            calls = 0
+            native = json.dumps
+
+            def detach(*args: Any, **kwargs: Any) -> str:
+                nonlocal calls
+                calls += 1
+                if calls == (1 if stage == "prepare" else 2):
+                    clock[0] += 31
+                return native(*args, **kwargs)
+
+            monkeypatch.setattr(async_local_client, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+            monkeypatch.setattr(async_local_client, "json", SimpleNamespace(
+                dumps=detach, loads=json.loads, JSONDecodeError=json.JSONDecodeError,
+            ))
+            selected.deadline = 1001.0
+            with pytest.raises(LocalDeadlineExpired):
+                await selected.request("subscribe", {"request_id": "original", "ttl": 60})
+            assert len(host.calls) == before and not selected._busy
+    asyncio.run(scenario())
+
+
 def test_peer_uid_is_checked_before_request_bytes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
