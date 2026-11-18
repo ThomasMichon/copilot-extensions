@@ -19,7 +19,7 @@ from agent_bridge.status_store import SelectedAgent, Selection, StatusStore
 @pytest.mark.parametrize("case", [
     "exited", "live-child", "unobservable", "native-held", "feed-failed", "flush-failed",
     "replacement", "completed", "missing-idle", "persisted-acked", "persisted-missing",
-    "unanchored", "no-origin", "evicted",
+    "unanchored", "no-origin", "evicted", "persisted-no-history",
 ])
 def test_exit_settles_turn_and_subscription_or_preserves_both(
     tmp_path: Path, tmp_db: Database, monkeypatch: pytest.MonkeyPatch, case: str,
@@ -51,8 +51,8 @@ def test_exit_settles_turn_and_subscription_or_preserves_both(
             record, settle=lambda locked: tmp_db.settle_exited_inherited_host(snapshot, locked),
         )
 
-    completion = case in {"completed", "missing-idle", "persisted-acked", "persisted-missing"}
-    persisted = case in {"persisted-acked", "persisted-missing"}
+    persisted = case in {"persisted-acked", "persisted-missing", "persisted-no-history"}
+    completion = persisted or case in {"completed", "missing-idle"}
     missing = case in {"missing-idle", "persisted-missing"}
     if completion:
         log = EventLog(db=tmp_db, session_id=sid)
@@ -65,7 +65,12 @@ def test_exit_settles_turn_and_subscription_or_preserves_both(
             tmp_db.flush()
             assert not store.page(after=0, epoch=None)["events"]
         else:
-            log.append("turn_complete", {"stop_reason": "end_turn"}, timestamp=3.0)
+            if case == "persisted-no-history":
+                # The feed commits, but the queued history write does not survive the crash.
+                with patch.object(tmp_db, "append_event"):
+                    log.append("turn_complete", {"stop_reason": "end_turn"}, timestamp=3.0)
+            else:
+                log.append("turn_complete", {"stop_reason": "end_turn"}, timestamp=3.0)
             page = store.page(after=0, epoch=None, subscription_id="watch")
             acknowledged = store.acknowledge("watch", page["events"][0]["id"], page["epoch"])
         if persisted:
@@ -73,6 +78,16 @@ def test_exit_settles_turn_and_subscription_or_preserves_both(
             tmp_db.update_session_status(sid, "idle", 5.0)
             log.append("session_state_changed", {"status": "idle"}, timestamp=5.0)
             observed = tmp_db.get_session(sid)
+        if case == "persisted-no-history":
+            saved = tmp_db.get_turn(sid, 0)
+            history = tmp_db.get_events(sid)
+            assert not any(e["event_type"] == "turn_complete" for e in history)
+            assert not retire()
+            assert tmp_db.get_turn(sid, 0) == saved and tmp_db.get_session(sid) == observed
+            assert tmp_db.get_events(sid) == history
+            assert store.page(after=0, epoch=None, subscription_id="watch")["subscription"] == acknowledged
+            assert HostIndex(tmp_path / "index.json").get(sid) == record
+            return
         assert retire()
         if acknowledged is not None:
             assert store.page(after=0, epoch=None, subscription_id="watch")["subscription"] == acknowledged

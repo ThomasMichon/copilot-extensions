@@ -201,9 +201,9 @@ class _SessionsMixin:
                     outcome = terminal_outcome(conn, sid, turn)
                 except ValueError:
                     return False
+                if turn["completed_at"] is not None and (outcome is None or turn["stop_reason"] != outcome.reason):
+                    return False
                 if outcome is not None:
-                    if turn["completed_at"] is not None and turn["stop_reason"] != outcome.reason:
-                        return False
                     if not reconcile_idle(self, conn, sid, outcome):
                         return False
                 if turn["completed_at"] is None:
