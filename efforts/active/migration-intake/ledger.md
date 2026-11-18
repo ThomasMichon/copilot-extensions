@@ -692,3 +692,21 @@ deleted. Complete whole-receiving acceptance is unavailable, so the earlier
 redundant-tracking retirement loses its one closure credit. Original,
 discussion and historical observation records remain; no held ROOT/copy is
 read for this correction and no broad Manager audit or resource action begins.
+
+## Reviewed operation-credential receiving receipt (2026-11-18 UTC)
+
+#13171 actually delivered the complete #5763 WS-B domain Plan, local
+Validation, actual global Validation and continuing Coordination in
+[Venue Parity](../venue-parity/README.md), after current-head Copilot
+approval and all required green CI. The earlier conditional route in this
+append-only ledger is now effective; it was not accepted before its SAME-PR
+domain clauses.
+
+Complete current ROOT/source/custody readback preceded the separate audited
+#5763 `NOT_PLANNED` redundant-tracker retirement. All three technical rows
+remain unchecked; the same-account AND scope-verified-credential union,
+availability/status seam, positive source credit, #5760 and actual
+account/credential/transport/resource custodians remain. #954's OPEN
+programme/P3 conditions are unchanged. This receipt authorizes no
+implementation, authentication/native test, provider mutation or custody
+transfer.

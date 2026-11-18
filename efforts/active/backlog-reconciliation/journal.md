@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-17 - Operation-credential receiving receipt and canonical keepers](journal/2026/11.17-operation-credential-receiving-receipt.md)
+
 - [2026-11-17 - Current create-credential qualification and whole receiving proposal](journal/2026/11.17-current-create-credential-qualification.md)
 
 - [2026-11-17 - Manager receipt and native/transport retentions](journal/2026/11.17-manager-receipt-and-native-transport-retentions.md)

@@ -6,14 +6,18 @@ import importlib.util
 import concurrent.futures
 from pathlib import Path
 import sys
+from types import ModuleType
+from typing import Any, Callable, Literal, TypeVar
 
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
+T = TypeVar("T")
 
 
-def _load(name, path):
+def _load(name: str, path: Path) -> ModuleType:
     spec = importlib.util.spec_from_file_location(name, path)
+    assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module
     spec.loader.exec_module(module)
@@ -31,29 +35,32 @@ _original = _load(
 
 
 @pytest.fixture(autouse=True)
-def canonical_source_identity(monkeypatch):
+def canonical_source_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setitem(sys.modules, "versioned_runtime_source", _identity)
     monkeypatch.setattr(concurrent.futures, "ThreadPoolExecutor", InlinePool)
+    monkeypatch.syspath_prepend(str(ROOT / "libs/versioned-runtime"))
     runtime = importlib.import_module("versioned_runtime")
-    monkeypatch.setattr(
-        runtime._runtime_component("versioned_runtime_source"), "ThreadPoolExecutor", InlinePool,
-    )
+    for source in (_identity, runtime._runtime_component("versioned_runtime_source")):
+        monkeypatch.setattr(
+            source._runtime()._runtime_component("versioned_runtime_fingerprint"),
+            "ThreadPoolExecutor", InlinePool,
+        )
 
 
 class InlinePool:
     """Keep canonical file framing and reads; substitute only thread execution."""
 
-    def __init__(self, **_options):
+    def __init__(self, **_options: object) -> None:
         pass
 
-    def __enter__(self):
+    def __enter__(self) -> "InlinePool":
         return self
 
-    def __exit__(self, *_error):
+    def __exit__(self, *_error: object) -> Literal[False]:
         return False
 
-    def submit(self, function, *args, **kwargs):
-        result = concurrent.futures.Future()
+    def submit(self, function: Callable[..., T], *args: Any, **kwargs: Any) -> concurrent.futures.Future[T]:
+        result: concurrent.futures.Future[T] = concurrent.futures.Future()
         try:
             result.set_result(function(*args, **kwargs))
         except BaseException as error:

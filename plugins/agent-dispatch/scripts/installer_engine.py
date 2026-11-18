@@ -1,7 +1,7 @@
 """Python-owned runtime construction, shared by independently shipped installers."""
 
 from __future__ import annotations
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 
 import importlib.util
 import codecs
@@ -16,13 +16,14 @@ import subprocess
 import sys
 import tempfile
 import time
-from contextlib import ExitStack, contextmanager
+from contextlib import AbstractContextManager, ExitStack, contextmanager
 from dataclasses import dataclass, replace
 from functools import partial
 from pathlib import Path
 from types import ModuleType
+from typing import Any, cast
 
-import tomllib
+tomllib = importlib.import_module("tomllib")
 import versioned_runtime as runtime
 import versioned_runtime_source as runtime_source
 from installer_dependency_policy import (
@@ -75,7 +76,7 @@ class ReadyCandidate:
     slot: Path
     payload_hash: str
     reused: bool
-    descriptor: int
+    descriptor: int | None
     frozen_plugin: Path
     extras: tuple[str, ...] = ()
     local_packages: tuple[str, ...] | None = None
@@ -93,7 +94,7 @@ def _construction_hash(
 ) -> str:
     source_hash = runtime.fingerprint_source(
         files, file_hashes=file_hashes,
-        **({"on_progress": on_progress} if on_progress is not None else {}),
+        **cast(dict[str, Any], {"on_progress": on_progress} if on_progress is not None else {}),
     )
     if not extras and local_packages is None:
         return source_hash
@@ -164,7 +165,7 @@ def _package_roots(plugin: Path) -> tuple[Path, ...]:
             child = root / path
             if child.is_file():
                 child = _contained(child, (root,))
-                if not _bundled_dbus_next(key, dependency, child):
+                if not cast(Callable[[str, str, Path], bool], _bundled_dbus_next)(key, dependency, child):
                     raise DependencyPolicyError("local UV artifacts cannot prove release age")
                 # The admitted artifact is already covered by its owning package's files.
                 continue
@@ -265,7 +266,7 @@ def freeze_inputs(
     for root in roots:
         if destination == root or destination.is_relative_to(root):
             raise ValueError(f"Frozen input destination is inside runtime source: {destination}")
-    progress = {"on_progress": on_progress} if on_progress is not None else {}
+    progress: dict[str, Any] = {"on_progress": on_progress} if on_progress is not None else {}
     files = _source_files(roots, **progress)
     Path(_native_retained_path(destination)).mkdir(parents=True, exist_ok=False)
     try:
@@ -354,7 +355,7 @@ def _procutil(inputs: FrozenInputs) -> ModuleType:
 @contextmanager
 def _retained_inputs(
     inputs: FrozenInputs, uv: Path, python: Path, *, refresh: bool, timeout: float = 180,
-):
+) -> Iterator[FrozenInputs]:
     with ExitStack() as owner:
         with _source_phase("retention", timeout, {}) as progress:
             def completed() -> None:
@@ -371,7 +372,7 @@ def _retained_inputs(
 def _retained_input_graph(
     inputs: FrozenInputs, uv: Path, python: Path, *, refresh: bool,
     on_progress: Callable[[], None],
-):
+) -> Iterator[FrozenInputs]:
     with retained_input_graph(
         inputs, uv, python, refresh=refresh, on_progress=on_progress,
         engine=sys.modules[__name__],
@@ -380,13 +381,13 @@ def _retained_input_graph(
 
 
 def _child(
-    argv: list[str], *, inputs: FrozenInputs, descriptor: int,
+    argv: list[str], *, inputs: FrozenInputs, descriptor: int | None,
     timeout: float, delays: tuple[float, ...] = (), transient: str = "",
     environment: dict[str, str] | None = None, cwd: Path | None = None,
     candidate: Path | None = None,
     on_progress: Callable[[], None] | None = None,
     allow_breakaway: bool = False,
-) -> subprocess.CompletedProcess:
+) -> subprocess.CompletedProcess[str]:
     env = dict(os.environ if environment is None else environment)
     if environment is None:
         for name in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV"):
@@ -408,7 +409,7 @@ def _child(
         except (AttributeError, io.UnsupportedOperation):
             output_fds = {}
 
-        def relay(name, data):
+        def relay(name: str, data: bytes) -> None:
             if not output_fds:
                 sys.stderr.write(decoders[name].decode(data))
                 sys.stderr.flush()
@@ -426,11 +427,11 @@ def _child(
                 on_output=relay if on_progress is not None or not output_fds else None,
                 output_fds=output_fds,
                 allow_breakaway=allow_breakaway,
-                **({
+                **cast(dict[str, Any], {
                     "runtime_root": candidate.parent.parent, "runtime_version": candidate.name,
                     "runtime_path": Path(runtime.__file__),
                 } if candidate is not None else {}),
-                **({"deadline": inputs.wheel_inputs.deadline} if inputs.wheel_inputs is not None else {}),
+                **cast(dict[str, Any], {"deadline": inputs.wheel_inputs.deadline} if inputs.wheel_inputs is not None else {}),
             )
             if inputs.wheel_inputs is not None:
                 _check_deadline(inputs.wheel_inputs.deadline)
@@ -452,7 +453,7 @@ def _child(
                 raise TimeoutError("closed wheel acquisition/assembly deadline would expire during retry")
             time.sleep(delays[attempt])
         except subprocess.TimeoutExpired as error:
-            diagnostic = f"{error.stdout or ''}{error.stderr or ''}"
+            diagnostic = str(error.stdout or "") + str(error.stderr or "")
             print(
                 f"Installer child timed out after {remaining}s:\n{diagnostic}",
                 file=sys.stderr, flush=True,
@@ -493,11 +494,11 @@ def _input_origins(inputs: FrozenInputs, slot: Path | None = None) -> dict[str, 
 
 def _verify_installed(
     inputs: FrozenInputs, slot: Path, python: Path | None, module: str,
-    descriptor: int, timeout: float, *, health_callable: str | None = None,
+    descriptor: int | None, timeout: float, *, health_callable: str | None = None,
     require_frozen_origin: bool = True,
     confirm_source_contents: bool = False,
 ) -> None:
-    def run(argv):
+    def run(argv: list[str]) -> subprocess.CompletedProcess[str]:
         return _child(
             argv, inputs=inputs, descriptor=descriptor, timeout=timeout, candidate=slot,
         )
@@ -519,7 +520,7 @@ def _verify_application_wheels(inputs: FrozenInputs, slot: Path) -> None:
 
 def _construct(
     inputs: FrozenInputs, slot: Path, uv: Path, base_python: Path,
-    descriptor: int, timeout: float, *, refresh: bool = False, nested_environment: bool = False,
+    descriptor: int | None, timeout: float, *, refresh: bool = False, nested_environment: bool = False,
 ) -> Path:
     uv = Path(_select_uv_executable(str(Path.cwd() / uv))).resolve(strict=True)
     base_python = base_python.resolve(strict=True)
@@ -598,13 +599,13 @@ def _construct(
             raise RuntimeError("Application staging did not produce its slot-local interpreter")
         inputs.wheel_inputs.verify()
         return python
-    environment = slot / ".venv" if nested_environment else slot
-    python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    environment_root = slot / ".venv" if nested_environment else slot
+    python = environment_root / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     native_python = Path(_native_retained_path(python))
-    configuration = Path(_native_retained_path(environment / "pyvenv.cfg"))
+    configuration = Path(_native_retained_path(environment_root / "pyvenv.cfg"))
     if not refresh or not native_python.is_file() or not configuration.is_file():
         _child(
-            [str(base_python), "-I", "-m", "venv", "--without-pip", "--copies", _native_retained_path(environment)],
+            [str(base_python), "-I", "-m", "venv", "--without-pip", "--copies", _native_retained_path(environment_root)],
             inputs=inputs, descriptor=descriptor, timeout=timeout, candidate=slot,
             delays=(0.75, 0.75) if os.name == "nt" else (),
             transient=r"Access is denied|failed to persist temporary file",
@@ -635,7 +636,7 @@ def _construct(
 
 def _prepare_installed(
     inputs: FrozenInputs, slot: Path, python: Path, callable_name: str,
-    data: dict, descriptor: int, timeout: float, payload: FrozenInputs,
+    data: dict[str, Any], descriptor: int | None, timeout: float, payload: FrozenInputs,
 ) -> None:
     module, separator, function = callable_name.partition(":")
     if not separator or not module or not function:
@@ -664,7 +665,7 @@ def _refuse(decision: str, version: str) -> None:
         raise RuntimeError(f"Unrecognized runtime admission for {version}: {decision}")
 
 
-def _assert_source_pin(plugin: Path, expected: dict | None) -> None:
+def _assert_source_pin(plugin: Path, expected: dict[str, Any] | None) -> None:
     if expected is None:
         return
     package_version = tomllib.loads(
@@ -679,10 +680,10 @@ def numbered_candidate(
     root: Path, version: str, *, plugin: Path, uv: Path, base_python: Path,
     health_module: str, health_callable: str | None = None,
     validate_candidate: Callable[[Path], None] | None = None,
-    construction_callable: str | None = None, construction_data: dict | None = None,
+    construction_callable: str | None = None, construction_data: dict[str, Any] | None = None,
     process_retention: bool = False,
     reuse_generations: bool = False,
-    expected_source_identity: dict | None = None,
+    expected_source_identity: dict[str, Any] | None = None,
     extras: tuple[str, ...] = (),
     local_packages: tuple[str, ...] | None = None,
     wheel_inputs: WheelInstallInputs | WheelReuseInputs | None = None,
@@ -691,7 +692,7 @@ def numbered_candidate(
     source_wheel_cache_root: Path | None = None,
     expected_payload_hash: str | None = None,
     wait_timeout: float = 180, child_timeout: float = 180,
-):
+) -> AbstractContextManager[ReadyCandidate]:
     """Construct or reuse an immutable identity; lifecycle owns cutover/governance.
 
     A prior freeze's expected payload hash avoids another initial scan, not
@@ -717,7 +718,7 @@ def numbered_candidate(
     )
 
 
-def dev_candidate(root: Path, *, owner: str, **kwargs):
+def dev_candidate(root: Path, *, owner: str, **kwargs: Any) -> AbstractContextManager[ReadyCandidate]:
     """Construct or reuse immutable source content under its explicit dev claim."""
     return _candidate(root, runtime.DEV_VERSION, dev_owner=owner, **kwargs)
 
@@ -738,10 +739,10 @@ def _candidate(
     root: Path, version: str, *, plugin: Path, uv: Path, base_python: Path,
     health_module: str, health_callable: str | None = None,
     validate_candidate: Callable[[Path], None] | None = None,
-    construction_callable: str | None = None, construction_data: dict | None = None,
+    construction_callable: str | None = None, construction_data: dict[str, Any] | None = None,
     process_retention: bool = False, dev_owner: str | None = None,
     reuse_generations: bool = False,
-    expected_source_identity: dict | None = None,
+    expected_source_identity: dict[str, Any] | None = None,
     extras: tuple[str, ...] = (),
     local_packages: tuple[str, ...] | None = None,
     wheel_inputs: WheelInstallInputs | WheelReuseInputs | None = None,
@@ -750,7 +751,7 @@ def _candidate(
     source_wheel_cache_root: Path | None = None,
     expected_payload_hash: str | None = None,
     wait_timeout: float = 180, child_timeout: float = 180,
-):
+) -> Iterator[ReadyCandidate]:
     if expected_payload_hash is not None and not re.fullmatch(r"[0-9a-f]{64}", expected_payload_hash):
         raise ValueError("Expected runtime payload hash must be a full source SHA256")
     root = root.resolve()
@@ -764,7 +765,7 @@ def _candidate(
         raise ValueError("Application construction requires immutable inspected wheel inputs")
     _assert_source_pin(plugin, expected_source_identity)
     extras = _selected_extras(plugin, extras)
-    def installed_python(slot):
+    def installed_python(slot: Path) -> Path | None:
         python = runtime.slot_python(root, slot.name)
         if nested_environment and (
             python is None or python.parent.parent != slot / ".venv"
@@ -788,9 +789,9 @@ def _candidate(
         ):
             raise ValueError("Existing wheel evidence requires its exact immutable generation")
         included = {_package_name(package) for package in packages}
-        selected = set(local_packages) if local_packages is not None else included
+        selected_packages = set(local_packages) if local_packages is not None else included
         installed = {name for name, _version, _filename, _digest in wheel_inputs.distributions}
-        if not selected <= installed or (included - selected) & installed:
+        if not selected_packages <= installed or (included - selected_packages) & installed:
             raise ValueError("Inspected wheels differ from the selected local dependency graph")
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
     (root / ".installer-inputs").mkdir(parents=True, exist_ok=True)
@@ -889,7 +890,7 @@ def _candidate(
                         inputs, uv, python, refresh=False, timeout=child_timeout,
                     ))
                     if wheel_inputs is None:
-                        def run_source_build(argv, **options):
+                        def run_source_build(argv: list[str], **options: Any) -> subprocess.CompletedProcess[str]:
                             return _child(
                                 argv, inputs=inputs, descriptor=descriptor,
                                 timeout=min(child_timeout, options.pop("timeout", child_timeout)),
@@ -928,6 +929,7 @@ def _candidate(
                         for name in (
                             "runtime_launcher.py", "versioned_runtime.py",
                             "versioned_runtime_leases.py", "versioned_runtime_source.py",
+                            "versioned_runtime_identity.py", "versioned_runtime_fingerprint.py",
                             "versioned_runtime_construction.py",
                             "versioned_runtime_publication.py",
                             "versioned_runtime_cache.py", "daemon_instance_runtime.pyz",

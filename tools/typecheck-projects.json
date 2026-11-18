@@ -350,6 +350,7 @@
     },
     {
       "name": "lib-versioned-runtime",
+      "requirements": "tools/typecheck-build-requirements.txt",
       "include": [
         "libs/versioned-runtime"
       ],
@@ -429,12 +430,12 @@
     },
     {
       "name": "agent-containers",
+      "requirements": "tools/typecheck-build-requirements.txt",
       "include": [
         "plugins/agent-containers"
       ],
       "exclude": [],
-      "level": "pending",
-      "requirements": "tools/typecheck-yaml-requirements.txt"
+      "level": "pending"
     },
     {
       "name": "agent-dispatch",
@@ -526,7 +527,8 @@
       ],
       "import_roots": [
         "fleet-manager/tests",
-        "plugins/agent-vault"
+        "plugins/agent-vault",
+        "plugins/agent-vault/scripts"
       ],
       "exclude": [],
       "level": "pending",
@@ -534,6 +536,7 @@
     },
     {
       "name": "agent-worktrees",
+      "requirements": "tools/typecheck-build-requirements.txt",
       "include": [
         "plugins/agent-worktrees"
       ],
@@ -560,8 +563,7 @@
         }
       ],
       "exclude": [],
-      "level": "pending",
-      "requirements": "tools/typecheck-yaml-requirements.txt"
+      "level": "pending"
     },
     {
       "name": "ai-attribution",
@@ -750,7 +752,7 @@
         "worktree-manager/tests",
         "worktree-manager/tests/native"
       ],
-      "requirements": "tools/typecheck-runner-requirements.txt"
+      "requirements": "tools/typecheck-build-requirements.txt"
     }
   ]
 }
