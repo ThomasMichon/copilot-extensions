@@ -365,7 +365,9 @@ def test_gateway_native_groups_preserve_the_complete_disjoint_selection(platform
     assert normal["if"] == "${{ inputs.pr_artifacts }}"
     assert normal["runs-on"] == ("ubuntu-latest" if platform == "linux" else "windows-latest")
     assert normal["timeout-minutes"] == 6
-    assert normal["needs"] == "gateway-continuity-application-" + platform
+    assert normal["needs"] == [
+        "gateway-continuity-application-" + platform, "pr-artifacts-" + platform,
+    ]
     assert not normal.get("continue-on-error")
     normal_steps = [step for step in normal["steps"] if "run" in step]
     source = normal_steps[0]
@@ -383,6 +385,14 @@ def test_gateway_native_groups_preserve_the_complete_disjoint_selection(platform
          "-k", "normal_ssh_setup or setup_status"],
     ]
     assert not any(step.get("continue-on-error") for step in normal_steps)
+    controls = [
+        step for step in workflow["jobs"]["pr-artifacts-" + platform]["steps"]
+        if "tests/test_repository_continuity.py" in step.get("run", "")
+    ]
+    assert len(controls) == 1 and not controls[0].get("if")
+    preparation_controls = normal_steps[-2]
+    assert preparation_controls["if"] == "${{ !inputs.pr_artifacts }}"
+    assert preparation_controls["run"] == controls[0]["run"]
     lifecycle = normal_steps[-1]
     assert lifecycle["shell"] == "python"
     assert lifecycle["env"]["COPILOT_EXTENSIONS_SSH_SETUP_NATIVE"] == "1"

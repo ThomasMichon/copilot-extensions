@@ -1789,6 +1789,13 @@ jobs:
         env:
           PYTEST_ADDOPTS: "-k regular_wheel_application_installs_an_inert_client"
         run: python tools/run-standalone-tests.py fleet-manager --prepare --timeout 120
+      - name: Repository source admission and pinned SSH setup controls
+        env:
+          PYTEST_ADDOPTS: "-vv --durations=20"
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees
+          --test-file tests/test_repository_continuity.py
+          -k "normal_ssh_setup or setup_status"
 
   pr-artifacts-windows:
     if: ${{ inputs.pr_artifacts }}
@@ -1881,7 +1888,7 @@ jobs:
 
   gateway-normal-setup-linux:
     if: ${{ inputs.pr_artifacts }}
-    needs: gateway-continuity-application-linux
+    needs: [gateway-continuity-application-linux, pr-artifacts-linux]
     name: Normal selected SSH setup (Linux)
     runs-on: ubuntu-latest
     timeout-minutes: 6
@@ -1920,6 +1927,7 @@ jobs:
       - name: Prepare the declared Manager dependency support
         run: python tools/run-plugin-tests.py worktree-manager --prepare-only
       - name: Repository source admission and pinned SSH setup controls
+        if: ${{ !inputs.pr_artifacts }}
         env:
           PYTEST_ADDOPTS: "-vv --durations=20"
         run: >-
@@ -2002,7 +2010,7 @@ jobs:
 
   gateway-normal-setup-windows:
     if: ${{ inputs.pr_artifacts }}
-    needs: gateway-continuity-application-windows
+    needs: [gateway-continuity-application-windows, pr-artifacts-windows]
     name: Normal selected SSH setup (Windows)
     runs-on: windows-latest
     timeout-minutes: 6

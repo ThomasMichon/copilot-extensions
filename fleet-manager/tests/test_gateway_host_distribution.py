@@ -375,6 +375,7 @@ def test_original_engine_owner_runs_its_declared_lifecycle_in_private_home(
     environment.update(
         HOME=str(home), USERPROFILE=str(home), AGENT_HOME=str(home),
         LOCALAPPDATA=str(home / "local"), APPDATA=str(home / "roaming"),
+        COPILOT_HOME=str(home / ".copilot"),
         COPILOT_PLUGIN_STAGED_FROM=str(owner),
         COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT=str(project),
     )
@@ -385,10 +386,22 @@ def test_original_engine_owner_runs_its_declared_lifecycle_in_private_home(
         "--payload-root", str(owner), "--source-payload-root", str(owner),
         "--plugin-id", "agent-worktrees", "--legacy-root", str(home / ".agent-worktrees"),
         "--project-root", str(project), "--run-lifecycle", "--",
-        sys.executable, "-I", "-B", "-c", "print('owned-fixture')",
+        sys.executable, "-I", "-B", "-c",
+        "import json,os,sys;from pathlib import Path;"
+        "owner=Path(os.environ['COPILOT_PLUGIN_STAGED_FROM']);"
+        "sys.path.insert(0,str(owner/'scripts'));import command_binding as binding;"
+        "result=binding.write_legacy_manifest(binding._load_primitive(owner),"
+        "{'schema_version':3,'service':'agent-worktrees','source':{}},"
+        "payload_root=owner,plugin_id='agent-worktrees',"
+        "legacy_root=Path.home()/'.agent-worktrees',"
+        "project_root=Path(os.environ['COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT']));"
+        "assert result['status']=='published',result;print('owned-fixture')",
     ], cwd=project, env=environment, timeout=60)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "owned-fixture" in result.stdout
+    manifest = json.loads((home / ".agent-worktrees" / "deploy-manifest.json").read_text())
+    assert manifest["commandLifecycle"]["state"] == "complete"
+    assert Path(manifest["commandBinding"]["payloadRoot"]) == owner
 
 
 @pytest.mark.parametrize(("preparation_only", "prebuild_code"), [

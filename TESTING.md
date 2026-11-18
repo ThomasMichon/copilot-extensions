@@ -2044,10 +2044,12 @@ in its own sequential 180-second runner, separate from the independent consumer
 controls. No lifecycle sequence is split; the six-minute job limit and peak job
 concurrency are unchanged.
 
-Its further dependent normal-setup jobs prepare the engine's declared test
-dependencies and run the repository continuity module's `normal_ssh_setup or
-setup_status` controls, including real Git source qualification and required
-request-pin capability. They then run `test_ssh_setup.py` and the whole
+Its first-party artifact jobs also run the repository continuity module's
+`normal_ssh_setup or setup_status` controls, including real Git source
+qualification and required request-pin capability. Each further dependent
+normal-setup job requires both its platform's artifact controls and explicit
+continuity case to succeed, prepares the declared engine/Manager dependencies,
+and runs `test_ssh_setup.py` and the whole
 `test_repository_ssh_setup_installed.py` sequence under the same 180-second
 runner/six-minute job limits. The latter builds the engine wheel with its
 packaged Source API and drives the actual Manager/engine handoff into synthetic
@@ -2060,8 +2062,12 @@ coverage. Local helper/ordering controls and a packaged-API refusal probe do
 not substitute for their actual native outcomes.
 The engine application installer runs through the separately materialized
 original payload owner's declared command-binding lifecycle entry, with the
-selected Source pin and fixture repository context. Prepared application Source
-is never substituted as its own command owner.
+selected Source pin and fixture repository context. The fixture's isolated
+Copilot home declares the copied owner's actual marketplace, and its control
+requires ownership publication, not merely a successful child command.
+Prepared application Source is never substituted as its own command owner.
+Preparation-only jobs retain the source controls locally; normal lifecycle jobs
+do not repeat that independently gated work inside their unchanged time budget.
 Direct Git Sources without Main composition use the existing
 `install_source.py --install-application` receiver; fixture code must not invent
 Main metadata to satisfy a different update-planner contract. Source preparation

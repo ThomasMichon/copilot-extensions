@@ -45,6 +45,13 @@ def original_engine_owner(home: Path) -> Path:
         source, owner, ignore=shutil.ignore_patterns("__pycache__", "build", "dist", "*.egg-info"),
     )
     materialize_consumer(PROJECT.parent, source, owner, deadline=time.monotonic() + 60)
+    (home / ".copilot" / "settings.json").write_text(json.dumps({
+        "extraKnownMarketplaces": {
+            "copilot-extensions": {
+                "source": {"source": "github", "repo": "ThomasMichon/copilot-extensions"},
+            },
+        },
+    }), encoding="utf-8")
     return owner.resolve(strict=True)
 
 

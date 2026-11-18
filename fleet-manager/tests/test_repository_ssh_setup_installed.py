@@ -143,6 +143,7 @@ def test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop(
     clean.update(
         HOME=str(home), USERPROFILE=str(home), AGENT_HOME=str(home),
         LOCALAPPDATA=str(home / "local"), APPDATA=str(home / "roaming"),
+        COPILOT_HOME=str(home / ".copilot"),
         UV_OFFLINE="1", UV_PYTHON=sys.executable,
         UV_PYTHON_DOWNLOADS="never", UV_CACHE_DIR=str(tmp_path / "uv-cache"),
         FLEET_MANAGER_HOME=str(root), AGENT_WORKTREES_STATUS_MONITOR="0",
