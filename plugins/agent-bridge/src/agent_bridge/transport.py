@@ -725,15 +725,17 @@ async def _stage_windows_launch(manager, target: SpawnTarget, script: str) -> st
     shell = (target.ssh_shell or "bash").lower()
     name = f"agent-bridge-launch-{uuid.uuid4().hex}.ps1"
     path = f"$path = Join-Path ([IO.Path]::GetTempPath()) '{name}'; "
+    # A raw stdin stream never reaches EOF through Windows OpenSSH, so read the
+    # text reader to its end; base64 keeps the payload independent of the
+    # receiver's console input code page.
     writer = (
         "$ErrorActionPreference = 'Stop'; " + path
-        + "$buffer = New-Object IO.MemoryStream; "
-        "[Console]::OpenStandardInput().CopyTo($buffer); "
-        "[IO.File]::WriteAllBytes($path, $buffer.ToArray())"
+        + "$payload = [Console]::In.ReadToEnd(); "
+        "[IO.File]::WriteAllBytes($path, [Convert]::FromBase64String($payload.Trim()))"
     )
     result = await manager.exec_command(
         target.host, _encoded_powershell(shell, writer),
-        input_bytes=script.encode("utf-8"), timeout=60,
+        input_bytes=base64.b64encode(script.encode("utf-8")), timeout=60,
     )
     if result.timed_out or result.exit_code:
         detail = "timed out" if result.timed_out else f"exit {result.exit_code}"
