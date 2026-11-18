@@ -759,7 +759,10 @@ outage-expiry defect remains unfixed.
   subscriber-specific filters/deadlines, legitimate terminal transitions,
   unknown-baseline handling and ordinary synchronous waits. Keep removal and
   outcomes under existing registry/persistence ownership, with no duplicate
-  terminal outcomes or departed pollers. Do not reopen #6019's delivered repair.
+  terminal outcomes or departed pollers. Persist expiry removal/outcome before
+  scheduling notifications. Definite write failure prevents scheduling;
+  uncertain durability after replacement follows the existing owner's recovery
+  path without adding legacy replay. Do not reopen #6019's delivered repair.
 - [ ] **P5947-2:** Expose bounded, honest, inspectable failure/unknown outcomes
   for failed or indeterminate attempts on the retained legacy callback path.
   Successful callback completion remains a positive control, not a required
@@ -767,8 +770,9 @@ outage-expiry defect remains unfixed.
   Generation or attempt is not delivery
   acknowledgement. Preserve its one-attempt best-effort wire compatibility:
   no reliable-legacy-delivery promise or forced migration. Preserve the
-  distinct acknowledged contract's durable pending failures, bounded retry,
-  immutable event identity and replay semantics.
+  distinct acknowledged contract's durable pending failures, retry with bounded
+  backoff rather than an attempt-count cap, immutable event identity and replay
+  semantics. Attempt count alone must not discard a pending acknowledged event.
 - [ ] **P5947-3:** Capture each registering caller's working directory, durably
   retain it with that subscription and execute its callback with that explicit
   cwd. Define the fallback/refusal when the directory no longer exists.
@@ -776,33 +780,43 @@ outage-expiry defect remains unfixed.
   whichever caller started the daemon.
 - [ ] **P5947-4:** Negotiate the cwd extension through the actual owner health
   capability before sending new fields to a strict existing acknowledged
-  owner. Preserve strict old-owner parsing, legacy compatibility,
+  owner. Use a documented, tested legacy baseline only when its semantics
+  suffice; otherwise report required subscriber cwd as unsupported before
+  registration, rather than silently dropping it. Preserve strict old-owner
+  parsing, legacy compatibility,
   acknowledgement/replay identity, bounded owned-child lifetime and
-  secret-free persistence. Document absolute callback paths as the interim
-  requirement; an attributable executable alone does not resolve a relative
-  callback script.
+  secret-free persistence. Put the interim absolute-callback-path requirement
+  in callback registration documentation; an attributable executable alone
+  does not resolve a relative callback script.
 
 #### Local callback Validation
 
 - [ ] **V5947-1:** Cover sustained provider outage, recovery, unknown baseline,
   unchanged/terminal precedence, filters and deadlines. Verify exactly one
   terminal outcome, correct poller retirement and preserved ordinary
-  synchronous waits. Subscription deadlines never expire resource/worktree claims.
+  synchronous waits. Verify persistence precedes scheduling, definite write
+  failure prevents notification scheduling, and uncertain post-replacement
+  durability follows the existing owner path without introducing legacy replay.
+  Subscription deadlines never expire resource/worktree claims.
 - [ ] **V5947-2:** Through the actual delivery owner, exercise applicable legacy
   success, exception, nonzero and timeout cases. Use successful callback
   completion as a positive control; require honest inspectable failure/unknown
   results for failed or indeterminate attempts, not successful ones. Preserve
   the one-attempt best-effort wire without fabricated acknowledgement.
-  Verify acknowledged failures remain durably
-  pending/retryable with original event/replay identity.
+  Verify acknowledged failures remain durably pending/retryable with original
+  event/replay identity and bounded backoff, not discarded at an attempt-count
+  ceiling.
 - [ ] **V5947-3:** Use separate subscribers with caller-relative callback paths
   and different registration directories while the daemon uses its state cwd.
   Cover persistence/restart, missing directories and the selected
   fallback/refusal. Assert each callback's actual cwd, not only schema acceptance.
 - [ ] **V5947-4:** Cover actual new/old owner capability negotiation, strict
   unknown-field rejection, legacy/acknowledged compatibility, original replay
-  identity, bounded child cleanup and secret-free durable metadata. Preserve
-  finite source/consumer qualification and existing operational holds; add no
+  identity, bounded child cleanup and secret-free durable metadata. Cover
+  the sufficient documented legacy-baseline positive control and reject a
+  required unsupported subscriber cwd before registration without silently
+  dropping the field. Verify the interim registration-documentation warning.
+  Preserve finite source/consumer qualification and existing operational holds; add no
   native-all-host, installed-rollout or fleet prerequisite.
 
 ### Fleet-hosted PR service expansion
@@ -1685,7 +1699,9 @@ All items below are **agent-recommended** acceptance checks.
   persistence and delivery owners: preserve credited #6019 outage-independent
   expiry, filters/deadlines, unknown baseline, recovery, unchanged/terminal
   precedence, ordinary waits, exactly one terminal outcome and correct poller
-  retirement. Subscription expiry cannot release resource/worktree claims.
+  retirement. Verify persistence before scheduling, definite write-failure
+  refusal and existing-owner handling of uncertain replacement durability
+  without legacy replay. Subscription expiry cannot release resource/worktree claims.
 - [ ] **G5947-2:** Resolve P5947-2/V5947-2 through actual legacy and acknowledged
   delivery consumers. Successful legacy callback completion is a positive
   control, not a required failure/unknown outcome or consumer acknowledgement.
@@ -1693,7 +1709,8 @@ All items below are **agent-recommended** acceptance checks.
   bounded truthful failure/unknown evidence without fabricated acknowledgement
   or guaranteed delivery; preserve one-attempt best-effort compatibility.
   Acknowledged failures remain durably pending/retryable with immutable
-  original event and replay identity.
+  original event/replay identity and bounded backoff, not an attempt-count cap
+  that discards the event.
 - [ ] **G5947-3:** Resolve P5947-3/V5947-3 through persisted subscriptions and
   actual callback execution: independent registration directories,
   caller-relative paths, daemon-neutral cwd, restart and missing-directory
@@ -1701,8 +1718,10 @@ All items below are **agent-recommended** acceptance checks.
   insufficient.
 - [ ] **G5947-4:** Resolve P5947-4/V5947-4 through actual owner health negotiation
   and strict old/new peers, preserving legacy wire behavior, acknowledged
-  identity, bounded owned-child cleanup and secret-free metadata. Retain the
-  interim absolute-path guidance, current domain/resource owners, real M1
+  identity, bounded owned-child cleanup and secret-free metadata. Verify
+  sufficient documented legacy-baseline use versus required-cwd refusal before
+  registration, without silent field dropping. Retain the interim absolute-path
+  warning in registration documentation, current domain/resource owners, real M1
   stage-5 custody/qualification conditions and operational holds without adding
   a generic ACK or whole-parent native/installed/fleet gate to this finite lane.
 
