@@ -74,6 +74,16 @@ def selected_version(root: Path, runtime: ModuleType) -> str | None:
     return version if runtime.slot_python(root, version) == python else None
 
 
+def selector_snapshot(root: Path) -> dict[str, bytes | None]:
+    result: dict[str, bytes | None] = {}
+    for name in ("current-version", "last-known-good"):
+        try:
+            result[name] = (root / name).read_bytes()
+        except FileNotFoundError:
+            result[name] = None
+    return result
+
+
 def installed_identity(slot: Path, runtime: ModuleType, refusal: type[Exception]) -> dict[str, Any]:
     python = runtime.slot_python(slot.parent.parent, slot.name)
     if python is None:
@@ -414,7 +424,6 @@ def _selected_snapshot_current(args: argparse.Namespace) -> bool:
     if absent:
         return False
     assert selected is not None
-    payload: Path = args.payload
     try:
         if (
             not stat.S_ISREG(info.st_mode)
@@ -422,9 +431,9 @@ def _selected_snapshot_current(args: argparse.Namespace) -> bool:
         ):
             return False
         current = Path(pointer.read_text(encoding="utf-8-sig").strip())
-        if not current.is_absolute() or not cast(Path, selected).is_absolute():
+        if not current.is_absolute() or not selected.is_absolute():
             return False
-        return current.resolve(strict=True) == cast(Path, selected).resolve(strict=True) == cast(Path, args.payload).resolve(strict=True)
+        return current.resolve(strict=True) == selected.resolve(strict=True) == cast(Path, args.payload).resolve(strict=True)
     except (OSError, RuntimeError, ValueError):
         return False
 
@@ -554,7 +563,7 @@ def _foreground(args: argparse.Namespace, driver: ModuleType) -> int:
     result = cast("Request", driver.wait(request.id, output=sys.stderr))
     if result.state != "completed" or result.exit_code is None:
         raise RuntimeError(f"Native Worktrees installation did not complete: {result.state}")
-    return cast(int, result.exit_code)
+    return result.exit_code
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -37,6 +37,10 @@ import runtime_input_verifier as verification
 from runtime_install_profiles import runtime_profile_policy
 from runtime_install_governance import Governance, InstallationRefused
 import runtime_install_governance as governance_types
+__all__ = [
+    "engine", "runtime", "runtime_source", "helper_publication", "install_driver",
+    "Governance", "InstallationRefused", "install", "settle_candidate", "main",
+]
 
 
 def helper_publication_plan(path: Path, digest: str, *, prepare_only: bool = False) -> dict[str, Any]:
@@ -281,13 +285,7 @@ def _selected(root: Path) -> str | None:
 
 
 def _selector_snapshot(root: Path) -> dict[str, bytes | None]:
-    result: dict[str, bytes | None] = {}
-    for name in ("current-version", "last-known-good"):
-        try:
-            result[name] = (root / name).read_bytes()
-        except FileNotFoundError:
-            result[name] = None
-    return result
+    return install_driver.selector_snapshot(root)
 
 
 def _restore_selectors(root: Path, version: str, snapshot: dict[str, bytes | None]) -> None:
@@ -518,12 +516,12 @@ def install(
                 )
             import runtime_install_modes as modes
 
-            return cast(dict[str, Any], modes.run(
+            return modes.run(
                 root, plugin, payload=payload, uv=uv, base_python=base_python, mode="repair",
                 wait_timeout=wait_timeout, child_timeout=child_timeout,
                 expected_source_identity=runtime_source.manifest_fields(source_identity),
                 frontend=frontend, recover_adopted_manager=recover_adopted_manager,
-            ))
+            )
         version = candidate.slot.name
         print(
             f"Runtime {version}: candidate healthy (reused={candidate.reused}); "

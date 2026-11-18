@@ -1,12 +1,6 @@
 from __future__ import annotations
 
-from work_coalescing_singleton import client as wcs_client
-import platform
-from agent_worktrees import status_monitor_recovery_contract as guarded_recovery
-from agent_worktrees import locks
-
-from types import ModuleType
-from typing import Any, overload
+from typing import overload
 
 import importlib.util
 import builtins
@@ -26,6 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from types import ModuleType
 from typing import TYPE_CHECKING, Any, NoReturn, Protocol, TypeVar, TypedDict, cast
+from unittest.mock import Mock
 
 import pytest
 from agent_procutil import no_window_kwargs
@@ -1208,7 +1203,6 @@ def test_install_source_cli_refuses_invalid_input_timeout(driver: ModuleType, tm
 def test_install_source_cli_rejects_input_timeout_without_source(
     driver: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:
-    from unittest.mock import Mock
 
     install = Mock(return_value={})
     monkeypatch.setattr(driver, "install", install)
@@ -1882,7 +1876,6 @@ def test_interrupted_marked_committed_witness_is_never_rolled_back(
 
 def test_restart_spawn_returns_the_real_process_handle_to_its_owner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from types import SimpleNamespace
-    from unittest.mock import Mock
     from agent_worktrees import status_monitor_cutover, status_monitor_runtime as smr
 
     handle = object()
