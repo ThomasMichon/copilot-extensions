@@ -19,9 +19,6 @@ models and returns per-model ranked results plus a fused ranking.
 from __future__ import annotations
 
 import logging
-import os
-import re
-from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ParamSpec, Protocol, TypeVar, cast
@@ -33,6 +30,16 @@ from agent_index.store.item_repr import ItemRepresentation as ItemRepresentation
 from agent_index.store.item_repr import item_content_hash as item_content_hash
 from agent_index.store.item_repr import pool_vectors as pool_vectors
 from agent_index.store.model_item_representation import _ItemRepresentationMixin
+from agent_index.store.rank_fusion import (
+    _DEFAULT_FTS_WEIGHT as _DEFAULT_FTS_WEIGHT,
+    _DEFAULT_VECTOR_WEIGHT as _DEFAULT_VECTOR_WEIGHT,
+    _EXACT_MATCH_BONUS as _EXACT_MATCH_BONUS,
+    _EXACT_MATCH_MAX_QUERY_LEN as _EXACT_MATCH_MAX_QUERY_LEN,
+    _exact_phrase_bonus as _exact_phrase_bonus,
+    _multi_list_rrf as _multi_list_rrf,
+    _reciprocal_rank_fusion as _reciprocal_rank_fusion,
+    _RRF_K as _RRF_K,
+)
 from agent_index.store.repo_filter import repo_matches
 from agent_index.store.result_filters import (
     SearchFilters,
@@ -69,61 +76,6 @@ source_read: _SourceGuard = _source_read
 source_fts_read: _SourceGuard = _source_fts_read
 source_write: _SourceGuard = _source_write
 
-# RRF constant - higher values flatten rank differences
-_RRF_K = 60
-
-# Default weights for hybrid search fusion.
-#
-# agent-index's primary goal is semantic ("search by meaning") search, supplemented
-# by keyword. The vector signal must therefore outweigh BM25/FTS: otherwise a
-# document that merely contains the query string verbatim (e.g. a session log
-# that quotes the query) outranks the authoritative semantic match (#880).
-# Vector is weighted above FTS so meaning wins and lexical matches only break
-# ties / surface exact-token hits. Tunable via env for ops experimentation.
-_DEFAULT_VECTOR_WEIGHT = float(os.environ.get("AGENT_INDEX_VECTOR_WEIGHT", "2.0"))
-_DEFAULT_FTS_WEIGHT = float(os.environ.get("AGENT_INDEX_FTS_WEIGHT", "1.0"))
-
-# Exact-keyword rescue (#890). The blanket vector>FTS weight flip (#880) fixed
-# query-echo but can over-correct: a vector candidate at rank ~50
-# (2/(60+51) = 0.018) can out-rank a *top* FTS-only exact hit at rank 1
-# (1/(60+1) = 0.016), burying exact lexical matches that have no strong semantic
-# signal -- issue IDs, filenames, symbols, config keys. When such an
-# identifier-like query appears verbatim (token-bounded) in a result, add a
-# bonus in units of one top-rank RRF position so the hit isn't out-ranked by a
-# merely mid-rank vector candidate. Deliberately scoped to *single-token*
-# queries: multi-word phrases are where query-echo session logs live (#880), so
-# boosting a verbatim phrase there would re-break that fix. `0` disables.
-_EXACT_MATCH_BONUS = float(os.environ.get("AGENT_INDEX_EXACT_MATCH_BONUS", "1.0"))
-# Skip the verbatim check for long queries -- a whole-phrase match by a long NL
-# question is vanishingly rare and would only add cost/noise.
-_EXACT_MATCH_MAX_QUERY_LEN = 80
-
-
-def _exact_phrase_bonus(query: str, result: SearchResult, bonus: float) -> float:
-    """RRF score bonus when an *identifier-like* query appears verbatim
-    (token-bounded) in a result's file path or content -- the exact-keyword
-    rescue for #890.
-
-    Only **single-token** queries are rescued (issue IDs, filenames, symbols,
-    config keys, dotted/underscored identifiers). Multi-word queries are
-    deliberately excluded: a natural-language phrase quoted verbatim is exactly
-    the query-echo session log #880 pushed *down*, so boosting it here would
-    re-introduce that bug. Returns one top-rank RRF unit
-    (``bonus / (_RRF_K + 1)``) on a match, so an exact hit gains roughly the
-    ground a rank-1 position would; ``0.0`` otherwise.
-    """
-    if bonus <= 0:
-        return 0.0
-    needle = query.strip().lower()
-    if len(needle) < 3 or len(needle) > _EXACT_MATCH_MAX_QUERY_LEN:
-        return 0.0
-    if len(needle.split()) != 1:  # multi-word -> query-echo territory, skip
-        return 0.0
-    haystack = f"{result.file_path}\n{result.content}".lower()
-    if re.search(rf"(?<!\w){re.escape(needle)}(?!\w)", haystack):
-        return bonus / (_RRF_K + 1)
-    return 0.0
-
 # Vector results are post-filtered by source/repo, so when such a filter is
 # set we widen the candidate pool to avoid a small repo's matches never
 # entering the globally-ranked top-N.
@@ -152,9 +104,11 @@ class MultiModelStore(_ItemRepresentationMixin):
         content_table: str = "chunks",
         content_store_type: type[ContentStore] = ContentStore,
         repo_matcher: Callable[[str, str], bool] = repo_matches,
+        exact_match_bonus: float = _EXACT_MATCH_BONUS,
     ) -> None:
         self._content = content_store_type(db_path, table_name=content_table)
         self._repo_matcher = repo_matcher
+        self._exact_match_bonus = exact_match_bonus
         self._source_domain = self._content._source_domain
         self._vector_tables: dict[str, VectorTable] = {}
         self._db_path = db_path
@@ -618,6 +572,7 @@ class MultiModelStore(_ItemRepresentationMixin):
             vector_weight=vector_weight,
             fts_weight=fts_weight,
             query=query_text,
+            exact_match_bonus=self._exact_match_bonus,
         )
         deduped = _deduplicate_by_content(merged)
         normalized = _normalize_scores(deduped)
@@ -697,7 +652,10 @@ class MultiModelStore(_ItemRepresentationMixin):
             normalized = _normalize_scores(deduped)
             return normalized[:limit]
 
-        fused = _multi_list_rrf(result_lists, weights=weights, query=query_text)
+        fused = _multi_list_rrf(
+            result_lists, weights=weights, query=query_text,
+            exact_match_bonus=self._exact_match_bonus,
+        )
         deduped = _deduplicate_by_content(fused)
         normalized = _normalize_scores(deduped)
         return normalized[:limit]
@@ -900,96 +858,6 @@ def _fts_to_results(
             metadata=getattr(rec, "metadata", {}),
         ))
     return results
-
-
-def _reciprocal_rank_fusion(
-    vector_results: list[SearchResult],
-    fts_results: list[SearchResult],
-    *,
-    vector_weight: float = _DEFAULT_VECTOR_WEIGHT,
-    fts_weight: float = _DEFAULT_FTS_WEIGHT,
-    query: str | None = None,
-) -> list[SearchResult]:
-    """Merge two ranked lists using weighted Reciprocal Rank Fusion."""
-    scores: dict[str, float] = defaultdict(float)
-    results_by_id: dict[str, SearchResult] = {}
-
-    for rank, r in enumerate(vector_results):
-        scores[r.chunk_id] += vector_weight / (_RRF_K + rank + 1)
-        results_by_id[r.chunk_id] = r
-
-    for rank, r in enumerate(fts_results):
-        scores[r.chunk_id] += fts_weight / (_RRF_K + rank + 1)
-        if r.chunk_id not in results_by_id:
-            results_by_id[r.chunk_id] = r
-
-    if query and _EXACT_MATCH_BONUS > 0:
-        for cid, r in results_by_id.items():
-            scores[cid] += _exact_phrase_bonus(query, r, _EXACT_MATCH_BONUS)
-
-    ranked_ids = sorted(scores, key=scores.__getitem__, reverse=True)
-
-    return [
-        SearchResult(
-            chunk_id=r.chunk_id,
-            score=scores[r.chunk_id],
-            source=r.source,
-            file_path=r.file_path,
-            chunk_type=r.chunk_type,
-            language=r.language,
-            content=r.content,
-            content_hash=r.content_hash,
-            line_start=r.line_start,
-            line_end=r.line_end,
-            metadata=r.metadata,
-        )
-        for cid in ranked_ids
-        if (r := results_by_id[cid])
-    ]
-
-
-def _multi_list_rrf(
-    result_lists: list[list[SearchResult]],
-    *,
-    weights: list[float] | None = None,
-    query: str | None = None,
-) -> list[SearchResult]:
-    """Weighted Reciprocal Rank Fusion across N ranked lists."""
-    if weights is None:
-        weights = [1.0] * len(result_lists)
-
-    scores: dict[str, float] = defaultdict(float)
-    results_by_id: dict[str, SearchResult] = {}
-
-    for result_list, weight in zip(result_lists, weights, strict=False):
-        for rank, r in enumerate(result_list):
-            scores[r.chunk_id] += weight / (_RRF_K + rank + 1)
-            if r.chunk_id not in results_by_id:
-                results_by_id[r.chunk_id] = r
-
-    if query and _EXACT_MATCH_BONUS > 0:
-        for cid, r in results_by_id.items():
-            scores[cid] += _exact_phrase_bonus(query, r, _EXACT_MATCH_BONUS)
-
-    ranked_ids = sorted(scores, key=scores.__getitem__, reverse=True)
-
-    return [
-        SearchResult(
-            chunk_id=r.chunk_id,
-            score=scores[r.chunk_id],
-            source=r.source,
-            file_path=r.file_path,
-            chunk_type=r.chunk_type,
-            language=r.language,
-            content=r.content,
-            content_hash=r.content_hash,
-            line_start=r.line_start,
-            line_end=r.line_end,
-            metadata=r.metadata,
-        )
-        for cid in ranked_ids
-        if (r := results_by_id[cid])
-    ]
 
 
 def _deduplicate_by_content(results: list[SearchResult]) -> list[SearchResult]:

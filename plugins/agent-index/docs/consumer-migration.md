@@ -196,6 +196,22 @@ wildcard, quote, backslash, metadata and independent-default-instance controls.
 Publish this expanded provider before migrating a consumer; an older provider's
 unknown-keyword error is not permission to silently use the wrong repo policy.
 
+### Instance-local retrieval ranking
+
+`MultiModelStore(..., exact_match_bonus=...)` sets the identifier-only rescue
+bonus for that facade's hybrid, cross-model and authorized-source fusion.
+It uses the same top-rank RRF units as `AGENT_INDEX_EXACT_MATCH_BONUS`; zero
+disables the rescue. Omitting the argument retains that environment-derived
+default. Instances sharing a database can select different bonuses without
+changing process-global state or copying the fusion implementation.
+Pure vector/FTS paths and existing single-list shortcuts do not apply a bonus.
+The existing per-query `vector_weight` and `fts_weight` arguments on
+`hybrid_search` and `search_all` remain independent.
+
+Publish this expanded constructor before migrating a consumer. A consumer
+retaining its own configuration names should pass their resolved values
+explicitly and qualify its actual native retrieval path.
+
 `tests/test_consumer_runtime.py` qualifies single- and dual-model injected
 consumers through the actual shared engine, native metadata-only reuse,
 registered-source full GC, client/lifecycle failure cleanup and injected worker

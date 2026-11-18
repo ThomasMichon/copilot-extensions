@@ -32,6 +32,75 @@ def catalog_repo_matches(source: str, repo: str) -> bool:
     return bool(repo) and source.endswith(f":{repo}")
 
 
+@pytest.mark.parametrize("source_aware", [False, True])
+@pytest.mark.parametrize("model_count", [1, 2])
+def test_instance_bonus_preserves_independent_native_rankings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source_aware: bool, model_count: int,
+) -> None:
+    profiles = {
+        model: ModelProfile(model, model, table_name=f"vectors_{model}", dim=2)
+        for model in ("first", "second")[:model_count]
+    }
+    config = IndexConfig(data_dir=tmp_path, model_profiles=profiles)
+    if source_aware:
+        monkeypatch.setenv("AGENT_INDEX_STORE_LAYOUT", LAYOUT)
+        initialize: Callable[[IndexConfig], MultiModelStore] = initialize_source_store
+        initialize(config)
+    else:
+        monkeypatch.delenv("AGENT_INDEX_STORE_LAYOUT", raising=False)
+    disabled = MultiModelStore(config.lance_dir, exact_match_bonus=0.0)
+    chunks = [
+        Chunk("backup py", "docs/overview.md", "text", "markdown", 1, 1, source="git:alpha"),
+        Chunk(
+            "implementation details", "src/backup.py", "code", "python", 1, 1,
+            source="git:alpha",
+        ),
+    ]
+    vectors = np.array([[1.0, 0.0], [0.8, 0.6]], dtype=np.float32)
+    for profile in profiles.values():
+        disabled.register_model(profile)
+        disabled.upsert(profile.model_id, chunks, vectors)
+    assert disabled.ensure_fts_index()
+    assert [
+        chunk_id for chunk_id, _ in disabled.content_store.fts_search("backup.py")
+    ] == [chunks[0].chunk_id]
+
+    def search(store: MultiModelStore, query: str = "backup.py") -> list[tuple[str, float]]:
+        if source_aware:
+            inference = Mock()
+            inference.embed_query.return_value = vectors[0]
+            engine = SearchEngine(dict.fromkeys(profiles, inference), store)
+            results = engine.search_authorized(query, families=("git:alpha",))
+        elif model_count == 1:
+            results = store.hybrid_search("first", vectors[0], query)
+        else:
+            results = store.search_all(dict.fromkeys(profiles, vectors[0]), query)
+        assert {hit.chunk_id for hit in results} == {chunk.chunk_id for chunk in chunks}
+        return [(hit.chunk_id, hit.score) for hit in results]
+
+    unboosted = search(disabled)
+    assert unboosted[0][0] == chunks[0].chunk_id
+    boosted = MultiModelStore(config.lance_dir, exact_match_bonus=2.0)
+    default = MultiModelStore(config.lance_dir)
+    explicit_default = MultiModelStore(
+        config.lance_dir, exact_match_bonus=multi_model_store._EXACT_MATCH_BONUS,
+    )
+    for store in (boosted, default, explicit_default):
+        for profile in profiles.values():
+            store.register_model(profile)
+        assert store.ensure_fts_index()
+    domain = disabled._source_domain
+    receipt = domain.receipt() if domain is not None else None
+    assert search(boosted)[0][0] == chunks[1].chunk_id
+    assert search(disabled) == unboosted
+    assert search(default) == search(explicit_default)
+    assert search(disabled) == unboosted
+    assert search(boosted, "backup py") == search(disabled, "backup py")
+    if source_aware:
+        assert domain is not None
+        assert domain.receipt() == receipt
+
+
 @pytest.mark.parametrize("source_aware", [True, False])
 def test_facade_preserves_source_delete_return_and_remaining_rows(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source_aware: bool,
