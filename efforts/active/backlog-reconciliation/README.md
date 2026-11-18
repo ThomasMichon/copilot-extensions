@@ -3421,6 +3421,12 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [registry/lifecycle receipt and manager mechanisms](journal/2026/11.17-registry-lifecycle-receipt-and-manager-mechanisms.md)
+  records #13158's actual delivery and separate #5559/#5579/#5616 tracking
+  retirements, preserving every technical obligation and actual custodian.
+  #5655 receives a three-row mechanism proposal and explicit pattern-debt
+  home; #5641/#5665 retain their conditional/final-OPEN keeper boundaries.
+  The complete census is 880 whole, 151 above fixed 729.
   The [authentication/baseline receipt and overlay proposals](journal/2026/11.17-auth-baseline-receipt-and-overlay-proposals.md)
   records #13153's actual delivery and separate #5452/#5518/#5549 tracking
   retirements, with only the evidenced #5518 documentary routing row checked.
