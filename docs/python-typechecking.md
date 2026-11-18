@@ -564,8 +564,8 @@ loader semantics, missing/extra fragments and file-wide checker directives.
 Checked loader and fragment code are never imported or executed. Each original
 source first passes non-executing compilation, so AST-only acceptance cannot
 hide runtime syntax errors. Directive scanning uses Python's universal-newline
-interpretation,
-including CR-only sources. Checker diagnostics point back to original loader and
+interpretation, including CR-only sources. Checker diagnostics point back to
+original loader and
 fragment paths and line numbers. Input and emitted-view bytes are revalidated
 before a result is credited; temporary views are removed while holding the
 checker lease. Views live beside, not inside, the prepared venv because MyPy
