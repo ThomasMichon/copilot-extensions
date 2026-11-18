@@ -5,7 +5,7 @@
 > *operator guide* (how to invoke it) see [`README.md`](./README.md); for the
 > *north-star intent* see the [clean-room-validation vision](../../visions/clean-room-validation/README.md);
 > for *how to run, evaluate, and author scenarios* use the **`validating-in-clean-room`**
-> skill (in the `copilot-extensions-harness` plugin).
+> skill (in the `copilot-extensions-maintainer` plugin).
 
 The rig is deliberately **generic and name-free** of any operator's repos: it is
 the public substrate. Scenarios that name specific repos or internal venues live
@@ -224,5 +224,5 @@ the rig-owned assertion/reporting harness.
 - Tier-E execution design: [`TIER-E-EXECUTION.md`](./TIER-E-EXECUTION.md) (how an
   agent-driven eval run executes end-to-end — pre-build design)
 - Vision: [`visions/clean-room-validation/README.md`](../../visions/clean-room-validation/README.md)
-- Skill: **`validating-in-clean-room`** (run / evaluate / author more) — `copilot-extensions-harness` plugin
-- Judge: **`clean-room-judge`** sub-agent — `copilot-extensions-harness` plugin
+- Skill: **`validating-in-clean-room`** (run / evaluate / author more) — `copilot-extensions-maintainer` plugin
+- Judge: **`clean-room-judge`** sub-agent — `copilot-extensions-maintainer` plugin

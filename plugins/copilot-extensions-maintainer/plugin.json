@@ -1,0 +1,24 @@
+{
+  "name": "copilot-extensions-maintainer",
+  "description": "Opt-in contribution, review, release-triage and clean-room procedures for explicitly assigned copilot-extensions source work. Maintainer availability does not authorize incidental maintenance during another product's task or expand an operator charter.",
+  "version": "0.1.0",
+  "defaultEnabled": false,
+  "runtimeScope": "none",
+  "author": {
+    "name": "Thomas Michon"
+  },
+  "homepage": "https://github.com/ThomasMichon/copilot-extensions",
+  "repository": "https://github.com/ThomasMichon/copilot-extensions",
+  "license": "MIT",
+  "keywords": [
+    "harness",
+    "harness-plugin",
+    "operator-harness",
+    "contributing",
+    "diagnostics",
+    "copilot-extension"
+  ],
+  "skills": "skills/",
+  "agents": "agents/",
+  "hooks": "hooks.json"
+}

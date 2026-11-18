@@ -2,11 +2,16 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import Protocol
 
 from scan_plugin_sources import PluginSource
 
 BLOCKING = "blocking"
 WARNING = "warning"
+
+
+class _Report(Protocol):
+    def add(self, severity: str, check: str, path: Path | str, message: str) -> None: ...
 
 MCP_FALLBACK_ACTION = re.compile(
     r"(?i)\b(use|invoke|run|switch|continue|fall\s+back)\b.{0,120}"
@@ -117,9 +122,9 @@ def extract_triggers(frontmatter: str) -> list[str]:
     for match in re.finditer(r"-\s*['\"]([^'\"]+)['\"]", tail):
         triggers.append(match.group(1).strip())
     for line in tail.splitlines()[1:]:
-        match = re.match(r"\s*-\s+(?!['\"])(.+?)\s*$", line)
-        if match:
-            triggers.append(match.group(1).strip())
+        bare_match = re.match(r"\s*-\s+(?!['\"])(.+?)\s*$", line)
+        if bare_match:
+            triggers.append(bare_match.group(1).strip())
     return _dedup(triggers)
 
 
@@ -235,7 +240,7 @@ def readme_documents_dependencies(plugin_root: Path) -> bool:
     return False
 
 
-def _check_owned_skill(sf: Path, report, frontmatter: str) -> str:
+def _check_owned_skill(sf: Path, report: _Report, frontmatter: str) -> str:
     """Run the owned-skill frontmatter/name checks; return the skill's name."""
     name = get_field(frontmatter, "name")
     desc = "description" in frontmatter.lower()
@@ -265,7 +270,7 @@ def _check_owned_skill(sf: Path, report, frontmatter: str) -> str:
 
 def scan_skills(
     root: Path,
-    report,
+    report: _Report,
     plugin_sources: list[PluginSource] | None = None,
 ) -> None:
     trigger_owner: dict[str, set[str]] = {}
@@ -333,11 +338,14 @@ def scan_skills(
             where = f" (source: {', '.join(sources)})" if sources else ""
             message += (
                 f"  --  involves plugin(s) OUTSIDE this repo's control{where}. "
-                "Fix in-repo (reclaim the phrase with a local authority-override "
-                "skill, or disable the plugin), OR file an issue/PR upstream -- "
-                "if a `<repo>-harness` plugin is enabled for that source, use "
-                "its contributing-to-<repo> skill (e.g. "
-                "copilot-extensions-harness -> "
-                "contributing-to-copilot-extensions)."
+                "A finding grants no edit or publication authority. Use a local "
+                "workaround only within assigned scope. During another product's "
+                "task, report the error, offer a bug report at the established "
+                "destination and return; do not automatically file an issue/PR "
+                "or wait for an upstream fix. A separately assigned source fix "
+                "uses the source repository's contribution docs or optional "
+                "`<repo>-maintainer` procedures (e.g. "
+                "copilot-extensions-maintainer:contributing-to-copilot-extensions); "
+                "do not auto-enable a plugin to act on a finding."
             )
         report.add(WARNING, "trigger-collision", ".github/skills", message)

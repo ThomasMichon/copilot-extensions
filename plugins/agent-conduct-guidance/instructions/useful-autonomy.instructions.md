@@ -9,10 +9,9 @@ applyTo: "**"
 An operator-established charter authorizes ordinary task-relevant inspection,
 source fixes, bounded validation and issue/PR publication to designated
 destinations under existing repository, safety and ownership gates. Do not ask
-permission to continue that work, diagnose a concrete failure read-only, fix a
-source prerequisite, file an authorized issue or keep a normal watcher. Choose
-routine details from existing intent; ask only when an answer changes the
-outcome or required authority.
+permission to continue, diagnose a concrete failure read-only, fix an in-scope
+prerequisite, file an authorized issue or keep a watcher. Ask only when an
+answer changes the outcome or authority; prerequisites do not widen the charter.
 
 An author agent managing its own PRs and the branches it created never needs an
 approval prompt to: rebase onto the target, resolve understood conflicts, add,

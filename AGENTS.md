@@ -44,7 +44,7 @@ agent-hosting policy.
 | Change a **CLI or service contract** across independently updated runtimes | `docs/patterns/service-contract-evolution.md` + `CONTRIBUTING.md` (*Contract impact*) |
 | See **what a subject should ultimately be** (intent) | `visions/README.md` |
 | Plan or resume a **stretch of work** | `efforts/README.md` + the **`efforts:planning-efforts`** skill |
-| **Make a change and land it correctly** | the **`copilot-extensions-harness:contributing-to-copilot-extensions`** skill (+ *Contribution Rules* below) |
+| **Make a change and land it correctly** | the **`copilot-extensions-maintainer:contributing-to-copilot-extensions`** skill (+ *Contribution Rules* below) |
 | **Test** a plugin | `TESTING.md` |
 | Decide **where config lives** (repo vs machine) | `docs/configuration.md` |
 | Turn a repo into an **agent harness** | `docs/harness-runbook.md` + the **`customizing-copilot:building-harnesses`** skill |
@@ -304,6 +304,15 @@ bot to ask for one.
 
 ### Coordinating Across Control Repos
 
+Supporting tooling/harness source stays frozen during another product's task. A tool
+failure does not assign a contribution or authorize an upstream issue/PR.
+Report the error and offer a report; local canonical repair has separate
+authority. An explicit source assignment can follow `CONTRIBUTING.md` and the
+native skill adapters without enabling `copilot-extensions-maintainer`.
+Plugin availability and Maintainer access do not expand that assignment.
+Products may span repositories, including implementation libraries; required
+source changes and fork/PR delivery there do not need another generic prompt.
+
 This repo is public and may be driven from **multiple downstream/control repos**
 at once. Two rules keep them from colliding and keep private context off the
 public face:
@@ -467,7 +476,7 @@ covering worktree lifecycle, the status/tracking model, PR flow, and the Textual
 A merge is not authorization to update a shared host. Wait for promotion to
 `main` and the target's explicit rollout authorization, then follow the unified
 repository update flow owned by
-`copilot-extensions-harness:contributing-to-copilot-extensions`. Do not turn
+`copilot-extensions-maintainer:contributing-to-copilot-extensions`. Do not turn
 test validation into a host update, per-plugin reinstall or daemon restart.
 
 ### Local Testing (Before PR Publication)

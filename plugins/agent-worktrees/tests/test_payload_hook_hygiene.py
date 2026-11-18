@@ -79,7 +79,7 @@ def test_native_guard_keeps_payload_content_only(tmp_path: Path) -> None:
     shell = shutil.which("pwsh" if os.name == "nt" else "bash")
     if not shell:
         pytest.skip("Native hook shell unavailable")
-    guard = PLUGIN.parent / "copilot-extensions-harness"
+    guard = PLUGIN.parent / "copilot-extensions-maintainer"
     payload = tmp_path / "payload space's [literal]"
     scripts = payload / "scripts"
     scripts.mkdir(parents=True)

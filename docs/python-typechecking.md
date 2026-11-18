@@ -109,6 +109,12 @@ not checked. PR CI selects changes between the actual PR head and its merge
 base with the target branch, rather than comparing an older base with the
 synthetic merge commit. The selected files are checked in the integration
 checkout; unrelated upstream changes must not enter this PR's ratchet cohort.
+The checker project also owns its admitted
+`tools/promotion_unit_tests/test_typecheck.py` fixture. It uses the checker's
+canonical type namespace rather than combining checker imports with unrelated
+tool execution namespaces. The file remains selected and strictly checked;
+its removal from the generic tools owner is ownership accounting, not an
+exemption.
 For a busy shared local clone,
 pin the synchronization/merge-base commit instead of a moving `origin/dev`
 reference while checking a fixed feature tip, so unrelated base-only files are not treated as
@@ -536,8 +542,8 @@ package/module environments remain separate campaign work.
 
 ### Fixed guard module alias
 
-Only the `copilot-extensions-harness` project substitutes its owned
-`plugins/copilot-extensions-harness/scripts/copilot-mention-guard.py` target
+Only the `copilot-extensions-maintainer` project substitutes its owned
+`plugins/copilot-extensions-maintainer/scripts/copilot-mention-guard.py` target
 with a derived `copilot_mention_guard.py` view. The alias contains exactly the
 original bytes: no header, newline normalization, annotations, stub or runtime
 loader change. Every diagnostic line and column maps to the original source.
@@ -602,7 +608,7 @@ project does not activate these views.
 ## Exact-candidate release enforcement
 
 The pending Harness project additionally declares its fixed emitted Python
-inputs in `plugins/copilot-extensions-harness/python-emitted-inputs.json`.
+inputs in `plugins/copilot-extensions-maintainer/python-emitted-inputs.json`.
 Within each verification pass, emitted views with identical member, asset and
 input-byte bindings share one binding verification. Every generated output's
 identity and bytes remain independently checked; nothing is cached across passes.

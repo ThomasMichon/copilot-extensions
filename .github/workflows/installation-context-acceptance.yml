@@ -1116,7 +1116,7 @@ jobs:
       - name: Windows shim simulation without shared platform mutation
         if: ${{ !cancelled() && steps.guardian-tooling.outcome == 'success' }}
         run: >-
-          python tools/run-plugin-tests.py copilot-extensions-harness
+          python tools/run-plugin-tests.py copilot-extensions-maintainer
           --test-file tests/test_reviewer_source.py
           -k test_windows_command_shim_uses_cmd
 

@@ -13,9 +13,9 @@ import re
 import tokenize
 
 INSTALLATION_ENTRY = "libs/installation-context/installation_context.py"
-GUARD_ENTRY = "plugins/copilot-extensions-harness/scripts/copilot-mention-guard.py"
+GUARD_ENTRY = "plugins/copilot-extensions-maintainer/scripts/copilot-mention-guard.py"
 GUARD_MODULE = "copilot_mention_guard"
-HARNESS_PREFIX = "plugins/copilot-extensions-harness/"
+HARNESS_PREFIX = "plugins/copilot-extensions-maintainer/"
 HARNESS_DECLARATION = HARNESS_PREFIX + "python-emitted-inputs.json"
 _WRAPPER = r'''
 """Resolve, validate, and explicitly mutate marketplace installation context."""
@@ -335,7 +335,7 @@ def _shape(node: ast.AST) -> str:
 _WITNESSES = {
     "pid_file": "/__harness_typing_witness__/descendant.pid",
     "procutil_src": "/__harness_typing_witness__/repo/libs/agent-procutil/src",
-    "source": "/__harness_typing_witness__/repo/plugins/copilot-extensions-harness/scripts/copilot-mention-guard.py",
+    "source": "/__harness_typing_witness__/repo/plugins/copilot-extensions-maintainer/scripts/copilot-mention-guard.py",
 }
 
 
