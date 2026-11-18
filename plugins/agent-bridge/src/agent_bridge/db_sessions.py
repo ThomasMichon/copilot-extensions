@@ -144,9 +144,20 @@ class _SessionsMixin:
             membership=True,
         )
 
+    def has_stopped_host_receipt(self, observed: dict[str, Any], record: HostRecord) -> bool:
+        """Read-only prefilter; retirement must recheck the receipt under both locks."""
+        from .host_exit_history import matches_stopped_receipt, stopped_event
+
+        self = cast("Database", self)
+        if (observed["status"] != "stopped" or observed["id"] != record.session_id
+                or not observed.get("acp_session_id") or record.boundary != "local"):
+            return False
+        receipt = stopped_event(record, observed["acp_session_id"], observed["created_at"])
+        return matches_stopped_receipt(self._get_conn(), record.session_id, receipt, observed["updated_at"])
+
     def settle_exited_inherited_host(self, observed: dict[str, Any], record: HostRecord) -> bool:
         """Close ordinary interrupted work, under the exact exited Host's retirement lock."""
-        from .host_exit_history import reconcile_idle, stopped_event, terminal_outcome
+        from .host_exit_history import matches_stopped_receipt, reconcile_idle, stopped_event, terminal_outcome
         from .status_store import StatusStore
 
         self = cast("Database", self)
@@ -175,13 +186,7 @@ class _SessionsMixin:
                 "SELECT turn_index,started_at FROM turns WHERE session_id=? AND completed_at IS NULL LIMIT 2", (sid,),
             ).fetchall()
             if current["status"] == "stopped" and current["pid"] is None and not current["background_recovery_enabled"]:
-                last = conn.execute(
-                    "SELECT data_json,timestamp FROM events WHERE session_id=? AND event_type='session_state_changed' "
-                    "ORDER BY event_id DESC LIMIT 1", (sid,),
-                ).fetchone()
-                return not turns and last is not None and (
-                    last["data_json"], last["timestamp"]
-                ) == (receipt, current["updated_at"])
+                return not turns and matches_stopped_receipt(conn, sid, receipt, current["updated_at"])
             if (current["status"] not in ("running", "idle") or current["status"] != observed["status"]
                 or not current["background_recovery_enabled"] or current["updated_at"] != observed["updated_at"]
                 or len(turns) > 1):

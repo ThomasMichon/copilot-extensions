@@ -1,0 +1,9 @@
+{
+  "comment": "Check Host ownership and durable stop receipts before admitting an inherited session refresh.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
