@@ -13,6 +13,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 import venv
 import zipfile
@@ -33,6 +34,45 @@ install_source: ModuleType = vars(importlib.import_module("local_install_profile
 from installer_wheel_snapshot import retain_wheel_inputs
 
 engine = install_source.engine
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows path-length boundary")
+@pytest.mark.parametrize("length", [251, 259])
+@pytest.mark.parametrize("fail_replace", [False, True])
+def test_application_atomic_write_preserves_ordinary_destination_headroom(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, length: int, fail_replace: bool,
+) -> None:
+    root = Path(str(tmp_path).removeprefix("\\\\?\\"))
+    name = "versioned_runtime_construction.py"
+    directory = root / ("p" * (length - len(str(root / name)) - 1))
+    directory.mkdir()
+    destination = directory / name
+    assert len(str(destination)) == length
+    destination.write_bytes(b"incumbent")
+    temporary_paths: list[Path] = []
+    mkstemp = tempfile.mkstemp
+
+    def create(**options: Any) -> tuple[int, str]:
+        descriptor, filename = mkstemp(**options)
+        temporary_paths.append(Path(filename))
+        return descriptor, filename
+
+    monkeypatch.setattr(tempfile, "mkstemp", create)
+
+    if fail_replace:
+        def refuse(_source: Path, _destination: Path) -> None:
+            raise PermissionError("fixture replacement refused")
+
+        monkeypatch.setattr(os, "replace", refuse)
+        with pytest.raises(PermissionError, match="fixture replacement refused"):
+            runtime_application_install._write(destination, b"incoming")
+    else:
+        runtime_application_install._write(destination, b"incoming")
+
+    assert destination.read_bytes() == (b"incumbent" if fail_replace else b"incoming")
+    assert list(directory.iterdir()) == [destination]
+    assert len(temporary_paths) == 1
+    assert len(str(temporary_paths[0])) < 260
 
 
 @pytest.mark.parametrize("abi,target", [
@@ -1587,6 +1627,8 @@ def test_relocated_wheel_data_damage_blocks_completion(
         "escape": "installed member differs from its wheel",
     }
     assert expected[damage] in result.stderr
+    if damage == "missing":
+        assert repr(str(asset))[1:-1] in result.stderr
     assert not (root / "current-version").exists()
     assert not (root / "setup.json").exists()
     assert not (root / "started.json").exists()
