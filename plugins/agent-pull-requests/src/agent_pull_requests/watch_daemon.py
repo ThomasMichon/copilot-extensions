@@ -33,6 +33,7 @@ from .watch_notification import (
 from .watch_registry import FiredEvent, WatchKey, WatchRegistry
 from .watch_storage import (
     StateCommitUncertain,
+    VersionedSubscriptions,
     _atomic_write_json as _atomic_write_json, lock_path, read_lock_data, read_subscriptions_state,
     state_dir, subscriptions_path, write_lock_data, write_subscriptions_state,
 )
@@ -150,7 +151,7 @@ class WatchDaemon:
         entries = self._read_state()
         if not entries:
             return
-        self._registry.restore_state(entries)
+        self._registry.restore_state(entries, strict=isinstance(entries, VersionedSubscriptions))
         self._deliveries.resume()
         for key in self._registry.active_keys():
             self._ensure_poller(key)
@@ -487,6 +488,9 @@ class WatchDaemon:
                 raise RuntimeError("PR watch state has not been adopted")
             if self._lifecycle_shutdown_event.is_set():
                 raise RuntimeError("PR watch owner is shutting down")
+            if self._persist_enabled:
+                self._read_state()
+                self._check_lifecycle_deadline(deadline)
             with self._admission:
                 self._accepting_mutations = False
             if self._shutdown_event.is_set():

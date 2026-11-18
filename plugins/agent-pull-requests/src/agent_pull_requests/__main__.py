@@ -2,59 +2,41 @@
 
 from __future__ import annotations
 
-from agent_procutil.daemon_instances import DaemonInstanceSpec, daemon_entrypoint
+from agent_procutil.daemon_instances import DaemonInstanceSpec, daemon_entrypoint as _daemon_entrypoint
 
 import argparse
 import json
 import os
-import re
 import shutil
 import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, cast
 
 from agent_procutil import no_window_kwargs
 
 from . import __version__
-from .cli_output import render_status as _render_status, version as _cmd_version
-
-_STATUS_QUERY = (
-    "query($owner: String!, $name: String!, $number: Int!) { "
-    "repository(owner: $owner, name: $name) { "
-    "pullRequest(number: $number) { "
-    "number title url state isDraft mergeable reviewDecision "
-    "} } }"
+from .cli_output import render_status as _untyped_render_status, version as _cmd_version
+from .github_contract import (
+    PR_URL_NUMBER_RE as _PR_URL_NUMBER_RE, STATUS_QUERY as _STATUS_QUERY, WATCH_QUERY as _WATCH_QUERY,
+    parse_repo_slug as _parse_repo_slug, validate_repo_slug as _validate_repo_slug,
 )
+from .watch_contract import PRSnapshot
 
-_WATCH_QUERY = (
-    "query($owner: String!, $name: String!, $number: Int!) { "
-    "repository(owner: $owner, name: $name) { "
-    "pullRequest(number: $number) { "
-    "state merged mergeable reviewDecision headRefOid updatedAt "
-    "commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } "
-    "} } }"
+if TYPE_CHECKING:
+    from .watch_invocation import WatchInvocation
+
+daemon_entrypoint = cast(
+    Callable[..., Callable[[Callable[..., int]], Callable[..., int]]], _daemon_entrypoint,
 )
-
-_PR_URL_NUMBER_RE = re.compile(r"/pull/(\d+)\s*$")
+_render_status = cast(Callable[[dict[str, Any]], str], _untyped_render_status)
 
 _WAIT_TERMINAL_STATES = frozenset({"MERGED", "CLOSED"})
 _WATCH_HANDLER_DRAIN_TIMEOUT_S = 5.0
 _WATCH_RESTART_STOP_TIMEOUT_S = 45.0
-_WATCH_INVOCATION = None
-
-
-def _parse_repo_slug(value: str) -> tuple[str, str]:
-    owner, sep, name = value.partition("/")
-    if not sep or not owner or not name:
-        raise argparse.ArgumentTypeError("repo must be 'owner/name'")
-    return owner, name
-
-
-def _validate_repo_slug(value: str) -> str:
-    _parse_repo_slug(value)
-    return value
+_WATCH_INVOCATION: WatchInvocation | None = None
 
 
 def _agent_worktrees_command() -> str:
@@ -85,7 +67,7 @@ def _run_agent_worktrees_gh_raw(
         encoding="utf-8",
         errors="replace",
         check=False,
-        **({"timeout": timeout} if timeout is not None else {}),
+        timeout=timeout,
         **no_window_kwargs(),
     )
 
@@ -131,7 +113,7 @@ def _parse_json_tail(stdout: str) -> dict[str, Any]:
     """
     stripped = stdout.strip()
     try:
-        return json.loads(stripped)
+        return cast(dict[str, Any], json.loads(stripped))
     except json.JSONDecodeError:
         pass
     for marker in ("{", "["):
@@ -139,7 +121,7 @@ def _parse_json_tail(stdout: str) -> dict[str, Any]:
         while idx != -1:
             candidate = stripped[idx:]
             try:
-                return json.loads(candidate)
+                return cast(dict[str, Any], json.loads(candidate))
             except json.JSONDecodeError:
                 idx = stripped.rfind(marker, 0, idx)
     raise RuntimeError(
@@ -147,13 +129,11 @@ def _parse_json_tail(stdout: str) -> dict[str, Any]:
     )
 
 
-def _watch_github_snapshot(repo: str, number: int):
+def _watch_github_snapshot(repo: str, number: int) -> PRSnapshot:
     """Fetch one :class:`~agent_pull_requests.watch_contract.PRSnapshot` for
     ``repo``#``number`` -- the richer query the watch daemon's poll loop
     needs (merged flag, CI rollup), separate from ``status``'s own stable
     human-facing query/output contract."""
-    from .watch_contract import PRSnapshot
-
     owner, name = _parse_repo_slug(repo)
     payload = _run_agent_worktrees_gh(
         repo,
@@ -193,7 +173,7 @@ def _watch_github_snapshot(repo: str, number: int):
     )
 
 
-def _watch_native_snapshot(repo: str, number: int, command: str):
+def _watch_native_snapshot(repo: str, number: int, command: str) -> PRSnapshot:
     from .watch_provider import fetch_snapshot
 
     if _WATCH_INVOCATION is None:
@@ -508,9 +488,10 @@ def _watch_boot() -> None:
         return
     from agent_procutil import spawn_daemon
 
-    from .watch_storage import state_dir
+    from .watch_storage import read_subscriptions_state, state_dir
 
     root = state_dir().resolve()
+    read_subscriptions_state(root)
     root.mkdir(parents=True, exist_ok=True)
     # The child runs from ``root``: a relative override would resolve again there.
     home = "AGENT_PULL_REQUESTS_HOME"
@@ -526,8 +507,8 @@ def _watch_boot() -> None:
 
 
 def _watch_request(
-    kind: str, payload: dict, *, boot_wait_s: float = 6.0, boot: bool = True
-) -> dict:
+    kind: str, payload: dict[str, Any], *, boot_wait_s: float = 6.0, boot: bool = True
+) -> dict[str, Any]:
     if _WATCH_INVOCATION is not None:
         from .watch_entry import call
 
@@ -535,8 +516,10 @@ def _watch_request(
     from work_coalescing_singleton import call_with_fallback
     import uuid
 
-    def _fallback() -> dict:
-        result = {"error": "no watch daemon reachable and no inline fallback for this kind"}
+    def _fallback() -> dict[str, Any]:
+        result: dict[str, Any] = {
+            "error": "no watch daemon reachable and no inline fallback for this kind",
+        }
         if kind == "register":
             result["ambiguous_registration"] = True
         elif kind == "unregister":
@@ -640,6 +623,9 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         return 0
     if getattr(args, "passive_instance", None) or getattr(args, "port", 0):
         raise PermissionError("watch passive entry requires an explicit installation context")
+    from .watch_storage import read_subscriptions_state
+
+    read_subscriptions_state()
     return _serve_legacy(args)
 
 
@@ -735,7 +721,9 @@ def _cmd_serve_restart(args: argparse.Namespace) -> int:
     from single_instance_lease import AlreadyRunningError, SingleInstance
 
     from .watch_daemon import state_dir
+    from .watch_storage import read_subscriptions_state
 
+    read_subscriptions_state()
     lease = SingleInstance(state_dir(), service="agent-pull-requests-watch")
     try:
         lease.acquire()
@@ -792,9 +780,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     subparsers = parser.add_subparsers(dest="command", required=True)
     from .workspace_cli import add_parser as add_workspace_parser
-    add_workspace_parser(subparsers)
+    cast(Callable[[Any], None], add_workspace_parser)(subparsers)
     from .report_cli import add_parser as add_report_parser
-    add_report_parser(subparsers)
+    cast(Callable[[Any], None], add_report_parser)(subparsers)
     from .attention_cli import add_parser as add_attention_parser
     add_attention_parser(subparsers)
 
@@ -865,11 +853,15 @@ def build_parser() -> argparse.ArgumentParser:
     from .native_author import add_parsers as add_author_parsers
     add_author_parsers(subparsers, repo_type=_validate_repo_slug, handler=_cmd_native)
     from .native_creation_cancel import add_parser as add_cancellation_parser
-    add_cancellation_parser(subparsers, _cmd_native)
+    cast(Callable[..., None], add_cancellation_parser)(subparsers, _cmd_native)
     from .native_threads import add_parser as add_threads_parser
-    add_threads_parser(subparsers, repo_type=_validate_repo_slug, handler=_cmd_native)
+    cast(Callable[..., None], add_threads_parser)(
+        subparsers, repo_type=_validate_repo_slug, handler=_cmd_native,
+    )
     from .native_diff import add_parser as add_diff_parser
-    add_diff_parser(subparsers, repo_type=_validate_repo_slug, handler=_cmd_native)
+    cast(Callable[..., None], add_diff_parser)(
+        subparsers, repo_type=_validate_repo_slug, handler=_cmd_native,
+    )
 
     watch = subparsers.add_parser(
         "watch", help="non-blocking subscription against the shared watch daemon"
@@ -976,23 +968,30 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: list[str] | None = None, *, workspace_host=None, attention_host=None, report_host=None) -> int:
+def main(
+    argv: list[str] | None = None, *, workspace_host: Any = None,
+    attention_host: Any = None, report_host: Any = None,
+) -> int:
     global _WATCH_INVOCATION
     args = build_parser().parse_args(argv)
     if args.command == "workspace":
         from .workspace_cli import run
-        return run(args, workspace_host)
+        return cast(Callable[..., int], run)(args, workspace_host)
     if args.command == "attention":
         from .attention_cli import run
-        return run(args, attention_host)
+        return cast(Callable[..., int], run)(args, attention_host)
     if args.command == "report":
         from .report_cli import run
-        return run(args, report_host)
+        return cast(Callable[..., int], run)(args, report_host)
     from .watch_invocation import WatchInvocation
+    previous = _WATCH_INVOCATION
     _WATCH_INVOCATION = WatchInvocation.capture(
         require_selected=not (args.command == "serve" and args.passive_instance),
     )
-    return args.handler(args)
+    try:
+        return cast(Callable[[argparse.Namespace], int], args.handler)(args)
+    finally:
+        _WATCH_INVOCATION = previous
 
 
 if __name__ == "__main__":

@@ -61,10 +61,9 @@ def test_incompatible_contract_refuses_read_and_final_write_guard(
     root = Path("fixture-state")
     with pytest.raises(ValueError, match=reason):
         storage.read_subscriptions_state(root)
-    storage.write_subscriptions_state([], root)
-    assert len(reads) == 1
     with pytest.raises(storage.StateWriteRefused, match=reason):
-        guards[0]()
+        storage.write_subscriptions_state([], root)
+    assert guards == []
     assert reads == [root / "watch-subscriptions.json"] * 2
 
 
@@ -110,3 +109,120 @@ def test_guard_uses_latest_bytes_not_prior_read(
     monkeypatch.setattr(storage, "_atomic_write_json", atomic)
     with pytest.raises(storage.StateWriteRefused, match="unsupported.*version"):
         storage.write_subscriptions_state([], root)
+
+
+def test_selected_partition_update_preserves_opaque_versions_and_generation(
+    storage: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = {
+        "schema": "agent-pull-requests.watch-subscriptions", "version": 2,
+        "engineGeneration": 1, "activeStateVersion": 1,
+        "stateByVersion": {
+            "1": {"subscriptions": [], "extension": ["retained"]},
+            "2": {"unknown": {"pending": [{"event_id": "same-event"}]}},
+        },
+        "extension": {"retain": True},
+    }
+    current = [json.dumps(original)]
+    monkeypatch.setattr(Path, "read_text", lambda *_args, **_kwargs: current[0])
+    written: list[object] = []
+
+    def atomic(_path: Path, entries: object, *, before_replace: Callable[[], None]) -> None:
+        before_replace()
+        written.append(entries)
+        current[0] = json.dumps(entries)
+
+    monkeypatch.setattr(storage, "_atomic_write_json", atomic)
+    root = Path("fixture-state")
+    assert storage.read_subscriptions_state(root) == []
+    entries = [{"subscriber_id": "retained", "pending": {"event_id": "pending-id"}}]
+    storage.write_subscriptions_state(entries, root)
+    expected = json.loads(json.dumps(original))
+    expected["stateByVersion"]["1"]["subscriptions"] = entries
+    assert written == [expected]
+    assert storage.read_subscriptions_state(root) == entries
+    storage.write_subscriptions_state([], root)
+    assert written[-1] == original
+
+
+def test_final_guard_preserves_a_newer_opaque_partition(
+    storage: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    document: dict[str, Any] = {
+        "schema": "agent-pull-requests.watch-subscriptions", "version": 2,
+        "engineGeneration": 1, "activeStateVersion": 1,
+        "stateByVersion": {"1": {"subscriptions": []}, "2": {"pending": "earlier"}},
+    }
+    current = [json.dumps(document)]
+    monkeypatch.setattr(Path, "read_text", lambda *_args, **_kwargs: current[0])
+
+    def atomic(_path: Path, _entries: object, *, before_replace: Callable[[], None]) -> None:
+        document["stateByVersion"]["2"]["pending"] = "later"
+        current[0] = json.dumps(document)
+        before_replace()
+        pytest.fail("must not replace concurrently changed state")
+
+    monkeypatch.setattr(storage, "_atomic_write_json", atomic)
+    with pytest.raises(storage.StateWriteRefused, match="changed before replacement"):
+        storage.write_subscriptions_state([], Path("fixture-state"))
+    assert json.loads(current[0])["stateByVersion"]["2"]["pending"] == "later"
+
+
+@pytest.mark.parametrize("field,value", [
+    ("engineGeneration", 2), ("engineGeneration", True), ("engineGeneration", None),
+    ("activeStateVersion", 2), ("activeStateVersion", True),
+    ("stateByVersion", {"01": {"subscriptions": []}}),
+    ("stateByVersion", {"1": {"subscriptions": {}}}),
+], ids=[
+    "newer-engine", "boolean-engine", "missing-engine", "newer-state",
+    "boolean-state", "noncanonical-key", "non-list-partition",
+])
+def test_invalid_or_newer_executor_state_refuses_without_replacement(
+    storage: Any, monkeypatch: pytest.MonkeyPatch, field: str, value: object,
+) -> None:
+    document = {
+        "schema": "agent-pull-requests.watch-subscriptions", "version": 2,
+        "engineGeneration": 1, "activeStateVersion": 1,
+        "stateByVersion": {"1": {"subscriptions": []}},
+        field: value,
+    }
+    raw = json.dumps(document)
+    monkeypatch.setattr(Path, "read_text", lambda *_args, **_kwargs: raw)
+    monkeypatch.setattr(
+        storage, "_atomic_write_json",
+        lambda *_args, **_kwargs: pytest.fail("refused state must not begin replacement"),
+    )
+    with pytest.raises(ValueError, match="persisted watch subscriptions"):
+        storage.read_subscriptions_state(Path("fixture-state"))
+    with pytest.raises(storage.StateWriteRefused, match="persisted watch subscriptions"):
+        storage.write_subscriptions_state([], Path("fixture-state"))
+
+
+def test_duplicate_partition_identity_is_not_silently_overwritten(
+    storage: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw = (
+        '{"schema":"agent-pull-requests.watch-subscriptions","version":2,'
+        '"engineGeneration":1,"activeStateVersion":1,'
+        '"stateByVersion":{"1":{"subscriptions":[]},"1":{"subscriptions":[]}}}'
+    )
+    monkeypatch.setattr(Path, "read_text", lambda *_args, **_kwargs: raw)
+    with pytest.raises(ValueError, match="invalid.*JSON"):
+        storage.read_subscriptions_state(Path("fixture-state"))
+
+
+def test_nonfinite_opaque_state_refuses_as_a_definite_write_failure(
+    storage: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw = (
+        '{"schema":"agent-pull-requests.watch-subscriptions","version":2,'
+        '"engineGeneration":1,"activeStateVersion":1,'
+        '"stateByVersion":{"1":{"subscriptions":[]},"2":{"opaque":NaN}}}'
+    )
+    monkeypatch.setattr(Path, "read_text", lambda *_args, **_kwargs: raw)
+    monkeypatch.setattr(
+        storage, "_atomic_write_json",
+        lambda *_args, **_kwargs: pytest.fail("invalid JSON must refuse before serialization"),
+    )
+    with pytest.raises(storage.StateWriteRefused, match="invalid.*JSON"):
+        storage.write_subscriptions_state([], Path("fixture-state"))
