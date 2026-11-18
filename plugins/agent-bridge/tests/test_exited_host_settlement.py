@@ -18,7 +18,8 @@ from agent_bridge.status_store import SelectedAgent, Selection, StatusStore
 
 @pytest.mark.parametrize("case", [
     "exited", "live-child", "unobservable", "native-held", "feed-failed", "flush-failed",
-    "replacement", "completed", "missing-idle", "unanchored", "no-origin", "evicted",
+    "replacement", "completed", "missing-idle", "persisted-acked", "persisted-missing",
+    "unanchored", "no-origin", "evicted",
 ])
 def test_exit_settles_turn_and_subscription_or_preserves_both(
     tmp_path: Path, tmp_db: Database, monkeypatch: pytest.MonkeyPatch, case: str,
@@ -50,21 +51,30 @@ def test_exit_settles_turn_and_subscription_or_preserves_both(
             record, settle=lambda locked: tmp_db.settle_exited_inherited_host(snapshot, locked),
         )
 
-    if case in {"completed", "missing-idle"}:
+    completion = case in {"completed", "missing-idle", "persisted-acked", "persisted-missing"}
+    persisted = case in {"persisted-acked", "persisted-missing"}
+    missing = case in {"missing-idle", "persisted-missing"}
+    if completion:
         log = EventLog(db=tmp_db, session_id=sid)
         log.append("session_state_changed", {"status": "running", "turn_index": 0}, timestamp=2.0)
-        if case == "missing-idle":
+        acknowledged = None
+        if missing:
             with patch.object(StatusStore, "publish", side_effect=RuntimeError("feed unavailable")):
                 with pytest.raises(RuntimeError, match="feed unavailable"):
                     log.append("turn_complete", {"stop_reason": "end_turn"}, timestamp=3.0)
             tmp_db.flush()
             assert not store.page(after=0, epoch=None)["events"]
-            assert retire()
         else:
             log.append("turn_complete", {"stop_reason": "end_turn"}, timestamp=3.0)
             page = store.page(after=0, epoch=None, subscription_id="watch")
             acknowledged = store.acknowledge("watch", page["events"][0]["id"], page["epoch"])
-            assert retire()
+        if persisted:
+            tmp_db.update_turn(sid, 0, response_text="original reply", stop_reason="end_turn", completed_at=4.0)
+            tmp_db.update_session_status(sid, "idle", 5.0)
+            log.append("session_state_changed", {"status": "idle"}, timestamp=5.0)
+            observed = tmp_db.get_session(sid)
+        assert retire()
+        if acknowledged is not None:
             assert store.page(after=0, epoch=None, subscription_id="watch")["subscription"] == acknowledged
     elif case in {"no-origin", "evicted"}:
         after = 0
@@ -125,11 +135,13 @@ def test_exit_settles_turn_and_subscription_or_preserves_both(
     assert turn is not None and session is not None
     page = store.page(after=0, epoch=None, subscription_id="watch")
     sub = page["subscription"]
-    if case in {"completed", "missing-idle"}:
-        assert turn["stop_reason"] == "end_turn" and turn["completed_at"] == 3.0
+    if completion:
+        assert turn["stop_reason"] == "end_turn" and turn["completed_at"] == (4.0 if persisted else 3.0)
+        if persisted:
+            assert turn["response_text"] == "original reply"
         assert [e["event_type"] for e in tmp_db.get_events(sid)].count("turn_complete") == 1
         assert [e["kind"] for e in page["events"]] == ["idle"]
-        assert (sub["unread"] > sub["acked"]) is (case == "missing-idle")
+        assert (sub["unread"] > sub["acked"]) is missing
     elif case == "unanchored":
         assert turn["completed_at"] is None and session["status"] == "running"
         assert len(tmp_db.get_events(sid)) == 1 and HostIndex(tmp_path / "index.json").get(sid) == record

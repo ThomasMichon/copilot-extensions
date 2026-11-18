@@ -187,25 +187,33 @@ class _SessionsMixin:
                 or len(turns) > 1):
                 return False
             events = [("session_state_changed", receipt)]
-            if turns:
-                turn = turns[0]
-                if turn["started_at"] is None or conn.execute(
-                    "SELECT 1 FROM turns WHERE session_id=? AND turn_index>? LIMIT 1", (sid, turn["turn_index"]),
-                ).fetchone():
+            turn = conn.execute(
+                "SELECT turn_index,started_at,completed_at,stop_reason,"
+                "(runtime_custody_json IS NULL AND native_handoff_json IS NULL AND "
+                "native_admission_json IS NULL AND acquisition_delivery_id IS NULL) AS ordinary "
+                "FROM turns WHERE session_id=? ORDER BY turn_index DESC LIMIT 1", (sid,),
+            ).fetchone()
+            if turn is not None:
+                if (not turn["ordinary"] or turn["started_at"] is None
+                    or (turns and turns[0]["turn_index"] != turn["turn_index"])):
                     return False
                 try:
                     outcome = terminal_outcome(conn, sid, turn)
                 except ValueError:
                     return False
-                if outcome is None:
-                    events.insert(0, ("turn_complete", '{"stop_reason":"interrupted"}'))
-                    reason, finished = "interrupted", now
-                else:
+                if outcome is not None:
+                    if turn["completed_at"] is not None and turn["stop_reason"] != outcome.reason:
+                        return False
                     if not reconcile_idle(self, conn, sid, outcome):
                         return False
-                    reason, finished = outcome.reason, outcome.timestamp
-                conn.execute("UPDATE turns SET stop_reason=?,completed_at=? WHERE session_id=? AND turn_index=?",
-                             (reason, finished, sid, turn["turn_index"]))
+                if turn["completed_at"] is None:
+                    if outcome is None:
+                        events.insert(0, ("turn_complete", '{"stop_reason":"interrupted"}'))
+                        reason, finished = "interrupted", now
+                    else:
+                        reason, finished = outcome.reason, outcome.timestamp
+                    conn.execute("UPDATE turns SET stop_reason=?,completed_at=? WHERE session_id=? AND turn_index=?",
+                                 (reason, finished, sid, turn["turn_index"]))
             conn.execute("UPDATE sessions SET status='stopped',pid=NULL,background_recovery_enabled=0,updated_at=? "
                          "WHERE id=?", (now, sid))
             for kind, body in events:
