@@ -159,6 +159,21 @@ class EventLog:
             log._next_id = max_id + 1
         return log
 
+    def refresh_subscribed_history(self, hydrated: EventLog) -> None:
+        """Consume a private hydrated log; keep this reader's waiters and lock.
+
+        The caller excludes writers and discards the temporary log after transfer.
+        """
+        if self._db is None or self._db is not hydrated._db or not self._session_id or self._session_id != hydrated._session_id:
+            raise ValueError("Cannot refresh a different session's event history")
+        with self._lock:
+            self._events, hydrated._events = hydrated._events, self._events
+            self._next_id, hydrated._next_id = hydrated._next_id, self._next_id
+            self._open_tool_calls, hydrated._open_tool_calls = hydrated._open_tool_calls, self._open_tool_calls
+            self._tool_statistics, hydrated._tool_statistics = hydrated._tool_statistics, self._tool_statistics
+            self._telemetry, hydrated._telemetry = hydrated._telemetry, self._telemetry
+        self.wake_observers()
+
     def append(
         self, event_type: str, data: dict[str, Any], *, timestamp: float | None = None,
     ) -> SseEvent:
