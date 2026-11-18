@@ -329,6 +329,20 @@ named tracked objective before the whole effort is Done.
   MCP-tree native births remained unchanged. This is not full-host or
   adopted-session reattachment acceptance.
 
+### Maintenance queue recovery
+
+- [x] **Settled-refusal source:** #13243 preserves nonzero refusal results
+  without poisoning completed execution custody; unknown outcomes still fence.
+- [x] **Promoted release:** run `44396468041` releases the exact correction
+  in Worktrees `1.27.43-dev1`; source ancestry and implementation blobs agree.
+- [x] **Bounded Windows adoption:** one authorized Worktrees-only update
+  completes in 135.73 seconds with current selection, manifest, fresh command
+  and actual incoming service in agreement. All 56 measured client births
+  survive; outgoing retirement remains independently pending. See the
+  [release and installed result](journal/2026/11.18-settled-update-refusal.md#promoted-release-and-bounded-windows-adoption).
+  Full-suite performance, MCP reattachment and the remaining acceptance matrix
+  are not closed by this targeted result.
+
 ### Resident configuration-context correction
 
 - [x] **Source merged:** #10951 correction landed through #10969 at
@@ -804,6 +818,7 @@ migration already works.
 
 ## Journal
 
+- [2026-11-18 - Settled update refusal and bounded Windows adoption](journal/2026/11.18-settled-update-refusal.md)
 - [2026-11-10 - Explicit originating-owner CLI handoff](journal/2026/11.10-explicit-owner-cli.md)
 
 ### 2026-11-10 - Explicit originating-session lifetime prepared
