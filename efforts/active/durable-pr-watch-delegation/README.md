@@ -770,8 +770,8 @@ _Agent-recommended implementation requirements._
 
 [The subscriber-context contract](subscriber-callback-context.md), reviewed in
 #13228, specifies concrete wire, saved-state and rollback boundaries for
-P5947-3/4. The subsequent operator-selected map/version amendment is proposed
-for review there after an unsafe historical inline reader was reproduced.
+P5947-3/4. The subsequent operator-selected map/version amendment cleared
+review in #13277 after an unsafe historical inline reader was reproduced.
 Runtime expansion is local WIP, not published or activated; passing current
 tests does not resolve transition protection or consumer acceptance.
 
@@ -1785,6 +1785,15 @@ callback an implicit credential store.
 
 ## Journal
 
+- [2026-11-18 - Version-aware watch-state refusal baseline](journal/2026/11.18%20Watch%20state%20contract%20baseline.md)
+- **2026-11-18 - Versioned per-subscription map design reviewed.** #13277
+  captures the operator-selected command/cwd map and explicit contract-version
+  refusal without singleton-slot assignment. Current-head Copilot approval,
+  required CI and managed merge passed. Next: expand version-aware state
+  refusal and existing owner/activation protection before enabling map writes
+  or caller defaults. The unsafe inline-reader family remains a transition
+  gate; no runtime, installation or consumer acceptance is credited.
+  P/V/G5947-3/4 and the broader parent remain open.
 - [2026-11-18 - Released Gitea shadow and combined M1 qualification](journal/2026/11.18%20Gitea%20shadow%20qualification.md)
 - **2026-11-18 - Subscriber callback context contract reviewed.** #13228
   specifies actual-owner cwd negotiation, separate best-effort/ACK semantics,

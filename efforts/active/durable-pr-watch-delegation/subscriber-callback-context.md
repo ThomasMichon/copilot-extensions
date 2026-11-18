@@ -2,9 +2,9 @@
 
 Back to the [canonical effort](README.md#subscriber-callback-context-and-truthful-legacy-outcomes-from-5947).
 
-**Status:** Original contract reviewed and merged in #13228. Subsequent
-operator-selected map/version amendment is proposed for review; local runtime
-WIP and historical-reader audit do not resolve transition/consumer acceptance.
+**Status:** Original contract reviewed and merged in #13228; operator-selected
+map/version amendment reviewed and merged in #13277. Local runtime WIP and
+historical-reader audit do not resolve transition/consumer acceptance.
 **Scope:** P5947-3/4, V5947-3/4 and G5947-3/4. This does not complete those
 items, expiry acceptance, M1, or the parent effort.
 **Vision reconciliation:** Closes the existing
@@ -12,6 +12,11 @@ items, expiry acceptance, M1, or the parent effort.
 intent while preserving independent subscriber context. Applies the
 [service-contract evolution pattern](../../../docs/patterns/service-contract-evolution.md).
 No new supervisor, callback destination or remote-execution interface.
+
+The [first version-aware refusal slice](journal/2026/11.18%20Watch%20state%20contract%20baseline.md)
+adds read and final-write compatibility checks while retaining legacy-list
+writes. It does not resolve historical inline-executor activation or
+already-running pre-version writer protection, and enables no map/cwd support.
 
 ## Operator direction
 

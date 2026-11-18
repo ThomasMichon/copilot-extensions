@@ -548,6 +548,25 @@ for resident-daemon rollout requirements.
 
 ## Governed watch-state groundwork (internal)
 
+The subscription store currently reads and writes only the legacy JSON list.
+An explicit `agent-pull-requests.watch-subscriptions` schema/version envelope
+is recognized as an unsupported state contract, not an empty subscription set.
+Unknown schemas, malformed versions and other non-list state also refuse.
+Every subscription write rechecks the existing file under the atomic-replace
+lock immediately before replacement. An already-running contract-aware owner
+therefore leaves incompatible or corrupt state unchanged; the existing
+`state_write_failed` diagnostic and definite-failure registry rollback apply.
+Missing state still means an empty initial collection. Rendezvous metadata
+uses its separate existing format and is not subject to this subscription check.
+
+This is a provider expansion baseline, not map/callback-cwd support or a
+cross-process writer lease. Existing writer/lifecycle ownership remains required.
+It does not retrofit historical executables that overwrite unknown state.
+Their startup/rollback and already-running-writer transition protection remain
+prerequisites before versioned map writes or caller-context defaults are enabled.
+Installation readiness/current selection remain separate from state activation
+and outgoing-owner retirement.
+
 The watch-state core supplies an inactive construction and quiescence boundary
 for the reviewed governed-cutover design. This adoption is not yet released or
 advertised in the peer roster. Policy-default legacy `serve`, stop/restart and callback
