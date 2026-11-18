@@ -189,6 +189,7 @@ export class PendingInputNotice {
     this.limit = limit;
     this.sessionId = null;
     this.pending = new Set();
+    this.confirmations = new Set();
     this.incomplete = false;
     this.lastNoticeAt = null;
   }
@@ -197,6 +198,7 @@ export class PendingInputNotice {
     if (sessionId !== this.sessionId) {
       this.sessionId = sessionId;
       this.pending.clear();
+      this.confirmations.clear();
       this.incomplete = false;
       this.lastNoticeAt = null;
     }
@@ -204,7 +206,7 @@ export class PendingInputNotice {
       if (!Number.isSafeInteger(msg?.id) || msg.id <= 0
           || String(msg.kind || "").startsWith("control:")
           || String(msg.kind || "").startsWith("startup:")) continue;
-      if (this.pending.has(msg.id)) continue;
+      if (this.pending.has(msg.id) || this.confirmations.has(msg.id)) continue;
       if (this.pending.size >= this.limit) this.incomplete = true;
       else this.pending.add(msg.id);
     }
@@ -221,6 +223,11 @@ export class PendingInputNotice {
   confirmed(sessionId, id) {
     if (sessionId !== this.sessionId) return;
     this.pending.delete(id);
+    this.confirmations.delete(id);
+    this.confirmations.add(id);
+    while (this.confirmations.size > this.limit) {
+      this.confirmations.delete(this.confirmations.values().next().value);
+    }
     if (!this.pending.size && !this.incomplete) this.lastNoticeAt = null;
   }
 
@@ -237,7 +244,7 @@ export class PendingInputNotice {
         ? "Agent-bridge's bounded pending-input observation is incomplete. " +
           (this.pending.size ? "Known messages remain pending; END YOUR TURN for queued steering. " : "") +
           "Original inbox receipts remain authoritative; do not acknowledge or replay uncertain input."
-        : `Agent-bridge has ${this.pending.size} pending message(s) awaiting root input. ` +
+        : `Agent-bridge has ${this.pending.size} pending message(s) awaiting SDK submission. ` +
           "END YOUR TURN now so queued steering can be submitted. Do not send an acknowledgement or replay input.",
     };
   }
@@ -478,14 +485,16 @@ export async function drainInbox(sid, options) {
 }
 
 async function drainObservedInbox(sid, { getJson, post, session, inFlight, mainTurn,
-  pluginReadiness = false, isCurrent = () => true, log = () => {}, onPending = () => {} }, consumption) {
+  pluginReadiness = false, isCurrent = () => true, log = () => {}, onPending = () => {},
+  onSubmitted = () => {} }, consumption) {
   const base = `/api/v1/live-sessions/${encodeURIComponent(sid)}`;
   const inbox = `${base}/messages?exact_native=true${pluginReadiness ? "&plugin_readiness=true" : ""}`;
   const data = await getJson(inbox);
   const messages = data?.messages;
   if (!Array.isArray(messages) || messages.length === 0) return [];
   consumption.select(messages.filter((msg) => msg && typeof msg.id === "number").map((msg) => msg.id));
-  onPending(sid, messages.filter((msg) => msg && !consumption.has(msg.id)));
+  onPending(sid, messages.filter((msg) => msg && !consumption.has(msg.id)
+    && !inFlight.pending.has(msg.id)));
   const delivered = [];
   let interrupted = false;
   const currentNative = async (msg) => {
@@ -565,6 +574,7 @@ async function drainObservedInbox(sid, { getJson, post, session, inFlight, mainT
       if (!await currentNative(msg) || !stillCurrent(msg)) continue;
       if (!consumption.has(msg.id)) {
         await session.send(plan.options);
+        onSubmitted(sid, msg.id);
         if (!consumption.has(msg.id)) inFlight.sent(msg);
       }
       delivered.push(msg.id);

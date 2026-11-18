@@ -23,7 +23,7 @@ import {
   drainControls,
 } from "../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/delivery.mjs";
 
-test("pending-input notice coalesces, preserves mute and clears only actual root input", () => {
+test("pending-input notice coalesces, preserves mute and ignores foreign root input", () => {
   let now = 0;
   const notice = new PendingInputNotice({ now: () => now, reminderMs: 100 });
   const input = { sessionId: "root" }, invocation = { sessionId: "root" };
@@ -83,6 +83,27 @@ test("pending notification cannot resurrect input consumed while the inbox read 
   assert.deepEqual(observed, [[]]);
   assert.deepEqual(sent, []);
   assert.deepEqual(acks, [[1]]);
+});
+
+test("successful submission clears only its own notice while a failed send stays pending", async () => {
+  const notice = new PendingInputNotice();
+  const inFlight = new InFlightMessages();
+  const acks = [];
+  await drainInbox("root", {
+    inFlight,
+    getJson: async () => ({ messages: [{ id: 1 }, { id: 2 }] }),
+    session: { send: async (options) => {
+      if (options.prompt.includes('msg-id="2"')) throw new Error("SDK refused");
+      return "sdk-one";
+    } },
+    post: async (_method, _route, body) => acks.push(body.ids),
+    onPending: (sid, messages) => notice.offered(sid, messages),
+    onSubmitted: (sid, id) => notice.confirmed(sid, id),
+  });
+  assert.deepEqual([...notice.pending], [2]);
+  assert.deepEqual(acks, [[1]]);
+  assert.deepEqual([...inFlight.pending.keys()], [1]);
+  assert.equal(inFlight.consumed.size, 0);
 });
 
 test("a same-process resume switches registration to the resumed id", () => {
