@@ -173,6 +173,16 @@ shared paged acquisition journal, durable query progress, immutable full
 snapshots or authoritative tombstones. This legacy optimization does not
 qualify those delta-bounded or recovery gates.
 
+PR-list descriptions at the 400-symbol preview boundary are not accepted as
+complete text. The connector also accounts for UTF-16 units, so astral characters
+cannot hide a possibly truncated preview. After query eligibility and duplicate
+filtering, it point-reads that PR through the configured project endpoint,
+requires the same PR/repository identity and a string/null description, and
+replaces only the selected description. Short descriptions need no extra read.
+An unavailable or invalid detail response refuses acquisition rather than
+indexing a preview; the original query metadata and comment path remain intact.
+This adds no history enumeration, cursor capability or reconciliation authority.
+
 Work-item comments follow the comments API's JSON-body continuation tokens
 on the same selected work-item path, without following a supplied `nextPage`
 URL. Malformed pages, repeated tokens, a next-page indicator without a token,

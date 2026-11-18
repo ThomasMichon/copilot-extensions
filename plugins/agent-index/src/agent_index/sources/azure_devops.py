@@ -251,12 +251,14 @@ class AzureDevOpsConnector:
 
     def _observe_records(
         self, records: Any, *,
-        kind: Literal["query", "workitems", "pulls", "workitem_comments", "pull_comments"],
+        kind: Literal["query", "workitems", "pulls", "pull_detail", "workitem_comments", "pull_comments"],
     ) -> None:
         from agent_index.indexing.work_counts import observe_acquisition
 
         if kind in {"workitems", "pulls", "pull_comments"} and isinstance(records, dict):
             records = records.get("value")
+        elif kind == "pull_detail":
+            records = [records] if isinstance(records, dict) else None
         if not isinstance(records, list):
             return
         if kind == "pull_comments":
@@ -264,7 +266,7 @@ class AzureDevOpsConnector:
                 comment for thread in records if isinstance(thread, dict)
                 and isinstance(thread.get("comments"), list) for comment in thread["comments"]
             ]
-        is_pull = kind in {"pulls", "pull_comments"}
+        is_pull = kind in {"pulls", "pull_detail", "pull_comments"}
         counts = observe_acquisition(self._pulls_source if is_pull else self._workitems_source)
         if counts is None:
             return
@@ -285,7 +287,7 @@ class AzureDevOpsConnector:
                     )
                 )
             else:
-                key = {"pulls": "description", "workitem_comments": "text",
+                key = {"pulls": "description", "pull_detail": "description", "workitem_comments": "text",
                        "pull_comments": "content"}[kind]
                 body = key in record and (record[key] is None or isinstance(record[key], str))
             if body:
@@ -371,9 +373,45 @@ class AzureDevOpsConnector:
             seen_ids.add(pull_request_id)
             if since_dt and not self._pull_request_in_window(pull_request, since_dt):
                 continue
+            pull_request = self._complete_pull_description(pull_request)
             comments = self._pull_request_comments(pull_request)
             entries.append(self._pull_request_entry(pull_request, comments))
         return entries
+
+    def _complete_pull_description(self, pull_request: dict[str, Any]) -> dict[str, Any]:
+        description = pull_request.get("description")
+        if not isinstance(description, str):
+            return pull_request
+        # Also recognize UTF-16 previews whose astral characters use two units.
+        if len(description.encode("utf-16-le", "surrogatepass")) < 800:
+            return pull_request
+        # The list endpoint truncates at 400 symbols, including an ambiguous exact boundary.
+        result = self._http.get_json(
+            self._project_path("_apis", "git", "pullrequests", str(pull_request["pullRequestId"])),
+            params={"api-version": _DEFAULT_API_VERSION},
+            purpose="item_body",
+        )
+        details = result.data
+        self._observe_records(details, kind="pull_detail")
+        if (
+            not isinstance(details, dict)
+            or type(details.get("pullRequestId")) is not int
+            or details["pullRequestId"] != pull_request["pullRequestId"]
+        ):
+            raise ValueError("Azure DevOps pull-request details have mismatched identity")
+        selected_repo, actual_repo = pull_request.get("repository"), details.get("repository")
+        if (
+            not isinstance(selected_repo, dict) or not isinstance(actual_repo, dict)
+            or not isinstance(selected_repo.get("id"), str) or not selected_repo["id"]
+            or not isinstance(actual_repo.get("id"), str)
+            or selected_repo["id"].casefold() != actual_repo["id"].casefold()
+        ):
+            raise ValueError("Azure DevOps pull-request details have mismatched repository")
+        if "description" not in details or (
+            details["description"] is not None and not isinstance(details["description"], str)
+        ):
+            raise ValueError("Azure DevOps pull-request details have no valid description")
+        return pull_request | {"description": details["description"]}
 
     def _iter_pull_requests(self, *, since: str | None) -> Iterable[dict[str, Any]]:
         if not self._pull_request_queries:
