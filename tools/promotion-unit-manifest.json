@@ -5354,7 +5354,31 @@
         "tools/promotion_unit_tests/test_application_callback_deadlines.py::test_publication_cli_keeps_callback_separator_and_refuses_stage",
         "tools/promotion_unit_tests/test_application_callback_deadlines.py::test_publication_directory_preserves_current_and_retained_slots[2.0]",
         "tools/promotion_unit_tests/test_application_callback_deadlines.py::test_publication_directory_preserves_current_and_retained_slots[1.0]",
-        "tools/promotion_unit_tests/test_typecheck_new_code.py::test_candidate_manager_application_has_an_owner_without_waiving_the_strict_ratchet"
+        "tools/promotion_unit_tests/test_typecheck_new_code.py::test_candidate_manager_application_has_an_owner_without_waiving_the_strict_ratchet",
+        "tools/promotion_unit_tests/test_hosted_activation.py::test_hosted_source_is_bound_to_physical_activation_not_operation_id",
+        "tools/promotion_unit_tests/test_hosted_activation.py::test_hosted_source_fences_record_and_physical_boundaries[head]",
+        "tools/promotion_unit_tests/test_hosted_activation.py::test_hosted_source_fences_record_and_physical_boundaries[nonce-source]",
+        "tools/promotion_unit_tests/test_hosted_activation.py::test_hosted_source_fences_record_and_physical_boundaries[epoch]",
+        "tools/promotion_unit_tests/test_hosted_activation.py::test_hosted_source_fences_record_and_physical_boundaries[birth]",
+        "tools/promotion_unit_tests/test_hosted_activation.py::test_hosted_source_fences_record_and_physical_boundaries[parent]",
+        "tools/promotion_unit_tests/test_hosted_activation.py::test_hosted_source_fences_record_and_physical_boundaries[pruned]",
+        "tools/promotion_unit_tests/test_hosted_activation.py::test_hosted_source_fences_record_and_physical_boundaries[open]",
+        "tools/promotion_unit_tests/test_hosted_activation.py::test_hosted_source_rejects_malformed_evidence[version]",
+        "tools/promotion_unit_tests/test_hosted_activation.py::test_hosted_source_rejects_malformed_evidence[pid]",
+        "tools/promotion_unit_tests/test_hosted_activation.py::test_hosted_source_rejects_malformed_evidence[head]",
+        "tools/promotion_unit_tests/test_hosted_activation.py::test_hosted_source_rejects_malformed_evidence[unknown]",
+        "tools/promotion_unit_tests/test_hosted_activation.py::test_hosted_source_rejects_malformed_evidence[session]",
+        "tools/promotion_unit_tests/test_hosted_activation.py::test_hosted_source_rejects_malformed_evidence[budget]",
+        "tools/promotion_unit_tests/test_hosted_activation.py::test_hosted_source_rechecks_processes_and_epoch[process]",
+        "tools/promotion_unit_tests/test_hosted_activation.py::test_hosted_source_rechecks_processes_and_epoch[epoch]",
+        "tools/promotion_unit_tests/test_hosted_activation.py::test_hosted_source_uses_replayed_head_not_repairable_cache[stale]",
+        "tools/promotion_unit_tests/test_hosted_activation.py::test_hosted_source_uses_replayed_head_not_repairable_cache[current]",
+        "tools/promotion_unit_tests/test_hosted_activation.py::test_hosted_source_uses_replayed_head_not_repairable_cache[missing]",
+        "tools/promotion_unit_tests/test_hosted_activation.py::test_hosted_source_refuses_ambiguous_interval_history[older-open]",
+        "tools/promotion_unit_tests/test_hosted_activation.py::test_hosted_source_refuses_ambiguous_interval_history[older-open-retry]",
+        "tools/promotion_unit_tests/test_hosted_activation.py::test_hosted_source_refuses_ambiguous_interval_history[duplicate-ordinal]",
+        "tools/promotion_unit_tests/test_hosted_activation.py::test_hosted_source_refuses_ambiguous_interval_history[duplicate-source]",
+        "tools/promotion_unit_tests/test_hosted_activation.py::test_hosted_source_refuses_ambiguous_interval_history[stale-ended]"
     ],
     "coverage_targets": [
         "plugins/agent-worktrees/src/agent_worktrees/resource_delivery.py",
@@ -5716,7 +5740,9 @@
         "plugins/agent-dispatch/src/agent_dispatch/ordinary_control_invocation.py",
         "plugins/agent-dispatch/src/agent_dispatch/ordinary_invocation.py",
         "plugins/agent-bridge/src/agent_bridge/native_keyed_admission.py",
-        "plugins/agent-vault/src/agent_vault/source_start.py"
+        "plugins/agent-vault/src/agent_vault/source_start.py",
+        "plugins/agent-worktrees/src/agent_worktrees/retained_hosted_activation.py",
+        "plugins/agent-worktrees/src/agent_worktrees/tracking_session_activations.py"
     ],
     "sources": {
         "plugins/agent-worktrees/src/agent_worktrees/git_process.py": "6cc675a4d988e7d1fd6b0d76a48fde5909f78f085ef194ec69625c6334b4f80f",
@@ -6043,7 +6069,7 @@
         "plugins/agent-bridge/src/agent_bridge/acquisition_worktree_writer.py": "d66ea76d0fee8984060abf78f57ca2e88974d4eaed28c303dc45cea58257ea8e",
         "plugins/agent-bridge/src/agent_bridge/creation_worktree_writer.py": "d93f11053603ad66f77204d705dff03f5d7e73d284d2e80e5e43254e7a2b7d46",
         "plugins/agent-bridge/src/agent_bridge/creation_writer_inspection.py": "03ea01f80b57036a62cd9286089638a595447ca0ca5018aec9a7ce7921293e31",
-        "plugins/agent-worktrees/src/agent_worktrees/retained_record_writer.py": "2ab03a9acd1ac75761c5922057c6b140aced9383dea1dc5892d0da7aeb856ede",
+        "plugins/agent-worktrees/src/agent_worktrees/retained_record_writer.py": "cf3f9da2482a0129a54f070206d368e3f2c6f48c190f75256a0a443acd8a5199",
         "tools/promotion_unit_tests/test_retained_acquisition_writer.py": "1227cf6e9a8c465da6090c102d12764ed8b4e53ae437a155ada46d61b2c5ee6c",
         "plugins/agent-bridge/src/agent_bridge/workspace_creation_cli.py": "5d50c765fa431f296846c405e0f620c29f3c25845ca88df5b187601c4773cd96",
         "plugins/agent-bridge/src/agent_bridge/session_status.py": "96e8aec0a62cc68c7db7215d6a575c4ad772ce4a96c5def00b18cc1103f3b335",
@@ -6574,6 +6600,8 @@
         "tools/promotion_unit_tests/test_retained_admission_work.py": "bdde7bac4e96079165d6b1bdf94735a8e7ddc9c43e2566fe51e9420d9bc9515e",
         "plugins/agent-bridge/src/agent_bridge/native_keyed_admission.py": "ebeaf8c036abd606a867f35a1772dcb727985e1a48a0eb37d9d46177c45cc7ba",
         "tools/promotion_unit_tests/test_vault_client_install.py": "566d53f41e7510169bccb286d0830ef24b2d7b208c8253433df1fbc38d77c7e0",
-        "plugins/agent-vault/src/agent_vault/source_start.py": "9c023d7099a6aa762e82f91539018cbbd4f75ebd76e9061fe8bc10d9c6e74970"
+        "plugins/agent-vault/src/agent_vault/source_start.py": "9c023d7099a6aa762e82f91539018cbbd4f75ebd76e9061fe8bc10d9c6e74970",
+        "tools/promotion_unit_tests/test_hosted_activation.py": "20b44b2d24ea15e988b07a81d15eb01643a137d62666ff9b23e29fe8cfaf7f1c",
+        "plugins/agent-worktrees/src/agent_worktrees/retained_hosted_activation.py": "3e854addd94b96a577c4222b2808073fcd17224f8d97ca0f261fadb783f28c4a"
     }
 }

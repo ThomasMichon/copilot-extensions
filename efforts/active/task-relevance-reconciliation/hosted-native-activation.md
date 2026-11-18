@@ -3,7 +3,9 @@
 Part of [Task Relevance Reconciliation](README.md), correcting the remaining
 [#12696](https://github.com/ThomasMichon/copilot-extensions/issues/12696)
 boundary within [retained native recovery](retained-metadata-recovery.md).
-**Status: implementation proposal; no runtime behavior or rollout claimed.**
+**Status: plan reviewed in #13160; receiving writer implementation under
+qualification. Bridge caller, post-load reconciliation and runtime acceptance
+remain open.**
 
 ## Measured contract gap
 
