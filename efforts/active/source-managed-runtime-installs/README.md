@@ -44,6 +44,58 @@ qualification and reviewed, CI-passing, merged delivery. Capture-only work is a
 completed milestone, not that implementation's completion gate. Host/fleet
 rollout, credentials/access changes and unrelated app conversion are excluded.
 
+The bootstrap owns the **whole update** through a finite orchestration tool
+delivered with Manager, using only tools from that installation. It reconciles
+the control/knowledge repository pair's plugins, identifies every required
+application/service and builds the update roster. Worktrees is a roster
+consumer, not an orchestration prerequisite or a project-engine fallback.
+Per-application setup/construction and service lifecycle retain their canonical
+owners; the bootstrapper invokes orchestration rather than duplicating them.
+
+Operator clarification, verbatim:
+
+> So, I expect the bootstrap to run the *whole update*. It should only use tools from the Manager install to reconcile plugins from the harness+knowledge repo pair, identify the set of all required apps/services, and then build the roster of updates. The bootstrapper runs a tool delivered with Manager to handle orchestration only.
+
+> We're basically just piggybacking on manager to obtain some of its vendored tools, to reduce the amount of code that needs to come with the bootstrap
+
+Manager supplies the vendored tooling so bootstrap remains small; a running
+Manager daemon is not required for this finite orchestration entry.
+
+The bootstrap retains target source/ref resolution from registered projects and
+their configuration or the machine-side override, reusing the existing owners
+and selection rules before obtaining Manager-carried tooling. It does not
+silently replace that selection with Main or depend on an operational old
+application runtime to discover it.
+
+Operator clarification, verbatim:
+
+> Though the bootstrap will have to resolve the target copilot-extensions checkout ref from the registered projects and their config, or the machine-side override.
+
+> Because we need to determine what version of Manager to install first
+
+That selection determines the incoming Manager version itself: resolve the
+target first, install the selected Manager, then invoke its delivered finite
+orchestration tool. Installing latest/Main Manager before resolving the target
+does not satisfy this ordering.
+
+For the [source-pinned staging lane](app-footprint-transition.md#pinned-checkout-staging),
+the consuming repository selects a Git ref; one local checkout at its resolved
+commit is the sole first-party source for Manager, apps, services and plugin
+payloads until an explicit advance. Stage Manager first, then extend the same
+contract to all apps extracted from plugins. Rehearse successive Main
+promotions side by side using the upstream published wheels. A stage is not
+an activation: no daemon, live task/status store, command redirect or marketplace
+change. Runtime-state migration is later work.
+
+Bootstrap must accept an explicit build through the environment on both fresh
+install and update, alongside environment overrides for the source repository
+or a caller-selected local source folder. These select installation inputs,
+not merely the transport used to fetch the bootstrap script.
+
+A previously installed commit can be selected again. Validate and re-stage
+its retained builds without disturbing the current installation; full setup
+then uses the normal activation path to make the requested builds current.
+
 Fresh installation and update share the same incoming bootstrap, Manager-first
 application construction and repository-derived required closure. The
 [installation convergence map](installation-convergence.md) connects existing
@@ -911,6 +963,11 @@ onto one branch.
 
 ## Journal
 
+- 2026-11-18: [Atomic bootstrap-write headroom](journal/2026/11.17%20manager-footprint-consumer.md#merged-atomic-write-prerequisite)
+  merged in #13182 after exact-head approval, required Linux unit/coverage CI
+  and independent disposable Windows qualification of the unchanged runtime.
+  Its source workspace is finalized. F1-F3 source/profile construction and
+  cold bootstrap remain open; no release or installed rollout is inferred.
 - 2026-11-18: [Manager source-app staging and complete identity/resource closure](journal/2026/11.17%20manager-footprint-consumer.md#merged-source-app-staging)
   merged in #13149 after exact-head approval, required Linux unit/coverage CI
   and all nine external bootstrap/composition jobs. Its source workspace is
