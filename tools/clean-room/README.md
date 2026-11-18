@@ -221,6 +221,25 @@ resource-enforcement qualification.
 
 ## Scenarios & the scenario contract
 
+### Offline-job planning foundation
+
+`offline_job.py` provides an inert Python planning API for credential-free
+Linux jobs using a cached immutable image. It renders a single bounded
+container command with no pull/build fallback, a non-root identity, no network,
+no capabilities or privilege escalation, read-only root and explicit read-only
+inputs. Only the private results directory and an optional separate declared
+cache are writable host binds. Test HOME and temporary files remain below the
+results mount; no host environment or credentials are forwarded.
+
+This is **not a runnable lane or an execution receipt**. It neither creates
+files nor calls Docker. Its declared host/container partition check is
+arithmetic, not proof of enforcement. The later lifecycle caller must admit
+the actual ordinary identity and directory access, cached image/prerequisites,
+fresh resource name, native host and container limits, physical ID and retained
+stop/postflight before execution can qualify. Input contents and cache access
+remain the caller's responsibility; validating a mount root does not audit an
+entire input tree. Existing scenario/devcontainer defaults are unchanged.
+
 The [Gateway role-tunnel proof](gateway-role-tunnels/README.md) is an opt-in,
 host-driven Tier-P lane with one Gateway, two outbound service connectors and
 an observer on an internal network. It builds exact committed source and uses
