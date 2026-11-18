@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from .delegated_waiter_contract import validate_delegation, validate_event
+import sqlite3
+from typing import Any
+
+from .delegated_waiter_contract import (
+    validate_delegation, validate_event, validate_retained_delegation,
+)
 from .queue_records import TaskError
 from .queue_replay_waiters import ReplayWaiterProgressMixin
 
@@ -12,45 +17,57 @@ class DelegatedWaiterBindingMixin(ReplayWaiterProgressMixin):
         with self._connect() as conn:
             return str(conn.execute("SELECT id FROM run_waiter_identity").fetchone()["id"])
 
-    def find_delegated_preparation(self, task_id: str, preparation_id: str) -> dict | None:
+    def find_delegated_preparation(
+        self, task_id: str, preparation_id: str,
+    ) -> dict[str, Any] | None:
         with self._connect() as conn:
             return self._find_delegated_preparation(conn, task_id, preparation_id)
 
-    def _find_delegated_preparation(self, conn, task_id: str, preparation_id: str) -> dict | None:
+    def _find_delegated_preparation(
+        self, conn: sqlite3.Connection, task_id: str, preparation_id: str,
+    ) -> dict[str, Any] | None:
         for row in conn.execute("SELECT * FROM run_waiters WHERE task_id = ?", (task_id,)):
             value = self._run_waiter_from_row(row)
             if value["delegation"] and value["delegation"]["preparation_id"] == preparation_id:
                 return value
         return None
 
-    def _validate_waiter_preparation(self, kind: str, delegation: dict | None) -> dict | None:
+    def _validate_waiter_preparation(
+        self, kind: str, delegation: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
         if kind not in ("process", "delegated") or (kind == "process" and delegation is not None):
             raise TaskError("invalid run waiter kind")
         if kind == "delegated":
-            delegation = validate_delegation(delegation)
+            delegation = validate_retained_delegation(delegation)
             if delegation["coordinator_id"] != self.run_waiter_coordinator_id():
                 raise TaskError("delegated waiter belongs to another coordinator")
         return delegation
 
     @staticmethod
-    def _validate_waiter_arm(waiter, *, kind, delegation, pid, host, start_token):
+    def _validate_waiter_arm(
+        waiter: dict[str, Any], *, kind: str, delegation: dict[str, Any] | None,
+        pid: int | None, host: str | None, start_token: str | None,
+    ) -> None:
         if waiter["kind"] != kind:
             raise TaskError("run waiter kind mismatch")
         if kind == "delegated":
-            value = validate_delegation(delegation, armed=True)
+            value = validate_retained_delegation(delegation, armed=True)
             if {k: v for k, v in value.items() if k != "registration_id"} != waiter["delegation"]:
                 raise TaskError("delegated waiter identity mismatch")
         elif kind != "process" or not pid or not host or not start_token:
             raise TaskError("invalid process waiter identity")
 
     @staticmethod
-    def _delegated_finish_is_replay(waiter, delegation, event) -> bool:
+    def _delegated_finish_is_replay(
+        waiter: dict[str, Any], delegation: dict[str, Any] | None,
+        event: dict[str, Any] | None,
+    ) -> bool:
         if delegation is None:
             if waiter["kind"] != "process":
                 raise TaskError("run waiter kind mismatch")
             return False
         validate_delegation(delegation)
-        validate_event(event, delegation)
+        event = validate_event(event, delegation)
         stored = waiter["delegation"]
         if waiter["kind"] != "delegated" or not stored:
             raise TaskError("run waiter kind mismatch")
