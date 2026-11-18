@@ -154,6 +154,28 @@ def _plain(path: Path, *, directory: bool = False, owned: bool = True) -> os.sta
     return info
 
 
+def _expanded_path(path: Path) -> Path:
+    if sys.platform != "win32" or ".." in path.parts:
+        return path
+    import ctypes
+    from ctypes import wintypes
+
+    # Expand DOS names without following junctions or symbolic links.
+    expand = ctypes.WinDLL("kernel32", use_last_error=True).GetLongPathNameW
+    expand.argtypes = [wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.DWORD]
+    expand.restype = wintypes.DWORD
+    size = expand(str(path), None, 0)
+    if not size:
+        raise ctypes.WinError(ctypes.get_last_error())
+    buffer = ctypes.create_unicode_buffer(size)
+    length = expand(str(path), buffer, size)
+    if not length:
+        raise ctypes.WinError(ctypes.get_last_error())
+    if length >= size:
+        raise OSError("daemon path changed during name expansion")
+    return Path(buffer.value)
+
+
 def _root(path: Path, *, create: bool = False) -> Path:
     path = Path(path)
     if not path.is_absolute():
@@ -164,27 +186,31 @@ def _root(path: Path, *, create: bool = False) -> Path:
         while not current.exists():
             missing.append(current)
             current = current.parent
-        if current.resolve(strict=True) != current:
+        if current.resolve(strict=True) != _expanded_path(current):
             raise OSError("daemon registry parent is redirected")
         for entry in reversed(missing):
             mkdir_private(entry, exist_ok=True)
             _plain(entry, directory=True)
-    if path.resolve(strict=True) != path:
+    expanded = _expanded_path(path)
+    if path.resolve(strict=True) != expanded:
         raise OSError("daemon registry root is redirected")
     _plain(path, directory=True)
-    return path
+    return expanded
 
 
 def _runtime_anchor(path: Path) -> Path:
     path = Path(path)
     if not path.exists():
         return _root(path, create=True)
-    if not path.is_absolute() or path.resolve(strict=True) != path:
+    if not path.is_absolute():
+        raise OSError("daemon runtime anchor is redirected")
+    expanded = _expanded_path(path)
+    if path.resolve(strict=True) != expanded:
         raise OSError("daemon runtime anchor is redirected")
     # Existing code/config roots may be borrowed read-only metadata. This
     # never grants deletion of the directory or ownership of files below it.
     _plain(path, directory=True, owned=False)
-    return path
+    return expanded
 
 
 def _receipt(receipt: DaemonInstanceReceipt) -> Path:
@@ -704,10 +730,11 @@ def add_artifact(receipt: DaemonInstanceReceipt, artifact: Path) -> None:
         if (record.get("pid"), record.get("birth")) != (str(os.getpid()), birth_identity(os.getpid())):
             raise ValueError("daemon artifact custody belongs to the admitted process")
         root = Path(record["runtime_root"])
+        artifact = _expanded_path(artifact)
         if not artifact.is_absolute() or artifact.parent.resolve(strict=True) != artifact.parent:
             raise ValueError("daemon artifact parent is redirected")
         artifact.relative_to(root)
-        if artifact.is_relative_to(receipt.registry_root):
+        if artifact.is_relative_to(path.parent):
             raise ValueError("daemon inventory is not an application lifecycle artifact")
         if artifact == Path(record["source"]):
             raise ValueError("daemon source is not a lifecycle artifact")
@@ -835,7 +862,7 @@ def cleanup(
                 _remaining(deadline)
                 artifact = Path(record[f"artifact_{index}_path"])
                 artifact.relative_to(root)
-                if artifact.is_relative_to(receipt.registry_root):
+                if artifact.is_relative_to(path.parent):
                     return result("held", "inventory-artifact-refused")
                 if artifact.parent.resolve(strict=True) != artifact.parent:
                     return result("held", "artifact-parent-changed")
@@ -925,7 +952,14 @@ def cleanup(
 
 
 def _runtime_scope_key(runtime_root: str | os.PathLike[str]) -> bytes:
-    return os.fsencode(os.path.normcase(os.fspath(Path(runtime_root))))
+    path = Path(runtime_root)
+    if sys.platform == "win32":
+        try:
+            path = _expanded_path(path)
+        except FileNotFoundError:
+            # Missing runtime scopes retain their existing lexical identity.
+            pass
+    return os.fsencode(os.path.normcase(os.fspath(path)))
 
 
 def _cursor_path(root: Path, runtime_root: str | os.PathLike[str] | None = None) -> Path:

@@ -27,6 +27,14 @@ and production writer/merge cutover; it does not replace the broader Guiding
 Intent or any original, refined or inherited Plan/Validation outcome.
 This effort remains Active under its existing integration and domain owners.
 
+For subscriber callback context, the operator selected a map of subscription
+IDs to callback commands, each retaining its own cwd, with an explicit state
+contract version that incompatible engines refuse without changing the data.
+Do not assign singleton slots. The [callback-context amendment](subscriber-callback-context.md#operator-direction)
+preserves the verbatim direction and the required historical-reader transition
+protection; take the revised design through normal review and CI before
+enabling context-bearing state writes.
+
 The requested read-only extension is a reviewer-perspective status/current-PR/
 priority-next-action feed backed by PR activity, subscribable through SSE or
 WebSockets. The [reviewer-action feed contract](reviewer-action-feeds.md),
@@ -286,6 +294,12 @@ existing PR-watch service; it does not introduce a parallel watch owner,
 fleet controller or credential issuer.
 
 ## Request
+
+The callback-state direction is preserved verbatim in
+[subscriber-callback-context.md#operator-direction](subscriber-callback-context.md#operator-direction).
+It selects a versioned per-subscription command/cwd map, not a restriction to
+governed owners or a singleton-slot allocation. Operational authority and the
+parent's other acceptance gates remain unchanged.
 
 The selected first milestone's verbatim public-safe Request and separately
 labelled recommendations are in [repository-cache-events-m1.md#request](repository-cache-events-m1.md#request).
@@ -754,10 +768,12 @@ _Agent-recommended implementation requirements._
 
 ### Subscriber callback context and truthful legacy outcomes from #5947
 
-[The subscriber-context contract](subscriber-callback-context.md) proposes
-concrete wire, saved-state and rollback boundaries for P5947-3/4. Review it
-before runtime implementation; its source analysis is not mixed-version or
-consumer acceptance evidence.
+[The subscriber-context contract](subscriber-callback-context.md), reviewed in
+#13228, specifies concrete wire, saved-state and rollback boundaries for
+P5947-3/4. The subsequent operator-selected map/version amendment is proposed
+for review there after an unsafe historical inline reader was reproduced.
+Runtime expansion is local WIP, not published or activated; passing current
+tests does not resolve transition protection or consumer acceptance.
 
 #6019 already delivered outage-independent expiry and the acknowledged-delivery
 foundation. Preserve that positive credit; the unchecked rows below retain
@@ -1770,6 +1786,14 @@ callback an implicit credential store.
 ## Journal
 
 - [2026-11-18 - Released Gitea shadow and combined M1 qualification](journal/2026/11.18%20Gitea%20shadow%20qualification.md)
+- **2026-11-18 - Subscriber callback context contract reviewed.** #13228
+  specifies actual-owner cwd negotiation, separate best-effort/ACK semantics,
+  complete versioned subscription state and pre-effect rollback refusal.
+  Current documentation now states the absolute executable AND script/file
+  requirement. Required CI and current-head Copilot approval passed; all real
+  child qualification remains in opt-in lanes. Next: expand the provider
+  without migrating caller defaults. P/V/G5947-3/4 and the parent remain open;
+  no runtime, installation, provider or resource effect is credited.
 - **2026-11-18 - Native Gitea metadata contract proposed.** Continuing the
   bounded #10923 source-preservation work after GitHub source #13199;
   [Gitea title/body contract](native-gitea-metadata.md) retains the existing
