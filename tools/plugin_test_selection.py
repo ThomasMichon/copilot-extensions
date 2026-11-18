@@ -54,6 +54,12 @@ _BRIDGE_HISTORICAL_PARTITIONS = (
     "not http49 and http50",
     "not (http49 or http50) and http51",
 )
+_BRIDGE_HTTP52_OWNER = Path("tests") / "test_http52_owner_capture.py"
+_BRIDGE_HTTP52_REMAINING = Path("tests") / "test_http52_capture_probes.py"
+_BRIDGE_HTTP52_ISOLATED = (
+    "test_retained_acquisition_and_later_lineage_use_actual_owner_processes or "
+    "test_keyed_creation_uses_actual_retained_serializer_and_preserves_claim"
+)
 
 
 def plan_test_groups(
@@ -62,6 +68,13 @@ def plan_test_groups(
     """Partition expensive owned cohorts without widening their shared deadline."""
     target = plugin_root / _CODESPACES_NATIVE_FILE
     historical = plugin_root / _BRIDGE_HISTORICAL_FILE
+    owner = plugin_root / _BRIDGE_HTTP52_OWNER
+    remaining = plugin_root / _BRIDGE_HTTP52_REMAINING
+    if name == "agent-bridge" and len(groups) == 1 and set(groups[0]) == {owner, remaining}:
+        return [
+            ([owner], _BRIDGE_HTTP52_ISOLATED),
+            ([remaining], f"not ({_BRIDGE_HTTP52_ISOLATED})"),
+        ]
     plan: list[tuple[list[Path], str | None]] = []
     for group in groups:
         if name == "agent-bridge" and historical in group:

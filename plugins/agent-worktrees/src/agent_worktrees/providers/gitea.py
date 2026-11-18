@@ -45,6 +45,7 @@ _LABEL_ATTACH_ATTEMPTS = 3
 class _CurlOptions(TypedDict, total=False):
     preserve_line_endings: bool
     max_stdout_bytes: int
+    input_text: str
 
 
 def _is_transient(status: int) -> bool:
@@ -110,6 +111,7 @@ class GiteaProvider:
         payload: dict[str, Any] | None = None,
         preserve_line_endings: bool = False,
         read_deadline: float | None = None,
+        payload_stdin: bool = False,
     ) -> tuple[int, str]:
         """Run curl; return (http_status, body_text)."""
         if isinstance(token, ObservationCredentials):
@@ -124,9 +126,14 @@ class GiteaProvider:
             "-H", "Accept: application/json",
             "-w", COUNT_WRITE_OUT if counted else "\n%{http_code}",
         ]
-        if payload is not None:
-            args += ["-H", "Content-Type: application/json", "-d", json.dumps(payload)]
         options: _CurlOptions = {}
+        if payload is not None:
+            args += ["-H", "Content-Type: application/json"]
+            if payload_stdin:
+                args += ["--data-binary", "@-"]
+                options["input_text"] = json.dumps(payload)
+            else:
+                args += ["-d", json.dumps(payload)]
         if preserve_line_endings:
             options["preserve_line_endings"] = True
         if counted:

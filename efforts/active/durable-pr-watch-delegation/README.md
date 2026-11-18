@@ -39,9 +39,12 @@ The [M1 evidence map](repository-cache-events-m1.md#source-evidence-map)
 separates the standalone synthetic vertical from release, installed/running
 and authorized real-target qualification. The reviewed source stages 1–4 have
 landed. The [GitHub installed-running lane](journal/2026/11.18%20GitHub%20shadow%20qualification.md)
-now passes on an isolated Linux installation, including real continuing events,
-ACK and restart. Gitea qualification remains separately owned and uncredited;
-the combined Plan/Validation items and this effort remain open.
+passes on an isolated Linux installation, including real continuing events,
+ACK and restart. The separately owned
+[Gitea installed-running lane](journal/2026/11.18%20Gitea%20shadow%20qualification.md)
+also passes with actual later entry, reconnect and explicit ACK. Together with
+the source vertical these meet bounded M1 acceptance, not the broader Goal,
+Guiding Intent or retained parent Plan/Validation.
 
 ### Delegation driver's completion charter
 
@@ -69,8 +72,9 @@ the combined Plan/Validation items and this effort remain open.
 - **Now:** The filtered-population source and synthetic qualification are
   complete through #12200, including the bounded Windows registry snapshot
   prerequisite. Promotion #13048 includes that source, and the separately
-  authorized GitHub M1 installed-running lane passes. Reconcile the remaining
-  Gitea evidence with its operational owner without claiming full M1 acceptance.
+  authorized GitHub M1 installed-running lane passes. The complementary Gitea
+  evidence above completes bounded M1 acceptance while retaining each
+  operational owner and every broader outcome.
 - **Return:** Continue filtered-ADO and consumer-owned acceptance under this
   same effort within their separate authority and existing holds. The GitHub
   repository-local trial is not live filtered-ADO or posted-review proof.
@@ -426,7 +430,7 @@ its implementation or authorizing production activation.
 
 ### First integrated repository cache and event milestone
 
-- [ ] Deliver [M1's serial standalone discovery/projection/query/subscription stages](repository-cache-events-m1.md#serial-implementation-roster), then separately qualify authorized read-only live shadow; source stages and the GitHub lane pass, while separately owned Gitea qualification and all broader outcomes remain.
+- [x] Deliver [M1's serial standalone discovery/projection/query/subscription stages](repository-cache-events-m1.md#serial-implementation-roster), then separately qualify authorized read-only live shadow; both separately owned real-target lanes pass, while all broader outcomes and operational ownership remain.
 
 ### Author/Reviewer service perspectives
 
@@ -749,6 +753,11 @@ _Agent-recommended implementation requirements._
 - [x] Land and verify the notification-contract PR before enabling dispatch delegation.
 
 ### Subscriber callback context and truthful legacy outcomes from #5947
+
+[The subscriber-context contract](subscriber-callback-context.md) proposes
+concrete wire, saved-state and rollback boundaries for P5947-3/4. Review it
+before runtime implementation; its source analysis is not mixed-version or
+consumer acceptance evidence.
 
 #6019 already delivered outage-independent expiry and the acknowledged-delivery
 foundation. Preserve that positive credit; the unchecked rows below retain
@@ -1353,7 +1362,7 @@ or silently expanding a bounded source claim.
   required check. Legacy source behavior and broader
   installed/provider/HTTP/resource/effort acceptance remain independent.
 
-- [ ] Prove [M1's synthetic foreground/client/persistence/subscriber vertical and separate released/installed/running qualification](repository-cache-events-m1.md#validation-and-acceptance); the real GitHub lane now passes, but Gitea remains open. Neither that partial result, fixtures nor healthy-empty readiness closes M1 or this effort.
+- [x] Prove [M1's synthetic foreground/client/persistence/subscriber vertical and separate released/installed/running qualification](repository-cache-events-m1.md#validation-and-acceptance); separately owned real GitHub and Gitea lanes pass. This bounded M1 result does not close the full effort or its other Plan/Validation outcomes.
 
 - [x] Qualify the finite source [selected native reopening refinement](native-thread-resolution.md#reopening-source-controls-after-review)
   after independent contract review (#11741): exact resolved-to-active transition,
@@ -1760,6 +1769,7 @@ callback an implicit credential store.
 
 ## Journal
 
+- [2026-11-18 - Released Gitea shadow and combined M1 qualification](journal/2026/11.18%20Gitea%20shadow%20qualification.md)
 - **2026-11-18 - Native Gitea metadata contract proposed.** Continuing the
   bounded #10923 source-preservation work after GitHub source #13199;
   [Gitea title/body contract](native-gitea-metadata.md) retains the existing
