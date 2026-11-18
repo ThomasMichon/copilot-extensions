@@ -568,3 +568,38 @@ def test_live_linker_negotiation_uses_authenticated_health_not_advisory_version(
     })
     allocation_link_demand.require_capability("m/p/owner")
     assert seen == [{"contract_version": 1, "project": "p", "worktree_id": "owner", "include_missing": True}]
+
+
+def test_capability_check_waits_for_a_starting_resident(monkeypatch):
+    attempts, wakes = [], []
+    monkeypatch.setattr(allocation_link_demand.status_monitor_runtime, "_status_monitor_enabled", lambda: True)
+    monkeypatch.setattr(allocation_link_demand.status_monitor_runtime, "_ensure_status_monitor", lambda: wakes.append(1))
+    monkeypatch.setattr(allocation_link_demand.time, "sleep", lambda s: None)
+
+    def read_current(request):
+        attempts.append(request)
+        if len(attempts) < 3:
+            raise ConnectionError("endpoint owner exited or was replaced")
+        return {}
+
+    monkeypatch.setattr(allocation_link_demand.worktrees_client, "read_current", read_current)
+    monkeypatch.setattr(allocation_link_demand.worktrees_client, "read_health", lambda: {
+        "status": "ready", "published": True, "capabilities": ["worktree-allocation-linker-v1"],
+        "allocationLinker": {"admitting": True},
+    })
+    allocation_link_demand.require_capability("m/p/owner")
+    assert len(attempts) == 3
+    assert wakes
+
+
+def test_capability_check_reports_a_resident_that_never_starts(monkeypatch):
+    monkeypatch.setattr(allocation_link_demand.status_monitor_runtime, "_status_monitor_enabled", lambda: True)
+    monkeypatch.setattr(allocation_link_demand.status_monitor_runtime, "_ensure_status_monitor", lambda: False)
+    monkeypatch.setattr(allocation_link_demand, "CAPABILITY_WAIT", 0.0)
+
+    def read_current(request):
+        raise ConnectionError("no usable advisory roster")
+
+    monkeypatch.setattr(allocation_link_demand.worktrees_client, "read_current", read_current)
+    with pytest.raises(ConnectionError, match="no usable advisory roster"):
+        allocation_link_demand.require_capability("m/p/owner")
