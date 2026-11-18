@@ -3421,6 +3421,45 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [operation-credential receiving receipt](journal/2026/11.17-operation-credential-receiving-receipt.md)
+  records #13171's actual reviewed whole-domain acceptance and #5763's
+  separately audited redundant-tracker retirement after complete current
+  ROOT/source/custody readback. All three technical rows remain unchecked;
+  owners, #5760 and #954/P3 remain. The complete census is 883 whole,
+  154 above fixed 729, with one audited campaign retirement and no arrivals
+  or unrelated departures. Whole current safe comparisons retain #5947's
+  callback, #5952's settings-choice and #5953's cleanup/Restore contracts
+  independently OPEN; #5956's architecture decision retains its actual
+  copied-source qualification boundary.
+  The [current create-credential qualification](journal/2026/11.17-current-create-credential-qualification.md)
+  records #13168's actual reviewed receipt and #5763's corrected current
+  gate/create/SSH-source credit. A three-row whole venue-domain proposal
+  retains the operation-wide same-credential union and precise availability/
+  status seam, preserving actual custodians and #5760 rather than claiming
+  a different-token reproduction. Three independent canonical contracts
+  remain OPEN; a recovered containing-source boundary required withdrawal
+  of #356's earlier whole-ROOT qualification and restoration to OPEN.
+  The complete census is 884 whole, 155 above fixed 729; #5763 remains
+  OPEN at proposal and the earlier invalid closure credit is withdrawn.
+  The [manager receipt and native/transport retentions](journal/2026/11.17-manager-receipt-and-native-transport-retentions.md)
+  records #13165's actual reviewed delivery and #5655's separate tracking
+  retirement without technical completion or custody transfer. #5708's
+  reservation, #5716's complete canonical OPEN contract and #5761's genuine
+  source-author exclusion remain distinct; #13164/#13166 retain their
+  unfinished original scopes and owners. The complete census is 882 whole,
+  153 above fixed 729.
+  The [registry/lifecycle receipt and manager mechanisms](journal/2026/11.17-registry-lifecycle-receipt-and-manager-mechanisms.md)
+  records #13158's actual delivery and separate #5559/#5579/#5616 tracking
+  retirements, preserving every technical obligation and actual custodian.
+  #5655 receives a three-row mechanism proposal and explicit pattern-debt
+  home; #5641/#5665 retain their conditional/final-OPEN keeper boundaries.
+  The complete census is 880 whole, 151 above fixed 729.
+  The [authentication/baseline receipt and overlay proposals](journal/2026/11.17-auth-baseline-receipt-and-overlay-proposals.md)
+  records #13153's actual delivery and separate #5452/#5518/#5549 tracking
+  retirements, with only the evidenced #5518 documentary routing row checked.
+  #5616 receives a finite selected-remedy proposal; #5559/#5579 receive
+  prospective administrative clarifications preserving actual ownership and
+  technical gates. The complete census is 884 whole, 155 above fixed 729.
   The [authentication, baseline and engine receiving checkpoint](journal/2026/11.17-authentication-baseline-and-engine-receiving.md)
   records #13150's actual receipt merge, #5512's separate same-canonical
   tracking retirement and six current contracts. Whole #5452 authentication/

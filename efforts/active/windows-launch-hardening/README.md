@@ -149,7 +149,7 @@ Historical inventory totals are not fresh measurements.
 
 ### Proposed #5518 documentary route
 
-- [ ] **C5518-1:** Record the #5518-specific dated, append-only migration-intake
+- [x] **C5518-1:** Record the #5518-specific dated, append-only migration-intake
   ledger route in the SAME reviewed PR as this complete domain intake. Preserve
   deduplication, the existing tracker, explicit disposition and single canonical
   Windows-launch domain route. Acceptance is represented by the reviewed owning
@@ -185,6 +185,17 @@ Terminal / DefTerm. The `CREATE_NO_WINDOW`-vs-`DETACHED_PROCESS`-vs-`conhost
 against real behavior.
 
 ## Journal
+
+### 2026-11-17 - #5518 documentary routing receipt
+
+#13153 merged the complete domain clauses and dated migration-intake route
+in the same reviewed change. Whole current source/receiver/custody readback
+and independent metadata, roster and exact-document checks confirmed delivery;
+the coordinator explicitly accepted that published route before the separate
+audited `NOT_PLANNED` tracking retirement. C5518-1 records that documentary
+coordination result only. Every other checkbox state, unfinished product
+obligation, bounded claim and actual custodian remains unchanged. No guard,
+native test, implementation, process action or rollout was performed.
 
 ### 2026-11-17 - Finite #5518 baseline intake proposed
 

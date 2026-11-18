@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+from argparse import Namespace
 from contextlib import contextmanager
 import logging
 from importlib import import_module
@@ -19,12 +20,14 @@ from collections.abc import Callable, Iterator, Mapping
 from contextlib import ExitStack
 from pathlib import Path
 from types import ModuleType
+from typing import Any, cast
 import uuid
 
 
 _GUARDIAN_MEMBERS = (
     "_installer_process.py", "_versioned_runtime.py",
     "versioned_runtime_leases.py", "versioned_runtime_construction.py",
+    "versioned_runtime_identity.py", "versioned_runtime_fingerprint.py",
     "versioned_runtime_source.py", "versioned_runtime_publication.py",
     "_construction_procutil/__init__.py", "_construction_procutil/_job_scopes.py",
     "_construction_procutil/_windows_job_types.py",
@@ -62,8 +65,8 @@ class _ScopeDeadlineExpired(TimeoutError):
     pass
 
 
-def _scope_object(pairs):
-    value = {}
+def _scope_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    value: dict[str, Any] = {}
     for key, item in pairs:
         if key in value:
             raise ValueError("Installer retention packet has a duplicate field")
@@ -71,7 +74,7 @@ def _scope_object(pairs):
     return value
 
 
-def _scope_packet(path: Path, value: dict) -> None:
+def _scope_packet(path: Path, value: dict[str, Any]) -> None:
     temporary = path.with_name(path.name + ".tmp")
     stream = temporary.open("x", encoding="utf-8")
     try:
@@ -83,7 +86,7 @@ def _scope_packet(path: Path, value: dict) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def _read_scope_packet(path: Path) -> dict:
+def _read_scope_packet(path: Path) -> dict[str, Any]:
     metadata = path.lstat()
     if (
         not stat.S_ISREG(metadata.st_mode)
@@ -95,7 +98,7 @@ def _read_scope_packet(path: Path) -> dict:
         import msvcrt
         from ctypes import wintypes
 
-        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel = cast(Any, ctypes).WinDLL("kernel32", use_last_error=True)
         kernel.CreateFileW.argtypes = [
             wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p,
             wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE,
@@ -106,9 +109,9 @@ def _read_scope_packet(path: Path) -> dict:
         # Atomic rename can still hold DELETE access when the name becomes visible.
         handle = kernel.CreateFileW(str(path), 0x80000000, 0x7, None, 3, 0x80, None)
         if handle == wintypes.HANDLE(-1).value:
-            raise ctypes.WinError(ctypes.get_last_error())
+            raise cast(Any, ctypes).WinError(cast(Any, ctypes).get_last_error())
         try:
-            descriptor = msvcrt.open_osfhandle(handle, os.O_RDONLY | os.O_BINARY)
+            descriptor = cast(Any, msvcrt).open_osfhandle(handle, os.O_RDONLY | cast(Any, os).O_BINARY)
         except BaseException:
             kernel.CloseHandle(handle)
             raise
@@ -175,7 +178,7 @@ def _register_retention(context: str, root: Path, version: str, timeout: float) 
 class _RetentionScope:
     """The finite guardian co-retains each constructor target before writers start."""
 
-    def __init__(self, directory: Path, root: Path, runtime: ModuleType, custody: ExitStack):
+    def __init__(self, directory: Path, root: Path, runtime: ModuleType, custody: ExitStack) -> None:
         self.directory = directory.absolute()
         self.directory.mkdir(mode=0o700, exist_ok=False)
         self.directory = self.directory.resolve(strict=True)
@@ -240,7 +243,12 @@ class _OwnerDisconnected(RuntimeError):
     pass
 
 
-def _output_capture(process, procutil, on_output, output_fds=None, *, input_bytes=None):
+def _output_capture(
+    process: subprocess.Popen[str], procutil: ModuleType | None,
+    on_output: Callable[[str, bytes], None] | None, output_fds: Mapping[str, int] | None = None,
+    *, input_bytes: bytes | None = None,
+) -> Any:
+    assert procutil is not None
     capture = import_module(procutil.__name__ + ".streaming").SyncProcessOutput
     options = {"input_bytes": input_bytes} if input_bytes is not None else {}
     return capture(process, on_output=on_output, output_fds=output_fds, **options)
@@ -275,7 +283,7 @@ def run_owned(
     guardian_sources: dict[str, bytes] | None = None,
     allow_breakaway: bool = False,
     retention_scope: Path | None = None,
-) -> subprocess.CompletedProcess:
+) -> subprocess.CompletedProcess[str]:
     """Settle owned writers before returning or propagating a timeout.
 
     POSIX callers may omit procutil. With no construction descriptor, storage
@@ -317,7 +325,7 @@ def run_owned(
         if os.name == "nt":
             return _retained_windows(
                 argv, cwd=cwd, env=env, timeout=timeout, procutil=procutil,
-                root=runtime_root, version=runtime_version, runtime_path=runtime_path,
+                root=cast(Path, runtime_root), version=cast(str, runtime_version), runtime_path=cast(Path, runtime_path),
                 on_output=on_output,
                 output_fds=output_fds,
                 guardian_sources=guardian_sources,
@@ -325,24 +333,26 @@ def run_owned(
                 allow_breakaway=allow_breakaway,
                 retention_scope=retention_scope,
             )
-    options = dict(cwd=cwd, env=env, stdin=subprocess.DEVNULL,
+    options: dict[str, Any] = dict(cwd=cwd, env=env, stdin=subprocess.DEVNULL,
                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                    encoding="utf-8", errors="replace")
     timeout_error = None
-    capture = None
+    capture: Any = None
+    process: subprocess.Popen[str]
 
-    def communicate():
+    def communicate() -> tuple[str, str]:
         if capture is None:
             return process.communicate(
                 timeout=timeout if deadline is None else max(0, min(timeout, deadline - time.monotonic())),
             )
         capture.wait(timeout, deadline=deadline, wait_for_eof=False)
-        return capture.output()
+        return cast(tuple[str, str], capture.output())
 
-    def finish(grace):
-        return capture.finish(grace) if capture is not None else process.communicate(timeout=grace)
+    def finish(grace: float) -> tuple[str, str]:
+        return cast(tuple[str, str], capture.finish(grace)) if capture is not None else process.communicate(timeout=grace)
 
     if os.name == "nt":
+        assert procutil is not None
         # An explicit application path avoids MAX_PATH command-token parsing.
         try:
             process, job = procutil.spawn_sync_in_kill_on_close_job(
@@ -407,8 +417,10 @@ def run_owned(
     return result
 
 
-def _settle_output(finish, grace, *, capture=None):
-    result = []
+def _settle_output(
+    finish: Callable[[float], tuple[str, str]], grace: float, *, capture: Any = None,
+) -> tuple[str, str]:
+    result: list[tuple[str, str]] = []
     _settle(lambda: result.append(finish(grace)))
     if capture is not None:
         capture.deliver()
@@ -422,12 +434,12 @@ def _guardian_packet(
         paths = {
             "_installer_process.py": Path(__file__),
             "_versioned_runtime.py": runtime_path,
-            **{name: runtime_path.with_name(name) for name in _GUARDIAN_MEMBERS[2:6]},
-            "_construction_procutil/__init__.py": Path(procutil.__file__),
-            "_construction_procutil/_job_scopes.py": Path(procutil.__file__).with_name("_job_scopes.py"),
-            "_construction_procutil/_windows_job_types.py": Path(procutil.__file__).with_name("_windows_job_types.py"),
-            "_construction_procutil/streaming.py": Path(procutil.__file__).with_name("streaming.py"),
-            "_construction_procutil/_output_relay.py": Path(procutil.__file__).with_name("_output_relay.py"),
+            **{name: runtime_path.with_name(name) for name in _GUARDIAN_MEMBERS[2:8]},
+            "_construction_procutil/__init__.py": Path(cast(str, procutil.__file__)),
+            "_construction_procutil/_job_scopes.py": Path(cast(str, procutil.__file__)).with_name("_job_scopes.py"),
+            "_construction_procutil/_windows_job_types.py": Path(cast(str, procutil.__file__)).with_name("_windows_job_types.py"),
+            "_construction_procutil/streaming.py": Path(cast(str, procutil.__file__)).with_name("streaming.py"),
+            "_construction_procutil/_output_relay.py": Path(cast(str, procutil.__file__)).with_name("_output_relay.py"),
         }
         sources = {}
         for name, path in paths.items():
@@ -469,17 +481,21 @@ def _load_guardian_resources(
 
     try:
         register(runtime, "_versioned_runtime.py")
-        runtime._retained_runtime_components = {}
-        for member in _GUARDIAN_MEMBERS[2:6]:
+        setattr(runtime, "_retained_runtime_components", {})
+        for member in _GUARDIAN_MEMBERS[2:8]:
             component = member.removesuffix(".py")
             module = ModuleType(runtime.__name__ + "_" + component)
             register(module, member)
-            execute(module, member)
             runtime._retained_runtime_components[component] = module
+            if component != "versioned_runtime_source":
+                execute(module, member)
         runtime._retained_runtime_components["versioned_runtime_publication"]._leases = (
             runtime._retained_runtime_components["versioned_runtime_leases"]
         )
         execute(runtime, "_versioned_runtime.py")
+        source = runtime._retained_runtime_components["versioned_runtime_source"]
+        source._retained_runtime = runtime
+        execute(source, "versioned_runtime_source.py")
         procutil.__package__, procutil.__path__ = procutil.__name__, []
         scopes.__package__ = procutil.__name__
         register(procutil, "_construction_procutil/__init__.py")
@@ -494,7 +510,7 @@ def _load_guardian_resources(
             module.__package__ = procutil.__name__
             resource = "_construction_procutil/" + member + ".py"
             register(module, resource)
-            module._retained_source_bytes = sources[resource]
+            setattr(module, "_retained_source_bytes", sources[resource])
             execute(module, resource)
         yield runtime, procutil
     finally:
@@ -504,10 +520,13 @@ def _load_guardian_resources(
 
 
 def _retained_windows(
-    argv, *, cwd, env, timeout, procutil, root, version, runtime_path,
-    deadline=None, guardian_sources=None, on_output=None, output_fds=None,
-    allow_breakaway=False, retention_scope=None,
-):
+    argv: list[str], *, cwd: Path, env: dict[str, str], timeout: float,
+    procutil: ModuleType | None, root: Path, version: str, runtime_path: Path,
+    deadline: float | None = None, guardian_sources: dict[str, bytes] | None = None,
+    on_output: Callable[[str, bytes], None] | None = None, output_fds: Mapping[str, int] | None = None,
+    allow_breakaway=False,  # type: bool
+    retention_scope: Path | None = None,
+) -> subprocess.CompletedProcess[str]:
     import msvcrt
 
     streaming = on_output is not None or bool(output_fds)
@@ -518,17 +537,17 @@ def _retained_windows(
         execution_deadline = min(quiet_end, deadline) if deadline is not None else quiet_end
     if execution_deadline is not None:
         startup_deadline = min(startup_deadline, execution_deadline)
-    packet = _guardian_packet(procutil, runtime_path, guardian_sources)
+    packet = _guardian_packet(cast(ModuleType, procutil), runtime_path, guardian_sources)
     reader, writer = os.pipe()
     process = None
-    capture = None
+    capture: Any = None
     timeout_error = None
     try:
-        guardian_python = sys._base_executable if retention_scope is not None else sys.executable
-        handle = msvcrt.get_osfhandle(reader)
-        startup = subprocess.STARTUPINFO()
+        guardian_python = cast(Any, sys)._base_executable if retention_scope is not None else sys.executable
+        handle = cast(Any, msvcrt).get_osfhandle(reader)
+        startup = cast(Any, subprocess).STARTUPINFO()
         startup.lpAttributeList = {"handle_list": [handle]}
-        os.set_handle_inheritable(handle, True)
+        cast(Any, os).set_handle_inheritable(handle, True)
         try:
             try:
                 if time.monotonic() >= startup_deadline:
@@ -547,20 +566,20 @@ def _retained_windows(
                     stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",
                     startupinfo=startup, close_fds=True, executable=guardian_python,
                     **(
-                        procutil.windowless_daemon_kwargs(breakaway=True)
-                        if retention_scope is not None else procutil.no_window_kwargs()
+                        cast(ModuleType, procutil).windowless_daemon_kwargs(breakaway=True)
+                        if retention_scope is not None else cast(ModuleType, procutil).no_window_kwargs()
                     ),
                 )
             except OSError as error:
                 raise ChildLaunchError(f"Installer guardian could not start: {error}") from error
         finally:
-            os.set_handle_inheritable(handle, False)
+            cast(Any, os).set_handle_inheritable(handle, False)
         os.close(reader)
         reader = -1
         try:
             if on_output is None and not output_fds:
                 stdout, stderr = process.communicate(
-                    input=packet, timeout=max(0, execution_deadline - time.monotonic()) + 30,
+                    input=packet, timeout=max(0, cast(float, execution_deadline) - time.monotonic()) + 30,
                 )
             else:
                 capture = _output_capture(
@@ -584,7 +603,7 @@ def _retained_windows(
                 process.stdin = None
             # The guardian releases retention only after its Job has no writers.
             stdout, stderr = _settle_output(
-                capture.finish if capture is not None else lambda grace: process.communicate(timeout=grace),
+                capture.finish if capture is not None else lambda grace: cast("subprocess.Popen[str]", process).communicate(timeout=grace),
                 30, capture=capture,
             )
         if process.returncode != 0:
@@ -626,11 +645,11 @@ def _retained_windows(
             os.close(writer)
 
 
-def _supervise_windows(args, argv):
+def _supervise_windows(args: Namespace, argv: list[str]) -> dict[str, Any]:
     import ctypes
     from ctypes import wintypes
 
-    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel = cast(Any, ctypes).WinDLL("kernel32", use_last_error=True)
     kernel.PeekNamedPipe.argtypes = (
         wintypes.HANDLE, ctypes.c_void_p, wintypes.DWORD, ctypes.c_void_p,
         ctypes.c_void_p, ctypes.c_void_p,
@@ -638,18 +657,18 @@ def _supervise_windows(args, argv):
     kernel.PeekNamedPipe.restype = wintypes.BOOL
     kernel.CloseHandle.argtypes = (wintypes.HANDLE,)
 
-    def disconnected():
+    def disconnected() -> bool:
         if kernel.PeekNamedPipe(args.owner_handle, None, 0, None, None, None):
             return False
-        error = ctypes.get_last_error()
+        error = cast(Any, ctypes).get_last_error()
         if error in (109, 233):
             return True
-        raise ctypes.WinError(error)
+        raise cast(Any, ctypes).WinError(error)
 
     absolute_deadline = getattr(args, "deadline", None)
     expired = {"returncode": 1, "stdout": "", "stderr": "", "timed_out": True, "launch_error": None}
     try:
-        with _load_guardian_resources(_guardian_sources) as (runtime, procutil):
+        with _load_guardian_resources(cast(dict[str, bytes], _guardian_sources)) as (runtime, procutil):
             if absolute_deadline is not None and time.monotonic() >= absolute_deadline:
                 return expired
             with ExitStack() as custody:
@@ -672,8 +691,10 @@ def _supervise_windows(args, argv):
 
 
 def _run_guardian_child(
-    args, argv, procutil, disconnected, absolute_deadline, expired, *, scope=None, environment=None,
-):
+    args: Namespace, argv: list[str], procutil: ModuleType, disconnected: Callable[[], bool],
+    absolute_deadline: float | None, expired: dict[str, Any], *,
+    scope: _RetentionScope | None = None, environment: dict[str, str] | None = None,
+) -> dict[str, Any]:
     streaming = getattr(args, "progress_output", False)
     deadline = absolute_deadline
     if not streaming:
@@ -696,10 +717,10 @@ def _run_guardian_child(
             "timed_out": False, "launch_error": str(error),
         }
     timed_out = False
-    capture = None
+    capture: Any = None
     try:
         if streaming:
-            def observe_owner():
+            def observe_owner() -> None:
                 if disconnected():
                     raise _OwnerDisconnected("installer caller exited during child execution")
                 if scope is not None:
@@ -726,7 +747,7 @@ def _run_guardian_child(
             while True:
                 if disconnected():
                     raise RuntimeError("installer caller exited during child execution")
-                remaining = deadline - time.monotonic()
+                remaining = cast(float, deadline) - time.monotonic()
                 if remaining <= 0:
                     timed_out = True
                     break
@@ -738,7 +759,7 @@ def _run_guardian_child(
                         break
                 try:
                     stdout, stderr = process.communicate(timeout=min(remaining, 0.1))
-                    timed_out = time.monotonic() >= deadline
+                    timed_out = time.monotonic() >= cast(float, deadline)
                     break
                 except subprocess.TimeoutExpired:
                     continue
@@ -758,11 +779,11 @@ def _run_guardian_child(
     }
 
 
-def _terminate_group(process: subprocess.Popen) -> None:
+def _terminate_group(process: subprocess.Popen[bytes]) -> None:
     if process.returncode is not None:
         return
     try:
-        os.killpg(process.pid, signal.SIGKILL)
+        getattr(os, "killpg")(process.pid, getattr(signal, "SIGKILL"))
     except (ProcessLookupError, PermissionError):
         # Darwin reports EPERM for a group whose only members are zombies; the
         # ps check below still refuses to settle while a live member remains.
@@ -792,7 +813,10 @@ def _terminate_group(process: subprocess.Popen) -> None:
 def _child_exited_unreaped(pid: int) -> bool:
     waitid = getattr(os, "waitid", None)
     if waitid is not None:
-        return waitid(os.P_PID, pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is not None
+        return waitid(
+            getattr(os, "P_PID"), pid,
+            getattr(os, "WEXITED") | getattr(os, "WNOHANG") | getattr(os, "WNOWAIT"),
+        ) is not None
     # Python 3.11/3.12 on macOS lack waitid. ps observes zombie state without
     # reaping our direct child, keeping its PID/PGID reserved through cleanup.
     observation = subprocess.run(

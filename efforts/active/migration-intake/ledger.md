@@ -607,3 +607,106 @@ and #5555's whole four-pivot/venue outcome beyond Worktrees-local receiving.
 Neither is closed or reassigned. All twelve new product/coordination rows
 remain unchecked; ledger publication alone is not receiving acceptance,
 technical completion, native authority or a source-specific disposition.
+
+## Complete authentication/baseline receiving and next proposals (2026-11-17 UTC)
+
+#13153 merged complete #5452/#5518 receiving and the #5549 domain clarification
+after current-head Copilot approval and required CI. Entire current ROOT/
+source/custody readback and independent complete metadata/roster/document
+checks preceded separate audited `NOT_PLANNED` tracking retirements of all
+three originals. Prior authored content remains exact; every unfinished
+technical obligation and actual custodian remains.
+
+The coordinator explicitly accepted the #5518-specific same-PR dated route.
+Only C5518-1 records that completed documentary coordination fact; no product
+checkbox is completed, guard/native result asserted or resource transferred.
+
+| Whole contract | Original provenance | Proposed route | Direct receiving | Retained conditions |
+|---|---|---|---|---|
+| Transient knowledge-overlay-only resolution/omission/misleading-setup chain across four client operations | Public #5616 original and both discussions | routed (proposed; effective after reviewed complete domain acceptance) | [agent-index-standalone-service](../agent-index-standalone-service/README.md), I5616-P1/local I5616-LV/actual I5616-G and Coordination/Journal | Three unchecked rows; ONE OR MORE retry OR timeout change/config OR distinct resolution error OR cause logging; selected-remedy validation only; partial credit, existing custodians and #1941-specific token condition retained without generic ACK or operational prerequisites |
+| Existing complete operator-optional process-registry contract | Public #5559 whole original/discussions and recorded planning milestones | administrative clarification proposed; source remains OPEN | [agent-process-self-report-registry](../agent-process-self-report-registry/README.md), existing complete Plan/global Validation and prospective Coordination/Journal distinction | Historical parent-OPEN decisions retained; separate judgment only after actual reviewed complete receiving/current whole readback; all technical states, pending design/measured acceptance and actual custody unchanged |
+| Complete launcher-depth/lifecycle/diagnostic contract, including #102 | Public #5579 whole original and fourteen discussions | administrative clarification proposed; source remains OPEN | [lean-session-lifecycle](../lean-session-lifecycle/README.md) and its canonical mini-effort, existing LS5579 Plan/global Validation and prospective Coordination/Journal distinction | Current bounded owners, actual live-token/operator/resource conditions, installed/update/retained-session/shared-module/#8669 custody, literal alternatives and consumed native limits retained; no engineering-first gate invented for administrative judgment |
+
+The [dated receipt and complete proposals](../backlog-reconciliation/journal/2026/11.17-auth-baseline-receipt-and-overlay-proposals.md)
+retain #13154's bounded verifier/consumer claimant and the 884-open census.
+No #5559/#5579/#5616 disposition, implementation appointment, technical proof
+or source/resource release follows from publishing these proposed rows.
+
+## Registry/lifecycle/overlay receipt and retained manager mechanisms (2026-11-17 UTC)
+
+#13158 merged complete #5616 receiving and source-specific #5559/#5579
+administrative clarifications after current-head Copilot approval and required
+CI. Entire current three-ROOT/canonical-mini/source/custody readback and
+independent metadata/roster/document retention checks preceded separate
+audited `NOT_PLANNED` tracking retirements of all three originals.
+Originals and every earlier discussion remain exact; no technical checkbox,
+actual claim, owner, operational restriction or native authorization was
+completed, transferred or renewed by those judgments.
+
+| Whole contract | Original provenance | Proposed route | Direct receiving | Retained conditions |
+|---|---|---|---|---|
+| Original finite Windows manager lifetime-pipe/trusted-handle/Job/task-handoff mechanisms | Public #5655 whole original and all three discussions, qualified current manager pattern and existing ROOT | routed (proposed; effective after reviewed complete domain acceptance) | [versioned-singleton-manager](../versioned-singleton-manager/README.md), P5655-W/local V5655-W/actual G5655-W and same-custodian Coordination/Journal | Three unchecked rows; original Windows/passive-spawn scope, native gate and actual serial owner; no vacancy/accepted handoff from inquiry; pattern atomicity mismatch tracked against existing kernel synchronization; no new architecture, privilege, task or every-host programme |
+
+#5641 remains its complete conditional issue-local keeper; ordinary pivot/
+time/archive observations activate neither deferred lane. #5665 remains
+canonical OPEN under #5676's SPECIFIC final-OPEN/accepted-owner-preserving-
+handoff condition, not a generic ACK or permission to retire the parent.
+Neither is reassigned, closed or replaced by partial effort intake.
+
+The [dated receipt and keeper boundaries](../backlog-reconciliation/journal/2026/11.17-registry-lifecycle-receipt-and-manager-mechanisms.md)
+retain #13159's reported executable-resolution scope and the 880-open census.
+Ledger publication does not deliver the proposed #5655 domain receipt,
+implement Windows mechanisms, settle its administrative judgment or release
+any source/resource custody.
+
+## CodeSpace operation-credential receiving (2026-11-17 UTC)
+
+#13165 delivered the complete manager mechanism proposal after current-head
+Copilot approval and required CI. Complete current ROOT/source/custody
+readback and independent metadata/roster/document checks preceded #5655's
+separate audited `NOT_PLANNED` tracking retirement. Every technical row and
+actual owner remains; unanswered custodian inquiry is not accepted handoff.
+#13168 subsequently delivered the corresponding campaign receipt and native/
+transport retentions, not another implementation or resource operation.
+
+| Whole contract | Original provenance | Proposed route | Direct receiving | Retained conditions |
+|---|---|---|---|---|
+| One selected CodeSpace account AND scope-verified credential throughout create/provisioning | Public #5763 whole original, both earlier discussions and audited current-source correction | routed (proposed; effective after reviewed complete domain acceptance in the SAME PR) | [venue-parity](../venue-parity/README.md), WS-B P5763-1/local V5763-1/actual G5763 and continuing Coordination/Journal | Three unchecked rows retain gate/create/ordinary-REST/SSH-proxy/relay/ALL gh-helper scope, including availability/status. Current selected-environment propagation and helper refusal retain credit; independent status re-resolution remains a precise seam, not observed historical causality. Preserve #5760, generic account-contract ownership, #954/P3 and actual credential/transport custodians. |
+
+The ENTIRE current venue-parity ROOT and Account-Aware Operations ROOT were
+compared with the complete original. Generic account execution remains an
+interface, not a second canonical owner or proof of this full venue-specific
+operation. The original issue remains OPEN during review; historical campaign
+retention is prospectively distinguished from a later separate source-specific
+judgment after actual complete reviewed receiving and current whole readback.
+No implementation, new generic ACK, credential operation, native execution,
+provider mutation or claim/resource transfer follows from this proposed row.
+
+The same checkpoint recovers an unreconciled Manager ROOT containing-source
+boundary. Its earlier whole-ROOT qualification for #356 is withdrawn, not
+silently treated as cleared by successful acquisition or current editors.
+After complete metadata/custody reconciliation, the campaign audited its
+public correction and restored #356 OPEN. #12904 and the independent Phase 5
+material remain actual documentary delivery; no clauses or owners are
+deleted. Complete whole-receiving acceptance is unavailable, so the earlier
+redundant-tracking retirement loses its one closure credit. Original,
+discussion and historical observation records remain; no held ROOT/copy is
+read for this correction and no broad Manager audit or resource action begins.
+
+## Reviewed operation-credential receiving receipt (2026-11-18 UTC)
+
+#13171 actually delivered the complete #5763 WS-B domain Plan, local
+Validation, actual global Validation and continuing Coordination in
+[Venue Parity](../venue-parity/README.md), after current-head Copilot
+approval and all required green CI. The earlier conditional route in this
+append-only ledger is now effective; it was not accepted before its SAME-PR
+domain clauses.
+
+Complete current ROOT/source/custody readback preceded the separate audited
+#5763 `NOT_PLANNED` redundant-tracker retirement. All three technical rows
+remain unchecked; the same-account AND scope-verified-credential union,
+availability/status seam, positive source credit, #5760 and actual
+account/credential/transport/resource custodians remain. #954's OPEN
+programme/P3 conditions are unchanged. This receipt authorizes no
+implementation, authentication/native test, provider mutation or custody
+transfer.

@@ -911,6 +911,10 @@ onto one branch.
 
 ## Journal
 
+- 2026-11-17: [Promotion-produced Manager source project](journal/2026/11.17%20manager-footprint-consumer.md#promotion-produced-manager-source-project)
+  merged in #13121 after exact-head approval, required CI and real Linux
+  production-composition qualification. Its source worktree is finalized;
+  source-app setup/construction and cold bootstrap remain open under F1-F3.
 - 2026-11-17: [Prepared Manager install/update and recovery](journal/2026/11.17%20manager-footprint-consumer.md#merged-prepared-reference-source-and-next-footprint-slice)
   merged in #13069 after exact-head approval, required CI and final-runtime
   installed Windows repair/repeat qualification. Its source worktree is

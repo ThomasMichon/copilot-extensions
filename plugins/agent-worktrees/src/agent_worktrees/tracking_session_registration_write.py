@@ -169,6 +169,23 @@ def _apply_session_register_locked(args: dict[str, Any]) -> dict[str, Any]:
         if record.sessions is None:
             record.sessions = []
         existing = record.session_entry(session_id)
+        hosted = retained_record_writer.hosted_activation()
+        if hosted is not None:
+            from .retained_hosted_activation import source_identity as hosted_source
+
+            try:
+                if source_identity is not None or any((
+                    handoff_token, candidate_token, initial_projection, pane_id, started_at,
+                )):
+                    raise ValueError("Hosted activation cannot carry hook or handoff evidence")
+                source_identity = hosted_source(record, session_id, pid, hosted)
+                source = "retained-hosted-acp"
+                assert existing is not None
+                hosted_latest = max(existing.activations, key=lambda item: item.ordinal)
+                if hosted_latest.ended_at is None:
+                    return {"ok": True, "linked_handoff": None, "lifecycle": "duplicate"}
+            except (OSError, ValueError, TypeError, KeyError, IndexError, AttributeError) as exc:
+                return {"error": "lifecycle", "message": str(exc)}
         if existing is not None:
             latest = max(existing.activations, key=lambda item: item.ordinal, default=None)
             if (

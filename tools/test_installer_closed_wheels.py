@@ -596,6 +596,7 @@ def test_native_health_callable_runs_before_completion(
     for name in (
         "runtime_launcher.py", "versioned_runtime.py", "versioned_runtime_leases.py",
         "versioned_runtime_source.py", "versioned_runtime_construction.py",
+        "versioned_runtime_identity.py", "versioned_runtime_fingerprint.py",
         "versioned_runtime_publication.py", "versioned_runtime_cache.py", "daemon_instance_runtime.pyz",
     ):
         shutil.copyfile(helpers / name, scripts / name)

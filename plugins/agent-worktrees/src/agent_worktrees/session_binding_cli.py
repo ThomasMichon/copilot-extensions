@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from typing import Any, Callable, cast
 
 from . import activity, launch_native_observation, native_lifecycle_source, output, profile_assignment, related_briefing, sessions, tracking, worktree_identity, worktree_trust
 from . import config as cfg, hook_ipc, session_context as session_context_mod
@@ -12,20 +13,22 @@ from . import retained_record_writer, session_tracking_cli, status_monitor_runti
 from .session_title import capture_session_title as _capture_session_title
 
 
-def _core():
+def _core() -> Any:
     from . import __main__ as core
 
     return core
 
 
-def _core_helper(name: str, local):
+def _core_helper(name: str, local: Callable[..., Any]) -> Callable[..., Any]:
     candidate = vars(_core()).get(name)
     if callable(candidate) and candidate is not local:
-        return candidate
+        return cast(Callable[..., Any], candidate)
     return local
 
 
-def _note_disposition_snapshot(wt_id: str, *, summary: str, kind: str, session_id):
+def _note_disposition_snapshot(
+    wt_id: str, *, summary: str, kind: str, session_id: str | None,
+) -> None:
     """Shared `disposition_history.append` for the bind/handoff bookkeeping
     entries below -- reads the record's actual `paused` (never the
     `append` default, which would misrepresent an already-paused worktree;
@@ -41,57 +44,57 @@ def _note_disposition_snapshot(wt_id: str, *, summary: str, kind: str, session_i
     )
 
 
-def _read_hook_stdin(*args, **kwargs):
+def _read_hook_stdin(*args: Any, **kwargs: Any) -> Any:
     return _core()._read_hook_stdin(*args, **kwargs)
 
 
-def _hook_event_timestamp(*args, **kwargs):
+def _hook_event_timestamp(*args: Any, **kwargs: Any) -> Any:
     return _core()._hook_event_timestamp(*args, **kwargs)
 
 
-def _status_monitor_enabled(*args, **kwargs):
+def _status_monitor_enabled(*args: Any, **kwargs: Any) -> Any:
     return _core_helper("_status_monitor_enabled", status_monitor_runtime._status_monitor_enabled)(*args, **kwargs)
 
 
-def _ensure_status_monitor(*args, **kwargs):
+def _ensure_status_monitor(*args: Any, **kwargs: Any) -> Any:
     return _core_helper("_ensure_status_monitor", status_monitor_runtime._ensure_status_monitor)(*args, **kwargs)
 
 
-def _register_session_for_monitor(*args, **kwargs):
+def _register_session_for_monitor(*args: Any, **kwargs: Any) -> Any:
     return _core_helper(
         "_register_session_for_monitor", status_monitor_runtime._register_session_for_monitor
     )(*args, **kwargs)
 
 
-def _activate_project_for_path(*args, **kwargs):
+def _activate_project_for_path(*args: Any, **kwargs: Any) -> Any:
     return _core_helper("_activate_project_for_path", status_updater_cli._activate_project_for_path)(*args, **kwargs)
 
 
-def _resolve_mux_worktree_id(*args, **kwargs):
+def _resolve_mux_worktree_id(*args: Any, **kwargs: Any) -> Any:
     return _core_helper("_resolve_mux_worktree_id", status_updater_cli._resolve_mux_worktree_id)(*args, **kwargs)
 
 
-def _activate_project_for_worktree_id(*args, **kwargs):
+def _activate_project_for_worktree_id(*args: Any, **kwargs: Any) -> Any:
     return _core_helper("_activate_project_for_worktree_id", status_updater_cli._activate_project_for_worktree_id)(*args, **kwargs)
 
 
-def _emit_register_session_result(*args, **kwargs):
+def _emit_register_session_result(*args: Any, **kwargs: Any) -> Any:
     return _core()._emit_register_session_result(*args, **kwargs)
 
 
-def _spawn_status_updater(*args, **kwargs):
+def _spawn_status_updater(*args: Any, **kwargs: Any) -> Any:
     return _core_helper("_spawn_status_updater", status_updater_cli._spawn_status_updater)(*args, **kwargs)
 
 
-def _maybe_emit_stage_13(*args, **kwargs):
+def _maybe_emit_stage_13(*args: Any, **kwargs: Any) -> Any:
     return _core()._maybe_emit_stage_13(*args, **kwargs)
 
 
-def _resolve_active_project(*args, **kwargs):
+def _resolve_active_project(*args: Any, **kwargs: Any) -> Any:
     return _core()._resolve_active_project(*args, **kwargs)
 
 
-def _find_tracking_file_by_session(*args, **kwargs):
+def _find_tracking_file_by_session(*args: Any, **kwargs: Any) -> Any:
     return _core_helper("_find_tracking_file_by_session", session_tracking_cli._find_tracking_file_by_session)(*args, **kwargs)
 
 
@@ -122,24 +125,28 @@ def _register_manager_owned_monitor_session(
 
 
 def _session_handoff_token() -> str:
-    return getattr(_core(), "_SESSION_HANDOFF_TOKEN")
+    return cast(str, getattr(_core(), "_SESSION_HANDOFF_TOKEN"))
 
 
 def _session_bind_session_key() -> str:
-    return getattr(_core(), "_SESSION_BIND_SESSION")
+    return cast(str, getattr(_core(), "_SESSION_BIND_SESSION"))
 
 
 def _session_bind_worktree_key() -> str:
-    return getattr(_core(), "_SESSION_BIND_WORKTREE")
+    return cast(str, getattr(_core(), "_SESSION_BIND_WORKTREE"))
 
 
 def _session_bind_project_key() -> str:
-    return getattr(_core(), "_SESSION_BIND_PROJECT")
+    return cast(str, getattr(_core(), "_SESSION_BIND_PROJECT"))
 
 
-def add_parsers(sub) -> None:
+def add_parsers(sub: Any) -> None:
     sp = sub.add_parser("register-session", help="Register a Copilot session against a worktree")
     sp.add_argument("--retained-record-writer", help="Qualified executing writer and workspace JSON")
+    sp.add_argument(
+        "--retained-hosted-activation",
+        help="Negotiated accepted-load evidence from the original hosted ACP owner",
+    )
     sp.add_argument("--worktree-id", default=None, help="Worktree ID (resolved from --cwd when omitted)")
     sp.add_argument(
         "--session-id",
@@ -284,58 +291,40 @@ def add_parsers(sub) -> None:
 
 
 def _emit_handoff_claim_stages(
-    wt_id: str, session_id: str, linked_handoff, *, launch_id: str | None = None
+    wt_id: str, session_id: str, linked_handoff: tracking.SessionHandoff | None,
+    *, launch_id: str | None = None,
 ) -> None:
-    """Emit Stage 10 (claimed) always; Stage 11 (predecessor closing) only if
-    the resident-monitor's own retire flow hasn't already recorded it.
+    from .session_handoff_reporting import emit_claim_stages
 
-    ``linked_handoff`` is ``tracking.register_session()``'s return: the
-    ``SessionHandoff`` it *just* linked (head authoritatively transferred), or
-    ``None`` for no fresh transfer. The monitor's `handoff_predecessor_retire`
-    (outcome="gone") is ALSO mapped to Stage 11 (Phase 1) and can fire before
-    this call site (retirement is gated on candidate presence, not on this
-    link) -- checking for it first prevents a double Stage-11 record for the
-    same token while still covering the common case where that outcome never
-    fires (observed "left-running", not "gone" -- Phase 4's open question).
-    """
-    if linked_handoff is None:
-        return
-    from . import handoff_diagnostics
-
-    activity.log_event(
-        "handoff_successor_claimed",
-        worktree_id=wt_id,
-        session_id=session_id,
-        handoff_token=linked_handoff.token,
-        predecessor_session_id=linked_handoff.predecessor,
-        successor_session_id=session_id,
-        launch_id=launch_id,
+    emit_claim_stages(
+        wt_id, session_id, linked_handoff,
+        launch_id=launch_id, emit_stage_13=_maybe_emit_stage_13,
     )
-    already_retired = any(
-        str(e.get("handoff_token") or "").strip() == linked_handoff.token
-        and e.get("outcome") == "gone"
-        for e in activity.read_events(worktree_id=wt_id, event="handoff_predecessor_retire")
-    )
-    if not already_retired:
-        activity.log_event(
-            "handoff_pickup_confirmed_predecessor_closing",
-            worktree_id=wt_id,
-            session_id=linked_handoff.predecessor,
-            successor_session_id=session_id,
-            handoff_token=linked_handoff.token,
-            launch_id=launch_id,
-        )
-    handoff_diagnostics.stamp_session_state_handoff(
-        linked_handoff.predecessor,
-        handoff_token=linked_handoff.token,
-        successor_session_id=session_id,
-    )
-    _maybe_emit_stage_13(wt_id, linked_handoff.token, launch_id=launch_id)
 
 
 @retained_record_writer.command
 def cmd_register_session(args: argparse.Namespace) -> int:
     """Register a Copilot session against a worktree (hook-invoked)."""
+    if retained_record_writer.hosted_activation() is not None:
+        try:
+            from . import tracking_write
+
+            if not cfg.active_project():
+                _activate_project_for_worktree_id(args.worktree_id)
+            path = tracking._owning_tracking_dir(args.worktree_id) / f"{args.worktree_id}.yaml"
+            result = tracking_write.dispatch(
+                "session_register", {
+                    "worktree_id": args.worktree_id, "yaml_path": str(path),
+                    "session_id": args.session_id, "pid": args.pid, "source": "retained-hosted-acp",
+                },
+                read_lock_data=lambda: None, ensure_monitor=None,
+            )
+            if result.get("ok") is not True:
+                raise ValueError(result.get("message") or "Hosted activation was not registered")
+            return 0
+        except Exception as exc:
+            output.err(f"Failed to register hosted activation: {exc}")
+            return 1
     wt_id = getattr(args, "worktree_id", None)
     session_id = getattr(args, "session_id", None)
     cwd = getattr(args, "cwd", None)
@@ -417,8 +406,8 @@ def cmd_register_session(args: argparse.Namespace) -> int:
         else None
     )
     if recovered_mux:
-        pane_id = pane_id or mux_binding.get("pane_id")
-        pid = pid or mux_binding.get("copilot_pid")
+        pane_id = pane_id or recovered_mux.get("pane_id")
+        pid = pid or recovered_mux.get("copilot_pid")
 
     candidate_token = getattr(args, "handoff_candidate_token", None) or (
         None if resident_environment else os.environ.get(_session_handoff_token())
@@ -429,7 +418,7 @@ def cmd_register_session(args: argparse.Namespace) -> int:
     native_witness = native_lifecycle_source.witness(payload, resident=resident_environment)
     source_identity = native_lifecycle_source.start_identity(session_id, native_witness)
     try:
-        linked_handoff = tracking.register_session(
+        linked_handoff = getattr(tracking, "register_session")(
             wt_id,
             session_id,
             pid=pid,
@@ -453,7 +442,7 @@ def cmd_register_session(args: argparse.Namespace) -> int:
                 candidate_predecessor = (
                     candidate_handoff.predecessor if candidate_handoff is not None else None
                 )
-                tracking.associate_handoff_candidate(
+                getattr(tracking, "associate_handoff_candidate")(
                     candidate_record,
                     candidate_token,
                     session_id,
@@ -476,7 +465,7 @@ def cmd_register_session(args: argparse.Namespace) -> int:
         binding_path = cfg.tracking_dir() / f"{wt_id}.yaml"
         with tracking._RecordLock(binding_path, blocking=False, require_sidecar=True) as binding_guard:
             if binding_guard.acquired:
-                binding_record = tracking._load_record_uncached(binding_path)
+                binding_record = getattr(tracking, "_load_record_uncached")(binding_path)
                 handoff_diagnostics.stamp_session_state_worktree_binding(
                     session_id, wt_id, worktree_dir=binding_record.worktree_path,
                     worktree_record=binding_record if binding_record.repo == registration_project else None,
@@ -658,7 +647,7 @@ def cmd_bind_session(args: argparse.Namespace) -> int:
     try:
         from . import tracking_write
 
-        linked_handoff = tracking.register_session(
+        linked_handoff = getattr(tracking, "register_session")(
             wt_id,
             session_id,
             pid=getattr(args, "pid", None),
@@ -732,7 +721,7 @@ def cmd_bind_session(args: argparse.Namespace) -> int:
 _BIND_NUDGE_COOLDOWN_S = 90
 
 
-def _bind_nudge_should_fire(record) -> bool:
+def _bind_nudge_should_fire(record: tracking.WorktreeRecord | None) -> bool:
     """Whether an active agent in this worktree looks UNBOUND and should be nudged."""
     if record is None:
         return False
@@ -776,14 +765,14 @@ def cmd_note_handoff(args: argparse.Namespace) -> int:
             yaml_path = cfg.tracking_dir() / f"{wt_id}.yaml"
             existing = tracking.load_record(yaml_path)
             if existing.session_entry(session_id) is None:
-                tracking.register_session(
+                getattr(tracking, "register_session")(
                     wt_id,
                     session_id,
                     source="handoff",
                 )
             with tracking._RecordLock(yaml_path):
                 record = tracking.load_record(yaml_path)
-                handoff = tracking.open_handoff(
+                handoff = getattr(tracking, "open_handoff")(
                     record, session_id, task, save=False,
                     live_cutover=bool(getattr(args, "live_cutover", False)),
                 )
@@ -807,7 +796,7 @@ def cmd_note_handoff(args: argparse.Namespace) -> int:
     return 0
 
 
-def _bind_nudge_decision(cwd: str, *, deadline: float | None = None) -> dict:
+def _bind_nudge_decision(cwd: str, *, deadline: float | None = None) -> dict[str, Any]:
     """Return the advisory bind reminder without importing a CLI subprocess."""
     import time as _time
 
@@ -858,7 +847,7 @@ def cmd_bind_nudge(args: argparse.Namespace) -> int:
     """postToolUse hook: nudge an unbound-but-active session to bind (JSON out)."""
     import json as _json
 
-    def _emit(obj) -> int:
+    def _emit(obj: object) -> int:
         try:
             sys.stdout.write(_json.dumps(obj))
         except Exception:
@@ -889,7 +878,7 @@ def _activate_hook_session_binding(
 
 
 def _activate_session_binding(
-    session_id: str | None, *, environment: dict | None = None,
+    session_id: str | None, *, environment: dict[str, Any] | None = None,
 ) -> str | None:
     """Activate and return a scoped bare-resume worktree binding."""
     binding_environment = os.environ if environment is None else environment
@@ -971,7 +960,7 @@ def cmd_deregister_session(args: argparse.Namespace) -> int:
             native_lifecycle_source.witness(payload, resident=resident_environment),
             record.session_entry(session_id),
         )
-        result = tracking.deregister_session(
+        result = getattr(tracking, "deregister_session")(
             wt_id, session_id, ended_at=event_at, source=source,
             source_identity=source_identity, end_reason=end_reason,
         )

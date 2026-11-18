@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+import sys
 from argparse import Namespace
 from pathlib import Path
 from typing import Any
@@ -111,6 +112,7 @@ def cmd_resource_relationship(args: Namespace) -> int:
                 "writer_scope": "executing-process",
                 "retained_session_writes": 1,
                 "retained_native_activation": 1,
+                "retained_hosted_activation": 1 if sys.platform.startswith("linux") else 0,
                 "retained_native_resume": 1,
                 "writer_contract": relationship.writer_contract(),
                 "writer_identity": relationship.writer_identity(),

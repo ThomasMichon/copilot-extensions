@@ -100,6 +100,19 @@ disposition caveat remains; no formal new signature ceremony or assignment
 release is introduced. Generic companion supervision, runtime provisioning,
 engine lifecycle and mesh deployment remain outside this finite slice.
 
+#### Source #5616
+
+The proposed finite knowledge-overlay intake below retains the existing
+effective-configuration, lightweight-client overlay and transport custodians.
+The assigned-token and same-owner disposition condition above remains specific
+to #1941; it is neither removed there nor imposed as a universal #5616 ACK.
+Engine, serving, corpus, migration, installer and operational custody remain
+separate. Documentary receiving and any separate administrative judgment do
+not require setup, corpus or route work, restart, native execution, updater
+repair, rollback qualification or completion of this parent effort.
+Review, actual merged receiving and current whole-source/receiver and
+claims/custody readback remain distinct from implementing a selected remedy.
+
 
 
 #### Source #2860
@@ -382,6 +395,35 @@ receiving readback precede any separate source-specific disposition.
   all six scoped requirements/four acceptance rows, precedence/refusal/opt-in/CLI/SSH/metadata
   constraints, original assignment and separate release/installed/native tiers. Do not wait for
   unrelated whole-parent native or container/GPU gates.
+
+#### Source #5616 - Transient knowledge-overlay resolution
+
+- [ ] **I5616-P1:** Retain the correctly configured, knowledge-overlay-ONLY
+  indexer-designation case for `search`, `similar`, `clusters` and `status`:
+  a transient `state-root` timeout or invocation failure can become
+  unavailable, silently omit the required configuration layer and surface
+  misleading missing-setup advice. Preserve the reported legacy-path
+  failure handling separately from the narrower same-cell truthful refusal;
+  credit existing layered resolution, supported legacy behavior and that
+  narrower refusal without claiming the entire chain is repaired. Select
+  ONE OR MORE original remedies: bounded retry OR increased/configurable
+  timeout OR a distinct truthful resolution error OR cause logging.
+  Do not require all four. Preserve transient subprocess failures beyond
+  the related Worktrees update race; repairing #4547 alone is insufficient.
+
+##### Local Validation for #5616
+
+- [ ] **I5616-LV:** Qualify the SELECTED remedy at its actual producer and
+  client-consumer boundary for the knowledge-only designation case and the
+  four named operations. Cover timeout/invocation failure and relevant
+  nonzero-exit and malformed-resolution controls, contrasted with genuinely
+  absent configuration. Check the behavior promised by the chosen remedy,
+  including its bounds or diagnostic/cause evidence as applicable; do not
+  silently require the unselected remedies or fixes to untouched branches.
+  Preserve narrower truthful-refusal and supported legacy controls.
+  Immediate-retry success and separately healthy route/engine observations
+  remain observations, not proof of a new root cause, dead service, repaired
+  corpus or completed migration.
 
 #### Source #2860
 
@@ -732,6 +774,18 @@ with its existing owners and no execution is authorized here.)_
   finite evidence tier, preserving alternatives, completed credit and existing custodians.
   Administrative tracking is not technical completion or claim release.
 
+#### Source #5616
+
+- [ ] **I5616-G:** Resolve the complete original/refined knowledge-overlay
+  failure contract through I5616-P1 and I5616-LV at the SELECTED remedy's
+  scope, preserving all four client operations, the one-or-more alternatives
+  and existing partial credit. Complete planned receiving does not establish
+  technical repair; conversely, running these controls or completing engine,
+  updater, rollback, native, corpus, route or whole-parent work is not a
+  prerequisite for documentary receiving or its separate administrative
+  judgment. Preserve existing source/resource custody and #1941's own
+  source-specific token condition without extending it into a generic ACK.
+
 #### Source #2860
 
 - [ ] **V.2860.original-four-and-adopter-custody:** Verify the COMPLETE original/refined clause at
@@ -847,6 +901,17 @@ with its existing owners and no execution is authorized here.)_
 boundaries from implementation decisions and deployment-specific policy.
 
 ## Journal
+
+### 2026-11-17 - Proposed transient knowledge-overlay intake
+
+Proposed direct #5616 Plan, local Validation and actual global Validation
+beside the existing effective-configuration boundary. The original
+knowledge-only resolution/omission/misleading-setup chain and one-or-more
+remedy choice remain intact; narrower truthful refusal and layered-resolution
+credit are not whole-chain completion. Validation follows the selected remedy,
+not all alternatives. Existing custodians and #1941's specific token condition
+are unchanged. This proposal performs no implementation or operational work
+and establishes no merged receipt, technical acceptance or source disposition.
 
 ### 2026-10-30 - Proposed source-lock and historical-repair intake
 

@@ -2,15 +2,16 @@
 
 import base64
 import hashlib
-from importlib import metadata
+from importlib import metadata as metadata
 from pathlib import Path
 import stat
+from typing import Any, cast
 
-from . import __version__
+from . import __version__ as __version__
 from .planning import PlanError
 
 
-def diagnose_client():
+def diagnose_client() -> dict[str, Any]:
     """Require wheel RECORD-bound resources from this exact imported package."""
     package = Path(__file__).absolute().parent
     try:
@@ -38,6 +39,7 @@ def diagnose_client():
         "__init__.py", "_versioned_runtime.py",
         "versioned_runtime_leases.py", "versioned_runtime_construction.py",
         "versioned_runtime_source.py", "versioned_runtime_publication.py",
+        "versioned_runtime_identity.py", "versioned_runtime_fingerprint.py",
         "_installer_process.py", "_runtime_launcher.py",
         "_construction_procutil/__init__.py", "_construction_procutil/_job_scopes.py",
         "_construction_procutil/_windows_job_types.py",
@@ -50,7 +52,7 @@ def diagnose_client():
         if len(matches) != 1 or matches[0].hash is None or matches[0].hash.mode != "sha256":
             raise PlanError("fleet client resource has no unique SHA-256 RECORD entry")
         entry = matches[0]
-        selected = Path(distribution.locate_file(entry)).absolute()
+        selected = Path(cast(Path, distribution.locate_file(entry))).absolute()
         if selected != package / name:
             raise PlanError("fleet client resource does not belong to the imported package")
         try:
@@ -73,7 +75,7 @@ def diagnose_client():
             raise PlanError("fleet client resource exceeds the 1 MiB limit")
         value = hashlib.sha256(data).digest()
         encoded = base64.urlsafe_b64encode(value).rstrip(b"=").decode("ascii")
-        if encoded != entry.hash.value or entry.size != len(data):
+        if encoded != cast(metadata.FileHash, entry.hash).value or entry.size != len(data):
             raise PlanError("fleet client resource differs from its installed RECORD")
         resource_digests[name] = value.hex()
     return {

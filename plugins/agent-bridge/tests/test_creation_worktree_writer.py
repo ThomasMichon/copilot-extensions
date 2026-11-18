@@ -179,8 +179,12 @@ async def test_keyed_creation_writer_retains_original_scope_and_strict_resume(wr
 
 async def recovery_fixture(writer_creation: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
     from agent_bridge import creation_writer_inspection as inspection
+    from agent_bridge import retained_load_acceptance
     from agent_bridge.models import RetainedRecoveryRequest
 
+    monkeypatch.setattr(retained_load_acceptance, "epoch", lambda: {
+        "platform": "linux", "environment_id": "a" * 32, "boot_id": "original-boot",
+    })
     fixture, rig = writer_creation, writer_creation.rig
     session, _receipt = await workspace_creation.start(
         rig.manager, rig.target, key="original-key", worktree_writer=fixture.requirement,
@@ -204,6 +208,7 @@ async def recovery_fixture(writer_creation: Any, monkeypatch: pytest.MonkeyPatch
         result = await command(args, project, owner_prefix=owner_prefix)
         if args[0] == "resource-relationship":
             result["retained_native_resume"] = 1
+            result["retained_hosted_activation"] = 1
         return result
 
     monkeypatch.setattr(acquisition_authority, "worktree_command", recovery_command)
@@ -428,7 +433,8 @@ async def test_native_stop_race_retains_hold_and_records_no_native_entry(writer_
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("boundary", [
-    "host", "inventory", "native", "capability", "installation", "not-ready", "gate", "stop",
+    "host", "inventory", "native", "capability", "hosted-capability",
+    "installation", "not-ready", "gate", "stop",
 ])
 async def test_retained_recovery_denies_unconfirmed_native_owners_before_invocation(
     writer_creation: Any, monkeypatch: pytest.MonkeyPatch, boundary: Any,
@@ -446,10 +452,11 @@ async def test_retained_recovery_denies_unconfirmed_native_owners_before_invocat
         request = request.model_copy(update={"native_session_id": "another-native"})
     elif boundary == "installation":
         request = request.model_copy(update={"bridge_installation": "another-installation"})
-    elif boundary == "capability":
+    elif boundary in {"capability", "hosted-capability"}:
         async def unsupported(*args: Any, **kwargs: Any) -> Any:
             result = await command(*args, **kwargs)
-            result.pop("retained_native_resume", None)
+            result.pop("retained_native_resume" if boundary == "capability"
+                       else "retained_hosted_activation", None)
             return result
         monkeypatch.setattr(acquisition_authority, "worktree_command", unsupported)
     elif boundary == "gate":

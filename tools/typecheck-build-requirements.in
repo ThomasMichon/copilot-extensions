@@ -1,0 +1,2 @@
+-r typecheck-runner-requirements.txt
+types-setuptools==80.10.0.20260124

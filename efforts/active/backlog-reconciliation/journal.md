@@ -3,6 +3,16 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-17 - Operation-credential receiving receipt and canonical keepers](journal/2026/11.17-operation-credential-receiving-receipt.md)
+
+- [2026-11-17 - Current create-credential qualification and whole receiving proposal](journal/2026/11.17-current-create-credential-qualification.md)
+
+- [2026-11-17 - Manager receipt and native/transport retentions](journal/2026/11.17-manager-receipt-and-native-transport-retentions.md)
+
+- [2026-11-17 - Registry/lifecycle receipt and manager mechanisms](journal/2026/11.17-registry-lifecycle-receipt-and-manager-mechanisms.md)
+
+- [2026-11-17 - Authentication/baseline receipt and overlay proposals](journal/2026/11.17-auth-baseline-receipt-and-overlay-proposals.md)
+
 - [2026-11-17 - Authentication, finite baseline and engine receiving](journal/2026/11.17-authentication-baseline-and-engine-receiving.md)
 
 - [2026-11-17 - Webhook and host-teardown receipt, with receiving correction](journal/2026/11.17-webhook-receipt-and-receiving-correction.md)

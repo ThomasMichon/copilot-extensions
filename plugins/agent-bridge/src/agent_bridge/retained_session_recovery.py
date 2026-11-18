@@ -92,6 +92,8 @@ class RetainedRecovery:
     host_process: Any = None
     host_record: Any = None
     native_rpc_started: bool = False
+    hosted_epoch: dict[str, str] | None = None
+    accepted_load: dict[str, Any] | None = None
 
     @property
     def session_id(self) -> str:
@@ -167,8 +169,13 @@ class RetainedRecovery:
                 or kwargs.get("cwd") != self.session.target.cwd
             ):
                 raise _refuse("Original retained recovery native request changed")
+            from .retained_load_acceptance import prepare, record
+
+            acceptance = prepare(self, client)
             self.native_rpc_started = True
-            return await method(**kwargs)
+            result = await method(**kwargs)
+            record(self, acceptance)
+            return result
 
         return invoke
 
@@ -320,6 +327,11 @@ async def resume(
             writer, support = await select_writer(writer)
             if type(support.get("retained_native_resume")) is not int or support["retained_native_resume"] != 1:
                 raise _refuse("Original Worktrees owner lacks retained native resume fencing")
+            from .retained_load_acceptance import negotiate
+
+            hosted_epoch = negotiate(support)
+            if session.event_log is None:
+                raise _refuse("Retained native recovery requires its durable operation event log")
             command = partial(worktree_command, owner_prefix=writer.prefix)
             preflight = await command([
                 "embody", "--worktree-id", scope.worktree_id, "--json",
@@ -338,6 +350,7 @@ async def resume(
                 if item.session_id == session_id and not manager._host_index.release_exited_local(item):
                     raise _refuse("Recovery cannot replace unknown or retained Host custody")
             owner = RetainedRecovery(manager, session, request, session.target.to_json(), asyncio.current_task())
+            owner.hosted_epoch = hosted_epoch
             previous[request.operation_id] = {"request": request.model_dump(), "state": "invoking"}
             delivery = f"retained-recovery:{request.operation_id}"
             with manager.db._runtime_transaction(write=True, full_sync=True) as conn:

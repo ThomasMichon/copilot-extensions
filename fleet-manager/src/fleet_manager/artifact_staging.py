@@ -1,7 +1,7 @@
 """Retained authenticated artifact bytes, never installation or activation."""
 
 from collections.abc import Callable, Iterator
-from contextlib import ExitStack, contextmanager
+from contextlib import AbstractContextManager, ExitStack, contextmanager
 from dataclasses import dataclass, field
 import hashlib
 import os
@@ -12,22 +12,43 @@ import sys
 import threading
 import time
 from types import ModuleType
+from typing import Any, BinaryIO, Protocol, cast
 import tempfile
 import uuid
 
+from . import artifacts as _artifacts, planning as _planning, release_auth as _release_auth
 from .artifacts import (
     CHUNK_BYTES,
     MAX_ARTIFACT_BYTES,
-    _content_stamp,
-    _file_stat,
-    _identity,
-    _reader,
-    verify_role_artifacts,
 )
-from .client_diagnostics import diagnose_client
-from .planning import MAX_BYTES, PlanError, canonical, decode
-from .release_auth import authenticate_release
+from .client_diagnostics import diagnose_client as diagnose_client
+from .planning import MAX_BYTES, PlanError
 from .staging_cleanup import directory_identity, remove_owned_stage
+
+
+class _Authenticate(Protocol):
+    def __call__(
+        self, manifest_bytes: bytes, proof: object, policy: object, *,
+        authority: str, installation: str, role: str, now: int,
+    ) -> dict[str, Any]: ...
+
+
+class _VerifyArtifacts(Protocol):
+    def __call__(self, release: object, sources: object, *, role: str) -> dict[str, Any]: ...
+
+
+class _CurrentAuthentication(Protocol):
+    def __call__(self, current_policy: object, *, clock: Callable[[], int]) -> dict[str, Any]: ...
+
+
+_file_stat = cast(Callable[[Path], os.stat_result], _artifacts._file_stat)
+_identity = cast(Callable[[os.stat_result], tuple[int, int]], _artifacts._identity)
+_content_stamp = cast(Callable[[os.stat_result], tuple[int, ...]], _artifacts._content_stamp)
+_reader = cast(Callable[[Path], AbstractContextManager[BinaryIO]], _artifacts._reader)
+verify_role_artifacts = cast(_VerifyArtifacts, _artifacts.verify_role_artifacts)
+canonical = cast(Callable[[object], bytes], _planning.canonical)
+decode = cast(Callable[[bytes], Any], _planning.decode)
+authenticate_release = cast(_Authenticate, _release_auth.authenticate_release)
 
 _FILENAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,199}\Z")
 _DEVICES = {"CON", "PRN", "AUX", "NUL"} | {
@@ -110,6 +131,7 @@ def _primitive() -> Iterator[ModuleType]:
     companions = {}
     for component in (
         "versioned_runtime_leases", "versioned_runtime_construction", "versioned_runtime_source",
+        "versioned_runtime_identity", "versioned_runtime_fingerprint",
         "versioned_runtime_publication",
     ):
         member = component + ".py"
@@ -120,19 +142,23 @@ def _primitive() -> Iterator[ModuleType]:
     name = f"fleet_manager._retained_staging_runtime_{uuid.uuid4().hex}"
     module = ModuleType(name)
     module.__file__ = str(resource)
-    module._retained_runtime_components = {}
+    setattr(module, "_retained_runtime_components", {})
     sys.modules[name] = module
     try:
         for component, retained in companions.items():
             child = ModuleType(name + "_" + component)
             child.__file__ = str(resource.with_name(component + ".py"))
             sys.modules[child.__name__] = child
-            exec(compile(retained, child.__file__, "exec"), child.__dict__)
             module._retained_runtime_components[component] = child
+            if component != "versioned_runtime_source":
+                exec(compile(retained, child.__file__, "exec"), child.__dict__)
         module._retained_runtime_components["versioned_runtime_publication"]._leases = (
             module._retained_runtime_components["versioned_runtime_leases"]
         )
         exec(compile(content, str(resource), "exec"), module.__dict__)
+        source = module._retained_runtime_components["versioned_runtime_source"]
+        source._retained_runtime = module
+        exec(compile(companions["versioned_runtime_source"], source.__file__, "exec"), source.__dict__)
         yield module
     finally:
         for component in companions:
@@ -243,7 +269,7 @@ class StagedArtifacts:
                 raise PlanError("artifact staging ownership changed")
             return content
 
-    def reverify(self, policy: object, *, clock: Callable[[], int] = _clock) -> dict:
+    def reverify(self, policy: object, *, clock: Callable[[], int] = _clock) -> dict[str, Any]:
         """Re-authenticate exact frozen bytes under supplied current trusted policy."""
         with self._operation_lock:
             return self._reverify(policy, clock=clock)
@@ -272,13 +298,17 @@ class StagedArtifacts:
             self._closed.set()
 
     @contextmanager
-    def _retained_authentication(self, policy, *, clock):
+    def _retained_authentication(
+        self, policy: object, *, clock: Callable[[], int],
+    ) -> Iterator[tuple[bytes, _CurrentAuthentication]]:
         """Consume verified snapshots before short custody, retaining live authentication."""
         with self._operation_lock:
             snapshots = self.read_artifacts(policy, clock=clock)
             active = True
 
-            def authenticate(current_policy, *, clock):
+            def authenticate(
+                current_policy: object, *, clock: Callable[[], int],
+            ) -> dict[str, Any]:
                 if not active or self._closed.is_set():
                     raise PlanError("artifact staging retention has ended")
                 if _directory(self._root) != self._root_identity:
@@ -298,7 +328,7 @@ class StagedArtifacts:
                 active = False
                 snapshots.clear()
 
-    def _reverify(self, policy: object, *, clock: Callable[[], int]) -> dict:
+    def _reverify(self, policy: object, *, clock: Callable[[], int]) -> dict[str, Any]:
         if self._closed.is_set():
             raise PlanError("artifact staging retention has ended")
         if _directory(self._root) != self._root_identity:

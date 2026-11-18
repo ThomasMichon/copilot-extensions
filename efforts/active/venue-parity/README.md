@@ -450,6 +450,41 @@ P0/P1/P2 before dependent P3/P4 changes and P5 after proven abstraction.
   read back the complete current ROOT and source/custody before a separate
   tracker judgment; documentary acceptance is not technical completion.
 
+### Finite operation-wide CodeSpace credential consistency from #5763
+
+_(Agent-recommended WS-B receiving through migration-intake; no credential
+operation, implementation or source disposition.)_
+
+- [ ] **P5763-1:** Preserve the SAME selected venue account AND scope-verified
+  credential throughout one create/provisioning operation: scope gate,
+  ordinary create and REST fallback, SSH proxy/source, relay and every
+  gh-backed helper, including the intervening availability/status path.
+  Pass the operation's verified credential context rather than treating a
+  shared login or independent re-resolution as that invariant; unavailable
+  selected authority must fail explicitly, without silent substitution by
+  a narrower ambient credential. Credit current selected-environment
+  gate/create/SSH-source propagation and the helper's unavailable-credential
+  refusal; do not restore obsolete ambient-gate ordering or fallback claims.
+  The original environment-versus-keyring differential remains a candidate
+  cause, not a proven incident trace. #5760's independent provisioning-
+  truthfulness outcome and existing identity/credential/transport owners
+  remain separate.
+
+#### Local validation retained for #5763
+
+- [ ] **V5763-1:** Through the actual gate/create/provisioning and intervening
+  availability/status consumers, use synthetic controlled credentials for
+  the SAME account with different scope/selection outcomes. Verify every
+  supported proxy/relay/gh-helper boundary consumes the operation's original
+  verified context, including retry/fallback, and cannot silently reselect
+  ambient or independently changed credentials. Include selected-authority
+  unavailability, successful scoped propagation and unchanged global auth
+  controls. Preserve positive current gate/create/source/helper behavior;
+  source argument construction or account equality alone is not whole-flow
+  qualification. Keep source, fixture and actual provider/native evidence
+  distinct without adding an every-host programme or requiring real
+  credentials to review this plan.
+
 ### Finite both-provider auth-lifetime acceptance retained from #3442
 
 <!-- backlog-reconciliation:7556:transfer:3442:to:efforts/active/venue-parity/README.md -->
@@ -610,6 +645,17 @@ remains an explicit applicability gap, not silently reduced to a container case.
   daemon replacement grants arbitrary orphan reaping or resource release.
 
 ## Validation Plan
+
+- [ ] **G5763:** Resolve the complete P5763-1/V5763-1 same-account AND
+  same-scope-verified-credential union at the original operation's actual
+  consumers, including availability/status and all supported proxy/relay/
+  helper paths. Credit delivered source corrections and retain the precise
+  remaining passing/qualification seam without asserting a reproduced
+  different-token failure or historical causality. Preserve #5760, the
+  existing account/credential/SSH/relay custodians, incumbent P0-P5 and
+  source-specific reservations. Planned receiving, any later administrative
+  tracker judgment and actual technical acceptance are separate; no auth
+  operation, runtime test, provider mutation or custody transfer follows.
 
 - [ ] **G4227:** Resolve the complete
   [P4227 Plan and paired local Validation](#complete-shared-core-and-thin-adapter-acceptance-from-4227):
@@ -992,6 +1038,24 @@ native-outcomes OR complete accepted landed-transfer condition unchanged.
 No whole-#954 completion, all-parent native result, resource transfer,
 credential operation or implementation is required to review this plan.
 
+### Continuing finite #5763 custody
+
+This effort's WS-B receives the whole finite CodeSpace operation-credential
+contract through migration-intake's existing domain-Plan acceptance, not a
+second generic account resolver. Account-aware Operations retains generic
+identity/scoped-command ownership; existing CodeSpace, credential, SSH/proxy
+and relay owners retain their source and resource authority. No executor is
+appointed, live claim released or credential design broadened.
+
+Keep #5763 OPEN while this proposed complete intake is reviewed. Earlier
+campaign whole-OPEN retention and the current static correction preserve
+unfinished acceptance, not a perpetual old-tracker token or new generic ACK.
+Only actual reviewed complete receiving, whole current ROOT/source/custody
+readback and a separate source-specific judgment may supersede its tracking.
+This proposal does not close it or claim the operation invariant is delivered.
+Keep #954's whole-programme OPEN token, every actual P3 reservation, existing
+first gates and #5760's independent outcome unchanged.
+
 ### Continuing complete #4227 custody
 
 This effort receives the complete wrapper once, through its existing
@@ -1019,6 +1083,26 @@ No implementation, credential request, native test, venue operation,
 owner appointment or claim/resource transfer is authorized.
 
 ## Journal
+
+### 2026-11-17 - Whole CodeSpace operation-credential receiving proposed
+
+Added unchecked P5763-1, local V5763-1 and actual global G5763 with continuing
+WS-B custody through migration-intake. The full original plus both earlier
+discussions and audited current-source correction retain one selected venue
+account AND scope-verified credential through gate/create/SSH/proxy/relay/
+helpers, including the intervening availability/status path. Current gate/
+create/source propagation and selected-helper refusal retain credit;
+independent status credential resolution is the precise remaining seam,
+not an observed different-token failure or proven historical cause.
+
+The whole current ROOT and Account-Aware Operations comparison establish
+one existing venue-specific domain, without duplicating generic account
+selection or #5760 truthfulness. Historical OPEN retention is prospectively
+distinguished from a later separate administrative judgment; no proposal
+itself retires the source. Every incumbent row/check state, P0-P5 gate,
+#954 token and actual identity/credential/transport/resource owner remains.
+No implementation, authentication query, token operation, native test,
+provider mutation or custody transfer was performed.
 
 ### 2026-10-29 - Finite process-owned failed-start contract proposed
 
@@ -1249,3 +1333,21 @@ reconciliation before dependent implementation, the existing reservation,
 every incumbent gate, #954's OPEN programme token and all source/resource
 owners remain. No technical completion, native result, executor appointment
 or operational authority follows.
+
+### 2026-11-17 - Reviewed whole operation-credential receiving and tracking
+
+#13171 delivered P5763-1/local V5763-1/actual global G5763 and continuing
+Coordination through current-head Copilot approval and all required green CI.
+Complete current ROOT/source/custody readback then qualified the separate
+administrative judgment: #5763 is `CLOSED NOT_PLANNED` as redundant tracking,
+with its original and all three earlier discussions intact. Historical
+campaign KEEP recommendations are superseded by this complete accepted
+planned receiver, not an implementation claim.
+
+All three technical rows remain unchecked. Preserve the same selected
+account AND scope-verified credential union and precise availability/status
+passing seam, current gate/create/source/helper credit, #5760, the generic
+account owner and every actual credential/transport custodian. P0-P5,
+#954's OPEN programme token and actual P3 reservations remain. No credential
+operation, native qualification, owner appointment or claim/resource release
+follows.
