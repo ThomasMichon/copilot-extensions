@@ -76,6 +76,42 @@ and continuing applicability must be reconciled before any subsequent #6137
 retirement. No source condition or independent owner/resource/operational hold
 is waived here.
 
+#### Proposed prospective administrative tracking refinement
+
+The #7556 intake/retirement records for #3453, #6218 and #6294 required
+complete receiving in final-OPEN/OPEN #6137 while preserving unfinished
+technical work and incumbent custody. Their historical conditions and
+receipts remain recorded without retrospective revision.
+
+This proposal prospectively permits a later, SEPARATE judgment about redundant
+#6137 tracking after complete receiving in this existing same-domain effort.
+It changes only the identified campaign-authored physical-keeper convention,
+not an original runtime agreement, technical acceptance, owner/resource
+reservation or operational condition. Earlier keeper wording remains binding
+until the specifically reviewed and reflected refinement becomes effective.
+
+Drafting or receiver merge alone is insufficient. Normal reviewed explicit
+acceptance AND explicit reflection in STILL-OPEN #6137 must precede fresh
+complete permitted readback of the whole current receiver, original and ALL
+then-current discussions, eligibility and actual source-specific claim/
+resource/custody conditions. A separate administrative judgment follows.
+#6137 remains OPEN through proposal, receiving delivery and reconciliation;
+no automatic disposition is authorized.
+
+Preserve every R6137/R3453/R6218/R6294 Plan/local/actual-global clause,
+delivered credit, historical unknown, finite AND/OR and original owner.
+Retain the bounded observability/native-lifetime claimant, #5574's separate
+restart-loop/rollout acceptance, #7711's actual operational hold, #9096's
+release/authorized-rollout owner and MCP #5785's separate custody.
+
+If an independent operator/owner/resource condition requires physical #6137
+to remain OPEN, or its actual applicability/custody remains unresolved,
+retain it OPEN and identify that condition. No claim release, executor
+appointment, universal reservation inventory, generic ACK, every-host witness,
+implementation or operational authority is introduced. Existing scoped
+retirement/refusal/native-consumer duties remain; outgoing uncertainty adds
+no ordinary incoming-completion/current-selection veto.
+
 The [installation convergence map](../source-managed-runtime-installs/installation-convergence.md)
 connects this effort's remaining Phase3 sequencing to the common incoming
 installation path. Prepare the complete required set before activation;
@@ -425,7 +461,15 @@ no execution authority or new whole-parent prerequisite._
   OPEN-keeper and inherited source/readback/custody conditions. Planned receipt
   is not technical completion, native/release/rollout acceptance, source
   retirement or resource release. #6137 remains OPEN through receiving delivery;
-  no prospective waiver or amendment of its keeper conditions is made here.
+  no independent condition is waived. Campaign-introduced administrative
+  wording changes only through the specifically reviewed, still-OPEN-source-
+  reflected refinement and subsequent current readback/separate judgment above.
+- [ ] Verify reviewed explicit acceptance AND reflection in STILL-OPEN #6137,
+  then complete the permitted current receiver/source/discussion/eligibility
+  and actual source-specific claim/resource/custody readback and record a
+  SEPARATE disposition judgment. Until satisfied, retain #6137 OPEN.
+  Weaken no technical checkbox or independent condition; this is not a
+  general resource-inventory, native-probe or new owner-ACK requirement.
 
 - [ ] Qualify the relevant [L1-L6 boundaries](../source-managed-runtime-installs/update-service-lifetimes.md#validation-and-completion)
   before/during/after accepted activation, including caller/ancestor cleanup,
@@ -474,6 +518,26 @@ preparation barrier requires actual installer adapter support; it is not
 achieved by rearranging today's combined installer invocations.
 
 ## Journal
+
+### 2026-11-17 - Proposed prospective keeper-tracking refinement
+
+Fresh qualification and complete source/discussion readback retain #6137
+OPEN, with no change to technical scope, assignments or custody. Current ROOT
+coverage includes every unchanged original line and all inserted receiving
+clauses through EOF; all fifteen received entries remain unchecked.
+
+Qualified actual #3453/#6218/#6294 retirement explanations and the campaign's
+own intake records establish affirmative provenance for the final-OPEN/OPEN
+tracking wording. The original claimant's bounded observability/lifetime work,
+unknown historical requester and native proof limits remain separately
+preserved. That distinction supports proposing this tracking refinement,
+not present permission to close or a negative claim about every reservation.
+
+Normal review must explicitly accept the proposal and the refinement must
+be reflected in STILL-OPEN #6137 before a fresh complete permitted current
+receiver/source/discussion/eligibility/custody readback and separate judgment.
+Any independent physical-OPEN condition or unresolved applicability retains
+the source OPEN. No technical/native/operational/claim condition is revised.
 
 ### 2026-11-17 - Finite native-reconciliation Plan reviewed; keeper retained
 

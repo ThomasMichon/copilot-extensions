@@ -160,6 +160,21 @@ descriptions do not narrow it; historical test counts are not new minima.
 - [ ] `V.6241.neighbor-boundaries`: Verify the SAME existing source/resource appointment and original literal condition remain; no silence-as-consent, expanded reservation, new assignment or generic ACK: Keep #5789 routing/auth, #5862 observation, #6443 integration, #6424 lifecycle and retained owner/interface gates, not a competing queue, installer, scheduler or generic ACK-before-boot.
 - [ ] `V.6241.retained-union`: Read back #6241's WHOLE original/refined/inherited contract against complete matching Plan AND Validation, without dropped scope, source/resource duty, stronger native/all-parent/ACK gate or manufactured closure.
 
+### Source #6236 - bounded documentary refinements
+
+- [ ] `LV.6236.surface-alignment`: Read back the ROOT
+  `P.6236.surface-alignment` clause against comment 6260650998 and the existing
+  federation/console clarification. Preserve all three presentation surfaces,
+  qualified current-state/resumable handles and portable API/UX seams at their
+  documentation-only tier; keep optional control/console alternatives and
+  existing source assignments unchanged.
+- [ ] `LV.6236.finite-role-credit`: Read back ROOT
+  `P.6236.finite-role-credit` against the recorded #7343 finite completion and
+  existing ROOT Context. Preserve desired slots/live configuration, outbound
+  authenticated transport and isolated proof, completed initial-campaign
+  credit, excluded production/HA scope and retained readiness/adoption gates.
+  Neither a child link nor finite completion proves the integrated product.
+
 ## Closeout and independent donor boundary
 
 Credit the already-recorded source/design/local-process milestones only at
