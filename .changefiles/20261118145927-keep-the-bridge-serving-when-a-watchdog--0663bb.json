@@ -1,0 +1,13 @@
+{
+  "comment": "Keep the Bridge serving when a watchdog replacement cannot be scheduled, and log the durable WMI launch failure reason",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "libs/agent-procutil",
+      "type": "patch"
+    }
+  ]
+}

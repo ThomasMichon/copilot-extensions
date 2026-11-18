@@ -369,6 +369,77 @@ def test_startup_never_completes_fires():
     assert "startup did not complete" in dead[0]
 
 
+def _declining(dead: list[str]):
+    def on_dead(reason: str) -> bool:
+        dead.append(reason)
+        return False
+
+    return on_dead
+
+
+def test_repeated_declined_handoffs_back_off_then_hard_exit():
+    dead: list[str] = []
+    exits: list[str] = []
+    times: list[float] = []
+    wd, _, clock = _make(
+        probe_serving=lambda: False, max_declined=3, interval=5.0, serving_grace=15.0,
+        on_shutdown_stuck=exits.append,
+    )
+
+    def on_dead(reason: str) -> bool:
+        times.append(clock.t)
+        dead.append(reason)
+        return False
+
+    wd._on_dead = on_dead
+    wd.run()
+    assert len(dead) == 3
+    # The wait between attempts doubles: 15s, then 30s, then 60s.
+    assert [b - a for a, b in zip(times, times[1:])] == [30.0, 60.0]
+    assert len(exits) == 1
+    assert "no replacement could be scheduled" in exits[0]
+
+
+def test_healthy_probe_resets_declined_handoff_budget():
+    # A slow daemon whose replacement is unavailable keeps serving and
+    # recovers; each recovery resets the decline budget.
+    dead: list[str] = []
+    exits: list[str] = []
+    # Two wedges separated by a recovery: each declines once, never exhausting
+    # a budget of 2, and the loop ends through a graceful stop.
+    pattern = [False] * 4 + [True] + [False] * 4 + [True]
+    probes = iter(pattern)
+    shutting = {"v": False}
+
+    def probe() -> bool:
+        try:
+            return next(probes)
+        except StopIteration:
+            shutting["v"] = True
+            return True
+
+    wd, _, _ = _make(
+        probe_serving=probe, on_dead=_declining(dead), on_shutdown_stuck=exits.append,
+        max_declined=2, interval=5.0, serving_grace=15.0,
+        is_shutting_down=lambda: shutting["v"], is_stopped=lambda: shutting["v"],
+    )
+    wd.run()
+    assert len(dead) == 2
+    assert exits == []
+
+
+def test_declined_startup_handoff_retries_then_hard_exits():
+    dead: list[str] = []
+    exits: list[str] = []
+    wd, _, _ = _make(
+        is_started=lambda: False, on_dead=_declining(dead),
+        on_shutdown_stuck=exits.append, max_declined=2,
+    )
+    wd.run()
+    assert len(dead) == 2
+    assert len(exits) == 1 and "startup did not complete" in exits[0]
+
+
 def test_startup_graceful_shutdown_before_start_is_clean():
     # Shutdown requested before the server ever started -> clean no-op.
     wd, dead, _ = _make(

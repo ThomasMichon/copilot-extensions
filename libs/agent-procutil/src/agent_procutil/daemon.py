@@ -508,8 +508,10 @@ def _spawn_daemon(
                     admission_possible=getattr(error, "admission_sent", True) is not False,
                 )
             reason = str(error) or "Windows durable WMI launch failed; daemon not started"
+            detail = " ".join(reason.split())[:240]
             report_logs(
                 f"{stamp} spawn_daemon: durable WMI launch failed; daemon not started; "
+                f"reason={detail}; "
                 f"cleanup_confirmed={cleanup_confirmed}; reservation_settled={settled}\n".encode()
             )
             if not contained_fallback or not cleanup_confirmed or not settled:

@@ -25,6 +25,12 @@ an admin stop) is never treated as a wedge -- that path unwinds ``server.run()``
 and releases the lock on its own.
 
 Disable with ``AGENT_BRIDGE_WATCHDOG=0`` (operational safety valve).
+
+On Windows the terminal action first schedules a durable replacement daemon. If
+that cannot be scheduled (for example, a WMI launch timing out on a loaded
+host), exiting would leave no Bridge at all, so the process keeps serving and the
+watchdog retries the handoff with a doubling wait, hard-exiting only after
+repeated declines with no healthy probe in between.
 """
 
 from __future__ import annotations
@@ -50,6 +56,11 @@ _DEFAULT_SERVING_GRACE = 60.0
 _DEFAULT_SHUTDOWN_GRACE = 120.0
 _WINDOWS_INTERVAL = 5.0
 _WINDOWS_SERVING_GRACE = 15.0
+# Ceiling for the doubling wait between replacement attempts after ``on_dead``
+# declined to exit (no durable replacement could be scheduled), and how many
+# consecutive declines without a healthy probe are tolerated before hard exit.
+_MAX_RETRY_GRACE = 300.0
+_MAX_DECLINED_HANDOFFS = 4
 _EXIT_CODE = 70  # EX_SOFTWARE -- distinguishable in logs/postmortems
 _diagnostic_writer: BufferedSink | None = None
 _diagnostics_initialized = False
@@ -116,12 +127,13 @@ class ServingWatchdog:
         is_shutting_down: Callable[[], bool],
         is_stopped: Callable[[], bool],
         probe_serving: Callable[[], bool],
-        on_dead: Callable[[str], None],
-        on_shutdown_stuck: Callable[[str], None] | None = None,
+        on_dead: Callable[[str], bool | None],
+        on_shutdown_stuck: Callable[[str], object] | None = None,
         interval: float = _DEFAULT_INTERVAL,
         startup_grace: float = _DEFAULT_STARTUP_GRACE,
         serving_grace: float = _DEFAULT_SERVING_GRACE,
         shutdown_grace: float = _DEFAULT_SHUTDOWN_GRACE,
+        max_declined: int = _MAX_DECLINED_HANDOFFS,
         sleep: Callable[[float], None] = time.sleep,
         monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
@@ -130,19 +142,40 @@ class ServingWatchdog:
         self._is_stopped = is_stopped
         self._probe_serving = probe_serving
         self._on_dead = on_dead
-        self._on_shutdown_stuck = on_shutdown_stuck or on_dead
+        self._on_shutdown_stuck: Callable[[str], object] = on_shutdown_stuck or on_dead
         self._interval = interval
         self._startup_grace = startup_grace
         self._serving_grace = serving_grace
         self._shutdown_grace = shutdown_grace
+        self._max_declined = max(1, max_declined)
         self._sleep = sleep
         self._monotonic = monotonic
 
     def run(self) -> None:
-        """Supervise startup then serving; call ``on_dead`` once if wedged."""
+        """Supervise startup then serving; call ``on_dead`` when wedged.
+
+        ``on_dead`` normally does not return. A ``False`` return means it could
+        not hand off to a replacement and kept this process alive (it may be
+        merely slow), so supervision resumes and retries after a doubling wait
+        instead of leaving nothing serving. After ``max_declined`` consecutive
+        declines with no healthy probe in between, the hard-exit action runs so
+        a truly wedged process cannot hold the singleton lock forever.
+        """
         if not self._await_startup():
             return
         self._supervise_serving()
+
+    def _hand_off(self, reason: str, declined: int) -> bool:
+        """Offer ``reason`` to ``on_dead``; return True to keep supervising."""
+        if self._on_dead(reason) is not False:
+            return False
+        if declined + 1 >= self._max_declined:
+            self._on_shutdown_stuck(f"{reason}; no replacement could be scheduled")
+            return False
+        return True
+
+    def _next_grace(self, grace: float, floor: float) -> float:
+        return min(grace * 2, max(_MAX_RETRY_GRACE, floor))
 
     def _await_startup(self) -> bool:
         """Return True once the server has started; False (terminal) otherwise.
@@ -151,17 +184,24 @@ class ServingWatchdog:
         within the startup grace -- the "acquired the lock but never served"
         wedge. A graceful shutdown before startup is a clean no-op.
         """
-        deadline = self._monotonic() + self._startup_grace
+        grace = self._startup_grace
+        deadline = self._monotonic() + grace
+        declined = 0
         while not self._is_started():
             if self._is_shutting_down():
                 self._await_shutdown()
                 return False
-            if self._monotonic() >= deadline:
-                self._on_dead(
+            now = self._monotonic()
+            if now >= deadline:
+                if not self._hand_off(
                     f"startup did not complete within {self._startup_grace:.0f}s "
-                    "while holding the singleton lock"
-                )
-                return False
+                    "while holding the singleton lock",
+                    declined,
+                ):
+                    return False
+                declined += 1
+                grace = self._next_grace(grace, self._startup_grace)
+                deadline = now + grace
             self._sleep(self._interval)
         return True
 
@@ -173,6 +213,9 @@ class ServingWatchdog:
         and no graceful-shutdown request -- is treated as a wedge.
         """
         failing_since: float | None = None
+        window_start = 0.0
+        grace = self._serving_grace
+        declined = 0
         while True:
             self._sleep(self._interval)
             if self._is_shutting_down():
@@ -180,20 +223,26 @@ class ServingWatchdog:
                 return
             if self._probe_serving():
                 failing_since = None
+                grace = self._serving_grace
+                declined = 0
                 continue
             now = self._monotonic()
             if failing_since is None:
-                failing_since = now
+                failing_since = window_start = now
                 continue
-            if now - failing_since >= self._serving_grace:
+            if now - window_start >= grace:
                 if self._is_shutting_down():
                     self._await_shutdown()
                     return
-                self._on_dead(
+                if not self._hand_off(
                     f"stopped serving for {now - failing_since:.0f}s "
-                    "without a graceful-shutdown request"
-                )
-                return
+                    "without a graceful-shutdown request",
+                    declined,
+                ):
+                    return
+                declined += 1
+                window_start = now
+                grace = self._next_grace(grace, self._serving_grace)
 
     def _await_shutdown(self) -> None:
         """Force-exit only when a requested graceful shutdown never finishes."""
@@ -256,7 +305,7 @@ def arm_serving_watchdog(
     interval: float = _DEFAULT_INTERVAL,
     startup_grace: float = _DEFAULT_STARTUP_GRACE,
     serving_grace: float = _DEFAULT_SERVING_GRACE,
-    on_dead: Callable[[str], None] | None = None,
+    on_dead: Callable[[str], bool | None] | None = None,
 ) -> threading.Thread | None:
     """Start the serving watchdog on a daemon thread; return it (or None).
 
