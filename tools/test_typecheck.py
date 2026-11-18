@@ -20,6 +20,7 @@ import pytest
 
 from tools import plugin_test_resources, typecheck
 from tools import typecheck_source_views as views
+from tools.typecheck_new_code import select_new_code
 from installer_dependency_policy import DependencyPolicyError
 
 
@@ -2506,6 +2507,95 @@ def test_native_fragment_loader_remains_source_mapped(tmp_path: Path) -> None:
         assert view.diagnostics(f"{view.output}:{logical}: error: sample\n", tmp_path) == (
             f"{views.INSTALLATION_ENTRY}:{physical}: error: sample\n"
         )
+
+
+@pytest.mark.parametrize("invalid", [False, True])
+@pytest.mark.parametrize("program", [
+    "copied-fragments", "renamed-copied-fragments", "independent-setups",
+])
+def test_actual_mypy_keeps_copied_and_independent_programs_complete(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    invalid: bool, program: str,
+) -> None:
+    root = tmp_path / "source"
+    changes: tuple[str, ...]
+    if program.endswith("fragments"):
+        canonical = fragment_source(root)
+        prefix = "consumer/scripts/installation-context"
+        copied = tuple(
+            prefix + "/" + (
+                "_installation_context.py"
+                if program == "renamed-copied-fragments" and path.endswith("/installation_context.py")
+                else Path(path).name
+            )
+            for path in canonical
+        )
+        for original, relative in zip(canonical, copied):
+            target = root / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            content = (root / original).read_bytes()
+            target.write_bytes(content if invalid else content.replace(b"shared('wrong')", b"shared(1)"))
+        changes = (prefix + "/_installation_context_files.py",)
+        paths = (*canonical, *copied)
+        include = (prefix,)
+    else:
+        paths = ("consumer/first-project/setup.py", "consumer/second-project/setup.py")
+        for index, relative in enumerate(paths):
+            target = root / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            value = "'wrong'" if invalid and index else "1"
+            target.write_text(
+                f"value: int = {value}\nraise RuntimeError('never execute build programs')\n",
+                encoding="utf-8",
+            )
+        changes, include = paths, ("consumer",)
+    environment = tmp_path / "environment"
+    environment.mkdir()
+    (environment / ".typecheck-prepared").write_text("test-context", encoding="utf-8")
+    lease = Lease()
+    monkeypatch.setattr(typecheck, "environment_path", lambda *_args, **_kwargs: (environment, "test-context"))
+    monkeypatch.setattr(typecheck, "environment_python", lambda _path: Path(sys.executable))
+    monkeypatch.setattr(typecheck, "acquire_environment", lambda *_args: lease)
+    item = replace(project(), include=include, level="pending", platforms=("linux", "win32"))
+    owners = {path: item for path in paths if item.owns(path)}
+    selected = select_new_code(root, owners, changes)[item.name]
+    assert set(selected) == set(owners)
+    assert typecheck.check_project(
+        root, item, selected, all_paths=paths, strict=True,
+    ) == int(invalid)
+    diagnostics = capsys.readouterr().out
+    assert "Duplicate module" not in diagnostics and "[name-defined]" not in diagnostics
+    if invalid:
+        expected = (
+            "consumer/scripts/installation-context/_installation_context_files.py:2:"
+            if program.endswith("fragments") else "consumer/second-project/setup.py:1:"
+        )
+        assert expected in diagnostics and ": error:" in diagnostics
+    else:
+        assert diagnostics.count("Success: no issues found") == 2
+    assert lease.released
+
+
+@pytest.mark.parametrize("change", ["bytes", "membership"])
+def test_copied_fragment_view_verifies_its_own_inputs(tmp_path: Path, change: str) -> None:
+    canonical = fragment_source(tmp_path)
+    prefix = "consumer/scripts/installation-context"
+    copied = tuple(prefix + "/" + Path(path).name for path in canonical)
+    for original, relative in zip(canonical, copied):
+        destination = tmp_path / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes((tmp_path / original).read_bytes())
+    view = views.installation_view(
+        tmp_path, (*canonical, *copied), tmp_path / "view" / "copied.py",
+        entry_path=prefix + "/installation_context.py",
+    )
+    view.verify(tmp_path)
+    fragment = tmp_path / prefix / (
+        "_installation_context_files.py" if change == "bytes" else "_installation_context_extra.py"
+    )
+    fragment.write_bytes(b"value: int = 1\n")
+    with pytest.raises(views.SourceViewError, match="source changed|membership changed"):
+        view.verify(tmp_path)
 
 
 @pytest.mark.parametrize(("old", "new"), [

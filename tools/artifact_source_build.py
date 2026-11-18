@@ -3,28 +3,39 @@ from __future__ import annotations
 
 import importlib.machinery
 import configparser
+import os as os
 import re
 import sys
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from email.message import Message
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, Protocol, TYPE_CHECKING
 import zipfile
 
-if sys.version_info >= (3, 11):
-    import tomllib
+if TYPE_CHECKING:
+    if sys.version_info >= (3, 11):
+        import tomllib
+    else:
+        import tomli as tomllib
 else:
-    import tomli as tomllib
+    try:
+        import tomllib
+    except ModuleNotFoundError:
+        import tomli as tomllib
 
 
 class PromotionArtifactError(RuntimeError):
     pass
 
 
+class HashFields(Protocol):
+    def __call__(self, *fields: str) -> str: ...
+
+
 def payload_hash_directories(
     directories: Sequence[Path], *, root: Path, directory_hash: Callable[[Path], str],
-    hash_fields: Callable[..., str], workers: int = 1,
+    hash_fields: HashFields, workers: int = 1,
 ) -> str:
     """Hash the same directory identities with bounded, fully settled workers."""
     if type(workers) is not int or not 1 <= workers <= 4:
@@ -143,7 +154,9 @@ def validate_runtime_metadata(project: dict[str, Any], metadata: Message) -> Non
     ):
         raise PromotionArtifactError("invalid candidate runtime dependency declarations")
 
-    def requirement_key(value: str, extra: str | None = None) -> tuple[Any, ...]:
+    def requirement_key(
+        value: str, extra: str | None = None,
+    ) -> tuple[str, tuple[str, ...], SpecifierSet, str | None]:
         if not isinstance(value, str):
             raise PromotionArtifactError("runtime requirements must be strings")
         requirement = Requirement(value)
@@ -325,7 +338,16 @@ def validate_static_build(
         raise PromotionArtifactError("registered standalone build configuration is missing")
     reserved = sys.stdlib_module_names | {"setuptools", "wheel", "packaging", "sitecustomize", "usercustomize"}
     suffixes = ["", *importlib.machinery.all_suffixes()]
-    for name in sorted(reserved):
+    candidates = {
+        (name + suffix).casefold(): name for name in reserved for suffix in suffixes
+    }
+    # Inventory broadly, then preserve the filesystem's actual case/link semantics.
+    with os.scandir(source_dir) as entries:
+        possible = {
+            candidates[entry.name.casefold()] for entry in entries
+            if entry.name.casefold() in candidates
+        }
+    for name in sorted(possible):
         if any(
             path.exists() or path.is_symlink()
             for path in (source_dir / (name + suffix) for suffix in suffixes)

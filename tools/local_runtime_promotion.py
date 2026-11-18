@@ -7,7 +7,8 @@ from pathlib import Path
 import re
 import time
 
-import promote_release as promotion
+import promote_release as promote_release
+promotion = promote_release
 from materialize_source_applications import retain_outputs
 from promotion_source_archive import composition_budget, git_timeout_options
 

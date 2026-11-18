@@ -1023,7 +1023,7 @@ def _gc_protected_versions(
 class DevClaimConflict(RuntimeError):
     """Raised when a dev-slot claim/release is attempted by a non-owner."""
 
-    def __init__(self, existing: dict[str, Any]):
+    def __init__(self, existing: dict[str, Any]) -> None:
         owner = existing.get("owner")
         super().__init__(f"dev slot is already claimed by {owner!r}")
         self.existing = existing
@@ -1428,11 +1428,11 @@ def retention_lease(root: Path, version: str, *, payload_hash: str | None = None
 
 def retention_custody(root: Path, version: str, *, payload_hash: str | None = None,
                       timeout: float = 60.0, poll_interval: float = 0.05,
-                      require_installed: bool = True) -> AbstractContextManager[tuple[Path, int | None]]:
+                      require_installed: bool = True) -> AbstractContextManager[tuple[Path, int]]:
     """Yield a retained slot and borrowed descriptor under the same lease protocol.
     POSIX guardians may inherit it; callers must never close it themselves.
     """
-    return cast(AbstractContextManager[tuple[Path, int | None]], _runtime_component(
+    return cast(AbstractContextManager[tuple[Path, int]], _runtime_component(
         "versioned_runtime_construction",
     ).retention_custody(
         root, version, payload_hash=payload_hash, require_installed=require_installed,
@@ -1512,7 +1512,7 @@ ADMIT_HEALTH_REPAIR_REQUIRED = "health-repair-required"
 
 
 def fingerprint_source(
-    paths: Iterable[Path], *, on_progress: Callable[[], None] | None = None,
+    paths: Iterable[Path], *, on_progress: Callable[[], object] | None = None,
     file_hashes: dict[Path, str] | None = None,
     on_file: Callable[[Path, bytes], None] | None = None,
 ) -> str:

@@ -23,6 +23,8 @@ from installer_wheel_inputs import (
     _unsafe_windows_component, preflight_archive,
 )
 
+_SnapshotRecord = tuple[os.stat_result, os.stat_result, str, int]
+
 
 @contextmanager
 def retain_wheel_inputs(
@@ -184,6 +186,7 @@ def open_wheel_bundle_snapshot(
 
 def _unchanged(
     path: Path, before: os.stat_result, stream: BinaryIO, *, opened: os.stat_result | None = None,
+    allow_hardlinks: bool = False,
 ) -> os.stat_result:
     after = os.fstat(stream.fileno())
     changed = []
@@ -191,7 +194,7 @@ def _unchanged(
         changed.append("handle identity")
     if os.name != "nt" and opened is not None and after.st_ctime_ns != opened.st_ctime_ns:
         changed.append("handle change time")
-    if _identity(_ordinary(path)) != _identity(before):
+    if _identity(_ordinary(path, allow_hardlinks=allow_hardlinks)) != _identity(before):
         changed.append("path identity")
     if changed:
         raise WheelError("wheel snapshot input changed: " + ", ".join(changed))
@@ -266,7 +269,7 @@ class WheelSnapshot:
 
     paths: Mapping[str, Path]
     archives: Mapping[str, BinaryIO]
-    _records: Mapping[str, tuple[os.stat_result, os.stat_result, str, int]]
+    _records: Mapping[str, _SnapshotRecord]
     _deadline: float
 
     @property
@@ -526,7 +529,7 @@ def open_wheel_snapshot(
     if set(archives) != set(expected):
         raise WheelError("wheel snapshot filename set differs from expected")
     paths, hashes = dict(archives), _selected_hashes(expected, max_wheels, deadline)
-    originals = {}
+    originals: dict[str, tuple[Path, os.stat_result]] = {}
     total = 0
     for name, source in paths.items():
         _check_deadline(deadline)
@@ -545,11 +548,11 @@ def open_wheel_snapshot(
     directory.mkdir(mode=0o700)
     retained: dict[str, Path] = {}
     streams: dict[str, BinaryIO] = {}
-    records: dict[str, tuple[os.stat_result, os.stat_result, str, int]] = {}
+    records: dict[str, _SnapshotRecord] = {}
     with ExitStack() as opened:
         with ExitStack() as sources:
             actual = 0
-            source_streams = {}
+            source_streams: dict[str, tuple[BinaryIO, os.stat_result]] = {}
             for name, (source, before) in originals.items():
                 _check_deadline(deadline)
                 stream = sources.enter_context(_open(source))

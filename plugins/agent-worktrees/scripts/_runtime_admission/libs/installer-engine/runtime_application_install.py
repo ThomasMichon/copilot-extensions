@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 from contextlib import ExitStack, contextmanager
 from dataclasses import replace
 import importlib.util
@@ -20,6 +21,48 @@ from typing import Any, Callable, Iterator, NamedTuple, cast
 
 _QUALIFICATION_TIMEOUT = 600
 _PUBLICATION_ALLOWANCE = 60
+APPLICATION_INSTALL_CAPABILITIES = ("global-bin/v1",)
+
+
+def publication_directory(directory: Path, *, root: Path | None = None) -> Path:
+    """Validate an explicit publication selection without creating its ancestry."""
+    if (
+        not directory.is_absolute() or ".." in directory.parts
+        or any(char in str(directory) for char in "\r\n\0")
+    ):
+        raise ValueError("application command directory must be an absolute ordinary path")
+    for parent in reversed((directory, *directory.parents)):
+        try:
+            info = parent.lstat()
+        except FileNotFoundError:
+            continue
+        if not stat.S_ISDIR(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+            raise ValueError("application command directory must have ordinary directory ancestry")
+    if root is not None and directory.resolve().is_relative_to((root / "versions").resolve()):
+        raise ValueError("application command directory cannot overlap runtime version slots")
+    return directory
+
+
+def require_publication_selection(helper: Path) -> None:
+    """Read support from the selected helper, without executing a preflight."""
+    try:
+        content = _read(helper, limit=1 << 20)
+        body = ast.parse(content if content is not None else b"").body
+        declarations = [
+            node.value for node in body if isinstance(node, ast.Assign)
+            and any(isinstance(target, ast.Name) and target.id == "APPLICATION_INSTALL_CAPABILITIES"
+                    for target in node.targets)
+        ]
+        capabilities = ast.literal_eval(declarations[0]) if len(declarations) == 1 else ()
+        supported = (
+            isinstance(capabilities, (tuple, list))
+            and all(isinstance(value, str) for value in capabilities)
+            and "global-bin/v1" in capabilities
+        )
+    except (SyntaxError, ValueError, TypeError) as error:
+        raise ValueError("selected application helper lacks global-bin/v1 support") from error
+    if not supported:
+        raise ValueError("selected application helper lacks global-bin/v1 support")
 
 
 class ApplicationStartupUncertain(RuntimeError):
@@ -59,7 +102,7 @@ def _read(path: Path, *, limit: int = 65536) -> bytes | None:
 
 def _write(path: Path, content: bytes, *, executable: bool = False) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, filename = tempfile.mkstemp(prefix="." + path.name + ".", dir=path.parent)
+    descriptor, filename = tempfile.mkstemp(prefix=".tmp-", dir=path.parent)
     temporary = Path(filename)
     try:
         with os.fdopen(descriptor, "wb") as stream:
@@ -194,9 +237,10 @@ def _resources(slot: Path) -> tuple[ModuleType, ModuleType]:
     return runtime, engine
 
 
-def _construction_inputs(
-    slot: Path, record: dict[str, Any], runtime: ModuleType, engine: ModuleType, deadline: float,
+def _construction_metadata(
+    record: dict[str, Any], runtime: ModuleType, engine: ModuleType, deadline: float,
 ) -> SimpleNamespace:
+    """Validate claimed Source/profile facts without reading or qualifying a slot."""
     inputs = record["construction"]
     fields = {
         "identity", "runtime_version", "payload_hash", "source_hash", "wheel_inputs",
@@ -204,17 +248,14 @@ def _construction_inputs(
     }
     if not isinstance(inputs, dict) or set(inputs) != fields:
         raise ValueError("regular install requires the actual Source/profile construction inputs")
-    source_bytes = _read(slot / "runtime-source.json")
-    declaration = _read(slot / "application.json", limit=4 << 20)
     if not isinstance(inputs["identity"], dict):
         raise ValueError("application construction identity must be an object")
     source = inputs["identity"].get("runtime_source")
     source_owner = runtime._runtime_component("versioned_runtime_source")
     identity = source_owner.parse_source_identity(source)
+    source = cast(dict[str, Any], source)
     if (
-        source_bytes is None or json.loads(source_bytes) != source
-        or declaration is None or json.loads(declaration) != record
-        or inputs["identity"].get("runtime_version") != source["runtime_version"]
+        inputs["identity"].get("runtime_version") != source["runtime_version"]
         or any(
             not isinstance(inputs[key], str)
             or re.fullmatch(r"[0-9a-f]{64}", inputs[key]) is None
@@ -222,14 +263,19 @@ def _construction_inputs(
         )
         or any(
             not isinstance(inputs[key], list)
+            or any(
+                not isinstance(name, str)
+                or re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", name) is None
+                for name in inputs[key]
+            )
             or len(set(inputs[key])) != len(inputs[key])
-            or any(re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", name) is None for name in inputs[key])
             for key in ("extras", "local_packages", "excluded_packages")
         )
     ):
         raise ValueError("application construction inputs differ from their Source identity")
     wheels = engine.WheelReuseInputs(
-        slot.name, json.dumps(inputs["wheel_inputs"], sort_keys=True, separators=(",", ":")),
+        inputs["runtime_version"],
+        json.dumps(inputs["wheel_inputs"], sort_keys=True, separators=(",", ":")),
         deadline,
     )
     wheels.verify()
@@ -237,7 +283,6 @@ def _construction_inputs(
     generation = source["runtime_version"] + ".profile." + receipt["lock_id"][7:23]
     if (
         inputs["runtime_version"] != generation
-        or re.fullmatch(re.escape(generation) + r"(?:[.+]repair\.[0-9a-f]{32})?", slot.name) is None
         or engine._wheel_construction_hash(inputs["source_hash"], wheels) != inputs["payload_hash"]
         or receipt["binding"].get("release") != {
             "identity": "source:" + source["source_commit"],
@@ -247,7 +292,29 @@ def _construction_inputs(
         or not set(inputs["local_packages"]) <= receipt["distributions"].keys()
         or set(inputs["excluded_packages"]) & receipt["distributions"].keys()
     ):
-        raise ValueError("application source/profile selection differs from its version slot")
+        raise ValueError("application Source/profile construction metadata is inconsistent")
+    return SimpleNamespace(
+        inputs=inputs, identity=identity, source=source, wheels=wheels, receipt=receipt,
+    )
+
+
+def _construction_inputs(
+    slot: Path, record: dict[str, Any], runtime: ModuleType, engine: ModuleType, deadline: float,
+) -> SimpleNamespace:
+    association = _construction_metadata(record, runtime, engine, deadline)
+    inputs, source = association.inputs, association.source
+    wheels = replace(association.wheels, generation=slot.name)
+    receipt = association.receipt
+    source_bytes = _read(slot / "runtime-source.json")
+    declaration = _read(slot / "application.json", limit=4 << 20)
+    if (
+        source_bytes is None or json.loads(source_bytes) != source
+        or declaration is None or json.loads(declaration) != record
+        or re.fullmatch(
+            re.escape(inputs["runtime_version"]) + r"(?:[.+]repair\.[0-9a-f]{32})?", slot.name,
+        ) is None
+    ):
+        raise ValueError("application construction inputs differ from their Source identity")
     origins = {
         name: (slot / "wheels" / filename).as_uri()
         for name, _version, filename, _digest in wheels.distributions
@@ -259,7 +326,7 @@ def _construction_inputs(
         **({"extras": inputs["extras"]} if inputs["extras"] else {}),
     }
     return SimpleNamespace(
-        inputs=inputs, identity=identity, source=source, source_bytes=source_bytes,
+        inputs=inputs, identity=association.identity, source=source, source_bytes=source_bytes,
         declaration=declaration, wheels=wheels, receipt=receipt, origins=origins, proof=proof,
     )
 
@@ -435,6 +502,7 @@ def _qualified(
             for name in (
                 "runtime_launcher.py", "versioned_runtime.py", "versioned_runtime_leases.py",
                 "versioned_runtime_source.py", "versioned_runtime_construction.py",
+                "versioned_runtime_identity.py", "versioned_runtime_fingerprint.py",
                 "versioned_runtime_publication.py",
                 "versioned_runtime_cache.py",
                 "daemon_instance_runtime.pyz",
@@ -495,9 +563,10 @@ def _run(
     if os.name == "nt":
         _, engine = _resources(slot)
         python, cwd = engine._native_retained_path(python), slot.anchor
+        command_directory = root if record["name"] == "worktree-manager" else slot
         target = [
             "-c", "import os,runpy,sys\n"
-            f"os.chdir({engine._native_retained_path(slot)!r})\n"
+            f"os.chdir({engine._native_retained_path(command_directory)!r})\n"
             "target=sys.argv.pop(1)\n"
             "runpy.run_module(sys.argv.pop(1), run_name='__main__', alter_sys=True) "
             "if target == '-m' else runpy.run_path(target, run_name='__main__')",
@@ -553,7 +622,11 @@ def install(
     arguments: tuple[str, ...] = (),
 ) -> dict[str, str]:
     """UV has synchronized the environment before this entry runs."""
+    if global_bin is not None and stage:
+        raise ValueError("application command directory cannot be selected with --stage")
     slot = slot.resolve()
+    if global_bin is not None:
+        publication_directory(global_bin, root=slot.parent.parent)
     if (
         not (slot / ".venv" / "pyvenv.cfg").is_file()
         or not Path(sys.prefix).samefile(slot / ".venv")
@@ -677,16 +750,20 @@ def install(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(allow_abbrev=False)
     parser.add_argument("--stage", action="store_true")
+    parser.add_argument("--global-bin", type=Path, help="command publication directory (regular install)")
     parser.add_argument(
         "arguments", nargs=argparse.REMAINDER,
         help="application-owned setup/start arguments after -- (regular installation only)",
     )
     arguments = parser.parse_args(argv)
+    if arguments.stage and arguments.global_bin is not None:
+        parser.error("--global-bin cannot be selected with --stage")
     forwarded = arguments.arguments
     if forwarded[:1] == ["--"]:
         forwarded = forwarded[1:]
     print(json.dumps(install(
         Path(__file__).parent, stage=arguments.stage, arguments=tuple(forwarded),
+        **({"global_bin": arguments.global_bin} if arguments.global_bin is not None else {}),
     )))
     return 0
 

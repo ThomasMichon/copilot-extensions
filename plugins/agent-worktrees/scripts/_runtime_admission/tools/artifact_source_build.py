@@ -2,28 +2,46 @@
 from __future__ import annotations
 
 import importlib.machinery
+import configparser
+import os as os
 import re
 import sys
 from collections import Counter
+from collections.abc import Callable, Mapping, Sequence
 from email.message import Message
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+from typing import Any, Protocol, TYPE_CHECKING
+import zipfile
 
-try:
-    import tomllib
-except ModuleNotFoundError:
-    import tomli as tomllib
+if TYPE_CHECKING:
+    if sys.version_info >= (3, 11):
+        import tomllib
+    else:
+        import tomli as tomllib
+else:
+    try:
+        import tomllib
+    except ModuleNotFoundError:
+        import tomli as tomllib
 
 
 class PromotionArtifactError(RuntimeError):
     pass
 
 
-def payload_hash_directories(directories, *, root, directory_hash, hash_fields, workers=1):
+class HashFields(Protocol):
+    def __call__(self, *fields: str) -> str: ...
+
+
+def payload_hash_directories(
+    directories: Sequence[Path], *, root: Path, directory_hash: Callable[[Path], str],
+    hash_fields: HashFields, workers: int = 1,
+) -> str:
     """Hash the same directory identities with bounded, fully settled workers."""
     if type(workers) is not int or not 1 <= workers <= 4:
         raise ValueError("payload hashing requires between one and four workers")
 
-    def item(directory):
+    def item(directory: Path) -> tuple[str, str]:
         return directory.resolve().relative_to(root).as_posix(), directory_hash(directory)
 
     if workers == 1 or len(directories) < 2:
@@ -113,7 +131,7 @@ def parse_wheel_identity(
     }
 
 
-def validate_runtime_metadata(project: dict, metadata: Message) -> None:
+def validate_runtime_metadata(project: dict[str, Any], metadata: Message) -> None:
     """Compare runtime declarations using the standard PEP 440/508 parser."""
     try:
         from packaging.markers import Marker
@@ -136,7 +154,9 @@ def validate_runtime_metadata(project: dict, metadata: Message) -> None:
     ):
         raise PromotionArtifactError("invalid candidate runtime dependency declarations")
 
-    def requirement_key(value: str, extra: str | None = None) -> tuple:
+    def requirement_key(
+        value: str, extra: str | None = None,
+    ) -> tuple[str, tuple[str, ...], SpecifierSet, str | None]:
         if not isinstance(value, str):
             raise PromotionArtifactError("runtime requirements must be strings")
         requirement = Requirement(value)
@@ -176,10 +196,116 @@ def validate_runtime_metadata(project: dict, metadata: Message) -> None:
         raise PromotionArtifactError("wheel Python requirement differs from candidate")
 
 
-def validate_static_build(source_dir: Path, *, trusted_setup: bytes | None = None) -> dict:
+class _ExactEntryPointParser(configparser.ConfigParser):
+    def optionxform(self, optionstr: str) -> str:
+        return optionstr
+
+
+def validate_entry_points(
+    project: dict[str, Any], bundle: zipfile.ZipFile, hashes: Mapping[str, str], prefix: str,
+) -> None:
+    """Keep wheel entry-point groups and case-sensitive names equal to source metadata."""
+    entries = project.get("entry-points", {})
+    if not isinstance(entries, dict) or any(
+        not isinstance(group, str) or not isinstance(values, dict) or any(
+            not isinstance(name, str) or not name or not isinstance(value, str) or not value
+            for name, value in values.items()
+        ) for group, values in entries.items()
+    ):
+        raise PromotionArtifactError("invalid candidate entry-point declarations")
+    expected_entries = dict(entries)
+    for field, group in (("scripts", "console_scripts"), ("gui-scripts", "gui_scripts")):
+        values = project.get(field, {})
+        if not isinstance(values, dict) or any(
+            not isinstance(name, str) or not name or not isinstance(value, str) or not value
+            for name, value in values.items()
+        ):
+            raise PromotionArtifactError("invalid candidate script declarations")
+        if values:
+            if group in expected_entries:
+                raise PromotionArtifactError("ambiguous candidate entry-point group")
+            expected_entries[group] = values
+    entries_name = prefix + "entry_points.txt"
+    actual_entries = {}
+    if entries_name in hashes:
+        parser = _ExactEntryPointParser(interpolation=None)
+        parser.read_string(bundle.read(entries_name).decode("utf-8"))
+        actual_entries = {section: dict(parser[section]) for section in parser.sections()}
+    if actual_entries != expected_entries:
+        raise PromotionArtifactError("wheel entry points differ from candidate source")
+
+
+def data_file_sources(source_dir: Path, settings: dict[str, Any]) -> dict[str, Path]:
+    """Bind explicit share-data destinations to regular, unlinked project files."""
+    declarations = settings.get("data-files", {})
+    if not isinstance(declarations, dict):
+        raise PromotionArtifactError("invalid static data-files declarations")
+    if not declarations:
+        return {}
+    from build_python_artifacts import _PAYLOAD_IGNORE_DIR_NAMES, _PAYLOAD_IGNORE_SUFFIXES
+
+    def relative(value: object) -> PurePosixPath:
+        if not isinstance(value, str) or not value or any(
+            character in value for character in "\\:*?[]"
+        ) or any(ord(character) < 32 or ord(character) == 127 for character in value):
+            raise PromotionArtifactError("data-files require explicit canonical paths")
+        path = PurePosixPath(value)
+        if (
+            path.is_absolute() or not path.parts or path.as_posix() != value
+            or any(part in (".", "..") or part.endswith((".", " ")) for part in path.parts)
+        ):
+            raise PromotionArtifactError("data-files require explicit canonical paths")
+        return path
+
+    result: dict[str, Path] = {}
+    destinations: set[str] = set()
+    directories: set[str] = set()
+    root = source_dir.resolve()
+    for destination, files in declarations.items():
+        target = relative(destination)
+        if target.parts[0] != "share" or not isinstance(files, list) or not files:
+            raise PromotionArtifactError("unsupported static share-data layout")
+        for value in files:
+            declared = relative(value)
+            if (
+                ".test-runs" in declared.parts
+                or any(part in _PAYLOAD_IGNORE_DIR_NAMES for part in declared.parts[:-1])
+                or any(part.endswith(".egg-info") for part in declared.parts)
+                or declared.suffix in _PAYLOAD_IGNORE_SUFFIXES
+            ):
+                raise PromotionArtifactError("data-file source is outside the hashed source closure")
+            if declared.name.casefold().endswith(".pth"):
+                raise PromotionArtifactError("data-files cannot install Python startup hooks")
+            source = source_dir.joinpath(*declared.parts)
+            try:
+                valid = (
+                    source.resolve(strict=True) == root.joinpath(*declared.parts)
+                    and source.is_file() and not source.is_symlink()
+                )
+            except (OSError, RuntimeError):
+                valid = False
+            if not valid:
+                raise PromotionArtifactError("data-file source is missing, linked or outside its project")
+            installed = target / declared.name
+            name = installed.as_posix()
+            folded = name.casefold()
+            parents = {parent.as_posix().casefold() for parent in installed.parents}
+            if folded in destinations or folded in directories or parents & destinations:
+                raise PromotionArtifactError("ambiguous static data-file destination")
+            destinations.add(folded)
+            directories.update(parents)
+            result[name] = source
+    return result
+
+
+def validate_static_build(
+    source_dir: Path, *, trusted_setup: bytes | None = None,
+) -> dict[str, Any]:
     """Authenticate the setuptools contract before building or source mapping."""
     try:
-        data = tomllib.loads((source_dir / "pyproject.toml").read_text(encoding="utf-8"))
+        data: dict[str, Any] = tomllib.loads(
+            (source_dir / "pyproject.toml").read_text(encoding="utf-8"),
+        )
     except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
         raise PromotionArtifactError(f"{source_dir}: cannot read static build configuration: {exc}") from exc
     build = data.get("build-system")
@@ -212,7 +338,16 @@ def validate_static_build(source_dir: Path, *, trusted_setup: bytes | None = Non
         raise PromotionArtifactError("registered standalone build configuration is missing")
     reserved = sys.stdlib_module_names | {"setuptools", "wheel", "packaging", "sitecustomize", "usercustomize"}
     suffixes = ["", *importlib.machinery.all_suffixes()]
-    for name in sorted(reserved):
+    candidates = {
+        (name + suffix).casefold(): name for name in reserved for suffix in suffixes
+    }
+    # Inventory broadly, then preserve the filesystem's actual case/link semantics.
+    with os.scandir(source_dir) as entries:
+        possible = {
+            candidates[entry.name.casefold()] for entry in entries
+            if entry.name.casefold() in candidates
+        }
+    for name in sorted(possible):
         if any(
             path.exists() or path.is_symlink()
             for path in (source_dir / (name + suffix) for suffix in suffixes)
@@ -228,4 +363,5 @@ def validate_static_build(source_dir: Path, *, trusted_setup: bytes | None = Non
         or project.get("dynamic")
     ):
         raise PromotionArtifactError("unsupported dynamic or custom setuptools build configuration")
+    data_file_sources(source_dir, settings)
     return data

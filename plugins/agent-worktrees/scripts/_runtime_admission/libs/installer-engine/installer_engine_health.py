@@ -200,19 +200,32 @@ for name, expected in expected_origins.items():
             unquote(actual.path) == unquote(copied.path) and not actual.query and not actual.fragment, \
             f"{name} was not installed from its pinned slot wheel"
         if name in (expected_selection or []):
-            import base64, csv, io, zipfile
+            import base64, csv, io, sysconfig, zipfile
             with zipfile.ZipFile(slot / "wheels" / wheel["filename"]) as bundle:
                 records = [
                     member for member in bundle.namelist()
                     if member.count("/") == 1 and member.endswith(".dist-info/RECORD")
                 ]
                 assert len(records) == 1, f"{name} has ambiguous installed wheel RECORD"
+                data_directory = records[0].removesuffix(".dist-info/RECORD") + ".data"
                 data = bundle.read(records[0])
                 assert len(data) <= 4 << 20, f"{name} wheel RECORD exceeds its bound"
                 for member, recorded_hash, recorded_size in csv.reader(io.StringIO(data.decode("utf-8"))):
                     if member == records[0]:
                         continue
-                    path = resolved(distribution.locate_file(member))
+                    relative = pathlib.PurePosixPath(member)
+                    assert not relative.is_absolute() and ".." not in relative.parts and \
+                        not pathlib.PureWindowsPath(member).drive and chr(92) not in member, \
+                        f"{name} has an unsafe wheel member: {member}"
+                    if relative.parts[0] == data_directory:
+                        assert len(relative.parts) >= 3 and relative.parts[1] in \
+                            {"data", "purelib", "platlib"}, \
+                            f"{name} has an unsupported wheel relocation: {member}"
+                        # Wheel .data members are spread into the interpreter's install scheme.
+                        destination = pathlib.Path(sysconfig.get_path(relative.parts[1]))
+                        path = resolved(destination.joinpath(*relative.parts[2:]))
+                    else:
+                        path = resolved(distribution.locate_file(member))
                     native = pathlib.Path(native_path(path))
                     assert path.is_relative_to(slot) and native.stat().st_size == int(recorded_size), \
                         f"{name} installed member differs from its wheel: {member}"

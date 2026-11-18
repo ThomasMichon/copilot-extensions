@@ -10,23 +10,61 @@ import subprocess
 import sys
 import threading
 import time
+from concurrent.futures import Future
 from concurrent.futures import ThreadPoolExecutor
-from collections.abc import Iterator
-from contextlib import ExitStack, contextmanager, nullcontext
+from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager, ExitStack, contextmanager, nullcontext
+from dataclasses import dataclass, field
 from pathlib import Path
+from types import ModuleType
+from typing import TYPE_CHECKING, Any, NoReturn, Protocol, TypeVar, TypedDict, cast
 
 import pytest
 from agent_procutil import no_window_kwargs
 
+if TYPE_CHECKING:
+    from installer_wheel_snapshot import WheelInstallInputs
+
+
+class _MonitorResult(TypedDict, total=False):
+    committed: bool
+    rolled_back: bool
+    ok: bool
+    publication_uncertain: bool
+    error: str | None
+
+
+class _MonitorSummary(TypedDict, total=False):
+    action: str
+    result: _MonitorResult
+    restart: dict[str, bool]
+
+
+class _Verifier(Protocol):
+    identity: dict[str, object]
+
+    def check(self) -> None: ...
+
+
+_T = TypeVar("_T")
+
+
+class _WaitFor(Protocol):
+    def __call__(
+        self, predicate: Callable[[], _T | None], *, timeout: float = 20.0,
+        interval: float = 0.05, message: str,
+    ) -> _T: ...
+
 
 @pytest.fixture
-def driver(monkeypatch):
+def driver(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     scripts = Path(__file__).resolve().parents[1] / "scripts"
     monkeypatch.syspath_prepend(str(scripts))
     # Track both first import and replacement so teardown restores the prior module.
     monkeypatch.setitem(sys.modules, "runtime_install_governance", None)
     monkeypatch.delitem(sys.modules, "runtime_install_governance")
     spec = importlib.util.spec_from_file_location("worktrees_python_runtime_install", scripts / "runtime_install.py")
+    assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules, spec.name, module)
     spec.loader.exec_module(module)
@@ -38,21 +76,21 @@ def driver(monkeypatch):
     return module
 
 
-def test_driver_governance_uses_current_scripts(driver):
+def test_driver_governance_uses_current_scripts(driver: ModuleType) -> None:
     governance = sys.modules[driver.Governance.__module__]
     scripts = Path(__file__).resolve().parents[1] / "scripts"
-    assert Path(governance.__file__).resolve().parent == scripts
+    assert Path(cast(str, governance.__file__)).resolve().parent == scripts
     assert governance.SCRIPTS == scripts
 
 
-def test_native_release_entry_retains_inputs_without_a_source_association(driver, tmp_path, monkeypatch):
+def test_native_release_entry_retains_inputs_without_a_source_association(driver: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import install_source
 
-    held = []
+    held: list[object] = []
     wheels = object()
 
     @contextmanager
-    def retain(profile, directory, **_options):
+    def retain(profile: Path, directory: Path, **_options: object) -> Iterator[object]:
         assert profile == tmp_path / "profile.json" and directory == tmp_path / "wheels"
         held.append(wheels)
         try:
@@ -60,7 +98,7 @@ def test_native_release_entry_retains_inputs_without_a_source_association(driver
         finally:
             held.pop()
 
-    def install(root, plugin, **options):
+    def install(root: Path, plugin: Path, **options: object) -> dict[str, object]:
         assert held == [wheels]
         assert options["native_wheel_inputs"] is wheels
         assert "wheel_inputs" not in options
@@ -80,8 +118,8 @@ def test_native_release_entry_retains_inputs_without_a_source_association(driver
 
 
 def test_application_preparation_uses_wheel_assets_without_rewriting_wheel(
-    tmp_path, monkeypatch,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import agent_worktrees
     from agent_worktrees import runtime_candidate as candidate, update_stage
 
@@ -128,8 +166,8 @@ def test_application_preparation_uses_wheel_assets_without_rewriting_wheel(
 ])
 @pytest.mark.parametrize("frozen_provenance", [False, True])
 def test_application_preparation_retains_its_source_without_a_payload(
-    tmp_path, monkeypatch, legacy_paths, frozen_provenance,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, legacy_paths: bool, frozen_provenance: bool,
+) -> None:
     import agent_worktrees
     from agent_worktrees import runtime_candidate as candidate
 
@@ -143,7 +181,7 @@ def test_application_preparation_retains_its_source_without_a_payload(
     shutil.copytree(source_scripts / "installation-context", scripts / "installation-context")
     (slot / ".runtime-bootstrap").mkdir()
     (slot / "application.json").write_text("{}", encoding="utf-8")
-    source = {
+    source: dict[str, str | int] = {
         "schema": "copilot-extensions.runtime-source", "version": 1,
         "plugin": "agent-worktrees", "package_version": "1.2.3", "source_commit": "a" * 40,
     }
@@ -156,7 +194,7 @@ def test_application_preparation_retains_its_source_without_a_payload(
     if legacy_paths:
         scan = os.scandir
 
-        def legacy_scandir(path):
+        def legacy_scandir(path: str | os.PathLike[str]) -> Iterator[os.DirEntry[str]]:
             value = os.fspath(path)
             if len(value) >= 260 and not value.startswith("\\\\?\\"):
                 raise FileNotFoundError(3, "legacy Windows path limit", value)
@@ -164,14 +202,14 @@ def test_application_preparation_retains_its_source_without_a_payload(
 
         monkeypatch.setattr(os, "scandir", legacy_scandir)
         assert len(str(scripts / "installation-context")) > 260
-    provenance = None
+    provenance: dict[str, str] | None = None
     if frozen_provenance:
         from agent_worktrees import update_stage
 
         monkeypatch.setattr(update_stage, "fingerprint", lambda _path: "frozen-payload-fingerprint")
         provenance = {
-            "version": "1.2.3", "commit": source["source_commit"], "branch": "source",
-            "source": "source:" + source["source_commit"],
+            "version": "1.2.3", "commit": cast(str, source["source_commit"]), "branch": "source",
+            "source": "source:" + cast(str, source["source_commit"]),
             "deployment_source": json.dumps(source), "frozen_plugin": str(tmp_path / "inputs"),
         }
     candidate.prepare_runtime_candidate(provenance)
@@ -188,8 +226,8 @@ def test_application_preparation_retains_its_source_without_a_payload(
 @pytest.mark.skipif(os.name != "nt", reason="Windows installation ownership")
 @pytest.mark.parametrize("entry", ["install", "settle_candidate"])
 def test_direct_installation_refuses_before_governance_or_construction(
-    driver, tmp_path, monkeypatch, entry,
-):
+    driver: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, entry: str,
+) -> None:
     monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
     monkeypatch.delenv("UPDATE_DRIVER_WITNESS", raising=False)
     monkeypatch.setattr(driver.install_driver, "bootstrap", lambda payload: None)
@@ -220,7 +258,7 @@ def test_direct_installation_refuses_before_governance_or_construction(
         "marketplaceId", "namespaceGeneration", "generation", "pluginRoot",
     )
 ])
-def test_governance_recheck_uses_signed_fields(driver, monkeypatch, section, field):
+def test_governance_recheck_uses_signed_fields(driver: ModuleType, monkeypatch: pytest.MonkeyPatch, section: str, field: str) -> None:
     governance = driver.Governance.__new__(driver.Governance)
     governance.initial = ({}, {
         key: "original" for key in (
@@ -245,6 +283,36 @@ def native_runtime_source(tmp_path_factory: pytest.TempPathFactory) -> Iterator[
     plugin = repository / "plugins" / "agent-worktrees"
     owned = tmp_path_factory.mktemp("native-runtime-source")
     yield from _frozen_native_runtime_source(plugin, owned)
+
+
+def test_installed_identity_uses_the_retained_interpreter(tmp_path: Path, driver: ModuleType) -> None:
+    import venv
+    from types import SimpleNamespace
+    import runtime_install_driver as installation
+
+    slot = tmp_path / "slot"
+    venv.EnvBuilder(with_pip=False).create(slot)
+    python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    site = subprocess.check_output(
+        [str(python), "-I", "-B", "-c", "import sysconfig;print(sysconfig.get_path('purelib'))"],
+        text=True, timeout=30, **no_window_kwargs(),
+    ).strip()
+    package = Path(site) / "agent_worktrees"
+    package.mkdir()
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "_build_info.py").write_text("BUILD_INFO={'source':'retained'}\n", encoding="utf-8")
+    metadata = Path(site) / "agent_worktrees-1.2.3.dist-info"
+    metadata.mkdir()
+    (metadata / "METADATA").write_text(
+        "Metadata-Version: 2.1\nName: agent-worktrees\nVersion: 1.2.3\n", encoding="utf-8",
+    )
+    runtime = SimpleNamespace(slot_python=lambda root, version: python)
+    assert installation.installed_identity(slot, cast(ModuleType, runtime), ValueError) == {
+        "package_version": "1.2.3", "build_info": {"source": "retained"},
+    }
+    runtime.slot_python = lambda root, version: None
+    with pytest.raises(ValueError, match="no interpreter"):
+        installation.installed_identity(slot, cast(ModuleType, runtime), ValueError)
 
 
 def _frozen_native_runtime_source(plugin: Path, owned: Path) -> Iterator[tuple[Path, str]]:
@@ -280,9 +348,9 @@ def _frozen_native_runtime_source(plugin: Path, owned: Path) -> Iterator[tuple[P
     ]
 
     def run(*arguments: str) -> str:
-        return subprocess.check_output(
+        return cast(str, subprocess.check_output(
             [*options, *arguments], env=environment, text=True, **no_window_kwargs(),
-        ).strip()
+        ).strip())
 
     run("init", "-q", "--template", str(hooks))
     # Preserve literal copied inputs even if a package carries text/filter attributes.
@@ -304,8 +372,8 @@ def _frozen_native_runtime_source(plugin: Path, owned: Path) -> Iterator[tuple[P
 @pytest.mark.parametrize("application", [False, True])
 @pytest.mark.parametrize("selection", ["current-version", "last-known-good"])
 def test_selected_runtime_uses_generation_not_nested_environment(
-    driver, tmp_path, monkeypatch, application, selection,
-):
+    driver: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, application: bool, selection: str,
+) -> None:
     tmp_path = Path(driver.engine._native_retained_path(tmp_path))
     slot = tmp_path / "versions" / "2.0+source.fixture.profile.fixture"
     environment = slot / ".venv" if application else slot
@@ -315,28 +383,28 @@ def test_selected_runtime_uses_generation_not_nested_environment(
     driver.runtime.mark_complete(tmp_path, slot.name, payload_hash="fixture")
     (tmp_path / selection).write_text(slot.name + "\n")
     importer = builtins.__import__
-    def cold_import(name, *args, **kwargs):
+    def cold_import(name: str, *args: object, **kwargs: object) -> ModuleType:
         if name == "agent_procutil" or name.startswith("agent_procutil."):
             pytest.fail("raw bootstrap borrowed an installed process-helper package")
-        return importer(name, *args, **kwargs)
+        return cast(Callable[..., ModuleType], importer)(name, *args, **kwargs)
     monkeypatch.setattr(builtins, "__import__", cold_import)
     assert driver._selected(tmp_path) == slot.name
 
 
-def test_empty_runtime_selection_needs_no_installed_process_helper(driver, tmp_path, monkeypatch):
+def test_empty_runtime_selection_needs_no_installed_process_helper(driver: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     importer = builtins.__import__
-    def cold_import(name, *args, **kwargs):
+    def cold_import(name: str, *args: object, **kwargs: object) -> ModuleType:
         if name == "agent_procutil" or name.startswith("agent_procutil."):
             pytest.fail("genesis selection imported a not-yet-installed dependency")
-        return importer(name, *args, **kwargs)
+        return cast(Callable[..., ModuleType], importer)(name, *args, **kwargs)
     monkeypatch.setattr(builtins, "__import__", cold_import)
     assert driver._selected(tmp_path) is None
 
 
 @pytest.mark.parametrize("vendored", [False, True])
 def test_native_runtime_source_keeps_repository_metadata_outside_frozen_packages(
-    tmp_path, vendored,
-):
+    tmp_path: Path, vendored: bool,
+) -> None:
     plugin = tmp_path / "source" / "plugins" / "fixture"
     dependency = (
         plugin / "_vendor" / "dependency" if vendored
@@ -363,7 +431,7 @@ def test_native_runtime_source_keeps_repository_metadata_outside_frozen_packages
         assert head
 
 
-def _slot(driver, root, version):
+def _slot(driver: ModuleType, root: Path, version: str) -> Path:
     slot = root / "versions" / version
     python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     python.parent.mkdir(parents=True)
@@ -375,8 +443,8 @@ def _slot(driver, root, version):
 @pytest.mark.parametrize("separator", [".", "+"])
 @pytest.mark.parametrize("same_profile", [False, True])
 def test_native_wheel_update_keeps_selected_repair_for_full_candidate_admission(
-    driver, tmp_path, monkeypatch, separator, same_profile,
-):
+    driver: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, separator: str, same_profile: bool,
+) -> None:
     from types import SimpleNamespace
 
     root, plugin = tmp_path / "runtime", tmp_path / "payload"
@@ -389,7 +457,7 @@ def test_native_wheel_update_keeps_selected_repair_for_full_candidate_admission(
     manifest = {"runtime_version": previous, "venv": str(slot)}
 
     @contextmanager
-    def held(**_options):
+    def held(**_options: object) -> Iterator[None]:
         yield
 
     monkeypatch.setattr(driver, "Governance", lambda requested, payload: SimpleNamespace(
@@ -404,7 +472,7 @@ def test_native_wheel_update_keeps_selected_repair_for_full_candidate_admission(
     class CandidateAdmissionReached(Exception):
         pass
 
-    def candidate(requested, generation, **arguments):
+    def candidate(requested: Path, generation: str, **arguments: object) -> NoReturn:
         assert requested == root
         assert generation == (previous if same_profile else version)
         assert arguments["wheel_inputs"] is wheels
@@ -421,10 +489,10 @@ def test_native_wheel_update_keeps_selected_repair_for_full_candidate_admission(
 
 
 @pytest.mark.parametrize("tampered", [False, True])
-@pytest.mark.parametrize("deployment", ["source", "closed-wheels", "repair"])
+@pytest.mark.parametrize("deployment", ["source", "closed-wheels", "shared-profile", "repair"])
 def test_source_deployment_uses_exact_verified_snapshot_before_construction(
-    driver, tmp_path, monkeypatch, tampered, deployment,
-):
+    driver: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tampered: bool, deployment: str,
+) -> None:
     from types import SimpleNamespace
 
     root, plugin = tmp_path / "runtime", tmp_path / "payload"
@@ -446,30 +514,43 @@ def test_source_deployment_uses_exact_verified_snapshot_before_construction(
         (plugin / "changed.py").write_text("VALUE = 2\n", encoding="utf-8")
 
     @contextmanager
-    def held(**_kwargs):
+    def held(**_kwargs: object) -> Iterator[None]:
         yield
 
-    monkeypatch.setattr(driver, "Governance", lambda requested, payload: SimpleNamespace(
-        root=requested, payload=payload, held=held,
-    ))
-    provenance = {}
+    bound_policies: list[object] = []
+    policy_checks: list[bool] = []
+    def governance(requested: Path, payload: Path, **arguments: object) -> SimpleNamespace:
+        if "runtime_profile_policy" in arguments:
+            bound_policies.append(arguments["runtime_profile_policy"])
+        return SimpleNamespace(
+            root=requested, payload=payload, held=held,
+            recheck=lambda: policy_checks.append(True),
+        )
 
-    def attribute(payload, version, selected):
+    monkeypatch.setattr(driver, "Governance", governance)
+    provenance: dict[str, object] = {}
+
+    def attribute(payload: Path, version: str, selected: object) -> dict[str, object]:
         assert payload == plugin and version == "1.0.0" and selected == identity
         return provenance
 
     class ConstructionReached(Exception):
         pass
 
-    wheels = None
+    wheels: WheelInstallInputs | None = None
 
-    def construct(requested, version, **kwargs):
+    def construct(requested: Path, version: str, **kwargs: object) -> NoReturn:
         assert not tampered
         expected = identity.runtime_version
         if wheels is not None:
             expected += ".profile." + wheels.receipt()["lock_id"][7:23]
             assert kwargs["wheel_inputs"] is wheels
             assert kwargs["local_packages"] == ("agent-worktrees",)
+            if deployment == "shared-profile":
+                assert bound_policies == [policy]
+                assert wheels.receipt()["binding"] == binding
+                cast(Callable[[object], None], kwargs["validate_candidate"])(kwargs["plugin"])
+                assert policy_checks == [True]
         if deployment == "repair":
             assert version.startswith(expected + ".repair.") and version != expected
         else:
@@ -486,7 +567,7 @@ def test_source_deployment_uses_exact_verified_snapshot_before_construction(
     monkeypatch.setattr(driver.engine, "numbered_candidate", construct)
     error = source.SourceIdentityError if tampered else ConstructionReached
     with ExitStack() as custody:
-        options = {}
+        options: dict[str, object] = {}
         if deployment != "source":
             from installer_wheel_snapshot import retain_wheel_inputs
 
@@ -498,15 +579,52 @@ def test_source_deployment_uses_exact_verified_snapshot_before_construction(
                 max_wheels=2, max_archive_bytes=1024, max_total_bytes=1024,
                 max_snapshot_bytes=4096, deadline=time.monotonic() + 30,
             ))
-            profile = {
+            profile: dict[str, Any] = {
                 "component": "agent-worktrees", "mode": "source",
                 "release": {
                     "identity": "source:" + identity.source_commit,
                     "sha256": "sha256:" + identity.assembly_hash,
                 },
             }
+            if deployment == "shared-profile":
+                policy: dict[str, Any] = {
+                    "status": "ready", "policyId": "sha256:" + "c" * 64,
+                    "owner": {"pluginId": "agent-worktrees", "runtimeRoot": str(root)},
+                    "selection": {"backend": "cpu", "allowSourceFallback": True},
+                }
+                locked: dict[str, Any] = {
+                    "schema": "copilot-extensions.source-lock-candidate", "version": 1,
+                    "source": identity.document(), "component": "agent-worktrees",
+                    "mode": "source", "policy": policy, "target": {}, "build_roots": [],
+                    "trigger": "approved-profile-unavailable",
+                    "source_authentication": {
+                        "source": identity.document(), "owner_policy": policy["policyId"],
+                        "trigger": "approved-profile-unavailable",
+                    },
+                    "acquisition": {"policy_id": "sha256:" + "d" * 64},
+                }
+                profile.update(
+                    artifact=None, target={}, backend="cpu", approval_source=policy["policyId"],
+                    acquisition_policy="sha256:" + hashlib.sha256(json.dumps(
+                        locked, sort_keys=True, separators=(",", ":"), allow_nan=False,
+                    ).encode()).hexdigest(),
+                    wheels=[{
+                        "name": "agent-worktrees", "version": "1.0.0",
+                        "filename": archive.name, "sha256": digest,
+                    }],
+                )
+                build = {
+                    **profile, "roots": [], "wheels": [],
+                    "acquisition_policy": locked["acquisition"]["policy_id"],
+                }
+                binding: dict[str, Any] = {
+                    "profile": profile, "source_lock": locked, "build_profile": build,
+                    "build_toolchain": {"packages": {}, "admitted_profile": build},
+                }
+            else:
+                binding = profile
             wheels = driver.engine.WheelInstallInputs(
-                retained, json.dumps(profile, sort_keys=True, separators=(",", ":")),
+                retained, json.dumps(binding, sort_keys=True, separators=(",", ":")),
                 (("agent-worktrees", "1.0.0", archive.name, digest),),
             )
             options = {"wheel_inputs": wheels, "repair": deployment == "repair"}
@@ -519,12 +637,458 @@ def test_source_deployment_uses_exact_verified_snapshot_before_construction(
         assert not root.exists()
 
 
+def test_native_profile_policy_is_rechecked_against_the_actual_owner(driver: ModuleType, tmp_path: Path) -> None:
+    from types import SimpleNamespace
+
+    root = tmp_path / "worktrees"
+    policy: dict[str, Any] = {
+        "status": "ready", "policyId": "sha256:" + "a" * 64,
+        "owner": {"pluginId": "agent-worktrees", "runtimeRoot": str(root)},
+        "selection": {"backend": "cpu", "allowSourceFallback": True},
+    }
+    observed = json.loads(json.dumps(policy))
+    calls: list[dict[str, object]] = []
+
+    def resolve(**arguments: object) -> dict[str, object]:
+        calls.append(arguments)
+        return {"runtimeProfiles": observed}
+
+    governance = driver.Governance.__new__(driver.Governance)
+    governance.root, governance.runtime_profile_policy = root, policy
+    governance.helper = SimpleNamespace(resolve_runtime_profile_policy=resolve)
+    arguments = {"payload_root": tmp_path / "payload", "plugin_id": "agent-worktrees"}
+    governance._profile_policy(arguments)
+    assert calls == [{**arguments, "backend": "cpu"}]
+    observed["selection"]["allowSourceFallback"] = False
+    with pytest.raises(driver.InstallationRefused, match="profile policy changed"):
+        governance._profile_policy(arguments)
+
+
+@pytest.mark.parametrize("managed", [False, True])
+@pytest.mark.parametrize("profile_mode", ["source", "artifact"])
+@pytest.mark.parametrize("evidence", ["none", "policy-only", "live", "revoked", "changed"])
+def test_profile_aware_publication_keeps_live_and_managed_authority(
+    driver: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, managed: bool, evidence: str, profile_mode: str | None,
+) -> None:
+    root, payload = tmp_path / "runtime", tmp_path / "payload"
+    payload.mkdir()
+    home = tmp_path / "home"
+    home.mkdir()
+    for name in (
+        "COPILOT_EXTENSIONS_CONTEXT", "COPILOT_EXTENSIONS_COMMAND_LIFECYCLE",
+        "COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    descriptor = {"kind": "github", "canonical": "github:example/plugins", "ref": ""}
+    standalone = driver.Governance(root, payload, source_descriptor=descriptor)
+    helper = standalone.helper
+    arguments = {
+        "legacy_root": root, "payload_root": payload, "plugin_id": "agent-worktrees",
+        "durable_home": standalone.durable_home, "source_descriptor": descriptor,
+        "project_root": None,
+    }
+    resolution = helper.resolve_runtime_deployment(**arguments)
+    document = {
+        "schema": helper.RUNTIME_DEPLOYMENT_SCHEMA, "version": 1,
+        "owner": helper._deployment_owner(resolution, arguments), "managed": managed,
+        "runtimeProfiles": {"allowSourceFallback": profile_mode == "source"},
+    }
+    root.mkdir()
+    policy_path = root / "runtime-deployment.json"
+    policy_path.write_text(json.dumps(document), encoding="utf-8")
+    policy = helper.resolve_runtime_profile_policy(**arguments)["runtimeProfiles"]
+    checks: list[bool] = []
+    revoked: list[bool] = []
+
+    def verify() -> None:
+        checks.append(True)
+        if revoked:
+            raise ValueError("fixture runtime inputs revoked")
+
+    options = {} if evidence == "none" else {
+        "runtime_profile_policy": policy, "runtime_profile_mode": profile_mode,
+    }
+    if evidence == "changed":
+        document["runtimeProfiles"]["allowSourceFallback"] = profile_mode != "source"
+        policy_path.write_text(json.dumps(document), encoding="utf-8")
+    with driver.verification.LiveInputVerifier(
+        verify, deadline=time.monotonic() + 15,
+    ) as guard:
+        if evidence == "revoked":
+            revoked.append(True)
+        if evidence in ("live", "revoked", "changed"):
+            options.update(runtime_input_verification=guard.identity, verify_inputs=guard.check)
+        if evidence == "revoked":
+            with pytest.raises(ValueError, match="inputs revoked"):
+                driver.Governance(root, payload, source_descriptor=descriptor, **options)
+        elif evidence == "live" and not managed:
+            owner = driver.Governance(root, payload, source_descriptor=descriptor, **options)
+            assert checks
+            owner.recheck()
+            assert len(checks) >= 2
+            content = json.dumps({"schema_version": 3, "service": "agent-worktrees"}).encode()
+            with owner.held():
+                with owner.manifest_publication(content) as published:
+                    manifest = json.loads(published)
+                    assert manifest["commandBinding"]["runtimeRoot"] == str(root)
+                    assert manifest["commandLifecycle"]["state"] == "complete"
+                    helper._atomic_write_json(
+                        root / "deploy-manifest.json", manifest, lock=owner.command_lock,
+                    )
+                revoked.append(True)
+                with pytest.raises(ValueError, match="inputs revoked"):
+                    with owner.manifest_publication(content):
+                        pytest.fail("Revoked inputs reached manifest publication")
+                revoked.clear()
+                original_policy = owner._profile_policy
+
+                def revoke_after_policy(arguments: dict[str, object]) -> None:
+                    original_policy(arguments)
+                    revoked.append(True)
+
+                with pytest.MonkeyPatch.context() as patch:
+                    patch.setattr(owner, "_profile_policy", revoke_after_policy)
+                    with pytest.raises(ValueError, match="inputs revoked"):
+                        with owner.manifest_publication(content):
+                            pytest.fail("Inputs revoked during ownership checks reached commit")
+                revoked.clear()
+            monkeypatch.setattr(owner, "_retained_bootstrap", lambda: True)
+            with owner.held():
+                assert owner.retained_binding["commandBinding"] == manifest["commandBinding"]
+                with owner.manifest_publication(content) as restored:
+                    assert json.loads(restored)["commandBinding"] == manifest["commandBinding"]
+            (root / "deploy-manifest.json").unlink()
+            document["managed"] = True
+            policy_path.write_text(json.dumps(document), encoding="utf-8")
+            with pytest.raises(driver.InstallationRefused):
+                owner.recheck()
+        else:
+            with pytest.raises(driver.InstallationRefused):
+                driver.Governance(root, payload, source_descriptor=descriptor, **options)
+    assert sorted(path.name for path in root.iterdir()) == ["runtime-deployment.json"]
+
+
+def test_profile_publication_refuses_an_older_selected_lifecycle(driver: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+    import command_binding
+
+    owner = driver.Governance.__new__(driver.Governance)
+    owner.context = ""
+    owner.root = tmp_path / "runtime"
+    owner.runtime_profile_policy = {"status": "ready"}
+    owner.runtime_input_verification = {"fixture": "live"}
+    owner.verify_inputs = lambda: None
+    owner.publication_locks, owner.command_lock = (), None
+    monkeypatch.setattr(command_binding, "_load_lifecycle", lambda: SimpleNamespace())
+    with pytest.raises(driver.InstallationRefused, match="Selected lifecycle helper"):
+        with owner.held():
+            pytest.fail("Unsupported profile helper acquired publication custody")
+    assert not owner.root.exists()
+    assert not owner.root.with_name(owner.root.name + ".command-binding-publication.lock").exists()
+
+
+@pytest.mark.parametrize("tamper", [
+    None, "source", "owner", "release", "artifact", "first-party", "dependency", "distributions",
+])
+def test_native_artifact_policy_associates_both_byte_owners(driver: ModuleType, tamper: str | None) -> None:
+    from types import SimpleNamespace
+
+    source = SimpleNamespace(package_version="1.0.0", document=lambda: {"source": "fixture"})
+    policy: dict[str, Any] = {
+        "status": "ready", "policyId": "sha256:" + "a" * 64,
+        "owner": {"pluginId": "agent-worktrees"},
+        "selection": {"backend": "cpu", "allowSourceFallback": False},
+    }
+    first: dict[str, str] = {
+        "name": "agent-worktrees", "version": "1.0.0",
+        "filename": "agent_worktrees-1.0.0-py3-none-any.whl", "sha256": "sha256:" + "b" * 64,
+    }
+    dependency: dict[str, str] = {
+        "name": "fixture", "version": "1.0",
+        "filename": "fixture-1.0-py3-none-any.whl", "sha256": "sha256:" + "c" * 64,
+    }
+    manifest: dict[str, Any] = {
+        "plugin": "agent-worktrees", "version": "1.0.0",
+        "payload_hash": "sha256:" + "d" * 64,
+        "artifact_id": "sha256:" + "e" * 64, "wheels": [first],
+    }
+    profile: dict[str, Any] = {
+        "component": "agent-worktrees", "mode": "artifact", "backend": "cpu",
+        "approval_source": "promotion-main",
+        "artifact": {
+            "artifact_id": manifest["artifact_id"], "manifest_sha256": "sha256:" + "f" * 64,
+        },
+        "release": {"identity": "agent-worktrees:1.0.0", "sha256": manifest["payload_hash"]},
+        "wheels": [first.copy(), dependency.copy()],
+    }
+    receipt: dict[str, Any] = {
+        "binding": {
+            "schema": "copilot-extensions.artifact-runtime-inputs", "version": 1,
+            "profile": profile, "policy": policy, "artifact_manifest": manifest,
+            "source": {
+                "source": source.document(), "owner_policy": policy["policyId"],
+                "mode": "origin", "trigger": None,
+            },
+            "release_subject": "sha256:" + "1" * 64, "bundle": "sha256:" + "2" * 64,
+            "acquisition": {
+                "schema": "copilot-extensions.wheel-acquisition", "version": 1,
+                "files": [dependency.copy()],
+            },
+        },
+        "distributions": {
+            row["name"]: {key: row[key] for key in ("version", "filename", "sha256")}
+            for row in (first, dependency)
+        },
+    }
+    binding = receipt["binding"]
+    if tamper == "source":
+        binding["source"]["source"] = {}
+    elif tamper == "owner":
+        policy["owner"]["pluginId"] = "another"
+    elif tamper == "release":
+        profile["release"]["sha256"] = "sha256:" + "3" * 64
+    elif tamper == "artifact":
+        profile["artifact"]["artifact_id"] = "sha256:" + "3" * 64
+    elif tamper == "first-party":
+        manifest["wheels"][0]["sha256"] = "sha256:" + "3" * 64
+    elif tamper == "dependency":
+        binding["acquisition"]["files"] = [first]
+    elif tamper == "distributions":
+        receipt["distributions"].pop("fixture")
+    if tamper is None:
+        assert driver.runtime_profile_policy(receipt, source) == policy
+        binding["acquisition"] = None
+        profile["wheels"] = [profile["wheels"][0]]
+        receipt["distributions"].pop("fixture")
+        assert driver.runtime_profile_policy(receipt, source) == policy
+    else:
+        with pytest.raises(ValueError, match="Worktrees"):
+            driver.runtime_profile_policy(receipt, source)
+
+
+def _admission_module(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
+    scripts = Path(__file__).resolve().parents[1] / "scripts"
+    monkeypatch.syspath_prepend(str(scripts))
+    spec = importlib.util.spec_from_file_location(
+        "worktrees_native_admission", scripts / "runtime_install_admission.py",
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.parametrize("locator", [
+    "https://github.com/example/plugins.git", "ssh://git@github.com/example/plugins.git",
+    "git@github.com:example/plugins.git",
+])
+def test_native_admission_uses_the_acquired_producer_not_installed_defaults(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, locator: str,
+) -> None:
+    from types import SimpleNamespace
+
+    admission = _admission_module(monkeypatch)
+    acquired = SimpleNamespace(
+        checkout=tmp_path, commit="a" * 40,
+        selection=SimpleNamespace(repo=locator, branch="main"),
+    )
+    origin = SimpleNamespace(acquired=acquired, identity=SimpleNamespace(source_commit="a" * 40))
+    assert admission._producer(origin) == (tmp_path, "example/plugins")
+    acquired.selection.branch = "dev"
+    with pytest.raises(admission.InstallationRefused, match="promoted source"):
+        admission._producer(origin)
+    acquired.selection.branch = "main"
+    acquired.selection.repo = str(tmp_path)
+    with pytest.raises(admission.InstallationRefused, match="GitHub producer"):
+        admission._producer(origin)
+
+
+def test_semantic_admission_requires_live_parent_before_toolkit_or_source_reads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    admission = _admission_module(monkeypatch)
+    monkeypatch.delenv(admission.verification.ENVIRONMENT, raising=False)
+    monkeypatch.setattr(
+        admission, "_activate", lambda: pytest.fail("unowned invocation entered toolkit"),
+    )
+    with admission.verification.LiveInputVerifier(
+        lambda: None, deadline=time.monotonic() + 15,
+    ) as guard, pytest.raises(admission.verification.VerificationRefused, match="custody"):
+        admission.semantic_owner({"version": 1, "verifier": guard.identity})
+
+
+@pytest.mark.parametrize("revoked", [False, True])
+def test_native_admission_retains_origin_and_seed_until_semantic_settlement(
+    driver: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, revoked: bool,
+) -> None:
+    from types import SimpleNamespace
+
+    admission = _admission_module(monkeypatch)
+    monkeypatch.setattr(admission, "_activate", lambda: None)
+    active: list[str] = []
+    checks: list[bool] = []
+    deny: list[bool] = []
+    identity = SimpleNamespace(plugin="agent-worktrees", source_commit="a" * 40)
+    acquired = SimpleNamespace(
+        checkout=tmp_path, commit=identity.source_commit,
+        selection=SimpleNamespace(repo="https://github.com/example/plugins.git", branch="main"),
+    )
+    origin = SimpleNamespace(
+        acquired=acquired, identity=identity, payload=tmp_path,
+        record=lambda: {"original": True}, policy=lambda: {"policyId": "owner"},
+    )
+
+    @contextmanager
+    def retain_origin(**arguments: object) -> Iterator[SimpleNamespace]:
+        active.append("origin")
+        try:
+            yield origin
+        finally:
+            assert active.pop() == "origin"
+
+    def verify() -> None:
+        assert active == ["origin", "seed"]
+        checks.append(True)
+        if deny:
+            raise ValueError("fixture seed revoked")
+
+    @contextmanager
+    def retain_seed(selected: SimpleNamespace, **arguments: object) -> Iterator[SimpleNamespace]:
+        assert selected is origin and active == ["origin"]
+        active.append("seed")
+        try:
+            yield SimpleNamespace(slot=tmp_path / "seed", verify=verify)
+        finally:
+            assert active.pop() == "seed"
+
+    monkeypatch.setitem(sys.modules, "runtime_source_authentication", SimpleNamespace(
+        retain_installation_origin=retain_origin,
+    ))
+    monkeypatch.setitem(sys.modules, "runtime_admission_bootstrap", SimpleNamespace(
+        retain_origin_tooling=retain_seed,
+    ))
+    monkeypatch.setitem(sys.modules, "installer_engine", driver.engine)
+    monkeypatch.setattr(admission.verification, "require_source_contract", lambda payload: None)
+    monkeypatch.setattr(driver.engine, "_package_roots", lambda payload: ())
+    monkeypatch.setattr(driver.engine, "_procutil", lambda frozen: None)
+
+    def settle(argv: list[str], environment: dict[str, str], *, verifier: _Verifier) -> subprocess.CompletedProcess[str]:
+        assert active == ["origin", "seed"]
+        request = json.loads(argv[-1])
+        assert request["repository"] == "example/plugins"
+        assert request["checkout"] == str(tmp_path)
+        assert request["origin"] == {"original": True}
+        assert request["verifier"] == verifier.identity
+        if revoked:
+            deny.append(True)
+        verifier.check()
+        Path(request["result"]).write_text('{"settled": true}', encoding="utf-8")
+        return subprocess.CompletedProcess(argv, 0)
+
+    monkeypatch.setattr(admission.verification, "wait_for_settlement", settle)
+    from dataclasses import dataclass
+
+    @dataclass
+    class Limits:
+        max_bytes: int = 1024
+
+    arguments = {
+        "installation": {"payload_root": tmp_path}, "uv": tmp_path / "uv",
+        "base_python": Path(sys.executable), "deadline": time.monotonic() + 15,
+        "seed_limits": Limits(), "acquisition_limits": Limits(), "wheel_limits": Limits(),
+        "max_subject_bytes": 1024, "max_lock_bytes": 1024, "max_snapshot_bytes": 1024,
+        "wait_timeout": 10, "child_timeout": 10,
+    }
+    if revoked:
+        with pytest.raises(ValueError, match="seed revoked"):
+            admission.run(**arguments)
+    else:
+        assert admission.run(**arguments) == {"settled": True}
+    assert checks and not active
+
+
+@pytest.mark.parametrize("with_input_guard", [False, True])
+@pytest.mark.parametrize("profile_mode", [None, "artifact"])
+def test_candidate_handover_preserves_profile_policy_before_any_runtime_read(
+    driver: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, with_input_guard: bool, profile_mode: str | None,
+) -> None:
+    expected: dict[str, object] = {
+        "source_descriptor": {"kind": "github", "canonical": "example/plugins", "ref": ""},
+        "runtime_profile_policy": {"policyId": "sha256:" + "a" * 64},
+    }
+    if profile_mode is not None:
+        expected["runtime_profile_mode"] = profile_mode
+    if with_input_guard:
+        import runtime_input_verifier
+
+        with runtime_input_verifier.LiveInputVerifier(
+            lambda: None, deadline=time.monotonic() + 15,
+        ) as verifier:
+            expected["runtime_input_verification"] = verifier.identity
+    calls: list[tuple[Path, Path, dict[str, object]]] = []
+
+    def governance(root: Path, payload: Path, **arguments: object) -> NoReturn:
+        calls.append((root, payload, arguments))
+        raise driver.InstallationRefused("current profile policy changed")
+
+    monkeypatch.setattr(driver, "Governance", governance)
+    root, payload = tmp_path / "root", tmp_path / "payload"
+    with pytest.raises(driver.InstallationRefused, match="current profile policy changed"):
+        driver.settle_candidate(
+            root, "1.2.3", payload=payload, payload_hash="b" * 64,
+            expected_governance=expected,
+        )
+    assert calls == [(root, payload, expected)]
+    assert not root.exists()
+
+
+def test_old_candidate_source_refuses_required_verification_before_construction(
+    driver: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import runtime_input_verifier
+
+    plugin = tmp_path / "old-source"
+    candidate = plugin / "src" / "agent_worktrees" / "runtime_candidate.py"
+    candidate.parent.mkdir(parents=True)
+    candidate.write_text("MODE_OWNER_ABI = 1\n", encoding="utf-8")
+    root = tmp_path / "runtime"
+    monkeypatch.setattr(
+        driver, "Governance", lambda *a, **kw: pytest.fail("unsupported source entered governance"),
+    )
+    with runtime_input_verifier.LiveInputVerifier(
+        lambda: None, deadline=time.monotonic() + 15,
+    ) as verifier, pytest.raises(
+        runtime_input_verifier.VerificationRefused, match="does not support",
+    ):
+        driver.install(
+            root, plugin, payload=plugin, uv=tmp_path / "unused",
+            base_python=Path(sys.executable), input_verifier=verifier,
+        )
+    assert not root.exists()
+
+
+def test_helper_preparation_cannot_be_used_as_a_publication_owner(driver: ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
+    governance = driver.Governance.__new__(driver.Governance)
+    governance.prepare_only = True
+    monkeypatch.setattr(governance, "read", lambda: pytest.fail("read-only plan attempted a mutation"))
+    with pytest.raises(driver.InstallationRefused, match="cannot authorize"):
+        governance.recheck()
+    with pytest.raises(driver.InstallationRefused, match="cannot publish"):
+        with governance.manifest_publication(b"{}"):
+            pytest.fail("read-only helper plan published a runtime manifest")
+    with pytest.raises(driver.InstallationRefused, match="cannot acquire"):
+        with governance.held():
+            pytest.fail("read-only helper plan acquired publication custody")
+
+
 @pytest.mark.parametrize("mode", ["ordinary", "repair", "dev"])
 @pytest.mark.parametrize("input_timeout", [None, 1200])
 @pytest.mark.parametrize("expired", [False, True])
 def test_install_source_cli_retains_inputs_through_native_owner_return(
-    driver, tmp_path, monkeypatch, mode, input_timeout, expired,
-):
+    driver: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str, input_timeout: int | None, expired: bool,
+) -> None:
     from types import SimpleNamespace
     import install_source
     import installer_wheel_inputs as guards
@@ -534,12 +1098,12 @@ def test_install_source_cli_retains_inputs_through_native_owner_return(
     identity = SimpleNamespace(package_version="1.0.0")
     selected = SimpleNamespace(payload=plugin, identity=identity)
     wheels = object()
-    held = []
+    held: list[bool] = []
     now = [10.0]
-    clock_reads = []
+    clock_reads: list[float] = []
     budget = 600 if input_timeout is None else input_timeout
 
-    def clock():
+    def clock() -> float:
         clock_reads.append(now[0])
         return now[0]
 
@@ -547,7 +1111,7 @@ def test_install_source_cli_retains_inputs_through_native_owner_return(
     monkeypatch.setattr(guards, "time", SimpleNamespace(monotonic=lambda: now[0]))
 
     @contextmanager
-    def inputs(path, component, *, deadline):
+    def inputs(path: Path, component: str, *, deadline: float) -> Iterator[tuple[SimpleNamespace, object]]:
         assert path == snapshot and component == "agent-worktrees" and mode != "dev"
         assert deadline == 10.0 + budget
         guards._check_deadline(deadline)
@@ -558,7 +1122,7 @@ def test_install_source_cli_retains_inputs_through_native_owner_return(
             held.pop()
         guards._check_deadline(deadline)
 
-    def install(root, selected_plugin, **options):
+    def install(root: Path, selected_plugin: Path, **options: object) -> dict[str, object]:
         assert held == [True] and selected_plugin == plugin
         assert options["wheel_inputs"] is wheels and options["repair"] == (mode == "repair")
         if expired:
@@ -593,7 +1157,7 @@ def test_install_source_cli_retains_inputs_through_native_owner_return(
 
 
 @pytest.mark.parametrize("value", ["0", "-1", "nan", "inf", "-inf"])
-def test_install_source_cli_refuses_invalid_input_timeout(driver, tmp_path, value, capsys):
+def test_install_source_cli_refuses_invalid_input_timeout(driver: ModuleType, tmp_path: Path, value: str, capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit) as failure:
         driver.main(["--input-timeout=" + value])
     assert failure.value.code == 2
@@ -602,8 +1166,8 @@ def test_install_source_cli_refuses_invalid_input_timeout(driver, tmp_path, valu
 
 
 def test_install_source_cli_rejects_input_timeout_without_source(
-    driver, tmp_path, monkeypatch, capsys,
-):
+    driver: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     from unittest.mock import Mock
 
     install = Mock(return_value={})
@@ -624,7 +1188,7 @@ def test_install_source_cli_rejects_input_timeout_without_source(
 
 @pytest.mark.skipif(os.name != "nt", reason="native PowerShell parameter validation")
 @pytest.mark.parametrize("value", ["NaN", "Infinity"])
-def test_native_frontend_refuses_nonfinite_input_timeout_before_admission(tmp_path, value):
+def test_native_frontend_refuses_nonfinite_input_timeout_before_admission(tmp_path: Path, value: str) -> None:
     shell = shutil.which("pwsh.exe") or shutil.which("powershell.exe")
     if shell is None:
         pytest.skip("native PowerShell is unavailable")
@@ -643,8 +1207,8 @@ def test_native_frontend_refuses_nonfinite_input_timeout_before_admission(tmp_pa
 @pytest.mark.skipif(os.name != "nt", reason="native Windows installer argument admission")
 @pytest.mark.parametrize("shell", ["powershell", "pwsh"])
 def test_native_frontend_refuses_source_inputs_for_status_before_touching_installation(
-    tmp_path, shell,
-):
+    tmp_path: Path, shell: str,
+) -> None:
     executable = shutil.which(shell)
     if executable is None:
         pytest.skip(f"{shell} is unavailable")
@@ -662,8 +1226,8 @@ def test_native_frontend_refuses_source_inputs_for_status_before_touching_instal
 @pytest.mark.parametrize("source_backed", [False, True])
 @pytest.mark.parametrize("recover_manager", [False, True])
 def test_source_health_failure_routes_to_canonical_distinct_repair_after_custody(
-    driver, tmp_path, monkeypatch, source_backed, recover_manager,
-):
+    driver: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source_backed: bool, recover_manager: bool,
+) -> None:
     from types import SimpleNamespace
 
     root, plugin, owner = (tmp_path / name for name in ("runtime", "payload", "owner"))
@@ -674,10 +1238,10 @@ def test_source_health_failure_routes_to_canonical_distinct_repair_after_custody
         "agent-worktrees", "1.0.0", "a" * 40, "b" * 40, "c" * 64,
         source.runtime_version("1.0.0", "a" * 40, "c" * 64),
     ) if source_backed else None
-    calls = []
+    calls: list[str] = []
 
     @contextmanager
-    def held(**kwargs):
+    def held(**kwargs: object) -> Iterator[None]:
         calls.append("held")
         try:
             yield
@@ -692,10 +1256,10 @@ def test_source_health_failure_routes_to_canonical_distinct_repair_after_custody
     monkeypatch.setattr(driver, "_source_provenance", lambda *a: {})
     monkeypatch.setattr(driver, "_selected", lambda *a: None)
 
-    def construct(*args, **kwargs):
+    def construct(*args: object, **kwargs: object) -> NoReturn:
         raise driver.engine.HealthRepairRequired("controlled installed-health failure")
 
-    def repair(requested, selected, **kwargs):
+    def repair(requested: Path, selected: Path, **kwargs: object) -> dict[str, str]:
         assert calls == ["held", "released"]
         assert requested == root and selected == plugin
         assert kwargs["payload"] == owner and kwargs["mode"] == "repair"
@@ -725,8 +1289,8 @@ def test_source_health_failure_routes_to_canonical_distinct_repair_after_custody
     (False, False, False, "prepublication-interrupted"),
 ])
 def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
-    driver, tmp_path, monkeypatch, rollback, interrupted, activation_failed, special,
-):
+    driver: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, rollback: bool, interrupted: bool, activation_failed: bool, special: str | None,
+) -> None:
     from agent_worktrees import config as cfg, status_monitor_cutover as cutover
 
     root = tmp_path / "runtime"
@@ -744,21 +1308,21 @@ def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
     (plugin / "pyproject.toml").write_text(
         '[project]\nname="agent-worktrees"\nversion="2.0.0"\n', encoding="utf-8",
     )
-    authority = []
+    authority: list[str] = []
 
     class Governance:
-        def __init__(self, requested, payload):
+        def __init__(self, requested: Path, payload: Path) -> None:
             self.root, self.payload = requested, payload
             self.manifest_publication = nullcontext
 
-        def signature(self):
+        def signature(self) -> dict[str, object]:
             return {}
 
-        def recheck(self):
+        def recheck(self) -> None:
             pass
 
         @contextmanager
-        def held(self, *, timeout=180):
+        def held(self, *, timeout: float=180) -> Iterator[None]:
             authority.append("enter")
             try:
                 yield
@@ -766,16 +1330,16 @@ def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
                 authority.append("leave")
 
     class Guard:
-        def release(self):
+        def release(self) -> None:
             authority.append("cutover-released")
 
-    def construct(inputs, slot, *_args):
+    def construct(inputs: object, slot: Path, *_args: object) -> Path:
         python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
         python.parent.mkdir(parents=True)
         python.write_bytes(b"interpreter")
         return python
 
-    def actual_transition(**arguments):
+    def actual_transition(**arguments: object) -> dict[str, object]:
         assert arguments["cutover_guard"] is guard
         assert arguments["asynchronous_retirement"] is True
         assert authority == ["enter", "leave", "enter"]
@@ -805,8 +1369,8 @@ def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
     class Process:
         returncode = 0
 
-        def __init__(self, argv, **_kwargs):
-            def argument(name):
+        def __init__(self, argv: list[str], **_kwargs: object) -> None:
+            def argument(name: str) -> str:
                 return argv[argv.index(name) + 1]
 
             try:
@@ -820,7 +1384,7 @@ def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
             else:
                 Path(argument("--result")).write_text(json.dumps(result), encoding="utf-8")
 
-        def communicate(self):
+        def communicate(self) -> tuple[str, str]:
             return "", ""
 
     monkeypatch.setattr(driver, "Governance", Governance)
@@ -835,12 +1399,12 @@ def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
     monkeypatch.setattr(driver.engine, "_prepare_installed", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(driver.engine, "_verify_installed", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(driver, "_load_installed", lambda _slot: None)
-    def adopt(requested, slot):
+    def adopt(requested: Path, slot: Path) -> NoReturn:
         pytest.fail("normal construction must not adopt a Task")
 
     monkeypatch.setattr(driver.install_driver, "adopt_broker", adopt)
     if special in {"outgoing-identity-unavailable", "outgoing-identity-unavailable-already-serving"}:
-        def unavailable(*_args, **_kwargs):
+        def unavailable(*_args: object, **_kwargs: object) -> NoReturn:
             raise ValueError("Routed monitor process identity is unconfirmed")
 
         monkeypatch.setattr(cutover, "routed_monitor_identity", unavailable)
@@ -856,7 +1420,7 @@ def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
     if special == "deferred":
         from agent_worktrees.runtime_monitor_settlement import PublicationOutcomePending
 
-        def deferred(*args):
+        def deferred(*args: object) -> NoReturn:
             raise PublicationOutcomePending("retained unknown publication")
 
         monkeypatch.setattr(driver, "_settle_monitor", deferred)
@@ -864,16 +1428,16 @@ def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
         from agent_worktrees import runtime_monitor_recovery
         from zdd import breadcrumb
 
-        def rolled_back(*args):
+        def rolled_back(*args: object) -> str:
             breadcrumb.clear_breadcrumb(root / "status-monitor-routing")
             return "rolled_back"
 
         monkeypatch.setattr(runtime_monitor_recovery, "recover_owned_publication", rolled_back)
     elif special == "prepublication-interrupted":
-        settlement_actions = []
+        settlement_actions: list[str] = []
 
-        def prepublication(*args):
-            settlement_actions.append(args[2]["action"])
+        def prepublication(*args: object) -> bool:
+            settlement_actions.append(cast(str, cast(dict[str, object], args[2])["action"]))
             return False
 
         monkeypatch.setattr(driver, "_settle_monitor", prepublication)
@@ -905,13 +1469,13 @@ def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
             pass
 
 
-def test_failed_passive_exit_is_observed_before_returning(driver, tmp_path, monkeypatch):
-    events = []
+def test_failed_passive_exit_is_observed_before_returning(driver: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    events: list[str] = []
 
     class Handle:
         pid = 123
 
-        def poll(self):
+        def poll(self) -> int | None:
             events.append("poll")
             return None if len(events) == 1 else 0
 
@@ -922,7 +1486,7 @@ def test_failed_passive_exit_is_observed_before_returning(driver, tmp_path, monk
     ) is False
     assert events == ["poll", "wait", "poll"]
 
-def test_ready_successor_does_not_wait_for_predecessor_exit(driver, tmp_path, monkeypatch):
+def test_ready_successor_does_not_wait_for_predecessor_exit(driver: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(driver, "_candidate_serving", lambda *_args: True)
     monkeypatch.setattr(
         driver.time, "sleep", lambda *_args: pytest.fail("installer waited for drain"),
@@ -935,8 +1499,8 @@ def test_ready_successor_does_not_wait_for_predecessor_exit(driver, tmp_path, mo
 
 
 def test_failed_committed_activation_settles_without_waiting_for_readiness(
-    driver, tmp_path, monkeypatch,
-):
+    driver: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(
         driver, "_candidate_serving", lambda *_args: pytest.fail("failed commitment waited for readiness"),
     )
@@ -949,23 +1513,23 @@ def test_failed_committed_activation_settles_without_waiting_for_readiness(
     )
 
 
-def test_committed_successor_death_never_rolls_back_retirement_custody(driver, tmp_path, monkeypatch):
+def test_committed_successor_death_never_rolls_back_retirement_custody(driver: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(driver, "_candidate_serving", lambda *a: False)
-    summary = {"action": "cutover", "result": {"committed": True, "ok": True}}
+    summary: _MonitorSummary = {"action": "cutover", "result": {"committed": True, "ok": True}}
     assert driver._settle_monitor(tmp_path, tmp_path / "candidate", summary, None, []) is True
     assert summary["result"]["committed"] and not summary["result"]["ok"]
-    assert "stopped serving" in summary["result"]["error"]
+    assert "stopped serving" in cast(str, summary["result"]["error"])
 
 
 def test_predecessor_qualification_prefers_route_and_refuses_unrouted_live_owner(
-    driver, tmp_path, monkeypatch,
-):
+    driver: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_worktrees import locks, status_monitor_cutover as cutover
 
     monkeypatch.setattr(locks, "read_lock", lambda _path: {"pid": 101})
     monkeypatch.setattr(locks, "lock_is_live", lambda _record: True)
 
-    def routed(root, *, require_async_retirement=False):
+    def routed(root: Path, *, require_async_retirement: bool=False) -> tuple[int, str, str]:
         assert root == tmp_path and require_async_retirement
         return (202, "2002", "current")
 
@@ -978,8 +1542,8 @@ def test_predecessor_qualification_prefers_route_and_refuses_unrouted_live_owner
 
 @pytest.mark.parametrize("exit_confirmed", [False, True])
 def test_serving_incoming_monitor_does_not_wait_for_failed_predecessor_recovery(
-    driver, tmp_path, monkeypatch, capsys, exit_confirmed,
-):
+    driver: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], exit_confirmed: bool,
+) -> None:
     monkeypatch.setattr(driver, "_candidate_serving", lambda *_args: True)
     monkeypatch.setattr(driver, "_monitor_identity", lambda *_args: (222, "2020"))
     from agent_worktrees import runtime_monitor_recovery
@@ -999,8 +1563,8 @@ def test_serving_incoming_monitor_does_not_wait_for_failed_predecessor_recovery(
 
 @pytest.mark.parametrize("wire", ["legacy", "timeout"])
 def test_async_predecessor_admission_retains_slot_without_old_wire_contract(
-    driver, tmp_path, monkeypatch, wire,
-):
+    driver: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, wire: str,
+) -> None:
     from types import SimpleNamespace
     from agent_worktrees import locks, status_monitor_cutover as cutover
     from zdd import diagnostics, process_exit, routing
@@ -1021,7 +1585,7 @@ def test_async_predecessor_admission_retains_slot_without_old_wire_contract(
         process_start_time="1001",
     )
 
-    def health():
+    def health() -> dict[str, object]:
         if wire == "timeout":
             raise TimeoutError("old control unavailable")
         return {"pid": 101, "status": "ready", "capabilities": []}
@@ -1035,8 +1599,8 @@ def test_async_predecessor_admission_retains_slot_without_old_wire_contract(
 @pytest.mark.parametrize("failure_point", ["before", "current", "both"])
 @pytest.mark.parametrize("monitor_scope,committed", [(False, False), (True, False), (True, True)])
 def test_publication_failure_retains_custody_through_observed_outcome(
-    driver, tmp_path, monkeypatch, failure_point, monitor_scope, committed,
-):
+    driver: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure_point: str, monitor_scope: bool, committed: bool,
+) -> None:
     from agent_worktrees import config as cfg, status_monitor_cutover as cutover
 
     root = tmp_path / "runtime"
@@ -1045,24 +1609,24 @@ def test_publication_failure_retains_custody_through_observed_outcome(
     _slot(driver, root, "0.9.0")
     driver.runtime.activate(root, "1.0.0", link_free=True)
     snapshot = driver._selector_snapshot(root)
-    events = []
+    events: list[str] = []
     failure = OSError("publication storage failure")
     activate = driver.runtime.activate
     restore = driver._restore_selectors
 
     class Governance:
-        def __init__(self, requested, payload):
+        def __init__(self, requested: Path, payload: Path) -> None:
             self.root, self.payload = requested, payload
             self.manifest_publication = nullcontext
 
-        def signature(self):
+        def signature(self) -> dict[str, object]:
             return {}
 
-        def recheck(self):
+        def recheck(self) -> None:
             pass
 
         @contextmanager
-        def held(self, *, timeout=180):
+        def held(self, *, timeout: float=180) -> Iterator[None]:
             events.append("governance-held")
             try:
                 yield
@@ -1070,10 +1634,10 @@ def test_publication_failure_retains_custody_through_observed_outcome(
                 events.append("governance-released")
 
     class Guard:
-        def release(self):
+        def release(self) -> None:
             events.append("cutover-released")
 
-    def assert_custody():
+    def assert_custody() -> None:
         assert events[0] == "governance-held"
         assert "governance-released" not in events
         assert "cutover-released" not in events
@@ -1083,10 +1647,10 @@ def test_publication_failure_retains_custody_through_observed_outcome(
                 with driver.runtime._kernel_lease(root, version, kind="retention", shared=False, timeout=0):
                     pytest.fail("publication failure released runtime custody")
 
-    def fail_publication(*args, **kwargs):
+    def fail_publication(*args: object, **kwargs: object) -> Path:
         assert_custody()
         if "publication-failed" in events:
-            return activate(*args, **kwargs)
+            return cast(Path, activate(*args, **kwargs))
         events.append("publication-failed")
         if failure_point == "current":
             (root / "current-version").write_text("2.0.0\n", encoding="utf-8")
@@ -1094,12 +1658,12 @@ def test_publication_failure_retains_custody_through_observed_outcome(
             activate(*args, **kwargs)
         raise failure
 
-    def settle(*_args):
+    def settle(*_args: object) -> bool:
         assert_custody()
         events.append("outcome-observed")
         return committed
 
-    def retry_restore(*args):
+    def retry_restore(*args: object) -> None:
         assert_custody()
         events.append("restore")
         if events.count("restore") == 1:
@@ -1142,10 +1706,10 @@ def test_publication_failure_retains_custody_through_observed_outcome(
     {"action": "restart", "restart": {"spawned": True}},
 ])
 def test_reported_commit_or_restart_cannot_hide_actual_child_failure(
-    driver, tmp_path, monkeypatch, summary,
-):
+    driver: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, summary: _MonitorSummary,
+) -> None:
     class Handle:
-        def poll(self):
+        def poll(self) -> int | None:
             return 1
 
     monkeypatch.setattr(driver, "_candidate_serving", lambda *_args: False)
@@ -1153,14 +1717,14 @@ def test_reported_commit_or_restart_cannot_hide_actual_child_failure(
     assert driver._settle_monitor(tmp_path, tmp_path / "candidate", summary, None, [Handle()]) is committed
     if committed:
         assert summary["result"]["ok"] is False
-        assert "stopped serving" in summary["result"]["error"]
+        assert "stopped serving" in cast(str, summary["result"]["error"])
 
 
-def test_uncertain_publication_requires_terminal_owner_witness(driver, tmp_path, monkeypatch, capsys):
+def test_uncertain_publication_requires_terminal_owner_witness(driver: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     from zdd import breadcrumb
 
     records = iter([None, {"state": "unrecognized"}, {"state": "rolled_back"}])
-    waits = []
+    waits: list[float] = []
     monkeypatch.setattr(breadcrumb, "read_breadcrumb", lambda _root: next(records))
     monkeypatch.setattr(driver.time, "sleep", waits.append)
     monkeypatch.setattr(driver, "_candidate_serving", lambda *_args: False)
@@ -1174,14 +1738,14 @@ def test_uncertain_publication_requires_terminal_owner_witness(driver, tmp_path,
 
 @pytest.mark.parametrize("outcome", ["committed", "rolled_back"])
 def test_owned_terminal_outcome_is_consumed_without_rereading_a_cleared_witness(
-    driver, tmp_path, monkeypatch, outcome,
-):
+    driver: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, outcome: str,
+) -> None:
     from zdd import breadcrumb
     from agent_worktrees import runtime_monitor_recovery
 
-    record = {"state": "started", "self_retirement": True}
-    reads = []
-    def witness(_root):
+    record: dict[str, object] = {"state": "started", "self_retirement": True}
+    reads: list[bool] = []
+    def witness(_root: Path) -> dict[str, object]:
         reads.append(True)
         assert len(reads) == 1, "settlement reread a witness consumed by owned recovery"
         return record
@@ -1189,7 +1753,7 @@ def test_owned_terminal_outcome_is_consumed_without_rereading_a_cleared_witness(
     monkeypatch.setattr(breadcrumb, "read_breadcrumb", witness)
     monkeypatch.setattr(runtime_monitor_recovery, "recover_owned_publication", lambda *a: outcome)
     monkeypatch.setattr(driver, "_candidate_serving", lambda *a: True)
-    summary = {"action": "cutover", "result": {"publication_uncertain": True, "ok": False, "error": "uncertain"}}
+    summary: _MonitorSummary = {"action": "cutover", "result": {"publication_uncertain": True, "ok": False, "error": "uncertain"}}
     assert driver._settle_monitor(tmp_path, tmp_path / "candidate", summary, None, []) is (
         outcome == "committed"
     )
@@ -1201,15 +1765,15 @@ def test_owned_terminal_outcome_is_consumed_without_rereading_a_cleared_witness(
 @pytest.mark.parametrize("ready", [True, False])
 @pytest.mark.parametrize("grant_error", [False, True])
 def test_interrupted_marked_committed_witness_is_never_rolled_back(
-    driver, tmp_path, monkeypatch, ready, grant_error,
-):
+    driver: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ready: bool, grant_error: bool,
+) -> None:
     from zdd import breadcrumb
     from agent_worktrees import runtime_monitor_recovery
 
     record = {"state": "committed", "self_retirement": True}
     monkeypatch.setattr(breadcrumb, "read_breadcrumb", lambda path: record)
-    calls = []
-    def recover(*args):
+    calls: list[bool] = []
+    def recover(*args: object) -> str:
         calls.append(True)
         if grant_error:
             raise RuntimeError("retirement grant changed")
@@ -1218,22 +1782,22 @@ def test_interrupted_marked_committed_witness_is_never_rolled_back(
     monkeypatch.setattr(runtime_monitor_recovery, "recover_owned_publication", recover)
     monkeypatch.setattr(driver, "_candidate_serving", lambda *args: ready)
     monkeypatch.setattr(driver.time, "sleep", lambda delay: pytest.fail("committed recovery must not retry under installer guards"))
-    summary = {"action": "interrupted"}
+    summary: _MonitorSummary = {"action": "interrupted"}
     assert driver._settle_monitor(tmp_path, tmp_path / "candidate", summary, None, []) is True
     assert calls == [True]
     assert summary["result"]["committed"] is True
     assert summary["result"]["ok"] is (ready and not grant_error)
     if grant_error:
-        assert "retirement grant changed" in summary["result"]["error"]
+        assert "retirement grant changed" in cast(str, summary["result"]["error"])
         assert breadcrumb.read_breadcrumb(tmp_path) is record
 
 
-def test_restart_spawn_returns_the_real_process_handle_to_its_owner(tmp_path, monkeypatch):
+def test_restart_spawn_returns_the_real_process_handle_to_its_owner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from types import SimpleNamespace
     from agent_worktrees import status_monitor_cutover, status_monitor_runtime as smr
 
     handle = object()
-    handles = []
+    handles: list[subprocess.Popen[bytes]] = []
     monkeypatch.setattr(smr, "_core_helper", lambda _name, local: local)
     monkeypatch.setattr(smr, "_core", lambda: SimpleNamespace(windowless_daemon_kwargs=lambda **_kwargs: {}))
     monkeypatch.setattr(smr, "_daemon_cwd", lambda: str(tmp_path))
@@ -1247,7 +1811,7 @@ def test_restart_spawn_returns_the_real_process_handle_to_its_owner(tmp_path, mo
 @pytest.mark.parametrize("legacy_lock", ["absent", "stale"])
 @pytest.mark.parametrize("slot", ["serving", None, "..", "missing"])
 @pytest.mark.parametrize("nested", [False, True])
-def test_routed_predecessor_is_captured_before_runtime_retention(driver, tmp_path, legacy_lock, slot, nested):
+def test_routed_predecessor_is_captured_before_runtime_retention(driver: ModuleType, tmp_path: Path, legacy_lock: str, slot: str | None, nested: bool) -> None:
     from agent_worktrees import locks, status_monitor_cutover as cutover
     from agent_worktrees.runtime_monitor_retirements import CAPABILITY
     from agent_worktrees.status_monitor_recovery_contract import CAPABILITY as RECOVERY
@@ -1290,7 +1854,7 @@ def test_routed_predecessor_is_captured_before_runtime_retention(driver, tmp_pat
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows retained process object semantics")
-def test_native_exit_evidence_does_not_mistake_a_retained_handle_for_a_live_process():
+def test_native_exit_evidence_does_not_mistake_a_retained_handle_for_a_live_process() -> None:
     from zdd import diagnostics
 
     process = subprocess.Popen(
@@ -1312,20 +1876,20 @@ def test_native_exit_evidence_does_not_mistake_a_retained_handle_for_a_live_proc
     (123, 0, 0, False), (123, 0x102, 0, True), (123, 0xFFFFFFFF, 0, True),
 ])
 def test_native_exit_signal_preserves_ambiguous_process_liveness(
-    monkeypatch, handle, wait, error, alive,
-):
+    monkeypatch: pytest.MonkeyPatch, handle: int | None, wait: int, error: int, alive: bool,
+) -> None:
     import ctypes
     from types import SimpleNamespace
     from zdd import diagnostics
 
-    closed = []
+    closed: list[int] = []
 
-    def open_process(access, inherit, pid):
+    def open_process(access: int, inherit: bool, pid: int) -> int | None:
         assert access & 0x00100000
         assert pid == 202 and inherit is False
         return handle
 
-    def wait_process(observed, timeout):
+    def wait_process(observed: int, timeout: int) -> int:
         assert observed == handle and timeout == 0
         return wait
 
@@ -1333,7 +1897,7 @@ def test_native_exit_signal_preserves_ambiguous_process_liveness(
         OpenProcess=open_process, CloseHandle=lambda value: closed.append(value),
         WaitForSingleObject=wait_process,
     )
-    monkeypatch.setattr(diagnostics.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(cast(ModuleType, getattr(diagnostics, "platform")), "system", lambda: "Windows")
     monkeypatch.setattr(ctypes, "WinDLL", lambda *a, **k: kernel, raising=False)
     monkeypatch.setattr(ctypes, "get_last_error", lambda: error, raising=False)
     assert diagnostics._pid_alive(202) is alive
@@ -1348,13 +1912,19 @@ def test_native_exit_signal_preserves_ambiguous_process_liveness(
     )),
 ])
 def test_real_installer_returns_before_resident_owned_monitor_drain(
-    driver, tmp_path, native_runtime_source, legacy_lock, legacy_protocol,
-):
+    driver: ModuleType, tmp_path: Path, native_runtime_source: tuple[Path, str], legacy_lock: str, legacy_protocol: bool,
+) -> None:
     from agent_worktrees import classify_daemon, locks
     from agent_worktrees.status_monitor_cutover import ControlClient
-    from agent_worktrees.status_monitor_python import direct_monitor_python
+    from agent_worktrees import status_monitor_python
     from test_status_monitor_cutover_process import _wait_for
     from zdd import breadcrumb, diagnostics, routing
+    wait_for = cast(_WaitFor, _wait_for)
+    direct_monitor_python = cast(
+        Callable[[str], tuple[str, dict[str, str]]],
+        getattr(status_monitor_python, "direct_monitor_python"),
+    )
+    wcs_client = cast(ModuleType, getattr(classify_daemon, "wcs_client"))
 
     uv = shutil.which("uv")
     if uv is None:
@@ -1405,14 +1975,14 @@ def test_real_installer_returns_before_resident_owned_monitor_drain(
     lock_path = root / "status-monitor.lock"
     route_root = root / "status-monitor-routing"
     token = root / "status-monitor-control.token"
-    processes = []
-    identities = {}
-    monitor_waiter = None
-    monitor_exit = None
+    processes: list[subprocess.Popen[bytes]] = []
+    identities: dict[int, str | None] = {}
+    monitor_waiter: ThreadPoolExecutor | None = None
+    monitor_exit: Future[int] | None = None
     hook_thread = None
     demand_thread = None
     demand_stop = threading.Event()
-    demand_endpoint = None
+    demand_endpoint: tuple[str, int, str] | None = None
     request_started = tmp_path / "request-started"
     request_release = tmp_path / "request-release"
     monitor_probe = """
@@ -1459,7 +2029,7 @@ runpy.run_module("agent_worktrees", run_name="__main__", alter_sys=True)
             monitor_waiter = ThreadPoolExecutor(max_workers=1, thread_name_prefix="baseline-reaper")
             monitor_exit = monitor_waiter.submit(monitor.wait)
             try:
-                old_record = _wait_for(
+                old_record = wait_for(
                     lambda: (
                         record if "classify_endpoint" in (record := locks.read_lock(lock_path) or {})
                         else None
@@ -1474,43 +2044,45 @@ runpy.run_module("agent_worktrees", run_name="__main__", alter_sys=True)
                 )
             old_pid = old_record["pid"]
             identities[old_pid] = diagnostics.process_start_time(old_pid)
-            _wait_for(
+            wait_for(
                 lambda: routing.read_active_endpoint(route_root, verify_listener=False),
                 message="isolated baseline never published its route",
             )
             demand_host, demand_port = old_record["worktree_status_endpoint"].split(":")
             demand_endpoint = (demand_host, int(demand_port), old_record["worktree_status_token"])
-            classify_daemon.wcs_client.subscribe(*demand_endpoint, "retained-cutover-demand")
-            demand_errors = []
+            wcs_client.subscribe(*demand_endpoint, "retained-cutover-demand")
+            demand_errors: list[str] = []
 
-            def keep_demand():
+            def keep_demand() -> None:
                 while not demand_stop.wait(1):
                     try:
-                        classify_daemon.wcs_client.subscribe(
+                        wcs_client.subscribe(
                             *demand_endpoint, "retained-cutover-demand", timeout=2,
                         )
-                    except classify_daemon.wcs_client.DaemonUnavailable as error:
+                    except wcs_client.DaemonUnavailable as error:
                         demand_errors.append(str(error))
                         return
 
             demand_thread = threading.Thread(target=keep_demand, daemon=True)
             demand_thread.start()
             driver.runtime.activate(root, installed["runtime_version"], link_free=True)
-            hook_result = {}
-            host, port, classify_token = classify_daemon.endpoint_from_rendezvous(old_record)
-            def request():
+            hook_result: dict[str, object] = {}
+            host, port, classify_token = cast(
+                tuple[str, int, str], classify_daemon.endpoint_from_rendezvous(old_record),
+            )
+            def request() -> None:
                 try:
-                    hook_result.update(classify_daemon.wcs_client.request(
+                    hook_result.update(wcs_client.request(
                         host, port, classify_token, kind=classify_daemon.KIND,
                         key="retained-cutover-request", payload={"retention_probe": True},
                         request_deadline_s=180,
                     ))
-                except classify_daemon.wcs_client.DaemonUnavailable as error:
+                except wcs_client.DaemonUnavailable as error:
                     hook_result["error"] = str(error)
 
             hook_thread = threading.Thread(target=request, daemon=True)
             hook_thread.start()
-            _wait_for(
+            wait_for(
                 request_started.is_file, timeout=10,
                 message="baseline did not begin its controlled request",
             )
@@ -1526,7 +2098,7 @@ runpy.run_module("agent_worktrees", run_name="__main__", alter_sys=True)
                     stdin=subprocess.DEVNULL, **no_window_kwargs(),
                 )
                 processes.append(transition)
-                successor = _wait_for(
+                successor = wait_for(
                     lambda: (
                         endpoint if (endpoint := routing.read_active_endpoint(
                             route_root, verify_listener=False,
@@ -1535,7 +2107,7 @@ runpy.run_module("agent_worktrees", run_name="__main__", alter_sys=True)
                     timeout=120,
                     message="installer never published the successor route",
                 )
-                identities[successor.pid] = diagnostics.process_start_time(successor.pid)
+                identities[cast(int, successor.pid)] = diagnostics.process_start_time(cast(int, successor.pid))
                 assert transition.wait(timeout=60) == 0, log.read_text(encoding="utf-8", errors="replace")
                 demand_stop.set()
                 demand_thread.join(timeout=5)
@@ -1546,14 +2118,14 @@ runpy.run_module("agent_worktrees", run_name="__main__", alter_sys=True)
                     assert monitor.poll() is None, "installer bypassed the resident-owned grace"
                     assert hook_thread.is_alive(), "predecessor request ended before grace expiry"
                     grace_path = grace._path(root, {"pid": old_pid, "start": identities[old_pid]})
-                    grace_record = _wait_for(
+                    grace_record = wait_for(
                         lambda: grace._read(grace_path),
                         message="ready successor never armed its retirement grace",
                     )
                     assert 0 <= time.time() - grace_record["ready_at"] < grace.GRACE_SECONDS
                     assert grace_record["old"]["pid"] == old_pid
                     assert grace_record["successor"] == successor.to_dict()
-                    def old_slot_retained():
+                    def old_slot_retained() -> bool:
                         return old.name in {
                             version
                             for versions in driver.runtime._leases.read_runtime_references(root).values()
@@ -1570,11 +2142,11 @@ runpy.run_module("agent_worktrees", run_name="__main__", alter_sys=True)
                     hook_thread.join(timeout=15)
                     assert not hook_thread.is_alive() and "error" in hook_result
                     assert "bounded legacy takeover" not in log.read_text(encoding="utf-8")
-                    _wait_for(
+                    wait_for(
                         lambda: not old_slot_retained(),
                         message="resident did not settle the exited predecessor's runtime custody",
                     )
-                    new_lock = _wait_for(
+                    new_lock = wait_for(
                         lambda: locks.read_lock(lock_path),
                         message="successor monitor lock was never readable",
                     )
@@ -1582,9 +2154,9 @@ runpy.run_module("agent_worktrees", run_name="__main__", alter_sys=True)
                     health = ControlClient(successor.base_url, token=token.read_text().strip()).health()
                     assert health["published"] is True and health["status"] == "ready"
                     assert routing.read_active_endpoint(route_root) == successor
-                    assert "previous" not in routing.read_table(route_root)
+                    assert "previous" not in cast(dict[str, object], routing.read_table(route_root))
                     return
-                classify_daemon.wcs_client.release(*demand_endpoint, "retained-cutover-demand")
+                wcs_client.release(*demand_endpoint, "retained-cutover-demand")
                 assert not demand_errors, demand_errors
                 assert hook_thread.is_alive(), "predecessor request finished before the retention probe"
                 assert monitor.poll() is None, "installation waited for predecessor retirement"
@@ -1609,7 +2181,7 @@ runpy.run_module("agent_worktrees", run_name="__main__", alter_sys=True)
                 root, old.name, kind="retention", shared=False, timeout=0,
             ):
                 pass
-            new_lock = _wait_for(
+            new_lock = wait_for(
                 lambda: locks.read_lock(lock_path),
                 message="successor monitor lock was never readable",
             )
@@ -1632,7 +2204,7 @@ runpy.run_module("agent_worktrees", run_name="__main__", alter_sys=True)
             if demand_thread is not None:
                 demand_thread.join(timeout=5)
             if demand_endpoint is not None and not legacy_protocol:
-                classify_daemon.wcs_client.release(*demand_endpoint, "retained-cutover-demand")
+                wcs_client.release(*demand_endpoint, "retained-cutover-demand")
             from zdd import process_exit
 
             for pid, identity in identities.items():
@@ -1650,12 +2222,12 @@ runpy.run_module("agent_worktrees", run_name="__main__", alter_sys=True)
             finally:
                 if monitor_waiter is not None:
                     monitor_waiter.shutdown(wait=True)
-                    assert monitor_exit.done(), "baseline reaper did not join"
-                    assert monitor_exit.result() == monitor.returncode
+                    assert cast(Future[int], monitor_exit).done(), "baseline reaper did not join"
+                    assert cast(Future[int], monitor_exit).result() == monitor.returncode
                     assert monitor.returncode is not None, "baseline child was not reaped"
 
 
-def test_preparation_stamps_installed_metadata_and_preserves_native_scripts(tmp_path, monkeypatch):
+def test_preparation_stamps_installed_metadata_and_preserves_native_scripts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import ast
     import agent_worktrees
     from agent_worktrees import runtime_candidate as installer
@@ -1672,7 +2244,7 @@ def test_preparation_stamps_installed_metadata_and_preserves_native_scripts(tmp_
     python = scripts / "python.exe"
     python.write_bytes(b"signed interpreter")
     monkeypatch.setattr(agent_worktrees, "__file__", str(package / "__init__.py"))
-    monkeypatch.setattr(installer.sys, "prefix", str(tmp_path))
+    monkeypatch.setattr(cast(ModuleType, getattr(installer, "sys")), "prefix", str(tmp_path))
     monkeypatch.setattr(installer, "distribution_version", lambda _name: "2.0.0.dev1")
     provenance = {
         "version": "2.0.0-dev1", "commit": "abc", "branch": 'quoted"branch',
@@ -1701,7 +2273,7 @@ def test_preparation_stamps_installed_metadata_and_preserves_native_scripts(tmp_
     assert cached_info.read_text(encoding="utf-8") == "unchanged cached build provenance\n"
     assert not os.path.samefile(cached_info, package / "_build_info.py")
     content = (package / "_build_info.py").read_text(encoding="utf-8")
-    info = ast.literal_eval(ast.parse(content).body[-1].value)
+    info = ast.literal_eval(cast(ast.Assign, ast.parse(content).body[-1]).value)
     assert all(info[key] == value for key, value in provenance.items()
                if key not in ("deployment_source", "frozen_plugin"))
     assert json.loads(info["deployment_source"])["payload_fingerprint"] == "frozen-fingerprint"
@@ -1725,7 +2297,7 @@ def test_preparation_stamps_installed_metadata_and_preserves_native_scripts(tmp_
     "installer_retained_content.py",
     "installer_dependency_arguments.py",
 ])
-def test_prepared_bootstrap_loads_actual_installer_without_source(tmp_path, monkeypatch, missing):
+def test_prepared_bootstrap_loads_actual_installer_without_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, missing: str | None) -> None:
     import agent_worktrees
     from agent_worktrees import runtime_candidate as installer, update_stage
 
@@ -1743,7 +2315,7 @@ def test_prepared_bootstrap_loads_actual_installer_without_source(tmp_path, monk
     ):
         shutil.copyfile(frozen / "scripts" / name, bootstrap / name)
     monkeypatch.setattr(agent_worktrees, "__file__", str(package / "__init__.py"))
-    monkeypatch.setattr(installer.sys, "prefix", str(tmp_path))
+    monkeypatch.setattr(cast(ModuleType, getattr(installer, "sys")), "prefix", str(tmp_path))
     monkeypatch.setattr(installer, "distribution_version", lambda _name: "2.0.0.dev1")
     monkeypatch.setattr(update_stage, "fingerprint", lambda _path: "frozen-fingerprint")
     installer.prepare_runtime_candidate({
@@ -1771,7 +2343,7 @@ def test_prepared_bootstrap_loads_actual_installer_without_source(tmp_path, monk
         assert "--settle-slot" in result.stdout
 
 
-def test_bash_bootstrap_skips_unusable_alias_and_searches_all_candidates(tmp_path):
+def test_bash_bootstrap_skips_unusable_alias_and_searches_all_candidates(tmp_path: Path) -> None:
     bash = shutil.which("bash") if os.name != "nt" else None
     if os.name == "nt" and (git := shutil.which("git")) is not None:
         candidate = Path(git).resolve().parent.parent / "bin" / "bash.exe"
@@ -1801,8 +2373,8 @@ def test_bash_bootstrap_skips_unusable_alias_and_searches_all_candidates(tmp_pat
 
 @pytest.mark.timeout(900)
 def test_real_python_lifecycle_constructs_then_reuses_without_uv(
-    driver, tmp_path, native_runtime_source,
-):
+    driver: ModuleType, tmp_path: Path, native_runtime_source: tuple[Path, str],
+) -> None:
     uv = shutil.which("uv")
     if uv is None:
         pytest.skip("real construction requires the configured uv executable")
@@ -1825,7 +2397,7 @@ def test_real_python_lifecycle_constructs_then_reuses_without_uv(
     source_files = driver.engine._source_files(driver.engine._package_roots(plugin))
     source_hashes = {path: hashlib.sha256(path.read_bytes()).hexdigest() for path in source_files}
 
-    def run(command, label, timeout):
+    def run(command: list[str], label: str, timeout: float) -> str:
         log = tmp_path / f"{label}.log"
         started = time.monotonic()
         with log.open("w", encoding="utf-8") as stream:
@@ -1905,7 +2477,7 @@ def test_real_python_lifecycle_constructs_then_reuses_without_uv(
     assert json.loads(subprocess.check_output(
         info_probe, env=environment, text=True, timeout=30, **no_window_kwargs(),
     )) == info
-    native = []
+    native: list[list[str]] = []
     if os.name == "nt":
         for name in ("powershell.exe", "pwsh.exe"):
             executable = shutil.which(name)
@@ -1953,8 +2525,8 @@ def test_real_python_lifecycle_constructs_then_reuses_without_uv(
 ])
 @pytest.mark.parametrize("release", [False, True])
 def test_previous_only_installation_starts_and_settles_the_incoming_monitor(
-    driver, tmp_path, monkeypatch, discovery, release,
-):
+    driver: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, discovery: str, release: bool,
+) -> None:
     from types import SimpleNamespace
     from zdd import diagnostics, process_exit, routing
     from agent_worktrees import (
@@ -1989,34 +2561,34 @@ def test_previous_only_installation_starts_and_settles_the_incoming_monitor(
         (root / "status-monitor.lock").write_text(json.dumps({
             "pid": 202, "start_time": "2002", "prefix": str(tmp_path),
         }))
-    spawned = []
+    spawned: list[tuple[Path, int]] = []
     class Governance:
-        def __init__(self, requested, payload):
+        def __init__(self, requested: Path, payload: Path) -> None:
             self.root, self.payload = requested, payload
             self.manifest_publication = nullcontext
-        def signature(self):
+        def signature(self) -> dict[str, object]:
             return {}
-        def recheck(self):
+        def recheck(self) -> None:
             pass
-        def held(self, **kwargs):
+        def held(self, **kwargs: object) -> AbstractContextManager[None]:
             return nullcontext()
     class Handle:
         pid = 303
         process_start_time = "3003"
-        def poll(self):
+        def poll(self) -> int | None:
             return None
-        def terminate(self):
+        def terminate(self) -> None:
             pytest.fail("replacement must not terminate a daemon")
-    def spawn(python, *, port):
-        assert routing.read_table(directory)["active"] == raw_active
+    def spawn(python: Path, *, port: int) -> Handle:
+        assert cast(dict[str, object], routing.read_table(directory))["active"] == raw_active
         spawned.append((python, port))
         return Handle()
     read_text = Path.read_text
-    def read_discovery(path, *args, **kwargs):
+    def read_discovery(path: Path, *args: str | None, **kwargs: str | None) -> str:
         if discovery == "unreadable" and path == root / "status-monitor.lock":
             raise PermissionError("fixture discovery unavailable")
         return read_text(path, *args, **kwargs)
-    def health():
+    def health() -> dict[str, object]:
         return {
             "status": "ready", "published": True, "pid": 303,
             "runtime_slot": "2.0.0", "runtime_prefix": str(root / "versions" / "2.0.0"),
@@ -2029,8 +2601,8 @@ def test_previous_only_installation_starts_and_settles_the_incoming_monitor(
     monkeypatch.setattr(monitor, "_status_monitor_enabled", lambda: True)
     monkeypatch.setattr(cutover, "routing_dir", lambda *a: directory)
     (root / "status-monitor-control.token").write_text("fixture", encoding="utf-8")
-    def client(url, **kwargs):
-        def observed_health():
+    def client(url: str, **kwargs: object) -> SimpleNamespace:
+        def observed_health() -> dict[str, object]:
             if url.endswith(":61001"):
                 if discovery == "reuse-timeout":
                     raise TimeoutError("fixture outgoing timeout")
@@ -2044,8 +2616,8 @@ def test_previous_only_installation_starts_and_settles_the_incoming_monitor(
     monkeypatch.setattr(cutover, "spawn_passive", spawn)
     monkeypatch.setattr(cutover, "pick_free_port", lambda: 61002)
     monkeypatch.setattr(status_monitor_health, "prepared_check", lambda *a, **k: lambda *a: True)
-    monkeypatch.setattr(cutover.guarded_recovery, "successor_healthy", lambda *a, **k: (
-        routing.read_table(directory)["active"]["pid"] == 303
+    monkeypatch.setattr(cast(ModuleType, getattr(cutover, "guarded_recovery")), "successor_healthy", lambda *a, **k: (
+        cast(dict[str, object], cast(dict[str, object], routing.read_table(directory))["active"])["pid"] == 303
     ))
     monkeypatch.setattr(retirements, "_runtime", lambda: driver.runtime)
     exited = set()
@@ -2059,11 +2631,11 @@ def test_previous_only_installation_starts_and_settles_the_incoming_monitor(
     if discovery == "retry-references":
         from agent_worktrees import runtime_monitor_identity as identity
 
-        def unavailable(_root):
+        def unavailable(_root: object) -> NoReturn:
             raise driver.InstallationRefused("fixture outgoing identity unavailable")
         monkeypatch.setattr(driver, "_monitor_identity", unavailable)
         commit = driver.runtime._leases.commit_runtime_reference_transaction
-        def interrupted(*args, **kwargs):
+        def interrupted(*args: object, **kwargs: object) -> NoReturn:
             raise OSError("fixture reference commit interrupted")
         monkeypatch.setattr(driver.runtime._leases, "commit_runtime_reference_transaction", interrupted)
         with pytest.raises(OSError, match="commit interrupted"):
@@ -2089,7 +2661,7 @@ def test_previous_only_installation_starts_and_settles_the_incoming_monitor(
     )
     assert len(spawned) == 1
     assert result["runtime_version"] == "2.0.0" and result["retirement_pending"]
-    assert routing.read_table(directory)["active"]["pid"] == 303
+    assert cast(dict[str, object], cast(dict[str, object], routing.read_table(directory))["active"])["pid"] == 303
     assert (root / "deploy-manifest.json").is_file()
     if discovery == "unknown-slot" and not release:
         # A native-known owner outside this runtime needs retirement, not recovery archival.
@@ -2108,12 +2680,712 @@ def test_previous_only_installation_starts_and_settles_the_incoming_monitor(
         assert not retirements.reconcile(root, runtime=driver.runtime)
         assert driver.runtime.read_dev_claim(root, strict=True) is None
 
+@dataclass(frozen=True)
+class _NativeAdmissionLayout:
+    payload: Path
+    source: Path
+    environment: dict[str, str] = field(repr=False)
+    uv: str
+
+
+@pytest.fixture
+def native_admission_layout(tmp_path: Path, native_runtime_source: tuple[Path, str]) -> _NativeAdmissionLayout:
+    uv = shutil.which("uv")
+    if uv is None:
+        pytest.skip("native admission requires the configured UV executable")
+    if not any(os.environ.get(key) for key in ("UV_DEFAULT_INDEX", "UV_INDEX_URL", "UV_INDEX")):
+        pytest.skip("native admission requires an explicitly configured governed feed")
+    repository = Path(__file__).resolve().parents[3]
+    spec = importlib.util.spec_from_file_location(
+        "native_admission_fixture_packager",
+        repository / "libs" / "payload-invocation" / "runtime_admission.py",
+    )
+    assert spec and spec.loader
+    packager = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(packager)
+    toolkit_files = packager.expected_files(repository)
+    source, commit = native_runtime_source
+    origin = tmp_path / "origin"
+    shutil.copytree(source.parent.parent, origin)
+    for relative in toolkit_files:
+        if relative.parts[0] not in ("libs", "tools", "worktree-manager", "plugins"):
+            continue
+        path = origin / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes((repository / relative).read_bytes())
+    narrative = Path("docs") / "patterns" / "entity-relationship-model.md"
+    (origin / narrative).parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(repository / narrative, origin / narrative)
+    shutil.copytree(repository / "worktree-manager" / "bin", origin / "worktree-manager" / "bin")
+    shutil.copytree(
+        repository / "libs/payload-invocation/templates",
+        origin / "libs/payload-invocation/templates", dirs_exist_ok=True,
+    )
+    for support in ("command_binding.py", "command_lifecycle.py"):
+        shutil.copyfile(
+            repository / "libs/payload-invocation" / support,
+            origin / "libs/payload-invocation" / support,
+        )
+    source = origin / "plugins" / "agent-worktrees"
+    marketplace = origin / ".github" / "plugin" / "marketplace.json"
+    marketplace.parent.mkdir(parents=True, exist_ok=True)
+    marketplace.write_text(json.dumps({
+        "name": "runtime-fixture",
+        "plugins": [{"name": "agent-worktrees", "source": source.relative_to(origin).as_posix()}],
+    }), encoding="utf-8")
+    state = origin / ".github" / "release-pipeline-state.json"
+    hooks = tmp_path / "empty-origin-hooks"
+    hooks.mkdir()
+    git_environment = {
+        key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")
+    }
+    git_environment.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull)
+    git = [
+        "git", "-C", str(origin), "-c", "core.autocrlf=false", "-c", "core.longpaths=true",
+        "-c", "commit.gpgsign=false", "-c", f"core.hooksPath={hooks}",
+        "-c", "user.name=Runtime test", "-c", "user.email=runtime-test@example.invalid",
+    ]
+    subprocess.check_output(
+        [*git, "init", "-q", "--template", str(hooks)],
+        env=git_environment, timeout=30, **no_window_kwargs(),
+    )
+    (origin / ".git/info").mkdir(exist_ok=True)
+    (origin / ".git/info/attributes").write_text(
+        "* -text -filter -ident -working-tree-encoding\n", encoding="utf-8",
+    )
+    for arguments in (
+        ["branch", "-M", "main"], ["add", "."],
+        ["commit", "-qm", "Complete canonical preparation inputs"],
+    ):
+        subprocess.check_output(
+            [*git, *arguments], env=git_environment, timeout=30, **no_window_kwargs(),
+        )
+    commit = subprocess.check_output(
+        [*git, "rev-parse", "HEAD"], env=git_environment, text=True, timeout=30,
+        **no_window_kwargs(),
+    ).strip()
+    state.write_text(json.dumps({
+        "schema": "copilot-extensions.release-pipeline-state", "version": 1,
+        "last_promotion": {
+            "dev_head": commit, "main_before": commit, "release_id": commit,
+            "tag": "promote-dev-" + commit,
+        },
+    }), encoding="utf-8")
+    for arguments in (["add", "."], ["commit", "-qm", "Synthetic promotion state"]):
+        subprocess.check_output(
+            [*git, *arguments], env=git_environment, timeout=30, **no_window_kwargs(),
+        )
+    payload = tmp_path / "payload"
+    shutil.copytree(source, payload)
+    toolkit = payload / "scripts" / "_runtime_admission"
+    for relative, content in toolkit_files.items():
+        path = toolkit / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if isinstance(content, bytes):
+            path.write_bytes(content)
+        else:
+            path.write_text(content, encoding="utf-8", newline="\n")
+    home = tmp_path / "home"
+    home.mkdir()
+    environment = dict(os.environ)
+    environment.update(
+        HOME=str(home), USERPROFILE=str(home), AGENT_HOME=str(home),
+        WORKTREE_MANAGER_ROOT=str(tmp_path / "source-owner"), UV_SYSTEM_CERTS="true",
+        CE_FIXTURE_PROMOTED_DEV=commit,
+    )
+    for name in (
+        "COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT", "COPILOT_PLUGIN_STAGED_FROM",
+        "AGENT_WORKTREES_PAYLOAD_ROOT", "COPILOT_EXTENSIONS_COMMAND_LIFECYCLE",
+        "COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT",
+    ):
+        environment.pop(name, None)
+    return _NativeAdmissionLayout(payload, source, environment, uv)
+
+
+def test_native_admission_layout_has_independent_repository(native_admission_layout: _NativeAdmissionLayout, tmp_path: Path) -> None:
+    source = native_admission_layout.source
+    origin = source.parent.parent
+    environment = native_admission_layout.environment
+    arguments = ["git", "-C", str(source), "-c", "core.longpaths=true"]
+    top = subprocess.check_output(
+        [*arguments, "rev-parse", "--show-toplevel"], env=environment,
+        text=True, timeout=30, **no_window_kwargs(),
+    ).strip()
+    assert Path(top).resolve() == origin.resolve()
+    assert (origin / ".git").is_dir()
+    assert not (source / ".git").exists()
+    assert subprocess.check_output(
+        [*arguments, "status", "--porcelain"], env=environment,
+        text=True, timeout=30, **no_window_kwargs(),
+    ).strip() == ""
+    marketplace = json.loads((origin / ".github/plugin/marketplace.json").read_bytes())
+    assert origin / marketplace["plugins"][0]["source"] == source
+    assert native_admission_layout.payload != source
+    assert (origin / ".github/release-pipeline-state.json").is_file()
+    head = subprocess.check_output(
+        [*arguments, "rev-parse", "HEAD"], env=environment,
+        text=True, timeout=30, **no_window_kwargs(),
+    ).strip()
+    acquired = tmp_path / "acquired"
+    hooks = tmp_path / "empty-acquired-hooks"
+    hooks.mkdir()
+    subprocess.check_output(
+        [
+            "git", "-c", "core.autocrlf=false", "-c", "core.longpaths=true", "clone", "--no-hardlinks",
+            "--branch", "main", "--template", str(hooks), str(origin), str(acquired),
+        ],
+        env=environment, timeout=30, **no_window_kwargs(),
+    )
+    preparation = subprocess.check_output(
+        [
+            sys.executable, "-I", "-B",
+            str(native_admission_layout.payload / "scripts/_runtime_admission/tools/prepare_runtime_source.py"),
+            "--source", str(acquired), "--commit", head, "--plugin", "agent-worktrees",
+            "--output", str(tmp_path / "prepared"), "--branch", "main",
+        ],
+        env=environment, text=True, timeout=120, **no_window_kwargs(),
+    )
+    prepared = json.loads(preparation)
+    assert prepared["identity"]["source_commit"] == head
+    assert Path(prepared["payload"]).is_dir()
+    assert not Path(prepared["payload"]).is_relative_to(origin)
+
+
+@pytest.mark.parametrize("scope", ["parent", "child"])
+def test_native_qualification_trace_preserves_source_owner_capability(scope: str) -> None:
+    import ast
+    from contextlib import contextmanager
+    from functools import wraps
+    import inspect
+    from types import SimpleNamespace
+
+    script = max(
+        (value for value in test_real_semantic_admission_publishes_an_independent_native_runtime.__code__.co_consts
+         if isinstance(value, str)),
+        key=len,
+    )
+    tree = ast.parse(script)
+    if scope == "child":
+        script = cast(str, next(
+            node.value.value for node in tree.body
+            if isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant)
+            and any(isinstance(target, ast.Name) and target.id == "child" for target in node.targets)
+        ))
+        tree = ast.parse(script)
+    helper = next(
+        node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "timed_context"
+    )
+    namespace: dict[str, object] = {"contextmanager": contextmanager, "wraps": wraps, "time": time, "launches": [0]}
+    exec(compile(ast.Module(body=[helper], type_ignores=[]), "<native-admission-trace>", "exec"), namespace)
+    observed: list[Callable[[], None]] = []
+
+    @contextmanager
+    def provider(*, source_verifier: Callable[[], None]) -> Iterator[None]:
+        source_verifier()
+        observed.append(source_verifier)
+        yield None
+
+    module = SimpleNamespace(retain_packaging_seed=provider)
+    cast(Callable[[SimpleNamespace, str], None], namespace["timed_context"])(module, "retain_packaging_seed")
+    assert "source_verifier" in inspect.signature(module.retain_packaging_seed).parameters
+    verified: list[str] = []
+    callback = lambda: verified.append(scope)
+    with module.retain_packaging_seed(source_verifier=callback):
+        assert observed == [callback] and verified == [scope]
+
+
+@pytest.mark.skipif(
+    os.environ.get("CE_RUN_NATIVE_FULL_ADMISSION") != "1",
+    reason="native admission qualification requires explicit invocation",
+)
+@pytest.mark.timeout(300)
+def test_real_native_admission_planning(tmp_path: Path, native_admission_layout: _NativeAdmissionLayout, capsys: pytest.CaptureFixture[str]) -> None:
+    payload, source = native_admission_layout.payload, native_admission_layout.source
+    environment = native_admission_layout.environment
+    script = r"""
+import json, os, pathlib, sys, time
+payload, source, root = map(pathlib.Path, sys.argv[1:])
+sys.path.insert(0, str(payload / "scripts"))
+import runtime_install_admission as admission
+admission._activate()
+from worktree_manager import runtime_source_config
+from runtime_source_authentication import retain_installation_origin
+import runtime_input_verifier as verification
+runtime_source_config.set_source(runtime_source_config.RuntimeSource(
+    "main", str(source.parent.parent),
+), root=pathlib.Path(os.environ["WORKTREE_MANAGER_ROOT"]))
+installation = {
+    "legacy_root": root, "payload_root": payload, "plugin_id": "agent-worktrees",
+    "durable_home": pathlib.Path(os.environ["HOME"]) / ".copilot-extensions",
+    "project_root": None,
+    "source_descriptor": {"kind": "github", "canonical": "github:example/plugins", "ref": ""},
+}
+deadline = time.monotonic() + 240
+started = time.monotonic()
+child = r'''
+import json, pathlib, subprocess, sys, time
+sys.path.insert(0, sys.argv[1])
+import _runtime_admission
+_runtime_admission.activate()
+from packaging.markers import default_environment
+from packaging.tags import sys_tags
+from runtime_profile_policy import plan_discovered_installation_profile
+from runtime_source_authentication import borrow_installation_origin
+import runtime_input_verifier as verification
+import artifact_attestation
+request = json.loads(sys.argv[2])
+installation = request["installation"]
+for key in ("legacy_root", "payload_root", "durable_home", "project_root"):
+    if installation[key] is not None:
+        installation[key] = pathlib.Path(installation[key])
+client = verification.current_client(request["verifier"])
+def unavailable(argv, **options):
+    assert argv[:2] == ["api", "repos/example/plugins/releases/tags/python-artifacts-" + request["dev"]], argv
+    return subprocess.CompletedProcess(argv, 1, "", "gh: fixture channel absent (HTTP 404)")
+artifact_attestation._gh = unavailable
+started = time.monotonic()
+try:
+    with borrow_installation_origin(
+        pathlib.Path(request["payload"]), request["origin"], request["policy"],
+        installation=installation, verify_owner=client.check, deadline=request["deadline"],
+    ) as origin:
+        directory = installation["legacy_root"] / "planning"
+        directory.mkdir(parents=True, exist_ok=True)
+        selected = plan_discovered_installation_profile(
+            directory, origin, installation=installation, repository="example/plugins",
+            source_checkout=pathlib.Path(request["checkout"]), main_commit=origin.identity.source_commit,
+            target={"environment": default_environment(), "tags": [str(tag) for tag in sys_tags()], "device": "cpu"},
+            component="agent-worktrees", roots=["agent-worktrees==" + origin.identity.package_version],
+            max_subject_bytes=1 << 20, deadline=request["deadline"],
+        )
+        assert selected.release_selection is None
+        assert selected.source_trigger == "release-index-unavailable"
+        assert selected.policy() == origin.policy()
+        origin.verify()
+finally:
+    verification.close_clients()
+print("native-planning: borrowed source-bound plan ready in "
+      + str(round(time.monotonic() - started, 3)) + "s", flush=True)
+'''
+with retain_installation_origin(
+    installation=installation, deadline=deadline,
+) as origin, verification.LiveInputVerifier(origin.verify, deadline=deadline) as guard:
+    print("native-planning: origin ready in " + str(round(time.monotonic() - started, 3)) + "s", flush=True)
+    request = {
+        "installation": installation, "payload": str(origin.payload),
+        "origin": origin.record(), "policy": origin.policy(),
+        "checkout": str(origin.acquired.checkout), "verifier": guard.identity,
+        "deadline": deadline, "dev": os.environ["CE_FIXTURE_PROMOTED_DEV"],
+    }
+    result = verification.wait_for_settlement(
+        [sys.executable, "-I", "-B", "-c", child, str(payload / "scripts"),
+         json.dumps(request, default=str)],
+        dict(os.environ), verifier=guard,
+    )
+    assert result.returncode == 0
+    assert guard.failure is None
+    origin.verify()
+print("real-native-admission-borrowed-planning-ok", flush=True)
+"""
+    with capsys.disabled():
+        completed = subprocess.run(
+            [sys.executable, "-I", "-B", "-c", script,
+             str(payload), str(source), str(tmp_path / "runtime")],
+            env=environment, stdout=sys.stdout, stderr=subprocess.STDOUT,
+            timeout=260, **no_window_kwargs(),
+        )
+    assert completed.returncode == 0
+
+
+@pytest.mark.skipif(
+    os.environ.get("CE_RUN_NATIVE_FULL_ADMISSION") != "1",
+    reason="native admission qualification requires explicit invocation",
+)
+@pytest.mark.timeout(300)
+def test_real_native_admission_source_lock(tmp_path: Path, native_admission_layout: _NativeAdmissionLayout, capsys: pytest.CaptureFixture[str]) -> None:
+    payload, source = native_admission_layout.payload, native_admission_layout.source
+    environment, uv = native_admission_layout.environment, native_admission_layout.uv
+    script = r"""
+import pathlib, sys, time
+payload, source, root, uv = map(pathlib.Path, sys.argv[1:])
+sys.path.insert(0, str(payload / "scripts"))
+import runtime_install_admission as admission
+admission._activate()
+from packaging.markers import default_environment
+from packaging.tags import sys_tags
+from worktree_manager import runtime_source_config
+from runtime_profile_policy import plan_installation_profile
+from runtime_source_authentication import retain_installation_origin
+from runtime_source_lock import retain_source_wheel_lock
+import os
+runtime_source_config.set_source(runtime_source_config.RuntimeSource(
+    "main", str(source.parent.parent),
+), root=pathlib.Path(os.environ["WORKTREE_MANAGER_ROOT"]))
+installation = {
+    "legacy_root": root, "payload_root": payload, "plugin_id": "agent-worktrees",
+    "durable_home": pathlib.Path(os.environ["HOME"]) / ".copilot-extensions",
+    "project_root": None,
+    "source_descriptor": {"kind": "github", "canonical": "github:example/plugins", "ref": ""},
+}
+target = {
+    "environment": default_environment(), "tags": [str(tag) for tag in sys_tags()], "device": "cpu",
+}
+selected = plan_installation_profile(
+    installation=installation, release_index=None, repository="example/plugins",
+    signer_digest="", source_digest="", source_ref="", release={}, artifact=None,
+    target=target, component="fixture", roots=[], max_subject_bytes=1,
+)
+deadline = time.monotonic() + 240
+with retain_installation_origin(
+    installation=installation, deadline=deadline,
+) as origin, retain_source_wheel_lock(
+    selected, payload=origin.payload, expected_source=origin.identity,
+    target=target, component="fixture", uv=str(uv), python=pathlib.Path(sys.executable),
+    deadline=deadline, include_build_tools=True, installation=installation,
+    max_lock_bytes=16 << 20,
+) as locked:
+    record = locked.record()
+    assert record["source"] == origin.identity.document()
+    assert record["target"] == target
+    assert record["build_roots"]
+    assert any(item["name"] == "packaging" for item in record["files"])
+    locked.verify(deadline=deadline)
+print("real-native-admission-source-lock-ok", flush=True)
+"""
+    with capsys.disabled():
+        completed = subprocess.run(
+            [sys.executable, "-I", "-B", "-c", script,
+             str(payload), str(source), str(tmp_path / "runtime"), uv],
+            env=environment, stdout=sys.stdout, stderr=subprocess.STDOUT,
+            timeout=260, **no_window_kwargs(),
+        )
+    assert completed.returncode == 0
+
+
+@pytest.mark.skipif(
+    os.environ.get("CE_RUN_NATIVE_FULL_ADMISSION") != "1",
+    reason="full native admission is an explicitly invoked disposable qualification",
+)
+@pytest.mark.timeout(900)
+def test_real_semantic_admission_publishes_an_independent_native_runtime(
+    tmp_path: Path, native_admission_layout: _NativeAdmissionLayout, capsys: pytest.CaptureFixture[str],
+) -> None:
+    payload, source = native_admission_layout.payload, native_admission_layout.source
+    environment, uv = native_admission_layout.environment, native_admission_layout.uv
+    script = r"""
+import atexit, json, os, pathlib, subprocess, sys, time
+launches = [0]
+def audit_launch(event, arguments):
+    if event == "subprocess.Popen":
+        launches[0] += 1
+sys.addaudithook(audit_launch)
+atexit.register(lambda: print("native-admission: total subprocesses=" + str(launches[0]), flush=True))
+payload, source, root, uv = map(pathlib.Path, sys.argv[1:])
+sys.path.insert(0, str(payload / "scripts"))
+import runtime_install_admission as admission
+admission._activate()
+from worktree_manager import runtime_source_config
+from installer_packaging_seed import SeedLimits
+from installer_wheel_acquisition import AcquisitionLimits
+from installer_wheel_inputs import WheelLimits
+from contextlib import contextmanager
+from functools import wraps
+def timed_context(module, name):
+    original = getattr(module, name)
+    @contextmanager
+    @wraps(original)
+    def traced(*arguments, **options):
+        if name == "retain_packaging_seed":
+            assert callable(options.get("source_verifier")), "native qualification must use its source owner"
+        started = time.monotonic()
+        initial_launches = launches[0]
+        print("native-admission: " + name + " entering", flush=True)
+        with original(*arguments, **options) as value:
+            print("native-admission: " + name + " ready in "
+                  + str(round(time.monotonic() - started, 3)) + "s; subprocesses="
+                  + str(launches[0] - initial_launches), flush=True)
+            yield value
+        print("native-admission: " + name + " settled", flush=True)
+    setattr(module, name, traced)
+import runtime_source_authentication, runtime_admission_bootstrap, installer_packaging_seed
+timed_context(runtime_source_authentication, "retain_installation_origin")
+timed_context(runtime_admission_bootstrap, "retain_origin_tooling")
+timed_context(installer_packaging_seed, "retain_packaging_seed")
+original_verify = runtime_source_authentication.AuthenticatedSource.verify
+def timed_verify(self):
+    started = time.monotonic()
+    try:
+        return original_verify(self)
+    finally:
+        print("native-admission: origin verify "
+              + str(round(time.monotonic() - started, 3)) + "s", flush=True)
+runtime_source_authentication.AuthenticatedSource.verify = timed_verify
+original_seed_verify = installer_packaging_seed.ReadySeed.verify
+def timed_seed_verify(self):
+    started = time.monotonic()
+    try:
+        return original_seed_verify(self)
+    finally:
+        print("native-admission: parent seed verify "
+              + str(round(time.monotonic() - started, 3)) + "s", flush=True)
+installer_packaging_seed.ReadySeed.verify = timed_seed_verify
+runtime_source_config.set_source(runtime_source_config.RuntimeSource(
+    "main", str(source.parent.parent),
+), root=pathlib.Path(os.environ["WORKTREE_MANAGER_ROOT"]))
+deadline = time.monotonic() + 860
+installation = {
+    "legacy_root": root, "payload_root": payload, "plugin_id": "agent-worktrees",
+    "durable_home": pathlib.Path(os.environ["HOME"]) / ".copilot-extensions",
+    "project_root": None,
+    "source_descriptor": {"kind": "github", "canonical": "github:example/plugins", "ref": ""},
+}
+from installation_context import resolve_runtime_profile_policy, RUNTIME_DEPLOYMENT_SCHEMA
+resolution = resolve_runtime_profile_policy(**installation)
+policy_path = pathlib.Path(resolution["deployment"]["path"])
+policy_path.parent.mkdir(parents=True, exist_ok=True)
+policy_path.write_text(json.dumps({
+    "schema": RUNTIME_DEPLOYMENT_SCHEMA, "version": 1,
+    "owner": resolution["runtimeProfiles"]["owner"], "managed": False,
+    "runtimeProfiles": {},
+}), encoding="utf-8")
+# The fixture has real acquired Git history but no public producer. Keep that
+# transport substitution explicit; the independent producer parser has controls.
+def producer(origin):
+    assert origin.acquired.selection.repo == str(source.parent.parent)
+    assert origin.acquired.commit == origin.identity.source_commit
+    return origin.acquired.checkout, "example/plugins"
+admission._producer = producer
+native_wait = admission.verification.wait_for_settlement
+def observed_call(owner, name):
+    original = getattr(owner, name)
+    @wraps(original)
+    def traced(*arguments, **options):
+        started = time.monotonic()
+        print("native-settlement: " + name + " entering", flush=True)
+        try:
+            return original(*arguments, **options)
+        finally:
+            print("native-settlement: " + name + " finished in "
+                  + str(round(time.monotonic() - started, 3)) + "s", flush=True)
+    setattr(owner, name, traced)
+observed_call(admission.verification.LiveInputVerifier, "check")
+observed_call(admission.verification.LiveInputVerifier, "wait")
+observed_call(admission.verification.LiveInputVerifier, "__exit__")
+observed_call(admission.verification._Client, "close")
+observed_call(admission.verification, "close_clients")
+tool_slots = []
+child = r'''
+import atexit, os, pathlib, runpy, subprocess, sys, time
+launches = [0]
+def audit_launch(event, arguments):
+    if event == "subprocess.Popen":
+        launches[0] += 1
+sys.addaudithook(audit_launch)
+atexit.register(lambda: print("native-semantic: total subprocesses=" + str(launches[0]), flush=True))
+path = pathlib.Path(sys.argv[1])
+sys.path.insert(0, str(path.parent))
+import _runtime_admission
+_runtime_admission.activate()
+import artifact_attestation
+def unavailable(argv, **options):
+    assert argv[:2] == ["api", "repos/example/plugins/releases/tags/python-artifacts-" + expected_dev], argv
+    return subprocess.CompletedProcess(argv, 1, "", "gh: fixture channel absent (HTTP 404)")
+expected_dev = os.environ["CE_FIXTURE_PROMOTED_DEV"]
+artifact_attestation._gh = unavailable
+from contextlib import contextmanager
+from functools import wraps
+def timed_context(module, name):
+    original = getattr(module, name)
+    @contextmanager
+    @wraps(original)
+    def traced(*arguments, **options):
+        started = time.monotonic()
+        initial_launches = launches[0]
+        print("native-admission: " + name + " entering", flush=True)
+        with original(*arguments, **options) as value:
+            print("native-admission: " + name + " ready in "
+                  + str(round(time.monotonic() - started, 3)) + "s; subprocesses="
+                  + str(launches[0] - initial_launches), flush=True)
+            yield value
+        print("native-admission: " + name + " settled", flush=True)
+    setattr(module, name, traced)
+def timed_call(module, name, *, max_seconds=None):
+    original = getattr(module, name)
+    @wraps(original)
+    def traced(*arguments, **options):
+        started = time.monotonic()
+        if max_seconds is not None:
+            options["deadline"] = min(options["deadline"], started + max_seconds)
+        print("native-admission: " + name + " entering", flush=True)
+        try:
+            return original(*arguments, **options)
+        finally:
+            print("native-admission: " + name + " settled in "
+                  + str(round(time.monotonic() - started, 3)) + "s", flush=True)
+    setattr(module, name, traced)
+import runtime_source_build, runtime_feed_configuration, runtime_source_wheels
+import runtime_source_lock
+timed_context(runtime_source_build, "retain_source_runtime_inputs")
+timed_context(runtime_source_build, "retain_source_wheel_lock")
+timed_context(runtime_source_build, "retain_source_profile")
+timed_context(runtime_feed_configuration, "retain_native_feed_inputs")
+timed_call(runtime_source_build, "_query_marker_environment", max_seconds=30)
+timed_call(runtime_source_wheels, "build_wheel", max_seconds=30)
+timed_call(runtime_source_lock.SourceLockCandidate, "verify", max_seconds=30)
+import runtime_input_verifier
+timed_call(runtime_input_verifier.LiveInputVerifier, "check")
+timed_call(runtime_input_verifier.LiveInputVerifier, "wait")
+timed_call(runtime_input_verifier.LiveInputVerifier, "__exit__")
+timed_call(runtime_input_verifier._Client, "close")
+timed_call(runtime_input_verifier, "close_clients")
+sys.argv = sys.argv[1:]
+runpy.run_path(str(path), run_name="__main__")
+'''
+def wait(argv, environment, *, verifier):
+    tool_slots.append(pathlib.Path(argv[0]).parent.parent)
+    return native_wait(
+        [argv[0], "-I", "-B", "-c", child, *argv[3:]], environment, verifier=verifier,
+    )
+admission.verification.wait_for_settlement = wait
+installed = admission.run(
+    installation=installation, uv=uv, base_python=pathlib.Path(sys.executable),
+    deadline=deadline, seed_limits=SeedLimits(16 << 20, 128 << 20, 64 << 20),
+    acquisition_limits=AcquisitionLimits(
+        max_packages=200, max_requests=1000, max_redirects=10, max_candidates_per_project=4096,
+        max_index_bytes=16 << 20, max_total_metadata_bytes=64 << 20,
+        max_wheel_bytes=128 << 20, max_closure_bytes=512 << 20,
+        max_temporary_bytes=2 << 30,
+    ),
+    wheel_limits=WheelLimits(
+        128 << 20, 1 << 30, 128 << 20, 16 << 20, 100000, 10000, 4 << 20,
+    ),
+    max_subject_bytes=1 << 20, max_lock_bytes=16 << 20, max_snapshot_bytes=2 << 30,
+    wait_timeout=100, child_timeout=100,
+)
+assert installed["deployment_manifest_published"] is True, installed
+assert (root / "current-version").read_text().strip() == installed["runtime_version"]
+python = pathlib.Path(installed["runtime_python"])
+assert python.is_file()
+hidden = []
+try:
+    for slot in [*tool_slots, root / ".source-build-tools"]:
+        if slot.exists() and not any(slot.is_relative_to(path) for path, _ in hidden):
+            destination = slot.with_name(slot.name + ".fixture-unavailable")
+            slot.rename(destination)
+            hidden.append((slot, destination))
+    probe = (
+        "import pathlib,sys;import packaging,agent_worktrees;"
+        "from agent_worktrees.runtime_candidate import verify_runtime_candidate;"
+        "verify_runtime_candidate();"
+        "assert pathlib.Path(packaging.__file__).resolve().is_relative_to(pathlib.Path(sys.prefix).resolve());"
+        "assert pathlib.Path(agent_worktrees.__file__).resolve().is_relative_to(pathlib.Path(sys.prefix).resolve());"
+        "print('native-semantic-runtime-independent-ok')"
+    )
+    result = subprocess.run(
+        [str(python), "-I", "-B", "-c", probe], capture_output=True, text=True, timeout=30,
+        executable=installer_packaging_seed.dependencies._native_retained_path(python),
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    print(result.stdout.strip(), flush=True)
+finally:
+    for original, moved in reversed(hidden):
+        moved.rename(original)
+"""
+    with capsys.disabled():
+        completed = subprocess.run(
+            [sys.executable, "-I", "-B", "-c", script,
+             str(payload), str(source), str(tmp_path / "runtime"), uv],
+            env=environment, stdout=sys.stdout, stderr=subprocess.STDOUT,
+            timeout=880, **no_window_kwargs(),
+        )
+    assert completed.returncode == 0
+
+
+@pytest.mark.timeout(300)
+def test_real_candidate_publication_rechecks_live_inputs_and_preserves_incumbent_on_refusal(
+    tmp_path: Path, native_runtime_source: tuple[Path, str], capsys: pytest.CaptureFixture[str],
+) -> None:
+    uv = shutil.which("uv")
+    if uv is None:
+        pytest.skip("real construction requires the configured uv executable")
+    plugin, _ = native_runtime_source
+    home = tmp_path / "home"
+    home.mkdir()
+    environment = dict(os.environ)
+    environment.update(HOME=str(home), USERPROFILE=str(home), AGENT_HOME=str(home))
+    for name in (
+        "COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT",
+        "COPILOT_PLUGIN_STAGED_FROM", "AGENT_WORKTREES_PAYLOAD_ROOT",
+    ):
+        environment.pop(name, None)
+    script = """
+import json, pathlib, subprocess, sys, time
+plugin, root, uv = map(pathlib.Path, sys.argv[1:])
+sys.path.insert(0, str(plugin / "scripts"))
+import runtime_install as lifecycle
+import runtime_input_verifier as verification
+deadline = time.monotonic() + 270
+phase = {"candidate": False, "deny": False}
+checks = {"local": 0, "candidate": 0}
+class Verifier(verification.LiveInputVerifier):
+    def wait(self, process):
+        phase["candidate"] = True
+        try:
+            return super().wait(process)
+        finally:
+            phase["candidate"] = False
+def verify():
+    checks["candidate" if phase["candidate"] else "local"] += 1
+    if phase["candidate"] and phase["deny"]:
+        raise ValueError("fixture inputs revoked before candidate publication")
+def install(verifier):
+    return lifecycle.install(
+        root, plugin, payload=plugin, uv=uv, base_python=pathlib.Path(sys.executable),
+        input_verifier=verifier,
+    )
+print("live-input proof: constructing actual candidate", flush=True)
+with Verifier(verify, deadline=deadline) as guard:
+    installed = install(guard)
+print("live-input proof: actual candidate published", flush=True)
+assert installed["deployment_manifest_published"] is True
+assert checks["candidate"] > 0
+assert (root / "current-version").read_text().strip() == installed["runtime_version"]
+before = {
+    name: (root / name).read_bytes() if (root / name).exists() else None
+    for name in ("current-version", "last-known-good", "deploy-manifest.json")
+}
+candidate_checks = checks["candidate"]
+phase["deny"] = True
+print("live-input proof: checking refusal in actual candidate", flush=True)
+with Verifier(verify, deadline=deadline) as guard:
+    try:
+        install(guard)
+    except subprocess.CalledProcessError:
+        assert isinstance(guard.failure, ValueError), repr(guard.failure)
+    else:
+        raise AssertionError("candidate publication ignored the live owner refusal")
+assert checks["candidate"] > candidate_checks
+assert {
+    name: (root / name).read_bytes() if (root / name).exists() else None for name in before
+} == before
+print("real-candidate-live-input-refusal-ok")
+"""
+    with capsys.disabled():
+        completed = subprocess.run(
+            [sys.executable, "-I", "-B", "-c", script,
+             str(plugin), str(tmp_path / "runtime"), uv],
+            env=environment, stdout=sys.stdout, stderr=subprocess.STDOUT,
+            timeout=280, **no_window_kwargs(),
+        )
+    assert completed.returncode == 0
+
 
 @pytest.mark.parametrize("serving_slot", ["1.0.0", "dev"])
 @pytest.mark.parametrize("activation_fails", [False, True])
 def test_legacy_installer_replaces_unsupported_predecessor_and_keeps_failures_truthful(
-    driver, tmp_path, monkeypatch, activation_fails, serving_slot,
-):
+    driver: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, activation_fails: bool, serving_slot: str,
+) -> None:
     from agent_worktrees import (
         config as cfg, runtime_monitor_identity as monitor,
         runtime_monitor_retirements as retirements, status_monitor_cutover as cutover,
@@ -2133,30 +3405,30 @@ def test_legacy_installer_replaces_unsupported_predecessor_and_keeps_failures_tr
         driver.runtime.claim_dev(root, owner, previous_version="1.0.0")
         _slot(driver, root, "dev")
         claim = driver.runtime.read_dev_claim(root)
-    events = []
+    events: list[str] = []
     class Governance:
-        def __init__(self, requested, payload):
+        def __init__(self, requested: Path, payload: Path) -> None:
             self.root, self.payload = requested, payload
             self.manifest_publication = nullcontext
-        def signature(self):
+        def signature(self) -> dict[str, object]:
             return {}
-        def recheck(self):
+        def recheck(self) -> None:
             pass
-        def held(self, **kwargs):
+        def held(self, **kwargs: object) -> AbstractContextManager[None]:
             return nullcontext()
     class Guard:
         held = True
         lock_path = root / "status-monitor-routing" / "cutover.lock"
-        def release(self):
+        def release(self) -> None:
             events.append("released")
     guard = Guard()
     predecessor = (202, "2002", serving_slot)
     transition = cutover.activate_after_update
-    def unsupported(_root):
+    def unsupported(_root: object) -> NoReturn:
         raise monitor.AsyncRetirementUnsupported("legacy fixture", predecessor)
-    def retire(requested, expected, *, guard):
+    def retire(requested: Path, expected: tuple[int, str, str], *, guard: object) -> NoReturn:
         pytest.fail("predecessor retired before successor startup")
-    def activate(**kwargs):
+    def activate(**kwargs: object) -> dict[str, object]:
         assert events == ["reserve"]
         assert driver.runtime.current_version(root) == "2.0.0"
         assert kwargs["monitor_was_live"] is True
@@ -2168,11 +3440,11 @@ def test_legacy_installer_replaces_unsupported_predecessor_and_keeps_failures_tr
         }
         assert kwargs["cutover_guard"] is guard
         events.append("activation")
-        return transition(**kwargs)
+        return cast(Callable[..., dict[str, object]], transition)(**kwargs)
     class Orchestrator:
-        def __init__(self, *args, **kwargs):
+        def __init__(self, *args: object, **kwargs: object) -> None:
             pass
-        def run(self, **kwargs):
+        def run(self, **kwargs: object) -> SimpleNamespace:
             result = SimpleNamespace(
                 ok=not activation_fails, committed=not activation_fails,
                 publication_uncertain=False, retirement_pending=True,
@@ -2187,7 +3459,7 @@ def test_legacy_installer_replaces_unsupported_predecessor_and_keeps_failures_tr
     monkeypatch.setattr(runtime, "_aw_runtime_home", lambda: root)
     monkeypatch.setattr(cutover, "routing_dir", lambda *a: root / "status-monitor-routing")
     monkeypatch.setattr(cutover, "_monitor_lock_is_live", lambda: True)
-    monkeypatch.setattr(cutover.locks, "read_lock", lambda path: {
+    monkeypatch.setattr(cast(ModuleType, getattr(cutover, "locks")), "read_lock", lambda path: {
         "pid": predecessor[0], "start_time": predecessor[1],
     })
     monkeypatch.setattr(process_exit, "observe_original_exit", lambda *args: False)
@@ -2205,12 +3477,20 @@ def test_legacy_installer_replaces_unsupported_predecessor_and_keeps_failures_tr
     ))
     monkeypatch.setattr(monitor, "retire_legacy", retire)
     monkeypatch.setattr(monitor, "async_predecessor", lambda root, previous, **kwargs: (previous, {}))
-    monkeypatch.setattr(retirements, "reserve", lambda *a, **k: events.append("reserve") or True)
-    monkeypatch.setattr(retirements, "cancel", lambda *a, **k: events.append("cancel") or True)
+    def reserve(*a: object, **k: object) -> bool:
+        events.append("reserve")
+        return True
+
+    def cancel(*a: object, **k: object) -> bool:
+        events.append("cancel")
+        return True
+
+    monkeypatch.setattr(retirements, "reserve", reserve)
+    monkeypatch.setattr(retirements, "cancel", cancel)
     monkeypatch.setattr(cfg, "install_dir", lambda: root)
     monkeypatch.setattr(cutover, "_acquire_cutover_lock", lambda directory: guard)
     monkeypatch.setattr(cutover, "activate_after_update", activate)
-    kwargs = dict(
+    kwargs: dict[str, object] = dict(
         payload=tmp_path, payload_hash="previous", expected_governance={}, previous="1.0.0",
         release_dev_claim=claim, dev_owner=owner if claim is not None else None,
     )

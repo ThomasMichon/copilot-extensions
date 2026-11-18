@@ -21,13 +21,18 @@ from dataclasses import dataclass, replace
 from functools import partial
 from pathlib import Path
 from types import ModuleType
-from typing import Any, cast
+from typing import Any, TypedDict, cast
 
-tomllib = importlib.import_module("tomllib")
-import versioned_runtime as runtime
-import versioned_runtime_source as runtime_source
+if sys.version_info >= (3, 11):
+    import tomllib
+else:
+    from installer_dependency_policy import _toml_parser
+    tomllib = _toml_parser()
+import versioned_runtime as versioned_runtime
+import versioned_runtime_source as versioned_runtime_source
+runtime, runtime_source = versioned_runtime, versioned_runtime_source
 from installer_dependency_policy import (
-    DependencyPolicyError, RetainedUVInstall, _bundled_dbus_next, _contained, _file_uri, _native_retained_path,
+    DependencyPolicyError, RetainedUVInstall, _bundled_dbus_next, _contained, _file_uri, _native_retained_path as _native_retained_path,
     _bounded_content_map as _bounded_content_map,
     _private_retained_root as _private_retained_root, _select_uv_executable,
     _temporary_inputs as _temporary_inputs,
@@ -39,13 +44,16 @@ from installer_engine_process import (
     run_owned,
 )
 from installer_wheel_inputs import _check_deadline, _ordinary
-from installer_wheel_snapshot import WheelInstallInputs, WheelReuseInputs, _digest, _open, _unchanged
+from installer_wheel_snapshot import (
+    WheelInstallInputs, WheelReuseInputs as WheelReuseInputs, _digest as _snapshot_digest,
+    _open as _snapshot_open, _unchanged as _snapshot_unchanged)
+
+_open, _unchanged, _digest = _snapshot_open, _snapshot_unchanged, _snapshot_digest
 from installer_source_build import (
     SourceWheelInputs, _selected_extras as _selected_extras,
     _source_deadline, _source_phase, retained_input_graph, retained_source_wheels,
     revalidate_input_content, check_dev_owner,
-)
-
+    _wheel_construction_hash as _wheel_construction_hash)
 from installer_engine_health import (
     HealthRepairRequired as HealthRepairRequired,
     _PREPARE_INSTALLED_CHECK,
@@ -53,6 +61,7 @@ from installer_engine_health import (
     verify_application_wheels as verify_application_wheels,
 )
 
+_ProgressOptions = TypedDict("_ProgressOptions", {"on_progress": Callable[[], None]}, total=False)
 _GENERATED_DIRECTORIES = {
     ".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache", ".test-runs",
     "build", "dist", "node_modules",
@@ -86,15 +95,14 @@ class ContentRepairRequired(RuntimeError):
     """Published bytes differ; a caller must select a distinct generation."""
 
 
-def _construction_hash(
-    files: tuple[Path, ...], extras: tuple[str, ...],
+def _construction_hash(files: tuple[Path, ...], extras: tuple[str, ...],
     local_packages: tuple[str, ...] | None = None,
     *, on_progress: Callable[[], None] | None = None,
-    file_hashes: dict[Path, str] | None = None,
-) -> str:
+    file_hashes: dict[Path, str] | None = None) -> str:
+    progress: _ProgressOptions = {"on_progress": on_progress} if on_progress is not None else {}
     source_hash = runtime.fingerprint_source(
         files, file_hashes=file_hashes,
-        **cast(dict[str, Any], {"on_progress": on_progress} if on_progress is not None else {}),
+        **progress,
     )
     if not extras and local_packages is None:
         return source_hash
@@ -105,15 +113,6 @@ def _construction_hash(
     return hashlib.sha256(json.dumps({
         "schema": "installer-engine.dependency-profile", "version": 1,
         **profile,
-    }, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
-
-
-def _wheel_construction_hash(source_hash: str, wheels: WheelInstallInputs | WheelReuseInputs | None) -> str:
-    if wheels is None:
-        return source_hash
-    return hashlib.sha256(json.dumps({
-        "schema": "installer-engine.closed-wheel-inputs", "version": 1,
-        "source_hash": source_hash, "wheel_inputs": wheels.receipt(),
     }, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
@@ -210,9 +209,7 @@ def _excluded_packages(inputs: FrozenInputs) -> list[str]:
     return sorted({_package_name(package) for package in inputs.packages} - set(inputs.local_packages))
 
 
-def _source_files(
-    roots: tuple[Path, ...], *, on_progress: Callable[[], None] | None = None,
-) -> tuple[Path, ...]:
+def _source_files(roots: tuple[Path, ...], *, on_progress: Callable[[], None] | None = None) -> tuple[Path, ...]:
     files: set[Path] = set()
 
     def scan_error(error: OSError) -> None:
@@ -266,7 +263,7 @@ def freeze_inputs(
     for root in roots:
         if destination == root or destination.is_relative_to(root):
             raise ValueError(f"Frozen input destination is inside runtime source: {destination}")
-    progress: dict[str, Any] = {"on_progress": on_progress} if on_progress is not None else {}
+    progress: _ProgressOptions = {"on_progress": on_progress} if on_progress is not None else {}
     files = _source_files(roots, **progress)
     Path(_native_retained_path(destination)).mkdir(parents=True, exist_ok=False)
     try:
@@ -287,14 +284,21 @@ def freeze_inputs(
 
             before = runtime.fingerprint_source(files, on_file=retain_source, **progress)
             # Finish the full baseline before copying, preserving the mutation barrier.
-            for source in files:
+            def retained_sources() -> Iterator[tuple[Path, bytes]]:
+                for source in files:
+                    if deadline is not None:
+                        _check_deadline(deadline)
+                    offset, length = offsets[source]
+                    buffer.seek(offset)
+                    data = buffer.read(length)
+                    if len(data) != length:
+                        raise OSError("Frozen source buffer read was incomplete")
+                    yield source, data
+
+            def write_source(item: tuple[Path, bytes]) -> None:
+                source, data = item
                 if deadline is not None:
                     _check_deadline(deadline)
-                offset, length = offsets[source]
-                buffer.seek(offset)
-                data = buffer.read(length)
-                if len(data) != length:
-                    raise OSError("Frozen source buffer read was incomplete")
                 target = destination / source.relative_to(common)
                 Path(_native_retained_path(target.parent)).mkdir(parents=True, exist_ok=True)
                 Path(_native_retained_path(target)).write_bytes(data)
@@ -302,8 +306,13 @@ def freeze_inputs(
                     _native_retained_path(source), _native_retained_path(target),
                     follow_symlinks=False,
                 )
-                if on_progress is not None:
-                    on_progress()
+                if deadline is not None:
+                    _check_deadline(deadline)
+
+            _bounded_content_map(
+                write_source, retained_sources(),
+                **({"on_result": lambda _result: on_progress()} if on_progress is not None else {}),
+            )
         frozen_roots = tuple(destination / root.relative_to(common) for root in roots)
         frozen_plugin = destination / plugin.relative_to(common)
         frozen_applications = tuple(
@@ -369,8 +378,7 @@ def _retained_inputs(
 
 
 @contextmanager
-def _retained_input_graph(
-    inputs: FrozenInputs, uv: Path, python: Path, *, refresh: bool,
+def _retained_input_graph(inputs: FrozenInputs, uv: Path, python: Path, *, refresh: bool,
     on_progress: Callable[[], None],
 ) -> Iterator[FrozenInputs]:
     with retained_input_graph(

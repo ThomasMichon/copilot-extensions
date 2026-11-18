@@ -51,13 +51,14 @@ from promotion_candidate import (
     push_candidate,
 )
 from promotion_source_archive import (
-    changefile_existed_at as _changefile_existed_at,
+    changefile_existed_at as changefile_existed_at,
     git_environment,
     git_text,
     git_timeout_options,
     is_ancestor,
     main_version_inputs as _main_version_inputs,
 )
+_changefile_existed_at = changefile_existed_at
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -586,31 +587,9 @@ def _tree_excluding_state(tree_sha: str, *, repo: Path) -> str:
     tree is a fair, content-only comparison that never treats a mere
     bookkeeping update (pipeline state) or a freshly re-collected coverage
     baseline with no real code change behind it as a real promotion."""
-    with tempfile.TemporaryDirectory() as tmp:
-        index_file = Path(tmp) / "index"
-        env = git_environment(GIT_INDEX_FILE=str(index_file))
-        subprocess.run(
-            ["git", "read-tree", tree_sha], cwd=str(repo), env=env,
-            check=True, capture_output=True,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
-        )
-        subprocess.run(
-            ["git", "rm", "--cached", "-f", "-q", "--ignore-unmatch", PIPELINE_STATE_PATH],
-            cwd=str(repo), env=env, check=True, capture_output=True,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
-        )
-        subprocess.run(
-            ["git", "rm", "--cached", "-f", "-q", "-r", "--ignore-unmatch",
-             COVERAGE_BASELINES_DIR],
-            cwd=str(repo), env=env, check=True, capture_output=True,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
-        )
-        result = subprocess.run(
-            ["git", "write-tree"], cwd=str(repo), env=env,
-            capture_output=True, text=True, check=True,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
-        )
-        return result.stdout.strip()
+    from promotion_source_history import content_tree
+
+    return content_tree(tree_sha, repo=repo)
 
 
 def promote(
@@ -722,12 +701,12 @@ def promote(
             raise PromotionError("a frozen candidate cannot be recomposed")
         if expected_candidate_sha is None:
             raise PromotionError("frozen publication requires the admitted composition SHA")
-        return publish_frozen(
+        return cast(dict[str, Any], publish_frozen(
             frozen_candidate_dir, repo=repo, dev_head=dev_head, main_head=main_head,
             promotion_time=promotion_time, python_artifacts_dir=python_artifacts_dir,
             push=push, candidate_branch=candidate_branch,
             candidate_sha=expected_candidate_sha,
-        )
+        ))
     scratch = add_scratch_worktree(dev_head, repo=repo)
     try:
         summary = consume_pending_changes(

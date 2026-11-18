@@ -1,0 +1,9 @@
+{
+  "comment": "Retain shared source-profile evidence and actual installation policy through Worktrees candidate handover.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
