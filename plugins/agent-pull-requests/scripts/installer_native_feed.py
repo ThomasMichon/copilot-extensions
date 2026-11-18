@@ -17,7 +17,6 @@ import sys
 import time
 from typing import Any, BinaryIO, cast
 from urllib.parse import unquote, urlsplit, urlunsplit
-from typing import Any, cast
 
 import installer_dependency_policy as dependencies
 from installer_feed_policy import _is_public_pypi_url
