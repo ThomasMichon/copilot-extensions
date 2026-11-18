@@ -158,7 +158,7 @@ def test_source_application_contains_embedded_code_resources_and_notices(
 
 @pytest.mark.parametrize("fault", [
     "declaration", "missing-input", "collision", "script-shape",
-    "command-setup", "command-license", "command-src", "command-bin",
+    "command-setup", "command-license", "command-src", "command-bin", "command-build", "command-dist",
 ])
 def test_source_application_rejects_bad_inputs_before_creating_output(
     candidate: Path, fault: str,

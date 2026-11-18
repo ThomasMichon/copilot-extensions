@@ -160,7 +160,7 @@ def materialize(root: Path) -> list[str]:
         members["_standalone_runtime_build.py"] = root / "libs/versioned-runtime/standalone_build.py"
         members["install.py"] = root / "libs/installer-engine/runtime_application_install.py"
         reserved = {Path(name).parts[0].casefold() for name in members} | {
-            "pyproject.toml", "manifest.in", ".python-version", ".gitattributes", "bin",
+            "pyproject.toml", "manifest.in", ".python-version", ".gitattributes", "bin", "build", "dist",
         }
         if any(name.casefold() in reserved for name in launchers):
             raise ValueError("application source commands conflict with project inputs")
