@@ -131,7 +131,7 @@ PR descriptions use the string/null `description` field. Work-item comments
 use `text`, and comments nested in PR threads use `content`. Missing/nontext
 fields do not count as bodies. Multiple body fields in one work item still
 count as one record, not one body per field.
-Reacquiring a possibly truncated PR preview counts the point response as another
+Reacquiring a nonempty selected PR description counts the point response as another
 body, not another listing identity. The preview remains a returned body record;
 neither count alone certifies completeness or successful identity validation.
 

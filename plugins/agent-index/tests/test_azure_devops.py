@@ -125,6 +125,13 @@ def test_ado_discovers_work_items_and_pull_requests_with_pagination() -> None:
                     ]
                 },
             )
+        if path.endswith(("/_apis/git/pullrequests/7", "/_apis/git/pullrequests/8")):
+            number = int(path.rsplit("/", 1)[1])
+            return _json_response(200, {
+                "pullRequestId": number,
+                "repository": {"id": "repo-1"},
+                "description": {7: "Pull request body", 8: "Completed body"}[number],
+            })
         if "/_apis/git/repositories/repo-1/pullRequests/" in path and path.endswith("/threads"):
             return _json_response(
                 200,
@@ -190,6 +197,8 @@ def test_ado_discovers_work_items_and_pull_requests_with_pagination() -> None:
         "closed_date": None,
     }
     assert "Thread comment" in pull.content
+    assert "Pull request body" in pull.content
+    assert sum(path.endswith(("/pullrequests/7", "/pullrequests/8")) for path in seen_paths) == 2
     assert seen_tokens == [None, "next"]
     assert any(path.endswith("/_apis/wit/workitemsbatch") for path in seen_paths)
 

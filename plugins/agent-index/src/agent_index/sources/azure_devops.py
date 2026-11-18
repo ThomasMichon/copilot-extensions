@@ -384,12 +384,9 @@ class AzureDevOpsConnector:
         description = pull_request.get("description")
         if description is not None and not isinstance(description, str):
             raise ValueError("Azure DevOps pull-request listing has no valid description")
-        if description is None:
+        if not description:
             return pull_request
-        # Also recognize UTF-16 previews whose astral characters use two units.
-        if len(description.encode("utf-16-le", "surrogatepass")) < 800:
-            return pull_request
-        # The list endpoint truncates at 400 symbols, including an ambiguous exact boundary.
+        # Listing previews have no completeness flag or specified Unicode truncation rule.
         result = self._http.get_json(
             self._project_path("_apis", "git", "pullrequests", str(pull_request["pullRequestId"])),
             params={"api-version": _DEFAULT_API_VERSION},
