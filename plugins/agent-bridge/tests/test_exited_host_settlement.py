@@ -5,18 +5,20 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 import sqlite3
+from unittest.mock import patch
 
 import pytest
 from zdd import process_exit
 
 from agent_bridge.db import Database
+from agent_bridge.events import EventLog
 from agent_bridge.session_host.host_index import HostIndex, HostRecord
 from agent_bridge.status_store import SelectedAgent, Selection, StatusStore
 
 
 @pytest.mark.parametrize("case", [
     "exited", "live-child", "unobservable", "native-held", "feed-failed", "flush-failed",
-    "replacement", "completed", "unanchored",
+    "replacement", "completed", "missing-idle", "unanchored", "no-origin", "evicted",
 ])
 def test_exit_settles_turn_and_subscription_or_preserves_both(
     tmp_path: Path, tmp_db: Database, monkeypatch: pytest.MonkeyPatch, case: str,
@@ -48,23 +50,53 @@ def test_exit_settles_turn_and_subscription_or_preserves_both(
             record, settle=lambda locked: tmp_db.settle_exited_inherited_host(snapshot, locked),
         )
 
-    if case in {"completed", "unanchored"}:
-        if case == "completed":
-            tmp_db.append_event(sid, 1, "session_state_changed", {"status": "running", "turn_index": 0}, 2.0)
+    if case in {"completed", "missing-idle"}:
+        log = EventLog(db=tmp_db, session_id=sid)
+        log.append("session_state_changed", {"status": "running", "turn_index": 0}, timestamp=2.0)
+        if case == "missing-idle":
+            with patch.object(StatusStore, "publish", side_effect=RuntimeError("feed unavailable")):
+                with pytest.raises(RuntimeError, match="feed unavailable"):
+                    log.append("turn_complete", {"stop_reason": "end_turn"}, timestamp=3.0)
+            tmp_db.flush()
+            assert not store.page(after=0, epoch=None)["events"]
+            assert retire()
+        else:
+            log.append("turn_complete", {"stop_reason": "end_turn"}, timestamp=3.0)
+            page = store.page(after=0, epoch=None, subscription_id="watch")
+            acknowledged = store.acknowledge("watch", page["events"][0]["id"], page["epoch"])
+            assert retire()
+            assert store.page(after=0, epoch=None, subscription_id="watch")["subscription"] == acknowledged
+    elif case in {"no-origin", "evicted"}:
+        after = 0
+        if case == "no-origin":
+            tmp_db.append_event(sid, 2, "session_state_changed", {"status": "running", "turn_index": 0}, 2.0)
+            tmp_db.append_event(sid, 3, "turn_complete", {"stop_reason": "end_turn"}, 3.0)
+            tmp_db.flush()
+        else:
+            monkeypatch.setattr("agent_bridge.status_store.RETENTION", 1)
+            log = EventLog(db=tmp_db, session_id=sid)
+            log.append("session_state_changed", {"status": "running", "turn_index": 0}, timestamp=2.0)
+            log.append("turn_complete", {"stop_reason": "end_turn"}, timestamp=3.0)
+            page = store.page(after=0, epoch=None, subscription_id="watch")
+            after = page["events"][0]["id"]
+            store.acknowledge("watch", after, page["epoch"])
+            store.publish("other-worker", "idle", "another-completion")
+        before = store.page(after=after, epoch=None, subscription_id="watch")
+        assert not retire()
+        assert store.page(after=after, epoch=None, subscription_id="watch") == before
+        assert tmp_db.get_session(sid) == observed
+        assert HostIndex(tmp_path / "index.json").get(sid) == record
+        return
+    elif case == "unanchored":
         tmp_db.append_event(sid, 2, "turn_complete", {"stop_reason": "end_turn"}, 3.0)
         tmp_db.flush()
-        event = store.publish(sid, "idle", "original-completion")
-        assert event is not None
-        acknowledged = store.acknowledge("watch", event, store.page(after=0, epoch=None)["epoch"])
-        assert retire() is (case == "completed")
-        # Settlement must not rearm an acknowledged notice.
-        assert store.page(after=0, epoch=None, subscription_id="watch")["subscription"] == acknowledged
+        assert not retire()
     elif case in {"flush-failed", "replacement"}:
         def fail_flush() -> None:
             raise OSError("index unavailable")
 
-        with monkeypatch.context() as patch:
-            patch.setattr(index, "_flush", fail_flush)
+        with monkeypatch.context() as failing_index:
+            failing_index.setattr(index, "_flush", fail_flush)
             with pytest.raises(OSError, match="index unavailable"):
                 retire()
         index = HostIndex(tmp_path / "index.json")
@@ -93,10 +125,11 @@ def test_exit_settles_turn_and_subscription_or_preserves_both(
     assert turn is not None and session is not None
     page = store.page(after=0, epoch=None, subscription_id="watch")
     sub = page["subscription"]
-    if case == "completed":
+    if case in {"completed", "missing-idle"}:
         assert turn["stop_reason"] == "end_turn" and turn["completed_at"] == 3.0
         assert [e["event_type"] for e in tmp_db.get_events(sid)].count("turn_complete") == 1
-        assert len(page["events"]) == 1 and sub["unread"] == sub["acked"]
+        assert [e["kind"] for e in page["events"]] == ["idle"]
+        assert (sub["unread"] > sub["acked"]) is (case == "missing-idle")
     elif case == "unanchored":
         assert turn["completed_at"] is None and session["status"] == "running"
         assert len(tmp_db.get_events(sid)) == 1 and HostIndex(tmp_path / "index.json").get(sid) == record

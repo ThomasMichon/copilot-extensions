@@ -146,7 +146,7 @@ class _SessionsMixin:
 
     def settle_exited_inherited_host(self, observed: dict[str, Any], record: HostRecord) -> bool:
         """Close ordinary interrupted work, under the exact exited Host's retirement lock."""
-        from .host_exit_history import stopped_event, terminal_outcome
+        from .host_exit_history import reconcile_idle, stopped_event, terminal_outcome
         from .status_store import StatusStore
 
         self = cast("Database", self)
@@ -199,9 +199,13 @@ class _SessionsMixin:
                     return False
                 if outcome is None:
                     events.insert(0, ("turn_complete", '{"stop_reason":"interrupted"}'))
-                    outcome = ("interrupted", now)
+                    reason, finished = "interrupted", now
+                else:
+                    if not reconcile_idle(self, conn, sid, outcome):
+                        return False
+                    reason, finished = outcome.reason, outcome.timestamp
                 conn.execute("UPDATE turns SET stop_reason=?,completed_at=? WHERE session_id=? AND turn_index=?",
-                             (*outcome, sid, turn["turn_index"]))
+                             (reason, finished, sid, turn["turn_index"]))
             conn.execute("UPDATE sessions SET status='stopped',pid=NULL,background_recovery_enabled=0,updated_at=? "
                          "WHERE id=?", (now, sid))
             for kind, body in events:
