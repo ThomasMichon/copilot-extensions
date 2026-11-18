@@ -73,6 +73,7 @@ class Job:
     inputs: tuple[Input, ...]
     command: tuple[str, ...]
     cache: Path | None = None
+    workspace: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -194,17 +195,21 @@ def plan_job(
         mounts.extend(
             ("--mount", f"type=bind,src={item.source},dst={item.target},readonly")
         )
-    if job.cache is not None:
-        _source(job.cache, forbidden=forbidden)
-        if _overlap(job.cache, repository):
+    writable = [results]
+    for role, writable_path in (("cache", job.cache), ("workspace", job.workspace)):
+        if writable_path is None:
+            continue
+        _source(writable_path, forbidden=forbidden)
+        if _overlap(writable_path, repository):
             raise PlanRefusal("writable root overlaps the repository")
-        if (
-            not job.cache.is_dir()
-            or _overlap(job.cache, results)
-            or any(_overlap(job.cache, source) for source in sources)
+        if not writable_path.is_dir() or any(
+            _overlap(writable_path, other) for other in (*writable, *sources)
         ):
-            raise PlanRefusal("cache must be a separate explicit directory")
-        mounts.extend(("--mount", f"type=bind,src={job.cache},dst=/job/cache"))
+            raise PlanRefusal(f"{role} must be a separate explicit directory")
+        if role == "workspace" and stat.S_IMODE(writable_path.stat().st_mode) != 0o700:
+            raise PlanRefusal("workspace must be an existing private directory")
+        writable.append(writable_path)
+        mounts.extend(("--mount", f"type=bind,src={writable_path},dst=/job/{role}"))
     if (
         not job.command
         or any(not part or "\0" in part for part in job.command)
