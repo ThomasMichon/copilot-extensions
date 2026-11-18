@@ -533,6 +533,17 @@ def test_recovery_cli_dry_run_json_returns_bound_preview_without_state(
     assert ledger.read_bytes() == before
     assert not pr_recovery._path(str(wt)).exists()
     assert not list(git_dir.glob("agent-worktrees-pr-break-glass-*.json"))
+
+
+    # A later invocation refused before reaching recovery must not echo the earlier preview.
+    def early_refusal(*_a: object, **_k: object) -> bool:
+        return False
+
+    monkeypatch.setattr(finalize, "push_changes", early_refusal)
+    assert finalize_cli.cmd_push_changes(args) == 1
+    refused = json.loads(capfd.readouterr().out)
+    assert refused["success"] is False
+    assert "recovery_preview" not in refused
     assert not git_ops.git(
         "for-each-ref", "refs/agent-worktrees/recovery", cwd=str(wt),
     ).stdout.strip()

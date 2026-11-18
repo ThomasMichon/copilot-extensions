@@ -550,6 +550,7 @@ def cmd_push_changes(args: argparse.Namespace) -> int:
                 return 1
             return 0
 
+        pr_break_glass.last_preview.set(None)
         try:
             success = fin.push_changes(
                 worktree_id,
@@ -595,7 +596,7 @@ def cmd_push_changes(args: argparse.Namespace) -> int:
             from .pr_publication_labels import last_result
             if success and last_result.get() is not None:
                 out["publication_labels"] = last_result.get()
-            if args.dry_run and recovery_reason is not None:
+            if success and args.dry_run and recovery_reason is not None:
                 preview = pr_break_glass.last_preview.get()
                 if preview is not None:
                     out["recovery_preview"] = preview
