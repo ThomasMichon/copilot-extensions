@@ -288,13 +288,19 @@ async def test_acknowledged_hosted_load_registers_without_a_cli_hold(
                                 (session.session_id,),
                             )
                         else:
-                            event_log.append("user_message", {"text": "concurrent fixture activity"})
+                            current.client._emit("user_message", {"text": "concurrent fixture activity"})
 
                 lineage = path.read_bytes()
                 with monkeypatch.context() as held:
                     held.setattr(manager, "_route_acp_event", concurrent_activity)
                     with pytest.raises(AcquisitionRefused):
                         await settlement.inspect(manager, session.session_id, request.operation_id, lambda: True)
+                if completion == "config-activity":
+                    persisted = manager.db.get_events(session.session_id)
+                    assert sum(item["event_type"] == "user_message" for item in persisted) == 1
+                    with pytest.raises(AcquisitionRefused, match="conflicting subsequent activity"):
+                        await settlement.inspect(manager, session.session_id, request.operation_id, lambda: True)
+                    assert manager.db.get_events(session.session_id) == persisted
                 assert session.client is None and session.status == SessionStatus.STOPPED
                 assert manager.db.execute_read("SELECT * FROM acquisition_launch_gates")
                 assert path.read_bytes() == lineage and manager._host_index.get(session.session_id) is not None

@@ -200,17 +200,19 @@ async def complete(
                     def configuration_emitted(name: str, data: dict[str, Any]) -> None:
                         nonlocal event_fault
                         try:
-                            require_claim()
-                            if not configuration_event(name, data):
-                                raise recovery._refuse("Unexpected activity during original configuration")
+                            # The client swallows callback failures. Keep the actual event
+                            # in the journal even when it disqualifies this and later inspections.
                             manager._route_acp_event(session, name, data)
                             observed = _events(manager, session_id)
+                            if not configuration_event(name, data):
+                                raise recovery._refuse("Unexpected activity during original configuration")
                             if (
                                 observed[:-1] != expected_events or len(observed) != len(expected_events) + 1
                                 or observed[-1]["event_type"] != name or observed[-1]["data"] != data
                             ):
                                 raise recovery._refuse("Concurrent activity changed original configuration history")
                             expected_events[:] = observed
+                            require_claim()
                         except BaseException:
                             event_fault = True
                             raise
