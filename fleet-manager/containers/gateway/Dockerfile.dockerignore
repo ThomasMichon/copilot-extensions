@@ -44,6 +44,7 @@ libs/agent-procutil/src/agent_procutil/**
 !libs/agent-procutil/src/agent_procutil/_daemon_instance_cli.py
 !libs/agent-procutil/src/agent_procutil/_daemon_instance_clock.py
 !libs/agent-procutil/src/agent_procutil/_daemon_instance_identity.py
+!libs/agent-procutil/src/agent_procutil/_daemon_instance_io.py
 !libs/agent-procutil/src/agent_procutil/_daemon_instance_linux.py
 !libs/agent-procutil/src/agent_procutil/_daemon_instance_native.py
 !libs/agent-procutil/src/agent_procutil/_daemon_instance_owner.py
@@ -65,10 +66,13 @@ libs/agent-procutil/src/agent_procutil/**
 !libs/agent-procutil/src/agent_procutil/_retirement_channel.py
 !libs/agent-procutil/src/agent_procutil/_retirement_custodian.py
 !libs/agent-procutil/src/agent_procutil/_shell_caller_owned.py
+!libs/agent-procutil/src/agent_procutil/_suspended_handoff.py
 !libs/agent-procutil/src/agent_procutil/_terminal_offer.py
 !libs/agent-procutil/src/agent_procutil/_windows_caller_owned.py
 !libs/agent-procutil/src/agent_procutil/_windows_job_types.py
 !libs/agent-procutil/src/agent_procutil/_windows_parent_job.py
+!libs/agent-procutil/src/agent_procutil/async_foreground.py
+!libs/agent-procutil/src/agent_procutil/cleanup_diagnostics.py
 !libs/agent-procutil/src/agent_procutil/daemon.py
 !libs/agent-procutil/src/agent_procutil/daemon_broker.py
 !libs/agent-procutil/src/agent_procutil/daemon_instances.py
@@ -91,6 +95,7 @@ libs/agent-procutil/src/agent_procutil/**
 !libs/agent-procutil/src/agent_procutil/python_cache_pyc.py
 !libs/agent-procutil/src/agent_procutil/python_cache_store.py
 !libs/agent-procutil/src/agent_procutil/retirement_custody.py
+!libs/agent-procutil/src/agent_procutil/scratch.py
 !libs/agent-procutil/src/agent_procutil/startup.py
 !libs/agent-procutil/src/agent_procutil/streaming.py
 !libs/agent-procutil/src/agent_procutil/windows_broker_cell.py

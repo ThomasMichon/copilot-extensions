@@ -20,6 +20,7 @@ import tarfile
 import time
 import zipfile
 from pathlib import Path
+from typing import TypedDict
 
 import pytest
 from packaging.requirements import Requirement
@@ -28,10 +29,18 @@ from packaging.utils import canonicalize_name
 
 PROJECT = Path(__file__).absolute().parents[1]
 LIBRARY = PROJECT.parent / "libs" / "versioned-runtime"
-FLAGS = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+class _WindowFlags(TypedDict, total=False):
+    creationflags: int
+
+
+FLAGS: _WindowFlags = {}
+if sys.platform == "win32":
+    FLAGS["creationflags"] = subprocess.CREATE_NO_WINDOW
 COMPANIONS = (
     "versioned_runtime_leases.py", "versioned_runtime_construction.py",
     "versioned_runtime_source.py", "versioned_runtime_publication.py",
+    "versioned_runtime_identity.py", "versioned_runtime_fingerprint.py",
+    "versioned_runtime_cache.py",
 )
 PROCESS_RESOURCES = {
     "_runtime_launcher.py": Path("installer-engine") / "runtime_launcher.py",
@@ -44,13 +53,17 @@ PROCESS_RESOURCES = {
 }
 
 
-def run(argv, *, cwd=None, env=None, timeout=30):
+def run(
+    argv: list[str], *, cwd: str | Path | None = None,
+    env: dict[str, str] | None = None, timeout: int = 30,
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        argv, cwd=cwd, env=env, capture_output=True, text=True, timeout=timeout, check=False, **FLAGS,
+        argv, cwd=cwd, env=env, capture_output=True, text=True, timeout=timeout, check=False,
+        **FLAGS,
     )
 
 
-def project_at(root, *, nested=False):
+def project_at(root: Path, *, nested: bool = False) -> tuple[Path, Path]:
     project = root / ("services" if nested else "") / "fleet-manager"
     project.mkdir(parents=True)
     for name in ("pyproject.toml", "README.md", "setup.py"):
@@ -67,8 +80,8 @@ def project_at(root, *, nested=False):
     return project, library
 
 
-def build_path(path):
-    if os.name != "nt":
+def build_path(path: Path) -> str:
+    if sys.platform != "win32":
         return str(path)
     # The owned worktree sandbox can exceed setuptools' relative MAX_PATH paths.
     # Use an existing filesystem alias; never change host long-path policy.
@@ -84,7 +97,9 @@ def build_path(path):
     return buffer.value
 
 
-def build(project, output, operation="build_wheel"):
+def build(
+    project: Path, output: Path, operation: str = "build_wheel",
+) -> subprocess.CompletedProcess[str]:
     output.mkdir(exist_ok=True)
     return run(
         [sys.executable, "-I", "-c",
@@ -94,7 +109,9 @@ def build(project, output, operation="build_wheel"):
     )
 
 
-def test_wheel_contains_record_bound_exact_primitive_and_no_runtime_dependencies(wheel):
+def test_wheel_contains_record_bound_exact_primitive_and_no_runtime_dependencies(
+    wheel: tuple[Path, Path],
+) -> None:
     artifact, library = wheel
     with zipfile.ZipFile(artifact) as archive:
         assert {
@@ -143,7 +160,9 @@ def test_wheel_contains_record_bound_exact_primitive_and_no_runtime_dependencies
             for line in archive.read(metadata).decode().splitlines()
             if line.startswith("Requires-Dist:")
         ]
-        environments = ({}, {"python_version": "3.10", "python_full_version": "3.10.0"})
+        environments: tuple[dict[str, str], ...] = (
+            {}, {"python_version": "3.10", "python_full_version": "3.10.0"},
+        )
         assert all(requirement.marker is not None
                    and not any(requirement.marker.evaluate({**environment, "extra": ""})
                                for environment in environments)
@@ -153,32 +172,36 @@ def test_wheel_contains_record_bound_exact_primitive_and_no_runtime_dependencies
                                          "service-gateway", "gateway-host", "ssh-client", "komodo-host",
                                          "runtime-authentication"))
                    for requirement in requirements)
+        def extra_enabled(requirement: Requirement, extra: str) -> bool:
+            assert requirement.marker is not None
+            return requirement.marker.evaluate({"extra": extra})
+
         verification = [requirement for requirement in requirements
-                        if requirement.marker.evaluate({"extra": "release-verification"})]
+                        if extra_enabled(requirement, "release-verification")]
         assert len(verification) == 1
         assert canonicalize_name(verification[0].name) == "cryptography"
         assert verification[0].specifier == SpecifierSet(">=46,<47")
         construction = [requirement for requirement in requirements
-                        if requirement.marker.evaluate({"extra": "construction"})]
+                        if extra_enabled(requirement, "construction")]
         assert len(construction) == 1
         assert canonicalize_name(construction[0].name) == "pip"
         assert construction[0].specifier == SpecifierSet(">=25.1,<26")
         for extra in ("auth", "server"):
             enabled = {canonicalize_name(requirement.name) for requirement in requirements
-                       if requirement.marker.evaluate({"extra": extra})}
-            expected = {"pyjwt", "cryptography", "jwcrypto", "joserfc"}
+                       if extra_enabled(requirement, extra)}
+            expected_extras = {"pyjwt", "cryptography", "jwcrypto", "joserfc"}
             if extra == "server":
-                expected.add("agent-procutil")
-            assert enabled == expected
+                expected_extras.add("agent-procutil")
+            assert enabled == expected_extras
         identity = [requirement for requirement in requirements
-                    if requirement.marker.evaluate({"extra": "runtime-authentication"})]
+                    if extra_enabled(requirement, "runtime-authentication")]
         assert len(identity) == 1
         assert canonicalize_name(identity[0].name) == "joserfc"
         assert identity[0].specifier == SpecifierSet(">=1.7.5,<2")
         assert not any(name.endswith("/_standalone_runtime_build.py") for name in archive.namelist())
 
 
-def test_sdist_rebuild_is_self_contained_after_repository_removal(tmp_path):
+def test_sdist_rebuild_is_self_contained_after_repository_removal(tmp_path: Path) -> None:
     project, library = project_at(tmp_path / "checkout")
     output = tmp_path / "artifacts"
     result = build(project, output, "build_sdist")
@@ -190,14 +213,18 @@ def test_sdist_rebuild_is_self_contained_after_repository_removal(tmp_path):
     extracted = tmp_path / "extracted"
     extracted.mkdir()
     with tarfile.open(next(output.glob("*.tar.gz"))) as archive:
-        assert archive.extractfile(next(
+        helper_stream = archive.extractfile(next(
             name for name in archive.getnames() if name.endswith("/_standalone_runtime_build.py")
-        )).read() == helper
+        ))
+        assert helper_stream is not None
+        assert helper_stream.read() == helper
         for name, content in companions.items():
-            assert archive.extractfile(next(
+            companion_stream = archive.extractfile(next(
                 member for member in archive.getnames()
                 if member.endswith(f"/src/fleet_manager/{name}")
-            )).read() == content
+            ))
+            assert companion_stream is not None
+            assert companion_stream.read() == content
         if "filter" in inspect.signature(archive.extractall).parameters:
             archive.extractall(extracted, filter="data")
         else:
@@ -210,7 +237,9 @@ def test_sdist_rebuild_is_self_contained_after_repository_removal(tmp_path):
                 else:
                     target.parent.mkdir(parents=True, exist_ok=True)
                     with target.open("wb") as stream:
-                        shutil.copyfileobj(archive.extractfile(member), stream)
+                        member_stream = archive.extractfile(member)
+                        assert member_stream is not None
+                        shutil.copyfileobj(member_stream, stream)
     shutil.rmtree(project.parent)
     standalone = next(extracted.iterdir())
     result = build(standalone, output)
@@ -225,7 +254,7 @@ def test_sdist_rebuild_is_self_contained_after_repository_removal(tmp_path):
 
 
 @pytest.mark.client_distribution_full
-def test_nested_service_directory_uses_same_canonical_resource(tmp_path):
+def test_nested_service_directory_uses_same_canonical_resource(tmp_path: Path) -> None:
     project, library = project_at(tmp_path, nested=True)
     output = tmp_path / "artifacts"
     result = build(project, output)
@@ -243,7 +272,9 @@ def test_nested_service_directory_uses_same_canonical_resource(tmp_path):
     "versioned_runtime.py", "standalone_build.py", *COMPANIONS, *PROCESS_RESOURCES,
 ])
 @pytest.mark.parametrize("included_copy", [False, True])
-def test_missing_build_resource_is_not_a_successful_partial_wheel(tmp_path, resource, included_copy):
+def test_missing_build_resource_is_not_a_successful_partial_wheel(
+    tmp_path: Path, resource: str, included_copy: bool,
+) -> None:
     project, library = project_at(tmp_path)
     source = (library.parent / PROCESS_RESOURCES[resource]
               if resource in PROCESS_RESOURCES else library / resource)
@@ -260,7 +291,7 @@ def test_missing_build_resource_is_not_a_successful_partial_wheel(tmp_path, reso
 
 @pytest.mark.client_distribution_full
 @pytest.mark.parametrize("resource", ["primitive", "helper"])
-def test_conflicting_sdist_resource_is_refused(tmp_path, resource):
+def test_conflicting_sdist_resource_is_refused(tmp_path: Path, resource: str) -> None:
     project, _ = project_at(tmp_path)
     included = (project / "src" / "fleet_manager" / "_versioned_runtime.py"
                 if resource == "primitive" else project / "_standalone_runtime_build.py")
@@ -271,7 +302,7 @@ def test_conflicting_sdist_resource_is_refused(tmp_path, resource):
     assert not list((tmp_path / "artifacts").glob("*.whl"))
 
 
-def test_linked_helper_ancestor_is_rejected_before_loading_code(tmp_path):
+def test_linked_helper_ancestor_is_rejected_before_loading_code(tmp_path: Path) -> None:
     project, library = project_at(tmp_path)
     relocated = tmp_path / "external-resources"
     library.rename(relocated)
@@ -299,7 +330,9 @@ def test_linked_helper_ancestor_is_rejected_before_loading_code(tmp_path):
 
 
 @pytest.mark.client_distribution_full
-def test_regular_wheel_application_installs_an_inert_client(tmp_path, wheel, monkeypatch):
+def test_regular_wheel_application_installs_an_inert_client(
+    tmp_path: Path, wheel: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch,
+) -> None:
     artifact, _ = wheel
     uv = shutil.which("uv")
     assert uv, "native application installation requires the runner's uv"
@@ -393,7 +426,7 @@ def test_regular_wheel_application_installs_an_inert_client(tmp_path, wheel, mon
                  cwd=caller, env=clean)
     assert result.returncode == 0, result.stderr
 
-    def invoke(path, *arguments):
+    def invoke(path: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
         if os.name == "nt":
             host = shutil.which("powershell.exe") or shutil.which("pwsh")
             assert host, "native application installation requires PowerShell"
@@ -423,7 +456,9 @@ def test_regular_wheel_application_installs_an_inert_client(tmp_path, wheel, mon
         assert config.read_bytes() == content
 
 
-def test_real_client_install_doctor_and_package_manager_removal_preserve_config(tmp_path, wheel):
+def test_real_client_install_doctor_and_package_manager_removal_preserve_config(
+    tmp_path: Path, wheel: tuple[Path, Path],
+) -> None:
     artifact, _ = wheel
     uv = shutil.which("uv")
     assert uv, "native client installation proof requires the runner's uv"
@@ -441,7 +476,7 @@ def test_real_client_install_doctor_and_package_manager_removal_preserve_config(
                   "--no-deps", "--link-mode", "copy", str(artifact)], env=clean)
     assert result.returncode == 0, result.stderr
 
-    def client(*args, target=environment):
+    def client(*args: str, target: Path = environment) -> subprocess.CompletedProcess[str]:
         # -S excludes the runner's installed fleet package; only this target is evidence.
         return run([
             sys.executable, "-I", "-S", "-B", "-c",
@@ -504,7 +539,7 @@ def test_real_client_install_doctor_and_package_manager_removal_preserve_config(
 
 
 def gateway_context_inputs(recipe: Path) -> tuple[set[str], list[str]]:
-    copied = set()
+    copied: set[str] = set()
     for line in (recipe / "Dockerfile").read_text(encoding="utf-8").replace("\\\n", " ").splitlines():
         if not line.startswith("COPY "):
             continue
@@ -532,7 +567,7 @@ def gateway_context_supplies(name: str, copied: set[str], patterns: list[str]) -
     )
 
 
-def test_gateway_docker_context_delivers_complete_procutil_source_closure(tmp_path):
+def test_gateway_docker_context_delivers_complete_procutil_source_closure(tmp_path: Path) -> None:
     repository = PROJECT.parent
     path = repository / "tools" / "clean-room" / "gateway-role-tunnels" / "source.py"
     spec = importlib.util.spec_from_file_location("gateway_procutil_source", path)
@@ -567,7 +602,9 @@ def test_gateway_docker_context_delivers_complete_procutil_source_closure(tmp_pa
 
 
 @pytest.mark.parametrize("loader", ["package", "guardian"])
-def test_standalone_construction_resource_preserves_package_relative_job_scopes(tmp_path, monkeypatch, loader):
+def test_standalone_construction_resource_preserves_package_relative_job_scopes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, loader: str,
+) -> None:
     project, _library = project_at(tmp_path / "checkout")
     output = tmp_path / "artifacts"
     result = build(project, output)
@@ -663,18 +700,21 @@ def test_gateway_build_inputs_deliver_the_complete_runtime_family(
         environment = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
         environment.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull)
 
-        committed_blobs = {}
+        committed_blobs: dict[str, bytes] = {}
 
         def git(root: Path, *arguments: str, input: bytes | None = None) -> bytes:
             if arguments[:2] == ("cat-file", "blob"):
                 return committed_blobs[arguments[2]]
-            return subprocess.run(
+            result: subprocess.CompletedProcess[bytes] = subprocess.run(
                 ["git", "-C", str(root), "-c", "core.autocrlf=false",
+                 "-c", "core.longpaths=true",
                  "-c", f"core.hooksPath={hooks}", "-c", "commit.gpgsign=false",
                  "-c", "user.name=Gateway test", "-c", "user.email=gateway-test@example.invalid",
                  *arguments],
-                env=environment, input=input, capture_output=True, timeout=30, check=True, **FLAGS,
-            ).stdout
+                env=environment, input=input, capture_output=True, timeout=30, check=True,
+                **FLAGS,
+            )
+            return result.stdout
 
         git(checkout, "init", "-q", "--template", str(hooks))
         (checkout / ".git" / "info").mkdir(exist_ok=True)

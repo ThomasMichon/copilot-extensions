@@ -2035,6 +2035,10 @@ source-independent repeat, failed candidate
 preflight, a distinct generation update and confirmed native stop. The fixture
 does not qualify release-feed acquisition, provider authentication, reboot
 startup or fleet adoption. Required unit-only CI is unchanged.
+The copied wheel fixture retains the complete canonical versioned-runtime
+resource family. The container witness and Docker context keep explicit
+Fleet/procutil input rosters; new source modules must be reconciled in both
+without weakening unknown-source or missing-resource refusal.
 The Gateway jobs keep each complete installed Gateway and SSH lifecycle case
 in its own sequential 180-second runner, separate from the independent consumer
 controls. No lifecycle sequence is split; the six-minute job limit and peak job

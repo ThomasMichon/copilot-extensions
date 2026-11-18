@@ -8,6 +8,7 @@ import os
 import re
 import stat
 import subprocess
+import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
@@ -17,6 +18,7 @@ IMAGE = "fleet-manager/containers/gateway/"
 PACKAGE_MODULES = frozenset("""
 __init__ __main__ _service_caller_native allocation arc_owner artifact_staging artifacts bearer_identity client_activation client_admission client_command_removal client_construction client_deactivation client_diagnostics client_frontdoor client_generation_frontdoor client_generations client_installation client_recovery client_runtime_removal continuity_bootstrap credential_references enrolled_identity enrollment_journal
 gateway_account_source gateway_auth gateway_broker gateway_client gateway_cloudflare gateway_contract gateway_controller gateway_enrollment
+gateway_connect_route gateway_controller_services gateway_legacy_interop gateway_vault_available gateway_vault_fetch
 gateway_host gateway_host_runtime gateway_host_start gateway_identity_provider gateway_index gateway_local_handler gateway_manifest gateway_reconcile gateway_server
 gateway_service_caller gateway_service_channel gateway_service_connector gateway_service_context gateway_service_handler
 gateway_service_listener gateway_service_policy gateway_service_server gateway_user_context
@@ -30,7 +32,7 @@ release_selection reverse_listener_reservations role_bindings role_deployment ro
 RESOURCES = frozenset("""
 standalone_build.py versioned_runtime.py versioned_runtime_leases.py
 versioned_runtime_construction.py versioned_runtime_publication.py versioned_runtime_source.py
-versioned_runtime_cache.py
+versioned_runtime_identity.py versioned_runtime_fingerprint.py versioned_runtime_cache.py
 """.split())
 RUNNER_FILES = frozenset({
     "run.py", "source.py", "architecture.py", "engine.py", "witness.py",
@@ -39,6 +41,7 @@ RUNNER_FILES = frozenset({
 PROCUTIL_MODULES = frozenset("""
 __init__ _async _caller_owned _daemon_instance_child _daemon_instance_cli _daemon_instance_clock
 _daemon_instance_identity _daemon_instance_linux _daemon_instance_native _daemon_instance_owner
+_daemon_instance_io _suspended_handoff async_foreground cleanup_diagnostics scratch
 _daemon_instance_reconcile _daemon_instance_records _daemon_instance_shell _daemon_instance_shell_windows
 _daemon_instance_store _darwin_caller_owned _interactive_groups _job_scopes
 _interactive_session _interactive_terminal _interpreter _linux_pidfd _native_owned _native_query _output_relay
@@ -92,6 +95,8 @@ def save(path: Path, value: object) -> None:
 
 def private_root(supplied: Path, repository: Path) -> Path:
     """Refuse links, shared roots, repository trees and managed session state."""
+    if sys.platform == "win32":
+        raise ProofError("native-posix-host-required", "repo-config")
     if not supplied.is_absolute() or ".." in supplied.parts:
         raise ProofError("results-root-not-absolute", "repo-config")
     for path in (supplied, *supplied.parents):
@@ -133,7 +138,7 @@ def git(repository: Path, *args: str) -> bytes:
     return result.stdout
 
 
-def materialize(repository: Path, ref: str, run: Path) -> dict:
+def materialize(repository: Path, ref: str, run: Path) -> dict[str, str]:
     """Only known regular blobs, never the index, live source, HOME or Git archive."""
     if not ref or ref.startswith("-") or not re.fullmatch(r"[A-Za-z0-9_./-]+", ref):
         raise ProofError("invalid-source-ref", "repo-config")
@@ -145,8 +150,8 @@ def materialize(repository: Path, ref: str, run: Path) -> dict:
     for entry in listing.split(b"\0"):
         if not entry:
             continue
-        metadata, path = entry.split(b"\t", 1)
-        name = path.decode("utf-8")
+        metadata, raw_path = entry.split(b"\t", 1)
+        name = raw_path.decode("utf-8")
         mode, kind, oid = metadata.decode().split()
         if (name.startswith("fleet-manager/src/") and name not in REQUIRED):
             raise ProofError("unknown-package-source", "repo-config")
