@@ -658,3 +658,37 @@ retain #13159's reported executable-resolution scope and the 880-open census.
 Ledger publication does not deliver the proposed #5655 domain receipt,
 implement Windows mechanisms, settle its administrative judgment or release
 any source/resource custody.
+
+## CodeSpace operation-credential receiving (2026-11-17 UTC)
+
+#13165 delivered the complete manager mechanism proposal after current-head
+Copilot approval and required CI. Complete current ROOT/source/custody
+readback and independent metadata/roster/document checks preceded #5655's
+separate audited `NOT_PLANNED` tracking retirement. Every technical row and
+actual owner remains; unanswered custodian inquiry is not accepted handoff.
+#13168 subsequently delivered the corresponding campaign receipt and native/
+transport retentions, not another implementation or resource operation.
+
+| Whole contract | Original provenance | Proposed route | Direct receiving | Retained conditions |
+|---|---|---|---|---|
+| One selected CodeSpace account AND scope-verified credential throughout create/provisioning | Public #5763 whole original, both earlier discussions and audited current-source correction | routed (proposed; effective after reviewed complete domain acceptance in the SAME PR) | [venue-parity](../venue-parity/README.md), WS-B P5763-1/local V5763-1/actual G5763 and continuing Coordination/Journal | Three unchecked rows retain gate/create/ordinary-REST/SSH-proxy/relay/ALL gh-helper scope, including availability/status. Current selected-environment propagation and helper refusal retain credit; independent status re-resolution remains a precise seam, not observed historical causality. Preserve #5760, generic account-contract ownership, #954/P3 and actual credential/transport custodians. |
+
+The ENTIRE current venue-parity ROOT and Account-Aware Operations ROOT were
+compared with the complete original. Generic account execution remains an
+interface, not a second canonical owner or proof of this full venue-specific
+operation. The original issue remains OPEN during review; historical campaign
+retention is prospectively distinguished from a later separate source-specific
+judgment after actual complete reviewed receiving and current whole readback.
+No implementation, new generic ACK, credential operation, native execution,
+provider mutation or claim/resource transfer follows from this proposed row.
+
+The same checkpoint recovers an unreconciled Manager ROOT containing-source
+boundary. Its earlier whole-ROOT qualification for #356 is withdrawn, not
+silently treated as cleared by successful acquisition or current editors.
+After complete metadata/custody reconciliation, the campaign audited its
+public correction and restored #356 OPEN. #12904 and the independent Phase 5
+material remain actual documentary delivery; no clauses or owners are
+deleted. Complete whole-receiving acceptance is unavailable, so the earlier
+redundant-tracking retirement loses its one closure credit. Original,
+discussion and historical observation records remain; no held ROOT/copy is
+read for this correction and no broad Manager audit or resource action begins.
