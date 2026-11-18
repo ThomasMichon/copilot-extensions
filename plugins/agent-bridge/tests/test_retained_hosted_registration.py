@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -17,7 +18,8 @@ from agent_procutil import direct_python, no_window_kwargs
 
 from agent_bridge import acquisition_worktree_writer as writers, retained_load_acceptance as acceptance
 from agent_bridge import worktree_lineage
-from agent_bridge.acquisition_contract import WorktreeWriterRequirement
+from agent_bridge import retained_recovery_settlement as settlement, startup_progress
+from agent_bridge.acquisition_contract import AcquisitionRefused, WorktreeWriterRequirement
 from agent_bridge.connect import ConnectTracker
 from agent_bridge.creation_worktree_writer import CreationWriterScope, JOURNAL_KEY
 from agent_bridge.events import EventLog
@@ -32,8 +34,13 @@ pytestmark = pytest.mark.contract("agent_bridge.retained_hosted_registration")
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("completion", [
+    "direct", "accepted", "historical", "committed", "restart", "lost-response",
+    "stop", "foreign", "raced-stop",
+])
 async def test_acknowledged_hosted_load_registers_without_a_cli_hold(
     session_manager: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    completion: str,
 ) -> None:
     if not sys.platform.startswith("linux"):
         pytest.skip("Hosted activation is qualified against Linux procfs")
@@ -86,9 +93,11 @@ async def test_acknowledged_hosted_load_registers_without_a_cli_hold(
     })
     writer = writers.RetainedWriter(
         CreationWriterScope("a" * 64, "example", "host", str(checkout), requirement), prefix,
+        execution_identity=requirement.identity,
     )
     monkeypatch.setattr(writers, "current", lambda: writer)
     manager = session_manager
+    manager._generation_id = "c" * 32
     target = SpawnTarget(
         type="local", cwd=str(checkout), project="example", worktree_id="host",
         venue={JOURNAL_KEY: "a" * 64},
@@ -106,26 +115,169 @@ async def test_acknowledged_hosted_load_registers_without_a_cli_hold(
         head_revision=before.head_revision, bridge_installation=str(tmp_path / "bridge"),
     )
     owner = RetainedRecovery(manager, session, request, target.to_json(), asyncio.current_task())
-    # This boundary test supplies an admitted operation. SQL operation admission
-    # and stop serialization remain covered by retained-recovery controls.
-    monkeypatch.setattr(owner, "require_current", Mock())
+    if completion == "direct":
+        monkeypatch.setattr(owner, "require_current", Mock())
+    else:
+        from agent_bridge import creation_writer_inspection, workspace_creation
+        from agent_bridge.acquisition_store import AcquisitionStore
+
+        AcquisitionStore(manager.db)
+        facts = workspace_creation.creation_facts(target, None, {"worktree_writer": requirement.model_dump()})
+        manager.db.execute_write(
+            "INSERT INTO workspace_embodiments "
+            "(key_digest,facts_digest,state,session_id,native_session_id,worktree_json,"
+            "creation_writer_json,creation_recoveries_json) VALUES (?,?,'complete',?,?,?,?,?)",
+            (
+                request.journal_key, hashlib.sha256(json.dumps(facts, sort_keys=True).encode()).hexdigest(),
+                session.session_id, NATIVE, json.dumps({
+                    "id": "host", "repo": "example", "path": str(checkout),
+                    "creation_nonce": before.creation_nonce,
+                }),
+                json.dumps({
+                    "version": 1, "facts": facts, "worktree_writer": requirement.model_dump(),
+                    "binding": {"version": 1, "prefix": list(prefix)},
+                }),
+                json.dumps({request.operation_id: {"request": request.model_dump(), "state": "invoking"}}),
+            ),
+        )
+        manager.db.execute_write(
+            "INSERT INTO acquisition_launch_gates VALUES (?,?,'cli',?,?,'retained-recovery')",
+            ("host", f"retained-recovery:{request.operation_id}", session.session_id, NATIVE),
+        )
+        monkeypatch.setattr(creation_writer_inspection, "_instance", lambda: {
+            "installation_root": request.bridge_installation,
+        })
+        if completion == "historical":
+            def legacy_record(original: Any, document: dict[str, Any]) -> None:
+                original.accepted_load = document
+            monkeypatch.setattr(acceptance, "record", legacy_record)
+        manager._set_background_recovery_enabled(session, False)
+        session.event_log.append(settlement.START_EVENT, {"version": 1, "request": request.model_dump()})
     owner.hosted_epoch = acceptance.epoch()
     client = None
     try:
-        client, native = await manager._connect_via_session_host(
-            target, tracker=ConnectTracker(), session_id=session.session_id,
-            on_acp_event=lambda event, data: manager._route_acp_event(session, event, data),
-            permission_callback=None, load_session_id=NATIVE, recovery_operation=owner,
-        )
+        progress = startup_progress.StartupProgress(session.event_log.append)
+        token = startup_progress._active.set(progress)
+        progress.update("resume", "started")
+        try:
+            client, native = await manager._connect_via_session_host(
+                target, tracker=ConnectTracker(), session_id=session.session_id,
+                on_acp_event=lambda event, data: manager._route_acp_event(session, event, data),
+                permission_callback=None, load_session_id=NATIVE, recovery_operation=owner,
+            )
+        finally:
+            # Fault after the actual ACK, before the caller can finish registration.
+            progress.update("resume", "failed")
+            startup_progress._active.reset(token)
         assert native == NATIVE and owner.accepted_load is not None
         activation = acceptance.registration(owner, client)
         child = activation["child"]["pid"]
         assert not session_liveness.session_process_owns_hold(
             NATIVE, child, activation["child"]["start_time"],
         )
-        assert worktree_lineage.register_session(
-            "host", NATIVE, pid=child, worktree_dir=str(checkout), hosted_activation=activation,
-        )
+        if completion != "direct":
+            if completion == "committed":
+                assert worktree_lineage.register_session(
+                    "host", NATIVE, pid=child, worktree_dir=str(checkout), hosted_activation=activation,
+                )
+            manager._set_background_recovery_enabled(session, False)
+            await client.shutdown()
+            client, session.client = None, None
+            owner.active = False
+            manager.db.execute_write(
+                "UPDATE workspace_embodiments SET creation_recoveries_json=? WHERE key_digest=?",
+                (json.dumps({request.operation_id: {"request": request.model_dump(), "state": "unknown"}}),
+                 request.journal_key),
+            )
+            if completion == "restart":
+                index = manager._host_index
+                assert index.release(session.session_id, manager._generation_id)
+                previous_session = session
+                manager = type(manager)(
+                    manager.db, session_host_state_dir=str(index._path.parent),
+                )
+                session = manager.get_session(previous_session.session_id)
+                assert session is not None and session is not previous_session and session.client is None
+            original_events = manager.db.get_events(session.session_id)
+            if completion in {"stop", "foreign", "raced-stop"}:
+                if completion == "stop":
+                    manager.db.execute_write(
+                        "UPDATE sessions SET cold_recovery_stop_token='operator-stop' WHERE id=?",
+                        (session.session_id,),
+                    )
+                elif completion == "foreign":
+                    index = manager._host_index
+                    assert index.release(session.session_id, manager._generation_id)
+                    index.claim(
+                        session.session_id, generation="foreign", owner_pid=os.getpid(),
+                        pid_alive=lambda _pid: True,
+                    )
+                else:
+                    import agent_remote_driver.session_host.inspection as inspection
+
+                    probe = inspection.probe
+                    calls = 0
+
+                    async def stopped(*args: Any, **kwargs: Any) -> Any:
+                        nonlocal calls
+                        result = await probe(*args, **kwargs)
+                        calls += 1
+                        if calls == 2:
+                            manager.db.execute_write(
+                                "UPDATE sessions SET cold_recovery_stop_token='raced-stop' WHERE id=?",
+                                (session.session_id,),
+                            )
+                        return result
+                    monkeypatch.setattr(inspection, "probe", stopped)
+                lineage = path.read_bytes()
+                original_row = manager.db.execute_read("SELECT * FROM workspace_embodiments")
+                gates = manager.db.execute_read("SELECT * FROM acquisition_launch_gates")
+                reaper = Mock(side_effect=AssertionError("Unknown original Host must not be reaped"))
+                with monkeypatch.context() as held:
+                    held.setattr(manager, "_reap_host_record", reaper)
+                    with pytest.raises(AcquisitionRefused):
+                        await settlement.inspect(manager, session.session_id, request.operation_id, lambda: True)
+                assert path.read_bytes() == lineage
+                assert manager.db.execute_read("SELECT * FROM workspace_embodiments") == original_row
+                assert manager.db.execute_read("SELECT * FROM acquisition_launch_gates") == gates
+                assert session.client is None and session.status == SessionStatus.STOPPED
+                assert manager._host_index.get(session.session_id) is not None
+                messages = [json.loads(line) for line in transcript.read_text().splitlines()]
+                assert [item["method"] for item in messages if "method" in item].count("session/load") == 1
+                assert not manager.db.execute_read("SELECT * FROM turns")
+                return
+            if completion == "lost-response":
+                register = worktree_lineage.register_session
+                lineage = path.read_bytes()
+
+                def committed_response_lost(*args: Any, **kwargs: Any) -> bool:
+                    assert register(*args, **kwargs)
+                    return False
+
+                with monkeypatch.context() as lost:
+                    lost.setattr(worktree_lineage, "register_session", committed_response_lost)
+                    with pytest.raises(AcquisitionRefused, match="registration remains"):
+                        await settlement.inspect(manager, session.session_id, request.operation_id, lambda: True)
+                assert session.client is None and path.read_bytes() != lineage
+                committed = path.read_bytes()
+                assert manager.db.execute_read("SELECT * FROM acquisition_launch_gates")
+            result = await settlement.inspect(
+                manager, session.session_id, request.operation_id, lambda: True,
+            )
+            client = session.client
+            assert result["state"] == "complete" and client is not None
+            assert result == await settlement.inspect(
+                manager, session.session_id, request.operation_id, lambda: True,
+            )
+            assert manager.db.get_events(session.session_id) == original_events
+            assert session.status == SessionStatus.IDLE
+            assert not manager.db.execute_read("SELECT * FROM acquisition_launch_gates")
+            if completion == "lost-response":
+                assert path.read_bytes() == committed
+        else:
+            assert worktree_lineage.register_session(
+                "host", NATIVE, pid=child, worktree_dir=str(checkout), hosted_activation=activation,
+            )
         registered = path.read_bytes()
         assert worktree_lineage.register_session(
             "host", NATIVE, pid=child, worktree_dir=str(checkout), hosted_activation=activation,
@@ -142,13 +294,14 @@ async def test_acknowledged_hosted_load_registers_without_a_cli_hold(
         assert after.creation_nonce == before.creation_nonce
         assert not (state / "resident-calls").exists()
         original_host = manager._host_index.get(session.session_id)
-        manager._set_background_recovery_enabled(session, False)
-        await client.shutdown()
-        session.client = None
-        assert await manager._reattach_one(
-            original_host, session, new_status=SessionStatus.IDLE,
-        )
-        client = manager.get_session(session.session_id).client
+        if completion == "direct":
+            manager._set_background_recovery_enabled(session, False)
+            await client.shutdown()
+            session.client = None
+            assert await manager._reattach_one(
+                original_host, session, new_status=SessionStatus.IDLE,
+            )
+            client = manager.get_session(session.session_id).client
         assert client is not None
         assert client.acp_session_id == NATIVE
         assert acceptance.host_binding(manager._host_index.get(session.session_id)) == acceptance.host_binding(
@@ -159,10 +312,59 @@ async def test_acknowledged_hosted_load_registers_without_a_cli_hold(
         assert sum("boot" in item for item in messages) == 1
         assert [item["method"] for item in messages if "method" in item] == [
             "initialize", "session/load", "initialize",
-        ]
+        ] + (["initialize"] if completion == "lost-response" else [])
         assert not manager.db.execute_read("SELECT * FROM turns")
     finally:
+        client = client or session.client
         if client is not None:
             await client.shutdown()
         for host in manager._host_index.all():
             manager._reap_host_record(host, "owned hosted-registration fixture cleanup")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("start_failure", [False, True])
+async def test_retained_reattach_does_not_reap_an_unconfirmed_original_child(
+    session_manager: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, start_failure: bool,
+) -> None:
+    from types import SimpleNamespace
+    from agent_bridge.session_host.host_index import HostRecord
+
+    manager = session_manager
+    target = SpawnTarget(type="local", cwd=str(tmp_path))
+    session = Session("retained", "Original", target)
+    session.acp_session_id, session.status = NATIVE, SessionStatus.STOPPED
+    manager._sessions[session.session_id] = session
+    manager.db.create_session(
+        session.session_id, session.name, None, target.cwd, "local", "stopped", time.time(),
+        acp_session_id=NATIVE, target_json=target.to_json(),
+    )
+    host = HostRecord(
+        session_id=session.session_id, host_pid=90000001, child_pid=90000002,
+        port=1234, nonce="fixture-nonce",
+    )
+    manager._host_index.register(host)
+    before = manager._host_index._path.read_bytes()
+    socket = SimpleNamespace(attach=AsyncMock(return_value=SimpleNamespace(child_pid=host.child_pid)),
+                             close=AsyncMock())
+    streams = SimpleNamespace(
+        reader=object(), writer=object(), child_exit_code=9, aclose=AsyncMock(),
+    )
+    client = Mock()
+    client.start_streams = AsyncMock(side_effect=RuntimeError("child exited") if start_failure else None)
+    client.shutdown = AsyncMock()
+    monkeypatch.setattr("agent_remote_driver.session_host.client.SessionHostClient.connect",
+                        AsyncMock(return_value=socket))
+    monkeypatch.setattr("agent_bridge.session_host.acp_adapter.open_acp_streams",
+                        AsyncMock(return_value=streams))
+    monkeypatch.setattr("agent_bridge.session_manager.AcpClient", Mock(return_value=client))
+    reaper = Mock(side_effect=AssertionError("Retained unknown custody cannot be reaped"))
+    monkeypatch.setattr(manager, "_reap_host_record", reaper)
+    assert not await manager._reattach_one(
+        host, session, new_status=SessionStatus.STOPPED, retained_check=Mock(),
+    )
+    assert session.client is None and session.status == SessionStatus.STOPPED
+    assert manager._host_index._path.read_bytes() == before
+    reaper.assert_not_called()
+    socket.close.assert_awaited()
+    client.adopt_session.assert_not_called()

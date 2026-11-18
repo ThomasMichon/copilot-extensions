@@ -244,14 +244,28 @@ A missing acknowledgement, changed association or unconfirmed write retains
 the original recovery gate instead of reporting success. Ordinary CLI-native
 registration still uses its existing hold witness.
 
-Post-load completion and deliberate adaptation of affirmative older history
-remain in the
-[open follow-through](../../../efforts/active/task-relevance-reconciliation/hosted-native-activation.md).
-The registration consumer alone does not repair an interrupted operation.
+Original-operation status reconciliation can finish a load interrupted before
+registration. It requires the complete operation-tagged acknowledgement history,
+the original local Host, unchanged process births/epoch and native head, a
+compatible current writer and an unassociated stopped session. It claims the
+Host through its existing generation owner and authenticates a current idle
+child separately from the historical load acknowledgement. Reattachment only
+initializes the transport and adopts that same conversation: no new Host,
+native load, new conversation, prompt or queue drain.
+
+An older writer's affirmative tagged load-finished history can be adapted only
+when the retained Host's immutable state and birth evidence associate its launch
+with that original event span. Missing or conflicting history, a foreign live
+frontend, changed head/incarnation, a stop hold or unavailable transport stays
+held. Reattachment failure never prunes or reaps this unknown original Host.
+Registration response loss retries the same hosted activation idempotently,
+not the load. Completion atomically records the original operation complete,
+removes its launch gate and marks the session idle; task acceptance, permission
+holds, policy clocks and pending prompts remain independent.
 
 The same journal retains completed and uncertain operation IDs. A same-ID
 request reads that outcome, never relaunches. Pending/unknown recovery blocks
-other resumes; transport mutation retries are disabled. The inspection-only
+other resumes; transport mutation retries are disabled. The original-operation
 `GET /api/v1/sessions/{exact-id}/retained-recovery/{operation-id}` route, or
 `status <exact-id> --recovery-operation <id> --json`, reconciles the original
 operation without a new launch. A lost reply after committed acceptance

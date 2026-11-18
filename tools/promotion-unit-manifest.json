@@ -5405,7 +5405,20 @@
         "tools/promotion_unit_tests/test_retained_load_acceptance.py::test_registration_retains_unknown_or_changed_custody[nonce]",
         "tools/promotion_unit_tests/test_retained_load_acceptance.py::test_registration_retains_unknown_or_changed_custody[birth]",
         "tools/promotion_unit_tests/test_retained_load_acceptance.py::test_registration_retains_unknown_or_changed_custody[writer]",
-        "tools/promotion_unit_tests/test_retained_load_acceptance.py::test_registration_retains_unknown_or_changed_custody[stop]"
+        "tools/promotion_unit_tests/test_retained_load_acceptance.py::test_registration_retains_unknown_or_changed_custody[stop]",
+        "tools/promotion_unit_tests/test_retained_load_acceptance.py::test_original_ack_survives_compatible_writer_without_health_inference[False]",
+        "tools/promotion_unit_tests/test_retained_load_acceptance.py::test_original_ack_survives_compatible_writer_without_health_inference[True]",
+        "tools/promotion_unit_tests/test_retained_load_acceptance.py::test_missing_or_changed_original_load_keeps_evidence_unqualified[gap]",
+        "tools/promotion_unit_tests/test_retained_load_acceptance.py::test_missing_or_changed_original_load_keeps_evidence_unqualified[marker]",
+        "tools/promotion_unit_tests/test_retained_load_acceptance.py::test_missing_or_changed_original_load_keeps_evidence_unqualified[missing-ack]",
+        "tools/promotion_unit_tests/test_retained_load_acceptance.py::test_missing_or_changed_original_load_keeps_evidence_unqualified[nonce]",
+        "tools/promotion_unit_tests/test_retained_load_acceptance.py::test_missing_or_changed_original_load_keeps_evidence_unqualified[birth]",
+        "tools/promotion_unit_tests/test_retained_load_acceptance.py::test_missing_or_changed_original_load_keeps_evidence_unqualified[epoch]",
+        "tools/promotion_unit_tests/test_retained_load_acceptance.py::test_missing_or_changed_original_load_keeps_evidence_unqualified[writer]",
+        "tools/promotion_unit_tests/test_retained_load_acceptance.py::test_missing_or_changed_original_load_keeps_evidence_unqualified[subsequent-prompt]",
+        "tools/promotion_unit_tests/test_retained_load_acceptance.py::test_missing_or_changed_original_load_keeps_evidence_unqualified[historical-state]",
+        "tools/promotion_unit_tests/test_retained_load_acceptance.py::test_missing_or_changed_original_load_keeps_evidence_unqualified[historical-time]",
+        "tools/promotion_unit_tests/test_retained_load_acceptance.py::test_missing_or_changed_original_load_keeps_evidence_unqualified[historical-cwd]"
     ],
     "coverage_targets": [
         "plugins/agent-worktrees/src/agent_worktrees/resource_delivery.py",
@@ -5772,7 +5785,8 @@
         "plugins/agent-vault/src/agent_vault/source_start.py",
         "plugins/agent-worktrees/src/agent_worktrees/retained_hosted_activation.py",
         "plugins/agent-worktrees/src/agent_worktrees/tracking_session_activations.py",
-        "plugins/agent-bridge/src/agent_bridge/retained_load_acceptance.py"
+        "plugins/agent-bridge/src/agent_bridge/retained_load_acceptance.py",
+        "plugins/agent-bridge/src/agent_bridge/retained_postload_evidence.py"
     ],
     "sources": {
         "plugins/agent-worktrees/src/agent_worktrees/git_process.py": "6cc675a4d988e7d1fd6b0d76a48fde5909f78f085ef194ec69625c6334b4f80f",
@@ -6636,6 +6650,7 @@
         "tools/promotion_unit_tests/test_hosted_activation.py": "20b44b2d24ea15e988b07a81d15eb01643a137d62666ff9b23e29fe8cfaf7f1c",
         "plugins/agent-worktrees/src/agent_worktrees/retained_hosted_activation.py": "3e854addd94b96a577c4222b2808073fcd17224f8d97ca0f261fadb783f28c4a",
         "plugins/agent-bridge/src/agent_bridge/retained_load_acceptance.py": "f315ca94adb740d0615b4db2f33e606a2869d098852f65c54b669bcb9a00f4d3",
-        "tools/promotion_unit_tests/test_retained_load_acceptance.py": "83ee877ae8c75e0b46c3e7484667da630e793ed285e77b8ba35d1485fd65f4c7"
+        "tools/promotion_unit_tests/test_retained_load_acceptance.py": "1ea57063547f6c7b7cd9f1e5d6e8c527f6a7596e2d9150f85fcda30b598412fa",
+        "plugins/agent-bridge/src/agent_bridge/retained_postload_evidence.py": "5429d6ad548694d19a6442e5f0c1b18a6dcdec31ce9be7f354e218aa28635da8"
     }
 }

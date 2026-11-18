@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -153,3 +154,116 @@ def test_registration_retains_unknown_or_changed_custody(original: Any, changed:
         b.owner.require_current.side_effect = Refused("stopped", "stop hold")
     with pytest.raises(Refused):
         b.source.registration(b.owner, b.client)
+
+
+@pytest.fixture
+def postload(original: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Any:
+    b = original
+    b.writer["identity"]["installation_root"] = "/example/worktrees"
+
+    class Requirement:
+        @classmethod
+        def model_validate(cls, value: Any) -> Any:
+            return SimpleNamespace(
+                identity=SimpleNamespace(**value["identity"]), creation_nonce=value["creation_nonce"],
+            )
+
+    setattr(sys.modules[f"{PACKAGE}.acquisition_contract"], "WorktreeWriterRequirement", Requirement)
+    models = ModuleType(f"{PACKAGE}.models")
+    setattr(models, "RetainedRecoveryRequest", SimpleNamespace)
+    recovery = ModuleType(f"{PACKAGE}.retained_session_recovery")
+    setattr(recovery, "_refuse", lambda message: Refused("held", message))
+    settlement = ModuleType(f"{PACKAGE}.retained_recovery_settlement")
+    setattr(settlement, "START_EVENT", "retained_recovery_started")
+    for module in (models, recovery, settlement):
+        monkeypatch.setitem(sys.modules, module.__name__, module)
+    spec = importlib.util.spec_from_file_location(
+        f"{PACKAGE}.retained_postload_evidence",
+        ROOT / "plugins/agent-bridge/src/agent_bridge/retained_postload_evidence.py",
+    )
+    assert spec and spec.loader
+    source = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, source.__name__, source)
+    spec.loader.exec_module(source)
+    host = b.owner.host_record
+    host.state_file = str(tmp_path / "host-state.json")
+    state = {
+        "version": 2, **{key: getattr(host, key) for key in (
+            "session_id", "port", "host_pid", "child_pid", "protocol_version", "nonce",
+        )}, "cwd": "/example/workspace", "created_at": .5, "boot_id": "original-boot",
+        "host_start_ticks": 100, "child_start_ticks": 101,
+    }
+    Path(host.state_file).write_text(json.dumps(state), encoding="utf-8")
+    events = [
+        ("retained_recovery_started", {"version": 1, "request": b.owner.request.model_dump()}),
+        ("startup_progress", {"phase": "resume", "state": "started"}),
+        ("startup_progress", {"phase": "session-host-start", "state": "started"}),
+        ("startup_progress", {"phase": "session-host-start", "state": "finished"}),
+        ("startup_progress", {"phase": "native-session-load", "state": "started"}),
+        (b.source.EVENT, b.source.prepare(b.owner, b.client)),
+        ("startup_progress", {"phase": "native-session-load", "state": "finished"}),
+        ("startup_progress", {"phase": "resume", "state": "failed"}),
+    ]
+    b.history = [
+        {"event_id": index, "event_type": name, "data": data, "timestamp": timestamp}
+        for index, ((name, data), timestamp) in enumerate(zip(
+            events, [.01, .02, .1, 2., 3., 4., 5., 6.], strict=True,
+        ), 1)
+    ]
+    b.evidence, b.state = source, state
+    b.requirement = Requirement.model_validate(b.writer)
+    b.qualify = lambda: source.qualify(
+        b.history, host, b.owner.request, b.requirement, "/example/workspace",
+    )
+    return b
+
+
+@pytest.mark.parametrize("historical", [False, True])
+def test_original_ack_survives_compatible_writer_without_health_inference(postload: Any, historical: bool) -> None:
+    b = postload
+    expected = b.source.prepare(b.owner, b.client)["activation"]
+    if historical:
+        b.history.pop(5)
+        for index, item in enumerate(b.history, 1):
+            item["event_id"] = index
+    b.writer["identity"] = {**b.writer["identity"], "runtime_generation": "new-executor"}
+    if not historical:
+        assert b.history[5]["data"]["writer"]["identity"]["runtime_generation"] == "executing"
+    assert b.qualify() == expected
+
+
+@pytest.mark.parametrize("changed", [
+    "gap", "marker", "missing-ack", "nonce", "birth", "epoch", "writer", "subsequent-prompt",
+    "historical-state", "historical-time", "historical-cwd",
+])
+def test_missing_or_changed_original_load_keeps_evidence_unqualified(postload: Any, changed: str) -> None:
+    b = postload
+    if changed == "gap":
+        b.history[2]["event_id"] = 99
+    elif changed == "marker":
+        b.history[0]["data"]["request"] = {"operation_id": "other"}
+    elif changed == "missing-ack":
+        b.history[6]["data"]["state"] = "failed"
+    elif changed == "nonce":
+        b.owner.host_record.nonce = "other"
+    elif changed == "birth":
+        b.physical[42]["start_time"] = "other"
+    elif changed == "epoch":
+        b.epoch["boot_id"] = "other"
+    elif changed == "writer":
+        b.history[5]["data"]["writer"]["creation_nonce"] = "other"
+    elif changed == "subsequent-prompt":
+        b.history.append({"event_id": 9, "event_type": "user_message", "data": {}})
+    else:
+        b.history.pop(5)
+        for index, item in enumerate(b.history, 1):
+            item["event_id"] = index
+        if changed == "historical-state":
+            b.state["host_pid"] = 99
+        elif changed == "historical-time":
+            b.state["created_at"] = 2.
+        else:
+            b.state["cwd"] = "/other"
+        Path(b.owner.host_record.state_file).write_text(json.dumps(b.state), encoding="utf-8")
+    with pytest.raises(Refused):
+        b.qualify()
