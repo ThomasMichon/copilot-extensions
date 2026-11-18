@@ -3421,6 +3421,16 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [operation-credential receiving receipt](journal/2026/11.17-operation-credential-receiving-receipt.md)
+  records #13171's actual reviewed whole-domain acceptance and #5763's
+  separately audited redundant-tracker retirement after complete current
+  ROOT/source/custody readback. All three technical rows remain unchecked;
+  owners, #5760 and #954/P3 remain. The complete census is 883 whole,
+  154 above fixed 729, with one audited campaign retirement and no arrivals
+  or unrelated departures. Whole current safe comparisons retain #5947's
+  callback, #5952's settings-choice and #5953's cleanup/Restore contracts
+  independently OPEN; #5956's architecture decision retains its actual
+  copied-source qualification boundary.
   The [current create-credential qualification](journal/2026/11.17-current-create-credential-qualification.md)
   records #13168's actual reviewed receipt and #5763's corrected current
   gate/create/SSH-source credit. A three-row whole venue-domain proposal
