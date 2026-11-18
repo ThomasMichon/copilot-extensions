@@ -6,6 +6,10 @@ harness or a future-feature catalog. New adopters can start with
 [adoption](adoption.md); the [documentation index](README.md) maps the reading
 path. Exact commands and schemas remain owned by the linked components.
 
+For the execution path rather than the installation layout, see
+[How an automated task runs](agent-lifecycle/README.md): who assigns work,
+where the agent runs, how it returns a result, and who cleans up.
+
 How the plugins fit together: installation topology, runtimes, endpoints, and
 credential relay. Runtime-backed plugins deploy a plugin-owned Python package
 with `uv`, generated payload-local commands, and session command glossaries.
