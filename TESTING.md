@@ -8120,15 +8120,34 @@ Real front-door, missing-socket, installed-hook, SDK-forwarding and JavaScript
 delivery counterparts retain their existing periodic ownership. No Python
 classifier assertion is treated as proof of a native or shell boundary.
 
-`tools/promotion_unit_tests/test_peer_environment.py` re-exports all six exact
-functions from `libs/peer-launch/tests/test_peer_environment.py`. The original
+`tools/promotion_unit_tests/test_peer_environment.py` re-exports the selected
+actor-free functions from `libs/peer-launch/tests/test_peer_environment.py`. The original
 module already loads the canonical flat `libs/peer-launch/peer_launch.py`;
 the adapter does not preload production, rewrite imports or copy assertions.
 Replacing only the original file prefix maps each unit to its packet identity.
 All three files are hash-bound, and each unit must contribute actual
-`peer_environment` call coverage under the unchanged observer and budget.
+peer-boundary call coverage under the unchanged observer and budget.
+The Windows launch units cover short DOS, long DOS/UNC and already-extended
+executable selection, supplementary-character paths and unpaired surrogates
+for dynamic and pinned calls without creating a process.
+The separate explicit Dispatch `tests/native/test_peer_long_paths.py` uses the
+existing real-venv peer fixtures for both routes. It requires actual Windows
+execution beyond `MAX_PATH`, including paths below 260 Python code points that
+exceed the UTF-16-unit limit, and checks exact argv, inherited streams and exit
+status with both default and deliberately deep temporary names. The Unicode
+boundary uses a distinct short fixture-owned leaf when the per-test name cannot
+fit; an incompatible framework base is reported as unqualified rather than
+mistaken for a launch failure. This is not part of the actor-free promotion packet.
 The eleven separate packaging tests remain unqualified; this cohort does not
 prove native peer launch, vendor synchronization or the complete library census.
+
+`tools/promotion_unit_tests/test_bridge_contract_git.py` covers the source
+guard's complete multi-batch object inventory and late malformed-header,
+truncation and trailing-data refusals. Each native Git request retains its
+ten-second deadline and local-only environment, with at most 256 queries rather
+than an entire growing history. No provenance is dropped, and a later batch
+failure cannot publish a partial object cache. These four actor-free controls
+do not replace the real native full-history validation.
 
 The shared lazy-dispatch cohort re-exports the three original classes from
 `libs/lazy-cli-dispatch/tests/test_dispatch.py` through
