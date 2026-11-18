@@ -16,7 +16,6 @@ from zdd.claims import ClaimConflict
 from zdd.diagnostics import process_start_time
 
 from .config import config_dir
-from .session_host.host_inventory import HostInventoryError
 from .session_status import SessionStatus
 
 if TYPE_CHECKING:
@@ -32,16 +31,30 @@ def may_refresh_inherited(manager: SessionManager, row: dict[str, Any]) -> bool:
         )
     ):
         return True
-    if row.get("runtime_custody_json") is not None:
+    if row.get("runtime_custody_json") is not None or manager.db.retained_recovery_held(row["id"]):
         return False
     try:
-        manager._host_index.claim(
+        record = manager._host_index.claim(
             row["id"], generation=manager._generation_id, owner_pid=os.getpid(),
             pid_alive=pid_alive, require_owner_fields=True,
         )
+        if record.boundary == "local":
+            # Missing or ambiguous native evidence is neither admission nor exit.
+            exited = [
+                process_exit.observe_original_exit(
+                    getattr(record, name + "_pid"), record.extra.get(name + "_process_start"),
+                ) for name in ("host", "child")
+            ]
+            if any(exited):
+                if all(exited):
+                    manager._host_index.release_exited_local(
+                        record, settle=lambda: manager.db.settle_exited_inherited_host(row, record.child_pid),
+                    )
+                # Even on settlement this read predates STOPPED; refresh it on the next pass.
+                return False
     except (ClaimConflict, KeyError):
         return False
-    except HostInventoryError as exc:
+    except (OSError, ValueError, NotImplementedError) as exc:
         logging.getLogger("agent-bridge").warning("Deferring inherited session %s: %s", row["id"], exc)
         return False
     return True

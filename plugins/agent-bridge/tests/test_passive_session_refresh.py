@@ -5,12 +5,14 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import aclosing
+import os
 from pathlib import Path
 import time
 from typing import cast
 from unittest.mock import Mock
 
 import pytest
+from zdd import diagnostics, process_exit
 
 from agent_bridge.db import Database
 from agent_bridge.events import EventLog
@@ -98,7 +100,10 @@ def test_refresh_isolates_ineligible_hosts_from_compatible_workers_and_stops(tmp
         records = [
             HostRecord("partial", 9001, 21, 22, owner_generation="prior"),
             HostRecord("stranded", 9002, 31, 32, protocol_version=2),
-            HostRecord("released", 9003, 41, 42),
+            HostRecord("released", 9003, os.getpid(), os.getpid(), extra={
+                "host_process_start": diagnostics.process_start_time(os.getpid()),
+                "child_process_start": diagnostics.process_start_time(os.getpid()),
+            }),
         ]
         for record in records:
             manager._host_index.register(record)
@@ -115,5 +120,53 @@ def test_refresh_isolates_ineligible_hosts_from_compatible_workers_and_stops(tmp
         stopped = manager.get_session("stopped")
         assert stopped is not None and stopped.status == SessionStatus.STOPPED
         assert not stopped.background_recovery_enabled
+    finally:
+        db.close()
+
+
+@pytest.mark.parametrize("evidence", ["both-exited", "child-still-live", "denied", "native-held", "starting"])
+def test_refresh_preserves_or_settles_original_execution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, evidence: str,
+) -> None:
+    (tmp_path / "hosts").mkdir()
+    db = Database(str(tmp_path / "sessions.db"))
+    try:
+        sid = "worker"
+        status = "starting" if evidence == "starting" else "running"
+        db.create_session(sid, sid, None, str(tmp_path), "local", status, time.time(),
+                          acp_session_id="11111111-2222-4333-8444-555555555555")
+        db.create_turn(sid, 0, "unfinished", time.time(),
+                       delivery_id="original-delivery" if evidence == "native-held" else None)
+        manager = SessionManager(db, read_only_rehydrate=True)
+        session = manager.get_session(sid)
+        assert session is not None
+        session.awaiting_maintenance_refresh = True
+        manager._host_index.register(HostRecord(sid, 9001, 21, 22, extra={
+            "host_process_start": "100", "child_process_start": "102",
+        }))
+        monkeypatch.setattr(manager, "_rec_host_alive", lambda _: False)
+
+        def exited(pid: int, token: str) -> bool:
+            assert (pid, token) in {(21, "100"), (22, "102")}
+            if evidence == "denied":
+                raise PermissionError("fixture observation unavailable")
+            return (pid, evidence) != (22, "child-still-live")
+
+        monkeypatch.setattr(process_exit, "observe_original_exit", exited)
+        manager._prune_dead_hosts()
+        assert manager._host_index.get(sid) is not None
+        for _ in range(3):
+            refresh_inherited_sessions(manager)
+        turn = db.get_turn(sid, 0)
+        assert turn is not None
+        if evidence == "both-exited":
+            assert manager._host_index.get(sid) is None
+            assert session.status == SessionStatus.STOPPED and not session.background_recovery_enabled
+            assert turn["completed_at"] and turn["stop_reason"] == "interrupted"
+            assert [e["event_type"] for e in db.get_events(sid)] == ["turn_complete", "session_state_changed"]
+        else:
+            assert manager._host_index.get(sid) is not None and session.awaiting_maintenance_refresh
+            assert session.status.value == status and turn["completed_at"] is None
+            assert db.get_events(sid) == []
     finally:
         db.close()
