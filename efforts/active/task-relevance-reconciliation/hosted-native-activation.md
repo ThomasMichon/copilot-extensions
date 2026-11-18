@@ -3,9 +3,9 @@
 Part of [Task Relevance Reconciliation](README.md), correcting the remaining
 [#12696](https://github.com/ThomasMichon/copilot-extensions/issues/12696)
 boundary within [retained native recovery](retained-metadata-recovery.md).
-**Status: plan reviewed in #13160; receiving writer implementation under
-qualification. Bridge caller, post-load reconciliation and runtime acceptance
-remain open.**
+**Status: plan reviewed in #13160; receiving writer source accepted in #13162.
+Bridge negotiation and accepted-load journaling are under qualification.
+Hosted registration, post-load reconciliation and runtime acceptance remain open.**
 
 ## Measured contract gap
 
@@ -107,6 +107,24 @@ state during rollback; it may not clear its gate or relaunch the native.
 Document the supported passive rollback boundary before enabling the caller.
 Unsupported platforms retain an explicit unqualified outcome; Linux source
 controls must not be reported as Windows native qualification.
+
+### Accepted-load journal and passive rollback
+
+The first Bridge slice uses the existing operation-tagged event journal:
+`retained_native_load_accepted` retains the original request, selected executing
+writer, immutable Host transport association and hosted activation source.
+The RPC owner writes and flushes this event immediately after the actual load
+acknowledgement, before preference application or lineage registration. A stop
+arriving while the RPC was in flight does not erase its acknowledgement.
+The Host nonce itself is not copied into events; the association retains its
+digest. Physical observations alone never emit this event.
+
+The original recovery row keeps its existing strict request/state shape.
+Prior readers continue to treat an interrupted operation as unknown and retain
+its launch gate; their no-load settlement rejects the additional acceptance
+event. This passive rollback does not complete an accepted load, but also cannot
+turn it into a new eligible load. The initial slice does not yet emit the
+hosted registration option or claim post-load completion.
 
 ## Validation plan
 

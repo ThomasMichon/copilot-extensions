@@ -217,9 +217,25 @@ contracts separately advertise `retained-native-recovery`.
 The receiver requalifies its original keyed writer and installation, requires
 a stopped local session and owner-confirmed native loss, then writes the
 operation before one exact native load. Worktrees must advertise
-`retained_native_resume: 1` and enforces the original workspace incarnation
-and native head revision inside its process-creation fence. An older owner
-does not silently receive an ordinary unfenced resume.
+`retained_native_resume: 1` and `retained_hosted_activation: 1` from the actual
+selected executor. The native-resume fence enforces the original workspace
+incarnation and head revision. Missing hosted-activation support or an
+unqualified local Linux/WSL execution epoch refuses before Host creation;
+an older owner does not silently receive an ordinary unfenced resume.
+
+The original RPC owner records `retained_native_load_accepted` in the same
+operation-tagged event journal immediately after `session/load` acknowledges.
+It binds the original recovery request and selected writer to the actual local
+Host transport, process births and execution epoch, then flushes before
+returning to preference application or registration. The association stores a
+nonce digest, not the Host's attach credential. A timeout without an
+acknowledgement never manufactures this event. A stop arriving during the RPC
+does not erase an acknowledgement, grant permission or complete registration.
+The recovery row's request/state schema remains unchanged, so an older reader
+preserves unknown custody and rejects accepted-load evidence as a no-load
+failure. Hosted registration emission and post-load completion remain in the
+[open follow-through](../../../efforts/active/task-relevance-reconciliation/hosted-native-activation.md);
+this journal addition alone does not repair a registration failure.
 
 The same journal retains completed and uncertain operation IDs. A same-ID
 request reads that outcome, never relaunches. Pending/unknown recovery blocks

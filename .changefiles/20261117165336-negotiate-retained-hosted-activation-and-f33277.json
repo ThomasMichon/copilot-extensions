@@ -1,0 +1,9 @@
+{
+  "comment": "Negotiate retained hosted activation and durably retain accepted native loads before lineage registration",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
