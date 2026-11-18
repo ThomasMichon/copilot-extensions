@@ -11,6 +11,7 @@ import subprocess
 import sys
 from contextlib import redirect_stdout
 from pathlib import Path
+from types import ModuleType
 
 from agent_procutil._daemon_instance_identity import runtime_slot_paths
 
@@ -18,7 +19,7 @@ from . import config as cfg
 from . import output, registry_paths
 
 
-def add_parsers(sub) -> None:
+def add_parsers(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     status = sub.add_parser("dev-status", help="Read the selected runtime's dev claim")
     status.add_argument("--json", action="store_true")
     release = sub.add_parser("dev-release", help="Restore the original runtime, then release dev")
@@ -33,7 +34,7 @@ def _runtime_slot() -> Path:
     return Path(location[1])
 
 
-def _lifecycle():
+def _lifecycle() -> ModuleType:
     slot = _runtime_slot()
     bootstrap = slot / ".runtime-bootstrap"
     helper = bootstrap / "runtime_install.py"
@@ -50,10 +51,12 @@ def _lifecycle():
     return module
 
 
-def _error(args, error: Exception, code: int = 1) -> int:
+def _error(args: argparse.Namespace, error: Exception, code: int = 1) -> int:
     message = str(error)
     if isinstance(error, (subprocess.CalledProcessError, subprocess.TimeoutExpired)):
         diagnostic = error.stderr or error.stdout
+        if isinstance(diagnostic, bytes):
+            diagnostic = diagnostic.decode("utf-8", errors="replace")
         if diagnostic:
             message += f"\n{diagnostic}"
     if getattr(args, "json", False):
@@ -90,7 +93,7 @@ def cmd_dev_release(args: argparse.Namespace) -> int:
         execution.owner = args.owner.resolve()
         flags.extend(["--owner", str(execution.owner)])
 
-    def execute(request):
+    def execute(request: argparse.Namespace) -> int:
         with output.capture_json_output() as captured:
             code = _cmd_dev_release(request)
         print(captured.getvalue(), end="")
@@ -151,11 +154,14 @@ def _cmd_dev_release(args: argparse.Namespace) -> int:
                 mode="dev-release", owner=owner,
                 expected_governance=governance.signature(),
             )
+        code = int(lifecycle.install_driver.result_exit_code(result))
+        if code:
+            return _error(args, RuntimeError(result["installation_refused"]["error"]), code)
         if getattr(args, "json", False):
             output._json_output(result)
         else:
             output.info(f"Dev released; current-version -> {result['runtime_version']}")
-        return 0
+        return code
     except (OSError, ValueError, RuntimeError, ImportError, subprocess.SubprocessError) as error:
         code = 2 if lifecycle is not None and isinstance(
             error, lifecycle.runtime.DevClaimConflict,

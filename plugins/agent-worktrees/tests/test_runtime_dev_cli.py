@@ -1,5 +1,14 @@
 from __future__ import annotations
 
+import sys
+from agent_worktrees import config as cfg
+from agent_worktrees import output
+from agent_worktrees import registry_paths
+
+from collections.abc import Iterator
+from pathlib import Path
+from typing import Any
+
 import argparse
 from contextlib import contextmanager
 import json
@@ -11,9 +20,9 @@ from agent_worktrees import runtime_candidate, runtime_dev_cli
 
 
 @pytest.mark.parametrize("fault", ["none", "changed", "editable", "omitted", "malformed"])
-def test_original_origin_receipt_is_independent_of_current_graph(tmp_path, monkeypatch, fault):
-    monkeypatch.setattr(runtime_candidate.sys, "prefix", str(tmp_path))
-    record = {
+def test_original_origin_receipt_is_independent_of_current_graph(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str) -> None:
+    monkeypatch.setattr(sys, "prefix", str(tmp_path))
+    record: dict[str, Any] = {
         "schema": "installer-engine.frozen-input-origins", "version": 1,
         "packages": {"original-only": "file:///gone/original"},
     }
@@ -38,8 +47,8 @@ def test_original_origin_receipt_is_independent_of_current_graph(tmp_path, monke
             runtime_candidate.verify_installed_origins()
 
 
-def test_original_legacy_build_without_receipt_does_not_invent_origins(tmp_path, monkeypatch):
-    monkeypatch.setattr(runtime_candidate.sys, "prefix", str(tmp_path))
+def test_original_legacy_build_without_receipt_does_not_invent_origins(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys, "prefix", str(tmp_path))
     monkeypatch.setattr(
         runtime_candidate, "distributions",
         lambda: pytest.fail("Legacy build must not be compared to today's dependency graph"),
@@ -50,9 +59,9 @@ def test_original_legacy_build_without_receipt_does_not_invent_origins(tmp_path,
 @pytest.mark.parametrize("source_wheel", [False, True])
 @pytest.mark.parametrize("changed", [False, True])
 def test_origin_verifier_normalizes_wheel_names_but_preserves_directory_names(
-    tmp_path, monkeypatch, source_wheel, changed,
-):
-    monkeypatch.setattr(runtime_candidate.sys, "prefix", str(tmp_path))
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source_wheel: bool, changed: bool,
+) -> None:
+    monkeypatch.setattr(sys, "prefix", str(tmp_path))
     digest = "a" * 64
     name = "example-app" if source_wheel else "Example_App"
     url = "file:///gone/example.whl#sha256=" + digest if source_wheel else "file:///gone/example"
@@ -88,11 +97,11 @@ def test_origin_verifier_normalizes_wheel_names_but_preserves_directory_names(
     (None, False),
 ])
 def test_retained_source_wheel_archive_metadata_matches_construction(
-    tmp_path, monkeypatch, archive, accepted,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, archive: None | dict[str, Any], accepted: bool,
+) -> None:
     digest = "a" * 64
     url = "file:///gone/example.whl#sha256=" + digest
-    monkeypatch.setattr(runtime_candidate.sys, "prefix", str(tmp_path))
+    monkeypatch.setattr(sys, "prefix", str(tmp_path))
     (tmp_path / ".runtime-input-origins.json").write_text(json.dumps({
         "schema": "installer-engine.frozen-input-origins", "version": 1,
         "packages": {"example-app": url},
@@ -113,9 +122,11 @@ def test_retained_source_wheel_archive_metadata_matches_construction(
 
 @pytest.mark.parametrize("application", [False, True])
 @pytest.mark.parametrize("namespaced", [False, True])
+@pytest.mark.parametrize("refused", [False, True])
+@pytest.mark.parametrize("json_output", [False, True])
 def test_deployed_release_uses_whole_operation_without_owner_checkout(
-    tmp_path, monkeypatch, application, namespaced,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], application: bool, namespaced: bool, refused: bool, json_output: bool,
+) -> None:
     import sys
 
     monkeypatch.setenv("COPILOT_EXTENSIONS_TEST_CONTAINED", "1")
@@ -123,31 +134,32 @@ def test_deployed_release_uses_whole_operation_without_owner_checkout(
     slot = root / "versions" / ("2.0+source.fixture.profile.fixture" if application else "dev")
     slot.mkdir(parents=True)
     missing_owner = tmp_path / "missing-worktree"
-    monkeypatch.setattr(runtime_dev_cli.sys, "prefix", str(slot / ".venv" if application else slot))
-    monkeypatch.setattr(runtime_dev_cli.cfg, "install_dir", lambda: root)
+    monkeypatch.setattr(sys, "prefix", str(slot / ".venv" if application else slot))
+    monkeypatch.setattr(cfg, "install_dir", lambda: root)
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     if namespaced:
         monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(tmp_path / "context.json"))
-    arguments = argparse.Namespace(owner=missing_owner, json=True)
+    arguments = argparse.Namespace(owner=missing_owner, json=json_output)
     lifecycle = SimpleNamespace(
         SCRIPTS=slot / ".runtime-bootstrap",
         os=__import__("os"),
         Governance=lambda *_args: SimpleNamespace(signature=lambda: {"generation": 1}),
         runtime=SimpleNamespace(DevClaimConflict=RuntimeError),
+        install_driver=SimpleNamespace(result_exit_code=lambda result: int("installation_refused" in result)),
     )
     monkeypatch.setattr(runtime_dev_cli, "_lifecycle", lambda: lifecycle)
     payload_calls = []
 
-    def payload():
+    def payload() -> Any:
         if not namespaced:
             pytest.fail("Legacy restoration must not discover a removed source payload")
         payload_calls.append("namespaced")
         return tmp_path / "authorized-payload"
 
-    monkeypatch.setattr(runtime_dev_cli.registry_paths, "_payload_root", payload)
+    monkeypatch.setattr(registry_paths, "_payload_root", payload)
     calls = []
 
-    def owned(requested, plugin, **kwargs):
+    def owned(requested: Any, plugin: Any, **kwargs: Any) -> Any:
         assert requested == root
         assert plugin == lifecycle.SCRIPTS
         assert kwargs["owner"] == missing_owner
@@ -158,24 +170,41 @@ def test_deployed_release_uses_whole_operation_without_owner_checkout(
         )
         assert "uv" not in kwargs and "base_python" not in kwargs
         calls.append("whole-operation")
+        if refused:
+            return {"runtime_version": "dev", "installation_refused": {
+                "version": 1, "settled": True, "publication_committed": False,
+                "error": "predecessor route changed",
+            }}
         return {"runtime_version": "original", "runtime_generation": "a" * 32}
 
     monkeypatch.setitem(sys.modules, "runtime_install_modes", SimpleNamespace(
         run_owned=owned,
         _resolve_owner=lambda _payload, owner, **_kwargs: owner.resolve(),
     ))
-    with runtime_dev_cli.output.capture_json_output() as result:
-        assert runtime_dev_cli.cmd_dev_release(arguments) == 0
+    with output.capture_json_output() as result:
+        assert runtime_dev_cli.cmd_dev_release(arguments) == int(refused)
     assert calls == ["whole-operation"]
     assert payload_calls == (["namespaced"] if namespaced else [])
-    assert json.loads(result.getvalue())["runtime_version"] == "original"
+    if json_output:
+        record = json.loads(result.getvalue())
+        if refused:
+            assert record["error"] == "predecessor route changed"
+        else:
+            assert record["runtime_version"] == "original"
+    else:
+        captured = capsys.readouterr()
+        if refused:
+            assert "predecessor route changed" in captured.out + captured.err
+            assert "Dev released" not in captured.out
+        else:
+            assert "Dev released" in captured.out
     assert not missing_owner.exists()
 
 
 @pytest.mark.parametrize("application", [False, True])
 def test_retained_lifecycle_loads_from_slot_not_nested_environment(
-    tmp_path, monkeypatch, application,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, application: bool,
+) -> None:
     import sys
 
     slot = tmp_path / "versions" / "2.0"
@@ -186,24 +215,24 @@ def test_retained_lifecycle_loads_from_slot_not_nested_environment(
     )
     prefix = slot / ".venv" if application else slot
     prefix.mkdir(exist_ok=True)
-    monkeypatch.setattr(runtime_dev_cli.sys, "prefix", str(prefix))
+    monkeypatch.setattr(sys, "prefix", str(prefix))
     monkeypatch.setitem(sys.modules, "runtime_install", None)
     assert runtime_dev_cli._lifecycle().SCRIPTS == bootstrap
 
 
-def test_foreign_nested_environment_cannot_release_another_installation(tmp_path, monkeypatch):
+def test_foreign_nested_environment_cannot_release_another_installation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import sys
 
     root = tmp_path / "owner"
     prefix = tmp_path / "foreign" / "versions" / "2.0" / ".venv"
     prefix.mkdir(parents=True)
-    monkeypatch.setattr(runtime_dev_cli.sys, "prefix", str(prefix))
-    monkeypatch.setattr(runtime_dev_cli.cfg, "install_dir", lambda: root)
+    monkeypatch.setattr(sys, "prefix", str(prefix))
+    monkeypatch.setattr(cfg, "install_dir", lambda: root)
     monkeypatch.setattr(runtime_dev_cli, "_lifecycle", lambda: SimpleNamespace(
         runtime=SimpleNamespace(DevClaimConflict=ValueError),
     ))
     monkeypatch.setitem(sys.modules, "runtime_install_modes", SimpleNamespace())
-    with runtime_dev_cli.output.capture_json_output() as result:
+    with output.capture_json_output() as result:
         assert runtime_dev_cli._cmd_dev_release(argparse.Namespace(json=True)) == 1
     assert "this installation's retained slot" in json.loads(result.getvalue())["error"]
     assert not root.exists()
@@ -211,20 +240,20 @@ def test_foreign_nested_environment_cannot_release_another_installation(tmp_path
 
 @pytest.mark.parametrize("application", [False, True])
 def test_windows_release_request_retains_owning_slot_not_environment(
-    tmp_path, monkeypatch, application,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, application: bool,
+) -> None:
     from agent_worktrees import update_driver_json_cli
 
     root = tmp_path / "runtime"
     slot = root / "versions" / ("2.0+source.fixture.profile.fixture" if application else "dev")
     slot.mkdir(parents=True)
-    monkeypatch.setattr(runtime_dev_cli.sys, "prefix", str(slot / ".venv" if application else slot))
-    monkeypatch.setattr(runtime_dev_cli.cfg, "install_dir", lambda: root)
+    monkeypatch.setattr(sys, "prefix", str(slot / ".venv" if application else slot))
+    monkeypatch.setattr(cfg, "install_dir", lambda: root)
     monkeypatch.setattr(runtime_dev_cli, "os", SimpleNamespace(name="nt", environ={}))
     events = []
 
     @contextmanager
-    def retain(observed, version):
+    def retain(observed: Any, version: Any) -> Iterator[Any]:
         assert observed == root and version == slot.name
         events.append("retained")
         yield
@@ -234,52 +263,52 @@ def test_windows_release_request_retains_owning_slot_not_environment(
         runtime=SimpleNamespace(retention_lease=retain),
     ))
 
-    def release(_request):
+    def release(_request: Any) -> Any:
         assert events == ["retained"]
-        runtime_dev_cli.output._json_output({"runtime_version": "original"})
+        output._json_output({"runtime_version": "original"})
         return 0
 
-    def request(command, flags, execution, execute, *, retained_dev):
+    def request(command: Any, flags: Any, execution: Any, execute: Any, *, retained_dev: Any) -> Any:
         assert command == "dev-release" and flags == ["--json"]
         assert retained_dev == (not application)
         return execute(execution)
 
     monkeypatch.setattr(runtime_dev_cli, "_cmd_dev_release", release)
     monkeypatch.setattr(update_driver_json_cli, "_run_request", request)
-    with runtime_dev_cli.output.capture_json_output() as result:
+    with output.capture_json_output() as result:
         assert runtime_dev_cli.cmd_dev_release(argparse.Namespace(json=True)) == 0
     assert events == ["retained", "released"]
     assert json.loads(result.getvalue()) == {"version": 1, "runtime_version": "original"}
 
 
-def test_unavailable_deployed_lifecycle_reports_error_without_secondary_failure(monkeypatch):
+def test_unavailable_deployed_lifecycle_reports_error_without_secondary_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         runtime_dev_cli, "_lifecycle",
         lambda: (_ for _ in ()).throw(RuntimeError("missing installed lifecycle")),
     )
-    with runtime_dev_cli.output.capture_json_output() as result:
+    with output.capture_json_output() as result:
         assert runtime_dev_cli.cmd_dev_release(argparse.Namespace(json=True)) == 1
     assert json.loads(result.getvalue())["error"] == "missing installed lifecycle"
 
 
-def test_deployed_status_reads_claim_strictly_and_does_not_release(monkeypatch, tmp_path):
+def test_deployed_status_reads_claim_strictly_and_does_not_release(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     from types import SimpleNamespace
 
     calls = []
     claim = {"owner": str(tmp_path / "owner"), "previous_version": "original"}
 
-    def read(root, *, strict):
+    def read(root: Any, *, strict: Any) -> Any:
         assert root == tmp_path and strict
         calls.append("read")
         return claim
 
-    monkeypatch.setattr(runtime_dev_cli.cfg, "install_dir", lambda: tmp_path)
+    monkeypatch.setattr(cfg, "install_dir", lambda: tmp_path)
     monkeypatch.setattr(runtime_dev_cli, "_lifecycle", lambda: SimpleNamespace(
         runtime=SimpleNamespace(
             read_dev_claim=read, current_version=lambda _root: "dev",
         ),
     ))
-    with runtime_dev_cli.output.capture_json_output() as result:
+    with output.capture_json_output() as result:
         assert runtime_dev_cli.cmd_dev_status(argparse.Namespace(json=True)) == 0
     assert calls == ["read"]
     assert json.loads(result.getvalue())["claim"] == claim

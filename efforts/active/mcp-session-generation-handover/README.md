@@ -33,6 +33,22 @@ Client-owned stdio/session keepers remain with their actual client, not the
 updater's cleanup scope. This does not reintroduce a whole-SDK, desktop observer
 or unrelated portfolio prerequisite.
 
+### Maintenance recovery objective
+
+> Make the installer/update maintenance agent debug promotion and also fix the update queue (and fix whatever bug let the update queue jam)
+
+This adds a maintenance recovery slice: restore the reviewed promotion path,
+reconcile the interrupted update through its supported owner, and fix the
+refused-handover settlement path with a focused regression. It supplements,
+rather than replaces, the original handover intent and completion gates below.
+Queue release alone is not proof of cleanup, runtime adoption, or effort
+completion.
+
+The queue follow-up is tracked by #13237. Verify promotion before closing
+obsolete failure signatures; land the root-cause fix through normal review and
+required CI, then verify its promoted release and separately authorized runtime
+adoption. Existing state-preservation and completion gates remain unchanged.
+
 ### Selected originating-owner design
 
 > explicit-launcher-handoff
@@ -476,13 +492,18 @@ handover. Preserve held sessions and the separate pre-feature adoption hold.
       native-owned protected-name lifetime after publisher handles close.
       Installed handover, release and productive/default enrollment are
       independent remaining gates.
-    - [ ] **Joined retained headed physical receiver:** compose this copied
+    - [x] **Joined retained headed physical receiver:** compose this copied
       producer with the real optional physical receiver/custody through
       replacement, rollback, accepted/in-flight/unknown outcomes and exact
       settlement. Keep actual native/client/conduit/keeper/upstream attribution
       and the existing pre-effect context barrier; a synthetic configuration
       provider or a separately qualified creation/wait packet is not this
-      composition. Default and installed adoption remain separate.
+      composition. #12440 merged at
+      `cedf6979a7983699cfd677d8230e5af5e78ebd32` after genuine current-head
+      approval, all required checks and both hosted source platforms passed.
+      All three Windows original-client physical handover modes pass,
+      including the actual copied-headed receiver. Promoted release,
+      installed handover and ordinary/default caller adoption remain separate.
   - [x] **Explicit Linux exec caller:** capture the exec owner's native pair
     and pass a sealed, session-only overlay for explicitly named configured
     entries, with actual-start discovery bound to a physical optional receiver.
@@ -618,6 +639,12 @@ handover. Preserve held sessions and the separate pre-feature adoption hold.
   changefiles; land implementation through review and required CI.
 - [ ] Verify promotion, then perform separately authorized installed-consumer
   acceptance. Record old-client preservation separately from actual reattachment.
+  - [x] **Bounded installed Linux update handover:** an actual native client
+    consumes three tool results across the ordinary installed
+    `0.2.269-dev1` to `0.2.270-dev1` update and natural old-backend retirement.
+    See the [bounded installed result](journal/2026/11.10-explicit-owner-cli.md#bounded-installed-linux-update-handover).
+    Private namespace and contained lifetime only; default callers, payload
+    wrapper selection, installed Windows and the broader matrix remain open.
 - [ ] Resolve every plan and validation gate, or transfer an explicitly blocked
   legacy adoption item to its named tracked owner, before closing this effort.
 

@@ -11,9 +11,14 @@ import tempfile
 import uuid
 from contextlib import ExitStack
 from pathlib import Path
+from typing import Any, cast
+from collections.abc import Callable
 
 import runtime_install as lifecycle
-import tomllib
+if sys.version_info >= (3, 11):
+    import tomllib
+else:
+    import tomli as tomllib
 
 
 _MODE_OWNER_ABI = 1
@@ -23,7 +28,7 @@ _CONTEXT_CHILD_TIMEOUT = 480
 def _retained_control(
     root: Path, admitted: lifecycle.engine.FrozenInputs, custody: ExitStack,
     *, mode: str, wait_timeout: float, child_timeout: float,
-) -> tuple[Path, int, str] | None:
+) -> tuple[Path, int | None, str] | None:
     current = lifecycle.runtime.current_version(root)
     previous = lifecycle.runtime.read_last_known_good(root)
     if mode == "repair":
@@ -90,7 +95,7 @@ print(json.dumps({"version": 1, "compatible": compatible}))
                     f"Control runtime {version} has no installed interpreter"
                 )
             try:
-                completed = lifecycle.engine.run_owned(
+                completed = cast(Callable[..., subprocess.CompletedProcess[str]], getattr(lifecycle.engine, "run_owned"))(
                     [str(python), "-I", "-B", "-c", probe, str(slot), str(_MODE_OWNER_ABI)],
                     cwd=Path(root.anchor), env=environment, timeout=child_timeout,
                     procutil=lifecycle.engine._procutil(admitted), construction_fd=descriptor,
@@ -134,10 +139,10 @@ def run(
     owner: Path | None = None,
     wait_timeout: float = 180,
     child_timeout: float = 180,
-    expected_source_identity: dict | None = None,
-    frontend: dict | None = None,
+    expected_source_identity: dict[str, Any] | None = None,
+    frontend: dict[str, Any] | None = None,
     recover_adopted_manager: bool = False,
-) -> dict:
+) -> dict[str, Any]:
     """Bootstrap installed control code without selecting a replacement slot."""
     governance = lifecycle.Governance(root, payload)
     root = governance.root
@@ -257,7 +262,7 @@ def run(
             environment["PYTHONDONTWRITEBYTECODE"] = "1"
             if retained is not None:
                 try:
-                    completed = lifecycle.engine.run_owned(
+                    completed = cast(Callable[..., subprocess.CompletedProcess[str]], getattr(lifecycle.engine, "run_owned"))(
                         argv, cwd=Path(root.anchor), env=environment,
                         timeout=_CONTEXT_CHILD_TIMEOUT,
                         procutil=lifecycle.engine._procutil(admitted),
@@ -272,18 +277,20 @@ def run(
                         print(error.stdout, end="", file=sys.stderr, flush=True)
                     if error.stderr:
                         print(error.stderr, end="", file=sys.stderr, flush=True)
+                    if isinstance(error, subprocess.CalledProcessError) and error.returncode == 1:
+                        return lifecycle.install_driver.read_result(result_path, error.returncode, argv)
                     raise
                 if completed.stdout:
                     print(completed.stdout, end="", flush=True)
                 if completed.stderr:
                     print(completed.stderr, end="", file=sys.stderr, flush=True)
-                return json.loads(result_path.read_text(encoding="utf-8"))
+                return lifecycle.install_driver.read_result(result_path, completed.returncode, argv)
             process = subprocess.Popen(
                 argv,
                 executable=argv[0] if os.name == "nt" else None,
                 env=environment,
                 stdin=subprocess.DEVNULL,
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
             )
             try:
                 process.wait()
@@ -292,9 +299,7 @@ def run(
                 # actual owner settles; never delete its interpreter underneath it.
                 process.wait()
                 raise
-            if process.returncode != 0:
-                raise subprocess.CalledProcessError(process.returncode, argv)
-            return json.loads(result_path.read_text(encoding="utf-8"))
+            return lifecycle.install_driver.read_result(result_path, process.returncode, argv)
 
 
 @lifecycle.install_driver.owned
@@ -306,16 +311,16 @@ def run_owned(
     uv: Path | None = None,
     base_python: Path | None = None,
     mode: str,
-    expected_governance: dict,
+    expected_governance: dict[str, Any],
     expected_payload_hash: str | None = None,
     construction_provenance: dict[str, str] | None = None,
     owner: Path | None = None,
     wait_timeout: float = 180,
     child_timeout: float = 180,
-    frontend: dict | None = None,
+    frontend: dict[str, Any] | None = None,
     publication_source_root: Path | None = None,
     recover_adopted_manager: bool = False,
-) -> dict:
+) -> dict[str, Any]:
     if mode not in ("repair", "dev", "dev-release"):
         raise lifecycle.InstallationRefused(f"Unsupported whole-operation runtime mode: {mode}")
     if mode != "dev-release" and (uv is None or base_python is None):
@@ -418,7 +423,7 @@ def run_owned(
                 raise lifecycle.InstallationRefused(
                     "Frozen control provenance differs from candidate package version"
                 )
-            candidate_arguments = dict(
+            candidate_arguments: dict[str, Any] = dict(
                 plugin=candidate_plugin,
                 uv=uv,
                 base_python=base_python,
@@ -483,7 +488,7 @@ def _resolve_owner(payload: Path, owner: Path | None, *, source_required: bool) 
         text=True,
         check=True,
         timeout=30,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
     )
     resolved = Path(result.stdout.strip()).resolve(strict=True)
     if owner is not None and resolved != owner.resolve(strict=True):
@@ -496,15 +501,15 @@ def _resolve_owner(payload: Path, owner: Path | None, *, source_required: bool) 
 def _release(
     root: Path,
     plugin: Path,
-    governance,
+    governance: lifecycle.Governance,
     custody: ExitStack,
-    guard,
+    guard: Any,
     control_slot: Path,
     *,
     owner: Path | None,
     wait_timeout: float,
     child_timeout: float,
-) -> dict:
+) -> dict[str, Any]:
     with governance.held(timeout=wait_timeout):
         claim = lifecycle.runtime.read_dev_claim(root, strict=True)
         if claim is None:
@@ -574,7 +579,7 @@ def _release(
         environment = dict(os.environ)
         for name in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV"):
             environment.pop(name, None)
-        health = lifecycle.engine.run_owned(
+        health = cast(Callable[..., subprocess.CompletedProcess[str]], getattr(lifecycle.engine, "run_owned"))(
             [str(lifecycle.runtime.slot_python(root, previous)), "-I", "-B", "-c", probe,
              str(Path(runtime_candidate.__file__).resolve())],
             cwd=Path(root.anchor), env=environment, procutil=agent_procutil,
@@ -600,6 +605,8 @@ def _release(
         release_dev_claim=claim,
         dev_owner=str(owner),
     )
+    if lifecycle.install_driver.result_exit_code(result):
+        return result
     if result.get("dev_claim_release_pending") is True:
         result.update(reused=True, dev_claim_release_pending=True)
         return result
