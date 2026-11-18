@@ -104,7 +104,8 @@ Report per-resource partial outcomes without releasing unresolved custody.
 
 ## Plan
 
-- [ ] R0 Review and merge this subplan before runtime implementation.
+- [x] R0 Review and merge this subplan before runtime implementation.
+      #13280 merged after exact-head approval and required checks.
 - [ ] R1 Deliver explicit retained finalization and runtime support declaration.
 - [ ] R2 Deliver retained relationship discovery without changing obligations.
 - [ ] R3 Deliver selected test-cache/source-lifetime disposition.
@@ -159,3 +160,32 @@ CLI reference, retained discovery contract and test-runner reference.
 The existing issue coordinates the bounded retained-resource follow-up. This
 document states the source sequence and tests; no runtime behavior or live
 cleanup is claimed by this plan.
+
+### 2026-11-18 - Source plan accepted
+
+#13280 merged after current-head Copilot approval, no open review findings and
+passing required checks. A superseded direct source-attribution result was
+reconciled through the documented PR-scoped workflow before managed merge.
+Implementation starts with retained finalization and known-child discovery;
+cache/source-lifetime disposition and full qualification remain open.
+
+### 2026-11-18 - Retained finalization and discovery candidate
+
+The R1/R2 candidate adds explicit checkout retention, a selected-runtime support
+declaration, and bounded read-only traversal through settled child edges.
+The existing active-obligation view and default finalization behavior remain
+unchanged. Whole-file strict typing passes for both Linux and Windows targets.
+The focused Linux packet passes all 80 cases. Fatal-error lint, documentation
+consistency, version consistency and the install-contract check pass.
+
+A broader 12-file compatibility packet reports 417 passes and 31 failures.
+The unchanged source baseline has the identical 31 failing test selectors;
+#13300 tracks that separate receiving-fixture qualification gap. Neither run
+is a passing broader packet. Native Windows execution and the complete
+multi-repository cleanup flow remain unqualified. R1/R2 delivery is not yet
+merged, and the cache/source-lifetime and parent completion gates remain open.
+
+Documentation impact: the CLI reference and closeout/reclamation guide now
+name the explicit selection, runtime support check and retained discovery
+boundary. No install or configuration default changes. Inventory is an explicit
+bounded local read; it adds no launch-time work or background scan.

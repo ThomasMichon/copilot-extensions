@@ -42,6 +42,7 @@ import os
 import shutil
 import time
 from pathlib import Path
+from typing import cast
 
 from agent_procutil import no_window_flags
 
@@ -59,8 +60,10 @@ from . import (
     procs,
     sessions,
     tracking,
+    tracking_claims,
+    tracking_session_registry,
 )
-from .config import Config
+from .config import Config, RepoConfig
 from .checkout_data import preservation_reason
 from .finalize_lock import FinalizeLock
 from .finalize_support import authority_fenced_write as _authority_fenced_write
@@ -170,7 +173,7 @@ def _warn_of_dev_slot_claims_for_worktree(worktree_id: str, worktree_path: str) 
         candidates = list(home.glob(".*/dev-claim.json"))
     except OSError:
         return
-    held: list[tuple[str, Path, dict]] = []
+    held: list[tuple[str, Path, dict[str, object]]] = []
     for path in candidates:
         try:
             data = _json.loads(path.read_text(encoding="utf-8"))
@@ -212,7 +215,7 @@ def _warn_of_dev_slot_claims_for_worktree(worktree_id: str, worktree_path: str) 
         )
 
 
-def _has_live_session(record) -> bool:
+def _has_live_session(record: tracking.WorktreeRecord | None) -> bool:
     """Keep live sessions and pending guidance workers safe from removal.
 
     Uses exact registered sessions, mux ownership and workspace-local worker
@@ -317,7 +320,7 @@ def push_changes(
             # Pin the checkout reconciliation actually ran against: a pinned
             # source is only safe to pair with the PR selected from this same
             # branch -- never a different one checked out afterward.
-            reconciled_branch = git_ops._get_current_branch_safe(worktree_path)
+            reconciled_branch = git_ops._get_current_branch_safe(worktree_path) or ""
             try:
                 reconciled_source = pr_routine_recovery.reconcile(config, record, cwd=worktree_path)
             except (OSError, ValueError, git_ops.GitError, ProviderError) as exc:
@@ -380,7 +383,7 @@ def push_changes(
         # worktree of this repo via the freshness ledger, instead of only
         # this call benefiting.
         if record and record.repo:
-            tracking.record_repo_fetch_confirmed(record.repo)
+            tracking_session_registry.record_repo_fetch_confirmed(record.repo)
 
         # 2. Dirty check
         wt_exists = Path(worktree_path).exists()
@@ -543,7 +546,7 @@ def push_changes(
                 output.warn("Non-fast-forward -- fetching and retrying...")
                 git_ops.fetch(repo.remote, cwd=anchor)
                 if record and record.repo:
-                    tracking.record_repo_fetch_confirmed(record.repo)
+                    tracking_session_registry.record_repo_fetch_confirmed(record.repo)
                 if not git_ops.rebase(upstream, cwd=anchor):
                     output.err("Rebase after push rejection failed")
                     if record:
@@ -593,7 +596,7 @@ def push_changes(
 
 
 def _reconcile_merged_pointers(
-    repo,
+    repo: RepoConfig,
     worktree_path: str,
     anchor: str,
     branch: str,
@@ -713,7 +716,11 @@ def _push_changes_pr(
     repo = config.default_repo
     remote = repo.remote
     wt_branch = f"worktree/{worktree_id}"
-    feature = record.pr.branch
+    active_pr = record.pr
+    if active_pr is None:
+        output.err("PR mode: no tracked PR to update.")
+        return False
+    feature = active_pr.branch
     worktree_path = tracking.resolve_worktree_path(worktree_id, repo.worktree_root)
     lock_path = Path(repo.worktree_root) / ".finalize.lock"
 
@@ -759,7 +766,7 @@ def _push_changes_pr(
         feature = pushed_pr.branch if (pushed_pr and pushed_pr.branch) else feature
     else:
         # Legacy: HEAD is on a tracked feature branch -- push that one directly.
-        feature = head
+        feature = head or ""
         pushed_pr = next((p for p in record.prs if p.branch == feature), record.pr)
 
     from .pr_publication_labels import validate_scope
@@ -811,7 +818,8 @@ def _push_changes_pr(
         return True
 
     budget = publication_deadline.lifecycle_budget(repo.pr)
-    lock = pr_authority.PublicationLock(FinalizeLock(lock_path, timeout=budget, stale_after=budget), record, pushed_pr, timeout=publication_deadline.lock_wait(repo.pr.push_timeout_seconds))
+    lock_factory = cast(Callable[..., pr_authority.PublicationLock], pr_authority.PublicationLock)
+    lock = lock_factory(FinalizeLock(lock_path, timeout=budget, stale_after=budget), record, pushed_pr, timeout=publication_deadline.lock_wait(repo.pr.push_timeout_seconds))
     try:
         lock.acquire()
     except (TimeoutError, ValueError) as exc:
@@ -828,7 +836,7 @@ def _push_changes_pr(
                 output.err(f"Couldn't fetch the PR's fork remote '{push_to}': {exc}. Nothing was pushed.")
                 return False
         if record.repo:
-            tracking.record_repo_fetch_confirmed(record.repo)
+            tracking_session_registry.record_repo_fetch_confirmed(record.repo)
 
         if on_wt:
             git_ops.git("branch", "-f", feature, "HEAD", cwd=worktree_path, check=False)
@@ -870,7 +878,7 @@ def _push_changes_pr(
             "rev-parse", feature, cwd=worktree_path, check=False
         ).stdout.strip()
         pr_publish.record_pushed_head(config, record, worktree_id, pushed_pr, head_sha,
-                                      remote=push_to, head_repo=pushed.head_repo,
+                                      remote=push_to, head_repo=getattr(pushed, "head_repo", ""),
                                       head_identity=getattr(pushed, "head_identity", ""), rebase_base_sha=getattr(pushed, "rebase_base_sha", ""))
 
         activity.log_event(
@@ -909,7 +917,7 @@ def _resolve_content_ref(
 
 def _pr_finalize_precondition(
     record: tracking.WorktreeRecord,
-    repo,
+    repo: RepoConfig,
     worktree_path: str,
     anchor: str,
 ) -> tuple[bool, str | None]:
@@ -929,7 +937,7 @@ def _pr_finalize_precondition(
     Returns ``(ok, error_message)``.
     """
     remote = repo.remote
-    feature = record.pr.branch
+    feature = record.pr.branch if record.pr is not None else ""
     cwd = worktree_path if Path(worktree_path).exists() else anchor
     upstream = f"{remote}/{repo.default_branch}"
     strategy = (getattr(repo.pr, "strategy", "") or "keep-alive").strip().lower()
@@ -1035,7 +1043,7 @@ def _settle_current_session_claim(
     session id was resolvable (a silent, best-effort no-op)."""
     if record is None or not current_session_id:
         return record, None
-    current_session_ref = tracking.format_claim_ref(
+    current_session_ref = tracking_claims.format_claim_ref(
         record.execution_machine, record.repo, record.worktree_id,
         session=current_session_id,
     )
@@ -1119,12 +1127,12 @@ def _assert_obligations_settled(
     return finalize_obligations.assert_obligations_settled(
         record, worktree_id, abandon=abandon, handoff_to=handoff_to,
         emit_error=output.err, emit_warning=output.warn,
-        format_ref=tracking.format_claim_ref,
+        format_ref=tracking_claims.format_claim_ref,
     )
 
 
 def _rehome_abandoned_obligations(
-    record, worktree_id: str, config, *, handoff_to: str,
+    record: tracking.WorktreeRecord, worktree_id: str, config: Config, *, handoff_to: str,
 ) -> bool:
     """Durably re-home an ``--abandon`` finalize's still-unsettled obligations.
 
@@ -1141,13 +1149,14 @@ def _rehome_abandoned_obligations(
     ]
     if not abandoned:
         return True
-    tracking.rehome_abandoned_obligations(
+    tracking_claims.rehome_abandoned_obligations(
         abandoned, source_worktree=worktree_id, config=config,
         handoff_to=handoff_to)
-    persisted = {
-        (entry.get("source_worktree"), entry.get("ref"))
-        for entry in tracking.load_orphaned_obligations_strict()
+    persisted: set[tuple[str, str]] = {
+        (entry["source_worktree"], entry["ref"])
+        for entry in tracking_claims.load_orphaned_obligations_strict()
         if (entry.get("handoff_to") or "").strip() == handoff_to
+        and isinstance(entry.get("source_worktree"), str) and isinstance(entry.get("ref"), str)
     }
     expected = {(worktree_id, claim.ref) for claim in abandoned}
     if not expected.issubset(persisted):
@@ -1188,6 +1197,7 @@ def validate_and_finalize(
     abandon: bool = False,
     handoff_to: str | None = None,
     force_open_pr: bool = False,
+    retain_checkout: bool = False,
     record_guard: Callable[[tracking.WorktreeRecord | None], None] | None = None,
 ) -> bool:
     """Validate that worktree content is on upstream, then clean up.
@@ -1207,6 +1217,7 @@ def validate_and_finalize(
         handoff_to: Required with ``abandon`` when obligations remain; the
             affirmative recipient or flow recorded on every orphan entry.
         force_open_pr: Sole override for the backup open-PR gate.
+        retain_checkout: Preserve the checkout and branch after normal logical completion.
         record_guard: Additional own-worker admission, rechecked under cleanup
             locks. It cannot waive any normal finalization gate.
 
@@ -1250,7 +1261,7 @@ def validate_and_finalize(
 
     try:
         from . import claim_handoffs
-        source_ref = tracking.format_claim_ref(
+        source_ref = tracking_claims.format_claim_ref(
             config.machine, config.repo_name, worktree_id)
         active_handoffs = claim_handoffs.active_bundle_ids_for_source(source_ref)
     except Exception as exc:
@@ -1271,6 +1282,7 @@ def validate_and_finalize(
     if dry_run:
         _dry_run_finalize_preview(
             worktree_id, config, worktree_path, branch, upstream,
+            retain_checkout=retain_checkout,
         )
         return True
 
@@ -1289,7 +1301,7 @@ def validate_and_finalize(
     # reads as "(untitled)" with no session linkage -- even with a bypassed
     # register/deregister-session hook. Gap-filling + silent.
     if record is not None and record_guard is None:
-        fresh = _authority_fenced_write(yaml_path, config, tracking.seal_worktree_identity)
+        fresh = _authority_fenced_write(yaml_path, config, tracking_session_registry.seal_worktree_identity)
         record = fresh if fresh is not None else record
     # Settle only the invoking session's claim before the obligation gate
     # (the post-exit launcher lacks its child's session id, so missed
@@ -1305,7 +1317,7 @@ def validate_and_finalize(
         else:
             # Own-worker admission already requires canonical registration.
             # Keep its session claim until the guarded finalization commits.
-            current_session_ref = tracking.format_claim_ref(
+            current_session_ref = tracking_claims.format_claim_ref(
                 record.execution_machine, record.repo, worktree_id, session=current_session_id,
             ) if record is not None else None
     except ExecutionSpaceError as exc:
@@ -1356,7 +1368,7 @@ def validate_and_finalize(
         print(f"Fetching from {repo.remote}...")
         git_ops.fetch(repo.remote, cwd=anchor)
     if not local_only and record and record.repo:
-        tracking.record_repo_fetch_confirmed(record.repo)
+        tracking_session_registry.record_repo_fetch_confirmed(record.repo)
 
     if local_only and (err := finalize_local.content_error(repo, worktree_path, branch, upstream)):
         output.err(err)
@@ -1370,6 +1382,9 @@ def validate_and_finalize(
         output.err(dirty_err)
         return False
     if pr_mode:
+        if record is None:
+            output.err("PR finalization requires a tracking record.")
+            return False
         # PR mode (#4400 round 12): `assert_no_live_pr` above already refused
         # a still-open PR (short of --force-open-pr). `detach` allows an
         # early ok once pushed; other strategies require a genuine merge
@@ -1379,8 +1394,8 @@ def validate_and_finalize(
             output.err(err or "PR finalize precondition not met.")
             return False
         print(f"Verified: feature branch '{record.pr.branch}' is safely on {repo.remote}."
-              if record.pr.branch else
-              f"Verified: tracked PR #{record.pr.number}'s work is safely on {repo.remote}.")
+              if record.pr and record.pr.branch else
+              f"Verified: tracked PR #{record.pr.number if record.pr else '?'}'s work is safely on {repo.remote}.")
     elif wt_exists:
         # Validate against the worktree's ACTUAL current checkout, not just
         # the possibly-stale tracked `record.branch` name (#7723). A worktree
@@ -1466,7 +1481,7 @@ def validate_and_finalize(
             + ", ".join(active_handoffs))
         return False
 
-    prior_status: str | None = None
+    prior_status: tracking.WorktreeStatus | None = None
     if yaml_path.exists():
         try:
             with tracking._RecordLock(yaml_path, require_sidecar=True):
@@ -1476,7 +1491,7 @@ def validate_and_finalize(
                     record_guard(record)
                 try:
                     from . import claim_handoffs
-                    source_ref = tracking.format_claim_ref(
+                    source_ref = tracking_claims.format_claim_ref(
                         record.execution_machine, record.repo, record.worktree_id)
                     active_handoffs = (
                         claim_handoffs.active_bundle_ids_for_source(source_ref))
@@ -1580,7 +1595,7 @@ def validate_and_finalize(
         # PR mode (#4400 round 16): re-validate BEFORE reconciliation --
         # its rebase can itself drop a just-landed EMPTY race commit,
         # narrowing that window.
-        if pr_mode:
+        if pr_mode and record is not None:
             from . import finalize_open_pr_gate
             err = finalize_open_pr_gate.pr_precondition_recheck(
                 record, repo, worktree_path, anchor, precondition_fn=_pr_finalize_precondition)
@@ -1597,7 +1612,7 @@ def validate_and_finalize(
         from .finalized_checkout import optional_snapshot
         finalized_identity = optional_snapshot(worktree_path) if Path(worktree_path).exists() else None
         removal_candidate = (
-            checkout_managed and not inside_worktree and not has_live_session
+            not retain_checkout and checkout_managed and not inside_worktree and not has_live_session
             and not paired_pending and Path(worktree_path).exists()
         )
         data_blocker = preservation_reason(worktree_path) if removal_candidate else None
@@ -1607,7 +1622,7 @@ def validate_and_finalize(
         )
         # Recheck after inspection for both retained finalization and removal.
         # External writers can still race this check without a filesystem fence.
-        if pr_mode:
+        if pr_mode and record is not None:
             err = finalize_open_pr_gate.pr_precondition_recheck(
                 record, repo, worktree_path, anchor,
                 precondition_fn=_pr_finalize_precondition)
@@ -1619,8 +1634,10 @@ def validate_and_finalize(
             output.err(err)
             _rollback_finalizing_freeze(yaml_path, prior_status, worktree_id, config)
             return False
-        if not checkout_managed or inside_worktree or has_live_session or paired_pending or data_blocker or process_blocker:
+        if retain_checkout or not checkout_managed or inside_worktree or has_live_session or paired_pending or data_blocker or process_blocker:
             reason = (
+                "checkout retention was explicitly requested"
+                if retain_checkout else
                 "the checkout is owned by an external session host"
                 if not checkout_managed
                 else (
@@ -1637,7 +1654,12 @@ def validate_and_finalize(
                 f"Finalized: all content from {branch} is on "
                 f"{upstream}."
             )
-            if not checkout_managed:
+            if retain_checkout:
+                output.info(
+                    "Leaving the checkout and branch in place as requested. "
+                    "Physical removal requires a separate cleanup operation with fresh safety checks."
+                )
+            elif not checkout_managed:
                 output.info(
                     f"Leaving the worktree directory and branch in place because "
                     f"{reason}. Later agent-worktrees cleanup may retire this "
@@ -1664,6 +1686,7 @@ def validate_and_finalize(
                 worktree_id=worktree_id,
                 branch=branch,
                 reason=(
+                    "retention_requested" if retain_checkout else
                     "external_checkout"
                     if not checkout_managed
                     else (
@@ -1709,7 +1732,7 @@ def validate_and_finalize(
                         f"(may already be gone)."
                     )
 
-            if pr_mode and record.prs:
+            if pr_mode and record is not None and record.prs:
                 # Remove every tracked PR's local feature branch (serial +
                 # parallel); the remote branches are left intact as PR backing.
                 seen: set[str] = set()
@@ -1754,7 +1777,7 @@ def validate_and_finalize(
                 record_guard(record)
             record.finalized_checkout = finalized_identity if Path(worktree_path).exists() else None
             # Release settled outbound resources; children keep their prune gates.
-            released = tracking.release_all_resources(record, save=False)
+            released = tracking_claims.release_all_resources(record, save=False)
             tracking.update_status(record, "finalized")
             # Warn about (never auto-release) any real CodeSpace claim(s) this worktree still holds
             # in agent-codespaces' own lease store -- distinct from (and a necessary complement to)
@@ -1807,7 +1830,7 @@ def validate_and_finalize(
             "worktree_finalized",
             worktree_id=worktree_id,
             branch=branch,
-            removed=not (inside_worktree or has_live_session or paired_pending or data_blocker or process_blocker or not checkout_managed),
+            removed=not (retain_checkout or inside_worktree or has_live_session or paired_pending or data_blocker or process_blocker or not checkout_managed),
         )
 
         output.ok(f"Worktree {worktree_id} finalized.")
