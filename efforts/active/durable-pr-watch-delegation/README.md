@@ -228,11 +228,18 @@ whole-parent native, installation or fleet prerequisite for callback source work
 Resolve concrete overlaps through ordinary review and existing coordination,
 without a new generic owner-ACK ceremony.
 
-Keep #5947 OPEN throughout proposal and review. Only an actual accepted,
-normally reviewed receiving merge followed by current whole-ROOT, complete
-source/discussion and unchanged-custody readback permits a later, separate
-administrative disposition judgment. A proposal, topic link, checked historical
-milestone or source retirement is not technical completion or claim release.
+Keep #5947 OPEN until its own full WC1-WC4/WCV1-WCV4 acceptance is resolved,
+as recorded when it received #6723. This proposal and merging twelve unchecked
+rows do not resolve that source-specific condition. Any earlier administrative
+supersession requires explicit reconciliation of that condition through its
+actual governing source/coordination record; receiving review alone is not
+that reconciliation. Do not invent a generic owner-ACK requirement.
+
+Only after that specific condition is resolved or explicitly reconciled,
+actual accepted receiving, normal review, current whole-ROOT and complete
+source/discussion/unchanged-custody readback permit a later, separate tracker
+judgment. A proposal, topic link, checked historical milestone or source
+retirement is not technical completion or claim release.
 
 ## Context
 
@@ -747,7 +754,10 @@ outage-expiry defect remains unfixed.
   outcomes under existing registry/persistence ownership, with no duplicate
   terminal outcomes or departed pollers. Do not reopen #6019's delivered repair.
 - [ ] **P5947-2:** Expose bounded, honest, inspectable failure/unknown outcomes
-  on the retained legacy callback path. Generation or attempt is not delivery
+  for failed or indeterminate attempts on the retained legacy callback path.
+  Successful callback completion remains a positive control, not a required
+  failure/unknown result or proof of consumer acknowledgement.
+  Generation or attempt is not delivery
   acknowledgement. Preserve its one-attempt best-effort wire compatibility:
   no reliable-legacy-delivery promise or forced migration. Preserve the
   distinct acknowledged contract's durable pending failures, bounded retry,
@@ -772,9 +782,11 @@ outage-expiry defect remains unfixed.
   terminal outcome, correct poller retirement and preserved ordinary
   synchronous waits. Subscription deadlines never expire resource/worktree claims.
 - [ ] **V5947-2:** Through the actual delivery owner, exercise applicable legacy
-  success, exception, nonzero and timeout cases. Verify honest inspectable
-  failure/unknown results without fabricated acknowledgement or changing the
-  one-attempt best-effort wire. Verify acknowledged failures remain durably
+  success, exception, nonzero and timeout cases. Use successful callback
+  completion as a positive control; require honest inspectable failure/unknown
+  results for failed or indeterminate attempts, not successful ones. Preserve
+  the one-attempt best-effort wire without fabricated acknowledgement.
+  Verify acknowledged failures remain durably
   pending/retryable with original event/replay identity.
 - [ ] **V5947-3:** Use separate subscribers with caller-relative callback paths
   and different registration directories while the daemon uses its state cwd.
@@ -1668,9 +1680,11 @@ All items below are **agent-recommended** acceptance checks.
   precedence, ordinary waits, exactly one terminal outcome and correct poller
   retirement. Subscription expiry cannot release resource/worktree claims.
 - [ ] **G5947-2:** Resolve P5947-2/V5947-2 through actual legacy and acknowledged
-  delivery consumers. Legacy success/exception/nonzero/timeout must expose
-  bounded truthful failure/unknown evidence without acknowledgement or
-  guaranteed delivery; preserve one-attempt best-effort compatibility.
+  delivery consumers. Successful legacy callback completion is a positive
+  control, not a required failure/unknown outcome or consumer acknowledgement.
+  Applicable exception, nonzero, timeout or indeterminate attempts must expose
+  bounded truthful failure/unknown evidence without fabricated acknowledgement
+  or guaranteed delivery; preserve one-attempt best-effort compatibility.
   Acknowledged failures remain durably pending/retryable with immutable
   original event and replay identity.
 - [ ] **G5947-3:** Resolve P5947-3/V5947-3 through persisted subscriptions and
@@ -1707,9 +1721,11 @@ callback an implicit credential store.
   Coordination in this existing shared PR-watch subscription domain.
   Preserve credited #6019, legacy one-attempt versus acknowledged durable
   delivery, subscriber cwd and actual owner capability/compatibility, with
-  unchanged M1 integration/domain/resource custody. #5947 remains OPEN;
-  actual reviewed whole receiving and current whole source/ROOT/custody
-  readback precede any separate administrative judgment. No implementation,
+  unchanged M1 integration/domain/resource custody. #5947's original full-
+  acceptance OPEN condition remains; planned-row delivery does not resolve it.
+  Resolution or explicit source-condition reconciliation, actual reviewed
+  whole receiving and current whole source/ROOT/custody readback precede
+  any separate administrative judgment. No implementation,
   native operation, source disposition or resource transfer was performed.
 - [2026-11-17 - Filtered source completion; parent acceptance retained](journal/2026/11.17%20Filtered%20source%20completion.md)
 - [2026-11-16 - Reviewer-action feed contract reviewed](journal/2026/11.16%20Reviewer%20action%20feed%20contract.md)

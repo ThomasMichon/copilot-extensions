@@ -724,10 +724,14 @@ retain their separate responsibilities.
 |---|---|---|---|---|
 | Truthful legacy callback outcomes and persisted subscriber execution context | Public #5947 whole original and its complete discussion | routed (proposed; effective after reviewed complete domain acceptance in the SAME PR) | [Durable PR Watch Delegation](../durable-pr-watch-delegation/README.md), P5947-1..4/local V5947-1..4/actual global G5947-1..4 and continuing Coordination/Journal | Twelve unchecked rows preserve #6019 credit, outage-independent expiry, one-attempt legacy versus acknowledged durable retry/replay, subscriber cwd/missing-directory fallback, actual owner health negotiation and old-owner compatibility. Existing M1 stage-5 integration/qualification, operational holds and domain/resource owners remain. |
 
-#5947 remains OPEN through review. A complete canonical issue does not prevent
-planned aggregation into its existing rightful domain, but a proposal or
-topic link establishes no receiving acceptance. Actual reviewed whole receiving,
-current complete ROOT/source/discussion/custody readback and a separate
-administrative judgment precede any tracker supersession. No implementation,
+#5947's original condition keeps it OPEN until its own full WC1-WC4/WCV1-WCV4
+acceptance is resolved. A complete canonical issue does not prevent planned
+aggregation into its existing rightful domain, but neither a proposal nor
+merging twelve unchecked rows resolves that specific condition. Any earlier
+administrative supersession first requires explicit reconciliation through
+its actual governing source/coordination record, not a generic owner-ACK.
+Only after resolution or that explicit reconciliation do actual reviewed whole
+receiving, current complete ROOT/source/discussion/custody readback and a
+separate judgment permit supersession. No implementation,
 native/authentication operation, live migration, owner appointment or
 claim/resource release follows.
