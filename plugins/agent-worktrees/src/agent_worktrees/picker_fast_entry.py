@@ -110,6 +110,11 @@ def dispatch(argv: list[str]) -> int | None:
 
     selected, environment = select_receiver(result["manager_command"], environment)
     command = [*selected, "--project", argv[1]]
+    # Without a terminal-host channel, Windows keeps this process as the
+    # kill-on-close waiter: returning None would only reach the ordinary
+    # launch path, which waits the same way, and a detached Manager would
+    # lose the console. The front door locates the selected payload's host
+    # (and reports when it cannot) so interactive launches hand off instead.
     try:
         if os.name != "nt":
             os.execvpe(command[0], command, environment)
