@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-17 - Finite lifecycle receiving and accepted timeout tracking](journal/2026/11.17-lifecycle-receiving-and-timeout-retirement.md)
+
 - [2026-11-17 - Credential receipt, callback receiving and protected contracts](journal/2026/11.17-credential-receipt-and-protected-contracts.md)
 
 - [2026-11-17 - Operation-credential receiving receipt and canonical keepers](journal/2026/11.17-operation-credential-receiving-receipt.md)
