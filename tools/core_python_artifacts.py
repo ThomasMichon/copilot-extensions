@@ -4,6 +4,8 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
+import sys
+from typing import Any, TYPE_CHECKING, TypedDict, cast
 
 from artifact_source_build import PromotionArtifactError
 from packaging.requirements import Requirement
@@ -11,15 +13,28 @@ from packaging.specifiers import SpecifierSet
 from packaging.utils import canonicalize_name
 from packaging.version import Version
 from python_project_inventory import contained_path, manifests, runtime_roots
-from standalone_python_artifacts import COMPONENTS, validate_build
+from standalone_python_artifacts import ArtifactBuilder, HashBuilder, SourceBuilder, COMPONENTS, _BuildOptions, validate_build
 from standalone_python_artifacts import source_closure as standalone_closure
 
-try:
-    import tomllib
-except ModuleNotFoundError:
-    import tomli as tomllib
+if TYPE_CHECKING:
+    from build_toolchain_lock import ToolchainLock
+
+if TYPE_CHECKING:
+    if sys.version_info >= (3, 11):
+        import tomllib
+    else:
+        import tomli as tomllib
+else:
+    try:
+        import tomllib
+    except ModuleNotFoundError:
+        import tomli as tomllib
 
 SELECTION_PATH = Path("bundle") / "core.json"
+
+
+class _HashOptions(TypedDict, total=False):
+    workers: int
 
 
 @dataclass(frozen=True)
@@ -27,7 +42,7 @@ class CoreSources:
     version: str
     projects: tuple[tuple[str, Path], ...]
     resources: tuple[Path, ...]
-    selection: dict
+    selection: dict[str, Any]
 
 
 def enabled(root: Path) -> bool:
@@ -59,12 +74,12 @@ def release_version(root: Path) -> str:
         raise PromotionArtifactError("invalid core marketplace version") from exc
 
 
-def _read(path: Path) -> dict:
+def _read(path: Path) -> dict[str, Any]:
     with path.open("rb") as stream:
         return tomllib.load(stream)
 
 
-def _runtime_metadata(project: dict) -> tuple:
+def _runtime_metadata(project: dict[str, Any]) -> tuple[str, str, tuple[tuple[str, tuple[str, ...]], ...]]:
     dynamic = project.get("dynamic", [])
     if not isinstance(dynamic, list) or set(dynamic) & {
         "dependencies", "optional-dependencies", "requires-python",
@@ -73,9 +88,9 @@ def _runtime_metadata(project: dict) -> tuple:
     optional = project.get("optional-dependencies", {})
     if not isinstance(optional, dict):
         raise PromotionArtifactError("core optional dependencies must be a table")
-    sections = {"": project.get("dependencies", [])}
+    sections: dict[str, Any] = {"": project.get("dependencies", [])}
     for extra, values in optional.items():
-        name = canonicalize_name(extra, validate=True)
+        name: str = canonicalize_name(extra, validate=True)
         if name in sections:
             raise PromotionArtifactError("ambiguous core optional dependency")
         sections[name] = values
@@ -90,16 +105,16 @@ def _runtime_metadata(project: dict) -> tuple:
     )
 
 
-def source_closure(root: Path, builder) -> CoreSources:
+def source_closure(root: Path, builder: SourceBuilder) -> CoreSources:
     """Keep conditional edges as data; never evaluate them on the build host."""
     root = root.resolve()
     try:
-        catalog = {}
+        catalog: dict[str, tuple[Path, dict[str, Any]]] = {}
         for manifest in manifests(root):
             manifest = contained_path(manifest, root)
             data = _read(manifest)
             project = data["project"]
-            name = canonicalize_name(project["name"], validate=True)
+            name: str = canonicalize_name(project["name"], validate=True)
             if name in catalog:
                 raise PromotionArtifactError(f"ambiguous first-party distribution: {name}")
             _runtime_metadata(project)
@@ -112,7 +127,9 @@ def source_closure(root: Path, builder) -> CoreSources:
         if not roots:
             raise PromotionArtifactError("core composition has no runtime roots")
         pending = [(entry["name"], entry["extra"]) for entry in roots]
-        seen, selected, edges = set(), set(), []
+        seen: set[tuple[str, str]] = set()
+        selected: set[str] = set()
+        edges: list[dict[str, str]] = []
         while pending:
             name, extra = pending.pop()
             if (name, extra) in seen:
@@ -160,7 +177,9 @@ def source_closure(root: Path, builder) -> CoreSources:
                 )
         if selected & {name for group in ("index-service", "index-engine") for name, _extra, _condition in groups[group]}:
             raise PromotionArtifactError("core dependency crosses an optional environment boundary")
-        projects, resources, records = [], set(), []
+        projects: list[tuple[str, Path]] = []
+        resources: set[Path] = set()
+        records: list[dict[str, str]] = []
         reverse = {value: key for key, value in COMPONENTS.items()}
         root_names = {entry["name"] for entry in roots}
         for name in sorted(selected):
@@ -193,14 +212,14 @@ def source_closure(root: Path, builder) -> CoreSources:
         raise PromotionArtifactError(f"invalid core composition: {exc}") from exc
 
 
-def payload_hash(builder, closure: CoreSources, selection: dict | None = None, *, workers: int = 1) -> str:
+def payload_hash(builder: HashBuilder, closure: CoreSources, selection: dict[str, Any] | None = None, *, workers: int = 1) -> str:
     from build_toolchain_lock import _hash_fields
 
     if type(workers) is not int or not 1 <= workers <= 4:
         raise ValueError("core payload hashing requires between one and four workers")
     directories = [*(path for _role, path in closure.projects), *closure.resources]
     source_hash = builder.compute_payload_hash(
-        directories, **({"workers": workers} if workers != 1 else {}),
+        directories, **cast(_HashOptions, {"workers": workers} if workers != 1 else {}),
     )
     return "sha256:" + _hash_fields(
         source_hash,
@@ -210,11 +229,12 @@ def payload_hash(builder, closure: CoreSources, selection: dict | None = None, *
 
 
 def build_core_artifacts(
-    *, out_dir: Path, python=None, toolchain=None, builder=None,
-    uv: str = "uv", deadline: float | None = None,
-) -> dict:
+    *, out_dir: Path, python: str | None = None, toolchain: ToolchainLock | None = None,
+    builder: ArtifactBuilder | None = None, uv: str | Path = "uv", deadline: float | None = None,
+) -> dict[str, Any]:
     if builder is None:
-        import build_python_artifacts as builder
+        import build_python_artifacts as default_builder
+        builder = default_builder
     try:
         closure = source_closure(builder.REPO, builder)
     except PromotionArtifactError as exc:
@@ -224,5 +244,5 @@ def build_core_artifacts(
         raw_version=closure.version, schema_version=5, resources=closure.resources,
         selection=closure.selection, payload_hash=payload_hash(builder, closure),
         out_dir=out_dir, python=python, toolchain=toolchain,
-        **({"uv": uv, "deadline": deadline} if uv != "uv" or deadline is not None else {}),
+        **cast(_BuildOptions, {"uv": uv, "deadline": deadline} if uv != "uv" or deadline is not None else {}),
     )

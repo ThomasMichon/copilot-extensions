@@ -40,20 +40,20 @@ class _Execution(TypedDict, total=False):
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from artifact_source_build import read_build_system_requires  # noqa: E402
 from governed_feed_trust import (  # noqa: E402
-    _GOVERNED_FEED_DEFAULT_INDEX_ENV_VARS,  # noqa: F401 -- re-exported for test/caller use
-    _TRUSTED_INDEX_HOSTS_ENV_VAR,  # noqa: F401 -- legacy import compatibility
-    ArtifactBuildError,
-    _credential_free_index_identity,  # noqa: F401 -- re-exported for test/caller use
-    _effective_default_index_url,  # noqa: F401 -- re-exported for test/caller use
-    _effective_uv_toml_candidates,  # noqa: F401 -- re-exported for test/caller use
-    _governed_feed_configured,  # noqa: F401 -- re-exported for test/caller use
-    _opaque_index_identity,  # noqa: F401 -- re-exported for test/caller use
-    _project_uv_toml_candidates,  # noqa: F401 -- re-exported for test/caller use
-    _restrict_file_to_owner,
-    _trusted_index_hosts,  # noqa: F401 -- re-exported for test/caller use
-    _url_host,  # noqa: F401 -- re-exported for test/caller use
-    _validated_trusted_index_url,
-    strip_package_source_env_vars,
+    _GOVERNED_FEED_DEFAULT_INDEX_ENV_VARS as _GOVERNED_FEED_DEFAULT_INDEX_ENV_VARS,  # noqa: F401
+    _TRUSTED_INDEX_HOSTS_ENV_VAR as _TRUSTED_INDEX_HOSTS_ENV_VAR,  # noqa: F401
+    ArtifactBuildError as ArtifactBuildError,
+    _credential_free_index_identity as _credential_free_index_identity,  # noqa: F401
+    _effective_default_index_url as _effective_default_index_url,  # noqa: F401
+    _effective_uv_toml_candidates as _effective_uv_toml_candidates,  # noqa: F401
+    _governed_feed_configured as _governed_feed_configured,  # noqa: F401
+    _opaque_index_identity as _opaque_index_identity,  # noqa: F401
+    _project_uv_toml_candidates as _project_uv_toml_candidates,  # noqa: F401
+    _restrict_file_to_owner as _restrict_file_to_owner,
+    _trusted_index_hosts as _trusted_index_hosts,  # noqa: F401
+    _url_host as _url_host,  # noqa: F401
+    _validated_trusted_index_url as _validated_trusted_index_url,
+    strip_package_source_env_vars as strip_package_source_env_vars,
 )
 from public_toolchain_source import (  # noqa: E402
     PublicToolchainSource,
@@ -478,12 +478,7 @@ def _query_toolchain_versions(
 
 
 def _toml_escape(value: str) -> str:
-    """Escapes ``value`` for embedding in a TOML basic string (``"..."``)
-    -- backslash and double-quote are the only characters a basic string
-    must escape for this module's own use (index URLs/names never
-    legitimately contain control characters or newlines). No stdlib TOML
-    WRITER exists (only `tomllib`, a reader), so this is a tiny, scoped
-    helper rather than a dependency."""
+    """Escape backslashes and quotes in index URLs/names, which contain no controls."""
     return value.replace("\\", "\\\\").replace('"', '\\"')
 
 
@@ -836,6 +831,7 @@ def resolve_toolchain_lock(
 _BUILD_REQUIRES_CHECK_SCRIPT = (
     "import json, sys\n"
     "from pathlib import Path\n"
+    "from packaging.markers import default_environment\n"
     "from packaging.requirements import InvalidRequirement, Requirement\n"
     "from packaging.utils import canonicalize_name\n"
     "from packaging.version import InvalidVersion, Version\n"
@@ -851,6 +847,8 @@ _BUILD_REQUIRES_CHECK_SCRIPT = (
     "    for name, version in payload['locked_packages'].items()\n"
     "}\n"
     "marker_environment = payload['marker_environment']\n"
+    "if marker_environment is None:\n"
+    "    marker_environment = default_environment()\n"
     "for raw in payload['requires']:\n"
     "    try:\n"
     "        req = Requirement(raw)\n"
@@ -946,11 +944,7 @@ def _assert_toolchain_satisfies_build_requires(
     requires = _read_build_system_requires(source_dir)
     if run is None and deadline is not None and toolchain._marker_environment is None:
         toolchain._marker_environment = _query_marker_environment(toolchain.venv_python, deadline=deadline)
-    marker_environment = (
-        toolchain.marker_environment if run is None else json.loads(run([
-            str(toolchain.venv_python), "-I", "-S", "-c", _MARKER_ENV_QUERY_SCRIPT,
-        ]).stdout)
-    )
+    marker_environment = toolchain.marker_environment if run is None else None
     payload = json.dumps(
         {
             "requires": requires,

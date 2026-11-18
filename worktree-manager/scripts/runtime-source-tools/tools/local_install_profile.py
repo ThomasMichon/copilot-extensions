@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import argparse
 from contextlib import contextmanager, nullcontext, redirect_stdout
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 import hashlib
 import json
 import os
@@ -22,31 +22,35 @@ from typing import TYPE_CHECKING, Any
 
 sys.dont_write_bytecode = True
 
-from packaging.requirements import Requirement
-
 from packaging.utils import canonicalize_name
 from packaging.version import Version
+from packaging.requirements import Requirement
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "worktree-manager" / "scripts"
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(SCRIPTS))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "libs" / "installer-engine"))
-import install_source as source_inputs
+import install_source as install_source
+source_inputs = install_source
 from installer_wheel_inputs import WheelLimits, _check_deadline, inspect_archive
-from installer_wheel_snapshot import WheelInstallInputs, WheelSnapshot, retain_wheel_inputs
+from installer_wheel_snapshot import WheelInstallInputs, WheelSnapshot, retain_wheel_inputs as retain_wheel_inputs
 
 from build_toolchain_lock import _query_marker_environment
 from application_sources import application_sources
 from promotion_python_artifacts import validate_manifest, validate_wheel_sources
-from artifact_source_build import PromotionArtifactError
-from standalone_python_artifacts import project_key
-from runtime_profile import SCHEMA, ProfileError, _reachable, _requirement, validate_profile
+from artifact_source_build import PromotionArtifactError as PromotionArtifactError
+from standalone_python_artifacts import project_key as project_key
+from runtime_profile import SCHEMA, ProfileError as ProfileError, _reachable, _requirement, validate_profile
 from runtime_profile_wheels import profile_wheel_inputs
 from runtime_source_lock import _wheel_pins
 from standalone_build import embedded_projects as _embedded_projects
-import installer_dependency_policy as dependencies
-import installer_engine as engine
-import versioned_runtime_source as sources
+import installer_dependency_policy as installer_dependency_policy
+import installer_engine as installer_engine
+import versioned_runtime_source as versioned_runtime_source
+
+dependencies = installer_dependency_policy
+engine = installer_engine
+sources = versioned_runtime_source
 
 if TYPE_CHECKING:
     from installer_native_feed import NativeFeedInputs
@@ -122,7 +126,7 @@ def _associated_first_party(
     if manifest.get("component", manifest.get("plugin")) != component:
         raise ProfileError("source wheel manifest has a foreign component")
     entries = manifest["wheels"]
-    declared = {}
+    declared: dict[str, Version] = {}
     package_roots: dict[str, Path] = {}
     for package in engine._package_roots(selected.payload):
         metadata = dependencies._toml(package / "pyproject.toml")["project"]
@@ -252,7 +256,7 @@ def complete_profile(
         expanded += facts.unpacked_size
         if expanded > limits.max_expanded_bytes or name in wheels:
             raise ProfileError("native wheel closure exceeds its inspection budget")
-        wheel = {
+        wheel: dict[str, Any] = {
             "name": name, "version": facts.version, "filename": filename,
             "sha256": retained.digests[filename], "requires_python": facts.requires_python,
             "provides_extras": list(facts.provides_extras), "selected_extras": [],
@@ -300,8 +304,8 @@ def _write_snapshot(
     for filename, archive in retained.archives.items():
         _check_deadline(deadline)
         archive.seek(0)
-        with (wheels / filename).open("xb") as destination:
-            shutil.copyfileobj(archive, destination, 1 << 20)
+        with (wheels / filename).open("xb") as archive_output:
+            shutil.copyfileobj(archive, archive_output, 1 << 20)
     profile_path = prepared / "profiles" / (component + ".json")
     profile_path.parent.mkdir()
     profile_path.write_bytes(profile.canonical)
@@ -409,7 +413,7 @@ def _profile_policy(
 
 def _profile_feed(
     selected: source_inputs.ProjectSource, transaction: dependencies.RetainedUVInstall,
-    projections: list[str], *, uv: str, download_origins: tuple[str, ...],
+    projections: Sequence[str], *, uv: str, download_origins: tuple[str, ...],
     wheels: list[dict[str, Any]] | None, deadline: float,
     excluded_local_packages: tuple[str, ...] = (),
 ) -> tuple[dict[str, Any], NativeFeedInputs]:
@@ -434,7 +438,7 @@ def _profile_feed(
 def _prepare_profile(
     snapshot: Path, selected: source_inputs.ProjectSource, wheels: dict[str, dict[str, Any]],
     record: dict[str, Any], output: Path, transaction: dependencies.RetainedUVInstall,
-    projections: list[str], *,
+    projections: Sequence[str], *,
     uv: str, download_origins: tuple[str, ...], deadline: float,
 ) -> Path:
     from installer_wheel_acquisition import AcquisitionLimits, acquire_wheel_inputs
@@ -510,7 +514,7 @@ def prepare_registry_lock(
     environment = _query_marker_environment(Path(sys.executable), deadline=deadline)
     from packaging.tags import sys_tags
 
-    target = {"environment": environment, "tags": [str(tag) for tag in sys_tags()], "device": "cpu"}
+    target: dict[str, Any] = {"environment": environment, "tags": [str(tag) for tag in sys_tags()], "device": "cpu"}
     name = engine._package_name(selected.payload)
     if name not in wheels:
         raise ProfileError("associated closure has no selected project wheel")

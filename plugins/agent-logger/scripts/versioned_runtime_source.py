@@ -26,7 +26,7 @@ def fingerprint_entries(
     root_label: Callable[[Path], str], roots: Collection[Path],
     normalize_link: Callable[[str], str], path_type: Callable[[str], Path],
     file_hashes: MutableMapping[Path, str] | None, on_file: Callable[[Path, bytes], None] | None,
-    on_progress: Callable[[], None] | None = None,
+    on_progress: Callable[[], object] | None = None,
     io_path: Callable[[Path], Path] = lambda path: path,
     reported_path: Callable[[Path], Path] = lambda path: path,
 ) -> str:
@@ -373,8 +373,7 @@ def package_version(slot_name: str) -> str:
 
 
 def version_key(version: str) -> (
-    tuple[int, int, int, int, int, int, str, str]
-    | tuple[int, tuple[tuple[int, int] | tuple[int, str], ...]]
+    tuple[int, int, int, int, int, int, str, str] | tuple[int, tuple[tuple[int, int] | tuple[int, str], ...]]
 ):
     """Order package releases and profiles before generated identities."""
     supported = re.fullmatch(
@@ -607,7 +606,7 @@ def fingerprint_source(
     paths: Iterable[str | os.PathLike[str]], *,
     _normalize_windows_extended_path: Callable[[str], str],
     _native_path: Callable[[Path], Path],
-    on_progress: Callable[[], None] | None = None,
+    on_progress: Callable[[], object] | None = None,
     file_hashes: MutableMapping[Path, str] | None = None,
     on_file: Callable[[Path, bytes], None] | None = None,
 ) -> str:

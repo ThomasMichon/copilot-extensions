@@ -6,9 +6,9 @@ does not establish that authority. This is not an ordinary installer entrypoint.
 """
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import hashlib
 import json
 import os
@@ -16,18 +16,36 @@ from pathlib import Path
 import re
 import subprocess
 import time
+from types import ModuleType
+from typing import Any, BinaryIO, Protocol, cast
 from urllib.parse import unquote, urlsplit
 
-import installer_dependency_policy as dependencies
-import installer_engine as engine
-from installer_engine_process import run_owned
-from installer_native_feed import capture_native_feed_inputs
-from installer_wheel_acquisition import AcquisitionLimits, acquire_wheel_inputs
-from installer_wheel_inputs import WheelError, WheelLimits, _check_deadline, inspect_archive
-from installer_wheel_snapshot import WheelInstallInputs, _digest, _open, _ordinary, _unchanged
+import installer_dependency_policy as installer_dependency_policy
+import installer_engine as installer_engine
+dependencies, engine = installer_dependency_policy, installer_engine
+from installer_engine_process import ChildLaunchError, run_owned as run_owned
+from installer_native_feed import NativeFeedInputs, capture_native_feed_inputs, recheck_native_feed_inputs
+from installer_wheel_acquisition import AcquisitionLimits, acquire_wheel_inputs as acquire_wheel_inputs
+from installer_wheel_inputs import WheelError, WheelLimits, WheelFacts, _check_deadline, inspect_archive, _ordinary
+from installer_wheel_snapshot import (
+    WheelInstallInputs, _digest as _snapshot_digest,
+    _open as _snapshot_open, _unchanged as _snapshot_unchanged,
+)
+
+_open = cast(Callable[[Path], BinaryIO], _snapshot_open)
+_unchanged = cast(Callable[..., os.stat_result], _snapshot_unchanged)
+_digest = cast(Callable[..., tuple[str, int]], _snapshot_digest)
+
+
+class _SeedSource(Protocol):
+    @property
+    def runtime_version(self) -> str: ...
+
+    def document(self) -> dict[str, Any]: ...
 
 
 REQUIREMENT = "packaging>=23"
+_TARGET_PROBE_TIMEOUT_SECONDS = 30
 _PROJECT = (
     '[project]\nname="installer-packaging-seed"\nversion="0"\n'
     'dependencies=[' + json.dumps(REQUIREMENT) + "]\n"
@@ -47,16 +65,24 @@ class SeedLimits:
     max_interpreter_bytes: int
     max_tooling_bytes: int
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if any(type(value) is not int or value <= 0 for value in vars(self).values()):
             raise WheelError("tooling seed requires explicit positive byte limits")
 
 
-def _canonical(value) -> str:
+@dataclass(frozen=True, kw_only=True)
+class ReadySeed(engine.ReadyCandidate):
+    _verification: Callable[[], None] = field(repr=False, compare=False)
+
+    def verify(self) -> None:
+        self._verification()
+
+
+def _canonical(value: object) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
 
-def _file_identity(path, limit, deadline):
+def _file_identity(path: Path, limit: int, deadline: float) -> str:
     before = _ordinary(path)
     with _open(path) as stream:
         opened = _unchanged(path, before, stream)
@@ -65,25 +91,57 @@ def _file_identity(path, limit, deadline):
     return digest
 
 
-def _tooling_identity(limit, deadline):
-    records, total = {}, 0
+def _tooling_identity(limit: int, deadline: float) -> str:
+    inputs: list[tuple[str, Path, int, int]] = []
+    total = 0
     for namespace, root, pattern in (
         ("installer", Path(__file__).resolve().parent, "installer_*.py"),
-        ("runtime", Path(engine.runtime.__file__).resolve().parent, "versioned_runtime*.py"),
+        ("runtime", Path(getattr(engine, "runtime").__file__).resolve().parent, "versioned_runtime*.py"),
     ):
         for path in root.glob(pattern):
             _check_deadline(deadline)
-            if len(records) >= 256:
+            if len(inputs) >= 256:
                 raise WheelError("tooling seed source count limit exceeded")
             size = _ordinary(path).st_size
             if size > limit - total:
                 raise WheelError("tooling seed source byte limit exceeded")
-            records[namespace + "/" + path.name] = _file_identity(path, limit - total, deadline)
+            inputs.append((namespace + "/" + path.name, path, size, limit - total))
             total += size
+    def read(item: tuple[str, Path, int, int]) -> tuple[str, str]:
+        name, path, size, remaining = item
+        if _ordinary(path).st_size != size:
+            raise WheelError("tooling seed source changed during collection")
+        return name, _file_identity(path, remaining, deadline)
+
+    records = dict(engine._bounded_content_map(read, inputs))
     return "sha256:" + hashlib.sha256(_canonical(records).encode()).hexdigest()
 
 
-def _target(python: Path, environment: dict, deadline: float) -> dict:
+def _target_facts(target: Any) -> dict[str, Any]:
+    if (
+        not isinstance(target, dict) or target.keys() != {
+            "version", "implementation", "cache_tag", "platform", "machine", "base_prefix",
+        }
+        or not isinstance(target["version"], list) or len(target["version"]) != 5
+        or any(type(value) is not int for value in target["version"][:3])
+        or target["version"][:2] < [3, 11]
+    ):
+        raise ValueError
+    # Windows venvs can spell the same base prefix differently. Bind its
+    # physical directory, not case or extended-path syntax.
+    base = Path(target["base_prefix"])
+    if not base.is_absolute() or not base.is_dir():
+        raise ValueError
+    identity = base.stat()
+    if not identity.st_ino:
+        raise ValueError
+    target["base_prefix"] = {"device": identity.st_dev, "inode": identity.st_ino}
+    return cast(dict[str, Any], target)
+
+
+def _target(
+    python: Path, environment: dict[str, str], deadline: float, procutil: ModuleType,
+) -> dict[str, Any]:
     _check_deadline(deadline)
     clean = {
         key: value for key, value in environment.items()
@@ -91,41 +149,33 @@ def _target(python: Path, environment: dict, deadline: float) -> dict:
         and key.upper() not in ("VIRTUAL_ENV", "CONDA_PREFIX")
     }
     try:
-        result = subprocess.run(
-            [str(python), "-I", "-S", "-B", "-c", _TARGET],
-            executable=dependencies._native_retained_path(python),
-            env=clean, stdin=subprocess.DEVNULL, capture_output=True,
-            timeout=deadline - time.monotonic(),
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        probe_deadline = min(deadline, time.monotonic() + _TARGET_PROBE_TIMEOUT_SECONDS)
+        result = run_owned(
+            [dependencies._native_retained_path(python), "-I", "-S", "-B", "-c", _TARGET],
+            cwd=Path(dependencies._native_retained_path(Path.cwd())), env=clean,
+            timeout=probe_deadline - time.monotonic(),
+            deadline=probe_deadline, procutil=procutil, construction_fd=None,
         )
-        _check_deadline(deadline)
+        _check_deadline(probe_deadline)
         if result.returncode or len(result.stdout) > 16_384:
             raise ValueError
-        target = json.loads(result.stdout)
-        if (
-            not isinstance(target, dict) or target.keys() != {
-                "version", "implementation", "cache_tag", "platform", "machine", "base_prefix",
-            }
-            or not isinstance(target["version"], list) or len(target["version"]) != 5
-            or any(type(value) is not int for value in target["version"][:3])
-            or target["version"][:2] < [3, 11]
-        ):
-            raise ValueError
-        # Windows venvs can spell the same base prefix differently. Bind its
-        # physical directory, not case or extended-path syntax.
-        base = Path(target["base_prefix"])
-        if not base.is_absolute() or not base.is_dir():
-            raise ValueError
-        identity = base.stat()
-        if not identity.st_ino:
-            raise ValueError
-        target["base_prefix"] = {"device": identity.st_dev, "inode": identity.st_ino}
-        return target
-    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return _target_facts(json.loads(result.stdout))
+    except (OSError, TypeError, ValueError, ChildLaunchError, subprocess.SubprocessError):
         raise WheelError("tooling seed target probe failed or returned unsupported facts") from None
 
 
-def _selected_wheel(content: bytes, *, deadline: float) -> dict:
+def _targets(
+    python: Path, environment: dict[str, str], deadline: float, procutil: ModuleType, *, installed: Path,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    deadline = min(deadline, time.monotonic() + _TARGET_PROBE_TIMEOUT_SECONDS)
+    selected, observed = engine._bounded_content_map(
+        lambda target: _target(target, environment, deadline, procutil),
+        (python, installed),
+    )
+    return selected, observed
+
+
+def _selected_wheel(content: bytes, *, deadline: float) -> dict[str, Any]:
     """Read one native file witness; UV owns version and target selection."""
     _check_deadline(deadline)
     try:
@@ -150,9 +200,14 @@ def _selected_wheel(content: bytes, *, deadline: float) -> dict:
         if (
             not isinstance(wheel, dict) or set(wheel) - {"url", "hashes", "size", "upload-time"}
             or not isinstance(wheel.get("url"), str)
-            or not isinstance(wheel.get("hashes"), dict) or wheel["hashes"].keys() != {"sha256"}
+            or not isinstance(wheel.get("hashes"), dict)
+            or set(wheel["hashes"]) - {"sha256", "md5"}
             or not isinstance(wheel["hashes"]["sha256"], str)
             or re.fullmatch(r"[0-9a-f]{64}", wheel["hashes"]["sha256"]) is None
+            or "md5" in wheel["hashes"] and (
+                not isinstance(wheel["hashes"]["md5"], str)
+                or re.fullmatch(r"[0-9a-f]{32}", wheel["hashes"]["md5"]) is None
+            )
         ):
             raise ValueError
         location = urlsplit(wheel["url"])
@@ -171,7 +226,9 @@ def _selected_wheel(content: bytes, *, deadline: float) -> dict:
         raise WheelError("tooling seed needs one exact native Packaging wheel witness") from None
 
 
-def inspect_seed(archive, selected: dict, *, limits: WheelLimits, deadline: float):
+def inspect_seed(
+    archive: BinaryIO, selected: dict[str, Any], *, limits: WheelLimits, deadline: float,
+) -> WheelFacts:
     """Reject dependencies and executable installation hooks before construction."""
     facts = inspect_archive(archive, limits=limits, deadline=deadline)
     prefix = "packaging-" + selected["version"] + ".dist-info/"
@@ -197,12 +254,13 @@ def inspect_seed(archive, selected: dict, *, limits: WheelLimits, deadline: floa
 
 @contextmanager
 def retain_packaging_seed(
-    *, payload: Path, source, policy: dict, uv: Path, python: Path,
-    verify_owner: Callable[[tuple[dict, ...]], dict], opaque_identity: Callable[[str], str],
+    *, payload: Path, source: _SeedSource, policy: dict[str, Any], uv: Path, python: Path,
+    verify_owner: Callable[[tuple[dict[str, Any], ...]], dict[str, Any]], opaque_identity: Callable[[str], str],
     limits: SeedLimits, acquisition_limits: AcquisitionLimits, wheel_limits: WheelLimits,
-    deadline: float, procutil, transaction: dependencies.RetainedUVInstall,
+    deadline: float, procutil: ModuleType, transaction: dependencies.RetainedUVInstall,
     projections: tuple[str, str],
-):
+    source_verifier: Callable[[Path, object], None] | None = None,
+) -> Iterator[ReadySeed]:
     """Admit a fixed dependency through native UV and the existing constructor.
 
     ``verify_owner`` must recheck the real authenticated source and selected
@@ -213,11 +271,14 @@ def retain_packaging_seed(
     verification.
     The caller keeps its source compiler's native transaction alive. Its
     exclusive retained settings, not ambient configuration, govern the seed.
+    An explicit ``source_verifier`` may own source authentication instead,
+    including the same payload and SourceIdentity's full fresh validation.
+    Omission retains the original owner callback and raw source-pin check.
     """
     _check_deadline(deadline)
     acquisition_limits.verify()
     if (
-        not isinstance(source, engine.runtime_source.SourceIdentity)
+        not isinstance(source, getattr(engine, "runtime_source").SourceIdentity)
         or not isinstance(limits, SeedLimits) or not callable(verify_owner)
         or not isinstance(wheel_limits, WheelLimits)
         or not callable(opaque_identity) or not python.is_absolute()
@@ -225,6 +286,7 @@ def retain_packaging_seed(
         or not isinstance(transaction, dependencies.RetainedUVInstall)
         or not isinstance(projections, tuple) or len(projections) != 2
         or policy.get("status") != "ready"
+        or (source_verifier is not None and not callable(source_verifier))
     ):
         raise WheelError("tooling seed lacks its actual selected installation owner")
     uv = Path(dependencies._select_uv_executable(str(uv)))
@@ -237,21 +299,33 @@ def retain_packaging_seed(
         raise WheelError("tooling seed needs its installation-owned runtime root")
     if _canonical(verify_owner(())) != frozen_policy:
         raise WheelError("tooling seed selected policy changed before admission")
-    engine._assert_source_pin(payload, engine.runtime_source.manifest_fields(source))
+    expected_source = getattr(engine, "runtime_source").manifest_fields(source)
+
+    def verify_source() -> None:
+        if source_verifier is None:
+            engine._assert_source_pin(payload, expected_source)
+        else:
+            source_verifier(payload, source)
+
+    verify_source()
     root = root / ".source-build-tools"
     owner_transaction, owner_projections = transaction, projections
     environment = dependencies._captured_environment(transaction.environment)
     retained_environment = _canonical(environment)
-    target = _target(python, environment, deadline)
+    target = _target(python, environment, deadline, procutil)
     python_digest = _file_identity(python_identity, limits.max_interpreter_bytes, deadline)
     tooling_digest = _tooling_identity(limits.max_tooling_bytes, deadline)
-    expected_source = engine.runtime_source.manifest_fields(source)
-    selected_inputs = ()
+    selected_inputs: tuple[dict[str, Any], ...] = ()
+    owner_feed = capture_native_feed_inputs(
+        owner_transaction, owner_projections[1], owner_projections[0], None, policy,
+        str(uv), deadline, wheels=None, profile_policy="packaging-seed-resolution",
+        opaque_identity=opaque_identity,
+    )
 
-    def verify():
+    def verify_inputs() -> None:
         _check_deadline(deadline)
         current_policy = verify_owner(tuple(dict(item) for item in selected_inputs))
-        engine._assert_source_pin(payload, expected_source)
+        verify_source()
         if (
             _canonical(policy) != frozen_policy
             or _canonical(current_policy) != frozen_policy
@@ -259,17 +333,22 @@ def retain_packaging_seed(
             or python.resolve(strict=True) != python_identity
             or _file_identity(python_identity, limits.max_interpreter_bytes, deadline) != python_digest
             or _tooling_identity(limits.max_tooling_bytes, deadline) != tooling_digest
-            or _target(python, environment, deadline) != target
         ):
             raise WheelError("tooling seed source, interpreter or selected policy changed")
+        if recheck_native_feed_inputs(
+            owner_transaction, owner_projections[1], owner_projections[0], None, policy,
+            str(uv), deadline, wheels=None, profile_policy="packaging-seed-resolution",
+            opaque_identity=opaque_identity,
+        ).policy_id != owner_feed.policy_id:
+            raise WheelError("tooling seed owner feed policy changed")
         _check_deadline(deadline)
 
+    def verify() -> None:
+        verify_inputs()
+        if _target(python, environment, deadline, procutil) != target:
+            raise WheelError("tooling seed source, interpreter or selected policy changed")
+
     verify()
-    owner_feed = capture_native_feed_inputs(
-        owner_transaction, owner_projections[1], owner_projections[0], None, policy,
-        str(uv), deadline, wheels=None, profile_policy="packaging-seed-resolution",
-        opaque_identity=opaque_identity,
-    )
     owner_arguments = [
         argument
         for option, value in dependencies._argument_pairs(owner_transaction.argv[3:])
@@ -287,7 +366,7 @@ def retain_packaging_seed(
         project = temporary / "pyproject.toml"
         project.write_text(_PROJECT, encoding="utf-8")
         output = temporary / "pylock.toml"
-        seed_projections = []
+        seed_projections: list[str] = []
         with dependencies.retain_uv_source_compile(
             str(uv), [
                 str(project), "--python", str(python), "--python-version",
@@ -300,7 +379,7 @@ def retain_packaging_seed(
         ) as transaction:
             if len(seed_projections) != 2:
                 raise WheelError("tooling seed lacks paired retained native settings")
-            def frozen_cutoffs(held):
+            def frozen_cutoffs(held: dependencies.RetainedUVInstall) -> list[tuple[str, str]]:
                 return sorted(
                     (option, value) for option, value in dependencies._argument_pairs(held.argv[3:])
                     if option in ("--exclude-newer", "--exclude-newer-package")
@@ -309,8 +388,10 @@ def retain_packaging_seed(
             if frozen_cutoffs(transaction) != frozen_cutoffs(owner_transaction):
                 raise WheelError("tooling seed cutoffs differ from the held installation owner")
 
-            def capture(wheels, profile_policy):
-                return capture_native_feed_inputs(
+            def capture(
+                wheels: list[dict[str, Any]] | None, profile_policy: str,
+            ) -> NativeFeedInputs:
+                return recheck_native_feed_inputs(
                     transaction, seed_projections[1], owner_projections[0], None, policy,
                     transaction.argv[0], deadline, wheels=wheels,
                     profile_policy=profile_policy, opaque_identity=opaque_identity,
@@ -366,15 +447,19 @@ def retain_packaging_seed(
                 ))
                 version = source.runtime_version + ".build." + inputs.receipt()["lock_id"][7:]
 
-                def validate(slot):
-                    verify()
+                def validate(slot: Path) -> None:
+                    verify_inputs()
                     inputs.verify()
                     if capture([selected], "packaging-seed-lock:" + native_digest).policy_id != feed.policy_id:
                         raise WheelError("tooling seed feed policy changed during construction")
-                    installed = engine.runtime.slot_python(root, slot.name)
+                    installed = getattr(engine, "runtime").slot_python(root, slot.name)
                     if installed is None:
                         raise WheelError("tooling seed installed interpreter is missing")
-                    observed = _target(installed, environment, deadline)
+                    original, observed = _targets(
+                        python, environment, deadline, procutil, installed=installed,
+                    )
+                    if original != target:
+                        raise WheelError("tooling seed source, interpreter or selected policy changed")
                     changed = sorted(key for key in target if target[key] != observed[key])
                     if changed:
                         raise WheelError(
@@ -388,6 +473,16 @@ def retain_packaging_seed(
                     expected_source_identity=expected_source, validate_candidate=validate,
                     wait_timeout=deadline - time.monotonic(), child_timeout=deadline - time.monotonic(),
                 ) as ready:
-                    validate(ready.slot)
-                    yield ready
-                    validate(ready.slot)
+                    active = True
+
+                    def verify_ready() -> None:
+                        if not active:
+                            raise WheelError("tooling seed custody is closed")
+                        validate(ready.slot)
+
+                    try:
+                        verify_ready()
+                        yield ReadySeed(**vars(ready), _verification=verify_ready)
+                        verify_ready()
+                    finally:
+                        active = False

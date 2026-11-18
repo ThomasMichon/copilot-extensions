@@ -70,6 +70,11 @@ CODE_IMPACT_ENV = {
     "BASE": "${{ github.event.pull_request.base.sha || github.event.before }}",
     "HEAD": "${{ github.event.pull_request.head.sha || github.sha }}",
 }
+RATCHET_SCRIPT = '''if [ "${{ github.event_name }}" = "pull_request" ]; then
+  BASE="$(git merge-base "$BASE" "$HEAD")"
+fi
+python tools/typecheck.py --new-code --base "$BASE" --head "$HEAD" --prepare
+python tools/typecheck.py --new-code --base "$BASE" --head "$HEAD"'''
 CODE_GUARD_COMMANDS = (
     "python tools/typecheck.py --prepare",
     "python tools/typecheck.py --enforced",
@@ -461,10 +466,10 @@ def _validate_ci(path: Path) -> list[str]:
         ):
             errors.append("ci.yml must exclude only main-base pull requests and include retarget edits")
         ci_jobs = _mapping(ci_workflow.get("jobs"))
-        unit_profile = _mapping(ci_workflow.get("env"))
+        ci_env = _mapping(ci_workflow.get("env"))
         unit_profile = (
-            unit_profile is not None
-            and unit_profile.get("PROMOTION_UNIT_PROFILE") == "copilot-extensions.promotion-units/v1"
+            ci_env is not None
+            and ci_env.get("PROMOTION_UNIT_PROFILE") == "copilot-extensions.promotion-units/v1"
         )
         expected_guard = "python tools/check-trusted-ci.py"
         if not unit_profile:
@@ -690,8 +695,27 @@ def _validate_ci(path: Path) -> list[str]:
     return errors
 
 
+def validate_dev_ratchet(path: Path) -> list[str]:
+    """Check PR wiring in the development workflow, not the composed release workflow."""
+    workflow, errors = _load(path)
+    if workflow is None:
+        return errors
+    jobs = _mapping(workflow.get("jobs")) or {}
+    steps = (_mapping(jobs.get("checks")) or {}).get("steps")
+    ratchets = [
+        step for step in steps if isinstance(step, dict)
+        and step.get("name") == "Whole-file strict new-code ratchet"
+    ] if isinstance(steps, list) else []
+    if len(ratchets) != 1 or (
+        ratchets[0].get("env") != {key: CODE_IMPACT_ENV[key] for key in ("BASE", "HEAD")}
+        or str(ratchets[0].get("run", "")).strip() != RATCHET_SCRIPT
+    ):
+        errors.append("the whole-file ratchet must compare the feature head to its PR merge base")
+    return errors
+
+
 def main() -> int:
-    errors = validate_workflow()
+    errors = validate_workflow() + validate_dev_ratchet(WORKFLOW.with_name("ci.yml"))
     for error in errors:
         print(f"ERROR: {error}")
     if errors:

@@ -32,6 +32,20 @@ def _workflow(tmp_path: Path, transform: Callable[[str], str]) -> Path:
 
 def test_repository_workflow_is_valid() -> None:
     assert MODULE.validate_workflow() == []
+    assert MODULE.validate_dev_ratchet(MODULE.WORKFLOW.with_name("ci.yml")) == []
+
+
+@pytest.mark.parametrize("old,new", [
+    ("github.event.pull_request.head.sha || github.sha", "github.sha"),
+    ('BASE="$(git merge-base "$BASE" "$HEAD")"', ":"),
+])
+def test_dev_ratchet_rejects_wrong_comparison(tmp_path: Path, old: str, new: str) -> None:
+    path = tmp_path / "ci.yml"
+    text = MODULE.WORKFLOW.with_name("ci.yml").read_text(encoding="utf-8")
+    path.write_text(text.replace(old, new), encoding="utf-8")
+    assert MODULE.validate_dev_ratchet(path) == [
+        "the whole-file ratchet must compare the feature head to its PR merge base",
+    ]
 
 
 @pytest.mark.parametrize("mutation", ["missing", "reversed", "ignored", "gated"])
@@ -441,7 +455,9 @@ def test_ci_checks_job_cannot_be_gated_or_dependent(tmp_path: Path) -> None:
     ("push", "", "", False, (True, False, False)),
     ("workflow_dispatch", "", "", False, (True, True, False)),
 ])
-def test_actual_job_admission_excludes_closed_pr_edits_only(event, state, base, cancelled, expected):
+def test_actual_job_admission_excludes_closed_pr_edits_only(
+    event: str, state: str, base: str, cancelled: bool, expected: tuple[bool, bool, bool],
+) -> None:
     root = Path(__file__).resolve().parents[1]
     workflow, errors = MODULE._load(root / ".github/workflows/ci.yml")
     assert not errors

@@ -19,7 +19,10 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
+
+if TYPE_CHECKING:
+    from .repository_resources import RepositoryResourceSnapshot
 
 from .ado_discovery_scope import (
     validate_discovery_scope,
@@ -34,7 +37,7 @@ from .issue_loop_markers import (
     _parse_marker,
     latest_reservations as _latest_reservations,
 )
-from .repository_github_auth import _TIMEOUT_SECONDS, repository_environment, run_repository_command, validate_auth
+from .repository_github_auth import _TIMEOUT_SECONDS, command_group, repository_environment, run_repository_command, validate_auth
 from .repository_issue_selection import eligible_issues, validate_issue_numbers
 from .repository_issue_declarations import expand_repository_issue_loop as expand_repository_issue_loop
 from .repository_issue_task_contracts import (
@@ -172,7 +175,7 @@ def validate_config(
     inherited_script_fields: frozenset[str] = frozenset(),
     resolve_resources: bool = True,
     worker_identity_cwd: str | None = None,
-    snapshot=None,
+    snapshot: RepositoryResourceSnapshot | None = None,
 ) -> dict[str, Any]:
     """Validate/normalize a declaration. ``cwd`` (declaring repo root, if
     known) threads a named ``worker_identity`` to its repo-local override.
@@ -503,14 +506,15 @@ def _task_resource_keys(task: Mapping[str, Any]) -> tuple[str, ...]:
 
 def _approve_or_reread(client: Any, task_id: str) -> dict[str, Any]:
     try:
-        return client.approve(task_id)
+        current: dict[str, Any] = client.approve(task_id)
     except Exception:
         current = client.get(task_id)
         if current.get("status") == "proposed":
             raise
-        return current
+    return current
 
 def _abandon_or_reread(client: Any, task_id: str, *, reason: str) -> dict[str, Any]:
+    current: dict[str, Any]
     try:
         current = client.abandon(
             task_id,
@@ -537,8 +541,7 @@ class GitHubProvider:
 
     def __init__(
         self,
-        expected_login: str,
-        runner: Callable[..., Any] | None = None,
+        expected_login: str, runner: Callable[..., Any] | None = None,
         *,
         repository: str | None = None,
         auth: str = "ambient",
@@ -546,7 +549,7 @@ class GitHubProvider:
         if not expected_login:
             raise ValueError("expected_login must be non-empty")
         self.expected_login = expected_login
-        self.runner = runner or (run_repository_command if auth == "repository" else subprocess.run)
+        self.runner: Callable[..., Any] = runner or (run_repository_command if auth == "repository" else subprocess.run)
         if auth not in {"ambient", "repository"} or (auth == "repository" and not repository):
             raise ValueError("repository authentication requires a repository")
         self.repository = repository or ""
@@ -562,7 +565,7 @@ class GitHubProvider:
         return repository_environment(self.repository, self.expected_login, runner=self.runner)
 
     def _gh(self, *args: str, env: Mapping[str, str] | None = None) -> Any:
-        options = {}
+        options: dict[str, Any] = {"encoding": "utf-8"} if args[:2] == ("api", "graphql") else {}
         if self.auth == "repository":
             options["env"] = env if env is not None else repository_environment(
                 self.repository, self.expected_login, runner=self.runner,
@@ -577,11 +580,7 @@ class GitHubProvider:
         )
         if int(completed.returncode) != 0:
             if self.auth == "repository":
-                group = {
-                    ("api", "user"): "api user", ("api", "graphql"): "api graphql",
-                    ("issue", "view"): "issue view", ("issue", "comment"): "issue comment",
-                    ("issue", "edit"): "issue edit",
-                }.get(args[:2], "api" if args[:1] == ("api",) else "other")
+                group = command_group(args)
                 raise RuntimeError(
                     f"Repository GitHub operation failed ({group}, exit {int(completed.returncode)})"
                 )
@@ -1328,11 +1327,11 @@ def run_tick(
     if not dry_run:
         tasks_by_origin: dict[str, dict[str, Any]] = {}
         tasks_by_id: dict[str, dict[str, Any]] = {}
-        for task in discovered["tasks"]:
-            if isinstance(task.get("id"), str):
-                tasks_by_id[task["id"]] = task
-            if isinstance(task.get("origin_ref"), str):
-                tasks_by_origin.setdefault(task["origin_ref"], task)
+        for existing_task in discovered["tasks"]:
+            if isinstance(existing_task.get("id"), str):
+                tasks_by_id[existing_task["id"]] = existing_task
+            if isinstance(existing_task.get("origin_ref"), str):
+                tasks_by_origin.setdefault(existing_task["origin_ref"], existing_task)
         released_terminal_resources = []
         resource_reservations = client.list_resource_reservations(
             owner_prefix=f"repository-issue-loop:{config['name']}:"
@@ -1400,8 +1399,8 @@ def run_tick(
             tasks_by_id[proposed["id"]] = current
             if isinstance(current.get("origin_ref"), str):
                 tasks_by_origin[current["origin_ref"]] = current
-            for index, task in enumerate(discovered["tasks"]):
-                if task.get("id") == proposed["id"]:
+            for index, existing_task in enumerate(discovered["tasks"]):
+                if existing_task.get("id") == proposed["id"]:
                     discovered["tasks"][index] = current
                     break
             reconciled_proposed.append(
@@ -1409,8 +1408,8 @@ def run_tick(
             )
         for reservation in resource_reservations:
             task_id = reservation.get("task_id")
-            task = tasks_by_id.get(task_id) if isinstance(task_id, str) else None
-            if task is not None and task.get("status") in _TERMINAL:
+            reserved_task = tasks_by_id.get(task_id) if isinstance(task_id, str) else None
+            if reserved_task is not None and reserved_task.get("status") in _TERMINAL:
                 client.release_resource_reservation(
                     reservation["key"],
                     reservation["owner"],
@@ -1427,11 +1426,12 @@ def run_tick(
                 if own
                 else None
             )
-            matching_task = (
-                tasks_by_id.get(own.get("task_id"))
+            task_index, task_key = (
+                (tasks_by_id, own.get("task_id"))
                 if own and own.get("state") == "claimed"
-                else tasks_by_origin.get(reservation_origin)
+                else (tasks_by_origin, reservation_origin)
             )
+            matching_task = task_index.get(task_key) if isinstance(task_key, str) else None
             if (
                 matching_task is not None
                 and matching_task.get("origin_ref") != reservation_origin

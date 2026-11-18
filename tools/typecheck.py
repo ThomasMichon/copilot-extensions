@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 import hashlib
 from itertools import product
 import json
@@ -26,7 +26,8 @@ from tools.cache_directory_paths import ordinary_cache_root  # noqa: E402
 from tools import plugin_test_resources  # noqa: E402
 from tools.typecheck_source_views import (  # noqa: E402
     GUARD_ENTRY, GUARD_MODULE, INSTALLATION_ENTRY, SourceView, SourceViewError,
-    _write_view, guard_alias_view, installation_view,
+    _write_view, guard_alias_view, installation_view, setup_program_view,
+    installer_program_view,
     HARNESS_PREFIX, HarnessProgramView, harness_emitted_inputs, harness_emitted_views,
 )
 from tools.typecheck_catalog_views import (  # noqa: E402
@@ -37,7 +38,11 @@ from tools.typecheck_bootstrap_views import (  # noqa: E402
     SELECTOR_INPUTS, powershell_selector_view, posix_selector_view,
 )
 from tools.typecheck_new_code import select_new_code  # noqa: E402
-from tools.typecheck_programs import Program, ProgramError, ProgramInputs, independent_programs  # noqa: E402
+from tools.typecheck_programs import (  # noqa: E402
+    Program, ProgramError, _import_suffix as _import_suffix, _run as _run,
+    InstallerOverlay, check_independent_project, check_ordinary_program,
+    git_environment as git_environment,
+)
 from installer_dependency_policy import DependencyPolicyError, run_uv_install  # noqa: E402
 from single_instance_lease import AlreadyRunningError  # noqa: E402
 
@@ -216,18 +221,6 @@ class _ImportInputs:
     def verify(self, root: Path) -> None:
         if self != _import_inputs(root, self.roots, self.inventory):
             raise TypecheckError("Declared import inputs changed during type checking")
-
-
-def _import_suffix(path: Path) -> str:
-    suffix = path.suffix
-    lower = suffix.lower()
-    if os.name == "nt" and suffix != lower and lower in {".py", ".pyi"}:
-        try:
-            if path.with_suffix(lower).samefile(path):
-                return lower
-        except OSError:
-            pass
-    return suffix
 
 
 def _import_inputs(root: Path, roots: tuple[str, ...], paths: tuple[str, ...]) -> _ImportInputs:
@@ -465,27 +458,6 @@ class _SourceViews:
         return text
 
 
-def _run(argv: list[str], root: Path, *, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        argv, cwd=root, env=env, capture_output=True, text=True, encoding="utf-8",
-        errors="strict", timeout=120, creationflags=int(getattr(subprocess, "CREATE_NO_WINDOW", 0)),
-    )
-
-
-def git_environment() -> dict[str, str]:
-    """Keep repository selectors from redirecting inventory or change comparison."""
-    selectors = {
-        "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
-        "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-    }
-    env = {
-        key: value for key, value in os.environ.items()
-        if key.upper() not in selectors and not key.upper().startswith("GIT_CONFIG")
-    }
-    env.update(GIT_TERMINAL_PROMPT="0", GIT_NO_LAZY_FETCH="1", GIT_OPTIONAL_LOCKS="0")
-    return env
-
-
 def changed_paths(root: Path, base: str, head: str | None = None) -> tuple[str, ...]:
     """Compare verified commits, or the base against staged and unstaged source."""
     revisions: list[str] = []
@@ -653,35 +625,18 @@ def check_project(
     all_paths: tuple[str, ...], strict: bool = False,
 ) -> int:
     """Check all independent programs under the same physical owner and strict policy."""
-    if not project.program_roots:
-        return _check_program(root, project, files, all_paths=all_paths, strict=strict)
     try:
-        programs = independent_programs(
-            files, all_paths, tuple(program.root for program in project.program_roots), project.owns,
-        )
-        if not programs:
-            raise ProgramError("Independent programs have no selected Python files")
-        captured = ProgramInputs.capture(root, files, _import_identity)
-        failure = 0
-        for index, program in enumerate(programs, 1):
-            declaration = next(
-                (item for item in project.program_roots if program[0].startswith(item.root + "/")), None,
+        if not project.program_roots:
+            return check_ordinary_program(
+                root, project, files, all_paths=all_paths, strict=strict,
+                check=_check_program, identity=_import_identity, candidate_factory=installer_program_view,
+                environment=environment_path, nonce=lambda: uuid4().hex,
             )
-            member_project = replace(project, import_roots=declaration.import_roots) if declaration else project
-            member_paths = tuple(
-                path for path in all_paths if path.startswith(declaration.root + "/")
-            ) if declaration else all_paths
-            captured.verify()
-            print(f"Independent program {index}/{len(programs)}: {project.name}")
-            try:
-                result = _check_program(
-                    root, member_project, program, all_paths=member_paths, strict=strict,
-                    program_root=declaration.root if declaration else None,
-                )
-                failure = failure or result
-            finally:
-                captured.verify()
-        return failure
+        return check_independent_project(
+            root, project, files, all_paths=all_paths, strict=strict,
+            check=_check_program, identity=_import_identity, candidate_factory=installer_program_view,
+            environment=environment_path, nonce=lambda: uuid4().hex,
+        )
     except ProgramError as error:
         raise TypecheckError(str(error)) from error
 
@@ -689,6 +644,8 @@ def check_project(
 def _check_program(
     root: Path, project: Project, files: tuple[str, ...], *,
     all_paths: tuple[str, ...], strict: bool = False, program_root: str | None = None,
+    environment_root: Path | None = None, input_verifier: Callable[[], None] | None = None,
+    payload: InstallerOverlay | None = None,
 ) -> int:
     """Check one declared scope; never execute product or test code."""
     if not files:
@@ -698,7 +655,7 @@ def _check_program(
             project.level, (project.python_version, *project.additional_python_versions),
         )
     physical_count = len(files)
-    path, digest = environment_path(root, project)
+    path, digest = environment_path(environment_root or root, project)
     python = environment_python(path)
     marker = path / ".typecheck-prepared"
     if not python.is_file() or not marker.is_file() or marker.read_text(encoding="utf-8").strip() != digest:
@@ -771,6 +728,7 @@ def _check_program(
             key: value for key, value in os.environ.items()
             if key not in {"PYTHONPATH", "PYTHONHOME", "MYPYPATH"}
         }
+        physical_files = tuple(file for file in files if file in all_paths)
         installation_entries = tuple(
             entry for entry in all_paths
             if entry.endswith(("/installation_context.py", "/_installation_context.py"))
@@ -782,11 +740,13 @@ def _check_program(
                         and "/" not in file[len(entry.rsplit("/", 1)[0]) + 1:]
                         and not file.endswith("_installation_context_worker.py")
                     )
-                    for file in files
+                    for file in physical_files
                 )
             )
         )
-        for index, entry in enumerate(installation_entries):
+        for index, entry in enumerate(sorted(
+            installation_entries, key=lambda entry: entry != INSTALLATION_ENTRY,
+        )):
             prefix = entry.rsplit("/", 1)[0]
             installation_inputs = tuple(
                 file for file in all_paths if file == entry or (
@@ -801,9 +761,16 @@ def _check_program(
             ) -> SourceView:
                 return installation_view(root, paths, output, entry_path=entry_path)
 
+            imported = prefix in project.import_roots
+            filename = entry.rsplit("/", 1)[1] if imported else (
+                "installation_context.py" if index == 0 else f"_installation_context_program_{index}.py"
+            )
+            if imported and views.stage / filename in views.outputs:
+                raise TypecheckError(
+                    "Copied installation-context imports require independent program bindings"
+                )
             view = views.add(
-                compose_installation, all_paths, installation_inputs,
-                "installation_context.py" if index == 0 else f"_installation_context_program_{index}.py",
+                compose_installation, all_paths, installation_inputs, filename,
             )
             if entry in files:
                 members = {name for name, _content in view.inputs}
@@ -811,6 +778,14 @@ def _check_program(
                     raise TypecheckError(f"{project.name}: composed fragments must share one project owner")
                 files = (*tuple(file for file in files if file not in members), str(view.output))
             ordered_imports.insert(0, str(view.output.parent))
+        setups = tuple(file for file in files if file.endswith("/setup.py"))
+        if len(setups) > 1:
+            for entry in setups:
+                view = views.add(
+                    setup_program_view, (entry,), (entry,),
+                    "setup_" + hashlib.sha256(entry.encode()).hexdigest()[:16] + ".py",
+                )
+                files = tuple(str(view.output) if file == entry else file for file in files)
         if guard:
             view = views.add(guard_alias_view, files, (GUARD_ENTRY,), GUARD_MODULE + ".py")
             files = tuple(str(view.output) if file == GUARD_ENTRY else file for file in files)
@@ -819,7 +794,12 @@ def _check_program(
             views.guard_search = tuple(ordered_imports)
             if supplemental:
                 views.procutil_search = tuple(ordered_imports)
-        if (project.import_roots or guard) and any(os.pathsep in entry for entry in ordered_imports):
+        if payload is not None:
+            ordered_imports = payload.imports(root, ordered_imports, views.stage)
+            files = payload.targets(root, files)
+        if (project.import_roots or guard or payload is not None) and any(
+            os.pathsep in entry for entry in ordered_imports
+        ):
             raise TypecheckError("Import search paths contain the native path-list separator")
         env["MYPYPATH"] = os.pathsep.join(ordered_imports)
         views._parents(views.stage, create=True)
@@ -837,7 +817,7 @@ def _check_program(
                 "--explicit-package-bases", "--follow-imports", "silent",
                 "--check-untyped-defs", "--show-error-codes", "--no-pretty",
                 "--cache-dir", (
-                    os.devnull if import_inputs is not None or guard
+                    os.devnull if import_inputs is not None or guard or payload is not None
                     else str(path / "mypy-cache" / platform / version)
                 ),
             ]
@@ -846,6 +826,8 @@ def _check_program(
             argv.append("@" + str(targets))
             if import_inputs is not None:
                 import_inputs.verify(root)
+            if input_verifier is not None:
+                input_verifier()
             views.verify()
             try:
                 result = _run(argv, root, env=env)
@@ -853,15 +835,20 @@ def _check_program(
                 try:
                     views.verify()
                 finally:
-                    if import_inputs is not None:
-                        import_inputs.verify(root)
+                    try:
+                        if import_inputs is not None:
+                            import_inputs.verify(root)
+                    finally:
+                        if input_verifier is not None:
+                            input_verifier()
             print(f"[{project.level}] {project.name} (Python {version}, {platform}, {physical_count} physical files, {len(files)} targets)")
             if supplemental:
                 print(f"Supplemental portable emitted programs: {supplemental}; no native execution qualification")
             if project.name == "lib-payload-invocation" and version == "3.10":
                 print("Bootstrap: Python 3.10 checks its exit guard only; full body requires Python 3.11.")
-            print(views.diagnostics(result.stdout), end="")
-            print(views.diagnostics(result.stderr), end="", file=sys.stderr)
+            render: Callable[[str], str] = payload.diagnostics if payload else lambda text: text
+            print(views.diagnostics(render(result.stdout)), end="")
+            print(views.diagnostics(render(result.stderr)), end="", file=sys.stderr)
             if result.returncode:
                 if not project.additional_python_versions and not project.program_roots:
                     return result.returncode

@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import json
 import re
-from collections.abc import Callable, Iterable, Iterator, Set
+from collections.abc import Callable, Collection, Iterable, Iterator, Mapping
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -13,9 +13,20 @@ _Error = type[Exception]
 _Balanced = Callable[[str, int, str, str], tuple[str, int]]
 _Pairs = Callable[[list[str]], Iterable[tuple[str, str]]]
 
+def captured_environment(
+    env: Mapping[str, str], *, windows: bool, error_type: _Error,
+) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for key, value in env.items():
+        key = key.upper() if windows else key
+        if key in result and result[key] != value:
+            raise error_type("dependency installation environment has conflicting variable identities")
+        result[key] = value
+    return result
+
 
 def argument_pairs(
-    arguments: Iterable[str], value_options: Set[str], *, error_type: _Error,
+    arguments: Iterable[str], value_options: Collection[str], *, error_type: _Error,
 ) -> Iterator[tuple[str, str]]:
     iterator = iter(arguments)
     positional = False
@@ -76,7 +87,7 @@ def uv_command(
     operation: str,
     windows: bool,
     argument_pairs: _Pairs,
-    value_options: Set[str],
+    value_options: Collection[str],
 ) -> tuple[list[str], Path | None]:
     if not windows or len(os.path.abspath(cwd or Path.cwd())) < 260:
         return [uv, "pip", operation, *arguments], cwd

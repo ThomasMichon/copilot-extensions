@@ -14,24 +14,32 @@ pattern for driving ``cmd_resolve`` against a real tracking record.
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import os
 import shutil
+import socket
 import subprocess
 import sys
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, Literal
 
 import pytest
+from agent_procutil import no_window_kwargs
+from machine_transport import detect_platform, legacy_alias_forms
 
-import agent_worktrees.__main__ as m
 from agent_worktrees import config as cfg
-from agent_worktrees import launch_seed_state, push_timeout, resolve_cli, tracking
+from agent_worktrees import activity, git_ops, installer, launch_seed_state, local_cache_refresh
+from agent_worktrees import push_timeout, resolve_cli, sessions, tracking
 from agent_worktrees.sessions import LiveVerdict
+from agent_worktrees.tracking_lifecycle import create_new_record
+
+m = importlib.import_module("agent_worktrees.__main__")
 
 
-def _stub_launch_plumbing(monkeypatch, config: cfg.Config) -> None:
+def _stub_launch_plumbing(monkeypatch: pytest.MonkeyPatch, config: cfg.Config) -> None:
     monkeypatch.setattr(cfg, "_ACTIVE_PROJECT", config.repo_name)
     for record in tracking.list_records(cfg.tracking_dir()):
         Path(record.worktree_path).mkdir(parents=True, exist_ok=True)
@@ -57,18 +65,18 @@ def _stub_launch_plumbing(monkeypatch, config: cfg.Config) -> None:
     monkeypatch.setattr(m.sessions, "verify_worktree_active", lambda *_a, **_k: LiveVerdict())
 
 
-def _create_config(tmp_path: Path, **overrides) -> cfg.Config:
+def _create_config(tmp_path: Path, **overrides: Any) -> cfg.Config:
     anchor = tmp_path / "anchor"
     anchor.mkdir()
-    base = dict(
+    base: dict[str, Any] = dict(
         srcroot=str(tmp_path),
         machine="test",
-        platform="windows",
+        platform=detect_platform(),
         repo_name="demo-repo",
         repos={
             "demo-repo": cfg.RepoConfig(
                 anchor=str(anchor),
-                worktree_root=str(tmp_path / "worktrees"),
+                worktree_root=str(tmp_path),
             )
         },
     )
@@ -77,13 +85,15 @@ def _create_config(tmp_path: Path, **overrides) -> cfg.Config:
     project_dir = cfg.project_dir(config.repo_name)
     project_dir.mkdir(parents=True, exist_ok=True)
     (project_dir / "config.yaml").write_text(json.dumps({
-        "repo_name": config.repo_name, "machine": config.machine,
-        "repos": {config.repo_name: {"anchor": str(anchor)}},
+        "repo_name": config.repo_name, "machine": config.machine, "platform": config.platform,
+        "repos": {config.repo_name: {
+            "anchor": str(anchor), "worktree_root": config.default_repo.worktree_root,
+        }},
     }), encoding="utf-8")
     return config
 
 
-def _args(**overrides):
+def _args(**overrides: Any) -> argparse.Namespace:
     base = dict(
         json=True, base=False, new_worktree=False, auto=False, machine=None,
         environment=None, worktree_id="wt-a", codename=None, seed=None,
@@ -95,7 +105,7 @@ def _args(**overrides):
     return argparse.Namespace(**base)
 
 
-def _resume_plan(config, record, monkeypatch, capfd, *, surface, command=None, selection_calls=None, **kwargs):
+def _resume_plan(config: cfg.Config, record: tracking.WorktreeRecord, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str], *, surface: str, command: list[str] | None=None, selection_calls: list[dict[str, Any]] | None=None, **kwargs: Any) -> tuple[int, dict[str, Any]]:
     from agent_worktrees import resolve_launch_cli as rlc
 
     args = _args(
@@ -103,7 +113,7 @@ def _resume_plan(config, record, monkeypatch, capfd, *, surface, command=None, s
         profile=None, **kwargs,
     )
     command = command if command is not None else ["copilot"]
-    def selection(*args, **kwargs):
+    def selection(*args: Any, **kwargs: Any) -> SimpleNamespace:
         if selection_calls is not None:
             selection_calls.append(kwargs)
         return SimpleNamespace(profile=None, assignment=None)
@@ -115,9 +125,9 @@ def _resume_plan(config, record, monkeypatch, capfd, *, surface, command=None, s
         payload = json.loads(capfd.readouterr().out)
         return code, payload.get("launch", payload)
     monkeypatch.setattr(rlc, "_dispatch_validate_profile_assignment_config", lambda *a: None)
-    monkeypatch.setattr(rlc.sessions, "resolve_resume_target", lambda *a: None)
-    monkeypatch.setattr(rlc.tracking, "stamp_mux_live", lambda *a, **kw: None)
-    monkeypatch.setattr(rlc.tracking, "stamp_bound_live", lambda *a, **kw: None)
+    monkeypatch.setattr(sessions, "resolve_resume_target", lambda *a: None)
+    monkeypatch.setattr(tracking, "stamp_mux_live", lambda *a, **kw: None)
+    monkeypatch.setattr(tracking, "stamp_bound_live", lambda *a, **kw: None)
     monkeypatch.setattr(
         rlc, "_dispatch_launch_profile_selection",
         selection,
@@ -128,7 +138,7 @@ def _resume_plan(config, record, monkeypatch, capfd, *, surface, command=None, s
     monkeypatch.setattr(rlc, "_build_env", lambda *a, **kw: {})
     monkeypatch.setattr(rlc, "_repo_session_env", lambda *a: {})
     monkeypatch.setattr(rlc, "_preflight_launch", lambda *a: SimpleNamespace(error=None))
-    plans = []
+    plans: list[dict[str, Any]] = []
     monkeypatch.setattr(rlc, "_emit_plan", plans.append)
     code = rlc._resolve_resume_context(rlc.ResolveLaunchContext(
         config=config, args=args, record=record,
@@ -136,10 +146,10 @@ def _resume_plan(config, record, monkeypatch, capfd, *, surface, command=None, s
     return code, plans[-1]
 
 
-def _tool_preparation_result(monkeypatch, *, blocked):
+def _tool_preparation_result(monkeypatch: pytest.MonkeyPatch, *, blocked: bool) -> None:
     from agent_worktrees import copilot_plugin_profile, local_cache_refresh
 
-    def prepare(*args, **kwargs):
+    def prepare(*args: Any, **kwargs: Any) -> dict[str, str]:
         if blocked:
             raise RuntimeError("selected tool roster conflict")
         return {"action": "no-op"}
@@ -154,8 +164,8 @@ def _tool_preparation_result(monkeypatch, *, blocked):
 @pytest.mark.parametrize("defer", [False, True])
 @pytest.mark.parametrize("blocked", [False, True])
 def test_base_resolvers_block_tool_roster_but_not_optional_copy_failure(
-    tmp_path, monkeypatch, capfd, surface, defer, blocked,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str], surface: str, defer: bool, blocked: bool,
+) -> None:
     from agent_worktrees import resolve_launch_cli as rlc
 
     config = _create_config(tmp_path)
@@ -169,8 +179,8 @@ def test_base_resolvers_block_tool_roster_but_not_optional_copy_failure(
         code = resolve_cli.cmd_resolve(args)
         plan = json.loads(capfd.readouterr().out)
     else:
-        monkeypatch.setattr(rlc.git_ops, "get_dirty_files", lambda *a: [])
-        plans = []
+        monkeypatch.setattr(git_ops, "get_dirty_files", lambda *a: [])
+        plans: list[dict[str, Any]] = []
         monkeypatch.setattr(rlc, "_emit_plan", plans.append)
         code = rlc._resolve_base_repo(config, args)
         plan = plans[-1]
@@ -187,17 +197,18 @@ def test_base_resolvers_block_tool_roster_but_not_optional_copy_failure(
 @pytest.mark.parametrize("defer", [False, True])
 @pytest.mark.parametrize("blocked", [False, True])
 def test_resume_resolvers_block_tool_roster_but_not_optional_copy_failure(
-    tmp_path, monkeypatch, capfd, surface, defer, blocked,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str], surface: str, defer: bool, blocked: bool,
+) -> None:
     from agent_worktrees import worktree_trust
 
-    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    directory = cfg.project_dir("demo-repo") / "worktrees"
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: directory)
     config = _create_config(tmp_path, auto_fast_forward=False)
     config = replace(config, repos={config.repo_name:
                                    replace(config.default_repo, copilot_plugin_profile="tools.json")})
-    record = tracking.create_new_record(
+    record = create_new_record(
         "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), config.repo_name, "test",
-        "windows", tmp_path, codename="already-set")
+        config.platform, directory, codename="already-set")
     _stub_launch_plumbing(monkeypatch, config)
     monkeypatch.setattr(worktree_trust, "ensure_record_trusted", lambda *a: None)
     _tool_preparation_result(monkeypatch, blocked=blocked)
@@ -214,16 +225,17 @@ def test_resume_resolvers_block_tool_roster_but_not_optional_copy_failure(
 
 @pytest.mark.parametrize("surface", ["json", "interactive"])
 def test_native_resume_is_carried_to_the_real_deferred_owner_boundary(
-    tmp_path, monkeypatch, capfd, surface,
-):
-    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str], surface: str,
+) -> None:
+    directory = cfg.project_dir("demo-repo") / "worktrees"
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: directory)
     config = _create_config(tmp_path, auto_fast_forward=False)
-    record = tracking.create_new_record(
+    record = create_new_record(
         "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo-repo", "test",
-        "windows", tmp_path, codename="already-set",
+        config.platform, directory, codename="already-set",
     )
     _stub_launch_plumbing(monkeypatch, config)
-    selected = []
+    selected: list[dict[str, Any]] = []
     code, plan = _resume_plan(
         config, record, monkeypatch, capfd, surface=surface,
         no_resume=True, native_resume_session="native-original", selection_calls=selected,
@@ -241,21 +253,23 @@ def test_native_resume_is_carried_to_the_real_deferred_owner_boundary(
 @pytest.mark.parametrize("surface", ["json", "interactive"])
 @pytest.mark.parametrize("intent", ["plain", "typed", "seed_id"])
 def test_live_open_held_backend_admission_preserves_intent_and_refuses_mutation(
-    tmp_path, monkeypatch, capfd, surface, intent,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str], surface: str, intent: str,
+) -> None:
     from agent_worktrees import launch_admission
 
-    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    directory = cfg.project_dir("demo-repo") / "worktrees"
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: directory)
     config = _create_config(tmp_path, auto_fast_forward=False)
-    record = tracking.create_new_record(
+    record = create_new_record(
         "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo-repo", "test",
-        "windows", tmp_path, codename="already-set",
+        config.platform, directory, codename="already-set",
     )
     _stub_launch_plumbing(monkeypatch, config)
     saved = launch_seed_state.stage(record.yaml_path, kind="new", text="retain the original")
+    assert saved is not None
     before = launch_seed_state.state_path(record.yaml_path).read_bytes()
     monkeypatch.setattr(m.sessions, "verify_worktree_active", lambda *a: LiveVerdict(active=True))
-    changes = (
+    changes: dict[str, Any] = (
         {"seed": "do not replace"} if intent == "typed"
         else {"seed_id": saved.seed_id} if intent == "seed_id" else {}
     )
@@ -274,18 +288,20 @@ def test_live_open_held_backend_admission_preserves_intent_and_refuses_mutation(
 
 @pytest.mark.parametrize("surface", ["json", "interactive"])
 def test_preplanned_bare_launch_is_fenced_and_preserves_retained_seed(
-    tmp_path, monkeypatch, capfd, surface,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str], surface: str,
+) -> None:
     from agent_worktrees import launch_admission
 
-    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    directory = cfg.project_dir("demo-repo") / "worktrees"
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: directory)
     config = _create_config(tmp_path, auto_fast_forward=False)
-    record = tracking.create_new_record(
+    record = create_new_record(
         "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo-repo", "test",
-        "windows", tmp_path, codename="already-set",
+        config.platform, directory, codename="already-set",
     )
     _stub_launch_plumbing(monkeypatch, config)
     before_seed = launch_seed_state.stage(record.yaml_path, kind="new", text="retained private intent")
+    assert before_seed is not None
     before = launch_seed_state.state_path(record.yaml_path).read_bytes()
     consumer = [sys.executable, "-c", "print('bare-backend-started')"]
     code, plan = _resume_plan(
@@ -311,23 +327,21 @@ def test_preplanned_bare_launch_is_fenced_and_preserves_retained_seed(
 
 @pytest.mark.parametrize("surface", ["json", "interactive"])
 def test_live_plan_cannot_start_backend_after_original_exits_during_repair(
-    tmp_path, monkeypatch, capfd, surface,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str], surface: str,
+) -> None:
     from agent_worktrees import launch_admission, launch_seed_exec
 
-    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    directory = cfg.project_dir("demo-repo") / "worktrees"
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: directory)
     config = _create_config(tmp_path, auto_fast_forward=False)
-    record = tracking.create_new_record(
+    record = create_new_record(
         "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo-repo", "test",
-        "windows", tmp_path, codename="already-set",
+        config.platform, directory, codename="already-set",
     )
     _stub_launch_plumbing(monkeypatch, config)
-    options = {
-        "env": {
-            **os.environ,
-            "PYTHONPATH": str(Path(resolve_cli.__file__).resolve().parents[1]),
-        },
-        "creationflags": subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    environment = {
+        **os.environ,
+        "PYTHONPATH": str(Path(resolve_cli.__file__).resolve().parents[1]),
     }
     original = subprocess.Popen(
         launch_seed_exec.deferred_command(
@@ -335,8 +349,9 @@ def test_live_plan_cannot_start_backend_after_original_exits_during_repair(
             record.yaml_path, admission_only=True,
         ),
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        text=True, **options,
+        text=True, env=environment, **no_window_kwargs(),
     )
+    assert original.stdin is not None and original.stdout is not None and original.stderr is not None
     try:
         assert original.stdout.readline().strip() == "backend-ready"
         monkeypatch.setattr(m.sessions, "verify_worktree_active", lambda *a: LiveVerdict(active=True))
@@ -351,12 +366,12 @@ def test_live_plan_cannot_start_backend_after_original_exits_during_repair(
         monkeypatch.setattr(m.sessions, "verify_worktree_active", lambda *a: LiveVerdict())
         with launch_admission.guard(record.yaml_path):
             blocked = push_timeout.run_bounded(
-                plan["cmd"], cwd=None, timeout=15, env=options["env"],
+                plan["cmd"], cwd=None, timeout=15, env=environment,
             )
         assert blocked.returncode == 3 and "launch admission is busy" in blocked.stderr
         assert "replacement-started" not in blocked.stdout
         admitted = push_timeout.run_bounded(
-            plan["cmd"], cwd=None, timeout=15, env=options["env"],
+            plan["cmd"], cwd=None, timeout=15, env=environment,
         )
         assert admitted.returncode == 0, admitted.stderr
         assert admitted.stdout.strip() == "replacement-started"
@@ -365,18 +380,20 @@ def test_live_plan_cannot_start_backend_after_original_exits_during_repair(
             original.kill()
             original.wait(timeout=10)
         for stream in (original.stdin, original.stdout, original.stderr):
+            assert stream is not None
             stream.close()
 
 
 @pytest.mark.parametrize("no_mux", [False, True])
 def test_explicit_resume_seed_is_staged_with_history_and_provenance(
-    tmp_path: Path, monkeypatch, capfd, no_mux,
-):
-    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str], no_mux: bool,
+) -> None:
+    directory = cfg.project_dir("demo-repo") / "worktrees"
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: directory)
     config = _create_config(tmp_path)
-    tracking.create_new_record(
+    create_new_record(
         "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo-repo", "test",
-        "windows", tmp_path,
+        config.platform, directory,
     )
     _stub_launch_plumbing(monkeypatch, config)
     monkeypatch.setattr(m.sessions, "find_latest_session_id_fast", lambda *_a, **_k: "history-s1")
@@ -388,26 +405,29 @@ def test_explicit_resume_seed_is_staged_with_history_and_provenance(
     cmd = payload["launch"]["cmd"]
     assert payload["launch"]["seed_pending"] is True
     assert payload["launch"]["seed_kind"] == "resume"
-    assert payload["launch"]["record_path"] == str(tmp_path / "wt-a.yaml")
+    assert payload["launch"]["record_path"] == str(directory / "wt-a.yaml")
     assert type(payload["launch"]["pane_shell_version"]) is int
     assert payload["launch"]["pane_shell_version"] == 1
-    assert launch_seed_state.peek(tmp_path / "wt-a.yaml").text == "do the thing"
+    observed_seed = launch_seed_state.peek(directory / "wt-a.yaml")
+    assert observed_seed is not None
+    assert observed_seed.text == "do the thing"
     assert "--resume=history-s1" in cmd
-    assert tracking.load_record(tmp_path / "wt-a.yaml").pending_seed is None
+    assert tracking.load_record(directory / "wt-a.yaml").pending_seed is None
     # The real, full flag name -- never the short -i, which PowerShell's own
     # argument parser can intercept before it reaches copilot on Windows.
     assert "-i" not in cmd
 
 
 def test_pending_seed_is_retained_until_the_returned_command_executes(
-    tmp_path: Path, monkeypatch, capfd,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str],
+) -> None:
     """Planning alone cannot consume New ownership before final rejection."""
-    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    directory = cfg.project_dir("demo-repo") / "worktrees"
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: directory)
     config = _create_config(tmp_path)
-    tracking.create_new_record(
+    create_new_record(
         "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo-repo", "test",
-        "windows", tmp_path, pending_seed="queued at creation",
+        config.platform, directory, pending_seed="queued at creation",
     )
     _stub_launch_plumbing(monkeypatch, config)
 
@@ -418,21 +438,24 @@ def test_pending_seed_is_retained_until_the_returned_command_executes(
     cmd = payload["launch"]["cmd"]
     assert cmd[1:3] == ["-m", "agent_worktrees.launch_seed_exec"]
     assert "--interactive" not in cmd
-    reloaded = tracking.load_record(tmp_path / "wt-a.yaml")
+    reloaded = tracking.load_record(directory / "wt-a.yaml")
     assert reloaded.pending_seed is None
-    assert launch_seed_state.peek(tmp_path / "wt-a.yaml").text == "queued at creation"
+    observed_seed = launch_seed_state.peek(directory / "wt-a.yaml")
+    assert observed_seed is not None
+    assert observed_seed.text == "queued at creation"
 
 
 @pytest.mark.parametrize("bare_resume", [False, True])
 @pytest.mark.parametrize("live", [False, True])
 def test_no_seed_cold_launch_has_execution_admission_fence(
-    tmp_path: Path, monkeypatch, capfd, bare_resume, live,
-):
-    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str], bare_resume: bool, live: bool,
+) -> None:
+    directory = cfg.project_dir("demo-repo") / "worktrees"
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: directory)
     config = _create_config(tmp_path)
-    tracking.create_new_record(
+    create_new_record(
         "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo-repo", "test",
-        "windows", tmp_path,
+        config.platform, directory,
     )
     _stub_launch_plumbing(monkeypatch, config)
     monkeypatch.setattr(m.sessions, "verify_worktree_active", lambda *a: LiveVerdict(active=live))
@@ -452,13 +475,14 @@ def test_no_seed_cold_launch_has_execution_admission_fence(
     ("example-host-wsl", None),
 ])
 def test_resume_preserves_historical_host_and_separate_wsl_platform(
-    tmp_path: Path, monkeypatch, capfd, machine: str, environment: str | None,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str], machine: str, environment: str | None,
 ) -> None:
     directory = tmp_path / "state" / "worktrees"
     directory.mkdir(parents=True)
     monkeypatch.setattr(cfg, "tracking_dir", lambda: directory)
     monkeypatch.setattr(cfg, "project_dir", lambda _project=None: directory.parent)
     monkeypatch.setattr(cfg, "detect_platform", lambda: "wsl")
+    monkeypatch.setattr(socket, "gethostname", lambda: "example-host")
     config = _create_config(tmp_path, machine="example-host-wsl", platform="wsl")
     (directory.parent / "config.yaml").write_text(json.dumps({
         "repo_name": config.repo_name, "machine": config.machine, "platform": "wsl",
@@ -478,7 +502,7 @@ def test_resume_preserves_historical_host_and_separate_wsl_platform(
         "        - {name: wsl, alias: guest-ssh}\n",
         encoding="utf-8",
     )
-    tracking.create_new_record(
+    create_new_record(
         "wt-a", "worktree/wt-a", str(work_dir), "demo-repo", "example-host",
         "wsl", directory,
     )
@@ -496,8 +520,6 @@ def test_resume_preserves_historical_host_and_separate_wsl_platform(
     assert (record.machine, record.platform, record.resume_count) == ("example-host", "wsl", 1)
 
 
-from machine_transport import legacy_alias_forms
-
 ALIAS_RESUME_CELLS = [
     (platform, alias)
     for platform in ("windows", "wsl")
@@ -508,12 +530,13 @@ ALIAS_RESUME_CELLS = [
 
 
 @pytest.mark.parametrize("platform,alias", ALIAS_RESUME_CELLS)
-def test_actual_local_resume_alias_grid_preserves_record(tmp_path, monkeypatch, capfd, platform, alias):
+def test_actual_local_resume_alias_grid_preserves_record(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str], platform: str, alias: str) -> None:
     directory = tmp_path / "state" / "worktrees"
     directory.mkdir(parents=True)
     monkeypatch.setattr(cfg, "tracking_dir", lambda: directory)
     monkeypatch.setattr(cfg, "project_dir", lambda _project=None: directory.parent)
     monkeypatch.setattr(cfg, "detect_platform", lambda: platform)
+    monkeypatch.setattr(socket, "gethostname", lambda: "Generated-Host")
     current = "Example-Host-wsl" if platform == "wsl" else "Example-Host"
     config = _create_config(tmp_path, machine=current, platform=platform)
     (directory.parent / "config.yaml").write_text(json.dumps({
@@ -533,7 +556,7 @@ def test_actual_local_resume_alias_grid_preserves_record(tmp_path, monkeypatch, 
     }}), encoding="utf-8")
     checkout = Path(config.default_repo.worktree_root) / "wt-a"
     checkout.mkdir(parents=True)
-    tracking.create_new_record(
+    create_new_record(
         "wt-a", "worktree/wt-a", str(checkout), config.repo_name, alias, platform, directory,
     )
     _stub_launch_plumbing(monkeypatch, config)
@@ -544,26 +567,27 @@ def test_actual_local_resume_alias_grid_preserves_record(tmp_path, monkeypatch, 
     assert resolve_cli.cmd_resolve(_args(machine=alias, environment=platform)) == 0
     assert json.loads(capfd.readouterr().out)["launch"]["work_dir"] == str(checkout)
     record = tracking.load_record(directory / "wt-a.yaml")
-    assert (record.machine, record.platform, record.resume_count) == (alias, platform, 1)
+    assert (record.machine, record.platform, record.resume_count) == ("Example-Host", platform, 1)
 
 
 @pytest.mark.skipif(shutil.which("pwsh") is None, reason="PowerShell consumer unavailable")
 def test_cold_resume_plan_obeys_native_evidence_at_powershell_boundary(
-    tmp_path: Path, monkeypatch,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import venv
 
     from agent_procutil.owned_process import run_caller_owned
     from agent_worktrees import output
 
-    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
-    platform = cfg.detect_platform()
+    directory = cfg.project_dir("demo-repo") / "worktrees"
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: directory)
+    platform = detect_platform()
     config = _create_config(tmp_path, platform=platform)
     work_dir = tmp_path / "wt-a"
     work_dir.mkdir()
-    tracking.create_new_record(
+    create_new_record(
         "wt-a", "worktree/wt-a", str(work_dir), "demo-repo", "test",
-        platform, tmp_path,
+        platform, directory,
     )
     _stub_launch_plumbing(monkeypatch, config)
     consumer = tmp_path / "capture.ps1"
@@ -618,27 +642,29 @@ def test_cold_resume_plan_obeys_native_evidence_at_powershell_boundary(
     if os.name == "nt":
         assert proc.returncode == 3, proc.stderr
         assert "Could not verify cold Copilot handoff" in proc.stderr
-        staged = launch_seed_state.peek(tmp_path / "wt-a.yaml")
+        staged = launch_seed_state.peek(directory / "wt-a.yaml")
+        assert staged is not None
         assert staged.text == seed and staged.handoff_id is None
         assert not marker.exists()
         return
     assert proc.returncode == 0, proc.stderr
     assert marker.read_text(encoding="utf-8") == "started"
     assert json.loads(proc.stdout.splitlines()[-1]) == ["--resume=history-s1", "--interactive", seed]
-    assert tracking.load_record(tmp_path / "wt-a.yaml").pending_seed is None
-    assert launch_seed_state.peek(tmp_path / "wt-a.yaml") is None
+    assert tracking.load_record(directory / "wt-a.yaml").pending_seed is None
+    assert launch_seed_state.peek(directory / "wt-a.yaml") is None
 
 
-def test_no_mux_launch_still_gets_the_seed(tmp_path: Path, monkeypatch, capfd):
+def test_no_mux_launch_still_gets_the_seed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]) -> None:
     """resume-prompt-durable-seed-and-mux-fix's whole point: the seed is
     carried durably in the launch args, so a --no-mux resume gets it exactly
     the same way a muxed one does -- there is no pane either way for the old
     send-keys mechanism to even target."""
-    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    directory = cfg.project_dir("demo-repo") / "worktrees"
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: directory)
     config = _create_config(tmp_path)
-    tracking.create_new_record(
+    create_new_record(
         "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo-repo", "test",
-        "windows", tmp_path,
+        config.platform, directory,
     )
     _stub_launch_plumbing(monkeypatch, config)
 
@@ -647,25 +673,28 @@ def test_no_mux_launch_still_gets_the_seed(tmp_path: Path, monkeypatch, capfd):
     assert rc == 0
     payload = json.loads(capfd.readouterr().out)
     assert payload["launch"]["seed_pending"] is True
-    assert launch_seed_state.peek(tmp_path / "wt-a.yaml").text == "do the thing"
+    observed_seed = launch_seed_state.peek(directory / "wt-a.yaml")
+    assert observed_seed is not None
+    assert observed_seed.text == "do the thing"
 
 
 @pytest.mark.skipif(os.name != "posix", reason="Native POSIX JSON setup plan")
-def test_default_json_resume_selects_native_setup_without_a_mux_override(tmp_path, monkeypatch, capfd):
+def test_default_json_resume_selects_native_setup_without_a_mux_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]) -> None:
     from agent_worktrees import launch_seed_contract, launch_seed_exec, manager_launch_cli
 
-    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    directory = cfg.project_dir("demo-repo") / "worktrees"
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: directory)
     monkeypatch.delenv("BASH_ENV", raising=False)
-    config = _create_config(tmp_path, platform="linux")
-    tracking.create_new_record(
+    config = _create_config(tmp_path)
+    create_new_record(
         "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo-repo", "test",
-        "linux", tmp_path,
+        config.platform, directory,
     )
     _stub_launch_plumbing(monkeypatch, config)
     runtime = tmp_path / "runtime"
     scripts = runtime / "scripts"
     shutil.copytree(Path(__file__).resolve().parents[1] / "scripts", scripts)
-    monkeypatch.setattr(launch_seed_exec.installer, "install_dir", lambda: runtime)
+    monkeypatch.setattr(installer, "install_dir", lambda: runtime)
     monkeypatch.setattr(manager_launch_cli, "_worktree_manager_root", lambda: tmp_path / "manager")
     monkeypatch.setattr(launch_seed_contract, "supports_posix_setup", lambda _root: True)
     monkeypatch.setattr(
@@ -679,13 +708,15 @@ def test_default_json_resume_selects_native_setup_without_a_mux_override(tmp_pat
     assert plan["no_mux"] and plan["seed_pending"]
     index = launch_seed_exec.native_setup_index(plan["cmd"])
     assert index is not None
-    assert Path(plan["cmd"][index]).is_relative_to(tmp_path / "launch-attempts")
-    assert launch_seed_state.peek(tmp_path / "wt-a.yaml").text == "direct JSON seed"
+    assert Path(plan["cmd"][index]).is_relative_to(directory / "launch-attempts")
+    observed_seed = launch_seed_state.peek(directory / "wt-a.yaml")
+    assert observed_seed is not None
+    assert observed_seed.text == "direct JSON seed"
 
 
 def test_bare_resume_leaves_a_persisted_pending_seed_queued_in_json_mode(
-    tmp_path: Path, monkeypatch, capfd,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str],
+) -> None:
     """A persisted `pending_seed` must stay queued (never claimed/injected)
     for a `--bare-resume --json` resume, the same as the non-JSON
     `_resolve_resume_context` path already guarantees -- bare resume
@@ -693,11 +724,12 @@ def test_bare_resume_leaves_a_persisted_pending_seed_queued_in_json_mode(
     join. Without this guard the JSON path's own claim-and-embed block ran
     unconditionally and silently consumed the queued seed even though
     `--bare-resume` never delivers it."""
-    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    directory = cfg.project_dir("demo-repo") / "worktrees"
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: directory)
     config = _create_config(tmp_path)
-    tracking.create_new_record(
+    create_new_record(
         "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo-repo", "test",
-        "windows", tmp_path, pending_seed="queued at creation",
+        config.platform, directory, pending_seed="queued at creation",
     )
     _stub_launch_plumbing(monkeypatch, config)
 
@@ -706,9 +738,11 @@ def test_bare_resume_leaves_a_persisted_pending_seed_queued_in_json_mode(
     assert rc == 0
     payload = json.loads(capfd.readouterr().out)
     assert "--interactive" not in payload["launch"]["cmd"]
-    reloaded = tracking.load_record(tmp_path / "wt-a.yaml")
+    reloaded = tracking.load_record(directory / "wt-a.yaml")
     assert reloaded.pending_seed is None
-    assert launch_seed_state.peek(tmp_path / "wt-a.yaml").text == "queued at creation"
+    observed_seed = launch_seed_state.peek(directory / "wt-a.yaml")
+    assert observed_seed is not None
+    assert observed_seed.text == "queued at creation"
 
 
 @pytest.mark.parametrize("verdict", [
@@ -719,16 +753,17 @@ def test_bare_resume_leaves_a_persisted_pending_seed_queued_in_json_mode(
     None,
 ])
 def test_live_or_uncertain_json_resume_rejects_and_keeps_seed_for_next_attempt(
-    tmp_path: Path, monkeypatch, capfd, verdict,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str], verdict: LiveVerdict,
+) -> None:
     """Failed Resume attempts retain their typed intent, never inject live."""
     from agent_worktrees import sessions as sessions_mod
 
-    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    directory = cfg.project_dir("demo-repo") / "worktrees"
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: directory)
     config = _create_config(tmp_path)
-    tracking.create_new_record(
+    create_new_record(
         "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo-repo", "test",
-        "windows", tmp_path,
+        config.platform, directory,
     )
     _stub_launch_plumbing(monkeypatch, config)
     monkeypatch.setattr(
@@ -742,10 +777,11 @@ def test_live_or_uncertain_json_resume_rejects_and_keeps_seed_for_next_attempt(
     payload = json.loads(capfd.readouterr().out)
     assert "launch" not in payload
     assert "seed remains staged" in payload["error"]
-    reloaded = tracking.load_record(tmp_path / "wt-a.yaml")
+    reloaded = tracking.load_record(directory / "wt-a.yaml")
     assert reloaded.pending_seed is None
     assert reloaded.resume_count == 0
-    saved = launch_seed_state.peek(tmp_path / "wt-a.yaml")
+    saved = launch_seed_state.peek(directory / "wt-a.yaml")
+    assert saved is not None
     assert saved.kind == "resume" and saved.text == "do the thing"
     monkeypatch.setattr(sessions_mod, "verify_worktree_active", lambda *_a, **_k: LiveVerdict())
     assert resolve_cli.cmd_resolve(_args()) == 0
@@ -754,24 +790,25 @@ def test_live_or_uncertain_json_resume_rejects_and_keeps_seed_for_next_attempt(
 
 
 def test_explicit_newer_resume_intent_supersedes_old_creation_without_live_delivery(
-    tmp_path: Path, monkeypatch, capfd,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str],
+) -> None:
     """An explicit replacement changes the saved intent, not the live session."""
     from agent_worktrees import pending_seed as pending_seed_mod
     from agent_worktrees import sessions as sessions_mod
 
-    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    directory = cfg.project_dir("demo-repo") / "worktrees"
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: directory)
     config = _create_config(tmp_path)
-    tracking.create_new_record(
+    create_new_record(
         "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo-repo", "test",
-        "windows", tmp_path, pending_seed="new-worktree prompt",
+        config.platform, directory, pending_seed="new-worktree prompt",
     )
     _stub_launch_plumbing(monkeypatch, config)
     monkeypatch.setattr(
         sessions_mod, "verify_worktree_active",
         lambda *_a, **_k: LiveVerdict(active=True, mux_live=True),
     )
-    def unexpected_queue(*_a, **_k):
+    def unexpected_queue(*_a: Any, **_k: Any) -> None:
         raise AssertionError("Resume must use typed daemon state, not legacy New queue")
     monkeypatch.setattr(pending_seed_mod, "set_pending_seed", unexpected_queue)
 
@@ -780,22 +817,24 @@ def test_explicit_newer_resume_intent_supersedes_old_creation_without_live_deliv
     assert rc == 3
     payload = json.loads(capfd.readouterr().out)
     assert "launch" not in payload
-    assert tracking.load_record(tmp_path / "wt-a.yaml").pending_seed is None
-    saved = launch_seed_state.peek(tmp_path / "wt-a.yaml")
+    assert tracking.load_record(directory / "wt-a.yaml").pending_seed is None
+    saved = launch_seed_state.peek(directory / "wt-a.yaml")
+    assert saved is not None
     assert saved.kind == "resume" and saved.text == "do the thing"
 
 
 def test_degraded_mux_probe_is_treated_as_uncertain_not_confirmed_absent(
-    tmp_path: Path, monkeypatch, capfd,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str],
+) -> None:
     """A failed probe is not confirmation that the worktree is stopped."""
     from agent_worktrees import sessions as sessions_mod
 
-    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    directory = cfg.project_dir("demo-repo") / "worktrees"
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: directory)
     config = _create_config(tmp_path)
-    tracking.create_new_record(
+    create_new_record(
         "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo-repo", "test",
-        "windows", tmp_path,
+        config.platform, directory,
     )
     _stub_launch_plumbing(monkeypatch, config)
     monkeypatch.setattr(
@@ -808,21 +847,22 @@ def test_degraded_mux_probe_is_treated_as_uncertain_not_confirmed_absent(
     assert rc == 3
     payload = json.loads(capfd.readouterr().out)
     assert "launch" not in payload
-    reloaded = tracking.load_record(tmp_path / "wt-a.yaml")
+    reloaded = tracking.load_record(directory / "wt-a.yaml")
     assert reloaded.pending_seed is None
 
 
 def test_reclaim_probe_failure_blocks_explicit_no_mux_resume(
-    tmp_path: Path, monkeypatch, capfd,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str],
+) -> None:
     """No mux does not prove no live Copilot; bound-process certainty matters."""
     from agent_worktrees import sessions as sessions_mod
 
-    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    directory = cfg.project_dir("demo-repo") / "worktrees"
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: directory)
     config = _create_config(tmp_path)
-    tracking.create_new_record(
+    create_new_record(
         "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo-repo", "test",
-        "windows", tmp_path,
+        config.platform, directory,
     )
     _stub_launch_plumbing(monkeypatch, config)
     monkeypatch.setattr(
@@ -837,21 +877,22 @@ def test_reclaim_probe_failure_blocks_explicit_no_mux_resume(
     assert rc == 3
     payload = json.loads(capfd.readouterr().out)
     assert "launch" not in payload
-    assert tracking.load_record(tmp_path / "wt-a.yaml").pending_seed is None
+    assert tracking.load_record(directory / "wt-a.yaml").pending_seed is None
 
 
 def test_planning_never_claims_staged_seed_or_guesses_configured_argv(
-    tmp_path: Path, monkeypatch, capfd,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str],
+) -> None:
     """Explicit provenance: a delegated caller must not
     guess whether `cmd`'s own trailing argv is a claimed seed -- the
     returned plan's `seed_claimed` field is the sole source of truth, true
     only when `with_seed` actually ran in THIS call."""
-    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    directory = cfg.project_dir("demo-repo") / "worktrees"
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: directory)
     config = _create_config(tmp_path)
-    tracking.create_new_record(
+    create_new_record(
         "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo-repo", "test",
-        "windows", tmp_path,
+        config.platform, directory,
     )
     _stub_launch_plumbing(monkeypatch, config)
 
@@ -862,9 +903,9 @@ def test_planning_never_claims_staged_seed_or_guesses_configured_argv(
     assert payload["launch"]["seed_claimed"] is False
     assert payload["launch"]["seed_pending"] is True
 
-    tracking.create_new_record(
+    create_new_record(
         "wt-b", "worktree/wt-b", str(tmp_path / "wt-b"), "demo-repo", "test",
-        "windows", tmp_path,
+        config.platform, directory,
     )
     (tmp_path / "wt-b").mkdir()
     rc = resolve_cli.cmd_resolve(_args(worktree_id="wt-b", seed=None))
@@ -883,28 +924,29 @@ def test_planning_never_claims_staged_seed_or_guesses_configured_argv(
     None,
 ])
 def test_non_json_resume_seed_is_cold_start_only(
-    tmp_path: Path, monkeypatch, capfd, verdict, no_mux,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str], verdict: LiveVerdict, no_mux: bool,
+) -> None:
     """Both resolve surfaces enforce cold-only delivery and retry staging."""
     from agent_worktrees import resolve_launch_cli as rlc
 
-    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    directory = cfg.project_dir("demo-repo") / "worktrees"
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: directory)
     config = _create_config(tmp_path, auto_fast_forward=False)
-    record = tracking.create_new_record(
+    record = create_new_record(
         "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo-repo", "test",
-        "windows", tmp_path, codename="already-set",
+        config.platform, directory, codename="already-set",
     )
     _stub_launch_plumbing(monkeypatch, config)
     monkeypatch.setattr(
         rlc, "_dispatch_validate_profile_assignment_config", lambda *_a, **_k: None)
     monkeypatch.setattr(
-        rlc.sessions, "verify_worktree_active",
+        sessions, "verify_worktree_active",
         lambda *_a, **_k: verdict,
     )
-    monkeypatch.setattr(rlc.sessions, "resolve_resume_target", lambda *_a, **_k: "history-s1")
-    monkeypatch.setattr(rlc.tracking, "stamp_mux_live", lambda *_a, **_k: None)
-    monkeypatch.setattr(rlc.tracking, "stamp_bound_live", lambda *_a, **_k: None)
-    monkeypatch.setattr(rlc.local_cache_refresh, "refresh_local_cache", lambda *_a, **_k: None)
+    monkeypatch.setattr(sessions, "resolve_resume_target", lambda *_a, **_k: "history-s1")
+    monkeypatch.setattr(tracking, "stamp_mux_live", lambda *_a, **_k: None)
+    monkeypatch.setattr(tracking, "stamp_bound_live", lambda *_a, **_k: None)
+    monkeypatch.setattr(local_cache_refresh, "refresh_local_cache", lambda *_a, **_k: None)
     monkeypatch.setattr(
         rlc, "_dispatch_launch_profile_selection",
         lambda *_a, **_k: SimpleNamespace(profile=None, assignment=None),
@@ -915,8 +957,8 @@ def test_non_json_resume_seed_is_cold_start_only(
     monkeypatch.setattr(rlc, "_build_env", lambda *_a, **_k: {})
     monkeypatch.setattr(rlc, "_repo_session_env", lambda *_a, **_k: {})
     monkeypatch.setattr(rlc, "_preflight_launch", lambda *_a, **_k: SimpleNamespace(error=None))
-    monkeypatch.setattr(rlc.activity, "log_event", lambda *_a, **_k: None)
-    plans = []
+    monkeypatch.setattr(activity, "log_event", lambda *_a, **_k: None)
+    plans: list[dict[str, Any]] = []
     monkeypatch.setattr(rlc, "_emit_plan", plans.append)
 
     args = argparse.Namespace(
@@ -937,9 +979,11 @@ def test_non_json_resume_seed_is_cold_start_only(
         assert plans[-1]["no_mux"] is no_mux
     else:
         assert plans[-1]["action"] == "error"
-    reloaded = tracking.load_record(tmp_path / "wt-a.yaml")
+    reloaded = tracking.load_record(directory / "wt-a.yaml")
     assert reloaded.pending_seed is None
-    assert launch_seed_state.peek(tmp_path / "wt-a.yaml").text == "do the thing"
+    observed_seed = launch_seed_state.peek(directory / "wt-a.yaml")
+    assert observed_seed is not None
+    assert observed_seed.text == "do the thing"
 
 
 @pytest.mark.parametrize("verdict", [
@@ -947,16 +991,18 @@ def test_non_json_resume_seed_is_cold_start_only(
     LiveVerdict(active=True, bare=True, live_session_ids=["live"], mux_probe_ok=False, probes_ok=False),
 ])
 def test_positive_live_open_keeps_staged_prompt_despite_secondary_probe_failure(
-    tmp_path, monkeypatch, capfd, verdict,
-):
-    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str], verdict: LiveVerdict,
+) -> None:
+    directory = cfg.project_dir("demo-repo") / "worktrees"
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: directory)
     config = _create_config(tmp_path)
-    record = tracking.create_new_record(
+    record = create_new_record(
         "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo-repo", "test",
-        "windows", tmp_path,
+        config.platform, directory,
     )
     _stub_launch_plumbing(monkeypatch, config)
     saved = launch_seed_state.stage(record.yaml_path, kind="resume", text="retry later")
+    assert saved is not None
     monkeypatch.setattr(m.sessions, "verify_worktree_active", lambda *a: verdict)
     assert resolve_cli.cmd_resolve(_args()) == 0
     plan = json.loads(capfd.readouterr().out)["launch"]
@@ -968,21 +1014,24 @@ def test_positive_live_open_keeps_staged_prompt_despite_secondary_probe_failure(
 @pytest.mark.parametrize("surface", ["json", "interactive"])
 @pytest.mark.parametrize("kind", ["new", "resume"])
 def test_plain_open_preserves_unconfirmed_handoff_without_resubmitting(
-    tmp_path, monkeypatch, capfd, surface, kind,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str], surface: str, kind: Literal["new", "resume"],
+) -> None:
     from agent_worktrees import launch_seed_exec
 
     monkeypatch.setenv("AGENT_WORKTREES_RETAINED_SEED_PLANS", "1")
-    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    directory = cfg.project_dir("demo-repo") / "worktrees"
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: directory)
     config = _create_config(tmp_path)
-    record = tracking.create_new_record(
+    record = create_new_record(
         "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo-repo", "test",
-        "windows", tmp_path,
+        config.platform, directory,
     )
     _stub_launch_plumbing(monkeypatch, config)
     seed = launch_seed_state.stage(record.yaml_path, kind=kind, text="must not replay")
+    assert seed is not None
     receipt = launch_seed_state.take(record.yaml_path, seed_id=seed.seed_id)
     retained = launch_seed_state.peek(record.yaml_path)
+    assert retained is not None
     code, plan = _resume_plan(
         config, record, monkeypatch, capfd, surface=surface,
         command=["copilot", "--resume=saved-session"],
@@ -1010,45 +1059,51 @@ def test_plain_open_preserves_unconfirmed_handoff_without_resubmitting(
 @pytest.mark.parametrize("surface", ["json", "interactive"])
 @pytest.mark.parametrize("selection", ["seed_id", "stage_launch_seed"])
 def test_explicit_delivery_still_refuses_unconfirmed_handoff(
-    tmp_path, monkeypatch, capfd, surface, selection,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str], surface: str, selection: Any,
+) -> None:
     monkeypatch.setenv("AGENT_WORKTREES_RETAINED_SEED_PLANS", "1")
-    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    directory = cfg.project_dir("demo-repo") / "worktrees"
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: directory)
     config = _create_config(tmp_path)
-    record = tracking.create_new_record(
+    record = create_new_record(
         "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo-repo", "test",
-        "windows", tmp_path,
+        config.platform, directory,
     )
     _stub_launch_plumbing(monkeypatch, config)
     seed = launch_seed_state.stage(record.yaml_path, kind="new", text="must not replay")
+    assert seed is not None
     launch_seed_state.take(record.yaml_path, seed_id=seed.seed_id)
     retained = launch_seed_state.peek(record.yaml_path)
-    options = {selection: seed.seed_id if selection == "seed_id" else True}
+    assert retained is not None
+    options: dict[str, Any] = {selection: seed.seed_id if selection == "seed_id" else True}
     code, plan = _resume_plan(config, record, monkeypatch, capfd, surface=surface, **options)
     assert code == 3 and "handoff is unconfirmed" in plan["error"]
     assert launch_seed_state.peek(record.yaml_path) == retained
 
 
 def test_plain_open_retained_handoff_still_revalidates_seed_identity(
-    tmp_path, monkeypatch, capfd,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str],
+) -> None:
     from agent_worktrees import launch_seed_exec
 
     monkeypatch.setenv("AGENT_WORKTREES_RETAINED_SEED_PLANS", "1")
-    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    directory = cfg.project_dir("demo-repo") / "worktrees"
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: directory)
     config = _create_config(tmp_path)
-    record = tracking.create_new_record(
+    record = create_new_record(
         "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo-repo", "test",
-        "windows", tmp_path,
+        config.platform, directory,
     )
     _stub_launch_plumbing(monkeypatch, config)
     seed = launch_seed_state.stage(record.yaml_path, kind="new", text="must not replay")
+    assert seed is not None
     launch_seed_state.take(record.yaml_path, seed_id=seed.seed_id)
     assert resolve_cli.cmd_resolve(_args()) == 0
     captured = capfd.readouterr()
     assert "opening without submitting it again" in captured.err
     assert "must not replay" not in captured.err
     newer = launch_seed_state.stage(record.yaml_path, kind="resume", text="newer intent")
+    assert newer is not None
     assert launch_seed_exec._prepare(
         record.yaml_path, ["copilot"], invoke=False, seed_id=None,
         admission_only=True, preserve_seed_id=seed.seed_id,
@@ -1057,19 +1112,22 @@ def test_plain_open_retained_handoff_still_revalidates_seed_identity(
 
 
 def test_unqualified_caller_cannot_drop_retained_identity_during_delegation(
-    tmp_path, monkeypatch, capfd,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str],
+) -> None:
     monkeypatch.delenv("AGENT_WORKTREES_RETAINED_SEED_PLANS", raising=False)
-    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    directory = cfg.project_dir("demo-repo") / "worktrees"
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: directory)
     config = _create_config(tmp_path)
-    record = tracking.create_new_record(
+    record = create_new_record(
         "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo-repo", "test",
-        "windows", tmp_path,
+        config.platform, directory,
     )
     _stub_launch_plumbing(monkeypatch, config)
     seed = launch_seed_state.stage(record.yaml_path, kind="new", text="must not replay")
+    assert seed is not None
     launch_seed_state.take(record.yaml_path, seed_id=seed.seed_id)
     retained = launch_seed_state.peek(record.yaml_path)
+    assert retained is not None
     assert resolve_cli.cmd_resolve(_args()) == 3
     assert "handoff is unconfirmed" in json.loads(capfd.readouterr().out)["error"]
     assert launch_seed_state.peek(record.yaml_path) == retained
@@ -1077,21 +1135,24 @@ def test_unqualified_caller_cannot_drop_retained_identity_during_delegation(
 
 @pytest.mark.parametrize("surface", ["json", "interactive"])
 def test_delegated_preserved_open_rejects_replacement_before_second_resolve(
-    tmp_path, monkeypatch, capfd, surface,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str], surface: str,
+) -> None:
     monkeypatch.setenv("AGENT_WORKTREES_RETAINED_SEED_PLANS", "1")
-    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    directory = cfg.project_dir("demo-repo") / "worktrees"
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: directory)
     config = _create_config(tmp_path)
-    record = tracking.create_new_record(
+    record = create_new_record(
         "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo-repo", "test",
-        "windows", tmp_path,
+        config.platform, directory,
     )
     _stub_launch_plumbing(monkeypatch, config)
     seed = launch_seed_state.stage(record.yaml_path, kind="new", text="must not replay")
+    assert seed is not None
     launch_seed_state.take(record.yaml_path, seed_id=seed.seed_id)
     code, original = _resume_plan(config, record, monkeypatch, capfd, surface=surface)
     assert code == 0
     replacement = launch_seed_state.stage(record.yaml_path, kind="new", text="replacement")
+    assert replacement is not None
     monkeypatch.delenv("AGENT_WORKTREES_RETAINED_SEED_PLANS")
     if surface == "json":
         parser = argparse.ArgumentParser()
@@ -1112,17 +1173,19 @@ def test_delegated_preserved_open_rejects_replacement_before_second_resolve(
 
 
 def test_explicit_preservation_does_not_deliver_a_released_handoff(
-    tmp_path, monkeypatch, capfd,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str],
+) -> None:
     monkeypatch.delenv("AGENT_WORKTREES_RETAINED_SEED_PLANS", raising=False)
-    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    directory = cfg.project_dir("demo-repo") / "worktrees"
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: directory)
     config = _create_config(tmp_path)
-    record = tracking.create_new_record(
+    record = create_new_record(
         "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo-repo", "test",
-        "windows", tmp_path,
+        config.platform, directory,
     )
     _stub_launch_plumbing(monkeypatch, config)
     seed = launch_seed_state.stage(record.yaml_path, kind="new", text="must not replay")
+    assert seed is not None
     code, plan = _resume_plan(
         config, record, monkeypatch, capfd, surface="json", preserve_seed_id=seed.seed_id,
     )
@@ -1137,8 +1200,8 @@ def test_explicit_preservation_does_not_deliver_a_released_handoff(
     {"preserve_seed_id": ""},
 ])
 def test_preservation_selector_rejects_conflicting_or_empty_requests_before_seed_io(
-    monkeypatch, capfd, options,
-):
+    monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str], options: Any,
+) -> None:
     for name in ("peek", "stage", "take"):
         monkeypatch.setattr(launch_seed_state, name, lambda *a, **k: pytest.fail("invalid selector read intent"))
     args = _args()
@@ -1150,16 +1213,18 @@ def test_preservation_selector_rejects_conflicting_or_empty_requests_before_seed
 
 
 def test_preservation_selector_rejects_restore_before_process_recovery(
-    tmp_path, monkeypatch, capfd,
-):
-    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str],
+) -> None:
+    directory = cfg.project_dir("demo-repo") / "worktrees"
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: directory)
     config = _create_config(tmp_path)
-    record = tracking.create_new_record(
+    record = create_new_record(
         "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo-repo", "test",
-        "windows", tmp_path,
+        config.platform, directory,
     )
     _stub_launch_plumbing(monkeypatch, config)
     seed = launch_seed_state.stage(record.yaml_path, kind="new", text="must not replay")
+    assert seed is not None
     monkeypatch.setattr(
         resolve_cli, "_restore_before_resume", lambda *a: pytest.fail("stale selector reached process recovery"),
     )
@@ -1176,19 +1241,22 @@ def test_preservation_selector_rejects_restore_before_process_recovery(
     LiveVerdict(active=True, bare=True, live_session_ids=["live"], mux_probe_ok=False, probes_ok=False),
 ])
 def test_preserved_open_reattaches_when_target_becomes_live_between_resolves(
-    tmp_path, monkeypatch, capfd, surface, verdict,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str], surface: str, verdict: LiveVerdict,
+) -> None:
     monkeypatch.setenv("AGENT_WORKTREES_RETAINED_SEED_PLANS", "1")
-    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    directory = cfg.project_dir("demo-repo") / "worktrees"
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: directory)
     config = _create_config(tmp_path)
-    record = tracking.create_new_record(
+    record = create_new_record(
         "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo-repo", "test",
-        "windows", tmp_path,
+        config.platform, directory,
     )
     _stub_launch_plumbing(monkeypatch, config)
     seed = launch_seed_state.stage(record.yaml_path, kind="new", text="must not replay")
+    assert seed is not None
     launch_seed_state.take(record.yaml_path, seed_id=seed.seed_id)
     retained = launch_seed_state.peek(record.yaml_path)
+    assert retained is not None
     code, original = _resume_plan(config, record, monkeypatch, capfd, surface=surface)
     assert code == 0
     monkeypatch.setattr(m.sessions, "verify_worktree_active", lambda *a: verdict)

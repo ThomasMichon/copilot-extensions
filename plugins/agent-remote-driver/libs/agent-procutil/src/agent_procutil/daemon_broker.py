@@ -307,7 +307,7 @@ def _outside_caller_job(process: WindowsDaemonProcess) -> bool:
         raise _windows_ctypes.WinError(_windows_ctypes.get_last_error())
     if not in_job.value:
         return True
-    job_pids: Callable[..., list[int]] = _job_pids
+    job_pids: Callable[..., set[int]] = _job_pids
     members = job_pids(None, kernel=kernel)
     if os.getpid() not in members:
         raise OSError("caller Job membership did not identify the caller")

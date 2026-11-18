@@ -4,11 +4,16 @@ from __future__ import annotations
 
 import hashlib
 import json
+from typing import TYPE_CHECKING, Any
 
 from .events import is_nested_event_data
-from .status_store import StatusStore
+from .status_store import StatusKind, StatusStore
 
-_EVENTS = {
+if TYPE_CHECKING:
+    from .db import Database
+    from .live_questions import QuestionObservation
+
+_EVENTS: dict[str, StatusKind] = {
     "ask_user_request": "question_pending",
     "permission_request": "permission_pending",
     "turn_complete": "idle",
@@ -16,7 +21,15 @@ _EVENTS = {
 }
 
 
-def represented(db, session_id: str, events: list[dict]) -> None:
+def owned_event_identity(session_id: str, epoch: str, event_id: int) -> str:
+    return f"owned:{session_id}:{epoch}:{event_id}"
+
+
+def source_key(session_id: str, identity: str) -> str:
+    return hashlib.sha256(f"{session_id}:{identity}".encode()).hexdigest()
+
+
+def represented(db: Database, session_id: str, events: list[dict[str, Any]]) -> None:
     from .live_representation import translate_sdk_event
     for event in events:
         # Native identities survive redelivery and daemon restart. Missing
@@ -31,18 +44,20 @@ def represented(db, session_id: str, events: list[dict]) -> None:
             normalized(db, session_id, kind, translated, f"native:{identity}:{kind}")
 
 
-def normalized(db, session_id: str, event: str, data: dict, key: str, *, timestamp=None) -> None:
+def normalized(
+    db: Database, session_id: str, event: str, data: dict[str, Any], key: str, *, timestamp: float | None = None,
+) -> None:
     kind = _EVENTS.get(event)
     if kind is not None:
         StatusStore(db).publish(
-            session_id, kind, hashlib.sha256(f"{session_id}:{key}".encode()).hexdigest(),
+            session_id, kind, source_key(session_id, key),
             scope="nested" if is_nested_event_data(data) else "root",
             observed_at=timestamp,
             evidence="historical_transition",
         )
 
 
-def question_snapshot(db, session_id: str, observation) -> None:
+def question_snapshot(db: Database, session_id: str, observation: QuestionObservation) -> None:
     if not observation.requests:
         return
     # Snapshot freshness is qualified by its owner before calling this adapter.

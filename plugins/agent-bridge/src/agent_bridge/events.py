@@ -78,6 +78,7 @@ class EventLog:
         self._next_id = 1
         self._waiters: list[tuple[asyncio.AbstractEventLoop, asyncio.Event]] = []
         self._observation_revision = 0
+        self._tool_statistics: ToolStartCounter | None
         self._reset_tool_statistics()
         #: Set when this log was merged into another: (target log, old id -> new id).
         self.merged_into: tuple[EventLog, dict[int, int]] | None = None
@@ -158,6 +159,21 @@ class EventLog:
             log._next_id = max_id + 1
         return log
 
+    def refresh_subscribed_history(self, hydrated: EventLog) -> None:
+        """Consume a private hydrated log; keep this reader's waiters and lock.
+
+        The caller excludes writers and discards the temporary log after transfer.
+        """
+        if self._db is None or self._db is not hydrated._db or not self._session_id or self._session_id != hydrated._session_id:
+            raise ValueError("Cannot refresh a different session's event history")
+        with self._lock:
+            self._events, hydrated._events = hydrated._events, self._events
+            self._next_id, hydrated._next_id = hydrated._next_id, self._next_id
+            self._open_tool_calls, hydrated._open_tool_calls = hydrated._open_tool_calls, self._open_tool_calls
+            self._tool_statistics, hydrated._tool_statistics = hydrated._tool_statistics, self._tool_statistics
+            self._telemetry, hydrated._telemetry = hydrated._telemetry, self._telemetry
+        self.wake_observers()
+
     def append(
         self, event_type: str, data: dict[str, Any], *, timestamp: float | None = None,
     ) -> SseEvent:
@@ -197,10 +213,10 @@ class EventLog:
                     self._telemetry.log_epoch,
                     timestamp=ts,
                 )
-            from .status_producers import normalized
+            from .status_producers import normalized, owned_event_identity
             normalized(
                 self._db, self._session_id, event_type, data,
-                f"owned:{self._session_id}:{self._telemetry.log_epoch}:{event_id}",
+                owned_event_identity(self._session_id, self._telemetry.log_epoch, event_id),
                 timestamp=ts,
             )
         # Generic telemetry seam: emit only the reducer's content-free
@@ -455,7 +471,7 @@ class EventLog:
         return self._telemetry.log_epoch or None, floor, head, list(self._events[start:end])
 
     def _reset_tool_statistics(self) -> None:
-        self._tool_statistics: ToolStartCounter | None = None
+        self._tool_statistics = None
         try:
             self._tool_statistics = ToolStartCounter()
         except Exception:

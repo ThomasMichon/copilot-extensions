@@ -565,8 +565,11 @@ hint support they do not actually preserve.
 
 Retrieval facades retaining another canonical source naming scheme can override
 the pure `ContentStore.repo_filter_sql` method. The shared FTS/currentness path
-still executes that escaped prefilter before limiting candidates; the consumer
-migration recipe covers matching its vector-side policy.
+still executes that escaped prefilter before limiting candidates.
+`MultiModelStore` accepts an optional `content_store_type` subclass and matching
+pure `repo_matcher` callable, preserving the shared store/domain construction and
+all hydrated query paths without process-global policy replacement. Defaults
+remain identity-first; the consumer migration recipe covers paired injection.
 
 Full-text file-path filters use full-path shell globs (`*`, `?` and bracket
 classes), with SQL `%` and `_` treated as literal path characters. The path

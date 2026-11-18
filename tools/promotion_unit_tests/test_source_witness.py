@@ -1,11 +1,21 @@
 """Pure native-selection joins; process capture belongs to the native portfolio."""
+from __future__ import annotations
+
+from collections.abc import Iterator
+from contextlib import contextmanager
 import json
+from pathlib import Path
+import subprocess
 import time
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
 from runtime_profile import ProfileError
+from runtime_profile_policy import InstallationProfilePlan
+import runtime_source_capture
+import runtime_source_lock as source
 from runtime_source_capture import capture
 from runtime_source_lock import SourceWheelPin, _retain_source_lock, _wheel_pins
 
@@ -42,6 +52,70 @@ def test_witness_uses_native_choice_and_excludes_urls_and_unselected_versions(al
     assert result == [{"name": "demo", "version": "1.0", "filename": "demo-1.0-py3-none-any.whl",
                        "sha256": "sha256:" + "a" * 64}]
     assert "not-persisted" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("native_witness", [False, True])
+def test_source_build_lock_preserves_native_witness_or_target_inference(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, native_witness: bool,
+) -> None:
+    content = lock().replace(
+        b"wheels=[",
+        b'wheels=[{url="https://example.invalid/demo-1.0-cp311-cp311-win_amd64.whl",'
+        b'hashes={sha256="' + b"b" * 64 + b'"}},',
+    )
+    trace = diagnostic()
+    output = tmp_path / "pylock.toml"
+    output.write_bytes(content)
+    target = {
+        "environment": {"python_full_version": "3.11.0"},
+        "tags": ["cp311-cp311-win_amd64", "py3-none-any"],
+    }
+    plan = InstallationProfilePlan(b"{}", None, "artifact-unavailable")
+    transaction = SimpleNamespace(argv=("owned-compiler",), environment={}, cwd=tmp_path)
+    calls: list[str] = []
+
+    def record() -> dict[str, Any]:
+        return {"target": target, "build_roots": ["setuptools"]}
+
+    @contextmanager
+    def configuration(actual_plan: InstallationProfilePlan, **options: object) -> Iterator[SimpleNamespace]:
+        assert actual_plan is plan
+        assert options["_capture_diagnostics"] is native_witness
+        assert options["wheel_witness"] is True
+        yield SimpleNamespace(
+            transaction=transaction, output=output, payload=tmp_path, projections=(),
+            record=record, verify=lambda: None, verify_selection=lambda: None,
+        )
+
+    def compile_lock(argv: list[str], **options: object) -> subprocess.CompletedProcess[bytes]:
+        assert not native_witness and argv == ["owned-compiler"]
+        calls.append("compile")
+        return subprocess.CompletedProcess(argv, 0)
+
+    def captured(_transaction: object, directory: Path, **options: object) -> tuple[bytes, bytes]:
+        assert native_witness and directory == tmp_path.resolve()
+        calls.append("capture")
+        return content, trace
+
+    monkeypatch.setattr(source, "retain_source_configuration", configuration)
+    monkeypatch.setattr(source.subprocess, "run", compile_lock)
+    monkeypatch.setattr(runtime_source_capture, "capture", captured)
+    if native_witness:
+        with pytest.raises(ProfileError, match="own bounded diagnostic bytes"):
+            source._wheel_pins(
+                content, target, time.monotonic() + 5,
+                prefer_target_tags=True, diagnostic=trace,
+            )
+    with source._retain_source_lock(
+        plan, max_lock_bytes=65536, deadline=time.monotonic() + 5, wheel_witness=True,
+        max_diagnostic_bytes=65536 if native_witness else None,
+    ) as selected:
+        expected = "demo-1.0-" + (
+            "py3-none-any" if native_witness else "cp311-cp311-win_amd64"
+        ) + ".whl"
+        assert selected.record()["files"][0]["filename"] == expected
+        assert selected.native_lock == content
+    assert calls == ["capture" if native_witness else "compile"]
 
 
 @pytest.mark.parametrize("fault", [

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import os
 from collections.abc import Iterable
 import fnmatch
 import shlex
@@ -70,7 +71,12 @@ def plan_test_groups(
     historical = plugin_root / _BRIDGE_HISTORICAL_FILE
     owner = plugin_root / _BRIDGE_HTTP52_OWNER
     remaining = plugin_root / _BRIDGE_HTTP52_REMAINING
-    if name == "agent-bridge" and len(groups) == 1 and set(groups[0]) == {owner, remaining}:
+    if (
+        os.environ.get("BRIDGE_HTTP47_CAPTURE_REQUEST")
+        and os.environ.get("BRIDGE_HTTP47_CAPTURE_REQUEST_SHA256")
+        and name == "agent-bridge" and len(groups) == 1
+        and set(groups[0]) == {owner, remaining}
+    ):
         return [
             ([owner], _BRIDGE_HTTP52_ISOLATED),
             ([remaining], f"not ({_BRIDGE_HTTP52_ISOLATED})"),
