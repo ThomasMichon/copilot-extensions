@@ -7722,6 +7722,14 @@ admission refusals and Windows owned-worker timeout cleanup. Actor-free
 projection, candidate-witness, recheck, safe resolver-stop and isolated-worker
 deadline controls (including pre-launch expiry) live in
 `tools/promotion_unit_tests/test_guarded_core_contract.py`.
+`tools/promotion_unit_tests/test_guarded_request_diagnostics.py` drives the
+real acquisition request normalizer with a substituted opener, derives
+index/wheel stage from retained owner code identities, checks recorded numeric
+causes and the existing connection-reset retry count, and rejects sensitive or
+unbounded fields. Legacy and detailed resolver refusals round-trip through the
+actual worker JSON writer and parent reader in process; unrelated or late
+worker failures retain their existing opaque category. These controls do not
+probe a feed, launch UV or establish a historical cause.
 `tools/test_core_public_feed_native.py` compares real local-TLS producer outputs
 across separate machine-local keyed identities and source containers, and checks
 that credentials or a mismatched feed are refused before any feed request.

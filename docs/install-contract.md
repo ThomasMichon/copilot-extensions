@@ -5009,6 +5009,29 @@ allowlisted, nonsecret failure categories or a generic refusal; raw exception
 text, feed locations and credentials are never included. Deadline expiry is
 reported separately when no earlier failure was retained.
 
+For a retained request-opening failure at the resolver-stop boundary, the
+existing error mapper derives its known `project-index` or `wheel` stage from
+the exact broker function code identity in at most 16 retained traceback
+frames. It reads no frame locals, paths or source files and performs no live
+probe. It reads only exact known exception types and already-recorded `errno`,
+`winerror` and TLS certificate `verify_code` integers from the retained
+exception context; unknown subclasses and arbitrary messages are never
+formatted. The scalar is fixed when the resolver stops.
+The existing version-1 refusal's `reason` remains an ASCII scalar of at most
+128 characters, with the form
+`guarded request [stage=wheel,type=TimeoutError,errno=10060,winerror=none,tls=none]`.
+Here `tls` is the recorded certificate verification code, not exception text;
+`none` means absent or invalid, and an unrecognized cause has type `unknown`.
+Codes are bounded signed or unsigned 32-bit integers. The selected producer's
+pure `safe_guarded_request_reason()` validator lets a downstream CLI preserve
+only this grammar without copying the allowlist. Older producers retain their
+fixed categories; older consumers can retain their generic redacted refusal.
+No new CLI argument or JSON field is required. These observations perform no
+probe or retry and change no refusal, deadline, transport, admission or cleanup
+behavior. Unknown owner frames retain the existing fixed refusal; unrelated
+or late worker failures retain their opaque class category. These observations
+do not reconstruct a historical cause or qualify a delivery.
+
 For a reproducible producer profile, the caller may explicitly supply
 `--nonsecret-feed-url` with `--guarded-feed`. The value must be the exact
 affirmatively trusted HTTPS index and must be nonsecret throughout, including
