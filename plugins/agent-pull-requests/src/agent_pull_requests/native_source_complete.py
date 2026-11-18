@@ -5,6 +5,7 @@ import json
 import re
 import subprocess
 import sys
+from typing import Any, Callable
 
 from . import native_author
 from .native_command import run_command
@@ -14,7 +15,7 @@ SCHEMA = "agent-worktrees.pr-source-complete"
 RECOVERY = "Source completion is unconfirmed; inspect this source and retained recovery refs before retrying; no replay or fallback was attempted"
 
 
-def add_parser(subparsers, repo_type, handler):
+def add_parser(subparsers: Any, repo_type: Any, handler: Any) -> None:
     from .native_cli import validate_selector
 
     parser = subparsers.add_parser(
@@ -30,7 +31,7 @@ def add_parser(subparsers, repo_type, handler):
     parser.set_defaults(handler=handler)
 
 
-def _failure(args, message, *, dispatched=False):
+def _failure(args: Any, message: str, *, dispatched: bool = False) -> dict[str, Any]:
     return {
         "schema": SCHEMA, "version": 1, "repo": args.repo, "source": None,
         "dry_run": args.dry_run, "ok": False,
@@ -39,7 +40,7 @@ def _failure(args, message, *, dispatched=False):
     }
 
 
-def _valid(payload, args):
+def _valid(payload: Any, args: Any) -> bool:
     if not isinstance(payload, dict):
         return False
     status, source = payload.get("status"), payload.get("source")
@@ -74,7 +75,8 @@ def _valid(payload, args):
         return False
     if success:
         if (
-            not isinstance(result, dict) or result.get("success") is not True
+            not isinstance(result, dict) or not isinstance(source, dict)
+            or result.get("success") is not True
             or result.get("worktree_id") != source["worktree_id"]
             or result.get("branch") != args.expected_branch
             or result.get("action") not in ("up-to-date", "fast-forwarded", "reset-past-squash", "rebased")
@@ -84,7 +86,7 @@ def _valid(payload, args):
     return True
 
 
-def run(args, prefix_factory=None):
+def run(args: Any, prefix_factory: Callable[[], list[str]] | None = None) -> int:
     dispatched, payload, diagnostic = False, None, ""
     try:
         if (

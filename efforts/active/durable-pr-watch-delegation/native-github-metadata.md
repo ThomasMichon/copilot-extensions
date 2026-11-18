@@ -4,7 +4,7 @@ Back to the [CLI parity inventory](cli-parity-inventory.md) and
 [canonical effort](README.md#authorreviewer-service-perspectives).
 Coordination: #10923.
 
-**Proposed source contract, not implemented support.** This slice closes part
+**Contract reviewed in #13195; finite source qualification below.** This slice closes part
 of the PR-domain
 [author publication and metadata intent](../../../visions/plugins/agent-pull-requests/README.md#complete-author-publication-and-metadata)
 through the existing Worktrees/provider owner. It follows
@@ -14,21 +14,21 @@ It does not introduce another forge transport or retire legacy commands.
 
 ## Baseline and selected boundary
 
-Worktrees already exposes explicit-target `pr-update`; the dedicated native
+Worktrees exposes explicit-target `pr-update`; the dedicated native
 client forwards `update` after checking the selected runtime's
 `agent-worktrees.pr-author-capabilities`, version 1. Its `metadata-update`
-operation currently advertises only Azure DevOps. GitHub has no provider
-implementation of that operation. Raw description replacement can consequently
-remove the source marker supplied at PR creation.
+operation selects the Azure DevOps metadata owner or the GitHub title/body
+owner. The GitHub owner preserves the source marker supplied at PR creation;
+raw description replacement outside this operation can still remove it.
 
-Extend those existing operations rather than add another prerequisite command:
+The existing operations supply this boundary without another prerequisite command:
 
 | Surface | Selected form |
 |---------|---------------|
 | Worktrees owner | `pr-update --repo <registered-target> --number <positive-number> [--title <text>] [--body <text> \| --body-file <utf8-file>] --json` |
 | Dedicated native frontend | Existing `update` with the same target, number and field options, plus its existing selected `--worktrees-command` |
 | Optional delivered policy | Existing `--config` and `worker-policy-config` support; invalid or mismatched policy never falls back to ambient configuration |
-| Capability | Existing target-qualified `metadata-update` boolean, true for the enabled GitHub binding only after this implementation is qualified |
+| Capability | Existing target-qualified `metadata-update` boolean, true for enabled Azure DevOps and GitHub bindings |
 
 Azure DevOps retains its current reviewer, work-item, publication-label and
 metadata semantics. The initial GitHub slice supports title and description
@@ -92,7 +92,7 @@ Read before writing and verify after dispatch. An already-satisfied requested
 field is confirmed unchanged, not rewritten. Reconcile a lost write response
 by authoritative readback without automatically replaying it. Partial
 confirmation remains partial; later actions do not run after an unresolved
-earlier action. The existing per-action metadata result carries selected
+earlier action. The GitHub `agent-worktrees.pr-metadata`, version 1, per-action result carries selected
 `repo`, positive `number`, `provider`, URL, `publication_retained`, `ok` and
 `actions.title` / `actions.description`:
 
@@ -125,24 +125,53 @@ or rolled-back owners refuse this optional GitHub operation before dispatch.
 The existing Azure DevOps metadata path remains usable. No deprecation or
 removal occurs here.
 
-- [ ] Qualify the actual explicit parser, claimant, target/account/endpoint
+- [x] Qualify the actual explicit parser, claimant, target/account/endpoint
   resolution and provider transport with synthetic open/draft/terminal,
   wrong-target, malformed and unsupported-option controls.
-- [ ] Exercise the real native frontend-to-owner path with title-only,
+- [x] Exercise the real native frontend-to-owner path with title-only,
   description-only and combined updates, quote-heavy multiline Unicode body
   files, empty descriptions, already-satisfied fields and unrelated-field
   preservation. Prove zero create/push/comment/consent/review effects.
-- [ ] Prove source preservation with an updating caller different from the
+- [x] Prove source preservation with an updating caller different from the
   original source, frozen modes, root/encrypted metadata, anonymous policy,
   missing/conflicting/duplicate/malformed markers and literal examples.
   Recovery may refuse when original source is unavailable; it must not invent it.
-- [ ] Inject pre-write refusal, authoritative rejection, lost response,
+- [x] Inject pre-write refusal, authoritative rejection, lost response,
   partial success, failed/mismatched readback and concurrent edits. Retain
   uncertainty and selected identity; prove no automatic replay.
-- [ ] Cover old/new callers, selected owners, rollback, additive capability
+- [x] Cover old/new callers, selected owners, rollback, additive capability
   fields, strict invalid arguments and delivered-policy refusal through a real
   process seam. Preserve the existing Azure DevOps and tracked-attribution tests.
 - [ ] Record isolated source, native-platform, released, installed and separately
   authorized live-provider evidence distinctly. HTTP author mutation hosting,
   Gitea metadata and complete CLI retirement remain parent acceptance, not this
   finite source leaf.
+
+## Journal
+
+### 2026-11-17 - Reviewed contract and isolated source qualification
+
+Contract #13195 merged as `ebbc42ad46` after current-head Copilot approval,
+required green checks and normal managed Maintainer completion. The finite
+implementation retains the existing target/config/provider owners and leaves
+the full parent Plan and Validation Plan open.
+
+The isolated source packet passes 102 Worktrees metadata/author cases, including
+the existing Azure DevOps path. The final focused GitHub subset passes 48 after
+adding post-write identity/lifecycle/value and open-literal-boundary controls.
+The native frontend packet passes 108 with five Windows-only cases skipped on
+Linux, including a real subprocess/file-forwarding boundary. The combined
+frontend/parser/target-resolver/provider fixture uses synthetic forge responses.
+The final resolver-specific control also passes through the actual explicit
+worker-target resolver, rather than a replacement resolver response.
+All runs use the bounded supervisor and offline test-isolation containers with
+verified cleanup; these are not live-provider or installed-runtime results.
+
+Missing original attribution, including anonymous descriptions, refuses body
+editing in this finite implementation. No local frozen-record recovery is
+implemented. Existing published raw/codename/root/encrypted markers are retained,
+not regenerated from current policy. CommonMark parsing preserves literal
+examples, and composition refuses when an open literal boundary would hide the
+retained marker. The frontend retains the selected PR and unknown action state
+after a lost or malformed GitHub owner response. Other provider and parent
+acceptance remains open.
