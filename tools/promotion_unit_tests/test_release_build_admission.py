@@ -1,6 +1,10 @@
 """Source-bound release helper decisions without build or native actors."""
 from __future__ import annotations
 
+import os
+from typing import Callable, ContextManager, Iterator
+
+import importlib.machinery
 import importlib.util
 import io
 from pathlib import Path
@@ -16,6 +20,7 @@ import pytest
 
 import native_daemon_artifacts as native
 import plugin_runtime_resources as resources
+import artifact_source_build as source_build
 from artifact_source_build import PromotionArtifactError, validate_static_build
 
 
@@ -72,6 +77,70 @@ def test_gateway_build_context_contains_the_canonical_runtime_and_cache_closure(
 def _write(path: Path, content: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(content)
+
+
+@pytest.fixture
+def static_project(tmp_path: Path) -> Path:
+    _write(
+        tmp_path / "pyproject.toml",
+        (STATIC_BUILD + '[project]\nname="fixture"\nversion="1"\n').encode(),
+    )
+    return tmp_path
+
+
+def test_static_shadow_validation_bounds_probes_and_rechecks_new_inputs(static_project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    probes = []
+
+    def tracked(original: Callable[..., bool]) -> Callable[..., bool]:
+        def check(path: Path, *args: Any, **kwargs: Any) -> bool:
+            if path.parent == static_project:
+                probes.append(path)
+            return original(path, *args, **kwargs)
+        return check
+
+    monkeypatch.setattr(Path, "exists", tracked(Path.exists))
+    monkeypatch.setattr(Path, "is_symlink", tracked(Path.is_symlink))
+    assert validate_static_build(static_project)["project"]["name"] == "fixture"
+    assert len(probes) <= 8
+    _write(static_project / "os.py", b"unapproved = True\n")
+    with pytest.raises(PromotionArtifactError, match="shadows trusted build tooling: os"):
+        validate_static_build(static_project)
+
+
+@pytest.mark.parametrize("kind", ["module", "package", "extension", "dangling", "case-alias"])
+def test_static_shadow_inventory_keeps_all_native_name_refusals(static_project: Path, monkeypatch: pytest.MonkeyPatch, kind: str) -> None:
+    name = {
+        "module": "setuptools.py", "package": "sitecustomize",
+        "extension": "os" + importlib.machinery.EXTENSION_SUFFIXES[0],
+        "dangling": "packaging.py", "case-alias": "SeTuPtOoLs.PY",
+    }[kind]
+    path = static_project / name
+    if kind == "package":
+        path.mkdir()
+    else:
+        _write(path, b"unapproved = True\n")
+    if kind == "dangling":
+        exists, linked = Path.exists, Path.is_symlink
+        monkeypatch.setattr(Path, "exists", lambda item: False if item == path else exists(item))
+        monkeypatch.setattr(Path, "is_symlink", lambda item: True if item == path else linked(item))
+    if kind == "case-alias" and not (static_project / "setuptools.py").exists():
+        assert validate_static_build(static_project)["project"]["name"] == "fixture"
+    else:
+        with pytest.raises(PromotionArtifactError, match="shadows trusted build tooling"):
+            validate_static_build(static_project)
+
+
+def test_static_shadow_inventory_refuses_unreadable_directory(static_project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    scandir: Callable[[str | os.PathLike[str]], ContextManager[Iterator[os.DirEntry[str]]]] = source_build.os.scandir
+
+    def scan(path: str | os.PathLike[str]) -> ContextManager[Iterator[os.DirEntry[str]]]:
+        if Path(path) == static_project:
+            raise PermissionError("selected source directory is unreadable")
+        return scandir(path)
+
+    monkeypatch.setattr(source_build.os, "scandir", scan)
+    with pytest.raises(PermissionError, match="selected source directory is unreadable"):
+        validate_static_build(static_project)
 
 
 @pytest.fixture
@@ -260,7 +329,7 @@ def _archive(actual: bytes | None, *, arch: str="x86_64", tags: list[str] | None
 def test_legacy_native_artifact_is_refused_without_compiler_actor(
     native_project: Path, monkeypatch: pytest.MonkeyPatch, arch: str,
 ) -> None:
-    def refuse(*args: Any, **kwargs: Any) -> None:
+    def refuse(*args: object, **kwargs: object) -> None:
         pytest.fail("artifact admission must never invoke a compiler or subprocess")
 
     monkeypatch.setattr(subprocess, "run", refuse)

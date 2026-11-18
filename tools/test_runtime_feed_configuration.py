@@ -1,8 +1,30 @@
 """Actual owner policy/native settings composed with controlled TLS acquisition."""
 from __future__ import annotations
 
-from typing import Any, cast
 from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, ContextManager, Protocol, TypedDict, cast
+from email.message import Message
+
+if TYPE_CHECKING:
+    from test_runtime_profile_policy import _Adopter, _PolicyModule, _Arguments
+    from runtime_profile_policy import InstallationProfilePlan
+    from runtime_profile_release import ReleaseSelection
+    from runtime_profile import RuntimeProfile
+    from runtime_feed_configuration import RetainedNativeFeedInputs
+    from installer_native_feed import NativeFeedInputs
+
+    class _OwnedPolicy(Protocol):
+        def __call__(self, module: _PolicyModule, arguments: _Arguments, **profiles: object) -> tuple[Path, dict[str, Any]]: ...
+
+    class _CaptureOptions(TypedDict):
+        deadline: float
+        env: dict[str, str] | None
+
+    class _LegacyProfilePlan(Protocol):
+        def __call__(self, adopter: _Adopter, release: tuple[Path, dict[str, Any], dict[str, Any]], **overrides: object) -> InstallationProfilePlan: ...
+
+    class _LegacyVerification(Protocol):
+        def __call__(self, monkeypatch: pytest.MonkeyPatch, release: tuple[Path, dict[str, Any], dict[str, Any]], *, failure: str | None = None, on_verify: Callable[[Path], object] | None = None) -> list[Path]: ...
 
 import base64
 from dataclasses import replace
@@ -10,7 +32,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
-from types import FunctionType
+from types import FunctionType, ModuleType
 import shutil
 import ssl
 import subprocess
@@ -42,7 +64,7 @@ limits = cast(Callable[..., Any], untyped_limits)
 worker_procutil = cast(Callable[..., Any], untyped_worker_procutil)
 plan = cast(Callable[..., Any], untyped_plan)
 _verification = cast(Callable[..., Any], untyped_verification)
-owned_policy = cast(Callable[..., Any], vars(policy_fixtures)["owned_policy"])
+owned_policy = cast("_OwnedPolicy", vars(policy_fixtures)["owned_policy"])
 
 
 def _required_executable(command: str) -> str:
@@ -127,7 +149,7 @@ def test_native_tls_refuses_unprojected_certificate_directory(tmp_path: Path) ->
     ('"fixture%40user"', 'Some("redacted")',
      ("https://feed.example:8443/simple/", "fixture@user", True)),
 ])
-def test_native_index_url_preserves_uv_wrapper_compatibility(wrapper: str, username: str, password: str, expected: Any) -> None:
+def test_native_index_url_preserves_uv_wrapper_compatibility(wrapper: str, username: str, password: str, expected: tuple[str, str, bool]) -> None:
     from installer_native_feed import _index_url
 
     projection = (
@@ -162,7 +184,7 @@ def test_native_uv_missing_credentials_message_compatibility(
         environment={"HOME": str(tmp_path), "USERPROFILE": str(tmp_path)}, cwd=tmp_path,
     ))
 
-    def missing(command: Any, **_kwargs: Any) -> Any:
+    def missing(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
         assert command == ["fixture-uv", "auth", "token", origin]
         message = "error: Failed to fetch credentials for " + quote + origin + "/" + quote
         return subprocess.CompletedProcess(command, 2, "", message + "\n")
@@ -208,19 +230,19 @@ def test_native_uv_credential_lookup_errors_are_not_absence(
 
 
 @pytest.fixture
-def selected(adopter: Any, release: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
+def selected(adopter: _Adopter, release: tuple[Path, dict[str, Any], dict[str, Any]], monkeypatch: pytest.MonkeyPatch) -> InstallationProfilePlan:
     record = release[2]
     record["target"] = {"environment": default_environment(), "tags": ["py3-none-any"], "device": "cpu"}
     record["wheels"][0]["requires_python"] = ""
     _write_index(release[0], release[1])
-    _verification(monkeypatch, release)
+    cast("_LegacyVerification", _verification)(monkeypatch, release)
     # The pre-existing keyed-identity helper has independent tests. These
     # synthetic projections must never create a real machine credential key.
     monkeypatch.setattr(configuration, "_opaque_index_identity", lambda value: hashlib.sha256(value.encode()).hexdigest())
-    return plan(adopter, release)
+    return cast("_LegacyProfilePlan", plan)(adopter, release)
 
 
-def environment(adopter: Any, state: dict[str, Any], tmp_path: Path, *, authenticate: Any="never", **settings: Any) -> Any:
+def environment(adopter: _Adopter, state: dict[str, Any], tmp_path: Path, *, authenticate: str="never", **settings: str | list[str] | bool | int) -> dict[str, str]:
     path = tmp_path / "native-uv.toml"
     path.write_text(
         "system-certs=true\n"
@@ -245,14 +267,14 @@ def environment(adopter: Any, state: dict[str, Any], tmp_path: Path, *, authenti
     return result
 
 
-def capture(selected: Any, adopter: Any, environment: Any, **changes: Any) -> Any:
+def capture(selected: InstallationProfilePlan, adopter: _Adopter, environment: dict[str, str], **changes: Any) -> ContextManager[RetainedNativeFeedInputs]:
     return configuration.retain_native_feed_inputs(
         selected, installation=adopter[1], uv="uv", python=Path(sys.executable),
-        **({"deadline": time.monotonic() + 30, "env": environment} | changes),
+        **cast("_CaptureOptions", {"deadline": time.monotonic() + 30, "env": environment} | changes),
     )
 
 
-def serve_release(state: dict[str, Any], release: Any) -> Any:
+def serve_release(state: dict[str, Any], release: tuple[Path, dict[str, Any], dict[str, Any]]) -> dict[str, Any]:
     record = release[2]
     expected = record["wheels"][0]
     with zipfile.ZipFile(release[0] / release[1]["artifacts"][0]["filename"]) as bundle:
@@ -272,7 +294,7 @@ def serve_release(state: dict[str, Any], release: Any) -> Any:
 
 
 def test_actual_owner_native_configuration_and_tls_download_into_complete_inspection(
-    adopter: Any, release: Any, selected: Any, feeds: Any, tmp_path: Path, engine: Any, plugin: Path, monkeypatch: pytest.MonkeyPatch,
+    adopter: _Adopter, release: tuple[Path, dict[str, Any], dict[str, Any]], selected: InstallationProfilePlan, feeds: Callable[..., dict[str, Any]], tmp_path: Path, engine: ModuleType, plugin: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     state = feeds()
     record = serve_release(state, release)
@@ -282,7 +304,7 @@ def test_actual_owner_native_configuration_and_tls_download_into_complete_inspec
     deadline = time.monotonic() + 90
     with capture(selected, adopter, env, deadline=deadline) as inputs:
         assert state["requests"] == []
-        assert inputs.profile.record() == record
+        assert cast("RuntimeProfile", inputs.profile).record() == record
         assert len(inputs.feeds) == 1
         assert inputs.feeds[0].index_url == state["origin"] + "/simple"
         with acquire_wheel_inputs(
@@ -292,14 +314,14 @@ def test_actual_owner_native_configuration_and_tls_download_into_complete_inspec
             procutil=worker_procutil(),
         ) as acquired:
             verify_profile_wheels(
-                inputs.profile, acquired.snapshot.archives,
+                cast("RuntimeProfile", inputs.profile), acquired.snapshot.archives,
                 max_archive_bytes=4096, max_unpacked_bytes=4096, max_metadata_bytes=4096,
                 deadline=deadline,
             )
             assert acquired.evidence()["policy_id"] == inputs.policy_id
             paths = tuple(acquired.snapshot.paths.values())
             unbound = profile_wheel_inputs(
-                inputs.profile, acquired.snapshot, max_archive_bytes=4096,
+                cast("RuntimeProfile", inputs.profile), acquired.snapshot, max_archive_bytes=4096,
                 max_unpacked_bytes=4096, max_metadata_bytes=4096, deadline=deadline,
             )
             wheel_inputs = acquired.construction_inputs(unbound)
@@ -357,7 +379,7 @@ def test_actual_owner_native_configuration_and_tls_download_into_complete_inspec
                 procutil=worker_procutil(),
             ) as reacquired:
                 repeated = reacquired.construction_inputs(profile_wheel_inputs(
-                    inputs.profile, reacquired.snapshot, max_archive_bytes=4096,
+                    cast("RuntimeProfile", inputs.profile), reacquired.snapshot, max_archive_bytes=4096,
                     max_unpacked_bytes=4096, max_metadata_bytes=4096, deadline=deadline,
                 ))
                 assert reacquired.evidence()["metadata_bytes"] > acquired.evidence()["metadata_bytes"]
@@ -390,14 +412,14 @@ def test_actual_owner_native_configuration_and_tls_download_into_complete_inspec
 
 @pytest.mark.parametrize("origin", ["named-environment", "retained-url"])
 def test_native_named_and_retained_url_credentials_are_built_without_masking(
-    adopter: Any, release: Any, selected: Any, feeds: Any, tmp_path: Path, origin: Any,
+    adopter: _Adopter, release: tuple[Path, dict[str, Any], dict[str, Any]], selected: InstallationProfilePlan, feeds: Callable[..., dict[str, Any]], tmp_path: Path, origin: str,
 ) -> None:
     state = feeds()
     env = environment(adopter, state, tmp_path, authenticate="always")
     user, password = "fixture-user", "synthetic-secret"
     record = serve_release(state, release)
 
-    def authorized(headers: Any) -> Any:
+    def authorized(headers: Message) -> bool:
         try:
             scheme, value = headers.get("Authorization", "").split(" ", 1)
             return scheme == "Ba" + "sic" and base64.b64decode(value, validate=True) == (user + ":" + password).encode()
@@ -443,7 +465,7 @@ def test_header_builder_exercises_real_bytes_not_a_mocked_transport() -> None:
     ("insecure", "NativeFeedError"),
 ])
 def test_native_capture_first_touch_is_stdlib_and_payload_local(
-    adopter: Any, selected: Any, feeds: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, setting: str, error: str | None,
+    adopter: _Adopter, selected: InstallationProfilePlan, feeds: Callable[..., dict[str, Any]], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, setting: str, error: None | str,
 ) -> None:
     import installer_native_feed as native
 
@@ -505,7 +527,7 @@ assert pathlib.Path(native.__file__).resolve().parent == pathlib.Path(sys.argv[1
 print(json.dumps(document))
 """
 
-    def first_touch(transaction: Any, projection: Any, original: Any, profile: Any, policy: Any, uv: Any, deadline: float, **options: Any) -> Any:
+    def first_touch(transaction: RetainedUVInstall, projection: str, original: str, profile: object, policy: dict[str, Any], uv: str, deadline: float, **options: Any) -> NativeFeedInputs:
         data = {
             "argv": transaction.argv, "environment": transaction.environment,
             "cwd": str(transaction.cwd),
@@ -537,7 +559,7 @@ print(json.dumps(document))
     monkeypatch.setattr(configuration, "capture_native_feed_inputs", first_touch)
     if error is None:
         with capture(selected, adopter, env) as inputs:
-            assert inputs.profile == selected.release_selection.selected.profile
+            assert cast("RuntimeProfile", inputs.profile) == cast("ReleaseSelection", selected.release_selection).selected.profile
         assert seen and "error" not in seen[0]
     else:
         with pytest.raises((ProfileError, AcquisitionUnavailable)):
@@ -547,7 +569,7 @@ print(json.dumps(document))
     assert state["requests"] == []
 
 
-def test_native_netrc_provider_is_bounded_and_preserved(adopter: Any, selected: Any, feeds: Any, tmp_path: Path) -> None:
+def test_native_netrc_provider_is_bounded_and_preserved(adopter: _Adopter, selected: InstallationProfilePlan, feeds: Callable[..., dict[str, Any]], tmp_path: Path) -> None:
     state = feeds()
     env = environment(adopter, state, tmp_path, authenticate="always")
     path = tmp_path / "selected-netrc"
@@ -562,7 +584,7 @@ def test_native_netrc_provider_is_bounded_and_preserved(adopter: Any, selected: 
 @pytest.mark.parametrize("provider", ["named-environment", "retained-url", "netrc"])
 @pytest.mark.parametrize("change", ["account", "password"])
 def test_native_authentication_changes_invalidate_opaque_reuse_identity(
-    adopter: Any, selected: Any, feeds: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, provider: Any, change: Any,
+    adopter: _Adopter, selected: InstallationProfilePlan, feeds: Callable[..., dict[str, Any]], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, provider: str, change: str,
 ) -> None:
     import governed_feed_trust as trust
 
@@ -573,7 +595,7 @@ def test_native_authentication_changes_invalidate_opaque_reuse_identity(
     path = Path(env["UV_CONFIG_FILE"])
     config = path.read_text()
 
-    def select(user: Any, password: str) -> Any:
+    def select(user: str, password: str) -> None:
         if provider == "named-environment":
             env.update(UV_INDEX_GOVERNED_USERNAME=user, UV_INDEX_GOVERNED_PASSWORD=password)
         elif provider == "retained-url":
@@ -601,7 +623,7 @@ def test_native_authentication_changes_invalidate_opaque_reuse_identity(
     assert state["requests"] == []
 
 
-def test_native_automatic_no_credentials_is_not_a_new_approval_map(adopter: Any, selected: Any, feeds: Any, tmp_path: Path) -> None:
+def test_native_automatic_no_credentials_is_not_a_new_approval_map(adopter: _Adopter, selected: InstallationProfilePlan, feeds: Callable[..., dict[str, Any]], tmp_path: Path) -> None:
     state = feeds()
     env = environment(adopter, state, tmp_path, authenticate="auto")
     with capture(selected, adopter, env) as inputs:
@@ -609,7 +631,7 @@ def test_native_automatic_no_credentials_is_not_a_new_approval_map(adopter: Any,
     assert state["requests"] == []
 
 
-def test_changed_owner_policy_cannot_be_replaced_by_a_stale_plan(adopter: Any, selected: Any, feeds: Any, tmp_path: Path) -> None:
+def test_changed_owner_policy_cannot_be_replaced_by_a_stale_plan(adopter: _Adopter, selected: InstallationProfilePlan, feeds: Callable[..., dict[str, Any]], tmp_path: Path) -> None:
     state = feeds()
     env = environment(adopter, state, tmp_path)
     owned_policy(adopter[0], adopter[1], downloadOrigins=["https://files.example"])
@@ -619,13 +641,38 @@ def test_changed_owner_policy_cannot_be_replaced_by_a_stale_plan(adopter: Any, s
     assert state["requests"] == []
 
 
+@pytest.mark.parametrize("change", ["settings", "policy", "closed"])
+def test_artifact_feed_live_checks_keep_current_native_and_owner_inputs(
+    adopter: _Adopter, selected: InstallationProfilePlan, feeds: Callable[..., dict[str, Any]], tmp_path: Path, change: str,
+) -> None:
+    state = feeds()
+    env = environment(adopter, state, tmp_path)
+    if change == "closed":
+        with capture(selected, adopter, env) as inputs:
+            inputs.verify()
+        with pytest.raises(ProfileError, match="custody is closed"):
+            inputs.verify()
+    else:
+        with pytest.raises(ProfileError, match="changed"):
+            with capture(selected, adopter, env) as inputs:
+                if change == "policy":
+                    owned_policy(adopter[0], adopter[1], downloadOrigins=["https://files.example"])
+                else:
+                    path = Path(env["UV_CONFIG_FILE"])
+                    path.write_text(
+                        path.read_text().replace('authenticate="never"', 'authenticate="auto"'),
+                    )
+                inputs.verify()
+    assert state["requests"] == []
+
+
 @pytest.mark.parametrize("changes,message", [
     ({"index_strategy": "unsafe-best-match"}, "index strategy"),
     ({"keyring_provider": "subprocess"}, "credential provider"),
     ({"allow_insecure_host": ["127.0.0.1"]}, "insecure"),
 ])
 def test_unsupported_native_settings_refuse_before_http(
-    adopter: Any, selected: Any, feeds: Any, tmp_path: Path, changes: Any, message: str,
+    adopter: _Adopter, selected: InstallationProfilePlan, feeds: Callable[..., dict[str, Any]], tmp_path: Path, changes: dict[str, Any], message: str,
 ) -> None:
     state = feeds()
     env = environment(adopter, state, tmp_path, **changes)
@@ -635,7 +682,7 @@ def test_unsupported_native_settings_refuse_before_http(
     assert state["requests"] == []
 
 
-def test_unsupported_bundled_root_provider_is_not_silently_replaced(adopter: Any, selected: Any, feeds: Any, tmp_path: Path) -> None:
+def test_unsupported_bundled_root_provider_is_not_silently_replaced(adopter: _Adopter, selected: InstallationProfilePlan, feeds: Callable[..., dict[str, Any]], tmp_path: Path) -> None:
     state = feeds()
     env = environment(adopter, state, tmp_path)
     path = Path(env["UV_CONFIG_FILE"])
@@ -646,7 +693,7 @@ def test_unsupported_bundled_root_provider_is_not_silently_replaced(adopter: Any
     assert state["requests"] == []
 
 
-def test_offline_native_configuration_is_a_typed_unavailable_outcome(adopter: Any, selected: Any, feeds: Any, tmp_path: Path) -> None:
+def test_offline_native_configuration_is_a_typed_unavailable_outcome(adopter: _Adopter, selected: InstallationProfilePlan, feeds: Callable[..., dict[str, Any]], tmp_path: Path) -> None:
     state = feeds()
     env = environment(adopter, state, tmp_path)
     env["UV_OFFLINE"] = "1"
@@ -657,22 +704,24 @@ def test_offline_native_configuration_is_a_typed_unavailable_outcome(adopter: An
 
 
 def test_owner_selected_download_origins_survive_native_capture(
-    adopter: Any, release: Any, feeds: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    adopter: _Adopter, release: tuple[Path, dict[str, Any], dict[str, Any]], feeds: Callable[..., dict[str, Any]], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     state = feeds()
-    owned_policy(adopter[0], adopter[1], downloadOrigins=["https://files.example"])
+    owned_policy(
+        adopter[0], adopter[1], downloadOrigins=["https://files.example"],
+    )
     release[2]["target"] = {"environment": default_environment(), "tags": ["py3-none-any"], "device": "cpu"}
     _write_index(release[0], release[1])
-    _verification(monkeypatch, release)
+    cast("_LegacyVerification", _verification)(monkeypatch, release)
     monkeypatch.setattr(configuration, "_opaque_index_identity", lambda value: hashlib.sha256(value.encode()).hexdigest())
-    selected = plan(adopter, release)
+    selected = cast("_LegacyProfilePlan", plan)(adopter, release)
     with capture(selected, adopter, environment(adopter, state, tmp_path)) as inputs:
         assert inputs.download_origins == ("https://files.example",)
     assert state["requests"] == []
 
 
 def test_changed_delivery_contract_invalidates_native_acquisition_reuse(
-    adopter: Any, selected: Any, feeds: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    adopter: _Adopter, selected: InstallationProfilePlan, feeds: Callable[..., dict[str, Any]], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import installer_native_feed as native
 
@@ -687,7 +736,7 @@ def test_changed_delivery_contract_invalidates_native_acquisition_reuse(
 
 
 def test_unchanged_native_policy_identity_excludes_retained_paths_and_current_cutoff(
-    adopter: Any, selected: Any, feeds: Any, tmp_path: Path,
+    adopter: _Adopter, selected: InstallationProfilePlan, feeds: Callable[..., dict[str, Any]], tmp_path: Path,
 ) -> None:
     state = feeds()
     env = environment(adopter, state, tmp_path)
@@ -705,17 +754,17 @@ def test_unchanged_native_policy_identity_excludes_retained_paths_and_current_cu
     ("duplicate", True), ("order", True), ("added", False), ("removed", False), ("transport", False),
 ])
 def test_native_trust_identity_uses_certificate_sets_but_preserves_real_changes(
-    adopter: Any, selected: Any, feeds: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: Any, equivalent: Any,
+    adopter: _Adopter, selected: InstallationProfilePlan, feeds: Callable[..., dict[str, Any]], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str, equivalent: bool,
 ) -> None:
     import installer_native_feed as native
 
     state = feeds()
     env = environment(adopter, state, tmp_path)
-    original = cast(Callable[..., Any], vars(native)["_tls_record"])
+    original = native._tls_record
     certificates = ["certificate-a", "certificate-b"]
     changed_transport = False
 
-    def record(context: Any) -> Any:
+    def record(context: ssl.SSLContext) -> dict[str, Any]:
         result = original(context)
         result["certificates"] = list(certificates)
         if changed_transport:
@@ -741,7 +790,7 @@ def test_native_trust_identity_uses_certificate_sets_but_preserves_real_changes(
 
 
 def test_changed_relative_seasoning_changes_effective_policy_identity(
-    adopter: Any, selected: Any, feeds: Any, tmp_path: Path,
+    adopter: _Adopter, selected: InstallationProfilePlan, feeds: Callable[..., dict[str, Any]], tmp_path: Path,
 ) -> None:
     state = feeds()
     env = environment(adopter, state, tmp_path, exclude_newer="14d")
@@ -757,7 +806,7 @@ def test_changed_relative_seasoning_changes_effective_policy_identity(
 
 @pytest.mark.parametrize("variable", ["UV_CONSTRAINT", "UV_OVERRIDE", "UV_BUILD_CONSTRAINT"])
 def test_machine_package_constraints_are_not_ignored_for_an_exact_profile(
-    adopter: Any, selected: Any, feeds: Any, tmp_path: Path, variable: Any,
+    adopter: _Adopter, selected: InstallationProfilePlan, feeds: Callable[..., dict[str, Any]], tmp_path: Path, variable: str,
 ) -> None:
     state = feeds()
     env = environment(adopter, state, tmp_path)
@@ -770,7 +819,7 @@ def test_machine_package_constraints_are_not_ignored_for_an_exact_profile(
     assert state["requests"] == []
 
 
-def test_selected_package_index_mapping_is_not_silently_replaced(adopter: Any, selected: Any, feeds: Any, tmp_path: Path) -> None:
+def test_selected_package_index_mapping_is_not_silently_replaced(adopter: _Adopter, selected: InstallationProfilePlan, feeds: Callable[..., dict[str, Any]], tmp_path: Path) -> None:
     state = feeds()
     env = environment(adopter, state, tmp_path)
     project = Path(adopter[1]["payload_root"])

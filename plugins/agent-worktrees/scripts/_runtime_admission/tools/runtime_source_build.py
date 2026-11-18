@@ -12,20 +12,22 @@ import os
 import shutil
 import sys
 import time
-from collections.abc import Callable
-from contextlib import contextmanager
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+from typing import Any, cast
 
 _ROOT = Path(__file__).resolve().parents[1]
 for _library in ("installer-engine", "versioned-runtime"):
     sys.path.insert(0, str(_ROOT / "libs" / _library))
 
-import installer_engine as engine
-from build_toolchain_lock import ToolchainLock, _query_marker_environment
-from installer_wheel_acquisition import AcquisitionLimits, acquire_wheel_inputs
+import installer_engine as installer_engine
+engine = installer_engine
+from build_toolchain_lock import ToolchainLock, _query_marker_environment as _query_marker_environment
+from installer_wheel_acquisition import AcquisitionLimits, acquire_wheel_inputs as acquire_wheel_inputs
 from installer_wheel_inputs import WheelLimits, _check_deadline
-from installer_wheel_snapshot import WheelInstallInputs
+from installer_wheel_snapshot import WheelInstallInputs, WheelSnapshot
 from packaging.requirements import Requirement
 from packaging.specifiers import SpecifierSet
 from packaging.utils import canonicalize_name
@@ -35,20 +37,26 @@ import runtime_feed_configuration
 from runtime_feed_configuration import retain_source_feed_inputs
 from runtime_profile import (
     SCHEMA,
-    ProfileError,
+    ProfileError as ProfileError,
     RuntimeProfile,
     _reachable,
     validate_profile,
 )
 from runtime_profile_wheels import profile_wheel_inputs
-from runtime_source_authentication import retain_authenticated_source
+from runtime_profile_policy import InstallationProfilePlan
+from runtime_source_authentication import (
+    AuthenticatedSource,
+    retain_installation_source as retain_installation_source,
+)
+retain_authenticated_source = retain_installation_source
 from runtime_source_lock import (
     _build_roots,
     _source,
-    dependencies,
+    SourceLockCandidate,
+    dependencies as dependencies,
     retain_source_wheel_lock,
 )
-from runtime_source_wheels import retain_source_profile
+from runtime_source_wheels import retain_source_profile as retain_source_profile
 from versioned_runtime_source import SourceIdentity
 
 
@@ -64,7 +72,7 @@ class SourceRuntimeInputs:
 
     @property
     def runtime_version(self) -> str:
-        return self.identity.runtime_version + ".profile." + self.wheels.receipt()["lock_id"][7:23]
+        return self.identity.runtime_version + ".profile." + cast(str, self.wheels.receipt()["lock_id"])[7:23]
 
     def verify(self) -> None:
         self._verification()
@@ -72,7 +80,10 @@ class SourceRuntimeInputs:
         _source(self.payload, self.identity)
 
 
-def _metadata_entries(snapshot, files, *, limits, deadline, hints=None):
+def _metadata_entries(
+    snapshot: WheelSnapshot, files: Sequence[dict[str, Any]], *,
+    limits: WheelLimits, deadline: float, hints: dict[str, str] | None = None,
+) -> list[dict[str, Any]]:
     entries, remaining = [], limits.max_expanded_bytes
     for selected in files:
         _check_deadline(deadline)
@@ -101,7 +112,11 @@ def _metadata_entries(snapshot, files, *, limits, deadline, hints=None):
     return entries
 
 
-def _profile(locked, authenticated, feed, entries, roots, deadline):
+def _profile(
+    locked: SourceLockCandidate, authenticated: AuthenticatedSource,
+    feed: runtime_feed_configuration.NativeFeedInputs, entries: Sequence[dict[str, Any]],
+    roots: list[str], deadline: float,
+) -> RuntimeProfile:
     record = locked.record()
     by_name = {
         item["name"]: (item, [Requirement(text) for text in item["requires_dist"]])
@@ -127,7 +142,10 @@ def _profile(locked, authenticated, feed, entries, roots, deadline):
     }, deadline=deadline)
 
 
-def _inputs(profile, snapshot, *, evidence, limits, deadline):
+def _inputs(
+    profile: RuntimeProfile, snapshot: WheelSnapshot, *, evidence: dict[str, Any],
+    limits: WheelLimits, deadline: float,
+) -> WheelInstallInputs:
     result = profile_wheel_inputs(
         profile, snapshot, max_archive_bytes=limits.max_archive_bytes * len(snapshot.paths),
         max_unpacked_bytes=limits.max_expanded_bytes,
@@ -145,12 +163,13 @@ def _inputs(profile, snapshot, *, evidence, limits, deadline):
 
 @contextmanager
 def retain_source_runtime_inputs(
-    plan, *, installation: dict, target: dict, component: str, uv: str,
+    plan: InstallationProfilePlan, *, installation: Mapping[str, Any], target: dict[str, Any], component: str, uv: str,
     python: Path, extras: tuple[str, ...] = (), env: dict[str, str] | None = None,
     acquisition_limits: AcquisitionLimits, wheel_limits: WheelLimits,
     max_lock_bytes: int, max_snapshot_bytes: int, deadline: float,
     revoked_inputs: Callable[[], frozenset[str]] | None = None,
-):
+    authenticated_source: AuthenticatedSource | None = None,
+) -> Iterator[SourceRuntimeInputs]:
     """Retain authenticated source, admitted tools and built runtime wheels.
 
     The caller must keep this context open through installed health. Build tools
@@ -163,13 +182,25 @@ def retain_source_runtime_inputs(
         raise ProfileError("source runtime needs an explicit wheel snapshot budget")
     selected_uv = dependencies._select_uv_executable(uv)
     uv = str(Path(shutil.which(selected_uv) or selected_uv).resolve(strict=True))
-    with retain_authenticated_source(
-        plan, installation=installation, deadline=deadline,
-    ) as authenticated, retain_source_wheel_lock(
+    if authenticated_source is not None and not isinstance(authenticated_source, AuthenticatedSource):
+        raise ProfileError("source build needs its retained authentication owner")
+    selected_source = (
+        nullcontext(authenticated_source.for_plan(plan, installation=installation))
+        if authenticated_source is not None else
+        retain_authenticated_source(plan, installation=installation, deadline=deadline)
+    )
+
+    def verify_source(payload: Path, identity: SourceIdentity) -> None:
+        if payload != authenticated.payload or identity != authenticated.identity:
+            raise ProfileError("source configuration verifier names another origin")
+        authenticated.verify()
+
+    with selected_source as authenticated, retain_source_wheel_lock(
         plan, payload=authenticated.payload, expected_source=authenticated.identity,
         target=target, component=component, uv=uv, python=python, extras=extras, env=env,
         max_lock_bytes=max_lock_bytes, deadline=deadline, include_build_tools=True,
         installation=installation,
+        source_verifier=verify_source,
     ) as locked, retain_source_feed_inputs(
         plan, locked, installation=installation, deadline=deadline,
     ) as feed:
@@ -208,21 +239,26 @@ def retain_source_runtime_inputs(
                 build_profile, build_snapshot, evidence=evidence, limits=wheel_limits, deadline=deadline,
             )
 
-            def verify_build():
-                authenticated.verify()
+            def verify_selected() -> None:
+                (locked._verification or authenticated.verify)()
                 if revoked_inputs is not None:
                     from runtime_source_reuse import verify_not_revoked
 
                     verify_not_revoked(build_inputs.receipt(), revoked_inputs)
 
+            selected = replace(locked, _verification=verify_selected)
+
+            def verify_build() -> None:
+                selected.verify(deadline=deadline)
+
             verify_build()
             build_root = Path(record["policy"]["owner"]["runtimeRoot"]) / ".source-build-tools"
             build_version = authenticated.identity.runtime_version + ".build." + build_inputs.receipt()["lock_id"][7:23]
 
-            def validate_tools(slot):
+            def validate_tools(slot: Path) -> None:
                 verify_build()
                 installed_python = engine.runtime.slot_python(build_root, slot.name)
-                if _query_marker_environment(installed_python, deadline=deadline) != record["target"]["environment"]:
+                if _query_marker_environment(cast(Path, installed_python), deadline=deadline) != record["target"]["environment"]:
                     raise ProfileError("installed build-tools interpreter differs from the selected target")
 
             with engine.numbered_candidate(
@@ -236,11 +272,10 @@ def retain_source_runtime_inputs(
                 toolchain = ToolchainLock(tool_python, {
                     item["name"]: item["version"] for item in build_profile.record()["wheels"]
                 })
-                selected = replace(locked, canonical=json.dumps({
+                selected = replace(selected, canonical=json.dumps({
                     **record, "source_authentication": evidence["source"],
                     "acquisition": evidence["acquisition"],
                 }, sort_keys=True, separators=(",", ":"), allow_nan=False).encode(),
-                    _verification=verify_build,
                 )
                 authenticated.verify()
                 with retain_source_profile(
@@ -253,7 +288,7 @@ def retain_source_runtime_inputs(
                     retained_runtime=(build_root, build_version, Path(engine.runtime.__file__)),
                     opaque_identity=runtime_feed_configuration._opaque_index_identity,
                 ) as completed:
-                    def verify_runtime():
+                    def verify_runtime() -> None:
                         verify_build()
                         if revoked_inputs is not None:
                             from runtime_source_reuse import verify_not_revoked

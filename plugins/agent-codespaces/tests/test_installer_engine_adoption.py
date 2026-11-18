@@ -25,11 +25,17 @@ import shlex
 import shutil
 import subprocess
 import sys
-import tomllib
 import venv
+from collections.abc import Callable, Sequence
 from pathlib import Path
+from typing import Any, TYPE_CHECKING
 
 import pytest
+
+if sys.version_info >= (3, 11):
+    import tomllib
+else:
+    import tomli as tomllib
 
 from agent_procutil.owned_process import run_caller_owned
 
@@ -40,6 +46,16 @@ from .installer_test_support import (
     isolate_installer_environment,
     snapshot_tree_manifest,
 )
+
+SourceLayout = tuple[Path, list[Path]]
+LaunchRuntime = tuple[Path, Path, Path, dict[str, str]]
+StampedSnapshot = tuple[Path, Path, Path, Path, dict[str, str]]
+AdmissionRecord = dict[str, Any]
+OrchestrationResult = tuple[
+    subprocess.CompletedProcess[str], list[list[str]], list[AdmissionRecord],
+    AdmissionRecord, Path, list[Path],
+]
+OrchestrationRuns = Callable[[str, bool, str], OrchestrationResult]
 
 PLUGIN = Path(__file__).resolve().parents[1]
 REPO = PLUGIN.parents[1]
@@ -139,10 +155,15 @@ def _function(ext: str, name: str) -> str:
     return match.group(0) + "\n"
 
 
-def _run(ext: str, script: str, tmp_path: Path, env: dict[str, str], *, timeout=None):
+def _run(
+    ext: str, script: str, tmp_path: Path, env: dict[str, str], *,
+    timeout: float | None = None,
+) -> subprocess.CompletedProcess[str]:
     path = tmp_path / f"harness.{ext}"
     path.write_text(script, encoding="utf-8")
-    command = ["bash", str(path)] if ext == "sh" else [PWSH, "-NoProfile", "-File", str(path)]
+    if ext != "sh":
+        assert PWSH is not None
+    command = ["bash", str(path)] if ext == "sh" else [str(PWSH), "-NoProfile", "-File", str(path)]
     try:
         return run_caller_owned(
             command, env=env, cwd=tmp_path,
@@ -156,7 +177,7 @@ def _run(ext: str, script: str, tmp_path: Path, env: dict[str, str], *, timeout=
         timing = phases.read_text() if phases.is_file() else "no UV phases"
         pytest.fail(
             f"native fixture timeout; UV calls: {calls}; phases: {timing}; "
-            f"stdout: {exc.stdout}; stderr: {exc.stderr}"
+            f"stdout: {exc.stdout!r}; stderr: {exc.stderr!r}"
         )
 
 
@@ -179,7 +200,8 @@ def _fake_uv(tmp_path: Path, engine: Path = ENGINE) -> Path:
     )
     driver = tmp_path / "uv-driver.py"
     driver.write_text(
-        """import json, os, subprocess, sys, time, tomllib
+        """from __future__ import annotations
+import json, os, subprocess, sys, time, tomllib
 from pathlib import Path
 __TEST_NATIVE_PATH_ADAPTER__
 args = sys.argv[1:]
@@ -333,7 +355,7 @@ raise SystemExit(2)
     return uv
 
 
-def _without_policy_arguments(arguments):
+def _without_policy_arguments(arguments: Sequence[str]) -> list[str]:
     assert "--exclude-newer" in arguments and "--reinstall" in arguments
     assert "--no-editable" not in arguments and "--editable" not in arguments
     assert arguments[arguments.index("--link-mode") + 1] == "copy"
@@ -374,7 +396,7 @@ def _prelude(ext: str, engine: Path = ENGINE) -> str:
 
 
 @pytest.fixture
-def launch_runtime(tmp_path):
+def launch_runtime(tmp_path: Path) -> LaunchRuntime:
     slot = tmp_path / "runtime" / "versions" / "1.2.3"
     env = _env(tmp_path)
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -406,8 +428,8 @@ def launch_runtime(tmp_path):
     "state", ["healthy", "namespace", "broken-entrypoint", "shadowed", "invalid-interpreter"],
 )
 def test_codespaces_activation_requires_installed_module_launch(
-    tmp_path, launch_runtime, ext, state,
-):
+    tmp_path: Path, launch_runtime: LaunchRuntime, ext: str, state: str,
+) -> None:
     slot, python, package, env = launch_runtime
     if state != "namespace":
         (package / "__init__.py").write_text("", encoding="utf-8")
@@ -493,8 +515,8 @@ if (-not (Invoke-VersionedActivate)) {{ exit 1 }}
     ],
 )
 def test_codespaces_completed_namespace_refuses_before_construction(
-    tmp_path, launch_runtime, ext,
-):
+    tmp_path: Path, launch_runtime: LaunchRuntime, ext: str,
+) -> None:
     slot, python, package, env = launch_runtime
     marker = slot / ".install-complete.json"
     marker.write_text('{"version":"1.2.3","completed_at":"2026-10-01"}', encoding="utf-8")
@@ -542,7 +564,7 @@ if (-not (Deploy-Venv)) {{ exit 1 }}
 
 @pytest.mark.parametrize("ext", ["sh", "ps1"])
 @pytest.mark.parametrize("mode", ["sre", "missing-cfg", "corrupt", "fallback", "fatal"])
-def test_codespaces_deploy_venv_uses_shared_retry_and_fallback(tmp_path, ext, mode):
+def test_codespaces_deploy_venv_uses_shared_retry_and_fallback(tmp_path: Path, ext: str, mode: str) -> None:
     if ext == "ps1" and PWSH is None:
         pytest.skip("pwsh unavailable")
     if ext == "sh" and os.name == "nt":
@@ -567,7 +589,7 @@ LINK_DIR="$INSTALL_DIR/.venv"
 VENV_DIR='{slot}'
 VENV_PYTHON="$VENV_DIR/bin/python"
 UV_CMD='{uv}'
-_bootstrap_python() {{ printf '%s\\n' '{sys._base_executable}'; }}
+_bootstrap_python() {{ printf '%s\\n' '{getattr(sys, "_base_executable")}'; }}
 _payload_hash() {{ printf '%s' aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; }}
 _assert_uv() {{ :; }}
 _ensure_uv_index() {{ :; }}
@@ -614,12 +636,17 @@ if ($ErrorActionPreference -ne 'Stop') {{ throw 'preference leaked' }}
         assert not (root / "last-known-good").exists()
 
 
-def _attributed_library_sources(tmp_path: Path, layout: str):
+def _attributed_library_sources(tmp_path: Path, layout: str) -> SourceLayout:
     sys.path.insert(0, str(REPO / "tools"))
     try:
-        import materialize_main as mm
-        import uv_editable_ref as uer
-        import installer_engine_ref as ier
+        if TYPE_CHECKING:
+            from tools import materialize_main as mm
+            from tools import uv_editable_ref as uer
+            from tools import installer_engine_ref as ier
+        else:
+            import materialize_main as mm
+            import uv_editable_ref as uer
+            import installer_engine_ref as ier
     finally:
         sys.path.pop(0)
     repository = tmp_path / "publisher-repo"
@@ -674,11 +701,11 @@ def _attributed_library_sources(tmp_path: Path, layout: str):
     # Ordering/retry tests need the real attributed metadata graph, not the
     # product's whole source corpus (artifact tests exercise that separately).
     for manifest_path in list(payload.rglob("pyproject.toml")):
-        project = manifest_path.parent
-        for directory in project.iterdir():
+        project_dir = manifest_path.parent
+        for directory in project_dir.iterdir():
             if directory.is_dir() and directory.name not in ("libs", "scripts"):
                 shutil.rmtree(directory)
-        scripts = project / "scripts"
+        scripts = project_dir / "scripts"
         if scripts.is_dir():
             for member in scripts.iterdir():
                 if member.name in (
@@ -693,7 +720,7 @@ def _attributed_library_sources(tmp_path: Path, layout: str):
                     shutil.rmtree(member)
                 else:
                     member.unlink()
-        code = project / "src"
+        code = project_dir / "src"
         code.mkdir()
         (code / "fixture_source.py").write_text("value = 'retained-source-contract'\n")
     manifest = json.loads((payload / "plugin.json").read_text(encoding="utf-8"))
@@ -764,9 +791,9 @@ def _attributed_library_sources(tmp_path: Path, layout: str):
 
 
 @pytest.fixture(scope="module")
-def attributed_library_sources(tmp_path_factory):
-    class Sources(dict):
-        def __missing__(self, layout):
+def attributed_library_sources(tmp_path_factory: pytest.TempPathFactory) -> dict[str, SourceLayout]:
+    class Sources(dict[str, SourceLayout]):
+        def __missing__(self, layout: str) -> SourceLayout:
             if layout not in ("local", "canonical"):
                 raise KeyError(layout)
             value = _attributed_library_sources(tmp_path_factory.mktemp(layout), layout)
@@ -776,7 +803,7 @@ def attributed_library_sources(tmp_path_factory):
     return Sources()
 
 
-def _validate_admission_record(record, expected):
+def _validate_admission_record(record: AdmissionRecord, expected: AdmissionRecord) -> str:
     """Fail closed at the explicitly spied orchestration/admission seam."""
     assert record["uv"] == expected["uv"], "incorrect UV executable"
     assert record["trusted_source_roots"] == expected["trusted_source_roots"], "incorrect trusted roots"
@@ -784,7 +811,7 @@ def _validate_admission_record(record, expected):
     assert record["env"] is None and record["cwd"] is None and record["now"] is None
     assert record["run_options"] == {"stdout": "stdout", "stderr": "stderr"}
     assert record["non_editable"] is True, "editable installation was admitted"
-    matches = [
+    matches: list[str] = [
         package for package, arguments in expected["arguments"].items()
         if record["arguments"] == arguments
     ]
@@ -795,14 +822,18 @@ def _validate_admission_record(record, expected):
     return matches[0]
 
 
-def _assert_admission_history(records, calls, expected):
+def _assert_admission_history(
+    records: Sequence[AdmissionRecord], calls: Sequence[list[str]], expected: AdmissionRecord,
+) -> None:
     assert records and len(records) == len(calls), "admission was bypassed"
     for record, call in zip(records, calls):
         _validate_admission_record(record, expected)
         assert call == ["pip", "install", *record["arguments"]], "admission/UV history differs"
 
 
-def _small_attributed_sources(tmp_path, *, editable, canonical=None):
+def _small_attributed_sources(
+    tmp_path: Path, *, editable: bool, canonical: bool | None = None,
+) -> SourceLayout:
     canonical = editable if canonical is None else canonical
     repository = tmp_path / "publisher"
     payload = repository / "plugins" / "agent-codespaces"
@@ -854,12 +885,15 @@ def _small_attributed_sources(tmp_path, *, editable, canonical=None):
     return engine, sources
 
 
-def _run_library_orchestration(tmp_path, ext, editable, mode, attributed_library_sources):
+def _run_library_orchestration(
+    tmp_path: Path, ext: str, editable: bool, mode: str,
+    attributed_library_sources: dict[str, SourceLayout],
+) -> OrchestrationResult:
     env = _env(tmp_path)
     env["TEST_UV_MODE"] = mode
     engine, sources = attributed_library_sources["canonical" if editable else "local"]
     uv = _fake_uv(tmp_path, engine)
-    python = Path(sys._base_executable)
+    python = Path(getattr(sys, "_base_executable"))
     roots = {sources[-1].resolve()}
     if editable:
         pending = list(roots)
@@ -871,7 +905,7 @@ def _run_library_orchestration(tmp_path, ext, editable, mode, attributed_library
                 if child not in roots:
                     roots.add(child)
                     pending.append(child)
-    expected = {
+    expected: AdmissionRecord = {
         "uv": str(uv),
         "policy": str(engine / "installer_dependency_policy.py"),
         "trusted_source_roots": sorted(str(root) for root in roots),
@@ -905,6 +939,7 @@ def _run_library_orchestration(tmp_path, ext, editable, mode, attributed_library
     env["TEST_ADMISSION_LOG"] = str(tmp_path / "admission.jsonl")
     spy = tmp_path / "admission-spy.py"
     spy.write_text(
+        "from __future__ import annotations\n"
         "import hashlib, inspect, json, os, runpy, subprocess, sys, tomllib\nfrom pathlib import Path\n"
         + inspect.getsource(_validate_admission_record)
         + """
@@ -974,10 +1009,12 @@ raise SystemExit(main())
 
 
 @pytest.fixture(scope="module")
-def orchestration_runs(tmp_path_factory, attributed_library_sources):
-    cache = {}
+def orchestration_runs(
+    tmp_path_factory: pytest.TempPathFactory, attributed_library_sources: dict[str, SourceLayout],
+) -> OrchestrationRuns:
+    cache: dict[tuple[str, bool, str], OrchestrationResult] = {}
 
-    def run(ext, editable, mode):
+    def run(ext: str, editable: bool, mode: str) -> OrchestrationResult:
         if ext == "ps1" and PWSH is None:
             pytest.skip("pwsh unavailable")
         if ext == "sh" and os.name == "nt":
@@ -997,8 +1034,8 @@ def orchestration_runs(tmp_path_factory, attributed_library_sources):
 @pytest.mark.parametrize("editable", [False, True])
 @pytest.mark.parametrize("mode", ["sre", "fatal"])
 def test_codespaces_library_install_order_retry_and_errors(
-    ext, editable, mode, orchestration_runs,
-):
+    ext: str, editable: bool, mode: str, orchestration_runs: OrchestrationRuns,
+) -> None:
     result, calls, records, expected, engine, sources = orchestration_runs(ext, editable, mode)
     assert bool(result.returncode) == (mode == "fatal"), result.stdout + result.stderr
     expected_call = ["pip", "install", *expected["arguments"]["closure"]]
@@ -1013,7 +1050,9 @@ def test_codespaces_library_install_order_retry_and_errors(
 @pytest.mark.timeout(180)
 @pytest.mark.portfolio_tier("T3")
 @pytest.mark.parametrize("editable", [False, True])
-def test_codespaces_native_batch_installs_cold_and_refreshes_warm_local_sources(tmp_path, editable):
+def test_codespaces_native_batch_installs_cold_and_refreshes_warm_local_sources(
+    tmp_path: Path, editable: bool,
+) -> None:
     if PWSH is None:
         pytest.skip("pwsh unavailable")
     uv = shutil.which("uv")
@@ -1050,9 +1089,9 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
     env.update(UV_OFFLINE="1", UV_NO_INDEX="1", UV_PYTHON_DOWNLOADS="never",
                UV_CACHE_DIR=str(tmp_path / "cache"))
     slot = tmp_path / "venv"
-    flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
     subprocess.run(
-        [sys._base_executable, "-I", "-m", "venv", "--copies", "--without-pip", str(slot)],
+        [getattr(sys, "_base_executable"), "-I", "-m", "venv", "--copies", "--without-pip", str(slot)],
         env=env, check=True, capture_output=True, timeout=30, creationflags=flags,
     )
     python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
@@ -1104,8 +1143,9 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
     ids=[f"{'healthy' if mode == 'ok' else mode}-{package}" for package, mode in REAL_ADMISSION_CASES],
 )
 def test_codespaces_real_admission_replays_captured_source(
-    tmp_path, ext, editable, package, mode, orchestration_runs,
-):
+    tmp_path: Path, ext: str, editable: bool, package: str, mode: str,
+    orchestration_runs: OrchestrationRuns,
+) -> None:
     """Real engine/policy/retention, bounded to one source from the captured batch."""
     result, calls, records, expected, engine, sources = orchestration_runs(ext, editable, "sre")
     assert result.returncode == 0, result.stdout + result.stderr
@@ -1162,7 +1202,9 @@ def test_codespaces_real_admission_replays_captured_source(
 
 
 @pytest.mark.parametrize("fault", ["bypassed", "source", "roots", "resources", "editable"])
-def test_codespaces_admission_spy_refuses_incorrect_or_bypassed_calls(fault, orchestration_runs):
+def test_codespaces_admission_spy_refuses_incorrect_or_bypassed_calls(
+    fault: str, orchestration_runs: OrchestrationRuns,
+) -> None:
     ext = "ps1" if PWSH else "sh"
     result, calls, records, expected, _, _ = orchestration_runs(ext, True, "sre")
     assert result.returncode == 0, result.stdout + result.stderr
@@ -1182,19 +1224,25 @@ def test_codespaces_admission_spy_refuses_incorrect_or_bypassed_calls(fault, orc
         _assert_admission_history(damaged, calls, expected)
 
 
-def _engine_asset_names():
+def _engine_asset_names() -> tuple[str, ...]:
     sys.path.insert(0, str(REPO / "tools"))
     try:
-        import installer_engine_ref as ier
+        if TYPE_CHECKING:
+            from tools import installer_engine_ref as ier
+        else:
+            import installer_engine_ref as ier
     finally:
         sys.path.pop(0)
     return (*ier.FILES, *ier.support_files(ENGINE))
 
 
-def _assert_codespaces_engine_wiring(plugin: Path, *, repo_root: Path = REPO):
+def _assert_codespaces_engine_wiring(plugin: Path, *, repo_root: Path = REPO) -> None:
     sys.path.insert(0, str(REPO / "tools"))
     try:
-        import installer_engine_ref as ier
+        if TYPE_CHECKING:
+            from tools import installer_engine_ref as ier
+        else:
+            import installer_engine_ref as ier
     finally:
         sys.path.pop(0)
     assert "agent-codespaces" in ier.ADOPTERS
@@ -1225,13 +1273,18 @@ def _assert_codespaces_engine_wiring(plugin: Path, *, repo_root: Path = REPO):
 
 
 @pytest.fixture(scope="module")
-def codespaces_engine_transition(tmp_path_factory):
+def codespaces_engine_transition(tmp_path_factory: pytest.TempPathFactory) -> Path:
     tmp_path = tmp_path_factory.mktemp("codespaces-engine")
     sys.path.insert(0, str(REPO / "tools"))
     try:
-        import installer_engine_ref as ier
-        import materialize_installer_engine as mie
-        import materialize_main as mm
+        if TYPE_CHECKING:
+            from tools import installer_engine_ref as ier
+            from tools import materialize_installer_engine as mie
+            from tools import materialize_main as mm
+        else:
+            import installer_engine_ref as ier
+            import materialize_installer_engine as mie
+            import materialize_main as mm
     finally:
         sys.path.pop(0)
     _assert_codespaces_engine_wiring(PLUGIN)
@@ -1297,8 +1350,11 @@ def codespaces_engine_transition(tmp_path_factory):
 
 
 @pytest.fixture
-def codespaces_engine_scripts(tmp_path, codespaces_engine_transition):
-    import installer_engine_ref as ier
+def codespaces_engine_scripts(tmp_path: Path, codespaces_engine_transition: Path) -> Path:
+    if TYPE_CHECKING:
+        from tools import installer_engine_ref as ier
+    else:
+        import installer_engine_ref as ier
 
     scripts = tmp_path / PLUGIN.name / "scripts"
     scripts.mkdir(parents=True)
@@ -1308,11 +1364,14 @@ def codespaces_engine_scripts(tmp_path, codespaces_engine_transition):
 
 
 def test_codespaces_canonical_reference_registration_and_release_materialization(
-    codespaces_engine_transition,
-):
+    codespaces_engine_transition: Path,
+) -> None:
     sys.path.insert(0, str(REPO / "tools"))
     try:
-        import installer_engine_ref as ier
+        if TYPE_CHECKING:
+            from tools import installer_engine_ref as ier
+        else:
+            import installer_engine_ref as ier
     finally:
         sys.path.pop(0)
     payload = codespaces_engine_transition
@@ -1328,11 +1387,15 @@ def test_codespaces_canonical_reference_registration_and_release_materialization
         assert not spec.get("editable", False)
 
 
-def test_codespaces_explicit_canonical_fixture_materializes(tmp_path):
+def test_codespaces_explicit_canonical_fixture_materializes(tmp_path: Path) -> None:
     sys.path.insert(0, str(REPO / "tools"))
     try:
-        import installer_engine_ref as ier
-        import materialize_main as mm
+        if TYPE_CHECKING:
+            from tools import installer_engine_ref as ier
+            from tools import materialize_main as mm
+        else:
+            import installer_engine_ref as ier
+            import materialize_main as mm
     finally:
         sys.path.pop(0)
     engine, sources = _attributed_library_sources(tmp_path / "input", "canonical")
@@ -1393,8 +1456,8 @@ def test_codespaces_explicit_canonical_fixture_materializes(tmp_path):
 @pytest.mark.parametrize("name", _engine_asset_names())
 @pytest.mark.parametrize("damage", ("missing", "modified"))
 def test_codespaces_engine_wiring_refuses_damaged_assets(
-    codespaces_engine_scripts, name, damage,
-):
+    codespaces_engine_scripts: Path, name: str, damage: str,
+) -> None:
     asset = codespaces_engine_scripts / "scripts" / name
     if damage == "missing":
         asset.unlink()
@@ -1407,9 +1470,12 @@ def test_codespaces_engine_wiring_refuses_damaged_assets(
 @pytest.mark.parametrize("ext", ("sh", "ps1"))
 @pytest.mark.parametrize("damage", ("mixed", "duplicate", "missing", "noncanonical"))
 def test_codespaces_engine_wiring_refuses_invalid_references(
-    codespaces_engine_scripts, ext, damage,
-):
-    import installer_engine_ref as ier
+    codespaces_engine_scripts: Path, ext: str, damage: str,
+) -> None:
+    if TYPE_CHECKING:
+        from tools import installer_engine_ref as ier
+    else:
+        import installer_engine_ref as ier
 
     script = codespaces_engine_scripts / "scripts" / f"install.{ext}"
     text = script.read_text(encoding="utf-8")
@@ -1425,7 +1491,7 @@ def test_codespaces_engine_wiring_refuses_invalid_references(
     with pytest.raises(AssertionError, match=rf"install\.{ext}"):
         _assert_codespaces_engine_wiring(codespaces_engine_scripts)
 
-def test_codespaces_stamp_reuses_native_directory_copy():
+def test_codespaces_stamp_reuses_native_directory_copy() -> None:
     materialize = _function("ps1", "Materialize-SnapshotDependencies")
     assert "Copy-InstallSnapshotItem -Source $source -Destination $destination" in materialize
     assert "Copy-Item -LiteralPath $source -Destination $destination -Recurse" not in materialize
@@ -1437,7 +1503,7 @@ def test_codespaces_stamp_reuses_native_directory_copy():
     assert "New-Item -ItemType Directory -Path $snapTmp -ErrorAction Stop" in stamp
 
 
-def test_codespaces_stamp_cleanup_failure_precedes_copy_and_publication(tmp_path):
+def test_codespaces_stamp_cleanup_failure_precedes_copy_and_publication(tmp_path: Path) -> None:
     if PWSH is None:
         pytest.skip("pwsh unavailable")
     fixture = tmp_path / "fixture 'quoted'"
@@ -1469,14 +1535,19 @@ try { Invoke-Stamp; throw 'missing cleanup refusal' } catch {
 
 
 @pytest.fixture(scope="module", params=[False, True])
-def codespaces_stamped_snapshot(tmp_path_factory, request):
+def codespaces_stamped_snapshot(
+    tmp_path_factory: pytest.TempPathFactory, request: pytest.FixtureRequest,
+) -> StampedSnapshot:
     if PWSH is None:
         pytest.skip("pwsh unavailable")
     tmp_path = tmp_path_factory.mktemp("codespaces-stamped-snapshot")
     materialized = request.param
     sys.path.insert(0, str(REPO / "tools"))
     try:
-        import materialize_main as mm
+        if TYPE_CHECKING:
+            from tools import materialize_main as mm
+        else:
+            import materialize_main as mm
     finally:
         sys.path.pop(0)
     stage = tmp_path / "source"
@@ -1513,6 +1584,7 @@ def codespaces_stamped_snapshot(tmp_path_factory, request):
     (probe / "empty-file").write_bytes(b"")
     probe_before = snapshot_tree_manifest(probe)
     library_inputs = {}
+    expected: dict[str, tuple[str, str]] | str
     project = tomllib.loads((payload / "pyproject.toml").read_text())
     for spec in project["tool"]["uv"]["sources"].values():
         name = Path(spec["path"]).name
@@ -1534,8 +1606,8 @@ def codespaces_stamped_snapshot(tmp_path_factory, request):
         fake_bin.mkdir()
     _fake_uv(fake_bin)
     if os.name != "nt":
-        (fake_bin / "python3").symlink_to(sys._base_executable)
-        (fake_bin / "python").symlink_to(sys._base_executable)
+        (fake_bin / "python3").symlink_to(getattr(sys, "_base_executable"))
+        (fake_bin / "python").symlink_to(getattr(sys, "_base_executable"))
     isolate_installer_environment(env, tmp_path / "home", fake_bin, PWSH)
     env["TEST_UV_MODE"] = "fatal"
     guard_installer_payload(payload)
@@ -1610,7 +1682,8 @@ def codespaces_stamped_snapshot(tmp_path_factory, request):
 
 # Include real source staging plus independently bounded stamp and consumer calls.
 @pytest.mark.timeout(180)
-def test_codespaces_stamp_snapshot_is_standalone_status(codespaces_stamped_snapshot):
+def test_codespaces_stamp_snapshot_is_standalone_status(codespaces_stamped_snapshot: StampedSnapshot) -> None:
+    assert PWSH is not None
     tmp_path, root, snapshot, fake_bin, env = codespaces_stamped_snapshot
     status = run_caller_owned(
         [
@@ -1651,7 +1724,8 @@ def test_codespaces_stamp_snapshot_is_standalone_status(codespaces_stamped_snaps
 
 
 @pytest.mark.timeout(180)
-def test_codespaces_stamp_snapshot_is_standalone(codespaces_stamped_snapshot):
+def test_codespaces_stamp_snapshot_is_standalone(codespaces_stamped_snapshot: StampedSnapshot) -> None:
+    assert PWSH is not None
     tmp_path, root, _snapshot, fake_bin, env = codespaces_stamped_snapshot
     first_use = run_caller_owned(
         [
@@ -1683,7 +1757,9 @@ def test_codespaces_stamp_snapshot_is_standalone(codespaces_stamped_snapshot):
 @pytest.mark.skipif(PWSH is None, reason="pwsh unavailable")
 @pytest.mark.parametrize("usable", [False, True])
 @pytest.mark.parametrize("signed_rc", [0, 23])
-def test_codespaces_signed_venv_recovery_keeps_usable_nonzero_result(tmp_path, usable, signed_rc):
+def test_codespaces_signed_venv_recovery_keeps_usable_nonzero_result(
+    tmp_path: Path, usable: bool, signed_rc: int,
+) -> None:
     env = _env(tmp_path)
     uv = _fake_uv(tmp_path)
     slot = tmp_path / "slot"
@@ -1756,7 +1832,9 @@ if (-not $ok) {{ exit 1 }}
 
 @pytest.mark.parametrize("ext", ["sh", "ps1"])
 @pytest.mark.parametrize("marketplace", [False, True])
-def test_codespaces_manifest_shared_writer_preserves_slot_and_source(tmp_path, ext, marketplace):
+def test_codespaces_manifest_shared_writer_preserves_slot_and_source(
+    tmp_path: Path, ext: str, marketplace: bool,
+) -> None:
     if ext == "ps1" and PWSH is None:
         pytest.skip("pwsh unavailable")
     if ext == "sh" and os.name == "nt":
@@ -1822,10 +1900,13 @@ Write-CodespacesDeployManifest
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX owning-payload stamp")
-def test_codespaces_materialized_posix_stamp_and_first_use_are_local(tmp_path):
+def test_codespaces_materialized_posix_stamp_and_first_use_are_local(tmp_path: Path) -> None:
     sys.path.insert(0, str(REPO / "tools"))
     try:
-        import materialize_main as mm
+        if TYPE_CHECKING:
+            from tools import materialize_main as mm
+        else:
+            import materialize_main as mm
     finally:
         sys.path.pop(0)
     payload = tmp_path / "release" / "plugins" / PLUGIN.name
@@ -1865,7 +1946,7 @@ def test_codespaces_materialized_posix_stamp_and_first_use_are_local(tmp_path):
 
 
 @pytest.mark.parametrize("ext", ["sh", "ps1"])
-def test_codespaces_dev_refuses_conflicting_claim_before_venv_writes(tmp_path, ext):
+def test_codespaces_dev_refuses_conflicting_claim_before_venv_writes(tmp_path: Path, ext: str) -> None:
     if ext == "ps1" and PWSH is None:
         pytest.skip("pwsh unavailable")
     if ext == "sh" and os.name == "nt":
@@ -1889,7 +1970,7 @@ _deploy_versioned_runtime_helper() {{ :; }}
 _resolve_dev_slot_owner() {{ echo 'owner'; }}
 _assert_uv() {{ :; }}
 _ensure_uv_index() {{ :; }}
-_bootstrap_python() {{ printf '%s\\n' '{sys._base_executable}'; }}
+_bootstrap_python() {{ printf '%s\\n' '{getattr(sys, "_base_executable")}'; }}
 _run_versioned_runtime() {{ return 2; }}
 do_dev
 """
@@ -1923,14 +2004,14 @@ if (-not (Invoke-Dev)) {{ exit 1 }}
 
 
 @pytest.mark.parametrize("ext", ["sh", "ps1"])
-def test_native_dev_generation_dependency_failure_preserves_working_runtime(tmp_path, ext):
+def test_native_dev_generation_dependency_failure_preserves_working_runtime(tmp_path: Path, ext: str) -> None:
     if ext == "sh" and os.name == "nt":
         pytest.skip("native POSIX shell is unavailable")
     if ext == "ps1" and PWSH is None:
         pytest.skip("PowerShell is unavailable")
     root = tmp_path / "runtime"
     env = _env(tmp_path)
-    base, helper = Path(sys._base_executable), PLUGIN / "scripts/versioned_runtime.py"
+    base, helper = Path(getattr(sys, "_base_executable")), PLUGIN / "scripts/versioned_runtime.py"
     for name in (
         "versioned_runtime_leases.py", "versioned_runtime_construction.py",
         "versioned_runtime_source.py", "versioned_runtime.py", "versioned_runtime_native.ps1",
@@ -2082,7 +2163,7 @@ printf '%s\\n' fixture-phase:release-restore
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX uv tool PATH")
-def test_codespaces_assert_uv_keeps_cached_tool_on_caller_path(tmp_path):
+def test_codespaces_assert_uv_keeps_cached_tool_on_caller_path(tmp_path: Path) -> None:
     env = _env(tmp_path)
     uv = _fake_uv(tmp_path)
     root = tmp_path / "runtime"
@@ -2109,7 +2190,9 @@ uv --version
 
 @pytest.mark.skipif(PWSH is None, reason="pwsh unavailable")
 @pytest.mark.parametrize("available", [False, True])
-def test_codespaces_assert_uv_uses_shared_acquisition_and_propagates_failure(tmp_path, available):
+def test_codespaces_assert_uv_uses_shared_acquisition_and_propagates_failure(
+    tmp_path: Path, available: bool,
+) -> None:
     env = _env(tmp_path)
     script = (
         _prelude("ps1")
@@ -2132,7 +2215,7 @@ if ($script:UvCommand -ne 'resolved-uv') {{ throw 'lost uv command' }}
         assert "uv is required but acquisition failed" in result.stderr
 
 
-def test_installer_engine_adoption_environment_excludes_host_tools(tmp_path):
+def test_installer_engine_adoption_environment_excludes_host_tools(tmp_path: Path) -> None:
     fake_bin = tmp_path / "fake-bin"
     fake_bin.mkdir()
     env = {
@@ -2166,7 +2249,10 @@ def test_installer_engine_adoption_environment_excludes_host_tools(tmp_path):
          "start host process"),
     ],
 )
-def test_installer_engine_adoption_guards_reject_host_effects(tmp_path, command, effect):
+def test_installer_engine_adoption_guards_reject_host_effects(
+    tmp_path: Path, command: str, effect: str,
+) -> None:
+    assert PWSH is not None
     env = _env(tmp_path)
     fake_bin = tmp_path / "fake-bin"
     fake_bin.mkdir()
@@ -2195,7 +2281,10 @@ def test_installer_engine_adoption_guards_reject_host_effects(tmp_path, command,
 
 @pytest.mark.skipif(os.name != "nt" or PWSH is None, reason="native Windows uv resolver")
 @pytest.mark.parametrize("version_exit", [0, 31])
-def test_installer_engine_adoption_native_fake_uv_selection_is_fail_closed(tmp_path, version_exit):
+def test_installer_engine_adoption_native_fake_uv_selection_is_fail_closed(
+    tmp_path: Path, version_exit: int,
+) -> None:
+    assert PWSH is not None
     env = _env(tmp_path)
     fake_bin = tmp_path / "fake-bin"
     fake_bin.mkdir()
