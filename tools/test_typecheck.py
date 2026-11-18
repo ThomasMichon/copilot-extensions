@@ -2265,9 +2265,9 @@ def guard_source(
     monkeypatch.setattr(typecheck, "environment_python", lambda _path: Path(sys.executable))
     monkeypatch.setattr(typecheck, "acquire_environment", lambda *_args: lease)
     item = typecheck.Project(
-        "copilot-extensions-harness", ("plugins/copilot-extensions-harness/scripts",), (),
+        "copilot-extensions-maintainer", ("plugins/copilot-extensions-maintainer/scripts",), (),
         "pending", "3.10", ("linux", "win32"), "requirements.txt",
-        import_roots=("plugins/copilot-extensions-harness/scripts",),
+        import_roots=("plugins/copilot-extensions-maintainer/scripts",),
     )
     paths = (views.GUARD_ENTRY, extra.relative_to(root).as_posix())
     return item, paths, environment, lease

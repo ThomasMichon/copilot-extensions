@@ -3268,7 +3268,7 @@ class _FakeCompletedProcess:
 def test_changed_plugins_always_includes_cross_plugin_contract_testers(monkeypatch: pytest.MonkeyPatch) -> None:
     """A PR touching only plugin 'foo' must still schedule any registered
     cross-plugin contract tester (regression: ThomasMichon/copilot-extensions
-    #4166 broke copilot-extensions-harness's own marketplace-wide contract
+    #4166 broke copilot-extensions-maintainer's own marketplace-wide contract
     test without touching a single file under that plugin, so the PR's own
     --changed-scoped CI never ran it)."""
     calls = iter([
@@ -3278,10 +3278,10 @@ def test_changed_plugins_always_includes_cross_plugin_contract_testers(monkeypat
     monkeypatch.setattr(runner.subprocess, "run", lambda *a, **k: next(calls))
     monkeypatch.setattr(
         runner, "_has_suite",
-        lambda name: name in {"foo", "copilot-extensions-harness", "customizing-copilot"},
+        lambda name: name in {"foo", "copilot-extensions-maintainer", "customizing-copilot"},
     )
     result = runner.changed_plugins("origin/main")
-    assert result == sorted({"foo", "copilot-extensions-harness", "customizing-copilot"})
+    assert result == sorted({"foo", "copilot-extensions-maintainer", "customizing-copilot"})
 
 
 def test_changed_plugins_empty_diff_schedules_nothing(monkeypatch: pytest.MonkeyPatch) -> None:

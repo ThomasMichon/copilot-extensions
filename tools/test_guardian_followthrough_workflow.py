@@ -9,12 +9,17 @@ import re
 import shlex
 import subprocess
 import sys
-from types import SimpleNamespace
+from types import CodeType, SimpleNamespace
+from typing import TYPE_CHECKING, Any, NoReturn
+from collections.abc import Mapping
 
 import pytest
 import yaml
 
-from tools import plugin_test_containment as containment
+if TYPE_CHECKING:
+    import plugin_test_containment as containment
+else:
+    from tools import plugin_test_containment as containment
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -28,7 +33,7 @@ IDENTITY = STEPS["Record actual native qualification identity"]
 CALLER = STEPS["Full caller-owned native capture and Darwin census controls"]
 
 
-def _python_body(step):
+def _python_body(step: dict[str, Any]) -> CodeType:
     prefix, suffix = "python - <<'PY'\n", "\nPY\n"
     command = step["run"]
     assert command.startswith(prefix) and command.endswith(suffix)
@@ -36,7 +41,7 @@ def _python_body(step):
     return compile(body, "<guardian-workflow-step>", "exec")
 
 
-def _enabled(expression, inputs, event="workflow_dispatch"):
+def _enabled(expression: str, inputs: dict[str, bool], event: str = "workflow_dispatch") -> bool:
     assert expression.startswith("${{ ") and expression.endswith(" }}")
     for term in expression[4:-3].split(" && "):
         if term == "github.event_name == 'workflow_dispatch'":
@@ -55,7 +60,7 @@ def _enabled(expression, inputs, event="workflow_dispatch"):
     return True
 
 
-def test_manual_selector_is_isolated_and_preserves_existing_routes():
+def test_manual_selector_is_isolated_and_preserves_existing_routes() -> None:
     trigger = WORKFLOW.get("on", WORKFLOW.get(True))
     assert set(trigger) == {"workflow_dispatch"}
     inputs = trigger["workflow_dispatch"]["inputs"]
@@ -93,7 +98,7 @@ def test_manual_selector_is_isolated_and_preserves_existing_routes():
                 assert jobs[name]["if"] == "${{ inputs." + selector + " }}"
 
 
-def test_non_broker_routes_cannot_expand_to_another_manual_input(monkeypatch):
+def test_non_broker_routes_cannot_expand_to_another_manual_input(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setitem(
         WORKFLOW["jobs"]["native-seed-reply-macos"],
         "if", "${{ (inputs.native_launch || inputs.immutable_runtime) }}",
@@ -104,7 +109,7 @@ def test_non_broker_routes_cannot_expand_to_another_manual_input(monkeypatch):
 
 @pytest.mark.parametrize("broker", ["windows_broker_probe", "windows_broker_consumers"])
 @pytest.mark.parametrize("owner", [None, "watch_owner", "dispatch_delegation"])
-def test_real_broker_routes_preserve_alternatives_and_owner_exclusions(broker, owner):
+def test_real_broker_routes_preserve_alternatives_and_owner_exclusions(broker: str, owner: str | None) -> None:
     trigger = WORKFLOW.get("on", WORKFLOW.get(True))
     selected = {
         name: item["default"]
@@ -133,7 +138,9 @@ def test_real_broker_routes_preserve_alternatives_and_owner_exclusions(broker, o
 
 
 @pytest.mark.parametrize("requested", ["", "A" * 40, "1234567890abcdef" * 2 + "12345678"])
-def test_actual_ref_validator_selects_only_an_immutable_sha(tmp_path, monkeypatch, requested):
+def test_actual_ref_validator_selects_only_an_immutable_sha(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, requested: str,
+) -> None:
     output = tmp_path / "outputs"
     monkeypatch.setenv("GUARDIAN_REF", requested)
     monkeypatch.setenv("DISPATCH_SHA", "b" * 40)
@@ -147,7 +154,9 @@ def test_actual_ref_validator_selects_only_an_immutable_sha(tmp_path, monkeypatc
     " " + "a" * 40, "a" * 40 + "\n", "$(touch unexpected)",
     "a" * 40 + "\nsha=dev",
 ])
-def test_actual_ref_validator_refuses_before_publishing_output(tmp_path, monkeypatch, requested):
+def test_actual_ref_validator_refuses_before_publishing_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, requested: str,
+) -> None:
     output = tmp_path / "outputs"
     monkeypatch.setenv("GUARDIAN_REF", requested)
     monkeypatch.setenv("DISPATCH_SHA", "b" * 40)
@@ -157,7 +166,7 @@ def test_actual_ref_validator_refuses_before_publishing_output(tmp_path, monkeyp
     assert not output.exists()
 
 
-def test_invalid_default_sha_also_refuses(tmp_path, monkeypatch):
+def test_invalid_default_sha_also_refuses(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GUARDIAN_REF", "")
     monkeypatch.setenv("DISPATCH_SHA", "dev")
     monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "outputs"))
@@ -166,12 +175,14 @@ def test_invalid_default_sha_also_refuses(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("matches", [True, False])
-def test_checkout_identity_is_checked_before_recording_evidence(monkeypatch, capsys, matches):
+def test_checkout_identity_is_checked_before_recording_evidence(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], matches: bool,
+) -> None:
     expected = "a" * 40
     actual = expected if matches else "b" * 40
     calls = []
 
-    def git(argv, **kwargs):
+    def git(argv: list[str], **kwargs: object) -> str:
         calls.append(argv)
         assert kwargs == {"text": True}
         if argv == ["git", "rev-parse", "HEAD"]:
@@ -194,7 +205,7 @@ def test_checkout_identity_is_checked_before_recording_evidence(monkeypatch, cap
         assert "Python: " in output and "OS: Darwin-fixture" in output
 
 
-def test_checkout_is_read_only_and_cannot_interpolate_input_into_shell():
+def test_checkout_is_read_only_and_cannot_interpolate_input_into_shell() -> None:
     assert WORKFLOW["permissions"] == JOB["permissions"] == {"contents": "read"}
     assert JOB["runs-on"] == "macos-latest" and JOB["timeout-minutes"] == 25
     assert JOB["env"] == {"UV_PYTHON": "3.11"}
@@ -222,17 +233,17 @@ def test_checkout_is_read_only_and_cannot_interpolate_input_into_shell():
 
 @pytest.mark.parametrize("result", [0, 1, 124])
 def test_actual_caller_packet_uses_containment_and_propagates_failure(
-    tmp_path, monkeypatch, result,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, result: int,
+) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(sys, "path", sys.path.copy())
     calls = []
 
-    def isolated(base, sandbox):
+    def isolated(base: Mapping[str, str], sandbox: Path) -> dict[str, str]:
         assert base is os.environ and sandbox.parent == tmp_path
         return {"contained": "1"}
 
-    def contained(command, **kwargs):
+    def contained(command: list[str], **kwargs: Any) -> int:
         sandbox = kwargs["sandbox"]
         assert sandbox.is_dir()
         assert kwargs["cwd"] == tmp_path
@@ -263,14 +274,14 @@ def test_actual_caller_packet_uses_containment_and_propagates_failure(
 
 
 def test_actual_caller_packet_retains_workspace_when_teardown_is_unverified(
-    tmp_path, monkeypatch, capsys,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(sys, "path", sys.path.copy())
     failure = containment.UnreapedProcessError("synthetic unsettled teardown")
     sandboxes = []
 
-    def unsettled(command, **kwargs):
+    def unsettled(command: list[str], **kwargs: Any) -> NoReturn:
         sandbox = kwargs["sandbox"]
         (sandbox / "owner-state").write_text("still owned", encoding="utf-8")
         sandboxes.append(sandbox)
@@ -290,7 +301,7 @@ def test_actual_caller_packet_retains_workspace_when_teardown_is_unverified(
     assert "retained" in output.out + output.err
 
 
-def test_exact_packet_has_no_broad_suite_or_timeout_override():
+def test_exact_packet_has_no_broad_suite_or_timeout_override() -> None:
     tooling = STEPS["Prepare seasoned shared-library test tooling"]
     assert shlex.split(tooling["run"]) == [
         "python", "tools/seasoned_uv.py", "--uv", "uv", "--registry-only", "--",
@@ -310,7 +321,7 @@ def test_exact_packet_has_no_broad_suite_or_timeout_override():
         ("customizing-copilot", "tests/test_instruction_delivery.py",
          "test_shipped_inline_allowlist_is_explicit_and_substantive or "
          "test_shipped_sources_all_declare_non_discovered_fallbacks"),
-        ("copilot-extensions-harness", "tests/test_reviewer_source.py",
+        ("copilot-extensions-maintainer", "tests/test_reviewer_source.py",
          "test_windows_command_shim_uses_cmd"),
     ]
     for step, (plugin, test_file, selector) in zip(packet[1:], expected, strict=True):

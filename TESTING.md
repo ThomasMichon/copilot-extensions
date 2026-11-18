@@ -10968,7 +10968,7 @@ so inherited host modules cannot autoload into a test. Core PowerShell commands
 and native application lookup remain available. Only the existing explicit
 host-state tier preserves the caller's module path; ordinary contained runs
 do not modify the parent environment.
-Changed-plugin selection always includes both `copilot-extensions-harness` and
+Changed-plugin selection always includes both `copilot-extensions-maintainer` and
 `customizing-copilot`, whose suites inspect other plugins' session-context
 contracts. An admission-wrapper change must therefore pass the real whole-suite
 hook-composition consumer before merge, not first encounter it in post-merge

@@ -64,6 +64,7 @@ def original(monkeypatch: pytest.MonkeyPatch) -> Any:
             model_dump=lambda: {"operation_id": "original-operation"},
         ),
         socket=object(), streams=object(), accepted_load=None,
+        require_current=Mock(),
         manager=SimpleNamespace(db=SimpleNamespace(flush=Mock())),
         session=SimpleNamespace(event_log=SimpleNamespace(
             append=lambda name, value: events.append((name, value)),
@@ -121,3 +122,34 @@ def test_failed_commit_retains_unknown_acceptance(original: Any) -> None:
     with pytest.raises(OSError, match="commit failed"):
         b.source.record(b.owner, document)
     assert b.owner.accepted_load is None
+
+
+def test_registration_uses_only_original_acknowledged_activation(original: Any) -> None:
+    b = original
+    document = b.source.prepare(b.owner, b.client)
+    b.source.record(b.owner, document)
+    registered = b.source.registration(b.owner, b.client)
+    assert registered == document["activation"]
+    registered["child"]["pid"] = 99
+    assert document["activation"]["child"]["pid"] == 42
+    b.owner.require_current.assert_called_once()
+
+
+@pytest.mark.parametrize("changed", ["missing", "transport", "nonce", "birth", "writer", "stop"])
+def test_registration_retains_unknown_or_changed_custody(original: Any, changed: str) -> None:
+    b = original
+    b.source.record(b.owner, b.source.prepare(b.owner, b.client))
+    if changed == "missing":
+        b.owner.accepted_load = None
+    elif changed == "transport":
+        b.client.session_host_client = object()
+    elif changed == "nonce":
+        b.owner.host_record.nonce = "different"
+    elif changed == "birth":
+        b.physical[42]["start_time"] = "102"
+    elif changed == "writer":
+        b.writer["creation_nonce"] = "different"
+    else:
+        b.owner.require_current.side_effect = Refused("stopped", "stop hold")
+    with pytest.raises(Refused):
+        b.source.registration(b.owner, b.client)

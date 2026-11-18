@@ -13,8 +13,9 @@ Contributor PRs merge into `dev`. Promotion regenerates `main` from a validated
 `dev` snapshot, possibly batching many PRs under a new commit. Original-commit
 ancestry against `main` does not establish release status.
 
-1. Resolve the referenced PR; ask if ambiguous. Use repository-scoped GitHub
-   access as in `contributing-to-copilot-extensions`.
+1. Resolve the referenced PR; ask if ambiguous. Use the existing repository-scoped
+   account wrapper. Verify its `api user` login against the resolved account
+   before reading GitHub data; never switch global authentication.
 2. Read the PR's state, base and diff (`pulls/<number>/files`, with pagination).
    An unmerged PR into `dev` is not released through promotion.
 3. Pin the current `main` SHA. Exclude consumed `.changefiles/*.json` entries;

@@ -25,6 +25,7 @@
         "tools/cache_directory_paths.py",
         "tools/test_typecheck.py",
         "tools/test_typecheck_programs.py",
+        "tools/promotion_unit_tests/test_typecheck.py",
         "tools/promotion_unit_tests/test_typecheck_catalog.py",
         "tools/promotion_unit_tests/test_typecheck_new_code.py"
       ],
@@ -426,7 +427,10 @@
         "plugins/agent-conduct-guidance"
       ],
       "exclude": [],
-      "level": "pending"
+      "level": "pending",
+      "import_roots": [
+        "plugins/customizing-copilot/skills/reviewing-customizations/scripts"
+      ]
     },
     {
       "name": "agent-containers",
@@ -590,15 +594,15 @@
       "level": "strict"
     },
     {
-      "name": "copilot-extensions-harness",
+      "name": "copilot-extensions-maintainer",
       "include": [
-        "plugins/copilot-extensions-harness"
+        "plugins/copilot-extensions-maintainer"
       ],
       "exclude": [],
       "level": "pending",
       "import_roots": [
         "tools",
-        "plugins/copilot-extensions-harness/scripts",
+        "plugins/copilot-extensions-maintainer/scripts",
         "plugins/customizing-copilot/skills/reviewing-customizations/scripts",
         "libs/agent-procutil/src"
       ]
@@ -723,6 +727,7 @@
         "tools/cache_directory_paths.py",
         "tools/test_typecheck.py",
         "tools/test_typecheck_programs.py",
+        "tools/promotion_unit_tests/test_typecheck.py",
         "tools/promotion_unit_tests/test_typecheck_catalog.py",
         "tools/promotion_unit_tests/test_typecheck_new_code.py"
       ],

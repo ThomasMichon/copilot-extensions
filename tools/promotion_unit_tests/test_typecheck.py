@@ -8,10 +8,14 @@ import os
 from pathlib import Path
 import subprocess
 from types import SimpleNamespace
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
-import typecheck as checker
+if TYPE_CHECKING:
+    from tools import typecheck as checker
+else:
+    import typecheck as checker
 from tools import _admission_protocol as admission
 from tools import typecheck_source_views as views
 
@@ -40,9 +44,9 @@ def guard_scope(
     extra.write_bytes(b"value: int = 1\n")
     (tmp_path / "libs/installer-engine").mkdir(parents=True)
     project = checker.Project(
-        "copilot-extensions-harness", ("plugins/copilot-extensions-harness/scripts",), (),
+        "copilot-extensions-maintainer", ("plugins/copilot-extensions-maintainer/scripts",), (),
         "pending", "3.10", ("linux",), "requirements.txt",
-        import_roots=("plugins/copilot-extensions-harness/scripts",),
+        import_roots=("plugins/copilot-extensions-maintainer/scripts",),
     )
     (tmp_path / "requirements.txt").write_bytes(b"mypy==1.18.2\n")
     environment, digest = checker.environment_path(tmp_path, project)
@@ -248,8 +252,8 @@ def test_candidate_guard_and_installation_views_keep_independent_custody(
 
 
 def test_candidate_checker_refuses_unclassified_pending_and_failed_scopes(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     tools = tmp_path / "tools"
     tools.mkdir()
     (tools / "typecheck-projects.json").write_text(
@@ -279,7 +283,7 @@ def test_candidate_checker_refuses_unclassified_pending_and_failed_scopes(
     monkeypatch.setattr(checker, "python_paths", lambda: ("admitted.py", "pending.py"))
     calls = []
 
-    def check(_root, project, files, **_kwargs):
+    def check(_root: Path, project: checker.Project, files: tuple[str, ...], **_kwargs: object) -> int:
         calls.append((project.name, files))
         return 1
 
@@ -292,16 +296,18 @@ def test_candidate_checker_refuses_unclassified_pending_and_failed_scopes(
 
 
 @pytest.mark.parametrize("prepare", [False, True])
-def test_all_projects_continues_past_unmaterialized_pending_copies(monkeypatch, capsys, prepare):
+def test_all_projects_continues_past_unmaterialized_pending_copies(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], prepare: bool,
+) -> None:
     projects = tuple(
-        checker.Project(name, (name + ".py",), (), level, "3.10", ("linux",), "requirements.txt")
+        checker.Project(name, (name + ".py",), (), cast(checker.Level, level), "3.10", ("linux",), "requirements.txt")
         for name, level in (("admitted", "strict"), ("pending-copy", "pending"))
     )
     monkeypatch.setattr(checker, "load_projects", lambda: projects)
     monkeypatch.setattr(checker, "python_paths", lambda: ("admitted.py",))
     calls = []
 
-    def check(_root, project, files, **_kwargs):
+    def check(_root: Path, project: checker.Project, files: tuple[str, ...], **_kwargs: object) -> int:
         assert files == ("admitted.py",)
         calls.append(project.name)
         return 0
@@ -339,7 +345,7 @@ def test_candidate_checker_preserves_checker_failure_and_environment_custody(
     python.write_bytes(b"fixture; never executed")
     (environment / ".typecheck-prepared").write_bytes(digest.encode() + b"\n")
     events = []
-    paths = ("admitted.py",)
+    paths: tuple[str, ...] = ("admitted.py",)
     if with_dependency:
         root = Path(__file__).resolve().parents[2]
         directory = Path(views.INSTALLATION_ENTRY).parent
@@ -355,17 +361,17 @@ def test_candidate_checker_preserves_checker_failure_and_environment_custody(
         paths = (*paths, *(path.relative_to(root).as_posix() for path in inputs))
 
     class Lease:
-        def __init__(self, path: Path, *, service: str):
+        def __init__(self, path: Path, *, service: str) -> None:
             assert service == admission.ADMISSION_SERVICE
             assert path.name
 
-        def acquire(self):
+        def acquire(self) -> None:
             events.append("acquired")
 
-        def release(self):
+        def release(self) -> None:
             events.append("released")
 
-    def run(argv, root, *, env):
+    def run(argv: list[str], root: Path, *, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
         assert root == tmp_path
         assert argv[:6] == [str(python), "-I", "-X", "utf8", "-m", "mypy"]
         assert "--strict" in argv and "--check-untyped-defs" in argv
@@ -433,7 +439,7 @@ def test_candidate_projects_reuse_dependency_cache_without_reusing_verdicts(
     assert not list(environment.glob("typecheck-*"))
 
 
-def test_candidate_source_view_binds_fragment_membership_bytes_and_diagnostics(tmp_path):
+def test_candidate_source_view_binds_fragment_membership_bytes_and_diagnostics(tmp_path: Path) -> None:
     root = Path(__file__).resolve().parents[2]
     directory = Path(views.INSTALLATION_ENTRY).parent
     inputs = [

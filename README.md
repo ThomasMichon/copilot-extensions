@@ -96,7 +96,8 @@ that every feature or platform is supported by every component.
 | [agent-machines](plugins/agent-machines/) | Reconcile explicitly declared machine requirements |
 | [agent-vault](plugins/agent-vault/) | Local KeePassXC-backed secrets fetched on demand |
 | [customizing-copilot](plugins/customizing-copilot/) | Author and diagnose skills, agents, plugins, MCP registrations, and harnesses |
-| [copilot-extensions-harness](plugins/copilot-extensions-harness/) | Contribution and diagnosis guidance for this toolkit; not a supplied personal harness |
+| [copilot-extensions-harness](plugins/copilot-extensions-harness/) | Consumer diagnosis and canonical local-repair boundaries; no automatic source work |
+| [copilot-extensions-maintainer](plugins/copilot-extensions-maintainer/) | Opt-in source contribution, review and clean-room procedures for assigned work |
 | [wsl-setup](plugins/wsl-setup/) | Windows WSL2 setup and troubleshooting |
 | [harness-knowledge](plugins/harness-knowledge/) | Bind a stateless harness to a separately selected private knowledge repo |
 | [ai-attribution](plugins/ai-attribution/) | Publication-policy guidance and attribution workflows |

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import json
+import subprocess
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, Mock
@@ -61,6 +63,7 @@ def original(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     session.client = client
     require = Mock()
     monkeypatch.setattr(owner, "require_native", require)
+    monkeypatch.setattr(owner, "require_current", Mock())
     return SimpleNamespace(
         owner=owner, client=client, physical=physical, epoch=observed_epoch,
         events=events, require=require, writer=writer,
@@ -167,3 +170,57 @@ def test_unsupported_local_epoch_refuses_before_native_effect(monkeypatch: pytes
     monkeypatch.setattr(acceptance, "epoch", Mock(side_effect=ValueError("unsupported platform")))
     with pytest.raises(AcquisitionRefused, match="qualified local epoch"):
         acceptance.negotiate({"retained_hosted_activation": 1})
+
+
+def test_registration_conveys_only_the_acknowledged_physical_activation(original: SimpleNamespace) -> None:
+    owner = original.owner
+    accepted = acceptance.prepare(owner, original.client)
+    acceptance.record(owner, accepted)
+    registered = acceptance.registration(owner, original.client)
+    assert registered == accepted["activation"]
+    registered["child"]["pid"] = 99
+    assert accepted["activation"]["child"]["pid"] == 42
+    owner.require_current.assert_called_once()
+
+
+def test_registration_conveys_explicit_hosted_writer_option(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agent_bridge import worktree_lineage
+
+    captured: list[str] = []
+
+    def run(args: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
+        captured.extend(args)
+        return subprocess.CompletedProcess(args, 0)
+
+    monkeypatch.setattr(worktree_lineage, "_run", run)
+    activation = {"version": 1, "child": {"pid": 42, "start_time": "100"}}
+    assert worktree_lineage.register_session("workspace", "native", pid=42, hosted_activation=activation)
+    assert json.loads(captured[captured.index("--retained-hosted-activation") + 1]) == activation
+
+
+@pytest.mark.parametrize("changed", [
+    "missing", "request", "writer", "host", "birth", "epoch", "transport", "stop",
+])
+def test_registration_cannot_turn_changed_or_unknown_load_into_cli_evidence(
+    original: SimpleNamespace, changed: str,
+) -> None:
+    owner = original.owner
+    acceptance.record(owner, acceptance.prepare(owner, original.client))
+    if changed == "missing":
+        owner.accepted_load = None
+    elif changed == "request":
+        owner.accepted_load["request"]["operation_id"] = "another-operation"
+    elif changed == "writer":
+        owner.accepted_load["writer"]["creation_nonce"] = "another-incarnation"
+    elif changed == "host":
+        owner.host_record = replace(owner.host_record, nonce="another-transport")
+    elif changed == "birth":
+        original.physical[42]["start_time"] = "102"
+    elif changed == "epoch":
+        original.epoch["boot_id"] = "another-boot"
+    elif changed == "transport":
+        original.client.session_host_client = object()
+    else:
+        owner.require_current.side_effect = AcquisitionRefused("stopped", "stop hold")
+    with pytest.raises(AcquisitionRefused):
+        acceptance.registration(owner, original.client)

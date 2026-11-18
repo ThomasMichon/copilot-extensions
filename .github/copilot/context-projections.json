@@ -42,77 +42,20 @@
       "applyTo": "**",
       "customizationKind": "instructions",
       "deliveryMode": "selector",
-      "destination": ".github/instructions/copilot-extensions-harness/commented-review-verdict.instructions.md",
+      "destination": ".github/instructions/copilot-extensions-harness/consumer-boundary.instructions.md",
       "fallback": {
-        "destination": ".github/copilot/context-fallbacks/copilot-extensions-harness/commented-review-verdict.md",
-        "renderedBytes": 1795,
-        "renderedSha256": "37a39d70952e4897e86245e5f969483d4629dcb13536cde4c8fe834151814604"
+        "destination": ".github/copilot/context-fallbacks/copilot-extensions-harness/consumer-boundary.md",
+        "renderedBytes": 2131,
+        "renderedSha256": "746bbfef698b13067a73dc9ac4bdec6174ed496a247a2ac89b2322f00ba7c5c2"
       },
       "plugin": "copilot-extensions-harness@copilot-extensions",
       "pluginVersion": "0.1.0-dev47",
-      "renderedBytes": 1538,
-      "renderedSha256": "bfa7ded8dfe12a3cf020ba5c0ca43762a7f474f72598409acd0a5f8fbc903902",
-      "sourceId": "commented-review-verdict",
-      "template": "instructions/commented-review-verdict.instructions.md",
-      "templateBytes": 979,
-      "templateSha256": "47d412d829f41c67d21f30e1d8acfd72a512d6ae1197ff4e8afa7ec93a6601c6"
-    },
-    {
-      "applyTo": "**",
-      "customizationKind": "instructions",
-      "deliveryMode": "selector",
-      "destination": ".github/instructions/copilot-extensions-harness/contribution-boundary.instructions.md",
-      "fallback": {
-        "destination": ".github/copilot/context-fallbacks/copilot-extensions-harness/contribution-boundary.md",
-        "renderedBytes": 1246,
-        "renderedSha256": "2953cfecb8797a02e6ddf47afc4307dfdfc85ec017de7fa71a3f0a7aebaed336"
-      },
-      "plugin": "copilot-extensions-harness@copilot-extensions",
-      "pluginVersion": "0.1.0-dev47",
-      "renderedBytes": 1523,
-      "renderedSha256": "72abcb6cf68f21664601a74e946762946bb9c751f1624eaf2f0c5d3970744e61",
-      "sourceId": "contribution-boundary",
-      "template": "instructions/contribution-boundary.instructions.md",
-      "templateBytes": 439,
-      "templateSha256": "f482a287e533f53d982fc06cf4f6ba74bdd4f2665f9bcb66a77583a306a445dd"
-    },
-    {
-      "applyTo": "**",
-      "customizationKind": "instructions",
-      "deliveryMode": "selector",
-      "destination": ".github/instructions/copilot-extensions-harness/cross-repo-debug-tracking.instructions.md",
-      "fallback": {
-        "destination": ".github/copilot/context-fallbacks/copilot-extensions-harness/cross-repo-debug-tracking.md",
-        "renderedBytes": 3016,
-        "renderedSha256": "a15dd261b80636784347841b7c0603fa0ee57cb548967607163c48a00a314223"
-      },
-      "plugin": "copilot-extensions-harness@copilot-extensions",
-      "pluginVersion": "0.1.0-dev47",
-      "renderedBytes": 1543,
-      "renderedSha256": "3791168d7063f1c89c29351b6819ab4852c09114ee43be9358fa6424939c46c6",
-      "sourceId": "cross-repo-debug-tracking",
-      "template": "instructions/cross-repo-debug-tracking.instructions.md",
-      "templateBytes": 2196,
-      "templateSha256": "1e36d1ad73a5d0b2b22d656cb3953518272a4bc97147478bbd8d7545aebc3eee"
-    },
-    {
-      "applyTo": "**",
-      "customizationKind": "instructions",
-      "deliveryMode": "selector",
-      "destination": ".github/instructions/copilot-extensions-harness/validate-and-promote-triage.instructions.md",
-      "fallback": {
-        "destination": ".github/copilot/context-fallbacks/copilot-extensions-harness/validate-and-promote-triage.md",
-        "renderedBytes": 2277,
-        "renderedSha256": "85020f78a986ac337c577d8aa6d7fd485d7b246ef4d16ca25423ed9c889ca871"
-      },
-      "plugin": "copilot-extensions-harness@copilot-extensions",
-      "pluginVersion": "0.1.0-dev47",
-      "renderedBytes": 1553,
-      "renderedSha256": "560d524d49c0a2be6b376280c9ef6dcea118af997edfb9354bcc4d4d9bd15b28",
-      "sourceId": "validate-and-promote-triage",
-      "template": "instructions/validate-and-promote-triage.instructions.md",
-      "templateBytes": 1451,
-      "templateSha256": "89bebb09582d19588a2e7d2635b2bd2e8db911aef71d2728a333e2e8d02a86bd"
+      "renderedBytes": 1503,
+      "renderedSha256": "e83711fbbe87d3f591cf1268967abbca9c9595a94f5e530196527e937352f6f5",
+      "sourceId": "consumer-boundary",
+      "template": "instructions/consumer-boundary.instructions.md",
+      "templateBytes": 1335,
+      "templateSha256": "1051bb016519ca95ce7b77830c04422e86830bf9a588d9d227c6c5b4b753ddc7"
     },
     {
       "applyTo": "**",

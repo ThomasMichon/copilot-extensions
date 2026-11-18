@@ -19,11 +19,27 @@ plugin lives in its internal marketplace. If removing personal and
 organizational assumptions would change the capability's purpose, this is not
 its destination.
 
+### Assignment and procedure availability
+
+Consumer diagnosis lives in `copilot-extensions-harness`; optional source
+procedures live in `copilot-extensions-maintainer`. Neither plugin assigns work
+or grants publication authority. During another product's task, supporting
+tooling/harness source stays frozen: diagnose within scope, use authorized canonical local
+repair, report the error and offer a bug report. Do not automatically create an
+upstream issue or PR, or wait for an upstream fix.
+
+An explicit source contribution can use this guide and the checkout's native
+skill adapters without installing or enabling the optional maintainer plugin.
+It includes normal relevant tests, understood rebases and required fork/PR
+delivery without repeated generic permission requests. A product can span
+repositories, including implementation libraries. Required fork/PR delivery in
+those repositories does not need another generic prompt. Rollout is separate.
+
 ## Contribution flow (PR-required)
 
 ### Conceptual direction review
 
-The public [Maintainer's Vision Adherence Review](plugins/copilot-extensions-harness/references/maintainer-vision-adherence-review.md)
+The public [Maintainer's Vision Adherence Review](plugins/copilot-extensions-maintainer/references/maintainer-vision-adherence-review.md)
 explains the conceptual lens for vision alignment, architectural coherence and
 proportionate planning. Substantial work benefits from PR -> effort -> vision
 citations; targeted architecture-neutral fixes do not need a new campaign.

@@ -29,7 +29,7 @@
   },
   "boundaries": ["fresh", "resume", "compaction", "spill"],
   "venues": ["interactive", "acp"],
-  "independentJudge": "copilot-extensions-harness:clean-room-judge",
+  "independentJudge": "copilot-extensions-maintainer:clean-room-judge",
   "behavioralCanaries": "per-run random 192-bit values materialized outside the read-only scenario fixture mount",
   "literalModeRubric": "../expected.md",
   "evidenceSchema": "evidence.schema.json"
