@@ -11,14 +11,29 @@ import sys
 import tempfile
 import time
 import uuid
+from collections.abc import Callable, Iterable, Sequence
+from types import ModuleType
+from typing import TYPE_CHECKING, Any, TypeVar, TypedDict, cast
 
 from dropin_registry import ScanAuthority
 from plugin_activation import resolve_active_plugins
 
 from . import registry_paths, repos
-from .repos_registry_reader import read_registry
+from .repos_registry_reader import RepositoryResolutionError, read_registry
 from .repos_registry_transaction import read_bytes, record_lock, registry_lock, remaining_timeout, revision
 from .tracking import _RecordLock, _atomic_write
+
+if TYPE_CHECKING:
+    from agent_procutil.owned_budget import OwnedExecutionBudget
+
+    from .acquisition_report import SourceObservation
+    from .repos import ReposRegistry
+
+T = TypeVar("T")
+
+
+class _BudgetArguments(TypedDict, total=False):
+    budget: OwnedExecutionBudget
 
 
 class GuardPublicationError(RuntimeError):
@@ -33,20 +48,20 @@ class CallerRegistrationUnavailable(GuardPublicationError):
     """Caller registration cannot be established from current observations."""
 
 
-def _reader():
+def _script(name: str) -> ModuleType:
     package = Path(__file__).resolve().parent
     # An installed runtime reads the copy it ships, so the guard map never depends on
     # which bin/ publication scope (wrappers vs resolvers) last ran, or on a stale bin/.
     candidates = (
-        package / "_runtime_assets" / "scripts" / "guarded_anchor_map.py",
-        package.parents[1] / "scripts" / "guarded_anchor_map.py",
+        package / "_runtime_assets" / "scripts" / name,
+        package.parents[1] / "scripts" / name,
     )
     source = next((path for path in candidates if path.is_file()), None)
     if source is None:
         from . import config as cfg
 
-        source = cfg.install_dir() / "bin" / "guarded_anchor_map.py"
-    spec = importlib.util.spec_from_file_location("_guarded_anchor_reader", source)
+        source = cfg.install_dir() / "bin" / name
+    spec = importlib.util.spec_from_file_location("_guarded_anchor_" + source.stem, source)
     if spec is None or spec.loader is None:
         raise GuardPublicationError("guard-map reader is unavailable")
     module = importlib.util.module_from_spec(spec)
@@ -57,7 +72,26 @@ def _reader():
     return module
 
 
-def _require_configuration_observations(observations) -> None:
+def _reader() -> ModuleType:
+    return _script("guarded_anchor_map.py")
+
+
+def _anchor_inventory(
+    root: Path, reader: ModuleType, row_limit: int,
+) -> dict[str, Any] | None:
+    if not callable(getattr(reader, "read_anchor_inventory", None)):
+        return None
+    try:
+        owner = _script("anchor_write_guard.py")
+        report = getattr(owner, "anchor_inventory_report", None)
+        if not callable(report):
+            return cast(dict[str, Any], reader.unavailable_anchor_inventory("owner-coverage-unavailable"))
+        return cast(dict[str, Any], reader.read_anchor_inventory(report(root), row_limit=row_limit))
+    except (OSError, ImportError, ValueError, TypeError, RuntimeError):
+        return cast(dict[str, Any], reader.unavailable_anchor_inventory("anchor-acquisition-unavailable"))
+
+
+def _require_configuration_observations(observations: Iterable[SourceObservation]) -> None:
     from .source_probes import probe_source
 
     reasons = set()
@@ -68,7 +102,7 @@ def _require_configuration_observations(observations) -> None:
         if findings == {"owner-coverage-unavailable"}:
             continue  # This observation is not a stable owner-input proof.
         if findings == {"presence-provenance-unavailable"}:
-            coverage = []
+            coverage: list[SourceObservation] = []
             present = probe_source(observation.source, "exists", coverage, observation.stage)
             if not present and coverage and all(
                 item.authority is ScanAuthority.ABSENT for item in coverage
@@ -79,7 +113,7 @@ def _require_configuration_observations(observations) -> None:
         raise GuardPublicationError("configuration acquisition unavailable: " + ", ".join(sorted(reasons)))
 
 
-def _posture_rows(registry, reader) -> tuple[list[dict], list[str]]:
+def _posture_rows(registry: ReposRegistry, reader: ModuleType) -> tuple[list[dict[str, Any]], list[str]]:
     from . import installer
 
     try:
@@ -104,7 +138,7 @@ def _posture_rows(registry, reader) -> tuple[list[dict], list[str]]:
             continue
         try:
             path = repos.registered_entry_root(registered)
-        except repos.RepositoryResolutionError as exc:
+        except RepositoryResolutionError as exc:
             if not registered.local_path() or isinstance(exc.__cause__, FileNotFoundError):
                 continue
             unavailable.append(name)
@@ -116,13 +150,15 @@ def _posture_rows(registry, reader) -> tuple[list[dict], list[str]]:
         rows.append({
             "name": name, "delegate": "none", "posture": posture,
             "elevated": elevated, "path": reader.canonical(path),
-            "registered_path": os.path.abspath(registered.local_path()),
+            "registered_path": os.path.abspath(cast(str, registered.local_path())),
             "identity": identity,
         })
     return rows, unavailable
 
 
-def build_snapshot(caller: str, root: Path, generation: str, prior_project: str | None = None) -> dict:
+def build_snapshot(
+    caller: str, root: Path, generation: str, prior_project: str | None = None,
+) -> dict[str, Any]:
     """Acquire one caller's effective overlays; never union other callers."""
     from . import config as cfg
     from .config_acquisition import capture_config_observations
@@ -143,7 +179,7 @@ def build_snapshot(caller: str, root: Path, generation: str, prior_project: str 
     for name, entry in registry.repos.items():
         try:
             registered = reader.repository_identity(repos.registered_entry_root(entry))
-        except repos.RepositoryResolutionError:
+        except RepositoryResolutionError:
             registration_unavailable |= bool(entry.local_path())
             continue
         if registered is None:
@@ -167,22 +203,22 @@ def build_snapshot(caller: str, root: Path, generation: str, prior_project: str 
         sources = _related_config_source_anchors_report(
             caller, configuration=configuration, activation_report=activation,
         )
-        effective = read_related_grafted_report(sources.value)
+        effective = read_related_grafted_report(cast(list[str | Path], sources.value))
     _require_configuration_observations(observations)
     for report in (sources, effective):
         if report.authority is ScanAuthority.INDETERMINATE:
             reasons = sorted({f.reason for f in report.findings})
             raise GuardPublicationError(f"{report.scope} unavailable: {', '.join(reasons)}")
     rows = []
-    for name, entry in sorted(effective.value.related.items()):
-        if not entry.delegate or entry.delegate == "none":
+    for name, related_entry in sorted(effective.value.related.items()):
+        if not related_entry.delegate or related_entry.delegate == "none":
             continue
         registered = registry.repos.get(name)
         if registered is None:
             continue
         try:
             path = repos.registered_entry_root(registered)
-        except repos.RepositoryResolutionError as exc:
+        except RepositoryResolutionError as exc:
             if not registered.local_path() or isinstance(exc.__cause__, FileNotFoundError):
                 continue
             raise GuardPublicationError(f"registered guarded checkout {name!r} is unavailable") from exc
@@ -190,12 +226,12 @@ def build_snapshot(caller: str, root: Path, generation: str, prior_project: str 
         if target is None or target["root"] != reader.canonical(path):
             raise GuardPublicationError(f"registered guarded checkout {name!r} has no Git identity")
         rows.append({
-            "name": name, "delegate": entry.delegate,
+            "name": name, "delegate": related_entry.delegate,
             "path": reader.canonical(path),
-            "registered_path": os.path.abspath(registered.local_path()),
+            "registered_path": os.path.abspath(cast(str, registered.local_path())),
             "locus": {
-                "preferred": entry.locus.preferred,
-                "machines": list(entry.locus.machines),
+                "preferred": related_entry.locus.preferred,
+                "machines": list(related_entry.locus.machines),
             },
             "identity": target,
         })
@@ -216,10 +252,11 @@ def build_snapshot(caller: str, root: Path, generation: str, prior_project: str 
         "roots": rows, "postures": postures,
         "posture_authority": "partial" if posture_errors else "complete",
         "posture_errors": posture_errors,
+        "anchor_inventory": _anchor_inventory(root, reader, reader.MAX_ROOTS - len(rows) - len(postures)),
     }
 
 
-def _view_data(path: Path, reader) -> object:
+def _view_data(path: Path, reader: ModuleType) -> Any:
     with reader._open_map(path) as stream:
         raw = stream.read(reader.MAX_BYTES + 1)
     if len(raw) > reader.MAX_BYTES:
@@ -235,7 +272,10 @@ def _view_paths(directory: Path) -> list[Path]:
         ]
 
 
-def _withdraw_views(directory: Path, *, paths=None, reader=None, backups=None, budget=None) -> None:
+def _withdraw_views(
+    directory: Path, *, paths: Sequence[Path] | None = None, reader: ModuleType | None = None,
+    backups: list[tuple[Path, Path]] | None = None, budget: OwnedExecutionBudget | None = None,
+) -> None:
     reader = reader if reader is not None else _reader()
     reader.validate_directory(directory)
     for path in _view_paths(directory) if paths is None else paths:
@@ -250,12 +290,12 @@ def _withdraw_views(directory: Path, *, paths=None, reader=None, backups=None, b
             if isinstance(data, dict) and isinstance(data.get(key), str)
         }
         if backups is not None:
-            remaining_timeout(budget, float("inf"))
+            remaining_timeout(cast("OwnedExecutionBudget", budget), float("inf"))
             fd, name = tempfile.mkstemp(prefix=".withdrawn-", dir=directory)
             os.close(fd)
             backup = Path(name)
             try:
-                remaining_timeout(budget, float("inf"))
+                remaining_timeout(cast("OwnedExecutionBudget", budget), float("inf"))
                 os.replace(path, backup)
             except BaseException:
                 backup.unlink(missing_ok=True)
@@ -267,17 +307,19 @@ def _withdraw_views(directory: Path, *, paths=None, reader=None, backups=None, b
         }))
 
 
-def _restore_withdrawn(backups, budget) -> None:
+def _restore_withdrawn(backups: list[tuple[Path, Path]], budget: OwnedExecutionBudget) -> None:
     for path, backup in reversed(backups):
         budget.cleanup_timeout()
         os.replace(backup, path)
 
 
-def _withdraw_before_write(directory: Path, budget):
+def _withdraw_before_write(
+    directory: Path, budget: OwnedExecutionBudget | None,
+) -> list[tuple[Path, Path]]:
     if budget is None:
         _withdraw_views(directory)
         return []
-    backups = []
+    backups: list[tuple[Path, Path]] = []
     try:
         _withdraw_views(directory, backups=backups, budget=budget)
         remaining_timeout(budget, float("inf"))
@@ -293,9 +335,9 @@ def _withdraw_before_write(directory: Path, budget):
 
 
 def _refresh_locked(
-    root: Path, callers=(), *, include_prepared: bool = True, require_callers: bool = True,
-    budget=None,
-) -> dict:
+    root: Path, callers: Iterable[str | Path] = (), *, include_prepared: bool = True,
+    require_callers: bool = True, budget: OwnedExecutionBudget | None = None,
+) -> dict[str, Any]:
     directory = root / "guarded-anchors"
     reader = _reader()
     reader.validate_directory(directory)
@@ -377,6 +419,10 @@ def _refresh_locked(
             if budget is not None:
                 remaining_timeout(budget, float("inf"))
             encoded = json.dumps(snapshot, ensure_ascii=False, allow_nan=False)
+            if len(encoded.encode("utf-8")) > reader.MAX_BYTES and "anchor_inventory" in snapshot:
+                # Supplemental facts must not withdraw independently usable roots.
+                del snapshot["anchor_inventory"]
+                encoded = json.dumps(snapshot, ensure_ascii=False, allow_nan=False)
             if len(encoded.encode("utf-8")) > reader.MAX_BYTES:
                 raise GuardPublicationError("guard map exceeds its byte bound")
             _atomic_write(reader.map_path(caller, root), encoded)
@@ -413,8 +459,9 @@ def _prepare_directory(root: Path) -> Path:
 
 
 def refresh(
-    callers=(), *, registry_root: Path | None = None, include_prepared: bool = True,
-) -> dict:
+    callers: Iterable[str | Path] = (), *, registry_root: Path | None = None,
+    include_prepared: bool = True,
+) -> dict[str, Any]:
     root = registry_root if registry_root is not None else registry_paths.registry_root()
     directory = _prepare_directory(root)
     with registry_lock(root / "repos.yaml"), _RecordLock(
@@ -423,11 +470,14 @@ def refresh(
         return _refresh_locked(root, callers, include_prepared=include_prepared)
 
 
-def managed_write(write, *, caller: str | Path | None = None, budget=None, validate=None):
+def managed_write(
+    write: Callable[[], T], *, caller: str | Path | None = None,
+    budget: OwnedExecutionBudget | None = None, validate: Callable[[], None] | None = None,
+) -> T:
     """Validate under publication locks before withdrawing views for mutation."""
     root = registry_paths.registry_root()
     directory = _prepare_directory(root)
-    arguments = {"budget": budget} if budget is not None else {}
+    arguments: _BudgetArguments = {"budget": budget} if budget is not None else {}
     publication = (
         _RecordLock(directory / "publication", timeout=10.0, require_sidecar=True)
         if budget is None else record_lock(directory / "publication", budget=budget)
@@ -457,7 +507,7 @@ def managed_write(write, *, caller: str | Path | None = None, budget=None, valid
             return result
         finally:
             for _, backup in backups:
-                budget.cleanup_timeout()
+                cast("OwnedExecutionBudget", budget).cleanup_timeout()
                 backup.unlink(missing_ok=True)
 
 

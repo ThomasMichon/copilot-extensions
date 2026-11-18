@@ -265,6 +265,13 @@ exception text, or environment variables. The consumer owns authentication,
 idempotency and recovery of its own effects; there is no consumer-specific
 coordination dependency here.
 
+**Current cwd limitation:** callbacks inherit the watch owner's working
+directory, not the registering caller's. Until subscriber-owned cwd is
+implemented and negotiated, use absolute paths for both the executable and
+callback script/file arguments. Do not register a callback that requires the
+caller's relative configuration or data paths: an absolute executable alone
+does not provide that context.
+
 Before invoking a callback, the owner atomically persists an immutable fired
 JSON payload with `notification_protocol`, `event_id` and `registration_id`,
 alongside the legacy event fields. **Exit code 0 acknowledges that event**;
@@ -326,6 +333,27 @@ persisted subscriptions still load. Legacy callbacks also use independent
 workers so they cannot stall observation for another subscriber; they still
 receive only one best-effort attempt. The reliable contract is not silently
 enabled for legacy consumers.
+
+`watch status --json` optionally includes `legacy_callback_history`, identified
+by `protocol: "legacy_callback_history/v1"`. It retains the latest 128 completed
+legacy attempts in completion order, with an `evicted` count, registration
+identity and sanitized outcome. `completed` means the callback returned zero,
+not consumer acknowledgement; `failed` means a nonzero return.
+Timeout, exception and absent/non-integer result are `unknown`, with
+`callback_timeout`, `callback_error` or `callback_result_unknown` respectively.
+They do not prove that the callback had no effects. No callback argv, output
+or exception text is copied into this history. Repository/subscriber display
+identities are capped at 256 characters with `identity_truncated: true` when
+needed; the registration identity remains exact.
+
+History is **process-local**, not a durable delivery receipt or replay queue.
+It resets on owner restart and evicts old entries. Missing support in an older
+owner, an empty history, an evicted entry or a currently running/queued callback
+is not proof of success or nonexecution. New readers select this optional
+diagnostic by its returned protocol; older readers may ignore the additive
+status member. Registration syntax, legacy stdin, saved subscription state,
+one-attempt scheduling and acknowledged pending/retry/ACK semantics are unchanged.
+No new request fields, migration or provider-rollback restriction is introduced.
 
 ## Pull-delivery reconciliation core (internal source library)
 

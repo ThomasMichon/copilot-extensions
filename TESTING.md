@@ -59,6 +59,32 @@ non-repository unit always substitutes the Git probe: a caller placing
 basetemp beneath a checkout must never redirect its credential writes there.
 Do not use inline fixture adapters or a live checkout/config as test state.
 
+Prepared-membership tail diagnostics use the opt-in Worktrees
+`tests/test_prepared_membership_tail.py` selection. Its typed adapter invokes
+the unchanged registered `patch-input` fixture on both real PowerShell engines
+and adds fixed wall/CPU boundaries to fixture copies only. Strict framing and
+native timeout controls preserve genuine stderr and the original ten-second
+child deadline. Use the contained runner with `--allow-explicit-tiers
+--test-timeout 30 --timeout 300 --plugin-timeout 300`.
+These observations do not explain an earlier timeout, waive a failed run or
+replace the complete prepared-membership acceptance portfolio.
+
+The same file's `-k registered_policy_timeout_observation` selection invokes
+the unchanged `cross-modes` cell composition on both engines. Only that test
+module's subprocess namespace is adapted. If its original ten-second entry
+times out, the adapter reports fixed shell-build/policy-start/policy-complete
+marker counts and partial-output byte counts, never command or output text.
+It re-raises the same exception even if observation fails. Pure controls cover
+redaction and error preservation; a passing diagnostic is nonreproduction,
+not a cause or accepted timeout disposition.
+
+The T2 `test_deployed_anchor_registry_and_bytecode_are_removed_by_native_profile`
+case in Worktrees `tests/test_guard_deploy_contract.py` uses the existing
+`--allow-explicit-tiers` runner selection. It deploys the actual helper into
+a temporary runtime, compiles adjacent bytecode and exercises the finite
+uninstall planner and native selective remover, retaining unrelated files.
+It never uninstalls an existing runtime or changes the runner's cache policy.
+
 The opt-in native receiving relocation case
 `tests/native/test_checkout_relocation_staging.py::test_live_cross_volume_receiving_uses_existing_native_owners`
 uses the canonical Worktrees runner with `--allow-explicit-tiers`. Explicit
@@ -2689,10 +2715,34 @@ Backend identity comes from its actual physical interpreter, not a Windows
 venv launcher's PID. Client exit, upstream EOF, exact process settlement and
 lease cleanup remain required, including natural wait-owner exit after its
 actual client settles. Each case retains its 180-second execution limit; the
-aggregate boundary allows both independent Windows cases. The path-gated
+aggregate boundary remains unchanged for the selected Windows cases. The path-gated
 workflow downloads digest-pinned
 clients on disposable Linux and Windows runners and retains separate source
 results. These are not installed-client or productive caller acceptance.
+
+The existing `COPILOT_DRIVER_HEADED_MUX_E2E` opt-in adds the retained headed
+receiver case on its disposable Windows owner. Its exact mux cleanup can
+observe natural exit after a matching identity observation: a failed kill
+requires a subsequent confirmed-absence result, not generic error suppression.
+Focused `tests/test_owner_mux_settlement.py` and the existing owner tests cover
+that race, a still-present session, failed presence probing and identity
+mismatch. They do not start a headed client or replace native qualification.
+
+If that fixture fails before its control attachment, it emits one bounded
+`MCP_HEADED_STARTUP` observation before exact cleanup. The report whitelists
+startup phase, original identity states and local output-presence counts;
+the shared fixture's `capture_original_pane` operation reads a pane only after
+the original mux incarnation matches, targeting that original pane ID rather
+than a reusable session name. Ordinary fixture queries still require the exact
+fixture session. The focused controls exercise the real selector validation,
+and the existing native copied-receiver case exercises that capture against
+the real private mux. Binding data,
+paths and credential-shaped output are redacted. Diagnostic failure cannot
+replace the original exception or skip cleanup. The existing 30-second state,
+5-second final-text and 15-second settlement waits retain their values through
+Python 3.10-compatible `wait_for` wrappers; the ten-second caller-context wait
+and native case/group/job limits are unchanged. This is observation only,
+not a causal timeout fix or acceptance of a failed run.
 
 The separate owner-only `mcp-caller-lifetime` hosted Windows packet selects
 `test_custody_native_lifetime.py::test_native_caller_jobs_and_session_owner_lifetime`.

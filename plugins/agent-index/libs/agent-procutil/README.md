@@ -911,6 +911,29 @@ Consumers must retain the error independently of exception translation and
 settle it before launching another attempt; this API never replays the child
 command or asserts that an interrupted mutation failed.
 
+`OwnedCleanupError.diagnostics` is an immutable creation-time snapshot.
+`error.diagnostics.public_fields()` returns schema `1` and only fixed scalar
+fields: `phase`, `native_error_kind` (`errno`, `winerror`, or `unknown`),
+`native_error_code` (an already-recorded integer or `null`), process/Job/output
+`*_settlement` (`confirmed`, `unconfirmed`, or `unknown`), reference-custody
+booleans `process_retained`, `job_retained`, `resources_retained`, and
+`cleanup_complete`. `unconfirmed` means an attempted confirmation failed, not
+proof that a resource remains live. Reference custody does not assert that a
+native handle is open. Missing evidence stays unknown; reading or rendering
+the snapshot performs no native query, cleanup, retry or custody transfer.
+The snapshot does not change after a subsequent cleanup retry.
+
+Windows bounded capture and failed startup record the failed cleanup phase,
+including Job retirement, process wait, pipe completion/join, stream closure
+and process-handle closure. Legacy/unannotated producers report `unknown`.
+Unknown phase/state values and nonnumeric codes are discarded. No exception
+message, chain, command, path, output, environment, resource object or handle
+is included. Consumers should render only `public_fields()`, not serialize
+the exception or its retained resources. Detect `diagnostics` on the actual
+exception to support older providers; absence means unavailable diagnostics,
+not confirmed settlement. Provider metadata alone does not establish that a
+consumer's error renderer adopted this contract or identify an earlier failure.
+
 POSIX retirement, group-confirmation and process-wait failures also retain a
 complete retry over the original unreaped leader and remaining streams/output.
 The leader is reaped only after the selected confirmation succeeds. Once this

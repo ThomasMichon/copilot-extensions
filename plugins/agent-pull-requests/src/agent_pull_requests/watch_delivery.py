@@ -6,13 +6,23 @@ import subprocess
 import threading
 import time
 from collections import deque
+from collections.abc import Callable
+from typing import Any, Protocol
 
 from .watch_notification import event_payload
+from .watch_registry import FiredEvent, WatchRegistry
 from .watch_storage import StateCommitUncertain
 
 
+class Persist(Protocol):
+    def __call__(self, entries: list[dict[str, Any]] | None = None) -> None: ...
+
+
 class Deliveries:
-    def __init__(self, registry, notify, persist, transaction, shutdown) -> None:
+    def __init__(
+        self, registry: WatchRegistry, notify: Callable[[FiredEvent], int | None],
+        persist: Persist, transaction: threading.RLock, shutdown: threading.Event,
+    ) -> None:
         self.registry = registry
         self.notify = notify
         self.persist = persist
@@ -20,14 +30,16 @@ class Deliveries:
         self.shutdown = shutdown
         self.workers: dict[str, threading.Thread] = {}
         self._native_threads: set[threading.Thread] = set()
-        self.in_flight: dict[str, dict] = {}
+        self.in_flight: dict[str, dict[str, str | int]] = {}
         self.lock = threading.Lock()
-        self.legacy_queue = deque()
+        self.legacy_queue: deque[FiredEvent] = deque()
         self.scheduler: threading.Thread | None = None
         self.max_workers = 8
         self.changed = threading.Event()
         self.prefer_legacy = True
         self.start_error: str | None = None
+        self.legacy_outcomes: deque[dict[str, str | int | bool | None]] = deque(maxlen=128)
+        self.legacy_evicted = 0
 
     def resume(self) -> None:
         with self.lock:
@@ -56,6 +68,7 @@ class Deliveries:
                         (event, event.subscriber.pending["next_attempt"],
                          event.subscriber.registration_id)
                         for event in self.registry.pending_events(delivery_mode="callback")
+                        if event.subscriber.pending is not None
                     ),
                     key=lambda item: item[1],
                 )
@@ -64,7 +77,7 @@ class Deliveries:
                     return
                 self._native_threads.intersection_update(threading.enumerate())
                 available = self.max_workers - len(self.workers)
-                candidates = []
+                candidates: list[tuple[FiredEvent, Callable[[FiredEvent], None]]] = []
                 ready = deque(
                     event for event, next_attempt, identity in pending
                     if next_attempt <= time.time()
@@ -110,31 +123,62 @@ class Deliveries:
                 delay = 1.0
             self.changed.wait(delay)
 
-    def legacy(self, event) -> None:
+    def legacy(self, event: FiredEvent) -> None:
         """Keep legacy best-effort delivery from blocking observation or other callbacks."""
         with self.lock:
             self.legacy_queue.append(event)
         self.resume()
 
-    def _run_legacy(self, event) -> None:
+    def _run_legacy(self, event: FiredEvent) -> None:
+        outcome = "unknown"
+        error: str | None = "callback_result_unknown"
         try:
-            self.notify(event)
+            result = self.notify(event)
+            if type(result) is int:
+                outcome = "completed" if result == 0 else "failed"
+                error = None if result == 0 else "callback_nonzero"
+        except subprocess.TimeoutExpired:
+            error = "callback_timeout"
         except Exception:
-            pass
+            error = "callback_error"
         finally:
             with self.lock:
+                if len(self.legacy_outcomes) == self.legacy_outcomes.maxlen:
+                    self.legacy_evicted += 1
+                self.legacy_outcomes.append({
+                    "repo": event.key.repo[:256], "number": event.key.number,
+                    "subscriber_id": event.subscriber.subscriber_id[:256],
+                    "registration_id": event.subscriber.registration_id,
+                    "identity_truncated": (
+                        len(event.key.repo) > 256 or len(event.subscriber.subscriber_id) > 256
+                    ),
+                    "outcome": outcome, "error": error,
+                })
                 self.workers.pop(event.subscriber.registration_id, None)
                 self.in_flight.pop(event.subscriber.registration_id, None)
             self.changed.set()
 
-    def _run(self, event) -> None:
+    def legacy_status(self) -> dict[str, Any]:
+        with self.lock:
+            return {
+                "protocol": "legacy_callback_history/v1",
+                "retention": "process-local",
+                "limit": self.legacy_outcomes.maxlen,
+                "evicted": self.legacy_evicted,
+                "outcomes": [dict(item) for item in self.legacy_outcomes],
+            }
+
+    def _run(self, event: FiredEvent) -> None:
         sub = event.subscriber
         try:
             if not self.shutdown.is_set():
                 with self.transaction:
                     if not self.registry.is_current(event):
                         return
-                    delay = max(0.0, sub.pending["next_attempt"] - time.time())
+                    pending = sub.pending
+                    if pending is None:
+                        return
+                    delay = max(0.0, pending["next_attempt"] - time.time())
                 if delay:
                     return
                 try:
@@ -167,6 +211,8 @@ class Deliveries:
                             self.registry.acknowledge(event)
                             return
                         pending = sub.pending
+                        if pending is None:
+                            return
                         pending["attempts"] += 1
                         pending["last_error"] = error
                         pending["next_attempt"] = time.time() + min(
@@ -188,7 +234,7 @@ class Deliveries:
                     self.in_flight.pop(sub.registration_id, None)
             self.changed.set()
 
-    def status(self) -> list[dict]:
+    def status(self) -> list[dict[str, Any]]:
         with self.transaction:
             return [
                 {
@@ -201,9 +247,10 @@ class Deliveries:
                     "next_attempt": event.subscriber.pending["next_attempt"],
                 }
                 for event in self.registry.pending_events(delivery_mode="callback")
+                if event.subscriber.pending is not None
             ]
 
-    def running(self) -> list[dict]:
+    def running(self) -> list[dict[str, str | int]]:
         with self.lock:
             return [dict(item) for item in self.in_flight.values()]
 
