@@ -3,8 +3,13 @@
 Back to the [canonical effort](README.md#subscriber-callback-context-and-truthful-legacy-outcomes-from-5947).
 
 **Status:** Original contract reviewed and merged in #13228; operator-selected
-map/version amendment reviewed and merged in #13277. Local runtime WIP and
-historical-reader audit do not resolve transition/consumer acceptance.
+map/version amendment reviewed and merged in #13277. The version-aware
+read/final-write refusal baseline is merged in #13295. Historical-reader
+transition protection and map/cwd consumer acceptance remain open.
+**Current direction:** Continue the version-aware design with older-engine
+restart refusal and per-version overwrite isolation. Review the revised
+contract before implementation; the preserved provider prototype is not
+delivered and map writes are not enabled.
 **Scope:** P5947-3/4, V5947-3/4 and G5947-3/4. This does not complete those
 items, expiry acceptance, M1, or the parent effort.
 **Vision reconciliation:** Closes the existing
@@ -36,6 +41,20 @@ The realization details below are **agent-recommended**. Normal review and CI
 are authorized source procedures, not installation, service replacement,
 credential, fleet rollout or retained-resource authority. The parent effort
 and its other gates remain open.
+
+### Version-aware restart and per-version state amendment
+
+The operator further directed, verbatim:
+
+> an older engine must recognize that it is older and NOT restart. Also make the shared state file support state-per-version for anything that risks overwrite, so versions cannot clobber each other. Continue the version-aware design on that basis, through normal review. Source/design scope only; no install, service stop or rollout implied.
+
+This amends the agent-proposed single-map persistence realization below.
+Keep the selected per-subscription command/cwd map and explicit contract
+version, add per-version protection for overwrite-prone state, and enforce
+older-engine restart refusal through the existing startup/activation owner.
+Normal review precedes implementation. No historical-engine retirement,
+installation, service stop, rollout or resource release follows from this
+source/design direction. P/V/G5947-3/4 and the parent remain open.
 
 ## Current boundary and the compatibility gap
 
@@ -87,6 +106,36 @@ provider/legacy suite passes 213 cases; its six changed Python files pass
 whole-file strict checking for Linux and Windows plus Ruff. That prototype and
 its audit tests are not delivered by this design-only amendment. Native Linux, complete
 historical-runtime/transition protection and client migration remain open.
+
+The subsequent contained Windows-native lease audit uses the actual
+`24b79724ac` lease and CLI entry source, with current unrelated imports.
+An independent process holding that historical lease excludes current
+`WatchWriter.adopt` before state read/adoption. In the reverse direction, the
+historical ordinary `serve` entry returns its existing already-running result
+before daemon construction while the current writer holds custody. The
+historical holder exits normally and the current owner releases its lease;
+there are no fetch or callback effects. This qualifies native mutual exclusion
+for those exact implementations, not a complete historical installation.
+
+After the current owner releases custody, the same historical `serve` entry
+reaches daemon construction even with a versioned state envelope present.
+The fixture intercepts that constructor, so this check proves entry admission,
+not another full old-daemon restore or overwrite test. The earlier inline-reader
+audit already demonstrated its unsafe restore/write behavior. Together they
+leave cold historical activation unprotected. Its self-booting client invokes
+its own Python module directly; a guard in a newer payload launcher does not
+intercept that path. Runtime retention references protect generation cleanup,
+not admission of this historical entry.
+
+**Required revised design:** a version tag alone cannot retrofit refusal into
+the historical executable. The operator's subsequent direction requires
+older-aware restart refusal plus per-version state isolation against clobbering;
+the realization must address both, rather than silently declaring the unsafe
+historical family unsupported. Exact historical behavior remains a qualification
+obligation, not an assertion that new code has changed old bytes. Map/context
+writes and caller migration remain disabled until the revised design clears
+review and the implementation satisfies its transition tests. Legacy callback
+support and ordinary installation readiness/current selection remain unchanged.
 
 The operator has now selected the per-subscription map and explicit version
 refusal above, rather than a governed-only initial scope. A version field does
@@ -164,38 +213,55 @@ Health is discovery, not a lock on the executing generation; prior-owner
 wire refusal and response validation must also cover owner replacement
 between discovery and registration.
 
-### Persistence and rollback
+### Persistence, per-version isolation and restart admission
 
-Use the existing `watch-subscriptions.json` and atomic-write owner. New readers
-continue to accept the existing list with its original meanings. The
-operator-selected new representation is an explicitly versioned map:
+Retain the existing storage, writer-lease and lifecycle owners; do not allocate
+installation or callback singleton slots. The operator's subsequent amendment
+requires the shared authoritative state file to retain independent per-version
+state, not one replaceable subscription collection. New readers continue to
+accept the existing list with its original meanings before migration.
+
+The following is an **agent-proposed shape**, not implemented syntax or a
+claim that a historical reader understands it:
 
 ```json
 {
   "schema": "agent-pull-requests.watch-subscriptions",
   "version": 2,
-  "subscriptions": {
-    "<subscription-id>": {
-      "repo": "example/project",
-      "number": 42,
-      "subscriber_id": "consumer-1",
-      "until": ["merged"],
-      "notify": {
-        "argv": ["callback", "relative-script"],
-        "cwd": "<absolute-native-directory>"
-      },
-      "notification_protocol": "legacy_callback_cwd/v1",
-      "baseline": null,
-      "remaining_timeout": null
+  "activeStateVersion": 2,
+  "engineGeneration": "<ordered-generation-of-the-admitted-executor>",
+  "stateByVersion": {
+    "1": {
+      "subscriptions": []
+    },
+    "2": {
+      "subscriptions": {
+        "<subscription-id>": {
+          "repo": "example/project",
+          "number": 42,
+          "subscriber_id": "consumer-1",
+          "until": ["merged"],
+          "notify": {
+            "argv": ["callback", "relative-script"],
+            "cwd": "<absolute-native-directory>"
+          },
+          "notification_protocol": "legacy_callback_cwd/v1",
+          "baseline": null,
+          "remaining_timeout": null
+        }
+      }
     }
   }
 }
 ```
 
-The example's path and identity are placeholders, not actual registration
-inputs. Map keys identify individual subscriptions, not singleton callback or
-installation slots. Each value carries its callback command/cwd and the
-existing target, baseline, deadline and delivery metadata. Use a stable
+The example's path, identity and engine generation are placeholders, not actual
+registration inputs. `version` identifies the outer format, independently of
+the selected state's version and executing engine generation. State-version
+keys partition overwrite-prone durable data; subscription-map keys identify
+individual subscriptions, not singleton callback or installation slots.
+Each subscription value carries its callback command/cwd and the existing
+target, baseline, deadline and delivery metadata. Use a stable
 per-registration storage identity; caller-facing subscriber labels may repeat
 on different targets and must not overwrite one another. Retain the identity
 across restart and retry. A legacy storage key is not an ACK or event identity.
@@ -203,15 +269,17 @@ Do not infer acknowledged delivery from a map key or the existence of cwd.
 Reject duplicate/malformed keys, inconsistent identities and malformed values
 before installing any entry.
 
-Version 2 contains the complete subscription map, not a second store.
-It is required whenever any retained subscription has caller-context
-semantics, whether legacy, acknowledged, pending, or continuous. Each such
-entry retains `notify.cwd` and the selected notification protocol. The
-envelope and per-entry validation reject unknown versions and inconsistent
-context/protocol combinations; do not skip a malformed entry and resume
-others. Validate the entire candidate collection before installing it or
-starting effects. The in-memory restore API must enforce the same context
-rules, not merely rely on the storage wrapper.
+The active version contains the complete authoritative subscription map,
+including every pending/queued/retry record. Other version entries are retained
+state, not concurrently active registries or implicit rollback permission.
+They must not start a second poller or redeliver an old pending event.
+Context-bearing entries retain `notify.cwd` and the selected notification
+protocol. Validate the outer envelope, selected version and complete candidate
+collection before installing any entry or starting effects. Malformed or
+unsupported active state refuses; do not skip an entry or silently select an
+older partition. Preserve unselected version entries without interpreting,
+stripping or reconstructing them through an older serializer. The in-memory
+restore API enforces the same context rules as storage.
 
 Retain all existing baseline/deadline, original registration/event identity,
 pending immutable payload, queued event, attempts and next-attempt metadata.
@@ -219,11 +287,26 @@ Cwd belongs to the subscription, not to an added field in the immutable
 event payload. Restart/retry uses that same retained subscription context;
 re-registration is not a mechanism for rewriting a pending event.
 
-A writer may keep the old list format while no record requires context.
-Writing a context-bearing collection must atomically replace the whole list
-with version 2, using the existing definite-failure/uncertain-commit recovery
-semantics. No context sidecar: an unaware writer could ignore it and overwrite
-or deliver the associated subscription without context.
+A writer may keep the old list format before the version-aware transition.
+After transition, mutate only its admitted version's state while preserving
+every other retained version, under the existing exclusive writer custody and
+atomic persistence boundary. Re-read the current envelope at the final write
+boundary; a cached snapshot is not authority to replace another generation's
+state. Use the existing definite-failure/uncertain-commit recovery semantics.
+Migration must preserve complete subscription and delivery identity; retained
+old snapshots are never independent sources of live delivery.
+
+An in-file version map is not itself protection against an unaware historical
+whole-file writer. Qualify the authoritative file's physical write boundary as
+well as the encoding. If the historical `watch-subscriptions.json` path cannot
+be guarded, the version-aware authoritative file must be isolated from that
+write address through the existing owner's reviewed, recoverable migration.
+That file remains the one shared per-version authority, not a context sidecar
+whose loss an old engine could ignore. Do not leave an independently active
+legacy copy that can replay migrated subscriptions, lose registrations accepted
+during transition, or overwrite the new authority. The migration and its
+crash/recovery cases precede activation; no state reset, stale-owner deletion
+or silent support-floor change is permitted.
 
 Contract-aware engines compare the explicit state contract version before
 restoring entries, fetching, scheduling callbacks or writing. An unsupported
@@ -234,14 +317,30 @@ reject a top-level object before returning any entries; the historical inline
 family does not. Its current audit result is a transition blocker, not safe
 rollback credit.
 
+**Older engines must not restart.** Before ordinary cold `serve`, client
+self-boot, installer-driven activation, resume or rollback can construct an
+active daemon, compare the exact candidate executor's generation against the
+admitted generation recorded by the shared state owner. A lower generation
+refuses restart before state mutation, provider fetch, route publication or
+callback effects, even if a retained partition matches its old state version.
+Missing or incomparable evidence is not permission to assume "latest".
+Define the ordering from attributable immutable executor evidence; a new
+payload's stamp, current selection alone or a package-equality test does not
+prove which engine is executing. Do not lower the recorded generation to
+make rollback pass. Recheck admission at mutation/activation so a delayed
+client cannot act on an earlier observation. Preserve ordinary legacy
+operation before the transition instead of treating absent new metadata as
+blanket refusal of all old calls.
+
 **Version-awareness expansion and transition protection precede writes.**
 First release the version-aware owner/activation guard through the existing
 launch and state-adoption boundaries, without enabling new context writes or
 caller defaults. The selected executor must support the retained state
 contract before it can consume that state or receive context registrations.
 Missing support from an actual historical executor is not guessed support.
-Use contract support from the exact executing candidate, not package-version
-comparisons, a new payload's stamp or a callback/installation slot assignment.
+Use contract support and generation evidence from the exact executing candidate,
+not package-version equality, a new payload's stamp or a callback/installation
+slot assignment.
 Keep this enforcement separate from installation readiness/current selection:
 an incompatible state executor refuses activation while installation may
 complete, preserving the state and existing lifecycle custody.
@@ -274,11 +373,11 @@ state activation and outgoing retirement. Retain the subscription state for
 a compatible executor; do not make installation success depend on repairing
 an incumbent or cleaning up its retained resources.
 
-New readers continue to restore old lists with their original meanings. If
-the last context-bearing subscription is explicitly removed through normal
-admission, a complete remaining snapshot may again use the old list only if
-no retained pending/queued/context-bearing record is lost. No lossy export or
-automatic stripping to make a rollback pass. Test every schema family in the
+New readers continue to restore old lists with their original meanings before
+transition. Removing the last context-bearing subscription must not erase the
+admitted generation, retained version partitions or their pending effects.
+Do not automatically downgrade the shared file to an unversioned list or strip
+context to make rollback pass. Test every schema family in the
 actual supported upgrade/rollback window; if a supported reader does not
 refuse safely, add a reviewed expansion/transition guard before enabling
 context writes. Do not redefine that reader as unsupported to avoid the test.
@@ -309,9 +408,11 @@ public diagnostic/history fields to disclose callback paths.
 ## Serial realization and qualification
 
 1. **Expand and qualify version-aware admission first.** Review this amendment,
-   add explicit state contract/version refusal under the existing
-   callback/storage/lifecycle owners, and qualify the actual historical
-   families plus the ordinary startup/activation guard. Do not enable new
+   add explicit state contract/version refusal and older-engine no-restart
+   under the existing callback/storage/lifecycle owners, and qualify the
+   actual historical families plus ordinary startup/activation and delayed
+   client self-boot. Establish shared per-version state preservation and
+   historical whole-file-writer isolation before context activation. Do not enable new
    map/context writes, advertise subscriber-cwd support or migrate callers in
    this release. Old callers remain unchanged.
 2. **Qualify current/prior transition behavior before client migration.**
@@ -354,6 +455,14 @@ The focused validation matrix must include:
   already-running pre-version writer case; no overwrite, implicit owner
   replacement or new slot allocation. A missing transition guarantee keeps
   context writes disabled without blocking installation readiness.
+- Per-version writes preserve unselected version records and every retained
+  pending/queued/retry identity. A lower executing generation refuses cold
+  startup, self-boot, resume and rollback even when its old partition remains.
+  Exercise delayed clients, final-write interleaving and removal of the final
+  cwd subscription without dropping the generation fence. Actual historical
+  whole-file writers cannot clobber the version-aware authority or redeliver
+  a migrated legacy copy; interrupted migration preserves registrations and
+  existing custody through the normal recovery owner.
 - Definite write failure before scheduling and uncertain post-replacement
   recovery, retaining the existing atomic persistence owner and no duplicate
   event or legacy replay.
