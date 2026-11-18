@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 import sqlite3
+import time
 from typing import TYPE_CHECKING, Any, cast
 import uuid
 
@@ -141,6 +142,50 @@ class _SessionsMixin:
             (acp_session_id, session_id),
             membership=True,
         )
+
+    def settle_exited_inherited_host(self, observed: dict[str, Any], child_pid: int) -> bool:
+        """Close ordinary interrupted work, under the exact exited Host's retirement lock."""
+        from .status_store import StatusStore
+
+        self = cast("Database", self)
+        sid = observed["id"]
+        if not observed.get("acp_session_id") or observed["status"] not in ("running", "idle"):
+            return False
+        now = time.time()
+        with self._runtime_transaction(write=True, membership=True) as conn:
+            held = self._retained_recovery_held_predicate(conn)
+            stopped = conn.execute(
+                "UPDATE sessions SET status='stopped',pid=NULL,background_recovery_enabled=0,updated_at=? "
+                "WHERE id=? AND status=? AND acp_session_id=? AND updated_at=? AND target_type='local' "
+                "AND (pid IS NULL OR pid=?) AND background_recovery_enabled=1 AND cold_recovery_stop_token IS NULL "
+                "AND runtime_custody_json IS NULL AND NOT EXISTS (SELECT 1 FROM cold_outages WHERE session_id=?) "
+                "AND NOT EXISTS (SELECT 1 FROM turns WHERE session_id=? AND completed_at IS NULL AND "
+                "(runtime_custody_json IS NOT NULL OR native_handoff_json IS NOT NULL OR "
+                "native_admission_json IS NOT NULL OR acquisition_delivery_id IS NOT NULL)) "
+                f"AND NOT ({held})",
+                (now, sid, observed["status"], observed["acp_session_id"], observed["updated_at"], child_pid, sid, sid),
+            )
+            if stopped.rowcount != 1:
+                return False
+            closed = conn.execute(
+                "UPDATE turns SET stop_reason='interrupted',completed_at=? WHERE session_id=? AND completed_at IS NULL",
+                (now, sid),
+            )
+            events = [('session_state_changed', '{"status":"stopped","trigger":"host_exit"}')]
+            if closed.rowcount:
+                events.insert(0, ('turn_complete', '{"stop_reason":"interrupted"}'))
+            for kind, body in events:
+                inserted = conn.execute(
+                    "INSERT INTO events (session_id,event_id,event_type,data_json,timestamp) "
+                    "SELECT ?,COALESCE(MAX(event_id),0)+1,?,?,? FROM events WHERE session_id=? RETURNING event_id",
+                    (sid, kind, body, now, sid),
+                ).fetchone()
+                if kind == "turn_complete":
+                    StatusStore(self).publish(
+                        sid, "idle", f"host-exit:{sid}:{observed['acp_session_id']}:{inserted[0]}",
+                        transaction=conn, observed_at=now, evidence="historical_transition",
+                    )
+        return True
 
     def update_session_background_recovery(
         self, session_id: str, enabled: bool, *, expected_stop_token: str | None = None,
