@@ -139,24 +139,52 @@ def test_expiry_during_synchronous_preparation_cannot_start_an_exchange(
                 await selected.negotiate()
             before = len(host.calls)
             clock = [1000.0]
-            calls = 0
-            native = json.dumps
+            native_freeze = async_local_client._freeze_request
+            native_dumps = json.dumps
 
-            def detach(*args: Any, **kwargs: Any) -> str:
-                nonlocal calls
-                calls += 1
-                if calls == (1 if stage == "prepare" else 2):
+            def detach(payload: dict[str, Any] | None) -> dict[str, Any] | None:
+                result = native_freeze(payload)
+                if stage == "prepare":
                     clock[0] += 31
-                return native(*args, **kwargs)
+                return result
+
+            def encode(*args: Any, **kwargs: Any) -> str:
+                if stage == "send":
+                    clock[0] += 31
+                return native_dumps(*args, **kwargs)
 
             monkeypatch.setattr(async_local_client, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+            monkeypatch.setattr(async_local_client, "_freeze_request", detach)
             monkeypatch.setattr(async_local_client, "json", SimpleNamespace(
-                dumps=detach, loads=json.loads, JSONDecodeError=json.JSONDecodeError,
+                dumps=encode, loads=json.loads, JSONDecodeError=json.JSONDecodeError,
             ))
             selected.deadline = 1001.0
             with pytest.raises(LocalDeadlineExpired):
                 await selected.request("subscribe", {"request_id": "original", "ttl": 60})
             assert len(host.calls) == before and not selected._busy
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("payload", [
+    {"request_id": "x" * 1_000_000},
+    {str(index): index for index in range(9)},
+    {"after": 1 << 100_000},
+    {"request_id": {"nested": ["not", "a", "scalar"]}},
+])
+def test_oversized_or_nested_input_refuses_without_serialization_or_ipc(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, payload: dict[str, Any],
+) -> None:
+    async def scenario() -> None:
+        async with running(tmp_path) as host:
+            def forbidden(*args: Any, **kwargs: Any) -> str:
+                raise AssertionError("unbounded input reached JSON encoding")
+
+            monkeypatch.setattr(async_local_client, "json", SimpleNamespace(
+                dumps=forbidden, loads=json.loads, JSONDecodeError=json.JSONDecodeError,
+            ))
+            with pytest.raises(LocalClientError, match="bounded scalar"):
+                await asyncio.wait_for(client(host).request("subscribe", payload), 0.1)
+            assert not host.calls
     asyncio.run(scenario())
 
 

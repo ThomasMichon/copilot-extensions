@@ -34,6 +34,29 @@ def _remaining(deadline: float) -> float:
     return remaining
 
 
+def _freeze_request(payload: dict[str, Any] | None) -> dict[str, Any] | None:
+    if payload is None:
+        return None
+    if type(payload) is not dict or len(payload) > 8:
+        raise LocalClientError("bounded scalar local request required")
+    result: dict[str, Any] = {}
+    for key, value in payload.items():
+        if type(key) is not str or len(key) > 64:
+            raise LocalClientError("bounded scalar local request required")
+        if type(value) is str:
+            valid = len(value) <= 512
+        elif type(value) is int:
+            valid = value.bit_length() <= 63
+        elif type(value) is float:
+            valid = math.isfinite(value)
+        else:
+            valid = value is None or type(value) is bool
+        if not valid:
+            raise LocalClientError("bounded scalar local request required")
+        result[key] = value
+    return result
+
+
 async def _exchange(
     path: Path, target: str, method: str, operation: str, payload: dict[str, Any] | None,
     *, deadline: float,
@@ -164,7 +187,7 @@ class AsyncBoundRepositoryClient:
             expires_at = min(expires_at, deadline)
         _remaining(expires_at)
         # Freeze caller-owned intent before yielding to negotiation or the socket.
-        original = None if payload is None else json.loads(json.dumps(payload, allow_nan=False))
+        original = _freeze_request(payload)
         remaining = _remaining(expires_at)
         self._busy = True
         self._expires_at = expires_at
@@ -185,6 +208,9 @@ class AsyncBoundRepositoryClient:
 
     async def request(self, operation: str, payload: dict[str, Any]) -> dict[str, Any]:
         """Exchange one cache operation; never retry an uncertain accepted effect."""
-        if operation not in OPERATIONS or not isinstance(payload, dict):
+        if (
+            type(operation) is not str or len(operation) > 32
+            or operation not in OPERATIONS or not isinstance(payload, dict)
+        ):
             raise LocalClientError("unsupported local request")
         return await self._run(operation, payload)

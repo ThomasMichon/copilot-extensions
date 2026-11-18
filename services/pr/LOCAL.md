@@ -247,6 +247,9 @@ requested exchange by `operation_seconds` (positive and at most 30 seconds).
 An optional absolute monotonic `client.deadline` further shortens that budget;
 an elapsed deadline refuses before IPC. Request intent is detached before the
 first await, so changing a caller's dictionary cannot replace an emitted request.
+The current operations use shallow scalar request fields. Before copying, the
+client admits at most eight fields with bounded keys, strings and numeric
+values; nested collections and oversized inputs refuse before encoding or IPC.
 Headers, request bodies and response bodies retain the local byte budgets.
 The client rejects ambiguous framing rather than adding another HTTP profile.
 
