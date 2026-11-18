@@ -45,6 +45,27 @@ def _arguments(tmp_path, **values):
     })
 
 
+@pytest.mark.parametrize("committed", [False, True])
+def test_settled_refusal_survives_the_child_result_boundary(adapter, tmp_path, committed):
+    result = adapter.refusal_result("2.0.0", RuntimeError("handover refused"), committed=committed)
+    path = tmp_path / "result.json"
+    path.write_text(json.dumps(result), encoding="utf-8")
+    assert adapter.read_result(path, 1, ["child"]) == result
+    with pytest.raises(subprocess.CalledProcessError):
+        adapter.read_result(path, 0, ["child"])
+    with pytest.raises(subprocess.CalledProcessError):
+        adapter.read_result(path, 7, ["child"])
+
+
+@pytest.mark.parametrize("receipt", [None, {}, {"version": 1, "settled": False}])
+def test_unknown_failure_cannot_be_certified_by_an_invalid_receipt(adapter, tmp_path, receipt):
+    path = tmp_path / "result.json"
+    if receipt is not None:
+        path.write_text(json.dumps({"runtime_version": "2.0.0", "installation_refused": receipt}))
+    with pytest.raises((ValueError, subprocess.CalledProcessError)):
+        adapter.read_result(path, 1, ["child"])
+
+
 @pytest.mark.parametrize("exit_code", [0, 7])
 def test_post_child_custody_failure_preserves_native_exit_status(
     adapter, tmp_path, monkeypatch, exit_code,

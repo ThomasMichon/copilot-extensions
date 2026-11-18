@@ -205,6 +205,41 @@ def child_environment() -> dict[str, str]:
     return {**os.environ, **inherited}
 
 
+def refusal_result(version: str, error: Exception, *, committed: bool) -> dict:
+    return {
+        "runtime_version": version,
+        "installation_refused": {
+            "version": 1, "settled": True, "publication_committed": committed, "error": str(error),
+        },
+    }
+
+
+def result_exit_code(result: dict) -> int:
+    refusal = result.get("installation_refused")
+    if "installation_refused" not in result:
+        return 0
+    if (
+        not isinstance(refusal, dict)
+        or set(refusal) != {"version", "settled", "publication_committed", "error"}
+        or type(refusal["version"]) is not int or refusal["version"] != 1
+        or refusal["settled"] is not True
+        or type(refusal["publication_committed"]) is not bool
+        or not isinstance(refusal["error"], str) or not refusal["error"]
+        or not isinstance(result.get("runtime_version"), str) or not result["runtime_version"]
+    ):
+        raise ValueError("Invalid settled installation refusal")
+    return 1
+
+
+def read_result(path: Path, code: int, argv: list[str]) -> dict:
+    if code not in (0, 1) or not path.is_file():
+        raise subprocess.CalledProcessError(code or 1, argv)
+    result = json.loads(path.read_text(encoding="utf-8"))
+    if result_exit_code(result) != code:
+        raise subprocess.CalledProcessError(code or 1, argv)
+    return result
+
+
 def adopt_broker(root: Path, slot: Path) -> None:
     """Adopt before publication or callbacks, with the complete slot retained."""
     if os.name != "nt" or os.environ.get("COPILOT_EXTENSIONS_TEST_CONTAINED") == "1":

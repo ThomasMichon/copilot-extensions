@@ -272,12 +272,14 @@ def run(
                         print(error.stdout, end="", file=sys.stderr, flush=True)
                     if error.stderr:
                         print(error.stderr, end="", file=sys.stderr, flush=True)
+                    if isinstance(error, subprocess.CalledProcessError) and error.returncode == 1:
+                        return lifecycle.install_driver.read_result(result_path, error.returncode, argv)
                     raise
                 if completed.stdout:
                     print(completed.stdout, end="", flush=True)
                 if completed.stderr:
                     print(completed.stderr, end="", file=sys.stderr, flush=True)
-                return json.loads(result_path.read_text(encoding="utf-8"))
+                return lifecycle.install_driver.read_result(result_path, completed.returncode, argv)
             process = subprocess.Popen(
                 argv,
                 executable=argv[0] if os.name == "nt" else None,
@@ -292,9 +294,7 @@ def run(
                 # actual owner settles; never delete its interpreter underneath it.
                 process.wait()
                 raise
-            if process.returncode != 0:
-                raise subprocess.CalledProcessError(process.returncode, argv)
-            return json.loads(result_path.read_text(encoding="utf-8"))
+            return lifecycle.install_driver.read_result(result_path, process.returncode, argv)
 
 
 @lifecycle.install_driver.owned
@@ -600,6 +600,8 @@ def _release(
         release_dev_claim=claim,
         dev_owner=str(owner),
     )
+    if lifecycle.install_driver.result_exit_code(result):
+        return result
     if result.get("dev_claim_release_pending") is True:
         result.update(reused=True, dev_claim_release_pending=True)
         return result

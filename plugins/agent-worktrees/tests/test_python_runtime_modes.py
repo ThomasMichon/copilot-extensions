@@ -28,13 +28,14 @@ def modes(monkeypatch):
     return sys.modules["runtime_install_modes"]
 
 
-@pytest.mark.parametrize(("mode", "recover_manager"), [
-    ("dev", False), ("repair", False), ("repair", True),
+@pytest.mark.parametrize(("mode", "recover_manager", "refused"), [
+    ("dev", False, False), ("repair", False, False), ("repair", True, False),
+    ("repair", False, True),
 ])
 @pytest.mark.parametrize("retained", [False, True])
 @pytest.mark.parametrize("context", ["", "namespaced"])
 def test_mode_bootstrap_attributes_inputs_and_retains_recovery_intent(
-    modes, tmp_path, monkeypatch, mode, recover_manager, retained, context,
+    modes, tmp_path, monkeypatch, mode, recover_manager, refused, retained, context,
 ):
     owner = tmp_path / "owner"
     plugin = owner / "plugins" / "agent-worktrees"
@@ -53,6 +54,10 @@ def test_mode_bootstrap_attributes_inputs_and_retains_recovery_intent(
                   "deployment_source": json.dumps({"path": plugin.as_posix()})}
     expected_hash = modes.lifecycle.runtime.fingerprint_source(
         modes.lifecycle.engine._source_files((plugin,)),
+    )
+    expected_result = (
+        modes.lifecycle.install_driver.refusal_result(mode, RuntimeError("route changed"), committed=False)
+        if refused else {"runtime_version": mode}
     )
 
     @contextmanager
@@ -98,7 +103,8 @@ def test_mode_bootstrap_attributes_inputs_and_retains_recovery_intent(
             assert argv[argv.index("--payload-hash") + 1] == expected_hash
             if retained:
                 assert json.loads(argv[argv.index("--construction-provenance") + 1]) == provenance
-            Path(argv[argv.index("--result") + 1]).write_text(json.dumps({"runtime_version": mode}))
+            Path(argv[argv.index("--result") + 1]).write_text(json.dumps(expected_result))
+            self.returncode = 1 if refused else 0
 
         def wait(self):
             return self.returncode
@@ -123,7 +129,9 @@ def test_mode_bootstrap_attributes_inputs_and_retains_recovery_intent(
             assert options["construction_fd"] == 17 and options["timeout"] == 480
             assert options["allow_breakaway"] is True
             assert Path(options["retention_scope"]).name == "retention-scope"
-            OwnerProcess(argv)
+            process = OwnerProcess(argv)
+            if process.returncode:
+                raise subprocess.CalledProcessError(process.returncode, argv, "", "")
             return subprocess.CompletedProcess(argv, 0, "", "")
 
         monkeypatch.setattr(modes.lifecycle.engine, "run_owned", run_owned)
@@ -138,7 +146,7 @@ def test_mode_bootstrap_attributes_inputs_and_retains_recovery_intent(
         root, plugin, payload=authority, uv=tmp_path / "uv",
         base_python=Path(sys.executable), mode=mode, owner=owner if mode == "dev" else None,
         recover_adopted_manager=recover_manager,
-    ) == {"runtime_version": mode}
+    ) == expected_result
     assert os.environ["AGENT_WORKTREES_PAYLOAD_ROOT"] == "previous-payload"
 
 
@@ -887,7 +895,9 @@ def test_dev_candidate_uses_immutable_content_and_retains_it(modes, tmp_path, mo
     (plugin / "scripts").mkdir()
     for name in (
         "runtime_launcher.py", "versioned_runtime.py", "versioned_runtime_leases.py",
-        "versioned_runtime_source.py", "versioned_runtime_construction.py", "versioned_runtime_publication.py",
+        "versioned_runtime_source.py", "versioned_runtime_identity.py",
+        "versioned_runtime_fingerprint.py", "versioned_runtime_construction.py",
+        "versioned_runtime_publication.py", "versioned_runtime_cache.py", "daemon_instance_runtime.pyz",
     ):
         shutil.copyfile(lifecycle.SCRIPTS / name, plugin / "scripts" / name)
     (plugin / "pyproject.toml").write_text(
@@ -976,7 +986,7 @@ def test_dev_candidate_uses_immutable_content_and_retains_it(modes, tmp_path, mo
     assert not (root / "versions" / "dev").exists()
 
 
-@pytest.mark.parametrize("settlement_failure", [False, True])
+@pytest.mark.parametrize("settlement_failure", [False, True, "refused"])
 @pytest.mark.parametrize("retirement_pending,retiring_dev,already_released", [
     (False, False, False), (True, False, False), (True, True, False),
     (False, True, True),
@@ -1051,6 +1061,10 @@ def test_dev_release_keeps_original_claim_until_restoration_settles(
                     timeout=0,
                 ):
                     pytest.fail("release lost generation retention")
+        if settlement_failure == "refused":
+            return lifecycle.install_driver.refusal_result(
+                version, lifecycle.InstallationRefused("route changed"), committed=False,
+            )
         if settlement_failure:
             raise RuntimeError("unsettled cutover")
         lifecycle.runtime.activate(root, version, link_free=True, dev_owner=kwargs["dev_owner"])
@@ -1079,7 +1093,12 @@ def test_dev_release_keeps_original_claim_until_restoration_settles(
         owner=owner,
         expected_governance={},
     )
-    if settlement_failure:
+    if settlement_failure == "refused":
+        result = modes.run_owned(root, plugin, **arguments)
+        assert lifecycle.install_driver.result_exit_code(result) == 1
+        assert lifecycle.runtime.read_dev_claim(root)["owner"] == str(owner)
+        assert lifecycle.runtime.current_version(root) == "dev"
+    elif settlement_failure:
         with pytest.raises(RuntimeError, match="unsettled cutover"):
             modes.run_owned(root, plugin, **arguments)
         assert lifecycle.runtime.read_dev_claim(root)["owner"] == str(owner)

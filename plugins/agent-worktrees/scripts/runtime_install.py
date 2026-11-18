@@ -559,9 +559,7 @@ def install(
                 print(stdout, end="", flush=True)
             if stderr:
                 print(stderr, end="", file=sys.stderr, flush=True)
-            if completed.returncode != 0:
-                raise subprocess.CalledProcessError(completed.returncode, argv, stdout, stderr)
-            result = cast(dict[str, Any], json.loads(result_path.read_text(encoding="utf-8")))
+            result = install_driver.read_result(result_path, completed.returncode, argv)
             result["reused"] = candidate.reused
             return result
 
@@ -747,7 +745,7 @@ def settle_candidate(
                 if helpers is not None:
                     helpers.keep()
                 raise
-            except BaseException:
+            except BaseException as failure:
                 if summary.get("action") == "interrupted" and not handles:
                     summary["action"] = "preparing"
                 announced = False
@@ -794,6 +792,8 @@ def settle_candidate(
                         helpers.keep()
                     else:
                         helpers.rollback()
+                if isinstance(failure, InstallationRefused):
+                    return install_driver.refusal_result(version, failure, committed=committed)
                 raise
             else:
                 if helpers is not None:
@@ -990,7 +990,7 @@ def main(argv: list[str] | None = None) -> int:
     temporary = arguments.result.with_name(f"{arguments.result.name}.tmp-{os.getpid()}")
     temporary.write_text(json.dumps(result) + "\n", encoding="utf-8")
     os.replace(temporary, arguments.result)
-    return 0
+    return install_driver.result_exit_code(result)
 
 
 if __name__ == "__main__":

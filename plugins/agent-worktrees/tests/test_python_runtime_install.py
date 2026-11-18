@@ -117,6 +117,20 @@ def test_native_release_entry_retains_inputs_without_a_source_association(driver
     assert not held and json.loads(result.read_text()) == {"installed": True}
 
 
+def test_cli_preserves_settled_refusal_as_a_nonzero_result(driver, tmp_path, monkeypatch):
+    result = driver.install_driver.refusal_result(
+        "2.0.0", driver.InstallationRefused("predecessor route changed"), committed=False,
+    )
+    monkeypatch.setattr(driver, "install", lambda *args, **kwargs: result)
+    path = tmp_path / "result.json"
+    assert driver.main([
+        "--root", str(tmp_path / "runtime"), "--plugin", str(tmp_path / "payload"),
+        "--payload", str(tmp_path / "payload"), "--uv", str(tmp_path / "uv"),
+        "--base-python", sys.executable, "--result", str(path),
+    ]) == 1
+    assert json.loads(path.read_text()) == result
+
+
 def test_application_preparation_uses_wheel_assets_without_rewriting_wheel(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1287,6 +1301,8 @@ def test_source_health_failure_routes_to_canonical_distinct_repair_after_custody
     (False, False, False, "outgoing-identity-unavailable"),
     (False, False, False, "outgoing-identity-unavailable-already-serving"),
     (False, False, False, "prepublication-interrupted"),
+    (True, False, False, "queue-refused"),
+    (False, False, False, "queue-unknown"),
 ])
 def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
     driver: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, rollback: bool, interrupted: bool, activation_failed: bool, special: str | None,
@@ -1301,8 +1317,9 @@ def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
     (plugin / "scripts").mkdir()
     for name in (
         "runtime_launcher.py", "versioned_runtime.py", "versioned_runtime_leases.py",
-        "versioned_runtime_source.py", "versioned_runtime_construction.py",
-        "versioned_runtime_publication.py",
+        "versioned_runtime_source.py", "versioned_runtime_identity.py",
+        "versioned_runtime_fingerprint.py", "versioned_runtime_construction.py",
+        "versioned_runtime_publication.py", "versioned_runtime_cache.py", "daemon_instance_runtime.pyz",
     ):
         shutil.copyfile(driver.SCRIPTS / name, plugin / "scripts" / name)
     (plugin / "pyproject.toml").write_text(
@@ -1351,7 +1368,7 @@ def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
                     pytest.fail("rollback/candidate retention was released")
         with driver.runtime.construction_lease(root, "2.0.0", timeout=0):
             pass
-        if interrupted or special == "prepublication-interrupted":
+        if interrupted or special in {"prepublication-interrupted", "queue-unknown"}:
             raise RuntimeError("cutover interrupted")
         if special == "committed-rollback":
             from zdd import breadcrumb
@@ -1383,6 +1400,7 @@ def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
                 self.returncode = 1
             else:
                 Path(argument("--result")).write_text(json.dumps(result), encoding="utf-8")
+                self.returncode = driver.install_driver.result_exit_code(result)
 
         def communicate(self) -> tuple[str, str]:
             return "", ""
@@ -1444,7 +1462,44 @@ def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
     else:
         monkeypatch.setattr(driver, "_settle_monitor", lambda *_args: not rollback)
     monkeypatch.setattr(driver.subprocess, "Popen", Process)
-    if rollback or interrupted or activation_failed or special in {"deferred", "prepublication-interrupted"}:
+    if special in {"queue-refused", "queue-unknown"}:
+        from update_driver import core, borrowed_custody, ParticipantError
+
+        queue = tmp_path / "queue"
+        runner = core.TrustedRunner((sys.executable,), str(tmp_path))
+        first = core.enqueue(core.RequestSpec("refused"), runner=runner, root=queue)
+        later = core.enqueue(core.RequestSpec("later"), runner=runner, root=queue)
+        monkeypatch.setattr(driver.install_driver, "required_custody", lambda: driver.install_driver.custody(required=True))
+        monkeypatch.setattr(core, "default_root", lambda: queue)
+        observed = []
+
+        def execute(tx):
+            observed.append(tx.request.id)
+            with borrowed_custody(root=queue, environ=tx.participant_env()):
+                if tx.request.id == later.id:
+                    return 0
+                result = driver.install(
+                    root, plugin, payload=plugin, uv=tmp_path / "unused", base_python=Path(sys.executable),
+                )
+                assert result["installation_refused"]["publication_committed"] is False
+                assert driver.runtime.current_version(root) == "1.0.0"
+                return driver.install_driver.result_exit_code(result)
+
+        if special == "queue-unknown":
+            with pytest.raises(ParticipantError):
+                core.drain(root=queue, executor=execute)
+            assert core.status(first.id, root=queue).state == "interrupted"
+            assert core.status(later.id, root=queue).state == "pending"
+            assert observed == [first.id]
+            with pytest.raises(core.InterruptedError):
+                core.drain(root=queue, executor=execute)
+        else:
+            core.drain(root=queue, executor=execute)
+            assert observed == [first.id, later.id]
+            assert [(item.state, item.exit_code) for item in core.status(root=queue)] == [
+                ("completed", 1), ("completed", 0),
+            ]
+    elif interrupted or special in {"deferred", "prepublication-interrupted"}:
         with pytest.raises(subprocess.CalledProcessError):
             driver.install(root, plugin, payload=plugin, uv=tmp_path / "unused", base_python=Path(sys.executable))
         expected = "1.0.0" if rollback or special == "prepublication-interrupted" else "2.0.0"
@@ -1454,6 +1509,11 @@ def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
             from agent_worktrees import runtime_deployment
 
             assert runtime_deployment.read_manifest(root) is None
+    elif rollback or activation_failed:
+        result = driver.install(root, plugin, payload=plugin, uv=tmp_path / "unused", base_python=Path(sys.executable))
+        assert driver.install_driver.result_exit_code(result) == 1
+        assert result["installation_refused"]["publication_committed"] is not rollback
+        assert driver.runtime.current_version(root) == ("1.0.0" if rollback else "2.0.0")
     else:
         result = driver.install(root, plugin, payload=plugin, uv=tmp_path / "unused", base_python=Path(sys.executable))
         assert result["runtime_version"] == "2.0.0"
@@ -2310,8 +2370,9 @@ def test_prepared_bootstrap_loads_actual_installer_without_source(tmp_path: Path
     bootstrap.mkdir()
     for name in (
         "runtime_launcher.py", "versioned_runtime.py", "versioned_runtime_leases.py",
-        "versioned_runtime_source.py", "versioned_runtime_construction.py",
-        "versioned_runtime_publication.py",
+        "versioned_runtime_source.py", "versioned_runtime_identity.py",
+        "versioned_runtime_fingerprint.py", "versioned_runtime_construction.py",
+        "versioned_runtime_publication.py", "versioned_runtime_cache.py", "daemon_instance_runtime.pyz",
     ):
         shutil.copyfile(frozen / "scripts" / name, bootstrap / name)
     monkeypatch.setattr(agent_worktrees, "__file__", str(package / "__init__.py"))
@@ -3495,8 +3556,9 @@ def test_legacy_installer_replaces_unsupported_predecessor_and_keeps_failures_tr
         release_dev_claim=claim, dev_owner=owner if claim is not None else None,
     )
     if activation_fails:
-        with pytest.raises(driver.InstallationRefused, match="rolled back"):
-            driver.settle_candidate(root, "2.0.0", **kwargs)
+        result = driver.settle_candidate(root, "2.0.0", **kwargs)
+        assert driver.install_driver.result_exit_code(result) == 1
+        assert "rolled back" in result["installation_refused"]["error"]
         assert driver.runtime.current_version(root) == "1.0.0"
     else:
         result = driver.settle_candidate(root, "2.0.0", **kwargs)
