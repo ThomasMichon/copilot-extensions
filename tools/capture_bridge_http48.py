@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable
 import json
 import math
 import os
@@ -12,6 +13,8 @@ from pathlib import Path
 import sys
 import tempfile
 import time
+from types import ModuleType
+from typing import Any, Protocol
 from unittest.mock import patch
 import xml.etree.ElementTree as ET
 
@@ -20,13 +23,22 @@ import bridge_http47_runtime as binding
 
 ROOT = Path(__file__).resolve().parents[1]
 
+ProbeRunner = Callable[[Path, dict[str, Any], dict[str, Any]], dict[str, Any]]
+
+
+class CaptureRunner(Protocol):
+    def __call__(
+        self, root: Path, commit: str, *, write: bool,
+    ) -> dict[str, bytes]: ...
+
 
 def run_probes(
-    root: Path, proof: dict, vector: dict, *,
-    evidence=evidence, expected_roles: frozenset[str] = frozenset(),
+    root: Path, proof: dict[str, Any], vector: dict[str, Any], *,
+    evidence: ModuleType = evidence, expected_roles: frozenset[str] = frozenset(),
     isolated_probes: frozenset[str] = frozenset(),
+    isolated_test_file: str | None = None,
     aggregate_timeout: float | None = None,
-) -> dict:
+) -> dict[str, Any]:
     from agent_procutil.owned_process import run_caller_owned
 
     parent = evidence.safe(root, ".test-venvs", directory=True)
@@ -36,6 +48,11 @@ def run_probes(
     label = f"HTTP-{evidence.GENERATION}"
     if not isolated_probes <= evidence.PROBES.keys():
         raise ValueError(f"{label} isolated probes escaped the declared portfolio")
+    if isolated_test_file is not None and (
+        not isolated_probes
+        or (Path("plugins/agent-bridge") / isolated_test_file).as_posix() not in proof
+    ):
+        raise ValueError(f"{label} isolated test source is not bound to its probes")
     groups = [
         group for group in (
             [name for name in evidence.PROBES if name in isolated_probes],
@@ -63,6 +80,11 @@ def run_probes(
             if remaining <= 0:
                 raise ValueError(f"{label} aggregate probe deadline expired")
             junit = directory / f"junit-{index}.xml"
+            test_file = (
+                isolated_test_file
+                if isolated_test_file is not None and set(group) <= isolated_probes
+                else Path(evidence.TEST).relative_to("plugins/agent-bridge").as_posix()
+            )
             print(f"{label} bounded probe group {index + 1}/{len(groups)}", flush=True)
             with patch.dict(os.environ, {
                 binding.REQUEST: str(request), binding.REQUEST_SHA: evidence.digest(payload),
@@ -70,7 +92,7 @@ def run_probes(
             }):
                 result = run_caller_owned([
                     sys.executable, str(root / "tools/run-plugin-tests.py"), "agent-bridge",
-                    "--test-file", Path(evidence.TEST).relative_to("plugins/agent-bridge").as_posix(),
+                    "--test-file", test_file,
                     "-k", " or ".join(group),
                     "--subsuite-timeout", str(remaining),
                     "--plugin-timeout", str(remaining),
@@ -101,7 +123,7 @@ def run_probes(
             raise ValueError(f"{label} ASGI observer scope changed")
         if report.is_symlink() or not report.is_file() or report.stat().st_nlink != 1:
             raise ValueError(f"{label} observation report is absent or aliased")
-        observed = json.loads(report.read_bytes())
+        observed: dict[str, Any] = json.loads(report.read_bytes())
         expected = {case: vector["expected"] for case in ("legacy", "namespaced")}
         if observed != expected:
             raise ValueError(f"{label} observations differ from independent expectations")
@@ -109,7 +131,8 @@ def run_probes(
 
 
 def capture(
-    root: Path, commit: str, *, write: bool = False, evidence=evidence, probe_runner=None,
+    root: Path, commit: str, *, write: bool = False, evidence: ModuleType = evidence,
+    probe_runner: ProbeRunner | None = None,
 ) -> dict[str, bytes]:
     if write:
         from agent_bridge_contract_publication import recover_pending_links
@@ -130,7 +153,7 @@ def capture(
         raise ValueError(f"HTTP-{evidence.GENERATION} source changed during capture")
     if evidence.history(root, snapshot.materialized, proposed) != history:
         raise ValueError(f"HTTP-{evidence.GENERATION} historical inputs changed during capture")
-    outputs = evidence.build_outputs(root, commit, snapshot, before, observed)
+    outputs: dict[str, bytes] = evidence.build_outputs(root, commit, snapshot, before, observed)
     if outputs != proposed:
         raise ValueError(f"HTTP-{evidence.GENERATION} capture plan changed after actual probes")
     evidence.validate_outputs(root, snapshot, outputs)
@@ -146,7 +169,9 @@ def capture(
     return outputs
 
 
-def main(*, evidence=evidence, capture_fn=None) -> None:
+def main(
+    *, evidence: ModuleType = evidence, capture_fn: CaptureRunner | None = None,
+) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source-commit", required=True)
     parser.add_argument("--write", action="store_true")

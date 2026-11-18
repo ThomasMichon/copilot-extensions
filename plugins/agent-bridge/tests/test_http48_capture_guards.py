@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 import copy
+from collections.abc import Iterator
 import json
 import os
 from pathlib import Path
 import re
+import shlex
+import subprocess
 import sys
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
+from typing import Any, cast
+import xml.etree.ElementTree as ET
 
 import pytest
 
@@ -29,9 +34,104 @@ from test_http47_capture_guards import (
 ROOT = Path(__file__).resolve().parents[3]
 historical_repository = old_guards.repository
 
+CaptureCase = tuple[ModuleType, ModuleType]
+
+
+@pytest.mark.parametrize("fault", [None, "skipped", "missing", "duplicate", "request"])
+def test_isolated_capture_collection_preserves_portfolio_and_aggregate_deadline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str | None,
+) -> None:
+    from agent_procutil import owned_process
+    import bridge_http47_runtime as binding
+
+    entry = tmp_path / "entry.py"
+    entry.write_bytes(b"")
+    spec = SimpleNamespace(
+        GENERATION=52, PROBES={"test_owner": 1, "test_remaining": 1},
+        INPUT="input.json", TEST="plugins/agent-bridge/tests/test_all.py",
+        encode=evidence.encode, digest=evidence.digest,
+        safe=lambda root, path, **kwargs: root / path,
+        installation=SimpleNamespace(ENTRY="entry.py", required_sources=lambda _: frozenset()),
+    )
+    proof = {
+        spec.INPUT: {"sha256": "input-digest"},
+        "plugins/agent-bridge/tests/test_isolated.py": {"sha256": "isolated-source"},
+    }
+    vector = {"expected": {"outcome": "observed"}}
+    expected = {name: vector["expected"] for name in ("legacy", "namespaced")}
+    clock = iter((10.0, 20.0, 40.0))
+    monkeypatch.setattr(capture, "time", SimpleNamespace(monotonic=lambda: next(clock)))
+    calls: list[list[str]] = []
+
+    def run(argv: list[str], **limits: Any) -> subprocess.CompletedProcess[str]:
+        index = len(calls)
+        calls.append(argv)
+        assert argv[argv.index("--test-file") + 1] == (
+            "tests/test_isolated.py" if index == 0 else "tests/test_all.py"
+        )
+        remaining = (230.0, 210.0)[index]
+        assert limits["timeout"] == remaining
+        for option in ("--subsuite-timeout", "--plugin-timeout"):
+            assert float(argv[argv.index(option) + 1]) == remaining
+        names = argv[argv.index("-k") + 1].split(" or ")
+        assert names == (["test_owner"] if index == 0 else ["test_remaining"])
+        request = Path(os.environ[binding.REQUEST])
+        payload = json.loads(request.read_bytes())
+        Path(payload["report"]).write_bytes(evidence.encode(expected))
+        suite = ET.Element("testsuite")
+        for name in names:
+            count = 0 if fault == "missing" and index == 0 else (
+                2 if fault == "duplicate" and index == 0 else 1
+            )
+            for _ in range(count):
+                case = ET.SubElement(suite, "testcase", name=name)
+                if fault == "skipped" and index == 0:
+                    ET.SubElement(case, "skipped")
+        junit = shlex.split(os.environ["PYTEST_ADDOPTS"])[0].split("=", 1)[1]
+        ET.ElementTree(suite).write(junit)
+        if fault == "request" and index == 0:
+            request.write_bytes(request.read_bytes() + b"\n")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    verified: list[dict[str, Any]] = []
+
+    def verify(*args: Any, **kwargs: Any) -> dict[str, list[str]]:
+        verified.append(kwargs)
+        assert kwargs["expected_observers"] == 2
+        return {"roles": ["observer"]}
+
+    monkeypatch.setattr(owned_process, "run_caller_owned", run)
+    monkeypatch.setattr(binding, "verify_interpreters", verify)
+    kwargs: dict[str, Any] = {
+        "evidence": spec, "isolated_probes": frozenset({"test_owner"}),
+        "isolated_test_file": "tests/test_isolated.py", "aggregate_timeout": 240,
+    }
+    if fault:
+        with pytest.raises(ValueError):
+            capture.run_probes(tmp_path, proof, vector, **kwargs)
+        assert not verified
+    else:
+        assert capture.run_probes(tmp_path, proof, vector, **kwargs) == expected
+        assert len(calls) == 2 and len(verified) == 1
+
+
+@pytest.mark.parametrize("isolated_probes", [frozenset(), frozenset({"test_owner"})])
+def test_isolated_capture_refuses_an_unbound_collection_source(
+    tmp_path: Path, isolated_probes: frozenset[str],
+) -> None:
+    spec = SimpleNamespace(
+        GENERATION=52, PROBES={"test_owner": 1},
+        safe=lambda root, path, **kwargs: root / path,
+    )
+    with pytest.raises(ValueError, match="isolated test source is not bound"):
+        capture.run_probes(
+            tmp_path, {}, {}, evidence=cast(ModuleType, spec), isolated_probes=isolated_probes,
+            isolated_test_file="tests/test_unbound.py",
+        )
+
 
 @pytest.fixture(params=["http48", "http49", "http50", "http51"])
-def capture_case(request):
+def capture_case(request: pytest.FixtureRequest) -> CaptureCase:
     return {
         "http48": (evidence, capture), "http49": (producer_evidence, producer_capture),
         "http50": (recovery_evidence, recovery_capture),
@@ -40,7 +140,9 @@ def capture_case(request):
 
 
 @pytest.fixture
-def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capture_case) -> tuple[Path, str]:
+def repository(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capture_case: CaptureCase,
+) -> Iterator[tuple[Path, str]]:
     evidence, _ = capture_case
     root = tmp_path / f"http{evidence.GENERATION}-source"
     original = evidence.previous.registry_codec.load(ROOT).materialized
@@ -106,12 +208,14 @@ def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capture_case) ->
         old_guards.remove_fixture(root)
 
 
-def expected(root: Path, evidence) -> dict:
+def expected(root: Path, evidence: ModuleType) -> dict[str, Any]:
     vector = json.loads((root / evidence.INPUT).read_bytes())
     return {case: vector["expected"] for case in ("legacy", "namespaced")}
 
 
-def planned(root: Path, commit: str, evidence) -> tuple[dict, dict, dict]:
+def planned(
+    root: Path, commit: str, evidence: ModuleType,
+) -> tuple[dict[str, Any], dict[str, bytes], dict[str, tuple[str, dict[str, Any]]]]:
     snapshot = evidence.baseline(root, commit)
     proof = evidence.source_snapshot(root, commit, snapshot.materialized)
     outputs = evidence.build_outputs(root, commit, snapshot, proof, expected(root, evidence))
@@ -124,13 +228,15 @@ def planned(root: Path, commit: str, evidence) -> tuple[dict, dict, dict]:
 
 
 def test_http48_capture_write_and_no_write_preserve_the_source(
-    repository: tuple[Path, str], monkeypatch: pytest.MonkeyPatch, capture_case,
+    repository: tuple[Path, str], monkeypatch: pytest.MonkeyPatch, capture_case: CaptureCase,
 ) -> None:
     evidence, capture = capture_case
     root, commit = repository
-    calls = []
+    calls: list[tuple[Path, dict[str, Any]]] = []
 
-    def controlled_probe(source: Path, proof: dict, vector: dict) -> dict:
+    def controlled_probe(
+        source: Path, proof: dict[str, Any], vector: dict[str, Any],
+    ) -> dict[str, Any]:
         calls.append((source, proof))
         return expected(root, evidence)  # Publication-only seam, never an execution claim.
 
@@ -152,7 +258,7 @@ def test_http48_capture_write_and_no_write_preserve_the_source(
 
 
 def test_http48_capture_refreshes_only_registered_current_outputs(
-    repository: tuple[Path, str], monkeypatch: pytest.MonkeyPatch, capture_case,
+    repository: tuple[Path, str], monkeypatch: pytest.MonkeyPatch, capture_case: CaptureCase,
 ) -> None:
     evidence, capture = capture_case
     root, commit = repository
@@ -173,7 +279,7 @@ def test_http48_capture_refreshes_only_registered_current_outputs(
 
 
 def test_http48_capture_ignores_observation_object_key_order(
-    repository: tuple[Path, str], monkeypatch: pytest.MonkeyPatch, capture_case,
+    repository: tuple[Path, str], monkeypatch: pytest.MonkeyPatch, capture_case: CaptureCase,
 ) -> None:
     evidence, capture = capture_case
     root, commit = repository
@@ -193,7 +299,8 @@ def test_http48_capture_ignores_observation_object_key_order(
 
 @pytest.mark.parametrize("fault", ["dirty-output", "foreign-owner", "dirty-registry"])
 def test_http48_capture_refresh_refuses_unowned_changes(
-    repository: tuple[Path, str], monkeypatch: pytest.MonkeyPatch, fault: str, capture_case,
+    repository: tuple[Path, str], monkeypatch: pytest.MonkeyPatch,
+    fault: str, capture_case: CaptureCase,
 ) -> None:
     evidence, capture = capture_case
     root, commit = repository
@@ -227,7 +334,7 @@ def test_http48_capture_refresh_refuses_unowned_changes(
     "wrong-generation", "wrong-child-family",
 ])
 def test_http48_capture_rejects_self_consistent_evidence_tampering(
-    repository: tuple[Path, str], fault: str, capture_case,
+    repository: tuple[Path, str], fault: str, capture_case: CaptureCase,
 ) -> None:
     evidence, _ = capture_case
     root, commit = repository
@@ -276,7 +383,7 @@ def test_http48_capture_rejects_self_consistent_evidence_tampering(
 
 
 def test_http48_capture_unexpected_observation_writes_nothing(
-    repository: tuple[Path, str], monkeypatch: pytest.MonkeyPatch, capture_case,
+    repository: tuple[Path, str], monkeypatch: pytest.MonkeyPatch, capture_case: CaptureCase,
 ) -> None:
     evidence, capture = capture_case
     root, commit = repository
@@ -295,7 +402,8 @@ def test_http48_capture_unexpected_observation_writes_nothing(
     evidence.installation.INSTALLATION_HELPER_PREFIX + "_installation_context_resolution.py",
 ])
 def test_http48_capture_dirty_source_refuses_before_probes(
-    repository: tuple[Path, str], monkeypatch: pytest.MonkeyPatch, source: str, capture_case,
+    repository: tuple[Path, str], monkeypatch: pytest.MonkeyPatch,
+    source: str, capture_case: CaptureCase,
 ) -> None:
     evidence, capture = capture_case
     root, commit = repository
@@ -311,7 +419,7 @@ def test_http48_capture_dirty_source_refuses_before_probes(
     "none", "entry-bytes", "fragment-bytes", "forged-code", "foreign-entry", "foreign-suffix",
 ])
 def test_http48_actual_installation_helper_execution_is_source_bound(
-    repository: tuple[Path, str], fault: str, capture_case,
+    repository: tuple[Path, str], fault: str, capture_case: CaptureCase,
 ) -> None:
     evidence, _ = capture_case
     from agent_procutil.owned_process import run_caller_owned
@@ -382,7 +490,7 @@ def test_http48_actual_installation_helper_execution_is_source_bound(
 
 
 @pytest.mark.parametrize("reverse", [False, True])
-def test_http48_source_locator_preserves_specificity_ties_and_boundaries(reverse):
+def test_http48_source_locator_preserves_specificity_ties_and_boundaries(reverse: bool) -> None:
     import bridge_http47_runtime as runtime
 
     paths = [
@@ -391,7 +499,7 @@ def test_http48_source_locator_preserves_specificity_ties_and_boundaries(reverse
         "tools/pkg/client.py",
         "tools/pkg/config.json",
     ]
-    proof = dict.fromkeys(reversed(paths) if reverse else paths, {})
+    proof: dict[str, Any] = dict.fromkeys(reversed(paths) if reverse else paths, {})
     locate = runtime._source_locator(proof)
     for filename, expected in (
         ("/snapshot/tools/pkg/client.py", "tools/pkg/client.py"),
@@ -407,13 +515,13 @@ def test_http48_source_locator_preserves_specificity_ties_and_boundaries(reverse
         assert runtime.relative_source(filename, proof) == expected
 
 
-def test_http48_source_locator_does_not_rescan_the_bound_inventory():
+def test_http48_source_locator_does_not_rescan_the_bound_inventory() -> None:
     import bridge_http47_runtime as runtime
 
-    class Proof(dict):
+    class Proof(dict[str, Any]):
         bound = False
 
-        def __iter__(self):
+        def __iter__(self) -> Iterator[str]:
             assert not self.bound, "an admitted source lookup rescanned the full inventory"
             return super().__iter__()
 
@@ -446,10 +554,13 @@ def test_http48_observer_scope_does_not_relax_the_http47_child_portfolio(tmp_pat
 
 
 @pytest.mark.parametrize("fault", [None, "missing-entry", "missing-observer", "extra-observer"])
-def test_partitioned_capture_requires_every_declared_observer_entry(tmp_path, fault):
+def test_partitioned_capture_requires_every_declared_observer_entry(
+    tmp_path: Path, fault: str | None,
+) -> None:
     from bridge_http47_runtime import verify_interpreters
 
-    count = {"missing-observer": 1, "extra-observer": 3}.get(fault, 2)
+    counts: dict[str | None, int] = {"missing-observer": 1, "extra-observer": 3}
+    count = counts.get(fault, 2)
     for pid in range(1, count + 1):
         events = [{"kind": "start", "pid": pid, "parent": 0, "observer": True}]
         if not (fault == "missing-entry" and pid == 2):
@@ -470,7 +581,7 @@ def test_partitioned_capture_requires_every_declared_observer_entry(tmp_path, fa
 
 @pytest.mark.parametrize("future_generation", [48, 49, 50, 51])
 def test_http47_historical_current_hashes_are_not_future_source_inputs(
-    historical_repository: tuple[Path, str], monkeypatch: pytest.MonkeyPatch, future_generation,
+    historical_repository: tuple[Path, str], monkeypatch: pytest.MonkeyPatch, future_generation: int,
 ) -> None:
     from capture_bridge_http47 import expected_input
 
@@ -491,7 +602,7 @@ def test_http47_historical_current_hashes_are_not_future_source_inputs(
     historical.validate_closure(root, packet, metadata)
     original_git = evidence.previous.git_evidence.git
 
-    def unavailable_tree(*args: str):
+    def unavailable_tree(*args: str) -> Any:
         if args[:2] == ("ls-tree", "-r"):
             return SimpleNamespace(returncode=1)
         return original_git(*args)

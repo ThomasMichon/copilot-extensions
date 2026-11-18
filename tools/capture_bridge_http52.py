@@ -18,7 +18,7 @@ class ProbeRunner(Protocol):
     def __call__(
         self, root: Path, proof: dict[str, object], vector: dict[str, object], *,
         evidence: ModuleType, expected_roles: frozenset[str],
-        isolated_probes: frozenset[str], aggregate_timeout: float,
+        isolated_probes: frozenset[str], isolated_test_file: str, aggregate_timeout: float,
     ) -> dict[str, object]: ...
 
 
@@ -38,6 +38,7 @@ def run_probes(root: Path, proof: dict[str, object], vector: dict[str, object]) 
                 "test_retained_acquisition_and_later_lineage_use_actual_owner_processes",
                 "test_keyed_creation_uses_actual_retained_serializer_and_preserves_claim",
             }),
+            isolated_test_file="tests/test_http52_owner_capture.py",
             aggregate_timeout=1200 if os.name == "nt" else 240,
         )
 
