@@ -164,6 +164,13 @@ capability advertisement, transport, wake/ACK implementation or enrollment.
 Compatible reader/lifecycle transition, typed client selection and actual
 consumer recovery remain part of the serial acceptance below.
 
+The [explicit expected-consumer SDK client](../../../services/pr/LOCAL.md#explicit-expected-consumer-client)
+supplies the next local selection prerequisite. It checks the complete
+configured repository/consumer against running support and carries the consumer
+expectation to the existing operation's admission boundary. It does not prepare
+a native task, add a Dispatch import/dependency or activate a feed consumer.
+The native adapter, historical-reader transition and recovery exits stay open.
+
 ## Serial plan and validation
 
 - [x] Review this owner/contract refinement before new protocol or storage code

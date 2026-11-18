@@ -188,6 +188,51 @@ fall back to one-shot watch, a state-file read or an ambient account.
 The separately selected [reviewer-action capability](REVIEWER.md) adds
 `next-actions` and finite local SSE subscriptions under this same envelope.
 
+### Explicit expected-consumer client
+
+The optional programmatic `BoundRepositoryClient` reuses that Unix transport
+while selecting the complete expected repository and OS-admitted consumer from
+trusted configuration, not the first capability response:
+
+```python
+from pathlib import Path
+from agent_pull_requests.repository_contract import RepositoryIdentity
+from agent_pull_requests_service.bound_local_client import BoundRepositoryClient
+
+client = BoundRepositoryClient(
+    Path("/data/pr-cache/local.sock"), "example-github",
+    identity=RepositoryIdentity(
+        "installation-a", "github", "https://github.com", "account-a", "owner/repository",
+    ),
+    consumer="local-reader",
+)
+support = client.negotiate()
+```
+
+Negotiation reads the executing server's existing capabilities route. It
+requires the exact repository identity/key, namespace, target and
+`consumer_binding` with protocol
+`agent-pull-requests.repository-consumer/v1` and the configured consumer.
+Missing or incompatible support refuses; it does not select an older wire form,
+register a subscription, prepare a task or start anything. Callers still check
+the selected reviewer/stream support before relying on those optional features.
+The first request also negotiates automatically if no selection exists.
+
+The client sends `expected_consumer` beside the ordinary envelope fields on
+every operation, including SSE. The server compares it with the consumer
+already derived from the transport principal and target, before registration,
+delivery or ACK effects. It is an expectation, never caller identity or
+authority. A changed OS binding returns `repository_consumer_mismatch`;
+original request/registration identities remain with their existing owner.
+Changing this client object's selected transport or repository metadata refuses
+instead of retargeting a retained request.
+
+Ordinary clients still send their original four-field envelopes and retain
+their existing semantics. The optional assertion is advertised/enforced only
+for this repository profile, not silently added to filtered or watch profiles.
+No CLI selector, Dispatch dependency, consumer factory or operational enrollment
+is introduced. Linux remains the supported private local transport.
+
 Source limits are eight admitted requests/connections, 8 KiB headers, 32 KiB
 request bodies, 1 MiB selected responses, query/event pages of 1..16 and
 subscription TTL 1..86,400 seconds.
