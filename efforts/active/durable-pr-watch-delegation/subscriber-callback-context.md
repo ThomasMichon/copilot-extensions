@@ -226,9 +226,10 @@ The focused validation matrix must include:
   recovery, retaining the existing atomic persistence owner and no duplicate
   event or legacy replay.
 - Real child cwd, missing/removed directory, callback timeout and descendant
-  cleanup through existing contained Windows/Linux lanes. Use focused smoke
-  cases in required CI and existing full lanes for expensive process cases;
-  no new fleet-wide or hosted-workflow prerequisite.
+  cleanup through existing opt-in contained Windows/Linux process lanes,
+  including any focused smoke subset. Required PR/promotion CI stays unit-only
+  with coverage and no real-child/process smoke fallback; no new fleet-wide
+  or hosted-workflow prerequisite.
 
 No live forge request is necessary to test this local callback contract.
 Use temporary test-owned roots and synthetic snapshots. This proposal grants
