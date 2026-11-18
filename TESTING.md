@@ -2060,6 +2060,9 @@ coverage. Local helper/ordering controls and a packaged-API refusal probe do
 not substitute for their actual native outcomes.
 
 Only those normal-setup jobs select `--ephemeral-native-ssh-setup`. Admission
+keeps Source preparation in the ordinary runner-owned private scratch root;
+it does not assume shared `RUNNER_TEMP` ancestors satisfy Source ownership.
+The separately admitted native lifecycle still
 requires an explicitly selected Fleet lane on a GitHub-hosted disposable runner,
 with its owned sandbox beneath `RUNNER_TEMP`; ordinary hosts, self-hosted
 runners and nested contained callers refuse before preparation. The native

@@ -1948,7 +1948,7 @@ jobs:
           environment_root.mkdir(parents=True, exist_ok=True)
           lease = runner["acquire"](0, environment_root)
           temporary = runner["TestSandbox"](
-              prefix=runner["run_prefix"]("ssh-cohort"), dir=Path(os.environ["RUNNER_TEMP"]),
+              prefix=runner["run_prefix"]("ssh-cohort"), dir=runner["runs_root"](root),
           )
           sandbox = Path(temporary.name)
           try:

@@ -8,6 +8,7 @@ import importlib.util
 import json
 import os
 import re
+import runpy
 import shlex
 import shutil
 import subprocess
@@ -464,6 +465,44 @@ def test_gateway_native_groups_preserve_the_complete_disjoint_selection(platform
         "test_continuity_bootstrap.py::"
         "test_provider_caller_does_not_recreate_a_concurrently_removed_identity"
     ) in groups[2]
+
+
+@pytest.mark.parametrize("platform", ["linux", "windows"])
+def test_gateway_native_groups_prepare_under_owned_scratch_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, platform: str,
+) -> None:
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-acceptance.yml").read_text(),
+    )
+    steps = workflow["jobs"]["gateway-normal-setup-" + platform]["steps"]
+    script = next(
+        step["run"] for step in steps if step.get("name") == "Normal Manager and engine SSH setup"
+    )
+    private = tmp_path / "private"
+    private.mkdir()
+    observed: list[Path] = []
+
+    class Allocated(Exception):
+        pass
+
+    def sandbox(*, prefix: str, dir: Path) -> NoReturn:
+        observed.append(dir)
+        raise Allocated
+
+    runner = {
+        "default_python": lambda _: tmp_path / "env/Scripts/python.exe",
+        "ordinary_cache_root": lambda _: tmp_path / "cache",
+        "runs_root": lambda _: private,
+        "acquire": lambda *_: None,
+        "run_prefix": lambda _: "c-",
+        "TestSandbox": sandbox,
+    }
+    monkeypatch.setattr(runpy, "run_path", lambda _: runner)
+    monkeypatch.setattr(sys, "path", list(sys.path))
+    monkeypatch.setenv("RUNNER_TEMP", str(tmp_path / "shared-runner-temp"))
+    with pytest.raises(Allocated):
+        exec(compile(script, "normal-source-preparation", "exec"), {})
+    assert observed == [private]
 
 
 @pytest.mark.parametrize(
