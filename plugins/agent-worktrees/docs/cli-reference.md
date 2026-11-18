@@ -1109,7 +1109,7 @@ stamps per branch are kept. Recover a bad rewrite with
 `git for-each-ref refs/agent-worktrees/backup/<branch>/` and a normal branch
 reset to the retained commit. A backup write failure refuses the rewrite.
 
-### Explicit operator recovery
+### Owning-worktree PR history recovery
 
 Prefer normal `push-changes` or `git sync` from the source-owning worktree's CWD.
 Do not request operator approval merely because publication acknowledgement or
@@ -1120,24 +1120,28 @@ the existing `push-changes --rewrite-pr` ownership checks; the host's explicit
 command confirms that intent without a separate operator recovery ceremony.
 When that context or ordinary
 ownership/lineage proof is unavailable, select the
-recovery worktree explicitly with its project configuration and request a preview:
+recovery worktree explicitly with its project configuration and run recovery:
 
 ```text
 agent-worktrees push-changes <recovery-worktree-id> --config <project-config> --break-glass-reason "<reason>" --json
 ```
 
-This first call refuses with exit 2 and an exact PR/provider/repository/head-ref,
-destination fingerprint, full source commit and expected remote commit preview.
-The saved head remains separate from the current head agreed by the provider
-and remote ref; disagreement or an unreadable/deleted ref refuses even a preview.
-The preview also binds the original publication authority, proposed action and
-any validated recovery evidence. It changes no Git refs, tracking data, audit
-files or remote head. The reason and preview
-fingerprint are not operator authentication or permission. Obtain real operator
-sign-off for this specific PR and operation before repeating the same call with
-`--confirm-break-glass <preview-fingerprint>`. Never add confirmation automatically
-after a guard refusal. Changed source, reason, destination, saved publication,
-expected head, action or evidence requires a fresh preview and sign-off.
+Recovery of the author's own existing numbered PR from its owning worktree is
+line-of-business work and needs no operator approval. The command computes an
+exact PR/provider/repository/head-ref, destination fingerprint, full source
+commit and expected remote commit preview and binds it automatically. The saved
+head remains separate from the current head agreed by the provider and remote
+ref; disagreement or an unreadable/deleted ref refuses before any effect. The
+preview also binds the original publication authority, proposed action and any
+validated recovery evidence, and is revalidated immediately before taking
+effect. Add `--dry-run` to print the bound operation (PR, source commit, saved
+head, expected head, evidence) and its preview fingerprint without changing Git
+refs, tracking data, audit files or the remote head; with `--json` the same
+structured preview is returned as `recovery_preview`.
+A caller may pin that preview with `--confirm-break-glass <preview-fingerprint>`;
+if the source, reason, destination, saved publication, expected head, action or
+evidence changed since, the pinned call refuses with exit 2 and the new preview.
+Re-preview and retry rather than reusing the stale fingerprint.
 
 If an existing completed backed-sync checkpoint proves that its exact result
 is already the agreed published head, the preview prefers `settle-publication`:
@@ -1147,12 +1151,12 @@ new base; settlement records that base and its corresponding publication patch I
 Equal source/remote commits
 or matching patches alone do not establish this proof. Otherwise `rewrite`
 publishes the pinned committed source as-is with the **previewed live head** as
-its exact CAS lease, not a silently refreshed saved lease. Both actions require
-confirmation and revalidate the plan immediately before taking effect.
+its exact CAS lease, not a silently refreshed saved lease. Both actions bind the
+preview and revalidate the plan immediately before taking effect.
 Malformed, unreadable or dangling historical checkpoints explicitly mark
 settlement evidence `unusable` and disable settlement, not the rewrite preview.
 Invalid ref arguments and failed optional Git probes receive the same treatment.
-The imperfect evidence snapshot is confirmation-bound and preserved unchanged;
+The imperfect evidence snapshot is preview-bound and preserved unchanged;
 it is neither repaired nor accepted as authority.
 Outside the routine backed reconciliation above, ordinary `push-changes` and
 `--rewrite-pr` retain their saved-lease refusal.
@@ -1169,8 +1173,9 @@ repositories, non-default ports and plaintext destinations remain distinct;
 this source observation does not change the saved publication destination fence.
 
 The selected worktree's Git metadata contains private
-`agent-worktrees-pr-break-glass-<id>.json` audits with the reason, confirmed
-operation, original saved publication evidence, retained refs and observed
+`agent-worktrees-pr-break-glass-<id>.json` audits with the reason, bound
+operation, authorization basis, confirmation binding (`auto-bound` or
+`explicit`), original saved publication evidence, retained refs and observed
 invoker/session context. Unknown attribution
 stays unknown; this is not authenticated identity. Private rationale and invoker
 details are not posted to the provider. Audit `succeeded` records successful

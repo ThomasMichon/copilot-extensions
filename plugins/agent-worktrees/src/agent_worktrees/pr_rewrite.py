@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 from dataclasses import replace
@@ -78,7 +79,7 @@ def _validate(worktree_id: str, config: Config, record: tracking.WorktreeRecord 
     if not re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", pr.head_sha):
         raise ValueError("--rewrite-pr requires the previously recorded full expected-head SHA.")
     if recovery and (pr.number is None or not pr.repo):
-        raise ValueError("Break-glass recovery requires an existing numbered PR, never new-PR creation.")
+        raise ValueError("PR recovery requires an existing numbered PR, never new-PR creation.")
     if any(p is not pr and p.branch == pr.branch and not tracking._pr_is_terminal(p)
            and not (recovery and (p.number, p.repo, p.provider) == (pr.number, pr.repo, pr.provider))
            for p in record.prs):
@@ -97,7 +98,7 @@ def push_changes(worktree_id: str, config: Config, record: tracking.WorktreeReco
                  *, dry_run: bool = False, recovery_reason: str | None = None,
                  confirmation: str | None = None) -> bool:
     """Publish as-is; never rebase, squash, or refresh the saved lease."""
-    from .finalize import FinalizeLock
+    from .finalize_lock import FinalizeLock
 
     repo = config.default_repo
     cwd = record.worktree_path if record else str(Path(repo.worktree_root) / worktree_id)
@@ -125,8 +126,9 @@ def push_changes(worktree_id: str, config: Config, record: tracking.WorktreeReco
             # change which PR the request authorizes.
             path = cfg.tracking_dir(config.repo_name) / f"{worktree_id}.yaml"
             fresh = tracking.load_record(path) if path.exists() else None
-            if (record is None or fresh is None or record.active_pr() is None
-                    or not pr_publication_state.matches(fresh.active_pr(), record.active_pr())):
+            expected_pr = record.active_pr() if record is not None else None
+            if (fresh is None or expected_pr is None
+                    or not pr_publication_state.matches(fresh.active_pr(), expected_pr)):
                 raise ValueError("Tracked PR changed while preparing the rewrite; nothing was pushed.")
             recovery = recovery_reason is not None
             pr = _validate(worktree_id, config, fresh, cwd, recovery=recovery)
@@ -189,6 +191,11 @@ def push_changes(worktree_id: str, config: Config, record: tracking.WorktreeReco
             if dry_run:
                 action = approved.operation.action if approved is not None else "rewrite"
                 print(f"[dry-run] Would {action} {target.remote}/{pr.branch} with exact lease {remote_tip}.")
+                if approved is not None:
+                    preview = approved.preview(target.remote)
+                    pr_break_glass.last_preview.set(preview)
+                    print(f"[dry-run] Recovery preview fingerprint: {approved.confirmation}")
+                    print(json.dumps(preview, sort_keys=True, indent=2))
                 return True
             if approved is not None:
                 git_dir = Path(git_ops.git(
@@ -211,7 +218,8 @@ def push_changes(worktree_id: str, config: Config, record: tracking.WorktreeReco
                     worktree_id, fresh.branch, head_sha, replace(pr, head_sha=remote_tip), cwd=cwd,
                 )
                 audit.retained(point.local_ref, point.published_ref)
-                output.warn("Operator-confirmed recovery overrides historical ownership proof; normal merge gates remain.")
+                output.warn("Owning-worktree recovery overrides historical ownership proof; "
+                            "exact-lease and normal merge gates remain.")
                 print(f"Recovery commits retained: source={point.local_ref}, published={point.published_ref}")
                 _validate(worktree_id, config, fresh, cwd, recovery=True)
                 pr_recovery_plan.revalidate(
@@ -266,7 +274,7 @@ def push_changes(worktree_id: str, config: Config, record: tracking.WorktreeReco
             activity.log_event("pr_history_rewritten", worktree_id=worktree_id, branch=pr.branch)
             if audit is not None:
                 audit.finish("succeeded")
-            output.ok(f"Explicitly rewrote PR head '{pr.branch}' using its exact confirmed lease."
+            output.ok(f"Explicitly rewrote PR head '{pr.branch}' using its exact bound lease."
                       if recovery else f"Explicitly rewrote PR head '{pr.branch}' using its exact recorded lease.")
             return True
     except pr_break_glass.ConfirmationRequired:
