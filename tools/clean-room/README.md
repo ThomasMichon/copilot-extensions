@@ -228,7 +228,8 @@ Linux jobs using a cached immutable image. It renders a single bounded
 container command with no pull/build fallback, a non-root identity, no network,
 no capabilities or privilege escalation, read-only root and explicit read-only
 inputs. Only the private results directory and an optional separate declared
-cache are writable host binds. Test HOME and temporary files remain below the
+cache are writable host binds; both must be outside the repository. Narrow
+read-only repository inputs remain supported. Test HOME and temporary files remain below the
 results mount; no host environment or credentials are forwarded.
 
 This is **not a runnable lane or an execution receipt**. It neither creates

@@ -161,6 +161,8 @@ def plan_job(
         Path("/dev"),
     )
     _source(results, forbidden=forbidden)
+    if _overlap(results, repository):
+        raise PlanRefusal("writable root overlaps the repository")
     if not results.is_dir() or stat.S_IMODE(results.stat().st_mode) != 0o700:
         raise PlanRefusal("results must be an existing private directory")
     for name in ("owned-resources.json", "cr-report.json", "runner.log", "home", "tmp"):
@@ -188,6 +190,8 @@ def plan_job(
         )
     if job.cache is not None:
         _source(job.cache, forbidden=forbidden)
+        if _overlap(job.cache, repository):
+            raise PlanRefusal("writable root overlaps the repository")
         if (
             not job.cache.is_dir()
             or _overlap(job.cache, results)

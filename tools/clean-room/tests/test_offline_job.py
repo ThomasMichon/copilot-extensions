@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import importlib.util
 import sys
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -18,8 +19,32 @@ sys.modules[SPEC.name] = owner
 SPEC.loader.exec_module(owner)
 
 
+@dataclass(frozen=True)
+class PlanRequest:
+    job: Any
+    results: Path
+    home: Path
+    repository: Path
+
+    def __call__(
+        self,
+        selected: Any = None,
+        *,
+        results: Path | None = None,
+        now_epoch: float = 1000.0,
+    ) -> Any:
+        return owner.plan_job(
+            selected or self.job,
+            results=self.results if results is None else results,
+            host_home=self.home,
+            repository=self.repository,
+            deadline_epoch=1240,
+            now_epoch=now_epoch,
+        )
+
+
 @pytest.fixture
-def request_plan(tmp_path):
+def request_plan(tmp_path: Path) -> PlanRequest:
     home = tmp_path / "home"
     repository = tmp_path / "repository"
     results = tmp_path / "results"
@@ -40,29 +65,12 @@ def request_plan(tmp_path):
         cache=cache,
     )
 
-    def plan(selected=None, **changes):
-        return owner.plan_job(
-            selected or job,
-            **{
-                "results": results,
-                "host_home": home,
-                "repository": repository,
-                "deadline_epoch": 1240,
-                "now_epoch": 1000.0,
-                **changes,
-            },
-        )
-
-    plan.job = job
-    plan.results = results
-    plan.home = home
-    plan.repository = repository
-    return plan
+    return PlanRequest(job, results, home, repository)
 
 
 def test_plan_has_no_fallback_helpers_or_inherited_host_environment(
-    request_plan, monkeypatch
-):
+    request_plan: PlanRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("HOME", "/private-home")
     monkeypatch.setenv("PATH", "/private-tools")
     monkeypatch.setenv("COPILOT_GITHUB_TOKEN", "synthetic-unforwarded-value")
@@ -117,18 +125,24 @@ def test_plan_has_no_fallback_helpers_or_inherited_host_environment(
         {"command": ("/bin/sh", "bad\0argument")},
     ],
 )
-def test_bad_request_refuses_before_plan(request_plan, changes):
+def test_bad_request_refuses_before_plan(
+    request_plan: PlanRequest, changes: dict[str, Any]
+) -> None:
     with pytest.raises(owner.PlanRefusal):
         request_plan(replace(request_plan.job, **changes))
 
 
 @pytest.mark.parametrize("clock", [999.0, 1210.0, float("nan"), float("inf")])
-def test_deadline_cannot_extend_or_consume_cleanup_reserve(request_plan, clock):
+def test_deadline_cannot_extend_or_consume_cleanup_reserve(
+    request_plan: PlanRequest, clock: float
+) -> None:
     with pytest.raises(owner.PlanRefusal, match="deadline"):
         request_plan(now_epoch=clock)
 
 
-def test_refuse_broad_linked_overlapping_mounts(request_plan, tmp_path):
+def test_refuse_broad_linked_overlapping_mounts(
+    request_plan: PlanRequest, tmp_path: Path
+) -> None:
     for source in (
         Path("/"),
         request_plan.home,
@@ -154,7 +168,7 @@ def test_refuse_broad_linked_overlapping_mounts(request_plan, tmp_path):
         request_plan(replace(request_plan.job, cache=request_plan.job.inputs[0].source))
 
 
-def test_duplicate_name_and_dangling_result_refuse(request_plan):
+def test_duplicate_name_and_dangling_result_refuse(request_plan: PlanRequest) -> None:
     with pytest.raises(owner.PlanRefusal, match="distinct"):
         request_plan(replace(request_plan.job, inputs=request_plan.job.inputs * 2))
     (request_plan.results / "owned-resources.json").symlink_to("missing")
@@ -162,7 +176,9 @@ def test_duplicate_name_and_dangling_result_refuse(request_plan):
         request_plan()
 
 
-def test_partition_counts_host_and_container_instead_of_granting_both_full_budget():
+def test_partition_counts_host_and_container_instead_of_granting_both_full_budget() -> (
+    None
+):
     aggregate = owner.Limits(1024**3, 1000, 256)
     host = owner.Limits(128 * 1024**2, 125, 32)
     child = owner.Limits(896 * 1024**2, 875, 224)
@@ -174,3 +190,30 @@ def test_partition_counts_host_and_container_instead_of_granting_both_full_budge
     ):
         with pytest.raises(owner.PlanRefusal, match="aggregate"):
             owner.validate_partition(aggregate=aggregate, host=host, container=over)
+
+
+@pytest.mark.parametrize("role", ["results", "cache"])
+def test_writable_repository_descendants_are_rejected(
+    request_plan: PlanRequest, role: str
+) -> None:
+    inside = request_plan.repository / role
+    inside.mkdir(mode=0o700)
+    with pytest.raises(
+        owner.PlanRefusal, match="writable root overlaps the repository"
+    ):
+        if role == "results":
+            request_plan(results=inside)
+        else:
+            request_plan(replace(request_plan.job, cache=inside))
+    assert list(inside.iterdir()) == []
+
+
+def test_narrow_read_only_repository_input_stays_supported(
+    request_plan: PlanRequest,
+) -> None:
+    source = request_plan.repository / "scenario"
+    source.mkdir(mode=0o700)
+    plan = request_plan(
+        replace(request_plan.job, inputs=(owner.Input("scenario", source),))
+    )
+    assert f"type=bind,src={source},dst=/job/inputs/scenario,readonly" in plan.create
