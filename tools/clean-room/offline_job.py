@@ -229,7 +229,7 @@ def plan_job(
     docker = ("docker", "--host", f"unix://{docker_socket}")
     work_deadline = deadline_epoch - job.cleanup_seconds
     # Absolute expiry survives a slow create or loss of the host-side client.
-    expiry = 'left=$(( $1 - $(/bin/date +%s) )); [ "$left" -gt 0 ] && exec /bin/sleep "$left"'
+    expiry = 'left=$(( $1 - $(/bin/date +%s) - 1 )); [ "$left" -gt 0 ] && exec /bin/sleep "$left"'
     create = (
         *docker,
         "run",

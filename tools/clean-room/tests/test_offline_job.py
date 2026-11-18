@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 import sys
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -286,3 +287,27 @@ def test_docker_config_proxy_defaults_are_explicitly_overridden(
     for scheme in ("HTTP", "HTTPS", "FTP", "NO", "ALL"):
         assert variables[f"{scheme}_PROXY"] == ""
         assert variables[f"{scheme.lower()}_proxy"] == ""
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="POSIX expiry arithmetic")
+@pytest.mark.parametrize("fraction", [0.0, 0.5, 0.999])
+def test_integer_clock_quantization_does_not_spend_the_cleanup_reserve(
+    request_plan: PlanRequest, fraction: float
+) -> None:
+    plan = request_plan()
+    script = plan.create[-3]
+    clock = "$(/bin/date +%s)"
+    sleeper = 'exec /bin/sleep "$left"'
+    assert script.count(clock) == script.count(sleeper) == 1
+    script = script.replace(clock, "1000").replace(sleeper, 'printf "%s" "$left"')
+    deadline = int(plan.create[-1])
+    result = subprocess.run(
+        ("/bin/sh", "-c", script, "synthetic-expiry", str(deadline)),
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=5,
+    )
+    duration = int(result.stdout)
+    assert duration > 0
+    assert 1000 + fraction + duration <= deadline

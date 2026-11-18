@@ -181,6 +181,8 @@ class FakeDocker:
             self.executed = True
             if self.case == "exec-failure":
                 raise host.CommandFailure(7)
+            if self.case == "exec-overflow":
+                raise host.CaptureOverflow()
             return ""
         if operation[:2] == ("container", "stop"):
             assert operation[-1] == PHYSICAL
@@ -366,6 +368,7 @@ def test_unknown_mutation_or_unqualified_identity_never_passes_or_replays(
         "changed-after-exec",
         "expires",
         "exec-failure",
+        "exec-overflow",
         "oom-at-stop",
     ],
 )
@@ -382,6 +385,10 @@ def test_configuration_expiry_or_execution_failure_is_not_a_pass(
         )
     if case == "exec-failure":
         assert report.execution_exit_code == 7
+    if case == "exec-overflow":
+        assert not report.execution_completed
+        assert report.problem == "captured output reached its finite limit"
+        assert any(call[3:5] == ("container", "stop") for call in packet.docker.calls)
     assert sum(call[3] == "create" for call in packet.docker.calls) == 1
 
 
@@ -456,7 +463,7 @@ def test_cli_uses_private_config_clean_environment_and_bounded_retained_output(
     backend = host.Docker(control)
     command = ("docker", "--host", "unix:///var/run/docker.sock", "version")
     if oversized:
-        with pytest.raises(plans.PlanRefusal, match="exceeded"):
+        with pytest.raises(host.CaptureOverflow):
             backend.run(command, timeout=3)
     else:
         result = backend.run(command, timeout=3)
@@ -468,6 +475,7 @@ def test_cli_uses_private_config_clean_environment_and_bounded_retained_output(
         str(control / "client-config"),
     )
     assert options["timeout"] == 3 and options["check"] is False
+    assert options["cwd"] == control
     assert options["env"] == {
         "HOME": str(host.registered_home()),
         "PATH": os.defpath,
@@ -475,3 +483,61 @@ def test_cli_uses_private_config_clean_environment_and_bounded_retained_output(
     }
     assert (control / "control-0001.stdout").is_file()
     assert (control / "control-0001.stderr").is_file()
+
+
+@pytest.mark.parametrize("stream", ["stdout", "stderr"])
+@pytest.mark.parametrize("execution", [False, True])
+def test_real_helper_cannot_write_past_either_capture_limit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    stream: str,
+    execution: bool,
+) -> None:
+    control = tmp_path / "control"
+    control.mkdir(mode=0o700)
+    (control / "client-config").mkdir(mode=0o700)
+    helper = tmp_path / "noisy-helper"
+    helper.write_text(
+        f"#!{Path(sys.executable).resolve()}\n"
+        "import os, sys\n"
+        "descriptor = 1 if sys.argv[-1] == 'stdout' else 2\n"
+        "for _ in range(128):\n"
+        "    os.write(descriptor, b'x' * 16384)\n",
+        encoding="utf-8",
+    )
+    helper.chmod(0o700)
+    monkeypatch.setattr(host.shutil, "which", lambda *args, **kwargs: str(helper))
+    backend = host.Docker(control)
+    output = control / "runner.log" if execution else None
+    limit = host.EXECUTION_CAPTURE_BYTES if execution else host.CONTROL_CAPTURE_BYTES
+    with pytest.raises(host.CaptureOverflow):
+        backend.run(
+            ("docker", "--host", "unix:///var/run/docker.sock", "synthetic", stream),
+            timeout=5,
+            output=output,
+        )
+    stdout = output or control / "control-0001.stdout"
+    stderr = control / "control-0001.stderr"
+    assert stdout.stat().st_size <= limit
+    assert stderr.stat().st_size <= limit
+
+
+def test_threaded_cli_caller_refuses_before_subprocess_or_capture(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    control = tmp_path / "control"
+    control.mkdir(mode=0o700)
+    (control / "client-config").mkdir(mode=0o700)
+    monkeypatch.setattr(host.shutil, "which", lambda *args, **kwargs: "/usr/bin/docker")
+    monkeypatch.setattr(host.threading, "active_count", lambda: 2)
+
+    def refuse_process(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("threaded caller reached subprocess dispatch")
+
+    monkeypatch.setattr(host.subprocess, "run", refuse_process)
+    backend = host.Docker(control)
+    with pytest.raises(plans.PlanRefusal, match="single-threaded"):
+        backend.run(
+            ("docker", "--host", "unix:///var/run/docker.sock", "version"), timeout=3
+        )
+    assert sorted(path.name for path in control.iterdir()) == ["client-config"]

@@ -249,7 +249,7 @@ entire input tree. Existing scenario/devcontainer defaults are unchanged.
 
 `offline_job_run.run_job` composes that planner with the checkout-local
 `offline_job_host` and `offline_job_inspect` modules. This is a synchronous
-Python API, not an installed plugin, fleet controller or command-line mode.
+single-threaded Python API, not an installed plugin, fleet controller or command-line mode.
 Calling it explicitly can create/start/execute/stop a container; importing it
 does none of those things.
 
@@ -267,10 +267,18 @@ cleanup window must not be borrowed as additional execution time. Native
 admission and independent caller cleanup remain the caller's responsibility.
 The partition counts the owned driver and container, not the shared Docker
 daemon's infrastructure.
+The PID1 timer subtracts a safety second so integer clock rounding does not
+silently consume the captured cleanup reserve.
 
 Control records, bounded CLI captures and a fresh empty Docker client config
 stay outside every payload bind. The host's HOME/PATH/configuration are not
 modified, and CLI calls do not inherit credentials, contexts or proxy settings.
+Both capture streams have child-only kernel file-size limits while the CLI
+runs: 64 KiB per control stream and 1 MiB per execution stream, respecting
+tighter inherited limits. Reaching a cap refuses rather than silently accepting
+truncation, and execution overflow still uses the original exact-ID cleanup.
+The client has core dumps disabled and a private control cwd. These are capture
+bounds, not a quota for the payload's declared writable output/cache.
 Whole-home protection uses the registered account home rather than a redirected
 HOME. The owner refuses name collisions, absent cached images and implicit image
 volumes/health checks before creation. It captures and records a full physical ID

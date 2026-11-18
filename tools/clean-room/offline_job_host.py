@@ -9,8 +9,10 @@ import shutil
 import stat
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -18,6 +20,8 @@ from offline_job import Job, Limits, PlanRefusal
 
 PROC_CGROUP = Path("/proc/self/cgroup")
 CGROUP_ROOT = Path("/sys/fs/cgroup")
+CONTROL_CAPTURE_BYTES = 65536
+EXECUTION_CAPTURE_BYTES = 1024**2
 
 
 @dataclass(frozen=True)
@@ -38,6 +42,11 @@ class CommandFailure(PlanRefusal):
     def __init__(self, returncode: int) -> None:
         self.returncode = returncode
         super().__init__("Docker command failed; inspect retained command output")
+
+
+class CaptureOverflow(PlanRefusal):
+    def __init__(self) -> None:
+        super().__init__("captured output reached its finite limit")
 
 
 class Runner(Protocol):
@@ -67,6 +76,8 @@ def registered_home() -> Path:
 
 
 def private_directory(path: Path) -> None:
+    if sys.platform != "linux":
+        raise PlanRefusal("offline-job owner supports Linux only")
     if (
         path.anchor != "/"
         or ".." in path.parts
@@ -83,6 +94,8 @@ def private_directory(path: Path) -> None:
 
 
 def write_json(path: Path, value: dict[str, Any]) -> None:
+    if sys.platform != "linux":
+        raise PlanRefusal("offline-job owner supports Linux only")
     descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
     with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
         json.dump(value, stream, indent=2)
@@ -135,8 +148,21 @@ def admit_host(job: Job, expected: Limits) -> Limits:
     return Limits(memory, (quota * 1000 + period - 1) // period, processes)
 
 
+def _capture_limits(limit: int) -> None:
+    if sys.platform != "linux":
+        raise PlanRefusal("offline-job CLI owner supports Linux only")
+    import resource
+
+    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+    resource.setrlimit(resource.RLIMIT_FSIZE, (limit, limit))
+
+
 class Docker:
-    """Synchronous one-job harness I/O, never called from an event loop."""
+    """Single-threaded one-job harness I/O, never called from an event loop."""
+
+    executable: str
+    control: Path
+    sequence: int
 
     def __init__(self, control: Path) -> None:
         if sys.platform != "linux":
@@ -156,6 +182,14 @@ class Docker:
         timeout: float,
         output: Path | None = None,
     ) -> str:
+        if sys.platform != "linux":
+            raise PlanRefusal("offline-job CLI owner supports Linux only")
+        if threading.active_count() != 1:
+            raise PlanRefusal(
+                "capture-limited CLI dispatch requires a single-threaded caller"
+            )
+        import resource
+
         if (
             arguments[:2] != ("docker", "--host")
             or len(arguments) < 3
@@ -164,6 +198,16 @@ class Docker:
             or timeout <= 0
         ):
             raise PlanRefusal("Docker invocation lacks the explicit local binding")
+        requested = CONTROL_CAPTURE_BYTES if output is None else EXECUTION_CAPTURE_BYTES
+        inherited = resource.getrlimit(resource.RLIMIT_FSIZE)
+        limit = min(
+            [
+                requested,
+                *(value for value in inherited if value != resource.RLIM_INFINITY),
+            ]
+        )
+        if limit <= 0:
+            raise PlanRefusal("caller file-size limit prevents retained capture")
         self.sequence += 1
         stdout = output or self.control / f"control-{self.sequence:04d}.stdout"
         stderr = self.control / f"control-{self.sequence:04d}.stderr"
@@ -184,12 +228,16 @@ class Docker:
                     stderr=err,
                     timeout=timeout,
                     check=False,
+                    cwd=self.control,
                     env={
                         "HOME": str(registered_home()),
                         "PATH": os.defpath,
                         "LANG": "C.UTF-8",
                     },
+                    preexec_fn=partial(_capture_limits, limit),
                 )
+        if stdout.stat().st_size >= limit or stderr.stat().st_size >= limit:
+            raise CaptureOverflow()
         if result.returncode:
             raise CommandFailure(result.returncode)
         return read_limited(stdout) if output is None else ""
