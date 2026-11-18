@@ -2062,6 +2062,11 @@ The engine application installer runs through the separately materialized
 original payload owner's declared command-binding lifecycle entry, with the
 selected Source pin and fixture repository context. Prepared application Source
 is never substituted as its own command owner.
+Direct Git Sources without Main composition use the existing
+`install_source.py --install-application` receiver; fixture code must not invent
+Main metadata to satisfy a different update-planner contract. Source preparation
+materializes the four declared cohort consumers and their required closures,
+not unrelated plugins; all five prepared profiles and native assertions remain.
 
 Only those normal-setup jobs select `--ephemeral-native-ssh-setup`. Admission
 keeps Source preparation in the ordinary runner-owned private scratch root;

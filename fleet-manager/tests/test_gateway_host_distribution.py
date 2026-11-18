@@ -18,7 +18,7 @@ import subprocess
 import sys
 import time
 import zipfile
-from typing import Any, Protocol, cast
+from typing import Any, NoReturn, Protocol, cast
 
 from packaging.markers import default_environment
 from packaging.requirements import Requirement
@@ -259,6 +259,105 @@ def test_cohort_native_workflow_retains_only_valid_selected_source(
             [(["git", "fetch", "--no-tags", "--depth=1", "origin", selected], True, 30), (probe, True, 10)]
             if missing else []
         )]
+
+
+def test_cohort_composition_selects_every_declared_consumer_without_unrelated_plugins(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import repository_ssh_cohort_fixture as fixture
+
+    monkeypatch.syspath_prepend(str(PROJECT.parent / "tools"))
+    import local_install_source as sources
+
+    prepared = tmp_path / "prepared"
+    for component in ("agent-worktrees", "worktree-manager", "fleet-manager"):
+        python = prepared / component / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+        python.parent.mkdir(parents=True)
+        python.write_bytes(b"fixture executable is never launched")
+    monkeypatch.setenv("COPILOT_EXTENSIONS_TEST_VENV_ROOT", str(prepared))
+    monkeypatch.setattr(shutil, "which", lambda _name: sys.executable)
+
+    def run(command: list[str], **_options: Any) -> subprocess.CompletedProcess[str]:
+        output = "" if command[0] == "git" else json.dumps([str(tmp_path / "site")])
+        return subprocess.CompletedProcess(command, 0, stdout=output, stderr="")
+
+    monkeypatch.setattr(fixture, "run", run)
+    observed: list[tuple[str, str | None, object]] = []
+
+    class Composed(Exception):
+        pass
+
+    def compose(
+        repository: Path, commit: str, main: str | None, output: Path, **options: Any,
+    ) -> NoReturn:
+        observed.append((commit, main, options.get("projects")))
+        raise Composed
+
+    def feeds(*, certificate: Path | None = None) -> NoReturn:
+        pytest.fail("Source composition must precede profile feed acquisition")
+
+    monkeypatch.setattr(sources, "compose", compose)
+    with pytest.raises(Composed):
+        fixture.prepare_cohort(
+            tmp_path, monkeypatch, feeds, lambda _message: None, source_commit="a" * 40,
+        )
+    assert observed == [("a" * 40, None, (
+        "standalone:worktree-manager", "agent-worktrees", "standalone:fleet-manager", "agent-ssh",
+    ))]
+
+
+def test_engine_application_command_keeps_direct_source_without_main_composition(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from repository_ssh_cohort_fixture import engine_application_command
+
+    monkeypatch.syspath_prepend(str(PROJECT.parent / "tools"))
+    from local_install_profile import source_inputs
+
+    snapshot = tmp_path / "snapshot"
+    payload = snapshot / "payload"
+    payload.mkdir(parents=True)
+    (payload / "pyproject.toml").write_text(
+        '[project]\nname = "agent-worktrees"\nversion = "1.0.0"\n', encoding="utf-8",
+    )
+    sources = source_inputs.engine.runtime_source
+    assembly = sources.assembly_hash(payload)
+    identity = sources.SourceIdentity(
+        "agent-worktrees", "1.0.0", "a" * 40, "b" * 40, assembly,
+        sources.runtime_version("1.0.0", "a" * 40, assembly),
+    )
+    document = identity.document()
+    (payload / "runtime-source.json").write_text(json.dumps(document), encoding="utf-8")
+    application = snapshot / "application"
+    application.mkdir()
+    selection = {"runtime_source": document, "runtime_version": identity.runtime_version}
+    generation = identity.runtime_version + ".profile." + "c" * 16
+    (application / "application.json").write_text(json.dumps({
+        "module": "agent_worktrees", "construction": {
+            "identity": selection, "runtime_version": generation, "payload_hash": "d" * 64,
+        },
+    }), encoding="utf-8")
+    record = {
+        "schema": "copilot-extensions.install-source", "version": 1, "kind": "source",
+        "source_commit": "a" * 40, "source_tree": "b" * 40, "main_head": None,
+        "projects": {"agent-worktrees": {
+            "payload": "payload", "source": document, "application": "application",
+        }},
+    }
+    manifest = snapshot / "install-source.json"
+    original = json.dumps(record).encode()
+    manifest.write_bytes(original)
+    arguments, pin = engine_application_command(snapshot, tmp_path / "runtime", Path(sys.executable))
+    assert arguments[arguments.index("--install-source") + 1] == str(snapshot)
+    assert arguments[arguments.index("--expected-runtime-version") + 1] == generation
+    assert arguments[arguments.index("--expected-payload-hash") + 1] == "d" * 64
+    assert json.loads(pin) == selection
+    assert manifest.read_bytes() == original
+    (payload / "pyproject.toml").write_text(
+        '[project]\nname = "agent-worktrees"\nversion = "2.0.0"\n', encoding="utf-8",
+    )
+    with pytest.raises(ValueError):
+        engine_application_command(snapshot, tmp_path / "runtime", Path(sys.executable))
 
 
 def test_original_engine_owner_runs_its_declared_lifecycle_in_private_home(

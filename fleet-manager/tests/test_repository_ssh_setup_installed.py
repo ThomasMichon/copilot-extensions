@@ -149,25 +149,25 @@ def test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop(
     )
     if os.name == "nt":
         clean.update(HOMEDRIVE=home.drive, HOMEPATH=str(home)[len(home.drive):])
-    from repository_ssh_cohort_fixture import original_engine_owner
+    from repository_ssh_cohort_fixture import engine_application_command, original_engine_owner
 
     command_owner = original_engine_owner(home)
     monkeypatch.syspath_prepend(str(PROJECT.parent / "plugins" / "agent-worktrees" / "src"))
-    from agent_worktrees.update_runtime_application import PreparedApplication
     from agent_worktrees.update_runtime_source import PIN_ENV
 
     initialized = run(["git", "init", "-q", str(harness)], env=clean)
     assert initialized.returncode == 0, initialized.stderr
 
     def install_engine(component: str) -> None:
-        prepared = PreparedApplication(cohort[component], "agent-worktrees", "null")
-        construction = json.loads(
-            (application_path(component) / "application.json").read_text(),
-        )["construction"]
-        assert prepared.version == construction["runtime_version"]
-        assert command_owner != prepared.payload.resolve()
+        uv = shutil.which("uv")
+        assert uv is not None
+        arguments, identity = engine_application_command(
+            cohort[component], home / ".agent-worktrees", Path(uv),
+        )
+        selected = source_inputs.select_project(cohort[component], "agent-worktrees")
+        assert command_owner != selected.payload.resolve()
         installation = {
-            **clean, PIN_ENV: prepared.identity,
+            **clean, PIN_ENV: identity,
             "COPILOT_PLUGIN_STAGED_FROM": str(command_owner),
             "COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT": str(harness.resolve()),
         }
@@ -176,7 +176,7 @@ def test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop(
             "--payload-root", str(command_owner), "--source-payload-root", str(command_owner),
             "--plugin-id", "agent-worktrees", "--legacy-root", str(home / ".agent-worktrees"),
             "--project-root", str(harness), "--run-lifecycle", "--",
-            *prepared.argv(home / ".agent-worktrees", repair=False),
+            *arguments,
         ], cwd=harness, env=installation, timeout=90)
         assert installed.returncode == 0, installed.stdout + installed.stderr
         engine_root = home / ".agent-worktrees"

@@ -48,6 +48,28 @@ def original_engine_owner(home: Path) -> Path:
     return owner.resolve(strict=True)
 
 
+def engine_application_command(
+    snapshot: Path, root: Path, uv: Path,
+) -> tuple[list[str], str]:
+    import local_install_profile  # noqa: F401 - establishes the normal source-owner import roots
+    import install_source
+
+    selected = install_source.select_project(snapshot, "agent-worktrees")
+    application = install_source._member(snapshot, selected.project["application"])
+    declaration = install_source._read(application / "application.json")
+    construction = declaration["construction"]
+    arguments = [
+        sys.executable, "-I", "-B", str(selected.payload / "scripts" / "install_source.py"),
+        "--install-source", str(snapshot), "--component", "agent-worktrees",
+        "--payload", str(selected.payload), "--install-application", "--root", str(root),
+        "--uv", str(uv), "--base-python", sys.executable,
+        "--health-module", str(declaration["module"]).partition(":")[0],
+        "--expected-runtime-version", str(construction["runtime_version"]),
+        "--expected-payload-hash", str(construction["payload_hash"]),
+    ]
+    return arguments, json.dumps(construction["identity"], sort_keys=True)
+
+
 class ProfileBuilder(Protocol):
     def prepare_registry_lock(
         self, snapshot: Path, output: Path, *, uv: str, deadline: float,
@@ -190,13 +212,13 @@ def prepare_cohort(
     started = time.monotonic()
     snapshot = tmp_path / "source"
     commit = _selected_source_commit(root, source_commit)
-    progress("normal Source cohort: compose selected Git source " + commit)
-    record = sources.compose(root, commit, None, snapshot)
-    progress(f"normal Source cohort materialized: {time.monotonic() - started:.2f}s")
     projects = (
         "standalone:worktree-manager", "agent-worktrees",
         "standalone:fleet-manager", "agent-ssh",
     )
+    progress("normal Source cohort: compose selected Git source " + commit)
+    record = sources.compose(root, commit, None, snapshot, projects=projects)
+    progress(f"normal Source cohort materialized: {time.monotonic() - started:.2f}s")
     first_party: dict[str, Any] = {}
     for relative in (
         "worktree-manager", "plugins/agent-worktrees", "fleet-manager", "plugins/agent-ssh",
