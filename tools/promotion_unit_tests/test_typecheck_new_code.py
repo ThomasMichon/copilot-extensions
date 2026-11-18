@@ -262,6 +262,104 @@ def test_installer_materialization_preserves_selected_physical_scope(
     assert verified == ["verified"]
 
 
+@pytest.mark.parametrize("mixed", [False, True])
+@pytest.mark.parametrize("shadow", [False, True])
+def test_ordinary_installer_uses_its_composed_sdk_and_preserves_outer_scope(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], mixed: bool, shadow: bool,
+) -> None:
+    from tools import installer_engine_ref
+
+    root = tmp_path / "source"
+    consumer = "worktree-manager"
+    caller = consumer + "/scripts/installer_wheel_acquisition.py"
+    helper = consumer + "/scripts/installer_wheel_snapshot.py"
+    canonical = root / "libs/installer-engine"
+    canonical.mkdir(parents=True)
+    for name in (*installer_engine_ref.PYTHON_FILES, *installer_engine_ref.SUPPORT_FILES):
+        (canonical / name).write_bytes(b"value = 1\n")
+    (canonical / "installer_wheel_snapshot.py").write_bytes(
+        (ROOT / "libs/installer-engine/installer_wheel_snapshot.py").read_bytes(),
+    )
+    caller_bytes = b"from installer_wheel_snapshot import _unchanged\n_unchanged(None, None, None, allow_hardlinks=True)\n"
+    (canonical / "installer_wheel_acquisition.py").write_bytes(caller_bytes)
+    (root / caller).parent.mkdir(parents=True)
+    (root / caller).write_bytes(caller_bytes)
+    stale = b"def _unchanged(path, before, stream, *, opened=None):\n    return before\n"
+    (root / helper).write_bytes(stale)
+    (root / "shared").mkdir()
+    (root / "shared/dependency.py").write_bytes(b"value: int = 1\n")
+    paths: tuple[str, ...] = (caller, helper, "shared/dependency.py")
+    retained = consumer + "/retained"
+    if mixed:
+        (root / retained).mkdir()
+        (root / retained / "unselected.py").write_bytes(b"value: int = 1\n")
+        paths = (*paths, retained + "/unselected.py")
+    if shadow:
+        package = root / consumer / "scripts/installer_wheel_snapshot"
+        package.mkdir()
+        (package / "__init__.py").write_bytes(b"# not the declared SDK module\n")
+        paths = (*paths, consumer + "/scripts/installer_wheel_snapshot/__init__.py")
+    environment = tmp_path / "environment"
+    environment.mkdir()
+    python = environment / "inert-python"
+    python.write_bytes(b"never execute this analyzer")
+    (environment / ".typecheck-prepared").write_bytes(b"fixture\n")
+    events: list[str] = []
+
+    class Lease:
+        def release(self) -> None:
+            events.append("released")
+
+    def run(
+        argv: list[str], source_root: Path, *, env: dict[str, str],
+    ) -> subprocess.CompletedProcess[str]:
+        assert source_root == root and "--strict" in argv
+        targets = Path(argv[-1][1:]).read_text("utf-8").splitlines()
+        assert len(targets) == 1
+        target = Path(targets[0])
+        assert target.name == "installer_wheel_acquisition.py" and target != root / caller
+        assert target.read_bytes() == caller_bytes
+        imports = env["MYPYPATH"].split(os.pathsep)
+        provider = next(
+            Path(directory) / "installer_wheel_snapshot.py" for directory in imports
+            if (Path(directory) / "installer_wheel_snapshot.py").is_file()
+        )
+        assert provider.parent == target.parent == Path(imports[0])
+        assert provider != canonical / "installer_wheel_snapshot.py"
+        assert str(root / "shared") in imports
+        assert provider.read_bytes() == (canonical / "installer_wheel_snapshot.py").read_bytes()
+        function = next(
+            node for node in ast.parse(provider.read_bytes()).body
+            if isinstance(node, ast.FunctionDef) and node.name == "_unchanged"
+        )
+        index = [argument.arg for argument in function.args.kwonlyargs].index("allow_hardlinks")
+        default = function.args.kw_defaults[index]
+        assert default is not None and ast.literal_eval(default) is False
+        events.append(argv[argv.index("--platform") + 1])
+        return subprocess.CompletedProcess(argv, 0, f"{target}:2: note: composed SDK\n", "")
+
+    monkeypatch.setattr(typecheck, "environment_path", lambda *_args: (environment, "fixture"))
+    monkeypatch.setattr(typecheck, "environment_python", lambda _path: python)
+    monkeypatch.setattr(typecheck, "acquire_environment", lambda *_args: Lease())
+    monkeypatch.setattr(typecheck, "_run", run)
+    project = typecheck.Project(
+        "sample", (consumer,), (), "pending", "3.10", ("linux", "win32"), "requirements.txt",
+        import_roots=("shared",),
+        program_roots=(Program(retained, (retained,)),) if mixed else (),
+    )
+    if shadow:
+        with pytest.raises(SourceViewError, match="Competing provider"):
+            typecheck.check_project(root, project, (caller,), all_paths=paths, strict=True)
+        assert events == ["released"]
+    else:
+        assert typecheck.check_project(root, project, (caller,), all_paths=paths, strict=True) == 0
+        assert events == ["linux", "win32", "released"]
+        assert f"{caller}:2: note: composed SDK" in capsys.readouterr().out
+    assert project.level == "pending" and (root / helper).read_bytes() == stale
+    assert not list(tmp_path.glob("installer-program-*"))
+
+
 @pytest.mark.parametrize("entry", ["installation_context.py", "_installation_context.py"])
 @pytest.mark.parametrize("independent", [False, True])
 def test_copied_program_imports_resolve_their_complete_composed_api(

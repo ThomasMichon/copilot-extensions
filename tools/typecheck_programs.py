@@ -5,6 +5,7 @@ from contextlib import AbstractContextManager
 from dataclasses import dataclass, replace
 import os
 from pathlib import Path
+import re
 import subprocess
 from typing import TYPE_CHECKING, Callable, Protocol
 
@@ -26,6 +27,7 @@ class _ProgramChecker(Protocol):
         self, root: Path, project: Project, files: tuple[str, ...], *,
         all_paths: tuple[str, ...], strict: bool = False, program_root: str | None = None,
         environment_root: Path | None = None, input_verifier: Callable[[], None] | None = None,
+        payload: InstallerOverlay | None = None,
     ) -> int: ...
 
 
@@ -75,6 +77,39 @@ class Program:
     import_roots: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class InstallerOverlay:
+    root: Path
+    consumer: str
+
+    def remap(self, source_root: Path, path: Path) -> Path:
+        if path.is_relative_to(source_root / self.consumer):
+            return self.root / path.relative_to(source_root)
+        return path
+
+    def imports(self, source_root: Path, paths: list[str], adapter: Path) -> list[str]:
+        return list(dict.fromkeys((
+            *((str(adapter),) if str(adapter) in paths else ()),
+            str(self.root / self.consumer / "scripts"),
+            *(str(self.remap(source_root, Path(path))) for path in paths),
+        )))
+
+    def targets(self, source_root: Path, paths: tuple[str, ...]) -> tuple[str, ...]:
+        mapped: list[str] = []
+        for path in paths:
+            original = Path(path) if Path(path).is_absolute() else source_root / path
+            target = self.remap(source_root, original)
+            mapped.append(str(target) if target != original else path)
+        return tuple(mapped)
+
+    def diagnostics(self, text: str) -> str:
+        prefixes = (str(self.root) + os.sep, self.root.as_posix() + "/")
+        return re.sub(
+            r"^(?:" + "|".join(re.escape(prefix) for prefix in prefixes) + r")([^\r\n:]+)",
+            lambda match: match.group(1).replace("\\", "/"), text, flags=re.MULTILINE,
+        )
+
+
 def independent_programs(
     files: tuple[str, ...], all_paths: tuple[str, ...], roots: tuple[str, ...],
     owns: Callable[[str], bool],
@@ -97,6 +132,67 @@ def independent_programs(
         )
         assigned[group].append(path)
     return tuple(tuple(group) for group in assigned if group)
+
+
+def check_ordinary_program(
+    root: Path, project: Project, files: tuple[str, ...], *,
+    all_paths: tuple[str, ...], strict: bool, check: _ProgramChecker,
+    identity: IdentityReader, candidate_factory: _InstallerFactory,
+    environment: Callable[[Path, Project], tuple[Path, str]], nonce: Callable[[], str],
+) -> int:
+    """Keep ordinary imports while qualifying registered consumers as shipped."""
+    from tools import installer_engine_ref
+
+    declared = tuple(dict.fromkeys((
+        *(f"plugins/{name}" for name in (*installer_engine_ref.ADOPTERS, *installer_engine_ref.PYTHON_ADOPTERS)),
+        *installer_engine_ref.STANDALONE_PYTHON_ADOPTERS,
+        *installer_engine_ref.STANDALONE_NATIVE_ADOPTERS,
+    )))
+    family = (*installer_engine_ref.FILES, *installer_engine_ref.PYTHON_FILES, *installer_engine_ref.SUPPORT_FILES)
+    consumers = tuple(
+        consumer for consumer in sorted(declared, key=len, reverse=True)
+        if any(project.owns(consumer + "/scripts/" + name) for name in family)
+        and any(path.startswith(consumer + "/") for path in files)
+    )
+    if not consumers:
+        return check(root, project, files, all_paths=all_paths, strict=strict)
+    captured = ProgramInputs.capture(root, files, identity)
+    remaining = files
+    failure = 0
+    for consumer in consumers:
+        selected = tuple(path for path in remaining if path.startswith(consumer + "/"))
+        if not selected:
+            continue
+        member_paths = tuple(path for path in all_paths if path.startswith(consumer + "/"))
+        captured.verify()
+        try:
+            with candidate_factory(
+                root, consumer, member_paths, (),
+                lambda: environment(root, project)[0].parent / (
+                    "installer-program-" + project.name + "-" + nonce()
+                ),
+                identity,
+            ) as candidate:
+                if candidate is None:
+                    raise ProgramError("Declared installer consumer lacks its materialized source view")
+                print(f"Checking materialized ordinary installer consumer: {consumer}")
+                result = check(
+                    root, project, selected, all_paths=all_paths, strict=strict,
+                    input_verifier=candidate.verify,
+                    payload=InstallerOverlay(candidate.root, consumer),
+                )
+                failure = failure or result
+        finally:
+            captured.verify()
+        remaining = tuple(path for path in remaining if path not in selected)
+    if remaining:
+        captured.verify()
+        try:
+            result = check(root, project, remaining, all_paths=all_paths, strict=strict)
+            failure = failure or result
+        finally:
+            captured.verify()
+    return failure
 
 
 def check_independent_project(
@@ -156,8 +252,10 @@ def check_independent_project(
                             environment_root=root, input_verifier=candidate.verify,
                         )
             else:
-                result = check(
+                result = check_ordinary_program(
                     root, member_project, program, all_paths=member_paths, strict=strict,
+                    check=check, identity=identity, candidate_factory=candidate_factory,
+                    environment=environment, nonce=nonce,
                 )
             failure = failure or result
         finally:

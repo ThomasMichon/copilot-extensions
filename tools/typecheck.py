@@ -40,7 +40,8 @@ from tools.typecheck_bootstrap_views import (  # noqa: E402
 from tools.typecheck_new_code import select_new_code  # noqa: E402
 from tools.typecheck_programs import (  # noqa: E402
     Program, ProgramError, _import_suffix as _import_suffix, _run as _run,
-    check_independent_project, git_environment as git_environment,
+    InstallerOverlay, check_independent_project, check_ordinary_program,
+    git_environment as git_environment,
 )
 from installer_dependency_policy import DependencyPolicyError, run_uv_install  # noqa: E402
 from single_instance_lease import AlreadyRunningError  # noqa: E402
@@ -624,9 +625,13 @@ def check_project(
     all_paths: tuple[str, ...], strict: bool = False,
 ) -> int:
     """Check all independent programs under the same physical owner and strict policy."""
-    if not project.program_roots:
-        return _check_program(root, project, files, all_paths=all_paths, strict=strict)
     try:
+        if not project.program_roots:
+            return check_ordinary_program(
+                root, project, files, all_paths=all_paths, strict=strict,
+                check=_check_program, identity=_import_identity, candidate_factory=installer_program_view,
+                environment=environment_path, nonce=lambda: uuid4().hex,
+            )
         return check_independent_project(
             root, project, files, all_paths=all_paths, strict=strict,
             check=_check_program, identity=_import_identity, candidate_factory=installer_program_view,
@@ -640,6 +645,7 @@ def _check_program(
     root: Path, project: Project, files: tuple[str, ...], *,
     all_paths: tuple[str, ...], strict: bool = False, program_root: str | None = None,
     environment_root: Path | None = None, input_verifier: Callable[[], None] | None = None,
+    payload: InstallerOverlay | None = None,
 ) -> int:
     """Check one declared scope; never execute product or test code."""
     if not files:
@@ -788,7 +794,12 @@ def _check_program(
             views.guard_search = tuple(ordered_imports)
             if supplemental:
                 views.procutil_search = tuple(ordered_imports)
-        if (project.import_roots or guard) and any(os.pathsep in entry for entry in ordered_imports):
+        if payload is not None:
+            ordered_imports = payload.imports(root, ordered_imports, views.stage)
+            files = payload.targets(root, files)
+        if (project.import_roots or guard or payload is not None) and any(
+            os.pathsep in entry for entry in ordered_imports
+        ):
             raise TypecheckError("Import search paths contain the native path-list separator")
         env["MYPYPATH"] = os.pathsep.join(ordered_imports)
         views._parents(views.stage, create=True)
@@ -806,7 +817,7 @@ def _check_program(
                 "--explicit-package-bases", "--follow-imports", "silent",
                 "--check-untyped-defs", "--show-error-codes", "--no-pretty",
                 "--cache-dir", (
-                    os.devnull if import_inputs is not None or guard
+                    os.devnull if import_inputs is not None or guard or payload is not None
                     else str(path / "mypy-cache" / platform / version)
                 ),
             ]
@@ -835,8 +846,9 @@ def _check_program(
                 print(f"Supplemental portable emitted programs: {supplemental}; no native execution qualification")
             if project.name == "lib-payload-invocation" and version == "3.10":
                 print("Bootstrap: Python 3.10 checks its exit guard only; full body requires Python 3.11.")
-            print(views.diagnostics(result.stdout), end="")
-            print(views.diagnostics(result.stderr), end="", file=sys.stderr)
+            render: Callable[[str], str] = payload.diagnostics if payload else lambda text: text
+            print(views.diagnostics(render(result.stdout)), end="")
+            print(views.diagnostics(render(result.stderr)), end="", file=sys.stderr)
             if result.returncode:
                 if not project.additional_python_versions and not project.program_roots:
                     return result.returncode

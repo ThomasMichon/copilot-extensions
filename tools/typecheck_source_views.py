@@ -151,6 +151,11 @@ def installer_program_view(
             outputs.verify()
             if output_members != members(stage, ""):
                 raise SourceViewError("Installer checker candidate membership changed")
+            for source, target in plan:
+                if source.suffix == ".py":
+                    provider = stage / target.relative_to(root)
+                    if provider.with_suffix(".pyi").exists() or provider.with_suffix("").is_dir():
+                        raise SourceViewError("Competing provider for a materialized installer module")
 
         inventory = tuple(sorted(set(paths) | {
             path for path in output_members if path.endswith(".py")

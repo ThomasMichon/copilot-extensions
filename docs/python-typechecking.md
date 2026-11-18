@@ -25,7 +25,7 @@ roots as its runtime inventory. The owner's remaining selected files form the
 ordinary program; no selected file is excluded or reassigned to another owner.
 Each program retains the existing requirements, strictness, Python versions and
 platforms. Failures aggregate across all programs and targets. Ordinary
-single-program checks are unchanged.
+non-installer checks are unchanged.
 
 Project-level `import_roots` may additionally supply shared dependencies only
 when the root contains no inventoried Python file owned by that project.
@@ -39,6 +39,12 @@ Composition refusals, source/preimage changes, candidate identity changes and
 membership drift fail qualification. Materialization preserves the caller's
 selected physical scope; it does not promote every refreshed dependency into
 strict admission.
+
+This includes ordinary standalone consumers and the ordinary outer program of
+a mixed project. Each consumer candidate is reused across its declared target
+matrix while source and candidate verification remain active. SDK imports bind
+the actual materialized consumer, not a stale developer helper or a canonical
+module substituted for the consumer.
 
 Grouped checks capture every selected physical file's bytes and file/directory
 identities before the first program and verify them across program boundaries.
