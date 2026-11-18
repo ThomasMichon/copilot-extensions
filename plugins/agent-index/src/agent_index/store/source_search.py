@@ -134,7 +134,7 @@ def search_source_store(
         if not lists:
             return []
         merged = lists[0] if len(lists) == 1 else _multi_list_rrf(
-            lists, weights=weights, query=query,
+            lists, weights=weights, query=query, exact_match_bonus=store._exact_match_bonus,
         )
         merged.sort(key=lambda hit: (-hit.score, hit.chunk_id))
         return _normalize_scores(_deduplicate_by_content(merged))[:limit]
