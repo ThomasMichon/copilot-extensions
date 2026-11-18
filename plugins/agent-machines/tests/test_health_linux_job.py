@@ -1,6 +1,7 @@
 """Portable finite-action controls, not native systemd qualification."""
 
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 import sys
@@ -71,10 +72,50 @@ def test_collection_support_uses_only_one_package_in_selected_environment(
     path.write_text(json.dumps({**declaration, "operations": ["preview", "apply"]}))
     with pytest.raises(ValueError, match="collection-unsupported"):
         health_job_support.require_collection_support(python)
+    path.write_bytes(b"x" * 4097)
+    with pytest.raises(ValueError, match="collection-unsupported"):
+        health_job_support.require_collection_support(python)
     path.write_text(json.dumps(declaration))
     (environment / "lib" / "python3.12" / "site-packages" / "agent_machines").mkdir(parents=True)
     with pytest.raises(ValueError, match="collection-unsupported"):
         health_job_support.require_collection_support(python)
+
+
+def test_installed_declaration_can_remain_hardlinked_to_wheel_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    environment = tmp_path / "versions" / "1.0" / ".venv"
+    package = environment / "lib" / "python3.13" / "site-packages" / "agent_machines"
+    package.mkdir(parents=True)
+    cached = tmp_path / "cached-declaration.json"
+    cached.write_text(json.dumps({
+        "schema": "agent-machines.health.collection", "version": 1,
+        "operations": ["preview", "apply", "installed-job"],
+    }))
+    os.link(cached, package / "health-collection-v1.json")
+    assert cached.stat().st_nlink == 2
+    monkeypatch.setattr(sys, "platform", "linux")
+    health_job_support.require_collection_support(environment / "bin" / "python")
+
+
+def test_installed_declaration_replacement_before_open_is_not_admitted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    package = tmp_path / "package"
+    package.mkdir()
+    path = package / "health-collection-v1.json"
+    replacement = package / "replacement.json"
+    path.write_text('{"version":1}')
+    replacement.write_text('{"version":1}')
+    original_open = os.open
+
+    def replace_before_open(target: Path, flags: int) -> int:
+        replacement.replace(path)
+        return original_open(target, flags)
+
+    monkeypatch.setattr(os, "open", replace_before_open)
+    with pytest.raises(ValueError, match="metadata-changed"):
+        health_job_support._read_metadata(package)
 
 
 def test_finite_job_keeps_owned_budget_and_retained_runtime(

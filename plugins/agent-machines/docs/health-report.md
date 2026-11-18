@@ -387,6 +387,10 @@ The finite root uses the existing 55-second owned budget
 and five-second cleanup reserve. Collection support must come from exactly one
 package beneath that selected virtual environment's Linux `lib/python3.x`
 directory; missing, ambiguous or unsupported declarations refuse before launch.
+The bounded installed-metadata reader accepts wheel-cache hardlinks while
+rejecting indirect paths, oversized declarations and file replacement during
+the read. Mutable health-store readers retain their separate exclusive-file
+requirements.
 
 This is a portable execution foundation, **not Linux enrollment support**.
 The normal `health job` lifecycle still rejects Linux. No unit publication,
