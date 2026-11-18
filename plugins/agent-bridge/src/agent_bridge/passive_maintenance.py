@@ -16,6 +16,7 @@ from zdd.claims import ClaimConflict
 from zdd.diagnostics import process_start_time
 
 from .config import config_dir
+from .session_host.host_inventory import HostInventoryError
 from .session_status import SessionStatus
 
 if TYPE_CHECKING:
@@ -39,6 +40,9 @@ def may_refresh_inherited(manager: SessionManager, row: dict[str, Any]) -> bool:
             pid_alive=pid_alive, require_owner_fields=True,
         )
     except (ClaimConflict, KeyError):
+        return False
+    except HostInventoryError as exc:
+        logging.getLogger("agent-bridge").warning("Deferring inherited session %s: %s", row["id"], exc)
         return False
     return True
 

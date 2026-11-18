@@ -16,6 +16,7 @@ from agent_bridge.db import Database
 from agent_bridge.events import EventLog
 from agent_bridge.passive_maintenance import refresh_inherited_sessions
 from agent_bridge.routes.sessions import _sse_event_stream
+from agent_bridge.session_host.host_index import HostRecord
 from agent_bridge.session_manager import SessionManager
 from agent_bridge.session_status import SessionStatus
 
@@ -83,5 +84,36 @@ def test_missing_durable_row_evicts_only_unused_projection(tmp_path: Path) -> No
         assert manager.get_session("removed") is None
         assert manager.list_sessions() == [owned] and owned.client is not None
         assert db.list_sessions() == []
+    finally:
+        db.close()
+
+
+def test_refresh_isolates_ineligible_hosts_from_compatible_workers_and_stops(tmp_path: Path) -> None:
+    (tmp_path / "hosts").mkdir()
+    db = Database(str(tmp_path / "sessions.db"))
+    try:
+        for sid in ("partial", "stranded", "released", "stopped"):
+            db.create_session(sid, sid, None, str(tmp_path), "local", "running", time.time())
+        manager = SessionManager(db, read_only_rehydrate=True)
+        records = [
+            HostRecord("partial", 9001, 21, 22, owner_generation="prior"),
+            HostRecord("stranded", 9002, 31, 32, protocol_version=2),
+            HostRecord("released", 9003, 41, 42),
+        ]
+        for record in records:
+            manager._host_index.register(record)
+        for session in manager.list_sessions():
+            session.awaiting_maintenance_refresh = True
+        db.update_session_stopped("stopped", time.time(), False)
+        refresh_inherited_sessions(manager)
+        assert {s.session_id for s in manager.list_sessions() if s.awaiting_maintenance_refresh} == {
+            "partial", "stranded",
+        }
+        assert manager._host_index.get("partial") == records[0]
+        assert manager._host_index.get("stranded") == records[1]
+        assert manager._host_index.get("released").owner_generation == manager._generation_id
+        stopped = manager.get_session("stopped")
+        assert stopped is not None and stopped.status == SessionStatus.STOPPED
+        assert not stopped.background_recovery_enabled
     finally:
         db.close()

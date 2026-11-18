@@ -224,7 +224,7 @@ class HostIndex:
                 # Do not silently fill absent owner fields or drop unknown records on flush.
                 from .host_inventory import read_inventory
 
-                inventory = read_inventory(self._path.absolute())
+                inventory = read_inventory(self._path.absolute(), storage_only=True)
                 self._records = {record.session_id: record for record in inventory.records}
             else:
                 self._load_or_raise()
@@ -373,6 +373,11 @@ class HostIndex:
         """
         with self._locked_reload(strict=require_owner_fields):
             rec = self._records[session_id]
+            if require_owner_fields:
+                from .version_mux import is_compatible
+
+                if not is_compatible(rec.protocol_version):
+                    raise HostInventoryError("Incompatible Session Host is not eligible for recovery")
             if require_owner_fields and (
                 bool(rec.owner_generation) != bool(rec.owner_pid) or rec.owner_pid > 0x7fff_ffff
                 or (rec.owner_generation == generation and rec.owner_pid != owner_pid)
