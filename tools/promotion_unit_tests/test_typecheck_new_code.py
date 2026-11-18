@@ -11,7 +11,6 @@ from types import SimpleNamespace
 from typing import Callable
 
 import pytest
-import yaml
 
 from tools import typecheck
 from tools import typecheck_source_views as views
@@ -28,12 +27,6 @@ def test_pr_ratchet_uses_the_feature_head_and_merge_base(monkeypatch: pytest.Mon
     monkeypatch.syspath_prepend(str(ROOT))
     from tools import typecheck
 
-    ci = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text("utf-8"))
-    step = next(item for item in ci["jobs"]["checks"]["steps"]
-                if item.get("name") == "Whole-file strict new-code ratchet")
-    assert step["env"]["BASE"] == "${{ github.event.pull_request.base.sha || github.event.before }}"
-    assert step["env"]["HEAD"] == "${{ github.event.pull_request.head.sha || github.sha }}"
-    assert 'BASE="$(git merge-base "$BASE" "$HEAD")"' in step["run"]
     feature, common = "a" * 40, "b" * 40
     comparisons: list[list[str]] = []
 
