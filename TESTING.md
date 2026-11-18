@@ -124,6 +124,12 @@ This page is a reference catalog, not a sequential checklist. Read the lane
 needed for the changed behavior; optional packets below do not all become
 prerequisites for one contribution.
 
+For explicit retirement of a source-bound test environment, see
+[Retained test environments and source lifetime](docs/retained-test-environments.md).
+An idle prepared environment can still depend on its checkout. Retirement uses
+the runner's existing lease, keeps its directory identity and blocks later
+preparation; it does not authorize checkout deletion or retire sibling caches.
+
 | Question | Start here |
 |----------|------------|
 | What does required PR/promotion testing cover? | [Unit packet](#unit-only-promotion-packet), [portfolio invariants](#test-portfolio-invariants), and the bounded Windows Resume promotion exception below |

@@ -331,6 +331,8 @@ def _prepare_venv(name: str, uv: str, *, reinstall: bool, environment: dict[str,
     environment-scoped lease throughout preparation and subsequent test use.
     """
     venv = ordinary_cache_root(_venv_root() / name)
+    from plugin_test_retirement import require_active
+    require_active(venv)
     py = _venv_python(name)
     stamp = venv / ".dep-fingerprint"
     fingerprint = _dep_fingerprint(name)
