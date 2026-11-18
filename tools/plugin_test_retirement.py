@@ -32,6 +32,8 @@ class Preview:
     schema: str
     version: int
     source: str
+    source_device: int
+    source_inode: int
     target: str
     platform: str
     environment: str
@@ -90,6 +92,9 @@ def _identity(environment: Path) -> tuple[int, int]:
 
 
 def _observe(source: Path, target: str, platform: str, environment: Path) -> Preview:
+    source_info = source.stat()
+    if not stat.S_ISDIR(source_info.st_mode) or not source_info.st_ino:
+        raise ValueError("Source has no stable directory identity")
     info = native_test_path(environment).stat()
     rows: list[tuple[str, int, int, int, int, int]] = []
     for child in native_test_path(environment).iterdir():
@@ -102,6 +107,7 @@ def _observe(source: Path, target: str, platform: str, environment: Path) -> Pre
         value = _metadata(marker)
         if any(value.get(key) != expected for key, expected in (
             ("schema", SCHEMA), ("version", 1), ("source", str(source)),
+            ("source_device", source_info.st_dev), ("source_inode", source_info.st_ino),
             ("target", target), ("platform", platform),
             ("device", info.st_dev), ("inode", info.st_ino),
         )) or value.get("state") not in {"retiring", "retired"}:
@@ -110,7 +116,7 @@ def _observe(source: Path, target: str, platform: str, environment: Path) -> Pre
         [info.st_mtime_ns, sorted(rows)], separators=(",", ":"),
     ).encode()).hexdigest()
     return Preview(
-        SCHEMA, 1, str(source), target, platform, str(environment),
+        SCHEMA, 1, str(source), source_info.st_dev, source_info.st_ino, target, platform, str(environment),
         info.st_dev, info.st_ino, generation, len(rows),
     )
 
@@ -135,7 +141,7 @@ def parse_preview(value: object) -> Preview:
     for key in ("schema", "source", "target", "platform", "environment", "generation"):
         if not isinstance(value[key], str):
             raise ValueError("Invalid retirement preview text")
-    for key in ("version", "device", "inode", "entries"):
+    for key in ("version", "source_device", "source_inode", "device", "inode", "entries"):
         if type(value[key]) is not int or value[key] < 0:
             raise ValueError("Invalid retirement preview number")
     if value["schema"] != SCHEMA or value["version"] != 1:
@@ -157,6 +163,9 @@ def _write_marker(environment: Path, plan: Preview, state: str) -> None:
 def apply(plan: Preview) -> dict[str, object]:
     """Retire only this environment's contents, never its leased directory."""
     source = Path(plan.source).resolve(strict=True)
+    source_info = source.stat()
+    if (source_info.st_dev, source_info.st_ino) != (plan.source_device, plan.source_inode):
+        raise ValueError("Retirement preview names a replaced source checkout")
     environment = _environment(source, plan.target, plan.platform)
     identity = _identity(environment)
     if str(environment) != plan.environment or identity != (plan.device, plan.inode):

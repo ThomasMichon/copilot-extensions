@@ -65,7 +65,7 @@ def test_runner_cannot_rebuild_a_retired_inode(
         runner._prepare_venv("example", "must-not-run", reinstall=True, environment={})
 
 
-@pytest.mark.parametrize("change", ["contents", "replacement", "wrong-source", "foreign-platform"])
+@pytest.mark.parametrize("change", ["contents", "replacement", "source-replacement", "wrong-source", "foreign-platform"])
 def test_stale_or_wrong_scope_preview_never_removes(
     environment: tuple[Path, Path], change: str,
 ) -> None:
@@ -77,6 +77,9 @@ def test_stale_or_wrong_scope_preview_never_removes(
         root.rename(root.with_name("retained-old"))
         root.mkdir()
         (root / "interpreter").write_bytes(b"replacement")
+    elif change == "source-replacement":
+        source.rename(source.with_name("retained-source"))
+        (source / "plugins" / "example").mkdir(parents=True)
     elif change == "wrong-source":
         plan = replace(plan, source=str(source.parent))
     else:

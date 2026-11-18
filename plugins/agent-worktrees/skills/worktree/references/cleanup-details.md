@@ -39,6 +39,13 @@ outbound resource obligations. It deliberately bypasses dirty/WIP,
 inbound-claimant, follow-up and branch-merge checks, not responsibility for
 unfinished PRs or owned children.
 
+Ignored checkout data also remains protected, including with `--force`.
+Git-ignore status and familiar directory names do not prove producer ownership
+or completed disposition. Preserve the data or use its producer's explicit
+reclaim operation, then retry cleanup. This includes legacy local history;
+an export alone does not establish a supported writer cutover or permit source
+deletion. Failed ignored-path inspection is a hold, not an empty result.
+
 Before physical removal, cleanup also checks for live processes whose current
 directory is inside the checkout. Any observed holder defers removal, including
 with `--force`: the checkout, branch, trust and tracking record stay intact.
