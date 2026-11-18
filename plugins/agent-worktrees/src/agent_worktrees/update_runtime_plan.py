@@ -37,9 +37,15 @@ INDEX_ROLE_RESOLVER_TIMEOUT_S = 60
 
 def _seam(owner: str, name: str) -> Any:
     """Resolve a planning seam at call time so patches on its owner apply."""
-    from . import update_cli, update_runtime
+    # Import only the owner: contract checkers load this module under a
+    # synthetic package that provides update_runtime but not update_cli.
+    if owner == "update_cli":
+        from . import update_cli
 
-    return vars(update_cli if owner == "update_cli" else update_runtime)[name]
+        return vars(update_cli)[name]
+    from . import update_runtime
+
+    return vars(update_runtime)[name]
 
 
 def _machine_gate_blocks(name: str, scope: str, context: Path | None) -> bool:
