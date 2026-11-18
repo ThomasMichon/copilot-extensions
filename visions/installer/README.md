@@ -697,6 +697,15 @@ through one attributable selection.
 The bootstrap's transport override is distinct from its runtime selections;
 choosing a Dev runtime does not implicitly replace the Main orchestrator.
 
+An explicitly selected repository-owned update controller remains usable when
+its registered anchor is bare. Its executable and required tracked helpers come
+from one isolated, pinned committed source consistent with the selected
+repository policy, under the existing update request and participant custody.
+An absent checkout never selects an arbitrary live worktree or a different
+updater. Unprovable source, unsafe materialization or failed execution remains
+a failure; preparing controller source does not mutate the bare anchor or grant
+installation authority.
+
 The bootstrap orchestrates installation into the assigned immutable slot.
 Its baseline is a fresh installation, not permission to reuse whatever happens
 to be present. Positive recognition of a compatible existing footprint enables

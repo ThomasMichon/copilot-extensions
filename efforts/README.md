@@ -8,6 +8,11 @@ that pattern to this repository.
 
 ## Active effort index
 
+The [Committed Project Controllers](active/committed-project-controllers/README.md)
+proposal covers only pinned source execution for an opted-in bare-anchor
+controller under #10377. It preserves existing update custody and fail-closed
+behavior; no installation or deployment is included.
+
 Installer/update campaigns and bug-fix slices, including already-active work,
 must cite and evaluate their objective and completion/validation gates against
 [authoritative runtime replacement](../visions/installer/README.md#authoritative-runtime-replacement).
