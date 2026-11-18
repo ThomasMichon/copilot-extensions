@@ -98,6 +98,67 @@ def test_original_request_conflicts_before_another_task_is_suspended(tmp_path: P
     assert persisted is not None and persisted["delegation"] == spec
 
 
+@pytest.mark.parametrize("section,field,value", [
+    ("binding", "reviewer", "another-reviewer"),
+    ("binding", "target", "another-target"),
+    ("binding", "socket", "/private/alias/service.sock"),
+    ("identity", "account", "another-account"),
+    ("identity", "endpoint", "https://another.example.com"),
+    ("identity", "repo", "different/project"),
+])
+def test_original_consumer_request_cannot_be_rebound_by_changing_selection(
+    tmp_path: Path, section: str, field: str, value: str,
+) -> None:
+    queue = TaskQueue(tmp_path / "tasks.db")
+    first, second = task(queue), task(queue)
+    spec = feed_intent(queue)
+    prepare(queue, first, spec)
+    changed = copy.deepcopy(spec)
+    changed["preparation_id"] = "changed"
+    binding = changed["feed"]["binding"]
+    (binding if section == "binding" else binding["identity"])[field] = value
+    if field == "repo":
+        changed["repo"] = value
+    before = queue.get(second)
+    with pytest.raises(TaskError, match="already bound"):
+        prepare(queue, second, changed)
+    assert queue.get(second) == before
+    assert queue.find_delegated_preparation(second, "changed") is None
+    assert not queue.list_run_waiter_wakes(second)
+
+
+def test_distinct_feed_requests_keep_full_binding_and_registration_isolation(tmp_path: Path) -> None:
+    queue = TaskQueue(tmp_path / "tasks.db")
+    specs = [feed_intent(queue, "first"), feed_intent(queue, "second")]
+    specs[1]["feed"]["binding"]["reviewer"] = "another-reviewer"
+    task_ids = [task(queue), task(queue)]
+    for task_id, spec in zip(task_ids, specs):
+        prepare(queue, task_id, spec)
+    first, = queue.list_replay_waiters(specs[0]["feed"]["binding"])
+    second, = queue.list_replay_waiters(specs[1]["feed"]["binding"])
+    assert [first["task_id"], second["task_id"]] == task_ids
+    queue.replay_waiter_progress(first, registration_id="original-registration")
+    assert queue.find_replay_waiter(specs[1]["feed"]["binding"], "original-registration") is None
+    with pytest.raises(TaskError, match="registration already bound"):
+        queue.replay_waiter_progress(second, registration_id="original-registration")
+    second, = queue.list_replay_waiters(specs[1]["feed"]["binding"])
+    assert second["replay_registration_id"] is None
+
+
+def test_explicit_namespace_and_consumer_boundaries_keep_independent_request_spaces(tmp_path: Path) -> None:
+    queue = TaskQueue(tmp_path / "tasks.db")
+    specs = [feed_intent(queue, str(index)) for index in range(3)]
+    for spec in specs:
+        spec["feed"]["request_id"] = "same-original"
+    specs[1]["feed"]["binding"]["identity"]["namespace"] = "installation-b"
+    specs[2]["feed"]["binding"]["consumer"] = "another-consumer"
+    for spec in specs:
+        task_id = task(queue)
+        prepare(queue, task_id, spec)
+        waiter, = queue.list_replay_waiters(spec["feed"]["binding"])
+        assert waiter["task_id"] == task_id
+
+
 @pytest.mark.parametrize("armed", [False, True])
 def test_feed_custody_never_becomes_a_local_pid_or_preparing_recovery(
     tmp_path: Path, armed: bool,

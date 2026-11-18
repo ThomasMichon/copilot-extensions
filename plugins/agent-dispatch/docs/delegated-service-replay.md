@@ -279,6 +279,13 @@ request cannot be rebound to another task.
 Both feed and watch-replay variants use the existing waiter service-scope,
 request, attempted, registration and settlement columns. Their complete
 serialized bindings partition lookups; no table or request journal is added.
+Feed request/registration reservations use namespace and consumer, not reviewer
+or target. This mirrors the service's consumer/request idempotency boundary and
+conservatively retains the reservation across configured socket aliases in
+that namespace. Changing reviewer, account, target or socket cannot bind an
+original request to another task. Distinct namespace/consumer pairs retain
+independent request spaces. Indexed scope selection plus exact binding
+filtering keeps one reviewer's rows out of another binding's reads.
 Feed rows remain outside the existing indexed local-only recovery queries,
 including while their consumer is absent. They cannot become missing local
 processes or preparing-arm timeouts. Changed selection leaves old rows

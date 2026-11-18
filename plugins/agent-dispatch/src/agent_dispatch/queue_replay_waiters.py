@@ -9,6 +9,24 @@ from typing import Any, TYPE_CHECKING
 from .delegated_replay_contract import replay_scope
 from .queue_common import Task
 from .queue_records import TaskError
+from .repository_feed_waiter_contract import CACHE_PROTOCOL, feed_service_scope
+
+
+def _service_scope(binding: dict[str, Any]) -> str:
+    return feed_service_scope(binding) if binding.get("protocol") == CACHE_PROTOCOL else replay_scope(binding)
+
+
+def _binding_selector(binding: dict[str, Any]) -> tuple[str, tuple[str, ...]]:
+    if binding.get("protocol") == CACHE_PROTOCOL:
+        paths = ("protocol", "socket", "target", "consumer", "reviewer",
+                 "identity.namespace", "identity.provider", "identity.endpoint",
+                 "identity.account", "identity.repo")
+        values = tuple(binding[path] if "." not in path else binding["identity"][path[9:]]
+                       for path in paths)
+        return "".join(
+            f" AND json_extract(delegation_json, '$.feed.binding.{path}') = ?" for path in paths
+        ), values
+    return "", ()
 
 
 class ReplayWaiterProgressMixin:
@@ -26,7 +44,7 @@ class ReplayWaiterProgressMixin:
         if replay is not None:
             if conn.execute(
                 "SELECT 1 FROM run_waiters WHERE replay_scope = ? AND replay_request_id = ?",
-                (replay_scope(replay["binding"]), replay["request_id"]),
+                (_service_scope(replay["binding"]), replay["request_id"]),
             ).fetchone():
                 raise TaskError("replay request already bound to a waiter")
 
@@ -40,7 +58,7 @@ class ReplayWaiterProgressMixin:
             conn.execute(
                 "UPDATE run_waiters SET replay_scope = ?, replay_request_id = ? "
                 "WHERE task_id = ? AND generation = ?",
-                (replay_scope(replay["binding"]), replay["request_id"], task_id, generation),
+                (_service_scope(replay["binding"]), replay["request_id"], task_id, generation),
             )
 
     def list_replay_waiters(
@@ -48,20 +66,23 @@ class ReplayWaiterProgressMixin:
     ) -> list[dict[str, Any]]:
         if type(limit) is not int or not 1 <= limit <= 32 or type(after) is not int or after < 0:
             raise ValueError("invalid replay scan bound")
+        selector, binding_params = _binding_selector(binding)
         with self._connect() as conn:
             rows = conn.execute(
                 "SELECT * FROM run_waiters WHERE replay_scope = ? AND replay_settled = 0 "
-                "AND id > ? ORDER BY id LIMIT ?", (replay_scope(binding), after, limit),
+                + selector + " AND id > ? ORDER BY id LIMIT ?",
+                (_service_scope(binding), *binding_params, after, limit),
             ).fetchall()
         return [self._run_waiter_from_row(row) for row in rows]
 
     def find_replay_waiter(
         self, binding: dict[str, Any], registration_id: str,
     ) -> dict[str, Any] | None:
+        selector, binding_params = _binding_selector(binding)
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT * FROM run_waiters WHERE replay_scope = ? AND replay_registration_id = ?",
-                (replay_scope(binding), registration_id),
+                "SELECT * FROM run_waiters WHERE replay_scope = ? AND replay_registration_id = ?"
+                + selector, (_service_scope(binding), registration_id, *binding_params),
             ).fetchone()
         return self._run_waiter_from_row(row) if row else None
 

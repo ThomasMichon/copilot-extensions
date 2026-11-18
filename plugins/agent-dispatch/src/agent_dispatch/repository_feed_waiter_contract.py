@@ -18,6 +18,14 @@ _BINDING = {"protocol", "socket", "identity", "target", "consumer", "reviewer"}
 _ORIGINAL = {"binding", "request_id", "issued_at", "deadline_at", "baseline"}
 
 
+def feed_service_scope(binding: dict[str, Any]) -> str:
+    """Reserve consumer/request identity across bindings in the same namespace."""
+    return json.dumps({
+        "protocol": STORAGE_PROTOCOL, "namespace": binding["identity"]["namespace"],
+        "consumer": binding["consumer"],
+    }, sort_keys=True, separators=(",", ":"), allow_nan=False)
+
+
 def _text(value: object, pattern: str) -> bool:
     return isinstance(value, str) and re.fullmatch(pattern, value) is not None
 
