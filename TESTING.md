@@ -3799,6 +3799,10 @@ The existing optional installation-context acceptance workflow's `native_launch`
 input also selects this focused reader/phase/copy/consumer packet on Linux and macOS, using
 `/bin/bash` and explicitly requiring stock macOS Bash 3.2. It stays outside
 required PR CI; the Windows terminal packet selected by that input is unchanged.
+Resolver and exec fixtures register records in the receiving project's actual
+ledger and declared checkout namespace. Ordinary cases use the host platform;
+alias cases explicitly supply their synthetic observed host rather than relying
+on the runner's name or treating persisted aliases as reporter identity.
 The same optional Linux/macOS jobs select Manager's
 `test_launch_session_unwrap.py -k shell_pane_environment` component controls.
 They execute the production export/flag-building blocks and observe literal
