@@ -3428,22 +3428,22 @@ sources, transferring owners or turning partial/planning gains into completion.
   guidance acceptance, and the role/lifecycle receiver already contains its
   finite cohort continuation while preserving #7192's named-owner condition.
   All three remain canonical OPEN; an evidence-handling failure is retained
-  without source clearance. A subsequent domain-ownership assessment proposes
-  twelve unchecked complete #5947 callback Plan/local/global Validation rows
-  in the existing PR-watch programme, without retiring the source or changing
-  custody. Its published full-acceptance OPEN condition remains until an
-  explicitly accepted prospective tracking refinement is reflected in that
-  still-OPEN source; planned-row delivery alone does not resolve it. The
-  complete count remains 883 whole, 154 above fixed 729.
+  without source clearance. The [subsequent reviewed callback receipt](journal/2026/11.17-credential-receipt-and-protected-contracts.md#reviewed-callback-receiving-and-separate-tracker-retirement)
+  records #13178's complete direct domain acceptance, explicit prospective
+  tracking refinement reflected while #5947 remained OPEN, entire current
+  ROOT/source/discussion/custody readback and separate audited `NOT_PLANNED`
+  retirement. All twelve callback technical rows remain unchecked; #6019's
+  credit, actual owners and operational holds remain. One excluded arrival
+  offsets that retirement: 883 whole issues remain, 154 above fixed 729.
   The [operation-credential receiving receipt](journal/2026/11.17-operation-credential-receiving-receipt.md)
   records #13171's actual reviewed whole-domain acceptance and #5763's
   separately audited redundant-tracker retirement after complete current
   ROOT/source/custody readback. All three technical rows remain unchecked;
   owners, #5760 and #954/P3 remain. The complete census is 883 whole,
   154 above fixed 729, with one audited campaign retirement and no arrivals
-  or unrelated departures. Whole current safe comparisons retain #5947's
+  or unrelated departures. The earlier whole safe comparisons retained #5947's
   callback, #5952's settings-choice and #5953's cleanup/Restore contracts
-  independently OPEN; #5956's architecture decision retains its actual
+  independently OPEN at that observation; #5956's architecture decision retains its actual
   copied-source qualification boundary.
   The [current create-credential qualification](journal/2026/11.17-current-create-credential-qualification.md)
   records #13168's actual reviewed receipt and #5763's corrected current
