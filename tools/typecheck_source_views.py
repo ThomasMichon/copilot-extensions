@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import ast
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 import io
 import hashlib
@@ -10,7 +12,11 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import tokenize
+from typing import Callable
+
+from tools.typecheck_programs import IdentityReader, ProgramInputs
 
 INSTALLATION_ENTRY = "libs/installation-context/installation_context.py"
 GUARD_ENTRY = "plugins/copilot-extensions-maintainer/scripts/copilot-mention-guard.py"
@@ -45,6 +51,120 @@ if __name__ == "__main__":
 
 class SourceViewError(ValueError):
     """Source correspondence is incomplete or no longer matches the view."""
+
+
+@dataclass(frozen=True)
+class InstallerProgramView:
+    root: Path
+    paths: tuple[str, ...]
+    verify: Callable[[], None]
+
+
+@contextmanager
+def installer_program_view(
+    root: Path, program: str, paths: tuple[str, ...], shared: tuple[str, ...],
+    stage_factory: Callable[[], Path], identity: IdentityReader,
+) -> Iterator[InstallerProgramView | None]:
+    """Qualify declared installer consumers through the production materializer."""
+    from tools import materialize_installer_engine as materializer
+    from tools import installer_engine_ref, uv_editable_ref
+
+    consumer = root / program
+    plan = materializer.derived_file_pairs(
+        root, root, copied_consumer=(consumer, consumer),
+    )
+    if not plan:
+        yield None
+        return
+    stage = stage_factory()
+
+    def members(base: Path, directory: str) -> tuple[str, ...]:
+        found: list[str] = []
+        for parent, directories, files in os.walk(base / directory, followlinks=False):
+            current = Path(parent)
+            identity(current, directory=True)
+            directories[:] = [
+                name for name in directories
+                if name not in {"__pycache__", ".pytest_cache", ".ruff_cache"}
+            ]
+            for name in directories:
+                identity(current / name, directory=True)
+            for name in sorted(files):
+                if not name.endswith((".pyc", ".pyo")):
+                    found.append((current / name).relative_to(base).as_posix())
+        return tuple(sorted(found))
+
+    directories = (program, *shared, "libs/installer-engine")
+    membership = tuple((directory, members(root, directory)) for directory in directories)
+    source_paths = {path for _directory, entries in membership for path in entries}
+    owner_root = Path(__file__).resolve().parents[1]
+    owner_paths: list[str] = []
+    for module in (materializer, installer_engine_ref, uv_editable_ref):
+        location = module.__file__
+        if not isinstance(location, str):
+            raise SourceViewError("Installer composition owner has no physical source")
+        owner_paths.append(Path(location).relative_to(owner_root).as_posix())
+    owner_inputs = ProgramInputs.capture(owner_root, tuple(owner_paths), identity)
+    inputs = ProgramInputs.capture(root, tuple(sorted(source_paths)), identity)
+
+    def verify_sources() -> None:
+        owner_inputs.verify()
+        inputs.verify()
+        if membership != tuple((directory, members(root, directory)) for directory in directories):
+            raise SourceViewError("Installer composition source membership changed")
+
+    stage.parent.mkdir(parents=True, exist_ok=True)
+    if stage.exists() or stage.is_symlink():
+        raise SourceViewError("Installer checker candidate must be a fresh directory")
+    stage.mkdir()
+    stage_identity = identity(stage, directory=True)
+    outputs: ProgramInputs | None = None
+    output_members: tuple[str, ...] = ()
+    try:
+        for directory in (program, *shared):
+            destination = stage / directory
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(
+                root / directory, destination, symlinks=True,
+                ignore=shutil.ignore_patterns("__pycache__", ".pytest_cache", ".ruff_cache", "*.pyc", "*.pyo"),
+            )
+        verify_sources()
+        log = materializer.materialize_ref_into(
+            source_consumer_dir=consumer, dest_consumer_dir=stage / program,
+            canonical_root=root, dest_root=stage,
+            human_sources=materializer.validate_human_output_sources(root, consumers=(consumer,)),
+        )
+        if not any(line.startswith("SKIP") for line in log):
+            log.extend(materializer.materialize_derived_files(
+                stage, canonical_root=root, copied_consumer=(consumer, stage / program),
+            ))
+        refusals = [line for line in log if line.startswith("SKIP")]
+        if refusals:
+            raise SourceViewError("Installer checker composition refused:\n" + "\n".join(refusals))
+        verify_sources()
+        output_members = members(stage, "")
+        outputs = ProgramInputs.capture(stage, output_members, identity)
+
+        def verify() -> None:
+            verify_sources()
+            assert outputs is not None
+            outputs.verify()
+            if output_members != members(stage, ""):
+                raise SourceViewError("Installer checker candidate membership changed")
+
+        inventory = tuple(sorted(set(paths) | {
+            path for path in output_members if path.endswith(".py")
+        }))
+        yield InstallerProgramView(stage, inventory, verify)
+        verify()
+    finally:
+        if identity(stage, directory=True) != stage_identity:
+            raise SourceViewError("Installer checker candidate directory was replaced")
+        if outputs is not None:
+            outputs.verify()
+            if output_members != members(stage, ""):
+                raise SourceViewError("Installer checker candidate membership changed; retained")
+        shutil.rmtree(stage)
 
 
 @dataclass(frozen=True)

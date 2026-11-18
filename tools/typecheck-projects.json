@@ -533,7 +533,19 @@
       "import_roots": [
         "fleet-manager/tests",
         "plugins/agent-vault",
-        "plugins/agent-vault/scripts"
+        "plugins/agent-vault/scripts",
+        "libs/agent-procutil/src"
+      ],
+      "program_roots": [
+        {
+          "root": "plugins/agent-vault",
+          "import_roots": [
+            "plugins/agent-vault/tests",
+            "plugins/agent-vault/scripts",
+            "plugins/agent-vault/src",
+            "plugins/agent-vault/scripts/configuration-layers/src"
+          ]
+        }
       ],
       "exclude": [],
       "level": "pending",

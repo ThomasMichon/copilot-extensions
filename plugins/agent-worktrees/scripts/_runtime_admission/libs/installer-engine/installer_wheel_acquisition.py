@@ -738,13 +738,13 @@ def _worker_sources() -> dict[str, bytes]:
         Path(__file__), Path(_inspection.__file__), Path(_snapshots.__file__),
         Path(_feed_policy.__file__),
     ):
-        before = _inspection._ordinary(source)
+        before = _inspection._ordinary(source, allow_hardlinks=True)
         if before.st_size > 1 << 20:
             raise WheelError("acquisition worker source protocol budget exceeded")
-        with cast(Callable[[Path], BinaryIO], _snapshots._open)(source) as stream:
-            opened = cast(Callable[..., os.stat_result], _snapshots._unchanged)(source, before, stream)
+        with _snapshots._open(source) as stream:
+            opened = _snapshots._unchanged(source, before, stream, allow_hardlinks=True)
             content = stream.read((1 << 20) + 1)
-            cast(Callable[..., os.stat_result], _snapshots._unchanged)(source, before, stream, opened=opened)
+            _snapshots._unchanged(source, before, stream, opened=opened, allow_hardlinks=True)
         if len(content) > 1 << 20:
             raise WheelError("acquisition worker source protocol budget exceeded")
         result[source.name] = content
@@ -806,8 +806,8 @@ def _run_worker(
     try:
         with ExitStack() as held:
             for name in sources:
-                held.enter_context(cast(Callable[[Path], BinaryIO], _snapshots._open)(worker / name))
-            custody = held.enter_context(cast(Callable[[Path], BinaryIO], _snapshots._open)(control))
+                held.enter_context(_snapshots._open(worker / name))
+            custody = held.enter_context(_snapshots._open(control))
             _check_deadline(deadline)
             result = run_owned(
                 [executable, "-I", "-S", "-B", "-c", launch, str(worker), str(control)],

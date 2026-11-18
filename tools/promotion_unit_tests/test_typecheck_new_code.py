@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import ast
+from contextlib import nullcontext
 import os
 from pathlib import Path, WindowsPath
 import subprocess
 from types import SimpleNamespace
+from typing import Callable
 
 import pytest
 import yaml
@@ -13,8 +16,10 @@ import yaml
 from tools import typecheck
 from tools import typecheck_source_views as views
 from tools.typecheck_new_code import select_new_code
-from tools.typecheck_source_views import INSTALLATION_ENTRY, SourceViewError, setup_program_view
-from tools.typecheck_programs import ProgramError, independent_programs
+from tools.typecheck_source_views import (
+    INSTALLATION_ENTRY, InstallerProgramView, SourceViewError, installer_program_view, setup_program_view,
+)
+from tools.typecheck_programs import Program, ProgramError, independent_programs
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -119,33 +124,216 @@ def test_independent_programs_refuse_noninventoried_or_unowned_selection(
     with pytest.raises(ProgramError, match="unique inventoried owner"):
         independent_programs(selected, files, ("retained",), lambda path: path in files)
 
-ROOT = Path(__file__).resolve().parents[2]
+
+@pytest.mark.parametrize("both", [False, True])
+def test_independent_programs_share_only_declared_foreign_dependencies(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, both: bool,
+) -> None:
+    files = ("ordinary/contract.py", "retained/contract.py")
+    paths = (*files, "shared/helper.py", "unrelated/helper.py")
+    for relative in paths:
+        destination = tmp_path / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(b"value: int = 1\n")
+    project = typecheck.Project(
+        "sample", ("ordinary", "retained"), (), "pending", "3.10",
+        ("linux", "win32"), "requirements.txt",
+        import_roots=("ordinary", "shared"),
+        program_roots=(Program("retained", ("retained",)),),
+    )
+    checked: list[tuple[str, ...]] = []
+
+    def check(
+        root: Path, item: typecheck.Project, selected: tuple[str, ...], *,
+        all_paths: tuple[str, ...], strict: bool = False, program_root: str | None = None,
+    ) -> int:
+        assert root == tmp_path and strict and item.level == "pending"
+        checked.append(selected)
+        if program_root is None:
+            assert selected == files[:1] and all_paths == paths
+            assert item.import_roots == ("ordinary", "shared")
+        else:
+            assert program_root == "retained" and selected == files[1:]
+            assert item.import_roots == ("retained", "shared")
+            assert all_paths == (files[1], "shared/helper.py")
+        return 0
+
+    monkeypatch.setattr(typecheck, "_check_program", check)
+    selected = files if both else files[1:]
+    assert typecheck.check_project(tmp_path, project, selected, all_paths=paths, strict=True) == 0
+    assert checked == ([files[:1], files[1:]] if both else [files[1:]])
 
 
-def test_pr_ratchet_uses_the_feature_head_and_merge_base(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.syspath_prepend(str(ROOT))
-    from tools import typecheck
+@pytest.mark.parametrize("foreign", [False, True])
+def test_installer_program_uses_guarded_payload_composition(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, foreign: bool,
+) -> None:
+    from tools import installer_engine_ref
+    from tools import materialize_installer_engine as materializer
 
-    ci = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text("utf-8"))
-    step = next(item for item in ci["jobs"]["checks"]["steps"]
-                if item.get("name") == "Whole-file strict new-code ratchet")
-    assert step["env"]["BASE"] == "${{ github.event.pull_request.base.sha || github.event.before }}"
-    assert step["env"]["HEAD"] == "${{ github.event.pull_request.head.sha || github.sha }}"
-    assert 'BASE="$(git merge-base "$BASE" "$HEAD")"' in step["run"]
-    feature, common = "a" * 40, "b" * 40
-    comparisons: list[list[str]] = []
+    root = tmp_path / "source"
+    program = "worktree-manager"
+    relative = program + "/scripts/runtime_application_install.py"
+    canonical = root / "libs/installer-engine"
+    canonical.mkdir(parents=True)
+    for name in (*installer_engine_ref.PYTHON_FILES, *installer_engine_ref.SUPPORT_FILES):
+        (canonical / name).write_bytes(b"value = 1\n")
+    (canonical / "runtime_application_install.py").write_bytes(
+        (ROOT / "libs/installer-engine/runtime_application_install.py").read_bytes(),
+    )
+    source = root / relative
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"# retained developer preimage\n")
+    before = source.read_bytes()
+    stage = tmp_path / "candidate"
+    materialize = materializer.materialize_derived_files
 
-    def run(argv: list[str], cwd: Path, *, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
-        assert cwd == tmp_path
-        if argv[1] == "rev-parse":
-            value = common if argv[-1] == common + "^{commit}" else feature
-            return subprocess.CompletedProcess(argv, 0, value + "\n", "")
-        comparisons.append(argv)
-        return subprocess.CompletedProcess(argv, 0, "pr-owned.py\0", "")
+    def derive(
+        dest: Path, *, canonical_root: Path,
+        copied_consumer: tuple[Path, Path] | None = None,
+        file_names: frozenset[str] | None = None,
+    ) -> list[str]:
+        if foreign:
+            assert copied_consumer is not None
+            (copied_consumer[1] / "scripts/runtime_application_install.py").write_bytes(
+                b"foreign candidate content\n",
+            )
+        return materialize(
+            dest, canonical_root=canonical_root,
+            copied_consumer=copied_consumer, file_names=file_names,
+        )
 
+    monkeypatch.setattr(materializer, "materialize_derived_files", derive)
+
+    def check() -> None:
+        with installer_program_view(
+            root, program, (relative,), (), lambda: stage, typecheck._import_identity,
+        ) as candidate:
+            assert candidate is not None
+            candidate.verify()
+            payload = candidate.root / relative
+            assert payload.read_bytes() == (
+                ROOT / "libs/installer-engine/runtime_application_install.py"
+            ).read_bytes()
+            assert relative in candidate.paths and payload != source
+            assert any(
+                isinstance(node, ast.FunctionDef) and node.name == "application_install_timeout"
+                for node in ast.walk(ast.parse(payload.read_bytes()))
+            )
+
+    if foreign:
+        with pytest.raises(SourceViewError, match="foreign content"):
+            check()
+    else:
+        check()
+    assert source.read_bytes() == before and not stage.exists()
+
+
+def test_installer_materialization_preserves_selected_physical_scope(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths = ("retained/selected.py", "retained/dependency.py")
+    (tmp_path / "retained").mkdir()
+    for relative in paths:
+        (tmp_path / relative).write_bytes(b"value = 1\n")
+    verified: list[str] = []
+    candidate = InstallerProgramView(tmp_path, paths, lambda: verified.append("verified"))
+    monkeypatch.setattr(typecheck, "installer_program_view", lambda *_args: nullcontext(candidate))
+
+    def check(
+        root: Path, project: typecheck.Project, files: tuple[str, ...], *,
+        all_paths: tuple[str, ...], strict: bool = False, program_root: str | None = None,
+        environment_root: Path | None = None, input_verifier: Callable[[], None] | None = None,
+    ) -> int:
+        assert root == environment_root == tmp_path and project.level == "pending" and strict
+        assert files == paths[:1] and all_paths == paths and program_root == "retained"
+        assert input_verifier is not None
+        input_verifier()
+        return 0
+
+    monkeypatch.setattr(typecheck, "_check_program", check)
+    project = typecheck.Project(
+        "sample", ("retained",), (), "pending", "3.10", ("linux",), "requirements.txt",
+        program_roots=(Program("retained", ("retained",)),),
+    )
+    assert typecheck.check_project(
+        tmp_path, project, paths[:1], all_paths=paths, strict=True,
+    ) == 0
+    assert verified == ["verified"]
+
+
+@pytest.mark.parametrize("entry", ["installation_context.py", "_installation_context.py"])
+@pytest.mark.parametrize("independent", [False, True])
+def test_copied_program_imports_resolve_their_complete_composed_api(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, entry: str, independent: bool,
+) -> None:
+    prefixes = ("first", "second")
+    paths: list[str] = []
+    for source in sorted((ROOT / Path(INSTALLATION_ENTRY).parent).glob("*.py")):
+        if source.name != "installation_context.py" and not source.name.startswith("_installation_context_"):
+            continue
+        for prefix in prefixes:
+            relative = prefix + "/" + (entry if source.name == "installation_context.py" else source.name)
+            destination = tmp_path / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(source.read_bytes())
+            paths.append(relative)
+    for prefix in prefixes:
+        relative = prefix + "/consumer.py"
+        (tmp_path / relative).write_text(
+            f"from {entry[:-3]} import resolve_runtime_profile_policy\n", encoding="utf-8",
+        )
+        paths.append(relative)
+    environment = tmp_path / "environment"
+    environment.mkdir()
+    python = environment / "inert-python"
+    python.write_bytes(b"never execute this analyzer")
+    (environment / ".typecheck-prepared").write_bytes(b"fixture\n")
+    events: list[str] = []
+
+    class Lease:
+        def release(self) -> None:
+            events.append("released")
+
+    def run(
+        argv: list[str], root: Path, *, env: dict[str, str],
+    ) -> subprocess.CompletedProcess[str]:
+        assert root == tmp_path and "--strict" in argv
+        targets = Path(argv[-1][1:]).read_text("utf-8").splitlines()
+        provider = next(
+            Path(directory) / entry for directory in env["MYPYPATH"].split(os.pathsep)
+            if (Path(directory) / entry).is_file()
+        )
+        assert str(provider) in targets and provider.parent.name.startswith("sample")
+        assert any(
+            isinstance(node, ast.FunctionDef) and node.name == "resolve_runtime_profile_policy"
+            for node in ast.walk(ast.parse(provider.read_bytes()))
+        )
+        consumers = [target for target in targets if target.endswith("/consumer.py")]
+        assert len(consumers) == 1
+        events.append(consumers[0].split("/")[0] + ":" + argv[argv.index("--platform") + 1])
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(typecheck, "environment_path", lambda *_args: (environment, "fixture"))
+    monkeypatch.setattr(typecheck, "environment_python", lambda _path: python)
+    monkeypatch.setattr(typecheck, "acquire_environment", lambda *_args: Lease())
     monkeypatch.setattr(typecheck, "_run", run)
-    assert typecheck.changed_paths(tmp_path, common, feature) == ("pr-owned.py",)
-    assert comparisons[0][-3:] == [common, feature, "--"]
+    project = typecheck.Project(
+        "sample", prefixes, (), "pending", "3.10", ("linux", "win32"), "requirements.txt",
+        import_roots=() if independent else prefixes,
+        program_roots=tuple(Program(prefix, (prefix,)) for prefix in prefixes) if independent else (),
+    )
+    selected = tuple(path for path in paths if not path.endswith("_installation_context_worker.py"))
+    if independent:
+        assert typecheck.check_project(
+            tmp_path, project, selected, all_paths=tuple(paths), strict=True,
+        ) == 0
+        assert events == ["first:linux", "first:win32", "released", "second:linux", "second:win32", "released"]
+    else:
+        with pytest.raises(typecheck.TypecheckError, match="independent program bindings"):
+            typecheck.check_project(tmp_path, project, selected, all_paths=tuple(paths), strict=True)
+        assert events == ["released"]
+    assert not list(tmp_path.glob("source-views-*/**/*.py"))
 
 
 @pytest.mark.parametrize("level", ["pending", "basic", "strict"])

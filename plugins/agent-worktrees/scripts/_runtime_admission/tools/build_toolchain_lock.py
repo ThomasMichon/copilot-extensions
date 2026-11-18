@@ -26,7 +26,7 @@ import os
 import shutil
 import subprocess
 import sys
-import time
+import time as time
 import tempfile
 from pathlib import Path
 from collections.abc import Callable
@@ -36,10 +36,6 @@ from typing import Any, TYPE_CHECKING, TypedDict, cast
 class _Execution(TypedDict, total=False):
     uv: str
     deadline: float
-
-
-class _TimeoutOptions(TypedDict, total=False):
-    timeout: float
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from artifact_source_build import read_build_system_requires  # noqa: E402
@@ -59,18 +55,6 @@ from governed_feed_trust import (  # noqa: E402
     _validated_trusted_index_url as _validated_trusted_index_url,
     strip_package_source_env_vars as strip_package_source_env_vars,
 )
-if TYPE_CHECKING:
-    from installer_feed_policy import (
-        _PUBLIC_PYPI_HOSTS as _PUBLIC_PYPI_HOSTS,
-        _is_public_pypi_url as _is_public_pypi_url,
-        _normalize_hostname as _normalize_hostname,
-    )
-else:
-    from governed_feed_trust import (
-        _PUBLIC_PYPI_HOSTS as _PUBLIC_PYPI_HOSTS,
-        _is_public_pypi_url as _is_public_pypi_url,
-        _normalize_hostname as _normalize_hostname,
-    )
 from public_toolchain_source import (  # noqa: E402
     PublicToolchainSource,
     resolve_public_source,
@@ -78,10 +62,28 @@ from public_toolchain_source import (  # noqa: E402
     validate_lock_provenance,
 )
 from seasoned_public_feed import DEFAULT_MIN_AGE_DAYS  # noqa: E402
-from seasoned_uv import DependencyPolicyError, run_uv_install  # noqa: E402
+if TYPE_CHECKING:
+    from installer_feed_policy import (
+        _PUBLIC_PYPI_HOSTS as _PUBLIC_PYPI_HOSTS,
+        _is_public_pypi_url as _is_public_pypi_url,
+        _normalize_hostname as _normalize_hostname,
+    )
+    from installer_dependency_policy import DependencyPolicyError as DependencyPolicyError
+    from installer_dependency_policy import run_uv_install as _run_uv_install
+
+    run_uv_install = cast(Callable[..., subprocess.CompletedProcess[str]], _run_uv_install)
+else:
+    from governed_feed_trust import (
+        _PUBLIC_PYPI_HOSTS as _PUBLIC_PYPI_HOSTS,
+        _is_public_pypi_url as _is_public_pypi_url,
+        _normalize_hostname as _normalize_hostname,
+    )
+    from seasoned_uv import DependencyPolicyError, run_uv_install
 from installer_dependency_policy import retain_uv_install  # noqa: E402
-from build_toolchain_queries import execution_options as _execution_options, query_versions  # noqa: E402
-from installer_dependency_config import remaining_timeout as _remaining_timeout  # noqa: E402
+from build_toolchain_queries import (  # noqa: E402
+    execution_options as _execution_options, query_versions, run_interpreter,
+    remaining_timeout as _remaining_timeout,
+)
 
 #: The exact packages a locked build-toolchain venv pins -- every
 #: `pyproject.toml` under `plugins/` and `libs/` uses the same
@@ -103,7 +105,7 @@ def _seasoned_install(
 ) -> subprocess.CompletedProcess[str]:
     try:
         if deadline is None:
-            return cast(subprocess.CompletedProcess[str], run_uv_install(uv, arguments, env=env, capture_output=True, text=True))
+            return run_uv_install(uv, arguments, env=env, capture_output=True, text=True)
         with retain_uv_install(uv, arguments, env=env, deadline=deadline) as transaction:
             return subprocess.run(
                 list(transaction.argv), env=transaction.environment, cwd=transaction.cwd,
@@ -351,15 +353,9 @@ def _query_marker_environment(python_exe: Path, *, deadline: float | None = None
     values -- never assumed from the process running this script, which
     may be a different Python than ``--python`` locked into the toolchain
     venv."""
-    result = subprocess.run(
-        [str(python_exe), "-I", "-S", "-c", _MARKER_ENV_QUERY_SCRIPT],
-        executable=(
-            getattr(os.path, "_getfinalpathname")(str(python_exe))
-            if os.name == "nt" and python_exe.is_file() else None
-        ),
-        capture_output=True, text=True, env=sanitize_subprocess_env(),
-        **cast(_TimeoutOptions, {"timeout": max(0, deadline - time.monotonic())} if deadline is not None else {}),
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
+    result = run_interpreter(
+        python_exe, ["-I", "-S", "-c", _MARKER_ENV_QUERY_SCRIPT],
+        sanitize_subprocess_env(), deadline=deadline,
     )
     if result.returncode != 0:
         raise ArtifactBuildError(
@@ -965,16 +961,9 @@ def _assert_toolchain_satisfies_build_requires(
                 "--payload-file", str(payload_path),
             ])
     else:
-        result = subprocess.run(
-            [str(toolchain.venv_python), "-I", "-c", _BUILD_REQUIRES_CHECK_SCRIPT],
-            executable=(
-                getattr(os.path, "_getfinalpathname")(str(toolchain.venv_python))
-                if os.name == "nt" and toolchain.venv_python.is_file() else None
-            ),
-            input=payload, capture_output=True, text=True,
-            env=sanitize_subprocess_env(),
-            **cast(_TimeoutOptions, {"timeout": max(0, deadline - time.monotonic())} if deadline is not None else {}),
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
+        result = run_interpreter(
+            toolchain.venv_python, ["-I", "-c", _BUILD_REQUIRES_CHECK_SCRIPT],
+            sanitize_subprocess_env(), input_text=payload, deadline=deadline,
         )
     if result.returncode != 0:
         raise ArtifactBuildError(

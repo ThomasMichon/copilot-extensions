@@ -27,6 +27,19 @@ Each program retains the existing requirements, strictness, Python versions and
 platforms. Failures aggregate across all programs and targets. Ordinary
 single-program checks are unchanged.
 
+Project-level `import_roots` may additionally supply shared dependencies only
+when the root contains no inventoried Python file owned by that project.
+Owned roots are not inherited across independent programs; each program's own
+`import_roots` remains confined to its root. This uses the existing manifest
+fields rather than a new shared-root declaration.
+
+Declared installer consumers are checked in fresh candidates composed through
+the existing guarded installer materializer. Developer mirrors remain untouched.
+Composition refusals, source/preimage changes, candidate identity changes and
+membership drift fail qualification. Materialization preserves the caller's
+selected physical scope; it does not promote every refreshed dependency into
+strict admission.
+
 Grouped checks capture every selected physical file's bytes and file/directory
 identities before the first program and verify them across program boundaries.
 Each program also retains the existing source-view and declared-import custody
@@ -537,6 +550,12 @@ add them to the consumer's reported targets, or certify their implementation:
 the canonical project retains its separate strict check. Imported views use
 the same byte/membership verification, source mapping and lease-bound cleanup;
 no stub, private-fragment import or missing-import suppression is substituted.
+
+A copied Installation Context entry directly at a declared import root retains
+its importable module basename in the checker view, so consumers resolve its
+complete composed API. Conflicting bindings require independent programs.
+Closed fragment membership, source mapping and physical-inventory-only
+composition remain enforced.
 
 The view preserves physical source lines, normalizing line endings to LF and
 replacing the loader call and standalone `from __future__ import annotations`

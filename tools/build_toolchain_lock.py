@@ -105,7 +105,7 @@ def _seasoned_install(
 ) -> subprocess.CompletedProcess[str]:
     try:
         if deadline is None:
-            return cast(subprocess.CompletedProcess[str], run_uv_install(uv, arguments, env=env, capture_output=True, text=True))
+            return run_uv_install(uv, arguments, env=env, capture_output=True, text=True)
         with retain_uv_install(uv, arguments, env=env, deadline=deadline) as transaction:
             return subprocess.run(
                 list(transaction.argv), env=transaction.environment, cwd=transaction.cwd,

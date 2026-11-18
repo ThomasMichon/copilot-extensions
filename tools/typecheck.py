@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from functools import partial
 import hashlib
 from itertools import product
@@ -28,6 +28,7 @@ from tools import plugin_test_resources  # noqa: E402
 from tools.typecheck_source_views import (  # noqa: E402
     GUARD_ENTRY, GUARD_MODULE, INSTALLATION_ENTRY, SourceView, SourceViewError,
     _write_view, guard_alias_view, installation_view, setup_program_view,
+    installer_program_view,
     HARNESS_PREFIX, HarnessProgramView, harness_emitted_inputs, harness_emitted_views,
 )
 from tools.typecheck_catalog_views import (  # noqa: E402
@@ -38,7 +39,7 @@ from tools.typecheck_bootstrap_views import (  # noqa: E402
     SELECTOR_INPUTS, powershell_selector_view, posix_selector_view,
 )
 from tools.typecheck_new_code import select_new_code  # noqa: E402
-from tools.typecheck_programs import Program, ProgramError, ProgramInputs, independent_programs  # noqa: E402
+from tools.typecheck_programs import Program, ProgramError, check_independent_project  # noqa: E402
 from installer_dependency_policy import DependencyPolicyError, run_uv_install  # noqa: E402
 from single_instance_lease import AlreadyRunningError  # noqa: E402
 
@@ -657,32 +658,11 @@ def check_project(
     if not project.program_roots:
         return _check_program(root, project, files, all_paths=all_paths, strict=strict)
     try:
-        programs = independent_programs(
-            files, all_paths, tuple(program.root for program in project.program_roots), project.owns,
+        return check_independent_project(
+            root, project, files, all_paths=all_paths, strict=strict,
+            check=_check_program, identity=_import_identity, candidate_factory=installer_program_view,
+            environment=environment_path, nonce=lambda: uuid4().hex,
         )
-        if not programs:
-            raise ProgramError("Independent programs have no selected Python files")
-        captured = ProgramInputs.capture(root, files, _import_identity)
-        failure = 0
-        for index, program in enumerate(programs, 1):
-            declaration = next(
-                (item for item in project.program_roots if program[0].startswith(item.root + "/")), None,
-            )
-            member_project = replace(project, import_roots=declaration.import_roots) if declaration else project
-            member_paths = tuple(
-                path for path in all_paths if path.startswith(declaration.root + "/")
-            ) if declaration else all_paths
-            captured.verify()
-            print(f"Independent program {index}/{len(programs)}: {project.name}")
-            try:
-                result = _check_program(
-                    root, member_project, program, all_paths=member_paths, strict=strict,
-                    program_root=declaration.root if declaration else None,
-                )
-                failure = failure or result
-            finally:
-                captured.verify()
-        return failure
     except ProgramError as error:
         raise TypecheckError(str(error)) from error
 
@@ -690,6 +670,7 @@ def check_project(
 def _check_program(
     root: Path, project: Project, files: tuple[str, ...], *,
     all_paths: tuple[str, ...], strict: bool = False, program_root: str | None = None,
+    environment_root: Path | None = None, input_verifier: Callable[[], None] | None = None,
 ) -> int:
     """Check one declared scope; never execute product or test code."""
     if not files:
@@ -699,7 +680,7 @@ def _check_program(
             project.level, (project.python_version, *project.additional_python_versions),
         )
     physical_count = len(files)
-    path, digest = environment_path(root, project)
+    path, digest = environment_path(environment_root or root, project)
     python = environment_python(path)
     marker = path / ".typecheck-prepared"
     if not python.is_file() or not marker.is_file() or marker.read_text(encoding="utf-8").strip() != digest:
@@ -823,11 +804,22 @@ def _check_program(
                 and "/" not in file[len(prefix):]
                 and not file.endswith("_installation_context_worker.py")
             ))
+            imported = prefix.rstrip("/") in project.import_roots
+            filename = (
+                entry.rsplit("/", 1)[1] if imported
+                else "installation_context_" + hashlib.sha256(entry.encode()).hexdigest()[:16] + ".py"
+            )
+            if imported and views.stage / filename in views.outputs:
+                raise TypecheckError(
+                    "Copied installation-context imports require independent program bindings"
+                )
             view = views.add(
                 partial(installation_view, entry_path=entry), all_paths, copy_members,
-                "installation_context_" + hashlib.sha256(entry.encode()).hexdigest()[:16] + ".py",
+                filename,
             )
             files = (*tuple(file for file in files if file not in copy_members), str(view.output))
+            if imported and str(view.output.parent) not in ordered_imports:
+                ordered_imports.insert(0, str(view.output.parent))
         setups = tuple(file for file in files if file.endswith("/setup.py"))
         if len(setups) > 1:
             for entry in setups:
@@ -871,6 +863,8 @@ def _check_program(
             argv.append("@" + str(targets))
             if import_inputs is not None:
                 import_inputs.verify(root)
+            if input_verifier is not None:
+                input_verifier()
             views.verify()
             try:
                 result = _run(argv, root, env=env)
@@ -878,8 +872,12 @@ def _check_program(
                 try:
                     views.verify()
                 finally:
-                    if import_inputs is not None:
-                        import_inputs.verify(root)
+                    try:
+                        if import_inputs is not None:
+                            import_inputs.verify(root)
+                    finally:
+                        if input_verifier is not None:
+                            input_verifier()
             print(f"[{project.level}] {project.name} (Python {version}, {platform}, {physical_count} physical files, {len(files)} targets)")
             if supplemental:
                 print(f"Supplemental portable emitted programs: {supplemental}; no native execution qualification")

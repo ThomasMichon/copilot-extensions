@@ -9,30 +9,26 @@ import stat
 import sys
 import tempfile
 import zipfile
+from collections.abc import Mapping
 from email.message import Message
 from functools import partial
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, BinaryIO, Protocol, TYPE_CHECKING, cast
-from collections.abc import Callable, Mapping
+from typing import Any, BinaryIO, cast
 
-from artifact_source_build import PromotionArtifactError, validate_runtime_metadata
+from artifact_source_build import (
+    PromotionArtifactError, data_file_sources, validate_entry_points, validate_runtime_metadata,
+)
 from standalone_python_artifacts import COMPONENTS, artifact_label
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "libs" / "installer-engine"))
 from installer_wheel_inputs import WheelLimits
 from runtime_wheel_inspection import inspect_wheel_facts as inspect_wheel_facts
 
-if TYPE_CHECKING:
-    if sys.version_info >= (3, 11):
-        import tomllib
-    else:
-        import tomli as tomllib
+if sys.version_info >= (3, 11):
+    import tomllib
 else:
-    try:
-        import tomllib
-    except ModuleNotFoundError:
-        import tomli as tomllib
+    import tomli as tomllib
 
 _DIGEST = re.compile(r"[0-9a-f]{64}")
 _PLUGIN = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
@@ -40,10 +36,6 @@ _VERSION = re.compile(r"[0-9][A-Za-z0-9.+-]*")
 _MANIFEST_LIMIT = 1 << 20
 _BUNDLE_LIMIT = 512 << 20
 _WHEEL_TAG_LIMIT = 10_000
-
-
-class _OptionTransform(Protocol):
-    optionxform: Callable[[str], str]
 
 
 def _artifact_label(record: dict[str, Any]) -> str:
@@ -255,8 +247,10 @@ def validate_wheel_sources(
         injected = {}
         if component is not None:
             from standalone_python_artifacts import injected_resources, validate_build
-            data = validate_build(source_dir, component=component, root=cast(Path, candidate_root))
-            injected = injected_resources(component, cast(Path, candidate_root))
+            # Resource-free components do not dereference an omitted candidate root.
+            resource_root = cast(Path, candidate_root)
+            data = validate_build(source_dir, component=component, root=resource_root)
+            injected = injected_resources(component, resource_root)
         else:
             from plugin_runtime_resources import build_inputs
             data, injected = build_inputs(source_dir, root=candidate_root)
@@ -298,20 +292,25 @@ def validate_wheel_sources(
             "": str(base.relative_to(source_dir)),
         }:
             raise PromotionArtifactError("unsupported wheel source package-dir mapping")
+        installed_data = {
+            prefix.removesuffix(".dist-info/") + ".data/data/" + name: path
+            for name, path in data_file_sources(source_dir, settings).items()
+        }
         payload = {name for name in hashes if not name.startswith(prefix)}
-        if {name for name in payload if name.endswith(".py")} != required_python:
+        if {name for name in payload - installed_data.keys() if name.endswith(".py")} != required_python:
             raise PromotionArtifactError("wheel Python member set differs from candidate source")
         for name in payload:
-            path = injected.get(name, base / name)
+            path = installed_data.get(name, injected.get(name, base / name))
             if (
                 not path.resolve().is_relative_to(
-                    cast(Path, candidate_root).resolve() if name in injected else source_dir.resolve()
+                    candidate_root.resolve()
+                    if name in injected and candidate_root is not None else source_dir.resolve()
                 )
                 or not path.is_file() or path.is_symlink() or _digest(path) != hashes[name]
             ):
                 raise PromotionArtifactError(f"{name}: wheel payload differs from candidate source")
         package_data = settings.get("package-data", {})
-        if not isinstance(package_data, dict) or settings.get("exclude-package-data") or settings.get("data-files"):
+        if not isinstance(package_data, dict) or settings.get("exclude-package-data"):
             raise PromotionArtifactError("invalid wheel package-data configuration")
         required_data: set[str] = {name for name in injected if not name.endswith(".py")}
         for package, patterns in package_data.items():
@@ -330,39 +329,11 @@ def validate_wheel_sources(
                 path.relative_to(base).as_posix()
                 for root in roots for pattern in patterns for path in root.glob(pattern) if path.is_file()
             })
-        if payload != required_python | required_data:
+        if payload != required_python | required_data | installed_data.keys():
             raise PromotionArtifactError("wheel payload set differs from declared candidate members")
         project = data["project"]
         validate_runtime_metadata(project, metadata)
-        entries = project.get("entry-points", {})
-        if not isinstance(entries, dict) or any(
-            not isinstance(group, str) or not isinstance(values, dict) or any(
-                not isinstance(name, str) or not name or not isinstance(value, str) or not value
-                for name, value in values.items()
-            ) for group, values in entries.items()
-        ):
-            raise PromotionArtifactError("invalid candidate entry-point declarations")
-        expected_entries = dict(entries)
-        for field, group in (("scripts", "console_scripts"), ("gui-scripts", "gui_scripts")):
-            values = project.get(field, {})
-            if not isinstance(values, dict) or any(
-                not isinstance(name, str) or not name or not isinstance(value, str) or not value
-                for name, value in values.items()
-            ):
-                raise PromotionArtifactError("invalid candidate script declarations")
-            if values:
-                if group in expected_entries:
-                    raise PromotionArtifactError("ambiguous candidate entry-point group")
-                expected_entries[group] = values
-        entries_name = prefix + "entry_points.txt"
-        actual_entries = {}
-        if entries_name in hashes:
-            parser = configparser.ConfigParser(interpolation=None)
-            cast(_OptionTransform, parser).optionxform = str
-            parser.read_string(bundle.read(entries_name).decode("utf-8"))
-            actual_entries = {section: dict(parser[section]) for section in parser.sections()}
-        if actual_entries != expected_entries:
-            raise PromotionArtifactError("wheel entry points differ from candidate source")
+        validate_entry_points(project, bundle, hashes, prefix)
         top_name = prefix + "top_level.txt"
         if top_name in hashes:
             expected_top = {name.split("/")[0].removesuffix(".py") for name in required_python}

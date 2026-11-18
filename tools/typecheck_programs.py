@@ -1,9 +1,14 @@
 """Partition independently loaded physical programs without dropping source custody."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from contextlib import AbstractContextManager
+from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Callable, Protocol
+from typing import TYPE_CHECKING, Callable, Protocol
+
+if TYPE_CHECKING:
+    from tools.typecheck import Project
+    from tools.typecheck_source_views import InstallerProgramView
 
 
 class ProgramError(ValueError):
@@ -12,6 +17,21 @@ class ProgramError(ValueError):
 
 class IdentityReader(Protocol):
     def __call__(self, path: Path, *, directory: bool = False) -> tuple[int, int]: ...
+
+
+class _ProgramChecker(Protocol):
+    def __call__(
+        self, root: Path, project: Project, files: tuple[str, ...], *,
+        all_paths: tuple[str, ...], strict: bool = False, program_root: str | None = None,
+        environment_root: Path | None = None, input_verifier: Callable[[], None] | None = None,
+    ) -> int: ...
+
+
+class _InstallerFactory(Protocol):
+    def __call__(
+        self, root: Path, program: str, paths: tuple[str, ...], shared: tuple[str, ...],
+        stage_factory: Callable[[], Path], identity: IdentityReader,
+    ) -> AbstractContextManager[InstallerProgramView | None]: ...
 
 
 @dataclass(frozen=True)
@@ -42,6 +62,72 @@ def independent_programs(
         )
         assigned[group].append(path)
     return tuple(tuple(group) for group in assigned if group)
+
+
+def check_independent_project(
+    root: Path, project: Project, files: tuple[str, ...], *,
+    all_paths: tuple[str, ...], strict: bool, check: _ProgramChecker,
+    identity: IdentityReader, candidate_factory: _InstallerFactory,
+    environment: Callable[[Path, Project], tuple[Path, str]], nonce: Callable[[], str],
+) -> int:
+    """Run isolated owned programs with their declared shared dependencies."""
+    programs = independent_programs(
+        files, all_paths, tuple(program.root for program in project.program_roots), project.owns,
+    )
+    if not programs:
+        raise ProgramError("Independent programs have no selected Python files")
+    shared_roots = tuple(
+        directory for directory in project.import_roots
+        if not any(
+            project.owns(path) and path.startswith(directory + "/")
+            for path in all_paths
+        )
+    )
+    captured = ProgramInputs.capture(root, files, identity)
+    failure = 0
+    for index, program in enumerate(programs, 1):
+        declaration = next(
+            (item for item in project.program_roots if program[0].startswith(item.root + "/")), None,
+        )
+        member_project = replace(
+            project, import_roots=tuple(dict.fromkeys((*declaration.import_roots, *shared_roots))),
+        ) if declaration else project
+        member_paths = tuple(
+            path for path in all_paths
+            if path.startswith(declaration.root + "/")
+            or any(path.startswith(directory + "/") for directory in shared_roots)
+        ) if declaration else all_paths
+        captured.verify()
+        print(f"Independent program {index}/{len(programs)}: {project.name}")
+        try:
+            if declaration:
+                with candidate_factory(
+                    root, declaration.root, member_paths, shared_roots,
+                    lambda: environment(root, project)[0].parent / (
+                        "installer-program-" + project.name + "-" + nonce()
+                    ),
+                    identity,
+                ) as candidate:
+                    if candidate is None:
+                        result = check(
+                            root, member_project, program, all_paths=member_paths, strict=strict,
+                            program_root=declaration.root,
+                        )
+                    else:
+                        print("Checking materialized installer program; developer mirrors are not packaged proof.")
+                        result = check(
+                            candidate.root, member_project, program,
+                            all_paths=candidate.paths, strict=strict, program_root=declaration.root,
+                            environment_root=root, input_verifier=candidate.verify,
+                        )
+            else:
+                result = check(
+                    root, member_project, program, all_paths=member_paths, strict=strict,
+                )
+            failure = failure or result
+        finally:
+            captured.verify()
+    return failure
 
 
 @dataclass(frozen=True)
