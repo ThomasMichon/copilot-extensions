@@ -141,7 +141,7 @@ def test_manifest_retains_optional_program_roots_without_changing_policy(tmp_pat
 
 
 def test_retained_program_uses_actual_runtime_import_roots() -> None:
-    project = next(item for item in typecheck.load_projects() if item.name == "agent-worktrees")
+    project = next(item for item in typecheck.load_projects() if item.name == "agent-worktrees-admission-toolkit")
     program, = project.program_roots
     declaration = json.loads((typecheck.ROOT / program.root / "toolkit.json").read_bytes())
     assert program.import_roots == tuple(

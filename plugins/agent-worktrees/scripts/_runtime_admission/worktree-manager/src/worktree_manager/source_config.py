@@ -13,6 +13,9 @@ default) under a ``[source]`` table::
     repo = "https://github.com/<fork>/copilot-extensions.git"
     ref  = "canary"
 
+Prepared application commands default to their physical app root instead of
+the legacy root; an explicit ``WORKTREE_MANAGER_ROOT`` still takes precedence.
+
 Resolution is simply **config file → built-in default** (there is no env knob for
 the source). It is managed with the ``worktree-manager source`` command
 (``set`` / ``reset`` / show).
@@ -22,12 +25,15 @@ from __future__ import annotations
 
 import os
 import re
+import sys
+import importlib
 from pathlib import Path
+from typing import Any, cast
 
 try:  # tomllib is stdlib on 3.11+; tomli backports it for 3.10.
-    import tomllib
+    tomllib = importlib.import_module("tomllib")
 except ModuleNotFoundError:  # pragma: no cover - exercised only on 3.10
-    import tomli as tomllib
+    tomllib = importlib.import_module("tomli")
 
 #: Canonical defaults (the bootstrap one-liners fetch from the same place).
 DEFAULT_REPO = "https://github.com/ThomasMichon/copilot-extensions.git"
@@ -41,6 +47,15 @@ def default_root() -> Path:
     env = os.environ.get("WORKTREE_MANAGER_ROOT")
     if env:
         return Path(env).expanduser()
+    if __package__:
+        import worktree_manager
+        from .runtime_identity import running_application_slot
+
+        slot = running_application_slot()
+        if slot is not None and Path(worktree_manager.__file__).resolve().is_relative_to(
+            Path(sys.prefix).resolve(),
+        ):
+            return slot.parent.parent
     home = Path(os.environ.get("USERPROFILE") or os.path.expanduser("~"))
     return home / ".worktree-manager"
 
@@ -50,9 +65,9 @@ def config_path(root: Path | None = None) -> Path:
     return (root or default_root()).expanduser().resolve() / CONFIG_NAME
 
 
-def _load(root: Path | None = None) -> dict:
+def _load(root: Path | None = None) -> dict[str, Any]:
     try:
-        return tomllib.loads(config_path(root).read_text("utf-8"))
+        return cast(dict[str, Any], tomllib.loads(config_path(root).read_text("utf-8")))
     except (OSError, tomllib.TOMLDecodeError):
         return {}
 

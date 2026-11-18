@@ -97,8 +97,8 @@ def test_runtime_only_portfolio_refuses_incomplete_native_evidence(
     if outcome == "passed":
         exec(body, {})
     else:
-        expected = subprocess.CalledProcessError if outcome == "failed" else AssertionError
-        with pytest.raises(expected):
+        expected_error = subprocess.CalledProcessError if outcome == "failed" else AssertionError
+        with pytest.raises(expected_error):
             exec(body, {})
     assert len(calls) == (1 if outcome == "source-mismatch" else 2)
     if outcome == "failed":
@@ -218,8 +218,8 @@ ET.ElementTree(root).write(reports / "synthetic-admission-control.xml")
     if outcome == "passed":
         exec(body, {})
     else:
-        expected = subprocess.CalledProcessError if outcome == "failed" else AssertionError
-        with pytest.raises(expected):
+        expected_error = subprocess.CalledProcessError if outcome == "failed" else AssertionError
+        with pytest.raises(expected_error):
             exec(body, {})
     if outcome == "failed":
         captured = capsys.readouterr()
@@ -301,8 +301,8 @@ ET.ElementTree(root).write(reports / "native.xml")
     if outcome == "passed" or (outcome == "skipped" and step_id == "consumers"):
         exec(body, {})
     else:
-        expected = subprocess.CalledProcessError if outcome == "failed" else AssertionError
-        with pytest.raises(expected):
+        expected_error = subprocess.CalledProcessError if outcome == "failed" else AssertionError
+        with pytest.raises(expected_error):
             exec(body, {})
     arguments = json.loads((tmp_path / "arguments.json").read_text())
     assert arguments[0] == "agent-worktrees"
@@ -1284,19 +1284,23 @@ def test_constructor_groups_and_mutations_move_to_existing_lanes_without_droppin
     expected_files = {"tools/test_installer_source_build.py", "tools/test_runtime_source_wheel_cache.py"}
     for key in ("source-build-linux", "source-build-windows"):
         job = workflow["jobs"][key]
-        assert job["timeout-minutes"] == 6
+        assert job["timeout-minutes"] == (
+            "${{ matrix.suite == 'profiles' && 8 || 6 }}"
+            if key == "source-build-windows" else 6
+        )
         matrix = job["strategy"]["matrix"]
-        assert matrix["suite"] == ["profiles", "refusals", "manager", "normal", "toolkit"]
+        assert matrix["suite"] == ["profiles", "refusals", "manager", "normal", "toolkit", "overlap"]
         normal = next(item for item in matrix["include"] if item["suite"] == "normal")
         assert normal["normal_expression"] == f"not ({refusal_expression} or {groups})"
         profiles = next(item for item in matrix["include"] if item["suite"] == "profiles")
         refusals = next(item for item in matrix["include"] if item["suite"] == "refusals")
         assert profiles["constructor_expression"] == groups
+        assert "native_library_builds_overlap" in profiles["expression"]
         assert refusals["constructor_expression"] == refusal_expression
         admission = next(step for step in job["steps"] if step.get("name", "").startswith("Real authenticated source,"))
         assert admission["if"] == "${{ matrix.suite == 'profiles' || matrix.suite == 'refusals' }}"
         assert shlex.split(admission["run"]) == [
-            "python", "-m", "pytest", "-q",
+            "python", "-m", "pytest", "-q", "--durations=15",
             "tools/test_runtime_source_build.py", "tools/test_runtime_source_wheel_cache.py",
             "-k", "${{ matrix.expression }}",
         ]
@@ -1304,7 +1308,27 @@ def test_constructor_groups_and_mutations_move_to_existing_lanes_without_droppin
         assert toolkit["if"] == "${{ matrix.suite == 'toolkit' }}"
         assert shlex.split(toolkit["run"]) == [
             "python", "-m", "pytest", "-q", "tools/test_runtime_admission_toolkit.py",
+            "tools/test_runtime_packaged_artifacts.py",
+            "tools/test_local_install_source.py::test_native_archive_writes_owned_file_without_captured_binary",
             "libs/payload-invocation/tests/test_runtime_admission.py",
+        ]
+        overlap = next(step for step in job["steps"] if step.get("name") == "Bounded library overlap and serial application construction")
+        assert overlap["if"] == "${{ matrix.suite == 'overlap' }}"
+        assert overlap["shell"] == "python"
+        assert 'Limits(wall_seconds=240)' in overlap["run"]
+        assert (
+            '"native_library_builds_overlap or library_builds_overlap or library_dispatch_cancellation"'
+            in overlap["run"]
+        )
+        assert 'if owner.retained or temporary.exists():' in overlap["run"]
+        privacy = next(
+            step for step in job["steps"]
+            if step.get("name") == "Native POSIX lease privacy and existing-mode preservation"
+        )
+        assert privacy["if"] == "${{ matrix.suite == 'overlap' && runner.os == 'Linux' }}"
+        assert shlex.split(privacy["run"]) == [
+            "python", "-m", "pytest", "-q",
+            "libs/versioned-runtime/tests/test_runtime_lease_privacy.py",
         ]
         execution = next(step for step in job["steps"] if step.get("name", "").startswith("Ordinary constructors,"))
         assert set(shlex.split(execution["run"])[4:6]) == expected_files
@@ -1312,12 +1336,22 @@ def test_constructor_groups_and_mutations_move_to_existing_lanes_without_droppin
         refusal = next(step for step in job["steps"] if step.get("name", "").startswith("Ordinary constructor profiles"))
         assert refusal["if"] == "${{ matrix.suite == 'profiles' || matrix.suite == 'refusals' }}"
         assert shlex.split(refusal["run"]) == [
-            "python", "-m", "pytest", "-q", "tools/test_installer_source_build.py",
+            "python", "-m", "pytest", "-q", "--durations=15", "tools/test_installer_source_build.py",
             "-k", "${{ matrix.constructor_expression }}",
         ]
         backend = next(step for step in job["steps"] if step.get("name", "").startswith("Acquire the pinned real backend"))
-        assert backend["if"] == "${{ matrix.suite != 'manager' && matrix.suite != 'toolkit' }}"
+        assert backend["if"] == "${{ matrix.suite != 'manager' && matrix.suite != 'toolkit' && matrix.suite != 'overlap' }}"
         assert job["steps"].index(backend) < job["steps"].index(refusal)
+    unit_manifest = json.loads((HERE / "promotion-unit-manifest.json").read_text())
+    assert not any(
+        "::test_posix_fresh_lease_root_passes_strict_private_admission[" in node
+        or node.endswith("::test_posix_existing_root_is_not_repaired_for_private_admission")
+        for node in unit_manifest["nodes"]
+    )
+    assert (
+        "tools/promotion_unit_tests/test_windows_lease_acl.py"
+        "::test_posix_lease_requests_private_root_before_descendants"
+    ) in unit_manifest["nodes"]
     for key in ("source-cache-linux", "source-cache-windows"):
         matrix = workflow["jobs"][key]["strategy"]["matrix"]
         assert matrix == {"suite": ["normal"]}
@@ -1391,7 +1425,10 @@ def test_manager_native_step_retains_owned_cleanup_and_child_failure(
     assert [limits.wall_seconds for _command, _sandbox, limits in calls] == [300, 120][:len(calls)]
     if len(calls) == 2:
         assert calls[1][0][4:-2] == ["worktree-manager/tests/test_runtime_source.py"]
-    assert job["timeout-minutes"] == 6
+    assert job["timeout-minutes"] == (
+        "${{ matrix.suite == 'profiles' && 8 || 6 }}"
+        if job_key == "source-build-windows" else 6
+    )
 
 
 def test_manager_native_step_loads_first_party_helpers_without_site_packages(
@@ -2408,7 +2445,9 @@ def test_pr_service_acceptance_is_bounded_and_independently_selected() -> None:
         assert job["runs-on"] == runner and job["timeout-minutes"] == 10
         assert not job.get("strategy") and not job.get("continue-on-error")
         commands = [step for step in job["steps"] if "run" in step]
-        assert len(commands) == 2 and not any(step.get("env") for step in commands)
+        assert len(commands) == 3 and not commands[0].get("env")
+        assert commands[1]["env"] == {"PYTEST_ADDOPTS": "-k filtered"}
+        assert commands[2]["env"] == {"PYTEST_ADDOPTS": "-k 'not filtered'"}
         assert commands[0]["run"].split() == [
             "python", "tools/run-plugin-tests.py", "agent-pull-requests",
             "--test-file", "tests/test_watch_replay_store.py",
@@ -2424,6 +2463,10 @@ def test_pr_service_acceptance_is_bounded_and_independently_selected() -> None:
         assert commands[1]["run"].split() == [
             "python", "tools/run-standalone-tests.py", "services/pr",
             "--prepare", "--timeout", "180", "--admission-wait", "30",
+        ]
+        assert commands[2]["run"].split() == [
+            "python", "tools/run-standalone-tests.py", "services/pr",
+            "--timeout", "420", "--admission-wait", "30",
         ]
 
 
@@ -2442,18 +2485,26 @@ def test_compile_acceptance_is_bounded_native_and_independently_selected() -> No
         assert job["if"] == "${{ inputs.dependency_compile }}"
         assert job["runs-on"] == runner
         assert job["timeout-minutes"] == 6 and not job.get("continue-on-error")
-        assert not job.get("strategy")
-        commands = [step["run"] for step in job["steps"] if "run" in step]
-        assert commands == [
-            "python tools/seasoned_uv.py --uv uv --registry-only -- --system pytest pyyaml",
-            'python -m pytest -q tools/test_installer_dependency_compile.py '
-            'tools/test_installer_dependency_policy.py '
-            'tools/test_runtime_source_lock.py '
-            'tools/test_runtime_source_authentication.py '
-            'tools/test_runtime_source_feed.py '
-            '-k "compile or real_uv_registry_transitive_and_isolated_build_age or runtime_source_lock '
-            'or runtime_source_authentication or runtime_source_feed"',
+        assert job["strategy"]["fail-fast"] is False
+        assert job["strategy"]["matrix"]["include"] == [
+            {"suite": "native-compile", "test": "tools/test_installer_dependency_compile.py"},
+            {"suite": "compile-policy", "test": "tools/test_installer_dependency_policy.py"},
+            {"suite": "source-lock", "test": "tools/test_runtime_source_lock.py"},
+            {"suite": "source-authentication", "test": "tools/test_runtime_source_authentication.py"},
+            {"suite": "source-feed", "test": "tools/test_runtime_source_feed.py"},
         ]
+        tooling = next(step for step in job["steps"] if step.get("name") == "Validator tooling only")
+        assert tooling["run"] == (
+            'python tools/seasoned_uv.py --uv uv --registry-only -- --system pytest '
+            '"pytest-timeout>=2.3,<3" pyyaml'
+        )
+        packet = next(step for step in job["steps"] if step.get("shell") == "python")
+        assert packet["env"] == {"PACKET_TEST": "${{ matrix.test }}"}
+        assert 'os.environ["PACKET_TEST"]' in packet["run"]
+        assert '"compile or real_uv_registry_transitive_and_isolated_build_age or runtime_source_lock or runtime_source_authentication or runtime_source_feed"' in packet["run"]
+        assert 'Limits(wall_seconds=300)' in packet["run"]
+        assert 'if owner.retained or temporary.exists():' in packet["run"]
+        assert 'raise SystemExit(code)' in packet["run"]
 
 
 def test_installer_latency_contracts_are_native_bounded_and_opt_in() -> None:

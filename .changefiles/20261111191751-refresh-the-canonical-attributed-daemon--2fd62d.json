@@ -1,0 +1,9 @@
+{
+  "comment": "Refresh the canonical attributed daemon-instance resource retained by WSL setup alongside current shared construction inputs.",
+  "changes": [
+    {
+      "plugin": "wsl-setup",
+      "type": "patch"
+    }
+  ]
+}
