@@ -9,7 +9,9 @@ import re
 import shlex
 import sys
 
-from agent_worktrees.native_arguments import SETUP_VALUE_OPTIONS, VALUE_OPTIONS, bash_command_index
+from agent_worktrees.native_arguments import (
+    SETUP_VALUE_OPTIONS, VALUE_OPTIONS, append_native_arguments, bash_command_index,
+)
 
 
 def _option_start(command: list[str]) -> int:
@@ -94,7 +96,18 @@ def rebind(command: list[str], endpoint: str, session: str) -> list[str]:
     ]
 
 
+def append(values: list[str]) -> list[str]:
+    """Split ``<count> -- <arguments...> <command...>`` and add the arguments natively."""
+    count, delimiter, *rest = values
+    if delimiter != "--" or not count.isdigit() or int(count) > len(rest):
+        raise ValueError("Unsupported prepared passthrough command format")
+    return append_native_arguments(rest[int(count):], rest[:int(count)])
+
+
 if __name__ == "__main__":
+    if sys.argv[1:2] == ["append"]:
+        print(json.dumps(append(sys.argv[2:])))
+        raise SystemExit(0)
     output, endpoint, session, delimiter, *command = sys.argv[1:]
     if output not in {"json", "bash"} or delimiter != "--":
         raise ValueError("Unsupported prepared AHP command format")

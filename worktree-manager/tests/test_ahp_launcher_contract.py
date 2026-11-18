@@ -22,7 +22,8 @@ def test_windows_launcher_hard_binds_and_disables_post_exit():
     assert "@('-AwAhpTokenFile', $ahpTokenFile)" in source
     assert "$prop.Name -in @(" in source
     assert "Invoke-ManagedMuxRegister" in source
-    assert "$cmd += $CopilotPassthrough" in source
+    assert "$cmd += $CopilotPassthrough" not in source
+    assert "(Join-Path $PSScriptRoot 'ahp-command.py') append" in source
     assert "(Join-Path $PSScriptRoot 'ahp-command.py') json" in source
     assert "$cmd = @($reboundJson | ConvertFrom-Json)" in source
     assert "'--ahp', $endpointUrl" in source

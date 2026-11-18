@@ -273,6 +273,38 @@ def test_ahp_binding_keeps_prepared_transport_boundaries(tmp_path, prefix):
     ]
 
 
+def test_passthrough_append_joins_setup_native_argument_envelope(tmp_path):
+    envelope = json.dumps({"args": ["--experimental", "--", "positional"]})
+    prepared = ["pwsh", "-NoProfile", "-File", "default-setup.ps1", "-NativeArgumentsJson", envelope]
+    passthrough = ["--acp", "--stdio", "--no-auto-update"]
+    result = subprocess.run(
+        [sys.executable, str(_LAUNCH_SCRIPT.with_name("ahp-command.py")), "append",
+         str(len(passthrough)), "--", *passthrough, *prepared],
+        cwd=tmp_path, env=dict(os.environ, PYTHONPATH=str(
+            _BIN.parents[1] / "plugins" / "agent-worktrees" / "src",
+        )), capture_output=True, text=True, timeout=15,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    command = json.loads(result.stdout)
+    assert command[:-1] == prepared[:-1]
+    assert json.loads(command[-1])["args"] == [
+        "--experimental", "--acp", "--stdio", "--no-auto-update", "--", "positional",
+    ]
+
+
+def test_passthrough_append_refuses_a_malformed_request(tmp_path):
+    result = subprocess.run(
+        [sys.executable, str(_LAUNCH_SCRIPT.with_name("ahp-command.py")), "append",
+         "5", "--", "--acp", "copilot"],
+        cwd=tmp_path, env=dict(os.environ, PYTHONPATH=str(
+            _BIN.parents[1] / "plugins" / "agent-worktrees" / "src",
+        )), capture_output=True, text=True, timeout=15,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    assert result.returncode != 0 and not result.stdout
+
+
 @pytest.mark.parametrize("command", [
     ["env", "-S", "copilot --resume=opaque"],
     ["env", "-u"],
