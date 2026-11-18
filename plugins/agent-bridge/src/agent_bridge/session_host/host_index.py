@@ -298,7 +298,7 @@ class HostIndex:
             del self._records[expected.session_id]
 
     def release_exited_local(
-        self, expected: HostRecord, *, settle: Callable[[], bool] | None = None,
+        self, expected: HostRecord, *, settle: Callable[[HostRecord], bool] | None = None,
     ) -> bool:
         """Settle only this exact local Host record after both original processes exited."""
         from zdd.process_exit import observe_original_exit
@@ -313,7 +313,7 @@ class HostIndex:
                     getattr(current, f"{name}_pid"), birth,
                 ):
                     return False
-            if settle is not None and not settle():
+            if settle is not None and not settle(current):
                 return False
             del self._records[expected.session_id]
         return True

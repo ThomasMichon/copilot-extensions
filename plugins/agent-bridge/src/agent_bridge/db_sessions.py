@@ -13,6 +13,7 @@ from .creation_writer_schema import METADATA_RECOVERY_HELD, RETAINED_RECOVERY_HE
 
 if TYPE_CHECKING:
     from .db import Database
+    from .session_host.host_index import HostRecord
 
 
 class _SessionsMixin:
@@ -143,37 +144,66 @@ class _SessionsMixin:
             membership=True,
         )
 
-    def settle_exited_inherited_host(self, observed: dict[str, Any], child_pid: int) -> bool:
+    def settle_exited_inherited_host(self, observed: dict[str, Any], record: HostRecord) -> bool:
         """Close ordinary interrupted work, under the exact exited Host's retirement lock."""
+        from .host_exit_history import stopped_event, terminal_outcome
         from .status_store import StatusStore
 
         self = cast("Database", self)
         sid = observed["id"]
-        if not observed.get("acp_session_id") or observed["status"] not in ("running", "idle"):
+        if sid != record.session_id or not observed.get("acp_session_id") or record.boundary != "local":
             return False
+        receipt = stopped_event(record, observed["acp_session_id"], observed["created_at"])
+        self.flush()
         now = time.time()
         with self._runtime_transaction(write=True, membership=True) as conn:
             held = self._retained_recovery_held_predicate(conn)
-            stopped = conn.execute(
-                "UPDATE sessions SET status='stopped',pid=NULL,background_recovery_enabled=0,updated_at=? "
-                "WHERE id=? AND status=? AND acp_session_id=? AND updated_at=? AND target_type='local' "
-                "AND (pid IS NULL OR pid=?) AND background_recovery_enabled=1 AND cold_recovery_stop_token IS NULL "
+            current = conn.execute(
+                "SELECT status,pid,background_recovery_enabled,updated_at FROM sessions "
+                "WHERE id=? AND acp_session_id=? AND created_at=? AND target_type='local' "
+                "AND (pid IS NULL OR pid=?) AND cold_recovery_stop_token IS NULL "
                 "AND runtime_custody_json IS NULL AND NOT EXISTS (SELECT 1 FROM cold_outages WHERE session_id=?) "
                 "AND NOT EXISTS (SELECT 1 FROM turns WHERE session_id=? AND completed_at IS NULL AND "
                 "(runtime_custody_json IS NOT NULL OR native_handoff_json IS NOT NULL OR "
                 "native_admission_json IS NOT NULL OR acquisition_delivery_id IS NOT NULL)) "
                 f"AND NOT ({held})",
-                (now, sid, observed["status"], observed["acp_session_id"], observed["updated_at"], child_pid, sid, sid),
-            )
-            if stopped.rowcount != 1:
+                (sid, observed["acp_session_id"], observed["created_at"], record.child_pid, sid, sid),
+            ).fetchone()
+            if current is None:
                 return False
-            closed = conn.execute(
-                "UPDATE turns SET stop_reason='interrupted',completed_at=? WHERE session_id=? AND completed_at IS NULL",
-                (now, sid),
-            )
-            events = [('session_state_changed', '{"status":"stopped","trigger":"host_exit"}')]
-            if closed.rowcount:
-                events.insert(0, ('turn_complete', '{"stop_reason":"interrupted"}'))
+            turns = conn.execute(
+                "SELECT turn_index,started_at FROM turns WHERE session_id=? AND completed_at IS NULL LIMIT 2", (sid,),
+            ).fetchall()
+            if current["status"] == "stopped" and current["pid"] is None and not current["background_recovery_enabled"]:
+                last = conn.execute(
+                    "SELECT data_json,timestamp FROM events WHERE session_id=? AND event_type='session_state_changed' "
+                    "ORDER BY event_id DESC LIMIT 1", (sid,),
+                ).fetchone()
+                return not turns and last is not None and (
+                    last["data_json"], last["timestamp"]
+                ) == (receipt, current["updated_at"])
+            if (current["status"] not in ("running", "idle") or current["status"] != observed["status"]
+                or not current["background_recovery_enabled"] or current["updated_at"] != observed["updated_at"]
+                or len(turns) > 1):
+                return False
+            events = [("session_state_changed", receipt)]
+            if turns:
+                turn = turns[0]
+                if turn["started_at"] is None or conn.execute(
+                    "SELECT 1 FROM turns WHERE session_id=? AND turn_index>? LIMIT 1", (sid, turn["turn_index"]),
+                ).fetchone():
+                    return False
+                try:
+                    outcome = terminal_outcome(conn, sid, turn)
+                except ValueError:
+                    return False
+                if outcome is None:
+                    events.insert(0, ("turn_complete", '{"stop_reason":"interrupted"}'))
+                    outcome = ("interrupted", now)
+                conn.execute("UPDATE turns SET stop_reason=?,completed_at=? WHERE session_id=? AND turn_index=?",
+                             (*outcome, sid, turn["turn_index"]))
+            conn.execute("UPDATE sessions SET status='stopped',pid=NULL,background_recovery_enabled=0,updated_at=? "
+                         "WHERE id=?", (now, sid))
             for kind, body in events:
                 inserted = conn.execute(
                     "INSERT INTO events (session_id,event_id,event_type,data_json,timestamp) "
