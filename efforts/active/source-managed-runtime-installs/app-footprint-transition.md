@@ -53,6 +53,24 @@ or an updater that Manager must load or repair first. The finite bootstrap can
 establish Manager through the same component setup contract without a resident
 Manager, Copilot session or working legacy installer.
 
+The bootstrap runs the whole update by invoking the finite orchestration tool
+delivered with Manager. Only tools from that Manager installation reconcile
+the control/knowledge repository pair's plugin configuration, derive the complete
+required application/service closure and build the update roster. A successful
+Manager repair followed by delegation back to a Worktrees/project-engine
+controller is not this flow. Worktrees is one consumer in the roster.
+The orchestration tool composes existing discovery, construction, setup and
+lifecycle owners; the bootstrap script does not implement their algorithms.
+Manager is the carrier for those vendored tools, keeping bootstrap small rather
+than introducing a running-Manager-daemon requirement.
+Before obtaining that tooling, the bootstrap resolves the target source/ref
+from registered projects and their configuration or the machine-side override,
+using the canonical selection rules. Main is not an implicit replacement for
+an explicitly resolved target.
+The resolution determines which Manager version to install first. Only after
+installing that selected Manager does bootstrap invoke its delivered finite
+orchestration tool for the complete update.
+
 The operator's proposed footprint is:
 
 ```text
@@ -129,6 +147,60 @@ provider, a compatible provider must also be selected and ready: staging alone
 does not publish a neutral command or start a service. Do not work around this
 by importing its code or reaching directly into its private version/venv.
 Existing compatible providers can satisfy readiness without unnecessary restart.
+
+## Pinned checkout staging
+
+The checkout is the source of truth for first-party code and payloads. Matching
+published wheels are build outputs of that source, not a second version
+selector. An adopter-specific distribution archive is not an input. Record the
+requested ref and resolved commit independently: repeating `--stage` uses the
+pin, even if a branch or tag moved. Advancing is a distinct operation; stage
+the new version alongside the old one.
+
+> The Bootstrapper should always accept an override build via env var, just as it can accept an alternate repo or random source folder as an override via env var, too.
+
+Resolve invocation overrides before installing Manager, including on an
+already-pinned install. A local folder need not be a registered checkout;
+freeze the caller-selected input before using it. A selected build must match
+that source. Exercise the effective Manager version and wheel selection for a
+non-default build with both repository and directory inputs. Missing or
+incompatible overrides fail without selecting a default build, editing the
+adopter's config, or activating the staged installation. Preserve the existing
+transport-only meaning of `WORKTREE_MANAGER_BOOTSTRAP_REPO` and
+`WORKTREE_MANAGER_BOOTSTRAP_REF`.
+
+> If the bootstrapper is run against a commit which happens to be already-installed but no longer current, ideally it can validate those builds are still there, then re-stage and re-setup the existing builds, taking back over from whatever was active.
+
+With B current, explicitly select previously installed A. Check each retained
+slot against A's requested build/profile and existing setup readiness checks.
+Reuse complete slots and UV environments; do not download or rebuild healthy
+ones solely because B is current. A missing or damaged slot goes through normal
+construction/repair from A's inputs before it can count as staged. `--stage A`
+must leave B current. Full setup of the complete compatible A roster runs its
+normal setup/cutover, verifies A's readiness and current commands, and retains
+B's slot. Selecting older code does not restore an older copy of user data.
+
+### Acceptance sequence _(agent-recommended)_
+
+1. Select the ref before selecting Manager. Cover Main, a branch, a commit and
+   an annotated tag, including a moved ref, unknown ref and machine override.
+   Missing/conflicting inputs or unavailable matching wheels must not fall
+   back to a floating revision or another installation.
+2. From a cold isolated root with no Worktrees install, populate Manager's
+   version slot, complete its UV environment from the admitted wheel closure
+   and invoke its finite roster tool. Verify the selected commit, distribution
+   versions, wheel identities and physical interpreter prefix.
+3. Use the same entry to stage the required roster from a repository pair,
+   including dependency edges and plugins without apps. Keep staged Dispatch
+   tasks and Worktrees status apart from live stores; do not copy, initialize
+   or migrate live data. Include failure partway through and a repeat.
+4. Rehearse two actual Main promotions with the new bootstrap. Retain both
+   slots, show that the first pin stays put until advanced and verify that
+   staging publishes no live pointers/launchers or services. Record each
+   SHA, artifact selection and outcome; a missing publication is not a pass.
+5. Continue through the extracted-app inventory. Qualify the marketplace
+   pointer switch only after the remaining checks pass. Runtime-state
+   migration is separate from both staging and that switch.
 
 ## Receiving sequence _(agent-recommended)_
 

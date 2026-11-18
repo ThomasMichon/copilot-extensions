@@ -272,9 +272,10 @@ interface does not select them.
 The source vertical's operating flow is documented in
 [TESTING.md](../../../TESTING.md#optional-pr-service-lifecycle).
 Whole Fleet strict typing remains separately tracked by #9807; the focused
-standalone strict result is not a whole-project claim. Release promotion,
-installation, running support and real read-only target/event evidence are
-**open stage-5 acceptance**, with the integration/operational owners. Dynamic
+standalone strict result is not a whole-project claim. Stage 5 now has
+[released, installed-running GitHub evidence](journal/2026/11.18%20GitHub%20shadow%20qualification.md);
+the separately owned Gitea lane remains open. This is not fleet or production
+hosting acceptance. Dynamic
 backend intake, Dispatch consumers/emission, full Author/Reviewer and CLI
 parity, fleet placement and production writes remain broader parent work.
 
@@ -325,6 +326,23 @@ parity, fleet placement and production writes remain broader parent work.
   Observe a real later event or controlled authorized read-only change source;
   no forge mutation is granted to manufacture one. An unobserved event remains
   an open qualification item, not success.
+
+### GitHub stage-5 lane
+
+The 2026-11-18 isolated Linux trial passes for the promoted
+`repository-local/v1` service, actual native reader and supported local clients.
+It observes a real GitHub PR, later controlled head changes, two independent
+continuing subscriptions, original-ID/payload replay across restart, ACK,
+cancellation and joined drain. Both foreground instances exit zero and their
+test-lifecycle receipts settle; the temporary credential binding joins without
+credential-bearing files. See the [dated qualification record](journal/2026/11.18%20GitHub%20shadow%20qualification.md)
+for exact released artifacts and the reproducible flow.
+
+The fixture writer had separate operator permission for synthetic changes in
+its dedicated repository. The observer remains read-only; this plan grants no
+fixture-write or deployment authority. Gitea is assigned to its separate
+operational owners and is not credited here. Live ADO filtered populations,
+review actions and broader parent outcomes are also not qualified by this lane.
 
 Source fixtures, merged code and healthy-but-empty readiness are not live M1
 completion. Release promotion is distinct from installation, which is distinct
