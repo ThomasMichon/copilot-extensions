@@ -177,12 +177,14 @@ PR-list descriptions at the 400-symbol preview boundary are not accepted as
 complete text. The connector also accounts for UTF-16 units, so astral characters
 cannot hide a possibly truncated preview. After query eligibility and duplicate
 filtering, it point-reads that PR through the configured project endpoint,
-requires the same PR/repository identity and a string/null description, and
+requires the same PR/repository identity and a string/null/omitted description, and
 replaces only the selected description. Short descriptions need no extra read.
 An unavailable or invalid detail response refuses acquisition rather than
 indexing a preview; the original query metadata and comment path remain intact.
-Missing or nontext listing descriptions also refuse acquisition; an explicit
-null still means an empty description. Cancellation is checked again after the
+Nontext listing/detail descriptions refuse acquisition. Null or omitted
+descriptions mean empty text: the provider's `GitPullRequest.Description`
+serializer uses `EmitDefaultValue=false`, including after a description is cleared.
+Cancellation is checked again after the
 detail read, before requesting comments. Point-description reads are unconditional:
 the shared HTTP session caches validators, not the response bodies needed here.
 This adds no history enumeration, cursor capability or reconciliation authority.

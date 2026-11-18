@@ -382,9 +382,7 @@ class AzureDevOpsConnector:
 
     def _complete_pull_description(self, pull_request: dict[str, Any]) -> dict[str, Any]:
         description = pull_request.get("description")
-        if "description" not in pull_request or (
-            description is not None and not isinstance(description, str)
-        ):
+        if description is not None and not isinstance(description, str):
             raise ValueError("Azure DevOps pull-request listing has no valid description")
         if description is None:
             return pull_request
@@ -414,11 +412,10 @@ class AzureDevOpsConnector:
             or selected_repo["id"].casefold() != actual_repo["id"].casefold()
         ):
             raise ValueError("Azure DevOps pull-request details have mismatched repository")
-        if "description" not in details or (
-            details["description"] is not None and not isinstance(details["description"], str)
-        ):
+        description = details.get("description")
+        if description is not None and not isinstance(description, str):
             raise ValueError("Azure DevOps pull-request details have no valid description")
-        return pull_request | {"description": details["description"]}
+        return pull_request | {"description": description}
 
     def _iter_pull_requests(self, *, since: str | None) -> Iterable[dict[str, Any]]:
         if not self._pull_request_queries:

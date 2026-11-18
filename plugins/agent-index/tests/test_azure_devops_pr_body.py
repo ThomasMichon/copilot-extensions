@@ -22,6 +22,7 @@ from agent_index.sources.azure_devops import AzureDevOpsConnector
         "wrong-repo",
         "unavailable",
         "missing-body",
+        "invalid-body",
     ],
 )
 def test_selected_pull_description_is_complete_or_refused(outcome: str) -> None:
@@ -55,6 +56,8 @@ def test_selected_pull_description_is_complete_or_refused(outcome: str) -> None:
                 detail["repository"] = {"id": "repo-2"}
             elif outcome == "missing-body":
                 del detail["description"]
+            elif outcome == "invalid-body":
+                detail["description"] = 9
             return httpx.Response(200, json=detail)
         assert path == "/acme/widgets/_apis/git/repositories/repo-1/pullRequests/7/threads"
         return httpx.Response(200, json={"value": [{"comments": [{"content": "Review text"}]}]})
@@ -70,7 +73,7 @@ def test_selected_pull_description_is_complete_or_refused(outcome: str) -> None:
 
     @measure_reindex
     def run() -> dict[str, object]:
-        if outcome in {"wrong-id", "wrong-repo", "missing-body", "unavailable"}:
+        if outcome in {"wrong-id", "wrong-repo", "invalid-body", "unavailable"}:
             error = httpx.HTTPStatusError if outcome == "unavailable" else ValueError
             with pytest.raises(error):
                 connector.discover_changed("2026-01-02T00:00:00Z")
@@ -80,7 +83,7 @@ def test_selected_pull_description_is_complete_or_refused(outcome: str) -> None:
             assert entries[0].source == "ado:acme/widgets:pulls"
             assert entries[0].path == "pulls/7.md"
             assert "Review text" in entries[0].content
-            if outcome == "cleared":
+            if outcome in {"cleared", "missing-body"}:
                 assert preview not in entries[0].content
             else:
                 assert (preview if outcome == "short" else complete) in entries[0].content
@@ -91,12 +94,16 @@ def test_selected_pull_description_is_complete_or_refused(outcome: str) -> None:
     finally:
         connector._http.client.close()
     assert isinstance(counts, dict)
-    expected_bodies = 1 if outcome in {"short", "unavailable", "missing-body"} else 2
+    expected_bodies = (
+        1 if outcome in {"short", "unavailable", "missing-body", "invalid-body"} else 2
+    )
     assert counts["acquisition_by_source"] == {
         "ado:acme/widgets:pulls": {
             "identity_records": 1,
             "item_body_records": expected_bodies,
-            "comment_body_records": int(outcome in {"short", "complete", "unicode", "cleared"}),
+            "comment_body_records": int(
+                outcome in {"short", "complete", "unicode", "cleared", "missing-body"}
+            ),
         },
     }
     assert requests == [
@@ -104,7 +111,7 @@ def test_selected_pull_description_is_complete_or_refused(outcome: str) -> None:
         *([] if outcome == "short" else ["/acme/widgets/_apis/git/pullrequests/7"]),
         *(
             ["/acme/widgets/_apis/git/repositories/repo-1/pullRequests/7/threads"]
-            if outcome in {"short", "complete", "unicode", "cleared"}
+            if outcome in {"short", "complete", "unicode", "cleared", "missing-body"}
             else []
         ),
     ]
@@ -114,7 +121,7 @@ def test_selected_pull_description_is_complete_or_refused(outcome: str) -> None:
 
 
 @pytest.mark.parametrize("body", ["missing", "number", "null"])
-def test_invalid_list_description_is_refused_before_comments(body: str) -> None:
+def test_list_description_accepts_omitted_empty_and_refuses_nontext(body: str) -> None:
     listed: dict[str, Any] = {
         "pullRequestId": 7,
         "repository": {"id": "repo-1"},
@@ -127,7 +134,7 @@ def test_invalid_list_description_is_refused_before_comments(body: str) -> None:
         requests.append(request.url.path)
         if request.url.path.endswith("/pullrequests"):
             return httpx.Response(200, json={"value": [listed]})
-        assert body == "null"
+        assert body in {"missing", "null"}
         assert request.url.path.endswith("/pullRequests/7/threads")
         return httpx.Response(200, json={"value": []})
 
@@ -140,7 +147,7 @@ def test_invalid_list_description_is_refused_before_comments(body: str) -> None:
         pull_request_queries=[{"repository_id": "repo-1"}],
     )
     try:
-        if body == "null":
+        if body in {"missing", "null"}:
             entries = connector.discover()
             assert len(entries) == 1
         else:
@@ -148,7 +155,7 @@ def test_invalid_list_description_is_refused_before_comments(body: str) -> None:
                 connector.discover()
     finally:
         connector._http.client.close()
-    assert len(requests) == (2 if body == "null" else 1)
+    assert len(requests) == (2 if body in {"missing", "null"} else 1)
 
 
 def test_pull_counts_retain_parsed_work_on_invalid_body_and_id_only_paths() -> None:
