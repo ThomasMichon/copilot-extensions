@@ -87,6 +87,15 @@ promotions side by side using the upstream published wheels. A stage is not
 an activation: no daemon, live task/status store, command redirect or marketplace
 change. Runtime-state migration is later work.
 
+Bootstrap must accept an explicit build through the environment on both fresh
+install and update, alongside environment overrides for the source repository
+or a caller-selected local source folder. These select installation inputs,
+not merely the transport used to fetch the bootstrap script.
+
+A previously installed commit can be selected again. Validate and re-stage
+its retained builds without disturbing the current installation; full setup
+then uses the normal activation path to make the requested builds current.
+
 Fresh installation and update share the same incoming bootstrap, Manager-first
 application construction and repository-derived required closure. The
 [installation convergence map](installation-convergence.md) connects existing

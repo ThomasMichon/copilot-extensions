@@ -157,6 +157,29 @@ requested ref and resolved commit independently: repeating `--stage` uses the
 pin, even if a branch or tag moved. Advancing is a distinct operation; stage
 the new version alongside the old one.
 
+> The Bootstrapper should always accept an override build via env var, just as it can accept an alternate repo or random source folder as an override via env var, too.
+
+Resolve invocation overrides before installing Manager, including on an
+already-pinned install. A local folder need not be a registered checkout;
+freeze the caller-selected input before using it. A selected build must match
+that source. Exercise the effective Manager version and wheel selection for a
+non-default build with both repository and directory inputs. Missing or
+incompatible overrides fail without selecting a default build, editing the
+adopter's config, or activating the staged installation. Preserve the existing
+transport-only meaning of `WORKTREE_MANAGER_BOOTSTRAP_REPO` and
+`WORKTREE_MANAGER_BOOTSTRAP_REF`.
+
+> If the bootstrapper is run against a commit which happens to be already-installed but no longer current, ideally it can validate those builds are still there, then re-stage and re-setup the existing builds, taking back over from whatever was active.
+
+With B current, explicitly select previously installed A. Check each retained
+slot against A's requested build/profile and existing setup readiness checks.
+Reuse complete slots and UV environments; do not download or rebuild healthy
+ones solely because B is current. A missing or damaged slot goes through normal
+construction/repair from A's inputs before it can count as staged. `--stage A`
+must leave B current. Full setup of the complete compatible A roster runs its
+normal setup/cutover, verifies A's readiness and current commands, and retains
+B's slot. Selecting older code does not restore an older copy of user data.
+
 ### Acceptance sequence _(agent-recommended)_
 
 1. Select the ref before selecting Manager. Cover Main, a branch, a commit and
