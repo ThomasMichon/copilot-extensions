@@ -59,6 +59,29 @@ async def test_a_new_hold_wakes_the_owner_before_the_interval_ends(store: Path) 
     assert fake.reconciles == 2
 
 
+async def test_a_contended_hold_store_never_blocks_the_owner_loop(store: Path) -> None:
+    """The wait polls holds through a store lock that retries with time.sleep;
+    contention must stall only a worker thread, never the Owner's event loop."""
+    fake = _CountingOwner(stop_after=10**9)
+    task = asyncio.create_task(
+        owner.run_owner_daemon(fake, interval=60, stop_event=fake.stop_event)
+    )
+    await asyncio.wait_for(_first_reconcile(fake), timeout=5)
+    lock_file = store / "connection-owner.lock"
+    lock_file.write_text("held", "utf-8")
+    loop = asyncio.get_running_loop()
+    try:
+        started = loop.time()
+        for _ in range(30):  # 1.5s spans at least one contended poll
+            await asyncio.sleep(0.05)
+        # A blocked loop would stall here for the lock's 10s retry window.
+        assert loop.time() - started < 5
+    finally:
+        lock_file.unlink()
+    fake.stop_event.set()
+    await asyncio.wait_for(task, timeout=15)
+
+
 async def test_a_heartbeat_refresh_does_not_wake_the_owner(store: Path) -> None:
     owner.hold("cs-held", "tenant-a")
     fake = _CountingOwner(stop_after=10**9)

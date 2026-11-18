@@ -205,7 +205,7 @@ async def run_owner_loop(
                 if not keeper.beat():
                     break
             work.assert_owned()
-            seen = _hold_signature(registry)
+            seen = await _read_hold_signature(registry)
             if not demoted:
                 try:
                     await owner.reconcile()
@@ -223,7 +223,7 @@ async def run_owner_loop(
                         log.info("Connection Owner idle (no held CodeSpaces, no owed push) -- exiting;"
                                  " a tenant starts it back up on demand.")
                         break
-            await _wait_for_next_cycle(stop, interval, seen)
+            await _wait_for_next_cycle(stop, interval, seen, registry)
     finally:
         async def finish() -> None:
             from .owner_control import shutdown_owner
@@ -262,8 +262,17 @@ def _hold_signature(registry: Any) -> frozenset[tuple[str, str]] | None:
         return None
 
 
+async def _read_hold_signature(registry: Any) -> frozenset[tuple[str, str]] | None:
+    """Read holds off the event loop: the store lock may retry for seconds."""
+    result: frozenset[tuple[str, str]] | None = await owner_native_call(
+        _hold_signature, registry,
+    )
+    return result
+
+
 async def _wait_for_next_cycle(
     stop: asyncio.Event, interval: float, seen: frozenset[tuple[str, str]] | None,
+    registry: Any,
 ) -> None:
     """Sleep until the next cycle, waking early when a tenant places a new hold.
 
@@ -282,9 +291,7 @@ async def _wait_for_next_cycle(
             pass
         if seen is None or stop.is_set():
             continue
-        from . import connection_owner as registry
-
-        current = _hold_signature(registry)
+        current = await _read_hold_signature(registry)
         if current is not None and not current <= seen:
             return
 
