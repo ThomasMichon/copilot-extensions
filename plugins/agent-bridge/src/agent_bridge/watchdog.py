@@ -201,7 +201,7 @@ class ServingWatchdog:
                     return False
                 declined += 1
                 grace = self._next_grace(grace, self._startup_grace)
-                deadline = now + grace
+                deadline = self._monotonic() + grace
             self._sleep(self._interval)
         return True
 
@@ -241,7 +241,7 @@ class ServingWatchdog:
                 ):
                     return
                 declined += 1
-                window_start = now
+                window_start = self._monotonic()
                 grace = self._next_grace(grace, self._serving_grace)
 
     def _await_shutdown(self) -> None:

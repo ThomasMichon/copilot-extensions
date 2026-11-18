@@ -433,6 +433,43 @@ def test_healthy_probe_resets_declined_handoff_budget() -> None:
     assert exits == []
 
 
+def test_slow_declined_handoff_does_not_consume_retry_wait() -> None:
+    # A failed replacement launch that itself takes 30s must not count toward
+    # the next wait; retries wait the full doubled grace after it returns.
+    dead: list[str] = []
+    times: list[float] = []
+    wd, _, clock = _make(
+        probe_serving=lambda: False, max_declined=3, interval=5.0, serving_grace=15.0,
+        on_shutdown_stuck=lambda _reason: None,
+    )
+
+    def on_dead(reason: str) -> bool:
+        times.append(clock.t)
+        dead.append(reason)
+        clock.t += 30.0
+        return False
+
+    wd._on_dead = on_dead
+    wd.run()
+    assert [b - a for a, b in zip(times, times[1:])] == [30.0 + 30.0, 30.0 + 60.0]
+
+
+def test_slow_declined_startup_handoff_does_not_consume_retry_wait() -> None:
+    times: list[float] = []
+    wd, _, clock = _make(
+        is_started=lambda: False, max_declined=2, on_shutdown_stuck=lambda _reason: None,
+    )
+
+    def on_dead(reason: str) -> bool:
+        times.append(clock.t)
+        clock.t += 30.0
+        return False
+
+    wd._on_dead = on_dead
+    wd.run()
+    assert [b - a for a, b in zip(times, times[1:])] == [30.0 + 240.0]
+
+
 def test_declined_startup_handoff_retries_then_hard_exits() -> None:
     dead: list[str] = []
     exits: list[str] = []
