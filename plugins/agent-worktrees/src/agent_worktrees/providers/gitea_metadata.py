@@ -7,7 +7,7 @@ import re
 import subprocess
 from typing import Any
 
-from ..pr_contract import _BUILTIN_WIP_PREFIXES, _SERVER_NATIVE_WIP_PREFIXES
+from ..pr_contract import _BUILTIN_WIP_PREFIXES, _SERVER_NATIVE_WIP_PREFIXES, title_is_wip
 from .attribution_body import preserve_description, published_marker
 from .base import ProviderError, reject_copilot_mention
 
@@ -17,6 +17,8 @@ _REJECTED = {400, 401, 403, 404, 405, 409, 410, 412, 422}
 
 def _title_safe(current: str, requested: str, draft: bool,
                 prefixes: tuple[str, ...]) -> None:
+    if title_is_wip(current, prefixes) != title_is_wip(requested, prefixes):
+        raise ProviderError("Metadata title must preserve the configured WIP hold")
     known = (*prefixes, *_BUILTIN_WIP_PREFIXES)
     original = current.lstrip().casefold()
     desired = requested.lstrip().casefold()
@@ -77,6 +79,7 @@ def update(provider: Any, repo: str, number: int, *,
     def request(method: str, payload: dict[str, str] | None = None) -> tuple[int, str]:
         response: tuple[int, str] = provider._curl(
             method, endpoint, token, payload=payload, preserve_line_endings=True,
+            payload_stdin=True,
         )
         return response
 

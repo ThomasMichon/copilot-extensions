@@ -91,7 +91,13 @@ bind a text edit to a reviewed code candidate. Do not add a code-head pin or
 claim those stronger guarantees.
 
 Expand and qualify the provider first, then advertise target-qualified
-`metadata-update` and delivered-policy support for enabled Gitea bindings.
+`metadata-update` for enabled Gitea bindings. Gitea delivered-policy support
+remains unqualified: exported worker policy intentionally excludes credentials,
+and no separate target-qualified local credential binding is adopted by this
+slice. Keep `worker-policy-config` false for Gitea rather than advertise an
+unauthenticated composition or borrow the caller's credential. Native
+delivered-policy calls refuse before update dispatch; ordinary registered-target
+metadata remains useful.
 Extend the native frontend's existing strict per-action validation to this
 provider; do not infer support from package versions or newer payload help.
 Old callers retain existing behavior on new owners. New callers on old or
@@ -136,8 +142,8 @@ contract to Gitea; it does not add another forge client or fallback.
 Isolated source validation remains distinct from release, installation,
 native-platform execution and authorized live-provider mutation.
 
-The bounded supervisor and offline test-isolation containers pass 159
-Worktrees metadata/author cases, including existing GitHub and Azure DevOps
+The bounded supervisor and offline test-isolation containers pass 252
+Worktrees metadata/author/worker-policy cases, including existing GitHub and Azure DevOps
 regressions, and 130 frontend cases with five Windows-only skips on Linux.
 The frontend controls run for both GitHub and Gitea, including the actual
 subprocess/body-file seam and malformed, partial, missing-capability and
@@ -147,6 +153,19 @@ reaches actual Gitea curl serialization with synthetic responses.
 Each combined changed-title/body operation uses seven provider requests;
 an already-satisfied repeat uses three reads and no write. These are isolated
 work-count controls, not live-forge latency or native cold/warm measurements.
-Whole-file strict typing passes Linux and Windows analysis for all seven
+Whole-file strict typing passes Linux and Windows analysis for all eight
 changed Python files. Source lint and install-contract/documentation guards
 pass. No existing positively admitted unit-source binding changed.
+
+Configured WIP policy is evaluated through the shared classifier independently
+of native draft state; retaining a shorter built-in prefix alone cannot prove
+the configured hold stayed unchanged. Credential-free exported Gitea policies
+withhold worker-policy support until a separate qualified credential selection
+exists. Metadata JSON uses an opt-in stdin path in the existing Gitea HTTP
+owner to avoid process argument limits without changing other Gitea callers.
+Focused controls cover overlapping/Unicode prefix cases, actual export/load
+and token resolution with pre-dispatch refusal, and body files larger than
+the single-argument limit.
+The final Gitea metadata plus unchanged legacy Gitea provider packet passes
+95 selected cases. The legacy transport retains its existing default; only
+metadata opts into stdin JSON.

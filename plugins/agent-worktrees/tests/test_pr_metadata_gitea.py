@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 
-from agent_worktrees import config as cfg, output, pr_author_cli, pr_cli, providers
+from agent_worktrees import config as cfg, output, pr_author_cli, pr_cli, pr_metadata, pr_worker_config, providers
 from agent_worktrees.providers import gitea, gitea_metadata
 
 REPO = "example/project"
@@ -49,7 +49,9 @@ class Backend:
         assert authorization.split() == ["Authorization:", "token", "fixture-token"]
         status = 200
         if method == "PATCH":
-            payload = json.loads(args[args.index("-d") + 1])
+            assert args[args.index("--data-binary") + 1] == "@-" and "-d" not in args
+            payload = json.loads(kwargs["input_text"])
+            assert kwargs["input_text"] not in args
             assert len(payload) == 1 and set(payload) <= {"title", "body"}
             self.writes.append(deepcopy(payload))
             if self.failure == "reject":
@@ -143,6 +145,8 @@ def test_wrong_malformed_or_terminal_evidence_never_writes(
         ("before", None, "after", (), False),
         ("before", False, "custom after", ("custom ",), False),
         ("hold before", False, "after", ("hold ",), False),
+        ("Draft: before", False, "Draft: blocked after", ("draft: blocked",), False),
+        ("\u00df before", False, "ss after", ("\u00df",), False),
     ],
 )
 def test_title_preserves_native_and_configured_draft_wip_semantics(
@@ -161,6 +165,15 @@ def test_body_only_does_not_require_known_title_prefix_or_draft(backend: Backend
     backend.pr.update(title="custom before", draft=None)
     assert update(description="")["ok"]
     assert backend.pr["body"] == MARKER + "\n" and backend.pr["title"] == "custom before"
+
+
+def test_large_body_uses_stdin_instead_of_one_oversized_process_argument(backend: Backend) -> None:
+    body = "\u03bb" * 25000
+    assert update(description=body)["ok"]
+    sent = next((args, kwargs) for args, kwargs in backend.calls if "--data-binary" in args)
+    assert len(sent[1]["input_text"].encode("utf-8")) > 128 * 1024
+    assert max(map(len, sent[0])) < 1024
+    assert backend.pr["body"] == body + "\n\n" + MARKER + "\n"
 
 
 @pytest.mark.parametrize(
@@ -276,3 +289,54 @@ def test_native_frontend_real_owner_parser_target_policy_and_gitea_transport(
     assert code == 0 and result["provider"] == "gitea" and len(owner_calls) == 2
     assert backend.pr["body"] == BODY + MARKER + "\r\n"
     assert acquired == [(REPO, target.pr)]
+
+
+def test_exported_gitea_policy_withholds_credential_dependent_worker_support(
+    backend: Backend, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    target = cfg.RepoConfig(
+        anchor=str(tmp_path), worktree_root=str(tmp_path / "worktrees"), default_branch="main",
+        pr=cfg.PRConfig(
+            enabled=True, provider="gitea", repository=REPO, api_base=BASE,
+            token_command="fixture-selected-token",
+        ),
+    )
+    path = tmp_path / "worker.json"
+    pr_worker_config.export_config(REPO, target, str(tmp_path / "worker"), None, path, include_author=True)
+    loaded = pr_author_cli.load_author_config(str(path), REPO)
+    support = pr_author_cli.capabilities(loaded, REPO)
+    assert support["operations"]["metadata-update"] is True
+    assert support["operations"]["worker-policy-config"] is False
+    assert "token_command" not in path.read_text("utf-8")
+    lookups: list[str] = []
+
+    def credential(command: str, **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        lookups.append(command)
+        assert command == "fixture-selected-token"
+        return subprocess.CompletedProcess(command, 0, "fixture-token\n", "")
+
+    monkeypatch.setattr(subprocess, "run", credential)
+    assert providers.account_token_for_slug(REPO, target.pr) == "fixture-token"
+    assert lookups == ["fixture-selected-token"]
+    result = pr_metadata.update(loaded, REPO, 7, title="after")
+    assert not result["ok"] and not backend.calls
+    assert lookups == ["fixture-selected-token"], "export must not borrow a caller's credential"
+
+    monkeypatch.syspath_prepend(str(Path(__file__).parents[2] / "agent-pull-requests" / "src"))
+    from agent_pull_requests import native_author
+
+    calls: list[list[str]] = []
+
+    def peer(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append(argv)
+        assert argv[1] == "pr-author-capabilities", "worker update must refuse before dispatch"
+        return subprocess.CompletedProcess(argv, 0, json.dumps(support), "")
+
+    monkeypatch.setattr(native_author, "run_command", peer)
+    args = argparse.Namespace(
+        command="update", repo=REPO, number=7, title="after", body=None, body_file=None,
+        reviewer=[], work_item=[], publication_origin=None, publication_label=[], config=str(path),
+    )
+    code, result = native_author.run(args, ["selected-owner"])
+    assert code == 1 and len(calls) == 1 and not backend.calls
+    assert "does not advertise" in result["error"]

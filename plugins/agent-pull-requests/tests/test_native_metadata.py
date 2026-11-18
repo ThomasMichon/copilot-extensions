@@ -164,7 +164,7 @@ def test_response_lost_after_dispatch_does_not_retry(monkeypatch: pytest.MonkeyP
 
 def test_actual_process_boundary_keeps_body_file_as_a_file(tmp_path: Path) -> None:
     body = tmp_path / "description.md"
-    text = '# "quoted" \u03bb\r\n' * 200
+    text = '# "quoted" \u03bb\r\n' * 25000
     body.write_bytes(text.encode("utf-8"))
     value = result()
     value["actions"] = {"description": {"status": "confirmed", "changed": True}}

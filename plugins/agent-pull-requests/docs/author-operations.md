@@ -49,6 +49,8 @@ refuse. GitHub drafts remain drafts. Gitea title edits retain the existing
 recognized draft/WIP prefix and cannot introduce one on an unprefixed title.
 The owner uses built-in and target-configured `wip_title_prefixes`, requires
 boolean native draft evidence for title edits and verifies it after writing.
+Both titles must also retain the same result under the shared configured-WIP
+classifier, independently of native draft state.
 Unknown native prefixes or contradictory draft/title evidence refuse title
 editing; body-only edits remain available. No prefix is inserted or removed
 automatically. Configure nonstandard prefix policy on the actual target rather
@@ -68,6 +70,15 @@ or claim settlement is performed. Readback is not atomic compare-and-swap and
 cannot prevent another participant from editing later. Existing callers remain
 usable; old or rolled-back selected runtimes refuse these optional provider features
 before dispatch. Source support is not installed or live-provider qualification.
+
+Gitea metadata currently uses its registered target's local credential
+configuration. Gitea does not advertise `worker-policy-config`: credential-free
+exported worker policy cannot supply that authentication, and the owner does
+not borrow an ambient or unrelated target's credential. Native calls with
+delivered `--config` therefore refuse this optional Gitea composition before
+update dispatch. Existing GitHub/Azure DevOps worker-policy support is unchanged.
+Gitea body JSON travels through the existing HTTP owner's stdin path, not a
+large process argument.
 
 ## Explicit worker policy
 
