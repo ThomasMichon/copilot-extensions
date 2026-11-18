@@ -5376,7 +5376,9 @@
         "tools/promotion_unit_tests/test_hosted_activation.py::test_hosted_source_uses_replayed_head_not_repairable_cache[missing]",
         "tools/promotion_unit_tests/test_hosted_activation.py::test_hosted_source_refuses_ambiguous_interval_history[older-open]",
         "tools/promotion_unit_tests/test_hosted_activation.py::test_hosted_source_refuses_ambiguous_interval_history[older-open-retry]",
-        "tools/promotion_unit_tests/test_hosted_activation.py::test_hosted_source_refuses_ambiguous_interval_history[duplicate-ordinal]"
+        "tools/promotion_unit_tests/test_hosted_activation.py::test_hosted_source_refuses_ambiguous_interval_history[duplicate-ordinal]",
+        "tools/promotion_unit_tests/test_hosted_activation.py::test_hosted_source_refuses_ambiguous_interval_history[duplicate-source]",
+        "tools/promotion_unit_tests/test_hosted_activation.py::test_hosted_source_refuses_ambiguous_interval_history[stale-ended]"
     ],
     "coverage_targets": [
         "plugins/agent-worktrees/src/agent_worktrees/resource_delivery.py",
@@ -5739,7 +5741,8 @@
         "plugins/agent-dispatch/src/agent_dispatch/ordinary_invocation.py",
         "plugins/agent-bridge/src/agent_bridge/native_keyed_admission.py",
         "plugins/agent-vault/src/agent_vault/source_start.py",
-        "plugins/agent-worktrees/src/agent_worktrees/retained_hosted_activation.py"
+        "plugins/agent-worktrees/src/agent_worktrees/retained_hosted_activation.py",
+        "plugins/agent-worktrees/src/agent_worktrees/tracking_session_activations.py"
     ],
     "sources": {
         "plugins/agent-worktrees/src/agent_worktrees/git_process.py": "6cc675a4d988e7d1fd6b0d76a48fde5909f78f085ef194ec69625c6334b4f80f",
@@ -6598,7 +6601,7 @@
         "plugins/agent-bridge/src/agent_bridge/native_keyed_admission.py": "ebeaf8c036abd606a867f35a1772dcb727985e1a48a0eb37d9d46177c45cc7ba",
         "tools/promotion_unit_tests/test_vault_client_install.py": "566d53f41e7510169bccb286d0830ef24b2d7b208c8253433df1fbc38d77c7e0",
         "plugins/agent-vault/src/agent_vault/source_start.py": "9c023d7099a6aa762e82f91539018cbbd4f75ebd76e9061fe8bc10d9c6e74970",
-        "tools/promotion_unit_tests/test_hosted_activation.py": "509ab276e73f8342ec4dc77e4feee5b6d7b805c7b5e2dd8a9d32491a2dd5cd92",
-        "plugins/agent-worktrees/src/agent_worktrees/retained_hosted_activation.py": "0935b43fd4d78125a1a1dd9ff3365e24851ce5b4640ab06686a66b504e5b18aa"
+        "tools/promotion_unit_tests/test_hosted_activation.py": "20b44b2d24ea15e988b07a81d15eb01643a137d62666ff9b23e29fe8cfaf7f1c",
+        "plugins/agent-worktrees/src/agent_worktrees/retained_hosted_activation.py": "3e854addd94b96a577c4222b2808073fcd17224f8d97ca0f261fadb783f28c4a"
     }
 }

@@ -191,6 +191,31 @@ def test_same_open_hosted_source_retries_after_save_prunes_older_history(
     assert hosted.path.read_bytes() == before
 
 
+@pytest.mark.parametrize("change", ["duplicate-source", "stale-ended"])
+def test_same_open_source_requires_canonical_unique_observation(
+    hosted: SimpleNamespace, change: str,
+) -> None:
+    assert hosted.invoke() == 0
+    record = tracking.load_record(hosted.path)
+    entry = record.session_entry(SID)
+    assert entry is not None
+    if change == "duplicate-source":
+        entry.activations[0].source_identity = entry.activations[-1].source_identity
+    else:
+        entry.ended_at = "stale"
+    tracking.save_record(record, hosted.path)
+    loaded = tracking.load_record(hosted.path).session_entry(SID)
+    assert loaded is not None
+    if change == "duplicate-source":
+        assert loaded.activations[0].source_identity == loaded.activations[-1].source_identity
+        assert not any(item.source_ambiguous for item in loaded.activations)
+    else:
+        assert loaded.ended_at == "stale" and loaded.activations[-1].ended_at is None
+    before = hosted.path.read_bytes()
+    assert hosted.invoke() != 0
+    assert hosted.path.read_bytes() == before
+
+
 @pytest.mark.parametrize("change", [
     "writer", "nonce", "head", "epoch", "birth", "parent", "exited", "open-source",
     "pruned", "saturated", "terminal", "missing-scope", "hook", "extra-field", "older-open",

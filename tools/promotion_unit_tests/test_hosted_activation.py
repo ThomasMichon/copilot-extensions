@@ -45,9 +45,11 @@ def hosted_source(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     spec.loader.exec_module(owner)
     interval = SimpleNamespace(
         ordinal=1, source_identity="native:previous", ended_at="ended", source_ambiguous=False,
+        started_at="started", start_recorded_at="recorded",
     )
     entry = SimpleNamespace(
         state="active", activations=[interval], pruned_sources=[], source_history_saturated=False,
+        ended_at="ended",
     )
     record = SimpleNamespace(
         session_entry=lambda sid: entry if sid == SID else None,
@@ -73,6 +75,7 @@ def test_hosted_source_is_bound_to_physical_activation_not_operation_id(hosted_s
     assert b.owner.source_identity(b.record, SID, 102, b.value) == token
     b.interval.source_identity = token
     b.interval.ended_at = None
+    b.entry.ended_at = None
     b.entry.pruned_sources = ["native:previous"]
     assert b.owner.source_identity(b.record, SID, 102, b.value) == token
     b.interval.ended_at = "ended"
@@ -104,19 +107,23 @@ def test_hosted_source_fences_record_and_physical_boundaries(hosted_source: Any,
         b.owner.source_identity(b.record, SID, 102, b.value)
 
 
-@pytest.mark.parametrize("case", ["older-open", "older-open-retry", "duplicate-ordinal"])
+@pytest.mark.parametrize("case", [
+    "older-open", "older-open-retry", "duplicate-ordinal", "duplicate-source", "stale-ended",
+])
 def test_hosted_source_refuses_ambiguous_interval_history(hosted_source: Any, case: str) -> None:
     b = hosted_source
     token = b.owner.source_identity(b.record, SID, 102, b.value)
-    if case == "older-open-retry":
+    b.interval.ordinal = 2
+    if case in {"older-open-retry", "duplicate-source", "stale-ended"}:
         b.interval.source_identity, b.interval.ended_at = token, None
+        b.entry.ended_at = "stale" if case == "stale-ended" else None
     b.entry.activations.insert(0, SimpleNamespace(
-        ordinal=1 if case == "duplicate-ordinal" else 0,
-        source_identity="native:older",
-        ended_at="ended" if case == "duplicate-ordinal" else None,
-        source_ambiguous=False,
+        ordinal=2 if case == "duplicate-ordinal" else 1,
+        source_identity=token if case == "duplicate-source" else "native:older",
+        ended_at=None if case.startswith("older-open") else "ended",
+        source_ambiguous=False, started_at="older", start_recorded_at="older",
     ))
-    with pytest.raises(ValueError, match="unchanged retained native head"):
+    with pytest.raises(ValueError):
         b.owner.source_identity(b.record, SID, 102, b.value)
 
 

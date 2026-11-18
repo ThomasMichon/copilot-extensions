@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from . import native_source_context, retained_record_writer
+from .tracking_session_activations import session_activation_observation
 
 if TYPE_CHECKING:
     from .tracking import WorktreeRecord
@@ -102,7 +103,8 @@ def source_identity(
         json.dumps(identity, sort_keys=True, separators=(",", ":")).encode("utf-8"),
     ).hexdigest()
     if latest.ended_at is None:
-        if latest.source_identity != token or token in entry.pruned_sources:
+        observation = session_activation_observation(entry)
+        if observation is None or observation["sourceIdentity"] != token:
             raise ValueError("Hosted activation cannot replace an open source")
     elif any(item.source_identity == token for item in entry.activations):
         raise ValueError("Hosted activation source is already closed")
