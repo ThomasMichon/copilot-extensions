@@ -193,7 +193,7 @@ def test_same_open_hosted_source_retries_after_save_prunes_older_history(
 
 @pytest.mark.parametrize("change", [
     "writer", "nonce", "head", "epoch", "birth", "parent", "exited", "open-source",
-    "pruned", "saturated", "terminal", "missing-scope", "hook", "extra-field",
+    "pruned", "saturated", "terminal", "missing-scope", "hook", "extra-field", "older-open",
 ])
 def test_changed_or_unqualified_hosted_activation_cannot_write(
     hosted: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, change: str,
@@ -229,6 +229,12 @@ def test_changed_or_unqualified_hosted_activation_cannot_write(
         if change == "open-source":
             entry.activations[-1].ended_at = None
             entry.ended_at = None
+        elif change == "older-open":
+            entry.activations[-1].ended_at = None
+            entry.activations.append(tracking.SessionActivation(
+                ordinal=2, started_at="later", start_recorded_at="later",
+                source_identity="native:later", ended_at="later-exit",
+            ))
         elif change == "pruned":
             entry.pruned_sources = ["native:pruned"]
         elif change == "saturated":

@@ -104,6 +104,22 @@ def test_hosted_source_fences_record_and_physical_boundaries(hosted_source: Any,
         b.owner.source_identity(b.record, SID, 102, b.value)
 
 
+@pytest.mark.parametrize("case", ["older-open", "older-open-retry", "duplicate-ordinal"])
+def test_hosted_source_refuses_ambiguous_interval_history(hosted_source: Any, case: str) -> None:
+    b = hosted_source
+    token = b.owner.source_identity(b.record, SID, 102, b.value)
+    if case == "older-open-retry":
+        b.interval.source_identity, b.interval.ended_at = token, None
+    b.entry.activations.insert(0, SimpleNamespace(
+        ordinal=1 if case == "duplicate-ordinal" else 0,
+        source_identity="native:older",
+        ended_at="ended" if case == "duplicate-ordinal" else None,
+        source_ambiguous=False,
+    ))
+    with pytest.raises(ValueError, match="unchanged retained native head"):
+        b.owner.source_identity(b.record, SID, 102, b.value)
+
+
 @pytest.mark.parametrize("case", ["stale", "current", "missing"])
 def test_hosted_source_uses_replayed_head_not_repairable_cache(
     hosted_source: Any, case: str,

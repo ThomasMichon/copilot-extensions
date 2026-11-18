@@ -72,6 +72,8 @@ def source_identity(
         or record.pending_handoffs or entry is None or entry.state != "active"
         or entry.source_history_saturated
         or latest is None or latest.source_identity is None or latest.source_ambiguous
+        or any(item is not latest and item.ended_at is None for item in entry.activations)
+        or len({item.ordinal for item in entry.activations}) != len(entry.activations)
     ):
         raise ValueError("Hosted activation requires its unchanged retained native head and history")
     observed_epoch = native_source_context.epoch()
