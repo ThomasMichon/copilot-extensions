@@ -3429,17 +3429,18 @@ sources, transferring owners or turning partial/planning gains into completion.
   unaccepted under the current local-only scope; two agent-invented umbrella/
   ACK gates were withdrawn while genuine source/ownership boundaries remain.
   The [reviewed receiving and separate judgments](journal/2026/11.17-fleet-refinements-and-remote-scope.md#reviewed-receiving-and-three-separate-tracker-retirements)
-  record #13193's actual merge and audited NOT_PLANNED retirements of
-  #6236/#6137. #6137's campaign-owned keeper refinement was explicitly
-  reviewed, reflected in the STILL-OPEN source and followed by fresh complete
-  readback and a separate judgment; no independent condition was waived.
+  record #13193's actual merge and audited NOT_PLANNED retirement of #6236.
+  #6137's campaign-owned keeper refinement was reviewed and reflected in the
+  STILL-OPEN source, but that did not resolve the original owner's intentional-
+  OPEN condition. Its unsupported judgment was withdrawn and #6137 restored
+  OPEN with zero credit; both documentary tracking checks remain unchecked.
   #6394's seven Plan, seven local and actual global Validation rows remain
   unchecked. Its unsupported retirement was withdrawn and #6394 restored OPEN:
   the bounded queued contributor claim/plan does not establish the retained
   source/publisher owner's actual BT4 decision. That specific condition remains
   unresolved; no generic ACK is added. File-drop remains unaccepted and #6283
-  remains OPEN. The fresh complete two-pass count is 880 whole, 151 above 729,
-  with two net audited reductions and all 24 parent items open.
+  remains OPEN. The fresh complete two-pass count is 881 whole, 152 above 729,
+  with one net audited reduction and all 24 parent items open.
   The same [whole Gateway/index comparison](journal/2026/11.17-fleet-refinements-and-remote-scope.md#whole-gatewayindex-receiving-and-an-explicit-keeper-continuation)
   finds complete existing direct #6443/#6383 receiving without another
   technical checklist. The affirmative campaign-owned #6383 OPEN-parent
