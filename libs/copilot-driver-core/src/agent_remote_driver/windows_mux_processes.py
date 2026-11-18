@@ -5,6 +5,7 @@ from __future__ import annotations
 import ctypes
 import re
 from ctypes import wintypes
+from typing import Any
 
 from . import mux_process_identity as locks, mux_process_identity as windows_process_census
 from .mux_observation_types import ObservationUnavailable as MuxObservationUnavailable
@@ -19,6 +20,8 @@ _CLIENTS = {
 }
 _TH32CS_SNAPPROCESS = 2
 _ERROR_NO_MORE_FILES = 18
+# Windows-only ctypes members are absent from non-Windows type stubs.
+_native: Any = ctypes
 
 
 def _processes() -> list[tuple[int, str]]:
@@ -31,7 +34,7 @@ def _processes() -> list[tuple[int, str]]:
             ("flags", wintypes.DWORD), ("image", wintypes.WCHAR * 260),
         ]
 
-    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel = _native.WinDLL("kernel32", use_last_error=True)
     kernel.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
     kernel.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
     for name in ("Process32FirstW", "Process32NextW"):
@@ -55,7 +58,7 @@ def _processes() -> list[tuple[int, str]]:
                 if len(result) > 256:
                     raise MuxObservationUnavailable("Native mux process budget exceeded")
             if not kernel.Process32NextW(handle, ctypes.byref(entry)):
-                if ctypes.get_last_error() != _ERROR_NO_MORE_FILES:
+                if _native.get_last_error() != _ERROR_NO_MORE_FILES:
                     raise MuxObservationUnavailable("Native mux process enumeration is incomplete")
                 return result
     finally:
@@ -90,13 +93,16 @@ def servers() -> dict[int, str]:
                 f"Native mux process identity is unavailable: pid {pid} {field} "
                 f"is unreadable ({state}, Win32 error {error})",
             )
-        if locks.process_start_time(pid) != before:
+        after = locks.process_start_time(pid)
+        if after != before:
+            if after is None and locks.access(pid)[0] == "gone":
+                continue
             raise MuxObservationUnavailable(
                 f"Native mux process identity is unavailable: pid {pid} start time changed",
             )
         match = _COMMAND.match(command)
         mode = match[2].strip('"') if match else None
-        if mode == "server" and not match[1]:
+        if match and mode == "server" and not match[1]:
             result[pid] = before
         elif mode not in _CLIENTS:
             # Unknown/global-option forms might be servers; never omit them.

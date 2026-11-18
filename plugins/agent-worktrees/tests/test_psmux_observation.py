@@ -407,6 +407,53 @@ def test_native_census_names_the_unclassifiable_process(
         native.servers()
 
 
+@pytest.mark.parametrize("state,skipped", [(("gone", 87), True), (("live", 0), False)])
+def test_native_census_recheck_skips_only_verified_exits(
+    monkeypatch: pytest.MonkeyPatch, state: tuple[str, int], skipped: bool,
+) -> None:
+    monkeypatch.setattr(native, "_processes", lambda: [(101, "psmux.exe")])
+    values = iter(["123", None])
+    monkeypatch.setattr(mux_process_identity, "process_start_time", lambda pid: next(values))
+    monkeypatch.setattr(mux_process_identity, "command_line", lambda pid: "psmux attach -t fixture")
+    monkeypatch.setattr(mux_process_identity, "access", lambda pid: state)
+    if skipped:
+        assert native.servers() == {}
+    else:
+        with pytest.raises(MuxObservationUnavailable, match="pid 101 start time changed"):
+            native.servers()
+
+
+@pytest.mark.parametrize("opened,error,exit_code,expected", [
+    (False, 87, None, ("gone", 87)),
+    (False, 5, None, ("denied", 5)),
+    (False, 6, None, ("unknown", 6)),
+    (True, 0, 259, ("live", 0)),
+    (True, 0, 0, ("gone", 0)),
+    (True, 31, None, ("unknown", 31)),
+])
+def test_access_maps_native_errors_without_inferring_absence(
+    monkeypatch: pytest.MonkeyPatch, opened: bool, error: int, exit_code: int | None,
+    expected: tuple[str, int],
+) -> None:
+    closed: list[int] = []
+
+    def exit_status(handle: int, pointer: Any) -> bool:
+        if exit_code is None:
+            return False
+        pointer._obj.value = exit_code
+        return True
+
+    kernel = SimpleNamespace(
+        OpenProcess=lambda *a: 17 if opened else 0,
+        GetExitCodeProcess=exit_status,
+        CloseHandle=lambda handle: closed.append(handle),
+    )
+    monkeypatch.setattr(mux_process_identity, "_kernel", lambda: kernel)
+    monkeypatch.setattr(ctypes, "get_last_error", lambda: error, raising=False)
+    assert mux_process_identity.access(101) == expected
+    assert closed == ([17] if opened else [])
+
+
 def test_uncovered_inaccessible_process_still_fails_closed(registered: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(native, "servers", lambda: {101: "123", 202: "9"})
     with pytest.raises(MuxObservationUnavailable, match="missing its registration: pid 202"):

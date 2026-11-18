@@ -2,10 +2,14 @@
 
 import ctypes
 from ctypes import wintypes as w
+from typing import Any
+
+# Windows-only ctypes members are absent from non-Windows type stubs.
+_native: Any = ctypes
 
 
-def _kernel():
-    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+def _kernel() -> Any:
+    kernel = _native.WinDLL("kernel32", use_last_error=True)
     kernel.OpenProcess.argtypes = [w.DWORD, w.BOOL, w.DWORD]
     kernel.OpenProcess.restype = w.HANDLE
     kernel.CloseHandle.argtypes = [w.HANDLE]
@@ -35,7 +39,7 @@ def command_line(pid: int) -> str | None:
     if not handle:
         return None
     try:
-        query = ctypes.WinDLL("ntdll", use_last_error=True).NtQueryInformationProcess
+        query = _native.WinDLL("ntdll", use_last_error=True).NtQueryInformationProcess
         query.argtypes = [w.HANDLE, ctypes.c_int, ctypes.c_void_p, w.ULONG, ctypes.POINTER(w.ULONG)]
         query.restype = ctypes.c_long
         needed = w.ULONG()
@@ -77,7 +81,7 @@ def access(pid: int) -> tuple[str, int]:
     kernel = _kernel()
     handle = kernel.OpenProcess(0x1000, False, pid)
     if not handle:
-        error = ctypes.get_last_error()
+        error = _native.get_last_error()
         if error == _ERROR_INVALID_PARAMETER:
             return "gone", error
         return ("denied" if error == ERROR_ACCESS_DENIED else "unknown"), error
@@ -86,7 +90,7 @@ def access(pid: int) -> tuple[str, int]:
         kernel.GetExitCodeProcess.restype = w.BOOL
         code = w.DWORD()
         if not kernel.GetExitCodeProcess(handle, ctypes.byref(code)):
-            return "unknown", ctypes.get_last_error()
+            return "unknown", _native.get_last_error()
         return ("live" if code.value == _STILL_ACTIVE else "gone"), 0
     finally:
         kernel.CloseHandle(handle)
@@ -111,7 +115,7 @@ def system_start_times() -> dict[int, str]:
             ("priority", ctypes.c_long), ("pid", ctypes.c_void_p),
         ]
 
-    query = ctypes.WinDLL("ntdll", use_last_error=True).NtQuerySystemInformation
+    query = _native.WinDLL("ntdll", use_last_error=True).NtQuerySystemInformation
     query.argtypes = [ctypes.c_int, ctypes.c_void_p, w.ULONG, ctypes.POINTER(w.ULONG)]
     query.restype = ctypes.c_long
     size = 1 << 20
