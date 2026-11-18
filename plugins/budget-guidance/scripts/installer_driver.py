@@ -35,7 +35,7 @@ RECIPES = {
     "agent-bridge": frozenset({
         "Repair", "NoService", "RequireGracefulCutover", "NonInteractive", "ZeroDowntime", "Purge", "DryRun",
     }),
-    "agent-codespaces": frozenset({"Force", "DryRun", "Repair"}),
+    "agent-codespaces": frozenset({"Force", "DryRun", "Repair", "NoService"}),
     "agent-dispatch": frozenset({
         "NoService", "NoSupervisor", "Interactive", "Purge", "Force",
         "RequireGracefulCutover", "PreserveSupervisors", "ZeroDowntime", "DryRun", "Repair",
@@ -244,12 +244,15 @@ def native_arguments(args: argparse.Namespace) -> list[str]:
     ]
     install_source: Path | None = getattr(args, "install_source", None)
     wheel_values = [getattr(args, name, None) for name, _flag in WHEEL_FIELDS]
-    if args.plugin == "agent-bridge" and "NoService" in options and (
-        args.action not in {"install", "update"} or not all(wheel_values)
-        or install_source is not None
-        or set(options) - {"NoService", "ZeroDowntime"}
-    ):
-        raise ValueError("NoService requires complete closed wheels for install/update without service or repair options")
+    if args.plugin in {"agent-bridge", "agent-codespaces"} and "NoService" in options:
+        runtime_only_options = {
+            "NoService", "ZeroDowntime" if args.plugin == "agent-bridge" else "Force",
+        }
+        if (
+            args.action not in {"install", "update"} or not all(wheel_values)
+            or install_source is not None or set(options) - runtime_only_options
+        ):
+            raise ValueError("NoService requires complete closed wheels for install/update without service or repair options")
     if any(value is not None for value in wheel_values):
         if (
             install_source is not None or not all(wheel_values)

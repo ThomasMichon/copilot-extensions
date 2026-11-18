@@ -2924,14 +2924,18 @@ def test_codespaces_functional_profile_preparation_strips_test_only_flags(
 
 
 @pytest.mark.parametrize("profile", [None, "standard", "busy-host-functional"])
-@pytest.mark.parametrize("plugin,target", [
-    ("agent-codespaces", "tests/test_installer_engine_adoption.py"),
-    ("agent-ssh", "tests/test_snapshot_runtime.py"),
-    ("agent-ssh", "tests/test_snapshot_windows_visibility.py"),
+@pytest.mark.parametrize("plugin,targets", [
+    ("agent-codespaces", ("tests/test_installer_engine_adoption.py",)),
+    ("agent-codespaces", ("tests/test_install_runtime_only_ps1.py",)),
+    ("agent-codespaces", (
+        "tests/test_installer_engine_adoption.py", "tests/test_install_runtime_only_ps1.py",
+    )),
+    ("agent-ssh", ("tests/test_snapshot_runtime.py",)),
+    ("agent-ssh", ("tests/test_snapshot_windows_visibility.py",)),
 ])
 def test_codespaces_functional_profile_budgets_and_caps(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], profile: str | None,
-    tmp_path: Path, plugin: str, target: str,
+    tmp_path: Path, plugin: str, targets: tuple[str, ...],
 ) -> None:
     class Lease:
         def release(self) -> None:
@@ -2941,8 +2945,10 @@ def test_codespaces_functional_profile_budgets_and_caps(
     monkeypatch.setattr(runner, "_acquire_admission", lambda *_args: Lease())
     observed: list[dict[str, Any]] = []
     monkeypatch.setattr(runner, "run_plugin", lambda *a, **kw: recorded(observed, kw, 0))
-    files = [target]
-    arguments = [plugin, "--test-file", files[0], "--junit-dir", str(tmp_path / "reports")]
+    files = list(targets)
+    arguments = [plugin, "--junit-dir", str(tmp_path / "reports")]
+    for target in files:
+        arguments += ["--test-file", target]
     if profile is not None:
         arguments += ["--test-profile", profile]
     assert runner.main(arguments) == 0
@@ -2967,6 +2973,9 @@ def test_codespaces_functional_profile_budgets_and_caps(
     ["agent-codespaces"],
     ["agent-bridge", "--test-file", "tests/test_installer_engine_adoption.py"],
     ["agent-codespaces", "--test-file", "tests/test_install_ps1_recovery.py"],
+    ["agent-codespaces", "--test-file", "tests/test_installer_engine_adoption.py",
+     "--test-file", "tests/test_install_runtime_only_ps1.py",
+     "--test-file", "tests/test_install_ps1_recovery.py"],
     ["agent-codespaces", "--test-file", "tests/test_installer_engine_adoption.py", "-k", "healthy"],
     ["agent-codespaces", "--test-file", "tests/test_installer_engine_adoption.py", "--timeout", "900"],
     ["agent-codespaces", "--test-file", "tests/test_installer_engine_adoption.py", "--plugin-timeout", "2700"],

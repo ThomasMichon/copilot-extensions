@@ -13,6 +13,7 @@ def validate_profile(args: Namespace) -> None:
     allowed = {
         "agent-codespaces": {
             Path("tests") / "test_installer_engine_adoption.py",
+            Path("tests") / "test_install_runtime_only_ps1.py",
             Path("tests") / "test_snapshot_copy_contract.py",
             Path("tests") / "test_installer_test_support.py",
         },

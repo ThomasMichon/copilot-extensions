@@ -8760,6 +8760,9 @@ canonical installer module, normal committed-HEAD materialization, and the full
 materialized installer module. Windows retains all six disjoint installer
 partitions. It records exact source identity, profile, outcomes and cleanup
 inside one 7200-second functional envelope; required PR CI is unchanged.
+Adding the runtime-only PowerShell packet to both automated selections requires
+an owner-authored workflow change and remains pending. Admitting the packet to
+the test profile does not by itself change the workflow's selected files.
 
 For sustained host contention, explicitly select the test-only
 `busy-host-functional` profile on the existing isolated runner:
@@ -8767,7 +8770,8 @@ For sustained host contention, explicitly select the test-only
 ```bash
 python tools/run-plugin-tests.py agent-codespaces \
   --test-profile busy-host-functional \
-  --test-file tests/test_installer_engine_adoption.py
+  --test-file tests/test_installer_engine_adoption.py \
+  --test-file tests/test_install_runtime_only_ps1.py
 python tools/run-plugin-tests.py agent-codespaces \
   --test-profile busy-host-functional \
   --test-file tests/test_snapshot_copy_contract.py \
@@ -8778,11 +8782,17 @@ The devcontainer wrapper accepts the same profile and file selectors. It strips
 both only from dependency preparation and preserves both for the offline test
 pass; preparation still runs without importing tests.
 
-The first command is run against both canonical and normally materialized
+Run repository-wide documentation scans after preparation and cleanup finish
+in the same checkout. UV can stage short-lived first-party inputs beneath the
+source tree; scanning during their removal can report missing Markdown files.
+Keep the guard's scope unchanged and rerun it on the quiescent checkout rather
+than excluding temporary-looking paths.
+
+Run the first command against both canonical and normally materialized
 source for complete installer qualification. Keep the combined sequence,
 including materializer integration, preparation and cleanup, within a finite
 7200-second caller-owned containment envelope. The profile is opt-in and logged:
-the adoption and copy modules' default item hang guards are 300 seconds instead of 60;
+the adoption, copy and runtime-only modules' default item hang guards are 300 seconds instead of 60;
 their 45-second native subprocess hang guards become 135 seconds; group and plugin
 aggregate guards become 900 and 2700 seconds instead of 300 and 900.
 The runner's unmarked-item default remains 30 seconds. All other fixture
@@ -8792,6 +8802,14 @@ Existing explicit 180-second item markers remain 180 seconds in both profiles;
 limits also remain unchanged.
 The default item guard includes fixture setup and multiple separately bounded native
 calls, so it is larger than the individual native-call guard.
+
+The runtime-only participant re-entry fixture runs its real driver transaction
+and native PowerShell child inside the existing caller-owned subprocess runner,
+with the same 45/135-second native-call guard and output caps. This keeps pytest
+interruption out of the production driver's custody-preserving wait path; it does
+not change production cancellation or TTY behavior. A deliberately stalled native
+fixture checks that both the participant worker and its original native child
+have exited after the subprocess guard fires.
 
 This profile accepts only the three named test files, without keyword/portfolio
 filters, host-state opt-ins or limit overrides. It preserves the complete
@@ -11363,6 +11381,11 @@ PATH or other persistent environment state. It deliberately does not roll the
 key back because another process may have made a legitimate concurrent edit.
 Installer subprocesses launched by a direct pytest invocation receive the same
 prevention through pytest's inherited `PYTEST_CURRENT_TEST` marker.
+The runtime-only PowerShell re-entry cases additionally require the runner's
+`COPILOT_EXTENSIONS_TEST_CONTAINED=1` prerequisite and explicitly skip before
+fixture effects when it is absent. Use the
+[optional Codespaces qualification](#optional-busy-host-codespaces-functional-qualification)
+runner command to execute those cases; the fixture never fabricates containment.
 
 Codespaces PowerShell installer regressions additionally use a fixture-only
 executable search path and explicit batch exit-code forwarding. Temporary

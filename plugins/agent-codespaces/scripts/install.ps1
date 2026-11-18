@@ -19,6 +19,10 @@
 
 .PARAMETER Force
     Overwrite without confirmation.
+
+.PARAMETER NoService
+    Closed-wheel install/update only: prepare the runtime without changing
+    Connection Owner startup or scheduled tasks. The caller owns its lifecycle.
 #>
 [CmdletBinding()]
 param(
@@ -36,7 +40,8 @@ param(
     [string]$WheelProfile,
     [string]$WheelDirectory,
     [string]$WheelPython,
-    [string]$WheelUv
+    [string]$WheelUv,
+    [switch]$NoService
 )
 
 Set-StrictMode -Version Latest
@@ -47,6 +52,13 @@ if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
         throw 'Required installer human-output initializer is unavailable.'
     }
     . (Join-Path $PSScriptRoot 'installer-human-output.ps1')
+}
+
+if ($NoService -and (
+    $Action -notin @('install', 'update') -or $DryRun -or
+    -not $WheelProfile -or -not $WheelDirectory -or -not $WheelPython -or -not $WheelUv
+)) {
+    throw '-NoService requires complete closed wheels for install/update without dry-run options'
 }
 
 if ($WheelProfile -or $WheelDirectory -or $WheelPython -or $WheelUv) {
@@ -90,7 +102,7 @@ if ($env:OS -eq 'Windows_NT' -and
     $driverRoot = if ($InstallDir) { [IO.Path]::GetFullPath($InstallDir) }
         else { Join-Path $env:USERPROFILE '.agent-codespaces' }
     $driverOptions = @()
-    foreach ($name in @('Force', 'DryRun')) {
+    foreach ($name in @('Force', 'DryRun', 'NoService')) {
         if ($PSBoundParameters.ContainsKey($name) -and [bool]$PSBoundParameters[$name]) {
             $driverOptions += $name
         }
@@ -1313,6 +1325,10 @@ function Sync-ConnectionOwnerService {
     <# Register future login starts and independently ensure the selected runtime.
        Updating a task does not start a new instance while IgnoreNew holds V1.
        No predecessor shutdown is a prerequisite for installation or startup. #>
+    if ($NoService) {
+        Write-ServiceOk 'Runtime ready; Owner restore and verification remain with the caller'
+        return
+    }
     $policy = Get-WindowsScheduledTaskPolicy
     if ($policy -eq 'absent') {
         Remove-OwnerScheduledTaskOnly
