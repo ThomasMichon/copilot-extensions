@@ -2,15 +2,28 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+import sqlite3
+from typing import Any, TYPE_CHECKING
+
 from .delegated_replay_contract import replay_scope
+from .queue_common import Task
 from .queue_records import TaskError
 
 
 class ReplayWaiterProgressMixin:
+    if TYPE_CHECKING:
+        _connect: Callable[[], sqlite3.Connection]
+        _run_waiter_from_row: Callable[[sqlite3.Row], dict[str, Any]]
+        _fetch: Callable[[sqlite3.Connection, str], Task | None]
+        _run_waiter_matches_task: Callable[[dict[str, Any], Task | None], bool]
+
     @staticmethod
-    def _check_replay_request(conn, delegation):
-        if "replay" in delegation:
-            replay = delegation["replay"]
+    def _check_replay_request(
+        conn: sqlite3.Connection, delegation: dict[str, Any],
+    ) -> None:
+        replay = delegation.get("replay", delegation.get("feed"))
+        if replay is not None:
             if conn.execute(
                 "SELECT 1 FROM run_waiters WHERE replay_scope = ? AND replay_request_id = ?",
                 (replay_scope(replay["binding"]), replay["request_id"]),
@@ -18,16 +31,21 @@ class ReplayWaiterProgressMixin:
                 raise TaskError("replay request already bound to a waiter")
 
     @staticmethod
-    def _store_replay_intent(conn, delegation, task_id, generation):
-        if delegation is not None and "replay" in delegation:
-            replay = delegation["replay"]
+    def _store_replay_intent(
+        conn: sqlite3.Connection, delegation: dict[str, Any] | None,
+        task_id: str, generation: int,
+    ) -> None:
+        replay = delegation.get("replay", delegation.get("feed")) if delegation is not None else None
+        if replay is not None:
             conn.execute(
                 "UPDATE run_waiters SET replay_scope = ?, replay_request_id = ? "
                 "WHERE task_id = ? AND generation = ?",
                 (replay_scope(replay["binding"]), replay["request_id"], task_id, generation),
             )
 
-    def list_replay_waiters(self, binding: dict, *, after: int = 0, limit: int = 32) -> list[dict]:
+    def list_replay_waiters(
+        self, binding: dict[str, Any], *, after: int = 0, limit: int = 32,
+    ) -> list[dict[str, Any]]:
         if type(limit) is not int or not 1 <= limit <= 32 or type(after) is not int or after < 0:
             raise ValueError("invalid replay scan bound")
         with self._connect() as conn:
@@ -37,7 +55,9 @@ class ReplayWaiterProgressMixin:
             ).fetchall()
         return [self._run_waiter_from_row(row) for row in rows]
 
-    def find_replay_waiter(self, binding: dict, registration_id: str) -> dict | None:
+    def find_replay_waiter(
+        self, binding: dict[str, Any], registration_id: str,
+    ) -> dict[str, Any] | None:
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT * FROM run_waiters WHERE replay_scope = ? AND replay_registration_id = ?",
@@ -45,9 +65,11 @@ class ReplayWaiterProgressMixin:
             ).fetchone()
         return self._run_waiter_from_row(row) if row else None
 
-    def replay_waiter_progress(self, waiter: dict, *, attempt: bool = False,
-                               registration_id: str | None = None,
-                               settled: bool = False, settle_unattempted: bool = False) -> dict:
+    def replay_waiter_progress(
+        self, waiter: dict[str, Any], *, attempt: bool = False,
+        registration_id: str | None = None,
+        settled: bool = False, settle_unattempted: bool = False,
+    ) -> dict[str, Any]:
         """Short transaction only; no remote operation runs with this lock held."""
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -55,8 +77,9 @@ class ReplayWaiterProgressMixin:
             if row is None:
                 raise TaskError("replay waiter no longer exists")
             current = self._run_waiter_from_row(row)
-            original = lambda w: {k: v for k, v in w["delegation"].items()
-                                  if k != "registration_id"}
+            def original(value: dict[str, Any]) -> dict[str, Any]:
+                return {k: v for k, v in value["delegation"].items() if k != "registration_id"}
+
             if (current["kind"] != "delegated" or original(current) != original(waiter)
                     or current["generation"] != waiter["generation"]
                     or current["task_generation"] != waiter["task_generation"]):

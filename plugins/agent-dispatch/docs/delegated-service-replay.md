@@ -248,3 +248,53 @@ scan of its own: it reuses the finite cycle's bound above, plus the configured
 active-owner checkpoint per later effect/exchange. That callback must remain
 bounded; it cannot be replaced with cached authority after known loss.
 No installer, first-provision or PR-role activation change is made here.
+
+## Repository-feed reader expansion
+
+The native waiter library also reads the distinct
+`agent-dispatch.repository-feed-waiter/v1` storage variant specified by
+[repository-feed waits](../../../efforts/active/durable-pr-watch-delegation/repository-feed-waiters.md).
+This is storage support, not a feed consumer or advertised delivery capability.
+Default startup and the `delegated_run_waiters/v1` HTTP/callback validators do
+not select it. Those validators reject the new form before suspension;
+do not send it to an older or callback-only coordinator.
+
+The new delegation retains the ordinary coordinator, preparation, subscriber,
+repository, PR-number and finite-timeout fields. Its explicit `protocol` and
+`feed` replace watch-only `until`, `shared`, `installation` and `replay` fields;
+mixed forms are invalid. `feed` contains the original `request_id`, `issued_at`,
+`deadline_at`, trusted `binding` and selected activity `baseline`.
+The binding names the cache protocol, absolute normalized Linux socket path,
+full namespace/provider/forge-endpoint/account/repository identity, target,
+consumer and reviewer. It stores no credential or callback command.
+
+`baseline: null` means unknown. A known baseline has `event_cursor` and
+`action_key`; a null action key means that the qualified original view had no
+selected action. A nonnull key is the consumer contract's stable action
+correlation digest, not a task revision, ranking cursor, proof of publication
+or authority. Merely storing it does not qualify acquisition or selection.
+Reusing a preparation with changed intent refuses, and the same original
+request cannot be rebound to another task.
+
+Both feed and watch-replay variants use the existing waiter service-scope,
+request, attempted, registration and settlement columns. Their complete
+serialized bindings partition lookups; no table or request journal is added.
+Feed rows remain outside the existing indexed local-only recovery queries,
+including while their consumer is absent. They cannot become missing local
+processes or preparing-arm timeouts. Changed selection leaves old rows
+unsettled for their original owner.
+
+The current native reader preserves callback, v1/v2 replay and feed rows
+together across reopening. Invalid/unknown feed intent refuses without
+rewriting that row. This does not promise that arbitrary historical runtimes
+can execute the new variant: the current callback protocol still refuses it,
+and reader/consumer transition must retain reconciliation custody before a
+selection changes. No state adoption, callback fallback or automatic rollback
+is performed.
+
+`test_repository_feed_waiter_storage.py` exercises actual SQLite storage,
+original-request conflicts, detached baselines, full binding partition,
+unarmed/armed local-recovery exclusion and callback HTTP refusal without task
+or outbox changes. Actual typed feed transport, capability-before-preparation,
+native feed completion/expiry, wake-before-ACK recovery and coordinator
+enrollment remain subsequent implementation and validation exits.

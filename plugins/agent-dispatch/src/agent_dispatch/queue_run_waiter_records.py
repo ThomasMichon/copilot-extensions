@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from typing import Any
+from typing import Any, cast
 
 
 def select_waiter_row(
@@ -25,13 +25,19 @@ def select_waiter_row(
         + " AND ".join(clauses)
         + " ORDER BY generation DESC LIMIT 1"
     )
-    return conn.execute(query, params).fetchone()
+    return cast(sqlite3.Row | None, conn.execute(query, params).fetchone())
 
 
 def run_waiter_from_row(row: sqlite3.Row) -> dict[str, Any]:
+    delegation = json.loads(row["delegation_json"] or "null")
+    if isinstance(delegation, dict) and "feed" in delegation:
+        from .repository_feed_waiter_contract import validate_feed_delegation
+        delegation = validate_feed_delegation(
+            delegation, armed="registration_id" in delegation,
+        )
     return {
         "kind": row["kind"],
-        "delegation": json.loads(row["delegation_json"] or "null"),
+        "delegation": delegation,
         "event_id": row["event_id"],
         "replay_registration_id": row["replay_registration_id"],
         "replay_attempted": bool(row["replay_attempted"]),
@@ -54,7 +60,7 @@ def run_waiter_from_row(row: sqlite3.Row) -> dict[str, Any]:
     }
 
 
-def run_waiter_summary(waiter: dict) -> dict:
+def run_waiter_summary(waiter: dict[str, Any]) -> dict[str, Any]:
     summary = {field: waiter[field] for field in (
         "command", "state", "created_at", "updated_at",
     )}
@@ -67,5 +73,10 @@ def run_waiter_summary(waiter: dict) -> dict:
             summary.update(
                 observation_deadline=identity["replay"]["deadline_at"],
                 delivery="service-replay", replay_settled=waiter["replay_settled"],
+            )
+        elif "feed" in identity:
+            summary.update(
+                observation_deadline=identity["feed"]["deadline_at"],
+                delivery="repository-feed", replay_settled=waiter["replay_settled"],
             )
     return summary
