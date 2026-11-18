@@ -3,11 +3,13 @@
 import copy
 import argparse
 from contextlib import nullcontext
+from collections.abc import Callable
 import hashlib
 import json
 from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
 import sys
+import time
 from typing import Any, cast
 
 import pytest
@@ -173,6 +175,8 @@ class Pair:
 
     def call(
         self, operation: str, *, expected: str = "", definition: dict[str, Any] | None = None,
+        on_native_begin: Callable[[], None] | None = None,
+        on_native_settled: Callable[[], None] | None = None,
     ) -> dict[str, Any]:
         if self.unavailable:
             raise RuntimeError("native manager unavailable")
@@ -185,9 +189,12 @@ class Pair:
             assert definition is not None and not definition["enabled"]
             self.definition = copy.deepcopy(definition)
             self.timer_enabled = self.timer_active = False
-            if self.fail_after == "partial":
+            if self.fail_after in {"partial", "publisher-exit"}:
+                exited = self.fail_after == "publisher-exit"
                 del self.definition["artifacts"][next(reversed(self.definition["artifacts"]))]
                 self.fail_after = ""
+                if exited:
+                    raise PublisherExit()
                 self.unavailable = True
                 raise RuntimeError("interrupted publication")
         elif operation == "enable":
@@ -225,6 +232,10 @@ class Pair:
                 [observed, timer_enabled, timer_active], sort_keys=True,
             ).encode()).hexdigest(),
         }
+
+
+class PublisherExit(BaseException):
+    pass
 
 
 def linux_case(
@@ -416,6 +427,60 @@ def test_enrollment_settles_mixed_timer_states_instead_of_reporting_noop(
     assert not result["instances"] and pair.calls[0] == "disable"
     assert ("enable" in pair.calls) is expected
     assert not result["recovery_required"] and references.pending is None
+
+
+@pytest.mark.parametrize("operation", ["converge", "disable", "remove"])
+def test_fresh_owner_recovers_publisher_exit_between_unit_publications(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str,
+) -> None:
+    owner, pair, references, selected = linux_case(tmp_path, monkeypatch)
+    adopt(owner)
+    selected[0] = selected[1]("2.0")
+    pair.fail_after = "publisher-exit"
+    with pytest.raises(PublisherExit):
+        owner.converge()
+    assert owner.read()["pending"] is not None and references.pending is not None
+    assert not owner.read()["pending"]["native_unsettled"]
+    successor = enrollment.Enrollment(
+        owner.installation, backend=pair, selector=owner.selector, qualifier=owner.qualifier,
+    )
+    result = (
+        successor.disable() if operation == "disable"
+        else successor.converge(remove=operation == "remove")
+    )
+    assert result["status"] == {
+        "converge": "rolled-back", "disable": "disabled", "remove": "removed",
+    }[operation]
+    assert not result["recovery_required"] and references.pending is None
+
+
+def test_native_cleanup_fence_still_blocks_a_fresh_owner_until_exact_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_procutil.owned_process import OwnedCleanupError
+
+    owner, pair, references, _ = linux_case(tmp_path, monkeypatch)
+    call = pair.call
+    cleanup = OwnedCleanupError(None, cleanup_retry=lambda _deadline: None)
+
+    def unconfirmed(operation: str, **fields: Any) -> dict[str, Any]:
+        if operation == "create":
+            fields["on_native_begin"]()
+            raise cleanup
+        return call(operation, **fields)
+
+    monkeypatch.setattr(pair, "call", unconfirmed)
+    assert adopt(owner)["status"] == "unknown"
+    assert owner.read()["pending"]["native_unsettled"] and references.pending is not None
+    successor = enrollment.Enrollment(
+        owner.installation, backend=pair, selector=owner.selector, qualifier=owner.qualifier,
+    )
+    with pytest.raises(ValueError, match="cleanup-unconfirmed"):
+        successor.converge(remove=True)
+    cleanup.retry_cleanup(deadline=time.monotonic() + 5)
+    assert not owner.read()["pending"]["native_unsettled"]
+    assert successor.converge()["status"] == "removed"
+    assert references.pending is None
 
 
 def test_cross_platform_state_and_account_changes_refuse_before_native_calls(

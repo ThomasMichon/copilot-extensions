@@ -22,7 +22,7 @@ PROPERTIES = (
     "Id", "Names", "LoadState", "ActiveState", "SubState", "FragmentPath", "SourcePath",
     "DropInPaths", "Transient", "NeedDaemonReload", "Description", "UnitFileState",
     "MainPID", "ControlPID", "InvocationID", "ControlGroup", "Result",
-    "ExecMainCode", "ExecMainStatus", "ExecMainStartTimestamp", "NextElapseUSecRealtime",
+    "ExecMainCode", "ExecMainStatus", "ExecMainStartTimestamp", "NextElapseUSecRealtime", "Job",
 )
 
 
@@ -133,6 +133,8 @@ class NativePair:
         self.name, self.owner = name, owner
         self.units = (name + ".service", name + ".timer")
         self.native_cleanup_error: object | None = None
+        self._native_begin: Callable[[], None] | None = None
+        self._native_settled: Callable[[], None] | None = None
 
     def _context(self) -> tuple[int, Path]:
         if sys.platform != "linux":
@@ -160,6 +162,9 @@ class NativePair:
         executable = next((path for path in ("/usr/bin/systemctl", "/bin/systemctl") if Path(path).is_file()), None)
         if executable is None:
             raise slots.HealthError("native-user-manager-unavailable")
+        mutating = bool(arguments and arguments[0] != "show")
+        if mutating and self._native_begin is not None:
+            self._native_begin()
         result = run_caller_owned(
             [executable, "--user", "--no-pager", *arguments],
             timeout=timeout, budget=OwnedExecutionBudget.from_timeout(timeout, cleanup_reserve=5),
@@ -170,6 +175,8 @@ class NativePair:
             missing and result.returncode in {1, 4} and "LoadState=not-found" in result.stdout.splitlines()
         ):
             raise slots.HealthError("native-health-pair-operation-unconfirmed")
+        if mutating and self._native_settled is not None:
+            self._native_settled()
         return cast(str, result.stdout)
 
     def _properties(self, unit: str) -> dict[str, str]:
@@ -180,7 +187,7 @@ class NativePair:
             if not separator or key not in PROPERTIES or key in properties:
                 raise slots.HealthError("native-health-pair-response-invalid")
             properties[key] = value
-        if not {"LoadState", "ActiveState", "FragmentPath", "DropInPaths"}.issubset(properties):
+        if not {"LoadState", "ActiveState", "FragmentPath", "DropInPaths", "Job"}.issubset(properties):
             raise slots.HealthError("native-health-pair-response-invalid")
         return properties
 
@@ -225,6 +232,8 @@ class NativePair:
                 artifacts[unit] = text
             stamps[unit] = stamp
             properties = self._properties(unit)
+            if properties.get("Job", "0") != "0":
+                raise slots.HealthError("native-health-pair-operation-unconfirmed")
             fragment = properties["FragmentPath"]
             if (
                 properties["DropInPaths"] or properties.get("SourcePath")
@@ -264,6 +273,7 @@ class NativePair:
             "enabled": enabled, "timer_enabled": timer.get("UnitFileState") == "enabled",
             "timer_active": timer["ActiveState"] == "active", "loaded": loaded,
             "link_identity": link_state,
+            "file_identities": stamps,
             "service_loaded": service["LoadState"] == "loaded",
             "timer_loaded": timer["LoadState"] == "loaded",
             "instances": [service.get("InvocationID") or "unknown"] if active else [],
@@ -306,6 +316,18 @@ class NativePair:
                     temporary.unlink(missing_ok=True)
 
     def call(
+        self, operation: str, *, expected: str = "", definition: LinuxDefinition | None = None,
+        on_native_begin: Callable[[], None] | None = None,
+        on_native_settled: Callable[[], None] | None = None,
+    ) -> dict[str, Any]:
+        previous = self._native_begin, self._native_settled
+        self._native_begin, self._native_settled = on_native_begin, on_native_settled
+        try:
+            return self._call(operation, expected=expected, definition=definition)
+        finally:
+            self._native_begin, self._native_settled = previous
+
+    def _call(
         self, operation: str, *, expected: str = "", definition: LinuxDefinition | None = None,
     ) -> dict[str, Any]:
         if operation not in {"read", "create", "replace", "enable", "disable", "remove"}:
@@ -367,6 +389,12 @@ class NativePair:
         if settled["timer_enabled"] or settled["timer_active"] or settled["instances"]:
             raise slots.HealthError("native-health-pair-settlement-unconfirmed")
         if operation == "remove":
+            if (
+                (settled["definition"] or {}).get("artifacts", {})
+                != (observed["definition"] or {}).get("artifacts", {})
+                or settled["file_identities"] != observed["file_identities"]
+            ):
+                raise slots.HealthError("native-health-pair-changed")
             before_files = {unit: read_file(scope / unit, uid)[1] for unit in self.units}
             if self.snapshot()["digest"] != settled["digest"]:
                 raise slots.HealthError("native-health-pair-changed")

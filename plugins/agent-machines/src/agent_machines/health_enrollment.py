@@ -666,7 +666,13 @@ class Enrollment:
         if pending is None or pending["native_unsettled"]:
             raise slots.HealthError("native-health-task-cleanup-unconfirmed")
         token = pending["token"]
-        slots._write(self.path, {**state, "pending": {**pending, "native_unsettled": True}})
+        def beginning() -> None:
+            current = self.read()
+            if current["pending"] is None or current["pending"]["token"] != token:
+                raise slots.HealthError("native-health-task-cleanup-unconfirmed")
+            slots._write(self.path, {
+                **current, "pending": {**current["pending"], "native_unsettled": True},
+            })
 
         def settled() -> None:
             current = self.read()
@@ -678,16 +684,29 @@ class Enrollment:
         def cleanup_settled() -> None:
             remaining = max(0, (self.native_cleanup_deadline or time.monotonic() + 5) - time.monotonic())
             with self.leases.reference_transaction_custody(self.root, timeout=min(5, remaining)):
+                if self.platform == "linux":
+                    self._native_read()
                 settled()
 
         try:
-            result = self.backend.call(operation, **fields)
+            if self.platform == "linux":
+                from .health_systemd_native import NativePair
+
+                # The reference-custody lock fences synchronous file publication.
+                # Only a native child can outlive that publisher and needs this fence.
+                result = cast(NativePair, self.backend).call(
+                    operation, **fields, on_native_begin=beginning, on_native_settled=settled,
+                )
+            else:
+                beginning()
+                result = self.backend.call(operation, **fields)
         except OwnedCleanupError as error:
             self.native_cleanup_error = error
             error._retain_on_settled(cleanup_settled)
             raise
         except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
-            settled()
+            if self.platform != "linux":
+                settled()
             raise
         settled()
         return self._normalize(result)

@@ -49,6 +49,27 @@ def test_native_command_distinguishes_absent_unit_from_unavailable_manager(
     assert all("sudo" not in argv and "linger" not in argv for argv, _options in calls)
 
 
+def test_only_confirmed_native_mutations_clear_the_execution_fence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pair = native.NativePair(NAME, OWNER)
+    monkeypatch.setattr(Path, "is_file", lambda _path: True)
+    events: list[str] = []
+    pair._native_begin = lambda: events.append("begin")
+    pair._native_settled = lambda: events.append("settled")
+    answer = SimpleNamespace(returncode=0, stdout="")
+    monkeypatch.setattr(owned_process, "run_caller_owned", lambda *_args, **_kwargs: answer)
+    pair._command("show", NAME + ".service")
+    assert not events
+    pair._command("daemon-reload")
+    assert events == ["begin", "settled"]
+    events.clear()
+    answer.returncode = 1
+    with pytest.raises(ValueError, match="unconfirmed"):
+        pair._command("start", NAME + ".timer")
+    assert events == ["begin"]
+
+
 @pytest.mark.parametrize(("mode", "uid", "links"), [
     (stat.S_IFREG | 0o622, 1000, 1),
     (stat.S_IFREG | 0o600, 1001, 1),
@@ -154,6 +175,15 @@ def test_native_readback_refuses_foreign_loaded_or_overridden_units(
     pair, _, properties = snapshot_case(tmp_path, monkeypatch)
     properties[pair.units[0]].update(override)
     with pytest.raises(ValueError, match="foreign"):
+        pair.snapshot()
+
+
+def test_native_readback_refuses_queued_manager_work(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pair, _, properties = snapshot_case(tmp_path, monkeypatch)
+    properties[pair.units[1]]["Job"] = "1234"
+    with pytest.raises(ValueError, match="operation-unconfirmed"):
         pair.snapshot()
 
 
@@ -307,3 +337,41 @@ def test_partial_pair_disable_stops_timer_before_action_and_retains_unknown_sett
     with pytest.raises(ValueError, match="settlement-unconfirmed"):
         pair.call("disable", expected=snapshot()["digest"])
     assert calls == ["stop-timer", "unlink", "reload", "stop-action"]
+
+
+@pytest.mark.parametrize("change", ["contents", "identity"])
+def test_removal_preserves_unit_edited_or_replaced_during_action_stop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str,
+) -> None:
+    pair = native.NativePair(NAME, OWNER)
+    observed: dict[str, Any] = {
+        "configured": True, "definition": definition(), "enabled": False,
+        "timer_enabled": False, "timer_active": False, "timer_loaded": True,
+        "service_loaded": True, "instances": ["owned invocation"], "link_identity": None,
+        "file_identities": {unit: (1, 2, 3, 4) for unit in pair.units},
+    }
+
+    def snapshot() -> dict[str, Any]:
+        value = copy.deepcopy(observed)
+        value["digest"] = hashlib.sha256(json.dumps(observed, sort_keys=True).encode()).hexdigest()
+        return value
+
+    def command(*argv: str, **_options: Any) -> str:
+        if argv == ("stop", pair.units[0]):
+            observed["instances"] = []
+            if change == "contents":
+                observed["definition"]["artifacts"][pair.units[0]] += "# edited during stop\n"
+            else:
+                observed["file_identities"][pair.units[0]] = (1, 99, 3, 4)
+        return ""
+
+    def no_unlink(*_args: Any, **_kwargs: Any) -> None:
+        raise AssertionError("changed unit must not be deleted")
+
+    monkeypatch.setattr(pair, "_context", lambda: (1000, tmp_path))
+    monkeypatch.setattr(pair, "snapshot", snapshot)
+    monkeypatch.setattr(pair, "_command", command)
+    monkeypatch.setattr(native, "_link", lambda *_args: None)
+    monkeypatch.setattr(Path, "unlink", no_unlink)
+    with pytest.raises(ValueError, match="pair-changed"):
+        pair.call("remove", expected=snapshot()["digest"])
