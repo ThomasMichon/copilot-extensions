@@ -34,8 +34,10 @@ def catalog_repo_matches(source: str, repo: str) -> bool:
 
 @pytest.mark.parametrize("source_aware", [False, True])
 @pytest.mark.parametrize("model_count", [1, 2])
+@pytest.mark.parametrize("with_fts", [False, True])
 def test_instance_bonus_preserves_independent_native_rankings(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source_aware: bool, model_count: int,
+    with_fts: bool,
 ) -> None:
     profiles = {
         model: ModelProfile(model, model, table_name=f"vectors_{model}", dim=2)
@@ -60,17 +62,22 @@ def test_instance_bonus_preserves_independent_native_rankings(
     for profile in profiles.values():
         disabled.register_model(profile)
         disabled.upsert(profile.model_id, chunks, vectors)
-    assert disabled.ensure_fts_index()
-    assert [
-        chunk_id for chunk_id, _ in disabled.content_store.fts_search("backup.py")
-    ] == [chunks[0].chunk_id]
+    if with_fts:
+        assert disabled.ensure_fts_index()
+        assert [
+            chunk_id for chunk_id, _ in disabled.content_store.fts_search("backup.py")
+        ] == [chunks[0].chunk_id]
+    else:
+        assert not disabled.fts_available
 
     def search(store: MultiModelStore, query: str = "backup.py") -> list[tuple[str, float]]:
         if source_aware:
             inference = Mock()
             inference.embed_query.return_value = vectors[0]
             engine = SearchEngine(dict.fromkeys(profiles, inference), store)
-            results = engine.search_authorized(query, families=("git:alpha",))
+            results = engine.search_authorized(
+                query, families=("git:alpha",), mode="hybrid" if with_fts else "vector",
+            )
         elif model_count == 1:
             results = store.hybrid_search("first", vectors[0], query)
         else:
@@ -88,10 +95,14 @@ def test_instance_bonus_preserves_independent_native_rankings(
     for store in (boosted, default, explicit_default):
         for profile in profiles.values():
             store.register_model(profile)
-        assert store.ensure_fts_index()
+        if with_fts:
+            assert store.ensure_fts_index()
     domain = disabled._source_domain
     receipt = domain.receipt() if domain is not None else None
-    assert search(boosted)[0][0] == chunks[1].chunk_id
+    expected_top = chunks[1] if with_fts or model_count > 1 else chunks[0]
+    assert search(boosted)[0][0] == expected_top.chunk_id
+    if not with_fts and model_count == 1:
+        assert search(boosted) == unboosted
     assert search(disabled) == unboosted
     assert search(default) == search(explicit_default)
     assert search(disabled) == unboosted

@@ -204,7 +204,10 @@ It uses the same top-rank RRF units as `AGENT_INDEX_EXACT_MATCH_BONUS`; zero
 disables the rescue. Omitting the argument retains that environment-derived
 default. Instances sharing a database can select different bonuses without
 changing process-global state or copying the fusion implementation.
-Pure vector/FTS paths and existing single-list shortcuts do not apply a bonus.
+Direct vector/FTS queries, hybrid vector-only fallbacks and existing single-list
+shortcuts do not apply a bonus. Multi-list fusion can apply it even without an
+FTS branch, including cross-model `search_all` and multi-model authorized
+`mode="vector"` queries.
 The existing per-query `vector_weight` and `fts_weight` arguments on
 `hybrid_search` and `search_all` remain independent.
 
