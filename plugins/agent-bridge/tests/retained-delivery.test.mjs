@@ -133,7 +133,7 @@ function fixture() {
 test("accepted retained recovery clears submission attention without consuming or resending", async () => {
   const f = fixture();
   f.add();
-  const notice = new PendingInputNotice({ now: () => f.clock, reminderMs: 0 });
+  let notice = new PendingInputNotice({ now: () => f.clock, reminderMs: 0 });
   const options = {
     onPending: (target, messages) => notice.offered(target, messages),
     onSubmitted: (target, id) => notice.confirmed(target, id),
@@ -142,8 +142,10 @@ test("accepted retained recovery clears submission attention without consuming o
   await inbox.tick(sid);
   assert.equal(f.rows[0].handoff_stage, "sdk_accepted");
   assert.equal(notice.pending.size, 0);
-  // A stale local offer and a new consumer must reconcile the original receipt.
+  // A new consumer has no in-memory confirmation for the original receipt.
+  notice = new PendingInputNotice({ now: () => f.clock, reminderMs: 0 });
   notice.offered(sid, [{ id: 1 }]);
+  assert.equal(notice.pending.size, 1);
   await f.consumer("consumer-b", options).tick(sid, { allowSend: false });
   assert.equal(notice.pending.size, 0);
   assert.equal(f.sends.length, 1);
