@@ -134,6 +134,10 @@ route and consumer-contract files checkable without admitting the full plugin
 or changing its runtime dependencies.
 Dispatch's pending project uses the service-index profile for its selected recovery
 route, client and test files; the remaining project is not thereby admitted.
+Worktrees' pending project uses the build checker pins plus CommonMark and its
+third-party declarations in `typecheck-worktrees-requirements.txt`, so selected
+metadata/source-attribution files are checked against the real Markdown parser.
+This does not admit the unchanged Worktrees project.
 
 `--prepare` explicitly installs the checked-in hash-locked checker dependencies
 using the existing seven-day seasoning policy and environment-scoped admission.

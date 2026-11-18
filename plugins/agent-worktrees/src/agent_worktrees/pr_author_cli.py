@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 from . import config as cfg, output, pr_config, pr_publication_labels_cli
 from .providers.base import ProviderError
@@ -11,7 +12,8 @@ from .providers.base import ProviderError
 SCHEMA = "agent-worktrees.pr-author-capabilities"
 
 
-def load_author_config(path, repository: str, *, claimant: bool = False):
+def load_author_config(path: str | Path | None, repository: str, *,
+                       claimant: bool = False) -> cfg.Config:
     if path is None:
         return cfg.load_config()
     from .pr_read_context import read_explicit_config
@@ -37,7 +39,7 @@ def load_author_config(path, repository: str, *, claimant: bool = False):
     return replace(config, explicit_pr_target=target)
 
 
-def add_parsers(sub):
+def add_parsers(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     for name in ("pr-author-capabilities", "pr-update", "pr-push", "pr-author-ready",
                  "pr-author-nudge", "pr-thread-resolve", "pr-thread-reopen"):
         parser = sub.add_parser(name, help={
@@ -81,16 +83,17 @@ def add_parsers(sub):
                                 help="Optional exact old remote tip; empty means first push")
 
 
-def capabilities(config, repository: str) -> dict:
+def capabilities(config: cfg.Config, repository: str) -> dict[str, Any]:
     resolution = pr_config.resolve_repo_config_for_slug(config, repository)
-    if not resolution.resolved:
+    if not resolution.resolved or resolution.repo_config is None:
         raise ValueError("Author target needs a registered repository PR binding")
     pr = resolution.repo_config.pr
     supported = pr.enabled and pr.provider == "azure-devops"
     return {
         "schema": SCHEMA, "version": 1, "repo": repository, "provider": pr.provider,
         "operations": {
-            "qualified-create": supported, "metadata-update": supported,
+            "qualified-create": supported,
+            "metadata-update": pr.enabled and pr.provider in ("azure-devops", "github"),
             "source-push": supported, "remote-evidence": False,
             "worker-policy-config": pr.enabled and pr.provider in ("azure-devops", "github"),
             "worker-policy-export": True,
@@ -105,14 +108,17 @@ def capabilities(config, repository: str) -> dict:
     }
 
 
-def cmd_capabilities(args):
+def cmd_capabilities(args: argparse.Namespace) -> int:
     try:
         config = load_author_config(args.config, args.repo)
         result = capabilities(config, args.repo)
         output._json_output(result) if args.json else print(result)
         return 0
     except (ValueError, OSError, ProviderError) as exc:
-        return output._json_error(str(exc)) if args.json else (output.err(str(exc)) or 1)
+        if args.json:
+            return output._json_error(str(exc))
+        output.err(str(exc))
+        return 1
 
 
 def cmd_ready(args: argparse.Namespace) -> int:
@@ -201,7 +207,7 @@ def cmd_nudge(args: argparse.Namespace) -> int:
     return 0 if result["ok"] else 1
 
 
-def cmd_update(args):
+def cmd_update(args: argparse.Namespace) -> int:
     from . import pr_cli, pr_metadata
 
     try:
@@ -221,21 +227,24 @@ def cmd_update(args):
         output._json_output(result) if args.json else print(result)
         return 0 if result.get("ok") else 1
     except (ValueError, OSError, ProviderError) as exc:
-        return output._json_error(str(exc)) if args.json else (output.err(str(exc)) or 1)
+        if args.json:
+            return output._json_error(str(exc))
+        output.err(str(exc))
+        return 1
 
 
-def cmd_push(args):
+def cmd_push(args: argparse.Namespace) -> int:
     from . import pr_cli, pr_publication_labels as labels, pr_source_publication, providers
 
     try:
         identity, error = pr_cli.require_claimant_worktree("pr-push")
-        if error:
-            raise ValueError(error)
+        if error or identity is None:
+            raise ValueError(error or "Source publication requires a claimant worktree")
         config = load_author_config(args.config, args.repo, claimant=True)
         config = labels.activate(config, args.publication_origin, args.publication_label)
         origin = labels.selected_for_config(config)
         resolution = pr_config.resolve_repo_config_for_slug(config, args.repo)
-        if not resolution.resolved:
+        if not resolution.resolved or resolution.repo_config is None:
             raise ValueError("Source target needs a registered repository PR binding")
         prcfg = resolution.repo_config.pr
         if origin is not None:
@@ -274,4 +283,7 @@ def cmd_push(args):
         output._json_output(result) if args.json else print(result)
         return 0 if result.get("ok") else 1
     except (ValueError, OSError, ProviderError) as exc:
-        return output._json_error(str(exc)) if args.json else (output.err(str(exc)) or 1)
+        if args.json:
+            return output._json_error(str(exc))
+        output.err(str(exc))
+        return 1

@@ -16,6 +16,9 @@ Read only the path your task needs; component references remain authoritative.
 | 6 | How does the running system compose? | [Architecture](architecture.md) |
 | 7 | How do I assemble or audit an opinionated harness? | [Harness runbook](harness-runbook.md) |
 
+For a diagram of one worker's journey from queue to cleanup, start with
+[How an automated task runs](agent-lifecycle/README.md).
+
 For interactive configuration, follow the illustrated
 [Configuration workbench walkthrough](configuration-workbench.md).
 
