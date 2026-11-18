@@ -269,6 +269,8 @@ The partition counts the owned driver and container, not the shared Docker
 daemon's infrastructure.
 The PID1 timer subtracts a safety second so integer clock rounding does not
 silently consume the captured cleanup reserve.
+Failed, empty or noncanonical clock output refuses before arithmetic; the
+computed sleep must also fit the originally declared work duration.
 
 Control records, bounded CLI captures and a fresh empty Docker client config
 stay outside every payload bind. The host's HOME/PATH/configuration are not

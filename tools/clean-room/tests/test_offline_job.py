@@ -311,3 +311,37 @@ def test_integer_clock_quantization_does_not_spend_the_cleanup_reserve(
     duration = int(result.stdout)
     assert duration > 0
     assert 1000 + fraction + duration <= deadline
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="POSIX expiry arithmetic")
+@pytest.mark.parametrize(
+    "clock",
+    [
+        "exit 7",
+        "printf '1000'; exit 7",
+        "printf ''",
+        "printf 'not-a-clock'",
+        "printf '0'",
+        "printf '999999999999999999999999'",
+        "printf '00000001000'",
+    ],
+)
+def test_failed_empty_or_invalid_clock_never_reaches_sleep(
+    request_plan: PlanRequest, clock: str
+) -> None:
+    plan = request_plan()
+    script = plan.create[-3]
+    assert script.count("/bin/date +%s") == 1
+    assert script.count('exec /bin/sleep "$left"') == 1
+    script = script.replace("/bin/date +%s", clock).replace(
+        'exec /bin/sleep "$left"', 'printf "unexpected-sleep:%s" "$left"'
+    )
+    result = subprocess.run(
+        ("/bin/sh", "-c", script, "synthetic-expiry", plan.create[-1]),
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert result.stdout == ""
