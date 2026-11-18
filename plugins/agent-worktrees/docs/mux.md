@@ -218,10 +218,18 @@ every live native server; the files are never removed or repaired.
 
 The reader has a five-second total budget, bounded registration/reply sizes
 and process counts. It never writes registrations, starts a server, repairs
-an orphan, attaches a client, paints status or sends pane input. An unreadable
-process, unsupported command-line mode, missing live-server registration,
-PID reuse, rename, duplicate names across namespaces, authentication failure,
-incomplete reply or changing inventory remains unknown.
+an orphan, attaches a client, paints status or sends pane input. A process
+that verifiably exits during the census (its PID no longer opens, or its exit
+code is observed) is absent. A process this token may not open, such as an
+elevated server observed by a medium-integrity monitor, cannot be classified
+as server or client, so it is kept as a possible server under its
+system-snapshot start time: authenticated registration coverage must still
+prove it, and an uncovered inaccessible process (including an elevated
+client) keeps the result unknown. Any other unreadable process, unsupported
+command-line mode, missing live-server registration, PID reuse, rename,
+duplicate names across namespaces, authentication failure, incomplete reply
+or changing inventory remains unknown; the error names the PID, the
+unreadable field and the Win32 error where one applies.
 `PSMUX_DATA_DIR` must be absolute when set; live
 servers whose registrations are outside that selected directory also prevent
 a complete result. This conservative action-time support does not re-enable
