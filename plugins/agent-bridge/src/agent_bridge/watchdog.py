@@ -67,7 +67,7 @@ _diagnostics_initialized = False
 _diagnostic_owner_lock = threading.Lock()
 
 
-def _write_event(record: dict) -> None:
+def _write_event(record: dict[str, object]) -> None:
     from .install_paths import effective_config_dir
 
     with (effective_config_dir() / "agent-bridge-watchdog.log").open(
@@ -280,7 +280,7 @@ def _make_health_probe(bind: str, port: int, *, timeout: float = 2.0) -> Callabl
     def _probe() -> bool:
         try:
             with urllib.request.urlopen(url, timeout=timeout) as resp:  # noqa: S310 -- fixed loopback http
-                return resp.status == 200
+                return bool(resp.status == 200)
         except Exception as error:
             _record_event("probe-failed", type(error).__name__)
             return False

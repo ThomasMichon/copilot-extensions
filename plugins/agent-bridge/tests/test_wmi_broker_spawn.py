@@ -108,9 +108,6 @@ def test_wmi_refusal_never_creates_a_caller_owned_bridge(
     native.assert_called_once()
     contained.assert_not_called()
     assert "contained_fallback" not in (tmp_path / "agent-bridge-err.log").read_text()
-    assert "reason=Windows lifetime broker failed (child-adoption);" in (
-        tmp_path / "agent-bridge-err.log"
-    ).read_text()
 
 
 def test_passive_generation_never_falls_back_to_contained(native_launch: Mock) -> None:

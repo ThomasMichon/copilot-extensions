@@ -9,12 +9,15 @@ sockets, or process exit.
 from __future__ import annotations
 
 import json
+import os
 import sys
 import threading
 import time
-from collections.abc import Iterator
+import urllib.request
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 from process_telemetry.buffer import BufferedSink
@@ -62,17 +65,17 @@ def test_watchdog_offers_probe_and_exit_reason_before_replacement_log_truncation
     events = tmp_path / "agent-bridge-watchdog.log"
     stderr = tmp_path / "agent-bridge-err.log"
     stderr.write_text("incumbent", encoding="utf-8")
-    calls = []
+    calls: list[object] = []
 
-    def fail_probe(*args, **kwargs):
+    def fail_probe(*args: object, **kwargs: object) -> None:
         raise TimeoutError("synthetic health probe timed out")
 
-    def spawn(**kwargs) -> None:
+    def spawn(**kwargs: object) -> None:
         stderr.write_text("replacement", encoding="utf-8")
         calls.append("spawn")
 
-    monkeypatch.setattr(watchdog.urllib.request, "urlopen", fail_probe)
-    monkeypatch.setattr(watchdog.os, "_exit", lambda code: calls.append(code))
+    monkeypatch.setattr(urllib.request, "urlopen", fail_probe)
+    monkeypatch.setattr(os, "_exit", lambda code: calls.append(code))
     monkeypatch.setattr(service_process_cli, "_core", lambda: SimpleNamespace(
         _spawn_watchdog_replacement=spawn,
     ))
@@ -97,11 +100,11 @@ def test_unavailable_watchdog_diagnostic_path_does_not_prevent_terminal_action(
 
     writer, _release = event_writer
     monkeypatch.setattr(install_paths, "effective_config_dir", lambda: tmp_path / "absent")
-    calls = []
+    calls: list[object] = []
     monkeypatch.setattr(service_process_cli, "_core", lambda: SimpleNamespace(
         _spawn_watchdog_replacement=lambda **kwargs: calls.append("spawn"),
     ))
-    monkeypatch.setattr(watchdog.os, "_exit", lambda code: calls.append(code))
+    monkeypatch.setattr(os, "_exit", lambda code: calls.append(code))
     service_process_cli._watchdog_dead("stopped serving")
     _await_callbacks(writer, 3)
     assert calls == ["spawn", 70]
@@ -119,7 +122,7 @@ def test_stalled_watchdog_storage_does_not_gate_supervision_or_exit(
     writer, release = event_writer
     entered = threading.Event()
     original_open = Path.open
-    calls = []
+    calls: list[object] = []
 
     def stall() -> None:
         entered.set()
@@ -130,16 +133,16 @@ def test_stalled_watchdog_storage_does_not_gate_supervision_or_exit(
         return tmp_path
 
     class StalledStream:
-        def __enter__(self):
+        def __enter__(self) -> StalledStream:
             return self
 
-        def __exit__(self, *_args):
-            return False
+        def __exit__(self, *_args: object) -> None:
+            return None
 
         def write(self, _text: str) -> None:
             stall()
 
-    def open_log(path: Path, *args, **kwargs):
+    def open_log(path: Path, *args: Any, **kwargs: Any) -> Any:
         if path.name == "agent-bridge-watchdog.log":
             if blocked_operation == "open":
                 stall()
@@ -152,19 +155,19 @@ def test_stalled_watchdog_storage_does_not_gate_supervision_or_exit(
     else:
         monkeypatch.setattr(Path, "open", open_log)
 
-    def fail_probe(*_args, **_kwargs) -> None:
+    def fail_probe(*_args: object, **_kwargs: object) -> None:
         raise TimeoutError("synthetic failure")
 
-    monkeypatch.setattr(watchdog.urllib.request, "urlopen", fail_probe)
+    monkeypatch.setattr(urllib.request, "urlopen", fail_probe)
     monkeypatch.setattr(service_process_cli, "_core", lambda: SimpleNamespace(
         _spawn_watchdog_replacement=lambda **_k: calls.append("spawn"),
     ))
-    monkeypatch.setattr(watchdog.os, "_exit", lambda code: calls.append(code))
+    monkeypatch.setattr(os, "_exit", lambda code: calls.append(code))
     probe = watchdog._make_health_probe("127.0.0.1", 1)
     assert probe() is False
     assert entered.wait(2), "writer did not enter storage"
 
-    def forbidden(*_args, **_kwargs) -> None:
+    def forbidden(*_args: object, **_kwargs: object) -> None:
         pytest.fail("terminal path performed synchronous logging or stderr flush")
 
     with monkeypatch.context() as terminal_io:
@@ -190,7 +193,7 @@ def test_full_contended_and_closed_watchdog_writer_remains_lossy(
 
     writer, release = event_writer
     entered = threading.Event()
-    offered = []
+    offered: list[dict[str, Any]] = []
 
     def stalled_root() -> Path:
         entered.set()
@@ -198,9 +201,9 @@ def test_full_contended_and_closed_watchdog_writer_remains_lossy(
         raise OSError("synthetic unavailable storage")
 
     monkeypatch.setattr(install_paths, "effective_config_dir", stalled_root)
-    original_sink = writer._sink
+    original_sink = cast(Callable[[dict[str, Any]], None], writer._sink)
 
-    def capture(record: dict) -> None:
+    def capture(record: dict[str, Any]) -> None:
         offered.append(record)
         original_sink(record)
 
@@ -214,11 +217,11 @@ def test_full_contended_and_closed_watchdog_writer_remains_lossy(
     with writer._lock:
         watchdog._record_event("probe-failed", "contended")
     assert writer.stats()["contended"] == 1
-    calls = []
+    calls: list[object] = []
     monkeypatch.setattr(service_process_cli, "_core", lambda: SimpleNamespace(
         _spawn_watchdog_replacement=lambda **_k: calls.append("spawn"),
     ))
-    monkeypatch.setattr(watchdog.os, "_exit", lambda code: calls.append(code))
+    monkeypatch.setattr(os, "_exit", lambda code: calls.append(code))
     service_process_cli._watchdog_dead("queue full")
     writer.close()
     watchdog._record_event("exit", "closed")
@@ -227,14 +230,16 @@ def test_full_contended_and_closed_watchdog_writer_remains_lossy(
     assert calls == ["spawn", 70]
 
 
-def test_failed_watchdog_writer_initialization_is_not_retried(monkeypatch) -> None:
+def test_failed_watchdog_writer_initialization_is_not_retried(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_bridge import service_process_cli, watchdog
 
-    attempts = []
+    attempts: list[str] = []
     monkeypatch.setattr(watchdog, "_diagnostic_writer", None)
     monkeypatch.setattr(watchdog, "_diagnostics_initialized", False)
 
-    def unavailable(*_args, **_kwargs) -> None:
+    def unavailable(*_args: object, **_kwargs: object) -> None:
         attempts.append("initialize")
         raise RuntimeError("synthetic diagnostic initialization failure")
 
@@ -242,11 +247,11 @@ def test_failed_watchdog_writer_initialization_is_not_retried(monkeypatch) -> No
     assert watchdog._start_event_writer() is None
     assert watchdog._start_event_writer() is None
     assert attempts == ["initialize"]
-    calls = []
+    calls: list[object] = []
     monkeypatch.setattr(service_process_cli, "_core", lambda: SimpleNamespace(
         _spawn_watchdog_replacement=lambda **_k: calls.append("spawn"),
     ))
-    monkeypatch.setattr(watchdog.os, "_exit", lambda code: calls.append(code))
+    monkeypatch.setattr(os, "_exit", lambda code: calls.append(code))
     service_process_cli._watchdog_dead("diagnostics unavailable")
     assert calls == ["spawn", 70]
 
@@ -264,10 +269,10 @@ class _Clock:
         self.t += dt
 
 
-def _make(**overrides):
+def _make(**overrides: Any) -> tuple[ServingWatchdog, list[str], _Clock]:
     clock = _Clock()
     dead: list[str] = []
-    defaults = dict(
+    defaults: dict[str, Any] = dict(
         is_started=lambda: True,
         is_shutting_down=lambda: False,
         is_stopped=lambda: False,
@@ -283,7 +288,7 @@ def _make(**overrides):
     return ServingWatchdog(**defaults), dead, clock
 
 
-def test_serving_ok_then_graceful_shutdown_does_not_fire():
+def test_serving_ok_then_graceful_shutdown_does_not_fire() -> None:
     shutting = {"v": False}
     # Serve fine for a while, then a graceful shutdown is requested.
     calls = {"n": 0}
@@ -303,14 +308,14 @@ def test_serving_ok_then_graceful_shutdown_does_not_fire():
     assert dead == []  # graceful stop is not a wedge
 
 
-def test_sustained_serving_failure_fires():
+def test_sustained_serving_failure_fires() -> None:
     wd, dead, _ = _make(probe_serving=lambda: False)
     wd.run()
     assert len(dead) == 1
     assert "stopped serving" in dead[0]
 
 
-def test_single_transient_failure_is_tolerated():
+def test_single_transient_failure_is_tolerated() -> None:
     # One failed probe, then healthy forever -> never fires. Bound the loop by
     # flipping to a graceful shutdown after enough healthy probes.
     seq = iter([False] + [True] * 10)
@@ -339,7 +344,7 @@ def test_single_transient_failure_is_tolerated():
     assert dead == []  # a lone failure inside the grace window never fires
 
 
-def test_failure_recovers_before_grace_resets_timer():
+def test_failure_recovers_before_grace_resets_timer() -> None:
     # Fail for < serving_grace, recover, then a graceful stop. Must not fire.
     # interval=15, grace=60 -> 3 consecutive failures (45s) is under grace.
     pattern = [False, False, False, True, True]
@@ -362,14 +367,14 @@ def test_failure_recovers_before_grace_resets_timer():
     assert dead == []
 
 
-def test_startup_never_completes_fires():
+def test_startup_never_completes_fires() -> None:
     wd, dead, _ = _make(is_started=lambda: False)
     wd.run()
     assert len(dead) == 1
     assert "startup did not complete" in dead[0]
 
 
-def _declining(dead: list[str]):
+def _declining(dead: list[str]) -> Callable[[str], bool]:
     def on_dead(reason: str) -> bool:
         dead.append(reason)
         return False
@@ -377,7 +382,7 @@ def _declining(dead: list[str]):
     return on_dead
 
 
-def test_repeated_declined_handoffs_back_off_then_hard_exit():
+def test_repeated_declined_handoffs_back_off_then_hard_exit() -> None:
     dead: list[str] = []
     exits: list[str] = []
     times: list[float] = []
@@ -400,7 +405,7 @@ def test_repeated_declined_handoffs_back_off_then_hard_exit():
     assert "no replacement could be scheduled" in exits[0]
 
 
-def test_healthy_probe_resets_declined_handoff_budget():
+def test_healthy_probe_resets_declined_handoff_budget() -> None:
     # A slow daemon whose replacement is unavailable keeps serving and
     # recovers; each recovery resets the decline budget.
     dead: list[str] = []
@@ -428,7 +433,7 @@ def test_healthy_probe_resets_declined_handoff_budget():
     assert exits == []
 
 
-def test_declined_startup_handoff_retries_then_hard_exits():
+def test_declined_startup_handoff_retries_then_hard_exits() -> None:
     dead: list[str] = []
     exits: list[str] = []
     wd, _, _ = _make(
@@ -440,7 +445,7 @@ def test_declined_startup_handoff_retries_then_hard_exits():
     assert len(exits) == 1 and "startup did not complete" in exits[0]
 
 
-def test_startup_graceful_shutdown_before_start_is_clean():
+def test_startup_graceful_shutdown_before_start_is_clean() -> None:
     # Shutdown requested before the server ever started -> clean no-op.
     wd, dead, _ = _make(
         is_started=lambda: False,
@@ -451,9 +456,9 @@ def test_startup_graceful_shutdown_before_start_is_clean():
     assert dead == []
 
 
-def test_stuck_graceful_shutdown_force_exits():
-    serving_dead = []
-    shutdown_dead = []
+def test_stuck_graceful_shutdown_force_exits() -> None:
+    serving_dead: list[str] = []
+    shutdown_dead: list[str] = []
     wd, dead, _ = _make(
         is_shutting_down=lambda: True,
         is_stopped=lambda: False,
@@ -469,13 +474,13 @@ def test_stuck_graceful_shutdown_force_exits():
     assert "graceful shutdown did not complete" in shutdown_dead[0]
 
 
-def test_shutdown_requested_during_failed_probe_does_not_spawn_replacement():
+def test_shutdown_requested_during_failed_probe_does_not_spawn_replacement() -> None:
     shutting = {"value": False}
-    serving_dead = []
-    shutdown_dead = []
+    serving_dead: list[str] = []
+    shutdown_dead: list[str] = []
     probes = {"count": 0}
 
-    def probe():
+    def probe() -> bool:
         probes["count"] += 1
         if probes["count"] >= 2:
             shutting["value"] = True
@@ -495,7 +500,7 @@ def test_shutdown_requested_during_failed_probe_does_not_spawn_replacement():
     assert shutdown_dead == []
 
 
-def test_startup_completes_late_then_serves():
+def test_startup_completes_late_then_serves() -> None:
     # Not started for the first two checks, then started; serving fine; then a
     # graceful stop bounds the loop.
     started = {"v": False}
@@ -536,11 +541,11 @@ def test_startup_completes_late_then_serves():
         ("192.168.1.5", "192.168.1.5"),
     ],
 )
-def test_probe_host_maps_wildcard_to_loopback(bind, expected):
+def test_probe_host_maps_wildcard_to_loopback(bind: str, expected: str) -> None:
     assert _probe_host(bind) == expected
 
 
-def test_watchdog_enabled_default_and_disable(monkeypatch):
+def test_watchdog_enabled_default_and_disable(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("AGENT_BRIDGE_WATCHDOG", raising=False)
     assert _watchdog_enabled() is True
     for val in ("0", "false", "no", "off", "OFF"):
@@ -550,26 +555,30 @@ def test_watchdog_enabled_default_and_disable(monkeypatch):
     assert _watchdog_enabled() is True
 
 
-def test_arm_uses_supplied_terminal_action(monkeypatch):
+def test_arm_uses_supplied_terminal_action(monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_bridge import watchdog
 
     monkeypatch.setenv("AGENT_BRIDGE_WATCHDOG", "1")
-    captured = {}
+    captured: dict[str, Any] = {}
 
     class FakeThread:
-        def __init__(self, *, target, name, daemon):
+        def __init__(self, *, target: object, name: str, daemon: bool) -> None:
             captured.update(target=target, name=name, daemon=daemon)
 
-        def start(self):
+        def start(self) -> None:
             pass
 
     class Server:
         started = True
         should_exit = False
 
-    terminal = lambda reason: None
-    shutdown_terminal = lambda reason: None
-    monkeypatch.setattr(watchdog.threading, "Thread", FakeThread)
+    def terminal(reason: str) -> None:
+        return None
+
+    def shutdown_terminal(reason: str) -> None:
+        return None
+
+    monkeypatch.setattr(threading, "Thread", FakeThread)
     monkeypatch.setattr(watchdog, "_start_event_writer", lambda: None)
     monkeypatch.setattr(watchdog, "_force_exit", shutdown_terminal)
     thread = watchdog.arm_serving_watchdog(
