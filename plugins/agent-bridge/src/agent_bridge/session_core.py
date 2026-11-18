@@ -700,12 +700,10 @@ class _SessionCoreMixin(_SessionDrainGateMixin):
             if existing is not None and self._session_metadata_in_use(existing, include_readers=not promote_inherited):
                 continue
 
-            if status == SessionStatus.ENDED.value and sid not in retained:
+            if status == SessionStatus.ENDED.value and sid not in retained and not promote_inherited:
                 if read_only:
                     if existing is not None:
                         existing.status = SessionStatus.ENDED
-                        if promote_inherited:
-                            existing.awaiting_maintenance_refresh = False
                     continue
                 # Defense-in-depth: a single session's cleanup must never brick
                 # daemon startup -- log and skip on failure rather than aborting

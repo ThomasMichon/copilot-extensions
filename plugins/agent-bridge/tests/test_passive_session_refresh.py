@@ -21,7 +21,10 @@ from agent_bridge.session_status import SessionStatus
 
 
 @pytest.mark.asyncio
-async def test_subscribed_session_refreshes_lifecycle_and_durable_cursor(tmp_path: Path) -> None:
+@pytest.mark.parametrize("final_status", [SessionStatus.STOPPED, SessionStatus.ENDED])
+async def test_subscribed_session_refreshes_lifecycle_and_durable_cursor(
+    tmp_path: Path, final_status: SessionStatus,
+) -> None:
     (tmp_path / "hosts").mkdir()
     db = Database(str(tmp_path / "sessions.db"))
     try:
@@ -42,14 +45,22 @@ async def test_subscribed_session_refreshes_lifecycle_and_durable_cursor(tmp_pat
             second = asyncio.create_task(anext(reader))
             await asyncio.sleep(0)
             writer.append("agent_message", {"text": "second"})
-            db.update_session_stopped("watched", time.time(), False)
+            if final_status == SessionStatus.STOPPED:
+                db.update_session_stopped("watched", time.time(), False)
+            else:
+                db.update_session_status("watched", final_status.value, time.time())
+                assert "watched" not in db.gc_retained_relationship_session_ids()
             refresh_inherited_sessions(manager)
-            assert session.status == SessionStatus.STOPPED and not session.background_recovery_enabled
+            assert session.status == final_status
             assert session.event_log is subscribed_log and not session.awaiting_maintenance_refresh
             delivered = await asyncio.wait_for(second, 2)
             assert "id: 2\n" in delivered and "second" in delivered
-            assert subscribed_log.append("agent_message", {"text": "third"}).id == 3
-            assert "id: 3\n" in await asyncio.wait_for(anext(reader), 2)
+            if final_status == SessionStatus.STOPPED:
+                assert not session.background_recovery_enabled
+                assert subscribed_log.append("agent_message", {"text": "third"}).id == 3
+                assert "id: 3\n" in await asyncio.wait_for(anext(reader), 2)
+            else:
+                assert subscribed_log.latest_id == db.get_max_event_id("watched") == 2
         assert session.subscriber_count == 0
     finally:
         db.close()
