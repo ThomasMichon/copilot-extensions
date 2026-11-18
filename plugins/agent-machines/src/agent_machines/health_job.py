@@ -34,7 +34,10 @@ def main(argv: list[str] | None = None) -> int:
     slot = prefix_path.parent if prefix_path.name == ".venv" else prefix_path
     root = slot.parent.parent
     try:
-        from .health_job_support import require_collection_support
+        if sys.platform == "win32":
+            from .health_enrollment import require_collection_support
+        else:
+            from .health_job_support import require_collection_support
 
         require_collection_support(Path(sys.executable))
         identity = retained_runtime_identity(root, Path(sys.executable), "agent_machines")

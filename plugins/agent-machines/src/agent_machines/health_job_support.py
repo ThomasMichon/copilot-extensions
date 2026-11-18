@@ -12,12 +12,7 @@ from . import health_slots as slots
 
 
 def require_collection_support(python: Path) -> None:
-    """Keep Windows qualification and isolate Linux support to one installed venv."""
-    if sys.platform == "win32":
-        from .health_enrollment import require_collection_support as require_windows_support
-
-        require_windows_support(python)
-        return
+    """Isolate Linux support to one package in the installed virtual environment."""
     if sys.platform != "linux":
         raise slots.HealthError("native-health-job-unsupported")
     environment = python.parent.parent

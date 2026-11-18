@@ -46,9 +46,9 @@ def _text(value: str) -> str:
     return value
 
 
-def _systemd(value: str) -> str:
+def _systemd(value: str, *, executable: bool = False) -> str:
     value = _text(value).replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%")
-    return '"' + value.replace("$", "$$") + '"'
+    return '"' + (value if executable else value.replace("$", "$$")) + '"'
 
 
 def _systemd_directory(value: str) -> str:
@@ -216,12 +216,13 @@ def installed_linux_definition(
     ):
         raise JobError("invalid-local-job-enrollment")
     name = "ce-health-" + owner.rsplit(":", 1)[1][:32]
-    command = " ".join(_systemd(value) for value in [
-        python, "-I", "-S", "-B", "-X", "utf8",
+    arguments = [
+        "-I", "-S", "-B", "-X", "utf8",
         str(directory / ".runtime-bootstrap" / "runtime_launcher.py"),
         "--runtime-identity", identity, "-m", "agent_machines.health_job",
         "--store", store, "--expect-policy", policy_token,
-    ])
+    ]
+    command = " ".join([_systemd(python, executable=True), *(_systemd(value) for value in arguments)])
     return {
         "schema": "agent-machines.health.linux-definition", "version": 1,
         "platform": "linux", "owner": owner, "account_uid": account_uid, "enabled": enabled,

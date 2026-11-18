@@ -24,7 +24,7 @@ def test_installed_pair_pins_the_retained_finite_action_without_payload_or_accou
         account_uid=1000, enabled=False,
     )
     service, timer = result["artifacts"].values()
-    assert 'ExecStart="/example/runtime $$one%%/versions/1.2/.venv/bin/python" "-I" "-S"' in service
+    assert 'ExecStart="/example/runtime $one%%/versions/1.2/.venv/bin/python" "-I" "-S"' in service
     assert '"/example/runtime $$one%%/versions/1.2/.runtime-bootstrap/runtime_launcher.py"' in service
     assert f'"--runtime-identity" "{IDENTITY}"' in service
     assert '"-m" "agent_machines.health_job" "--store" "/example/store \\"three\\"%%"' in service
