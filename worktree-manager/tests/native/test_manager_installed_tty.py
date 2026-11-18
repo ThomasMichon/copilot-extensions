@@ -384,7 +384,7 @@ def _candidate_snapshot(
         raise RuntimeError("Executing checkout is not the exact admitted candidate")
     selectors = [
         "worktree-manager", "plugins/agent-worktrees", "libs", "tools", "docs",
-        "plugins/agent-containers/setup.py", ".github/plugin/marketplace.json",
+        ".github/plugin/marketplace.json",
     ]
     required = {
         manifest.source_relative(name)
@@ -393,13 +393,19 @@ def _candidate_snapshot(
         )
         for name in manifest.files
     }
+    inventory = "plugins/agent-worktrees/scripts/_runtime_admission/toolkit.json"
+    toolkit = json.loads(_run(
+        ["git", "show", f"{actual}:{inventory}"], env, REPO, diagnostics, "candidate-toolkit",
+    ))
+    required.update(toolkit["files"])
     selectors.extend(sorted(
         name for name in required
         if not any(name == parent or name.startswith(parent + "/") for parent in selectors)
     ))
     archive = root / "candidate.tar"
     result = subprocess.run(
-        ["git", "archive", "--format=tar", "--output", str(archive), actual, *selectors],
+        ["git", "--literal-pathspecs", "archive", "--format=tar", "--output", str(archive),
+         actual, "--", *selectors],
         cwd=REPO, env=env, timeout=30, capture_output=True, check=False, **no_window_kwargs(),
     )
     if result.returncode:
@@ -1525,15 +1531,16 @@ def test_sparse_candidate_materializes_invocation_admission_toolkit(tmp_path: Pa
     inventory = json.loads((toolkit / "toolkit.json").read_text(encoding="utf-8"))
     assert inventory["files"]
     assert all((toolkit / relative).is_file() for relative in inventory["files"])
-    resource = Path("plugins") / "agent-containers" / "setup.py"
-    assert (toolkit / resource).read_bytes() == (
-        snapshot / resource
-    ).read_bytes()
+    assert all((snapshot / relative).is_file() for relative in inventory["files"])
+    resource = Path("services/pr/setup.py")
+    retained = (toolkit / resource).read_bytes()
+    assert retained == (snapshot / resource).read_bytes()
     (snapshot / resource).unlink()
     refused = materialize_payload_invocation_into(
         source_consumer_dir=consumer, dest_consumer_dir=consumer, canonical_root=snapshot,
     )
     assert len(refused) == 1 and refused[0].startswith("SKIP Invocation materialization:")
+    assert (toolkit / resource).read_bytes() == retained
 
 
 def test_unreaped_error_preserves_enclosing_sandboxes_and_original_exception(
