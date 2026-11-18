@@ -77,6 +77,35 @@ class _WaitFor(Protocol):
     ) -> _T: ...
 
 
+def _runtime_reference_matches(
+    read: Callable[[], dict[str, list[str]]], slot: str, *, retained: bool,
+) -> bool:
+    try:
+        present = any(slot in versions for versions in read().values())
+    except (OSError, ValueError):
+        return False
+    return present is retained
+
+
+@pytest.mark.parametrize("retained", [False, True])
+@pytest.mark.parametrize("failure", [PermissionError, ValueError])
+def test_runtime_reference_poll_requires_an_observed_snapshot(
+    retained: bool, failure: type[Exception],
+) -> None:
+    reads = 0
+
+    def read() -> dict[str, list[str]]:
+        nonlocal reads
+        reads += 1
+        if reads == 1:
+            raise failure("reference publication in progress")
+        return {"resident": ["previous"]} if retained else {}
+
+    assert not _runtime_reference_matches(read, "previous", retained=retained)
+    assert _runtime_reference_matches(read, "previous", retained=retained)
+    assert not _runtime_reference_matches(read, "previous", retained=not retained)
+
+
 @pytest.fixture
 def driver(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     scripts = Path(__file__).resolve().parents[1] / "scripts"
@@ -2207,14 +2236,16 @@ runpy.run_module("agent_worktrees", run_name="__main__", alter_sys=True)
                     assert 0 <= time.time() - grace_record["ready_at"] < grace.GRACE_SECONDS
                     assert grace_record["old"]["pid"] == old_pid
                     assert grace_record["successor"] == successor.to_dict()
-                    def old_slot_retained() -> bool:
-                        return old.name in {
-                            version
-                            for versions in driver.runtime._leases.read_runtime_references(root).values()
-                            for version in versions
-                        }
+                    def old_slot_matches(retained: bool) -> bool:
+                        return _runtime_reference_matches(
+                            lambda: driver.runtime._leases.read_runtime_references(root),
+                            old.name, retained=retained,
+                        )
 
-                    assert old_slot_retained()
+                    wait_for(
+                        lambda: old_slot_matches(True),
+                        message="predecessor runtime retention was never observed",
+                    )
                     grace_record["ready_at"] = time.time() - grace.GRACE_SECONDS - 1
                     retirements._write_record(grace_path, grace_record)
                     assert ControlClient(
@@ -2225,7 +2256,7 @@ runpy.run_module("agent_worktrees", run_name="__main__", alter_sys=True)
                     assert not hook_thread.is_alive() and "error" in hook_result
                     assert "bounded legacy takeover" not in log.read_text(encoding="utf-8")
                     wait_for(
-                        lambda: not old_slot_retained(),
+                        lambda: old_slot_matches(False),
                         message="resident did not settle the exited predecessor's runtime custody",
                     )
                     new_lock = wait_for(
