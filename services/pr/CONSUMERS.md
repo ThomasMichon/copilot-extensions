@@ -176,6 +176,48 @@ coverage and author-owned rebase recommendations. They assert no delivery/ACK
 or cache mutation from planning. They do not qualify real Dispatch
 interoperability, durable request-owner integration or consumer activation.
 
+### Retained Dispatch task adapter
+
+The separate [inert adapter](examples/reviewer_dispatch.py) connects the planner
+to the existing client's `lookup_dedup`, `get` and `prepare_steer` methods.
+It is source-only example code, not an installed service command or a new
+dependency of the foreground host. Select the existing Dispatch client and
+its finite transport deadline explicitly in the embedding.
+
+Supply a trusted harness `lane` and a `task_key(pr)` function using the existing
+`recipes.render_recipe("reviewer", {"repo": configured_target, "pr": str(pr),
+"land": configured_landing})` followed by `recipes.dedup_key_for`.
+Use an explicitly forge-qualified `configured_target` for non-GitHub targets;
+do not derive the harness lane, target or landing policy from a feed body.
+Pass `retained_task` as the planner's lookup callback. It performs exact
+lane-scoped association lookup, then rereads the same task and checks its
+dedup key, complete owner-reported `draft_scope`, current steering revision,
+finite-task kind, holds and pending operator form.
+
+The adapter deliberately does **not** convert an empty lookup into a creation
+proposal. Although that lookup proves no live occupant for its exact key, it
+does not return the full queue/installation/machine attestation supplied by a
+task detail. Creation remains with the separately qualified task owner.
+Ambiguous, missing, foreign, replaced or unsupported task evidence therefore
+stays reconciliation, never a roster search or replacement task. Read failures
+propagate without fallback or retry.
+
+For an eligible retained-task proposal, `prepare_notification` rechecks the
+current task and calls the native client's read-only `prepare_steer`.
+That owner negotiates support and freezes the real request; the adapter never
+calls `steer`, `steer_prepared`, task creation, submission, persistence or ACK.
+Choose the original request ID through the embedding's existing durable
+request owner, preserve the returned complete envelope there **before**
+separately admitted effects, and reconcile unknown requests before preparing
+another. Preparation is not acceptance, a wake, freshness proof for buffered
+PR evidence or permission to act.
+
+The [source controls](tests/test_reviewer_dispatch_example.py) exercise actual
+cache pages, native task wire-shaped doubles and the existing native prepared
+steering implementation, including capability refusal and detached request
+identity. They do not qualify a live coordinator transport, actual recipe
+target configuration, durable request-owner storage or consumer activation.
+
 ## Inert qualification and operational exits
 
 Consumer examples/tests must exercise actual cache views with synthetic
