@@ -190,8 +190,10 @@ the existing `recipes.render_recipe` and `recipes.dedup_key_for`, preserving
 the native target identity across landing-policy changes. This narrow example
 requires an explicit HTTPS repository target, including for GitHub; it rejects
 bare `owner/repo` shorthand instead of silently assigning a non-GitHub target
-to GitHub. Do not derive the harness lane, target or landing policy from a feed
-body.
+to GitHub. It also refuses IPv6 literals and non-default HTTPS ports because
+the native recipe's existing target canonicalizer does not distinguish them.
+An explicit port 443 remains equivalent to the default HTTPS port.
+Do not derive the harness lane, target or landing policy from a feed body.
 Pass `retained_task` as the planner's lookup callback. It performs exact
 lane-scoped association lookup, then rereads the same task and checks its
 dedup key, complete owner-reported `draft_scope`, current steering revision,

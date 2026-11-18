@@ -214,11 +214,17 @@ def test_native_recipe_binds_forge_and_preserves_task_across_landing_changes(
 
     first = adapter.reviewer_task_key("https://forge.example/owner/repo", land="author")
     changed = adapter.reviewer_task_key("https://forge.example/owner/repo", land="self")
+    standard_port = adapter.reviewer_task_key("https://forge.example:443/owner/repo", land="author")
     other = adapter.reviewer_task_key("https://other.example/owner/repo", land="author")
-    assert first(7) == changed(7) == "recipe:reviewer:target=forge.example/owner/repo#7"
+    assert first(7) == changed(7) == standard_port(7)
+    assert first(7) == "recipe:reviewer:target=forge.example/owner/repo#7"
     assert first(7) != other(7) and first(7) != first(8)
-    for target in ("owner/repo", "http://forge.example/owner/repo",
-                   "https://user@forge.example/owner/repo", "https://forge.example/owner/repo?q=1"):
+    for target in (
+        "owner/repo", "http://forge.example/owner/repo",
+        "https://user@forge.example/owner/repo", "https://forge.example/owner/repo?q=1",
+        "https://forge.example:8443/owner/repo", "https://forge.example:9443/owner/repo",
+        "https://[2001:db8::1]/owner/repo", "https://[2001:db8::2]/owner/repo",
+    ):
         with pytest.raises(ValueError, match="forge-qualified"):
             adapter.reviewer_task_key(target, land="author")
     for number in (True, 0, "7"):

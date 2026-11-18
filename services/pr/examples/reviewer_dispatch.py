@@ -32,13 +32,13 @@ def reviewer_task_key(
     parts = address.path.lstrip("/").split("/")
     if (
         address.scheme != "https" or not address.hostname
+        or ":" in (address.hostname or "") or address.port not in (None, 443)
         or address.username is not None or address.password is not None
         or address.query or address.fragment or target.endswith("/")
         or any(char.isspace() for char in target)
         or len(parts) < 2 or any(part in {"", ".", ".."} for part in parts)
     ):
         raise ValueError("configured forge-qualified HTTPS repository required")
-    address.port
     from agent_dispatch.recipes.registry import dedup_key_for, render_recipe
 
     def key(pr: int) -> str:
