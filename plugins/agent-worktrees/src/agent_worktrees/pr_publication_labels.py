@@ -4,9 +4,10 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from contextvars import ContextVar
 import re
+from typing import Any, overload
 from urllib.parse import unquote
 
-last_result: ContextVar[dict | None] = ContextVar("publication_label_result", default=None)
+last_result: ContextVar[dict[str, Any] | None] = ContextVar("publication_label_result", default=None)
 
 @dataclass(frozen=True)
 class PublicationOrigin:
@@ -14,7 +15,7 @@ class PublicationOrigin:
     labels: tuple[str, ...]
 
 
-def parse_origin(raw) -> PublicationOrigin | None:
+def parse_origin(raw: Any) -> PublicationOrigin | None:
     if raw is None:
         return None
     if not isinstance(raw, dict) or set(raw) != {"id", "labels"}:
@@ -30,11 +31,19 @@ def parse_origin(raw) -> PublicationOrigin | None:
     return PublicationOrigin(identity, tuple(dict.fromkeys(labels)))
 
 
-def origin_dict(origin: PublicationOrigin | None) -> dict | None:
+@overload
+def origin_dict(origin: PublicationOrigin) -> dict[str, Any]: ...
+
+
+@overload
+def origin_dict(origin: None) -> None: ...
+
+
+def origin_dict(origin: PublicationOrigin | None) -> dict[str, Any] | None:
     return {"id": origin.id, "labels": list(origin.labels)} if origin else None
 
 
-def activate(config, identity: str | None, labels=()):
+def activate(config: Any, identity: str | None, labels: tuple[str, ...] = ()) -> Any:
     """Select policy for this command only; exported configuration stays inert."""
     last_result.set(None)
     target = getattr(config, "explicit_pr_target", None)
@@ -57,27 +66,30 @@ def activate(config, identity: str | None, labels=()):
     return replace(config, repos={**config.repos, config.repo_name: replace(repo, pr=prcfg)})
 
 
-def selected(prcfg) -> PublicationOrigin | None:
-    return prcfg.publication_origin if getattr(prcfg, "publication_origin_active", False) else None
+def selected(prcfg: Any) -> PublicationOrigin | None:
+    origin: PublicationOrigin | None = (
+        prcfg.publication_origin if getattr(prcfg, "publication_origin_active", False) else None
+    )
+    return origin
 
 
-def selected_for_config(config) -> PublicationOrigin | None:
+def selected_for_config(config: Any) -> PublicationOrigin | None:
     target = getattr(config, "explicit_pr_target", None)
     return selected((target if target is not None else config.default_repo).pr)
 
 
-def validate_policy(prcfg, origin):
+def validate_policy(prcfg: Any, origin: PublicationOrigin) -> None:
     forbidden = {value.casefold() for value in
                  (prcfg.automerge_label, *prcfg.hold_labels, "auto-complete") if value}
     if forbidden.intersection(label.casefold() for label in origin.labels):
         raise ValueError("Publication-origin labels cannot be merge-consent or hold labels")
 
 
-def reconcile(provider, repo: str, number: int | None, origin: PublicationOrigin | None,
-              *, api_base: str = "", token=None) -> dict | None:
+def reconcile(provider: Any, repo: str, number: int | None, origin: PublicationOrigin | None,
+              *, api_base: str = "", token: str | None = None) -> dict[str, Any] | None:
     if origin is None:
         return None
-    result = {"origin": origin.id, "repo": repo, "number": number,
+    result: dict[str, Any] = {"origin": origin.id, "repo": repo, "number": number,
               "requested": list(origin.labels), "ok": False}
     try:
         from .providers.base import ProviderError
@@ -102,13 +114,13 @@ def reconcile(provider, repo: str, number: int | None, origin: PublicationOrigin
     return result
 
 
-def validate_scope(prcfg, target) -> None:
+def validate_scope(prcfg: Any, target: Any) -> None:
     desired = selected(prcfg)
     if desired and target and target.publication_origin and parse_origin(target.publication_origin) != desired:
         raise ValueError("Publication origin is already frozen with a different policy")
 
 
-def refresh(config, record, target) -> dict | None:
+def refresh(config: Any, record: Any, target: Any) -> dict[str, Any] | None:
     from .providers.base import ProviderError
 
     try:
@@ -122,7 +134,7 @@ def refresh(config, record, target) -> dict | None:
     return result
 
 
-def _refresh(config, record, target) -> dict | None:
+def _refresh(config: Any, record: Any, target: Any) -> dict[str, Any] | None:
     """Attach selected scope after publication, retaining identity on metadata failure."""
     from . import claims_find_cli, pr_config, pr_publish, pr_sweep, providers, tracking
     from .pr_publication_state import authority, copy_pr
@@ -139,7 +151,7 @@ def _refresh(config, record, target) -> dict | None:
     if origin is None:
         return None
     resolution = pr_config.resolve_repo_config_for_slug(config, target.repo)
-    if not resolution.resolved:
+    if not resolution.resolved or resolution.repo_config is None:
         raise ValueError(resolution.error or "Tracked PR has no owning repository binding")
     prcfg = resolution.repo_config.pr
     if target.provider and target.provider != prcfg.provider:

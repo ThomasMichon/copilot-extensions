@@ -167,8 +167,14 @@ async def run_owner_loop(
     stop = stop_event if stop_event is not None else asyncio.Event()
     idle_since: float | None = None
     loop = asyncio.get_running_loop()
-    keeper = BeaconKeeper(owner, interval, lambda: loop.call_soon_threadsafe(stop.set))
-    work = OperationLock(Path(registry.RUNTIME_DIR).resolve() / "connection-owner.work.lock")
+
+    def request_stop() -> None:
+        loop.call_soon_threadsafe(stop.set)
+
+    keeper = BeaconKeeper(owner, interval, request_stop)
+    # Read through the module namespace so a redirected runtime root is honored.
+    runtime_dir = Path(vars(registry)["RUNTIME_DIR"])
+    work = OperationLock(runtime_dir.resolve() / "connection-owner.work.lock")
     try:
         keeper.start()
         while not stop.is_set():
@@ -199,6 +205,12 @@ async def run_owner_loop(
                 if not keeper.beat():
                     break
             work.assert_owned()
+            seen = await _read_hold_signature(registry)
+            # The read can wait on the store lock; honor stop, yield and
+            # demotion that arrived meanwhile before admitting a cycle.
+            if stop.is_set() or keeper.yielded or not keeper.beat():
+                break
+            demoted = bool(_PROCESS_SELECTION and _PROCESS_SELECTION.superseded())
             if not demoted:
                 try:
                     await owner.reconcile()
@@ -216,10 +228,7 @@ async def run_owner_loop(
                         log.info("Connection Owner idle (no held CodeSpaces, no owed push) -- exiting;"
                                  " a tenant starts it back up on demand.")
                         break
-            try:
-                await asyncio.wait_for(stop.wait(), timeout=interval)
-            except (TimeoutError, asyncio.TimeoutError):
-                pass
+            await _wait_for_next_cycle(stop, interval, seen, registry)
     finally:
         async def finish() -> None:
             from .owner_control import shutdown_owner
@@ -240,6 +249,56 @@ async def run_owner_loop(
         task.result()
         if cancelled:
             raise asyncio.CancelledError
+
+
+_HOLD_POLL = 1.0
+
+
+def _hold_signature(registry: Any) -> frozenset[tuple[str, str]] | None:
+    """Return the held (CodeSpace, tenant) pairs, or ``None`` when unreadable."""
+    try:
+        return frozenset(
+            (hold.codespace, tenant)
+            for hold in registry.list_holds(prune=False)
+            for tenant in hold.tenants
+        )
+    except Exception as exc:
+        log.debug("Connection Owner could not read holds for an early wake: %s", exc)
+        return None
+
+
+async def _read_hold_signature(registry: Any) -> frozenset[tuple[str, str]] | None:
+    """Read holds off the event loop: the store lock may retry for seconds."""
+    result: frozenset[tuple[str, str]] | None = await owner_native_call(
+        _hold_signature, registry,
+    )
+    return result
+
+
+async def _wait_for_next_cycle(
+    stop: asyncio.Event, interval: float, seen: frozenset[tuple[str, str]] | None,
+    registry: Any,
+) -> None:
+    """Sleep until the next cycle, waking early when a tenant places a new hold.
+
+    A tenant waits a bounded time for its relay, so a new hold must not sit out
+    the remainder of a full reconcile interval before the Owner acts on it.
+    Heartbeat refreshes of existing tenants do not wake the loop.
+    """
+    deadline = time.monotonic() + interval
+    while not stop.is_set():
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=min(remaining, _HOLD_POLL))
+        except (TimeoutError, asyncio.TimeoutError):
+            pass
+        if seen is None or stop.is_set():
+            continue
+        current = await _read_hold_signature(registry)
+        if current is not None and not current <= seen:
+            return
 
 
 async def settle_owner_task(task: asyncio.Future[Any]) -> bool:
@@ -312,7 +371,7 @@ async def stop_owner_channel(channel: Any) -> None:
                 if proc is not None and proc.returncode is None:
                     if isinstance(transport, SupervisedRelayForward):
                         await transport._terminate(proc)
-                    else:
+                    elif isinstance(transport, LocalForward):
                         await transport._kill(proc)
                 raise
         finally:

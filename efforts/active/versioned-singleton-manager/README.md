@@ -102,6 +102,34 @@ required live claim tokens. Every incumbent scope, alternative, hold and resourc
 obligation remains; this intake grants no implementation, deployment, process action or
 new blanket approval gate.
 
+#### Proposed finite #6143 conditional-protocol receiving
+
+- [ ] **C6143:** Retain the incumbent #6143 bounded shared-cutover and
+  consumer-adapter owner, separately claimed #5655 singleton-manager and
+  #5754 reader/recovery custody, Worktrees transferred-protocol ownership,
+  Bridge private-runtime and maintenance/governance responsibilities, and
+  existing native validation custodians. This ROOT's implementation driver
+  is not appointed executor of those distinct lanes. Preserve actual
+  source/resource holds, unresolved effects and #6389 build-versus-serving,
+  #6390 Index and #5769 boundaries.
+- [ ] **C6143-receiving:** Normal reviewed delivery of the COMPLETE direct
+  Plan, local Validation, ACTUAL global Validation and Coordination,
+  followed by permitted whole-current source/receiver/custody readback,
+  precedes any SEPARATE administrative tracking judgment. This proposal
+  leaves #6143 OPEN, appoints no owner, transfers no resources and creates
+  no implementation, process, native-validation or rollout authority.
+- [ ] **C6143-inherited-condition:** Preserve the current #6143 original's
+  explicit condition governing #1986 supersession: accept every ordinary
+  routing-consumer clause at its exact scope, place the entire unchecked
+  checklist directly in final-open #6143's body, preserve its current
+  owner/claims/acceptance and fully read it back; otherwise retain #1986.
+  Record that condition and its historical satisfaction or remaining
+  applicability in any later separate #6143 tracking judgment. Effort
+  receiving does not silently revise or discharge it. Neither historical
+  final-open wording nor this proposal independently settles a future
+  #6143 keeper decision. No generic ACK or unrelated whole-parent
+  technical-completion prerequisite is added.
+
 - **Topology:** Serial, independently reviewable slices.
 - **Host (owns PRs):** Implementation driver.
 - **Delegates:** Bounded evidence or test work only; no concurrent edits to
@@ -308,6 +336,143 @@ callback or an expansion of the native platform programme.)_
   paths and bounded intentional zero coverage OR record justified platform
   exemptions. Preserve compatible handoff and accepted cold takeover;
   unrelated adopters need not finish for this finite Worktrees lane.
+
+#### Proposed finite conditional-protocol intake from #6143
+
+_(Additive planned acceptance under the original protocol and consumer
+custodians. All new technical outcomes remain unchecked; #6143 remains
+OPEN at this proposal. Preserve every incumbent row and checked credit.)_
+
+- [ ] **P6143-1 - Selected conditional admission:** For a selected live
+  conditional handoff, acquire native serialization and then revalidate
+  expected serving PID, published process-start identity, generation and
+  address AND selected-versus-serving version ordering. Refuse changed or
+  unknown ownership and conditional rollback/downgrade; a newer-route race
+  winner must not be overwritten or trigger another stale repair.
+  Installer serialization alone does not exclude direct native deployment.
+  These conditional preconditions are NOT a new veto on ordinary incoming
+  installation success or current-selection authority.
+- [ ] **P6143-2 - Former-owner authority:** For that selected conditional
+  continuation, preserve an authoritative former-serving-owner effective
+  configuration/database/environment snapshot, including effective roots,
+  settings and sensitive context, AND matching nonsecret configuration/
+  version attestation. Caller environment, current files, cache
+  serialization and health alone cannot substitute for that authority.
+  Former-owner capture is not a universal installation prerequisite.
+- [ ] **P6143-3 - Bounded conditional outcomes:** Bound native acquisition
+  and the selected conditional transition with explicit owner-led refusal
+  OR ownership-safe rollback, according to actual state. Preserve each
+  acquisition's absolute deadline without silently enlarging the overall
+  transition budget or holding locks across unrelated work. Outer process
+  killing is not timeout recovery, ownership proof or retirement evidence.
+- [ ] **P6143-4 - Conditional receiver control:** Bind drain, undrain,
+  adoption and retirement to the exact receiver/native identity. Preserve
+  paired preparation/activation, required post-exit adoption, post-undrain
+  and final routed readiness, verified serving identity AND actual
+  kernel-confirmed predecessor retirement. Signal or shutdown acceptance
+  is not exact exit. Retain promoted-successor rollback protection,
+  uncertain-generation custody and truthful unresolved-retirement
+  breadcrumbs. Unknown or changed identity never authorizes killing.
+  These are the selected conditional protocol's requirements, not a new
+  incoming-ready-before-every-retirement rule.
+- [ ] **P6143-5 - Actual conditional consumers:** Through the incumbent
+  shared-cutover/consumer-adapter owner, complete production effective-
+  configuration capture, matching attestation, callable apply AND watcher/
+  registration integration. Compose the existing Bridge app/CLI, Dispatch
+  client/CLI and coordinator-CLI scopes without taking them over.
+  Demonstrate one safe authorized repair AND exact stale-generation
+  retirement while preserving hosted-session semantics. An optional CLI
+  seam, helper propagation or source availability is not actual whole-
+  consumer acceptance or installed effect.
+- [ ] **P6143-6 - Worktrees transferred boundary:** Preserve Worktrees
+  native owner-sourced former-configuration capture, nonsecret
+  configuration/version attestation, identity-conditioned receiver drain/
+  undrain/adopt/retire controls, bounded ownership races AND exact kernel
+  retirement for selected live conditional continuation. Legacy monitors
+  lacking that authority must refuse THAT continuation rather than infer
+  a former snapshot. This optional protocol must NOT gate healthy first
+  installation OR exact completed-slot reuse. Ordinary installer
+  transition recovery remains separate. Explicit current-configuration
+  cold recovery remains separate and requires every original participant's
+  kernel-confirmed retirement; it does not resume a former conditional
+  snapshot. Preserve the existing authoritative runtime-replacement goal,
+  compatible handoff AND accepted bounded cold takeover/recovery, without
+  turning conditional refusal into the intended ordinary replacement
+  outcome or inventing a universal former-owner prerequisite.
+- [ ] **P6143-7 - Positive credit and retained residual:** Credit #6164's
+  shared conditional foundation, actual os.fstat/no-byte-read correction
+  and explicit acquisition deadline; #7109's shared native private-channel,
+  paired preparation/activation and exact-exit library acceptance; AND
+  #7034's private preparation and idle continuity. Keep source, native
+  library/component, containing-release, installed and production tiers
+  distinct. Those components do NOT complete production former-owner
+  capture, nonempty serving, full ADOPT, automatic retirement, production
+  wiring, maintenance/governance ownership or final successor attestation.
+  Deliberately disabled capability remains disabled pending its existing
+  acceptance; this tracking proposal enables nothing.
+
+##### Separately scored ordinary Windows routing consumer from #1986
+
+- [ ] **P1986-1:** Correlate the original routing-lock PermissionError with
+  its exact failing operation and real reader/writer context. The source
+  has no original body/stack: retain unknown cause, not a reconstructed
+  reproducer or a universal mandatory-byte-lock/EACCES diagnosis.
+- [ ] **P1986-2:** Credit #6164's actual os.fstat/no-byte-read correction
+  and explicit-deadline acquisition, then qualify the actual contended
+  native Windows routing reader/writer boundary. Synthetic msvcrt EACCES
+  fixtures, Linux contention or another timeout regression are not that
+  native consumer proof.
+- [ ] **P1986-3:** Preserve genuine bad-path, permission and ownership
+  failures as actionable failures. Retry ONLY recognized acquisition
+  contention at its correct operation. Do not relabel arbitrary
+  PermissionError as contention/timeout or success, or use it to reset
+  permissions, delete lock files or bypass native authority.
+- [ ] **P1986-4:** Preserve one absolute deadline per acquisition and
+  truthful refusal/cleanup. Do not inflate the overall transition budget
+  or hold locks across unrelated work. Ordinary routing reads remain
+  distinct from conditional deployment/adoption.
+- [ ] **P1986-5:** Record exact source/platform/operation AND bounded
+  native negative AND positive outcomes at this finite ordinary-consumer
+  scope, without requiring whole-parent rollout or every platform.
+  Optional former-configuration continuation is not a first-install or
+  exact completed-slot-reuse prerequisite; source availability is not
+  installed effect.
+
+##### Local Validation - #6143 and inherited #1986
+
+- [ ] **V6143-1:** Qualify native serialization, exact identity/version
+  revalidation, newer-route races, contended/abandoned acquisition AND
+  bounded refusal OR legitimate rollback for the selected conditional
+  handoff. Confirm no downgrade, duplicate stale repair or termination
+  of an unproven process. Verify these checks are not imposed as new
+  vetoes on ordinary incoming installation success/current selection.
+- [ ] **V6143-2:** Qualify actual authoritative former-owner capture AND
+  matching attestation for conditional continuation, including configured
+  database/runtime preservation and sensitive-context boundaries.
+  Qualify truthful legacy-authority refusal at that selected boundary,
+  NOT universal refusal of ordinary installation/replacement. Preserve
+  first-install OR completed-slot-reuse independence and distinguish
+  ordinary transition recovery from explicit current-configuration cold
+  recovery with every original participant's kernel-confirmed retirement.
+- [ ] **V6143-3:** Qualify receiver-conditioned controls, paired callback
+  ordering, required post-exit adoption, post-undrain/final readiness AND
+  exact kernel retirement. Cover promoted-successor rollback retention,
+  partial/failed transitions and uncertain retirement without losing
+  custody or treating accepted shutdown as exit. Preserve the existing
+  accepted handoff/cold-recovery alternatives at their actual scope.
+- [ ] **V6143-4:** Through the incumbent actual consumers, qualify
+  production capture/registration/watcher/apply, one safe repair AND exact
+  stale-generation retirement with hosted-session semantics intact.
+  Score Bridge private idle preparation separately from nonempty serving,
+  full ADOPT, maintenance/governance and final production attestation.
+  Preserve originally required native venues and authorization gates;
+  no every-host programme or unrelated whole-effort gate is added.
+- [ ] **V1986:** Resolve EVERY P1986-1 through P1986-5 clause separately
+  from conditional adoption: unknown original cause, actual native Windows
+  reader/writer contention, recognized retry operation, genuine actionable
+  bad-path/permission/ownership failures, one absolute deadline, truthful
+  refusal/cleanup AND bounded native negative AND positive outcomes.
+  Fixtures or another consumer's proof do not satisfy this finite case.
 
 ### Phase D - Platform proof and release
 
@@ -578,6 +743,24 @@ _(Agent-recommended direct tracking under existing Phase C; all rows unchecked.)
 
 ## Validation Plan
 
+- [ ] **G6143:** Resolve EVERY P6143-1 through P6143-7, P1986-1 through
+  P1986-5, V6143-1 through V6143-4, V1986 AND C6143/C6143-receiving/
+  C6143-inherited-condition clause at its original finite scope,
+  alternatives and evidence tiers. Preserve the entire incumbent Plan,
+  ACTUAL global Validation, participants, checked Linux credit and Journal;
+  compatible handoff AND accepted bounded cold recovery; independent
+  native-manager/adopter obligations; actual owners, holds and resources.
+  Keep ordinary routing acceptance separately scored. Conditional identity,
+  version, former-configuration, control and retirement requirements govern
+  the selected conditional handoff, not ordinary incoming installation
+  success/current-selection authority or a universal former-owner gate.
+  Explicit current-configuration cold recovery retains its original
+  all-participant kernel-retirement requirement. Documentary receiving is
+  not technical completion, source disposition, execution authority or
+  resource release. #6143 remains OPEN at this proposal; its later tracking
+  judgment must separately preserve and resolve the inherited #1986
+  final-open/readback condition without silently rewriting it.
+
 - [ ] **G5655-W:** Resolve the complete P5655-W/V5655-W retention and continuing
   same-custodian Coordination at the original Windows manager/adopter scope.
   Include P5655-W's tracked pattern-alignment correction; preserve the
@@ -731,6 +914,51 @@ above are **agent-recommended implementation hardening**, not new operator
 requirements or permission to weaken the existing vision.
 
 ## Journal
+
+### 2026-11-17 - Conditional receiving reviewed; tracker separately retired
+
+#13185 merged as `09e81891ff64e197addbfc39c7691ca7b9db9d64` after
+current-head Copilot approval, no findings or threads and all required CI.
+All 21 new acceptance entries remain unchecked. Subsequent fresh qualification
+and entire current 1,021-line ROOT/source/discussion/custody readback confirm
+the complete conditional protocol AND separately scored ordinary routing
+contract remain directly planned under their original custodians.
+
+The inherited #1986 final-open/full-readback condition governed its earlier
+supersession. Its qualified actual retirement explanation records all five
+unchecked clauses accepted/read back while #6143 was OPEN. That historical
+receipt is not technical completion or a general waiver. The subsequent
+separate #6143 judgment rests on complete reviewed same-domain receiving and
+current readback, not component merges or absence alone.
+
+[#6143's exact explanation](https://github.com/ThomasMichon/copilot-extensions/issues/6143#issuecomment-6968395495)
+was audited before its `NOT_PLANNED` closure at 03:45:49 UTC on 2026-11-18.
+Original body, all five prior discussions, labels and assignments remain
+unchanged. Protocol, Worktrees, Bridge, native-validation, manager/reader and
+resource owners retain their actual scopes and holds. No implementation,
+native result, source-claim expiry or resource transfer is implied.
+
+### 2026-11-17 - Proposed complete conditional-protocol receiving
+
+Proposed the complete #6143 conditional former-configuration/identity/control
+union and separately scored inherited #1986 ordinary Windows routing consumer
+through direct Plan/local AND actual global Validation/Coordination. Every new
+technical outcome remains unchecked. Preserve #6164/#7109/#7034 credit, unknown
+original routing-lock cause, native/component/release/installed/production
+tiers, original protocol/consumer custodians and all actual holds.
+
+The conditional protocol stays conditional: its former-owner authority,
+version, control and retirement checks are not a new veto on ordinary incoming
+installation success/current selection or healthy first-install/completed-slot
+reuse. Explicit current-configuration cold recovery keeps its original exact
+all-participant retirement requirement. This ROOT's implementation driver is
+not appointed to another owner's protocol or resource work.
+
+#6143 remains OPEN at this proposal. Its inherited #1986 final-open/full-readback
+condition is retained for a later separate source-specific tracking judgment,
+not silently revised by effort receiving or converted into a generic ACK.
+No implementation, native operation, test, source disposition or resource
+transfer occurred.
 
 ### 2026-11-17 - Proposed finite #5655 Windows mechanism retention
 

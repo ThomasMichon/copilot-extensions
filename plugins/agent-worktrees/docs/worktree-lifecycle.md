@@ -16,31 +16,18 @@ full verb catalog, see [cli-reference.md](cli-reference.md).
 
 ## The lifecycle at a glance
 
-```
-                      ┌─────────────────────────────────────────────┐
-   create / resolve   │                                             │
-  ───────────────────▶│  ACTIVE  ──commit──▶  WIP  ──────────────┐  │
-   (picker or          │  (live session)      (ahead, not landed) │  │
-    programmatic)      └───────────────────────────────────────┐  │  │
-                                                                │  │  │
-                                   ┌────────────────────────────┘  │  │
-                                   ▼                                │  │
-                         ┌──────── landing ────────┐                │  │
-                         │                          │               │  │
-              direct-push│                          │PR mode        │  │
-                         ▼                          ▼               │  │
-                 push-changes              create-pr → review        │  │
-                      │                    → pr-merge (consent)       │  │
-                      │                    → merged                   │  │
-                      ▼                          │                    │  │
-                   MERGED  ◀──────────────────────┘                   │  │
-                      │                                               │  │
-                      ▼                                               │  │
-              finalize / pr-complete ──▶ COMPLETED ──cleanup──▶ FINALIZED/pruned
-                      │                                               ▲  ▲
-                      └────────── resume until pruned ────────────────┘  │
-                                   (detached PR? recover) ───────────────┘
-```
+1. **Allocate.** Create the branch, checkout and tracking record. A checkout
+   can exist without a live Copilot session.
+2. **Land source changes.** Use direct publication or the repository's PR flow.
+   After a merge, `pr-complete` reconciles the local branch with the landed
+   result. A clean working directory alone does not prove that commits landed.
+3. **Finalize responsibility.** `finalize` checks content, PRs and outstanding
+   claims. A `finalized` checkout can still be on disk or in use.
+4. **Remove eligible storage.** Before removing a retained managed checkout,
+   cleanup rechecks activity, content, claims, follow-ups and retention.
+
+The [worktree flow diagram](../../../docs/agent-lifecycle/worktree.md#what-moves-and-who-moves-it)
+shows the decisions rather than treating display labels as sequential writes.
 
 **Committed ≠ merged ≠ deployed.** A commit lives only on the worktree branch;
 **merged** (via the default-branch landing) makes the change shared and *primes*
@@ -336,7 +323,11 @@ reset the key or authorize another allocation.
 
 ## Worktree states
 
-The tracking state (seen in `list` / the picker) and its status-bar block:
+The tracker stores a lifecycle `status` in YAML. Git and session observations
+produce a separate classification; the picker also derives closure labels.
+For example, `active` in a new **record** means the allocation exists, not
+that a live session was observed. In the following table the rows describe
+the displayed observations unless marked **record**:
 
 | Tracking state | Bar block | Meaning |
 |----------------|-----------|---------|
@@ -345,11 +336,12 @@ The tracking state (seen in `list` / the picker) and its status-bar block:
 | `wip` | `WIP` (amber) | Clean; ahead with commits not yet on upstream |
 | `unused` | `UNUSED` (grey) | Clean; no commits **and** no conversation since the fork point |
 | `convo` | `CONVO` (teal) | Clean; no commits, but the session held conversation turns (`💬N`) |
-| `pushed` | — | Changes pushed to the default branch, awaiting finalization |
+| `pushed` (record) | — | Changes pushed to the default branch, awaiting finalization |
 | `completed` | `FINAL` (green) or `MERGED` (orange) | All content landed on the default branch -- see below for which label shows |
-| `finalized` | — | Landed and the worktree removed |
+| `finalized` (record) | — | Logical finalization recorded; the directory may still exist |
 | `gone` | — | Worktree directory missing |
 | `orphan` | `ORPHAN` (magenta) | No merge base with upstream |
+| `unknown` | `UNKNOWN` | Git observation unavailable; not evidence of landed content |
 
 `unused` vs `convo` is why cleanup never auto-purges a commit-less worktree: it
 may hold planning or conversation. See
@@ -533,7 +525,7 @@ replaces the summary. Re-assert any follow-up unrelated to the effort after
 release.
 
 The crucial rule: **`follow_up` is orthogonal to state, and it gates cleanup.** A
-worktree can be `finalized`/`completed` (git says "done, prune me") yet still
+worktree can have a `finalized` record or landed content yet still
 carry `follow_up=true` — its cleanup bucket is then downgraded from the auto-prune
 **`clean`** verdict to the review-class **`follow-up`** bucket, so cleanup/gc leave
 it alone. Two common cases:
@@ -897,7 +889,7 @@ why running it after resolving follow-ups only removes what genuinely landed.
 | Land | `push-changes --title` | `create-pr` → `pr-watch` → `pr-merge` → `pr-complete` |
 | Draft/hold | — | `create-pr --draft` → `pr-ready` |
 | Inspect | `status` | `pr-status` |
-| Clean up | `finalize` → `cleanup` / `gc` | `finalize` → `pr-complete` → `cleanup` / `gc` |
+| Clean up | `finalize` → `cleanup` / `gc` if retained | Same, after source reconciliation |
 | Reap residue | `reap-sessions` (mux) · `reap-shells` (launchers) · `remove-system <id>` (system worktree) | same |
 
 ## See also

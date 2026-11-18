@@ -7,7 +7,7 @@ import json
 import os
 from pathlib import Path
 import stat
-from typing import Callable, NamedTuple
+from typing import Any, BinaryIO, Callable, NamedTuple
 
 SCHEMA = "agent-worktrees.guarded-anchors"
 VERSION = 1
@@ -21,12 +21,12 @@ def validate_directory(path: Path) -> None:
         raise ValueError("non-directory or indirected guard-map store")
 
 
-def _open_map(path: Path):
+def _open_map(path: Path) -> BinaryIO:
     info = path.lstat()
     if not stat.S_ISREG(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
         raise ValueError("nonregular or indirected guard input")
     if os.name != "nt":
-        descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0))
+        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NONBLOCK") | getattr(os, "O_NOFOLLOW", 0))
         try:
             if not stat.S_ISREG(os.fstat(descriptor).st_mode):
                 raise ValueError("nonregular guard input")
@@ -38,7 +38,10 @@ def _open_map(path: Path):
     import msvcrt
     from ctypes import wintypes
 
-    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    native_ctypes: Any = ctypes
+    native_msvcrt: Any = msvcrt
+    native_os: Any = os
+    kernel = native_ctypes.WinDLL("kernel32", use_last_error=True)
     kernel.CreateFileW.argtypes = [
         wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
         wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE,
@@ -52,9 +55,9 @@ def _open_map(path: Path):
     # Match endpoint-rendezvous: readers must permit atomic replace and removal.
     handle = kernel.CreateFileW(native, 0x80000000, 0x7, None, 3, 0x00200080, None)
     if handle == ctypes.c_void_p(-1).value:
-        raise ctypes.WinError(ctypes.get_last_error())
+        raise native_ctypes.WinError(native_ctypes.get_last_error())
     try:
-        descriptor = msvcrt.open_osfhandle(handle, os.O_RDONLY | os.O_BINARY)
+        descriptor = native_msvcrt.open_osfhandle(handle, os.O_RDONLY | native_os.O_BINARY)
     except BaseException:
         kernel.CloseHandle(handle)
         raise
@@ -91,7 +94,7 @@ def _path_mode(path: Path) -> int:
 
 def repository_identity(
     start: str | Path, *, observe: Callable[[Path], None] | None = None,
-) -> dict | None:
+) -> dict[str, str] | None:
     """Nearest checkout/common directory, including new targets and bare roots.
 
     Only Git's filesystem markers are inspected; no config, index, object
@@ -172,10 +175,72 @@ def map_path(source_root: str | Path, registry_root: str | Path) -> Path:
 
 class MapRead(NamedTuple):
     status: str
-    roots: list[dict]
+    roots: list[dict[str, Any]]
     reason: str = ""
-    postures: list[dict] | None = None
+    postures: list[dict[str, Any]] | None = None
     posture_errors: list[str] | None = None
+    anchor_inventory: dict[str, Any] | None = None
+
+
+def unavailable_anchor_inventory(reason: str) -> dict[str, Any]:
+    return {
+        "version": 1, "status": "unavailable", "qualification": "managed-observation",
+        "rows": [], "observations": [], "reason": reason,
+    }
+
+
+def _inventory_text(value: object, limit: int = 4096) -> bool:
+    if not isinstance(value, str) or len(value) > limit or "\0" in value:
+        return False
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
+def read_anchor_inventory(value: object, *, row_limit: int | None = None) -> dict[str, Any]:
+    """Validate supplemental original-owner facts without probing their paths."""
+    invalid = unavailable_anchor_inventory("invalid-anchor-inventory")
+    if (
+        not isinstance(value, dict) or type(value.get("version")) is not int
+        or value["version"] != 1 or not isinstance(value.get("status"), str)
+        or value["status"] not in {"observed", "unavailable"}
+        or value.get("qualification") != "managed-observation"
+        or not isinstance(value.get("rows"), list)
+        or len(value["rows"]) > (MAX_ROOTS if row_limit is None else min(MAX_ROOTS, row_limit))
+        or not isinstance(value.get("observations"), list) or len(value["observations"]) > 2
+        or not _inventory_text(value.get("reason", ""), 128)
+    ):
+        return invalid
+    for row in value["rows"]:
+        if (
+            not isinstance(row, dict) or set(row) != {"name", "path"}
+            or any(not _inventory_text(row[key]) for key in ("name", "path"))
+            or not row["path"]
+        ):
+            return invalid
+    for item in value["observations"]:
+        if (
+            not isinstance(item, dict) or set(item) != {"source", "parser", "status", "reason"}
+            or not _inventory_text(item["source"]) or not item["source"]
+            or not isinstance(item["parser"], str)
+            or item["parser"] not in {"pyyaml", "fallback", "none", "opaque"}
+            or not isinstance(item["status"], str) or item["status"] not in {"observed", "unavailable"}
+            or not _inventory_text(item["reason"], 128)
+        ):
+            return invalid
+    if value["status"] == "observed" and (
+        len(value["observations"]) != 2 or any(
+            item["status"] != "observed" or item["parser"] not in {"pyyaml", "fallback"}
+            or item["reason"] for item in value["observations"]
+        )
+    ):
+        return invalid
+    return {
+        key: value[key] for key in ("version", "status", "qualification", "rows", "observations", "reason")
+        if key in value
+    }
 
 
 def read_map(source_root: str | Path, registry_root: str | Path) -> MapRead:
@@ -236,14 +301,21 @@ def read_map(source_root: str | Path, registry_root: str | Path) -> MapRead:
         for row in postures:
             if row.get("posture") not in {"", "reference", "worktree"} or type(row.get("elevated")) is not bool:
                 raise ValueError("invalid repository posture")
-        return MapRead("ready", data["roots"], postures=postures, posture_errors=posture_errors)
+        inventory = read_anchor_inventory(
+            data["anchor_inventory"], row_limit=MAX_ROOTS - len(data["roots"]) - len(postures),
+        ) if "anchor_inventory" in data else None
+        return MapRead("ready", data["roots"], postures=postures,
+                       posture_errors=posture_errors, anchor_inventory=inventory)
     except FileNotFoundError:
         return MapRead("missing", [], "guard map not prepared")
     except (OSError, UnicodeError, ValueError, TypeError, RuntimeError) as exc:
         return MapRead("unusable", [], str(exc))
 
 
-def matches(path: str, guarded: dict, *, identity_cache: dict | None = None) -> bool:
+def matches(
+    path: str, guarded: dict[str, Any], *,
+    identity_cache: dict[str, dict[str, str] | None] | None = None,
+) -> bool:
     """Do not attribute nested repositories to a containing guarded checkout."""
     identity = guarded.get("identity")
     if identity is None:

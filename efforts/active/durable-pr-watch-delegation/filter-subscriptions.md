@@ -190,6 +190,11 @@ No synthetic fixture passes those gates. The canonical parent remains Active
 until its own full Plan/Validation resolves; no runtime adoption, credential
 change or retained-resource disposition follows from these source merges.
 
+The later [GitHub M1 operational trial](journal/2026/11.18%20GitHub%20shadow%20qualification.md)
+qualifies the ordinary `repository-local/v1` host with real GitHub observations.
+It does not exercise the generation-three filtered ADO profile, group support,
+the selected real ADO population or review-consumer actions. Those gates remain.
+
 ## Journal
 
 ### 2026-11-17 - Filtered service source merged; operational gates retained

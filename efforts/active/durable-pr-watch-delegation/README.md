@@ -35,12 +35,13 @@ defines inert round-robin/Dispatch consumers plus observational comparison.
 It adds no consumer activation or production-write authority, and does not
 replace M1 or the full retained parent acceptance.
 
-The [M1 source evidence map](repository-cache-events-m1.md#source-evidence-map)
-separates the standalone synthetic vertical from still-open release,
-installed/running and authorized real-target qualification. Completing that
-source slice does not complete M1 or this effort. The reviewed source stages
-1–4 have landed; the combined Plan and Validation items below remain open
-because they also require the separate live qualification.
+The [M1 evidence map](repository-cache-events-m1.md#source-evidence-map)
+separates the standalone synthetic vertical from release, installed/running
+and authorized real-target qualification. The reviewed source stages 1–4 have
+landed. The [GitHub installed-running lane](journal/2026/11.18%20GitHub%20shadow%20qualification.md)
+now passes on an isolated Linux installation, including real continuing events,
+ACK and restart. Gitea qualification remains separately owned and uncredited;
+the combined Plan/Validation items and this effort remain open.
 
 ### Delegation driver's completion charter
 
@@ -67,11 +68,12 @@ because they also require the separate live qualification.
   accepted by their rightful owners through the normal guarded flow.
 - **Now:** The filtered-population source and synthetic qualification are
   complete through #12200, including the bounded Windows registry snapshot
-  prerequisite. Promotion #13048 includes that source; select the remaining
-  M1 installed/running qualification only within its separate operational
-  authority, without treating promotion as installed acceptance.
-- **Return:** Continue installed/running and consumer-owned acceptance under
-  this same effort when its separate operational authority is available.
+  prerequisite. Promotion #13048 includes that source, and the separately
+  authorized GitHub M1 installed-running lane passes. Reconcile the remaining
+  Gitea evidence with its operational owner without claiming full M1 acceptance.
+- **Return:** Continue filtered-ADO and consumer-owned acceptance under this
+  same effort within their separate authority and existing holds. The GitHub
+  repository-local trial is not live filtered-ADO or posted-review proof.
   Existing MCP follow-through, domain custody, operational holds and separate
   spending, deployment, credential and retained-resource authority remain.
 
@@ -424,7 +426,7 @@ its implementation or authorizing production activation.
 
 ### First integrated repository cache and event milestone
 
-- [ ] Deliver [M1's serial standalone discovery/projection/query/subscription stages](repository-cache-events-m1.md#serial-implementation-roster), then separately qualify authorized read-only live shadow; retain all broader outcomes.
+- [ ] Deliver [M1's serial standalone discovery/projection/query/subscription stages](repository-cache-events-m1.md#serial-implementation-roster), then separately qualify authorized read-only live shadow; source stages and the GitHub lane pass, while separately owned Gitea qualification and all broader outcomes remain.
 
 ### Author/Reviewer service perspectives
 
@@ -763,7 +765,7 @@ outage-expiry defect remains unfixed.
   scheduling notifications. Definite write failure prevents scheduling;
   uncertain durability after replacement follows the existing owner's recovery
   path without adding legacy replay. Do not reopen #6019's delivered repair.
-- [ ] **P5947-2:** Expose bounded, honest, inspectable failure/unknown outcomes
+- [x] **P5947-2:** Expose bounded, honest, inspectable failure/unknown outcomes
   for failed or indeterminate attempts on the retained legacy callback path.
   Successful callback completion remains a positive control, not a required
   failure/unknown result or proof of consumer acknowledgement.
@@ -804,7 +806,7 @@ outage-expiry defect remains unfixed.
   failure prevents notification scheduling, and uncertain post-replacement
   durability follows the existing owner path without introducing legacy replay.
   Subscription deadlines never expire resource/worktree claims.
-- [ ] **V5947-2:** Through the actual delivery owner, exercise applicable legacy
+- [x] **V5947-2:** Through the actual delivery owner, exercise applicable legacy
   success, exception, nonzero and timeout cases. Use successful callback
   completion as a positive control; require honest inspectable failure/unknown
   results for failed or indeterminate attempts, not successful ones. Preserve
@@ -1351,7 +1353,7 @@ or silently expanding a bounded source claim.
   required check. Legacy source behavior and broader
   installed/provider/HTTP/resource/effort acceptance remain independent.
 
-- [ ] Prove [M1's synthetic foreground/client/persistence/subscriber vertical and separate released/installed/running qualification](repository-cache-events-m1.md#validation-and-acceptance); neither fixtures nor a healthy empty host close M1 or this effort.
+- [ ] Prove [M1's synthetic foreground/client/persistence/subscriber vertical and separate released/installed/running qualification](repository-cache-events-m1.md#validation-and-acceptance); the real GitHub lane now passes, but Gitea remains open. Neither that partial result, fixtures nor healthy-empty readiness closes M1 or this effort.
 
 - [x] Qualify the finite source [selected native reopening refinement](native-thread-resolution.md#reopening-source-controls-after-review)
   after independent contract review (#11741): exact resolved-to-active transition,
@@ -1713,7 +1715,7 @@ All items below are **agent-recommended** acceptance checks.
   retirement. Verify persistence before scheduling, definite write-failure
   refusal and existing-owner handling of uncertain replacement durability
   without legacy replay. Subscription expiry cannot release resource/worktree claims.
-- [ ] **G5947-2:** Resolve P5947-2/V5947-2 through actual legacy and acknowledged
+- [x] **G5947-2:** Resolve P5947-2/V5947-2 through actual legacy and acknowledged
   delivery consumers. Successful legacy callback completion is a positive
   control, not a required failure/unknown outcome or consumer acknowledgement.
   Applicable exception, nonzero, timeout or indeterminate attempts must expose
@@ -1758,6 +1760,15 @@ callback an implicit credential store.
 
 ## Journal
 
+- **2026-11-18 - Native Gitea metadata contract proposed.** Continuing the
+  bounded #10923 source-preservation work after GitHub source #13199;
+  [Gitea title/body contract](native-gitea-metadata.md) retains the existing
+  target/account/provider/frontend owners and adds explicit native draft/WIP
+  preservation qualification. This is review-first planning, not delivered
+  Gitea metadata support, installation or live mutation. Full A4-A5 and all
+  other parent Plan/Validation gates remain open.
+- [2026-11-18 - Bounded legacy callback outcome visibility qualified](journal/2026/11.18%20Legacy%20callback%20outcomes.md)
+- [2026-11-18 - Released GitHub shadow and continuing events qualified](journal/2026/11.18%20GitHub%20shadow%20qualification.md)
 - **2026-11-17 - Complete subscriber callback receiving proposed.** Added
   unchecked P5947-1..4/V5947-1..4/actual global G5947-1..4 and continuing
   Coordination in this existing shared PR-watch subscription domain.

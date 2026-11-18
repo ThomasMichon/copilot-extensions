@@ -1,0 +1,9 @@
+{
+  "comment": "Expose bounded process-local legacy callback attempt outcomes without changing best-effort delivery or acknowledged retries.",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

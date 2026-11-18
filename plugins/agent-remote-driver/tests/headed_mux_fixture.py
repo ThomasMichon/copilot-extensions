@@ -59,6 +59,24 @@ class FixtureMux:
             raise ValueError("The exact fixture target is required")
         if any(value in {"-L", "-S", ";", "kill-server", "server"} for value in mux_arguments):
             raise ValueError("Fixture mux routing cannot be overridden")
+        return self._invoke(action, *arguments)
+
+    def capture_original_pane(self, identity: str) -> subprocess.CompletedProcess[str]:
+        match = re.fullmatch(r"\$[0-9]+:[0-9]+\|(%[0-9]+)", identity)
+        if match is None:
+            raise ValueError("An original fixture incarnation is required")
+        observed = self.query(
+            "display-message", "-p", "-t", self.target,
+            "#{session_id}:#{session_created}|#{pane_id}",
+        )
+        if observed.returncode != 0:
+            return observed
+        if observed.stdout.strip() != identity:
+            raise ValueError("The original fixture incarnation no longer matches")
+        return self._invoke("capture-pane", "-p", "-t", match[1])
+
+    def _invoke(self, action: str, *arguments: str) -> subprocess.CompletedProcess[str]:
+        validate_private_mux_args(self.mux_args, sandbox=self.sandbox, cwd=self.root)
         return subprocess.run(
             [self.binary, *self.mux_args, action, *arguments],
             env=self.environment, cwd=self.root, capture_output=True,

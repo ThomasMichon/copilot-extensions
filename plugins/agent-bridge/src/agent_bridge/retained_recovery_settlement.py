@@ -167,6 +167,12 @@ async def inspect(
     request = RetainedRecoveryRequest.model_validate(operation["request"])
     events = _events(manager, session_id)
     if not _failure_proven(row, session_id, request, events):
+        from .retained_postload_completion import complete
+
+        # A load-bearing history cannot use the pre-native failure settlement.
+        if any(item.get("event_type") == "startup_progress"
+               and item.get("data", {}).get("phase") == "native-session-load" for item in events):
+            return await complete(manager, session, row, request, events, ready)
         return outcome
     scope, _writer = _binding(row)
     with executor(manager.db, f"retained-recovery:{scope.worktree_id}"), executor(

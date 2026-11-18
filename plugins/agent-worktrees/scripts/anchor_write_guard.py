@@ -71,6 +71,8 @@ import re
 import sys
 import time
 from pathlib import Path
+from collections.abc import Iterable, Mapping
+from typing import Any, cast
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
 if str(_SCRIPT_DIR) not in sys.path:
@@ -78,6 +80,12 @@ if str(_SCRIPT_DIR) not in sys.path:
 
 from registry_root import resolve_registry_root
 from tool_call_forms import write_targets
+from anchor_registry import (
+    _inventory_observation,
+    _load_worktree_class_anchors,
+    _repos_yaml,
+    load_base_repo_names,
+)
 from anchor_shell_parser import (
     GIT_INTRINSIC_NONWRITE_COMMANDS as _GIT_READ_BUILTINS,
     git_branch_invocation_is_readonly as _git_branch_invocation_is_readonly,
@@ -392,7 +400,7 @@ def _git_subcommand_writes_worktree(subcommand: str) -> bool:
     return bool(separator and prefix in _GIT_WORKTREE_WRITE_SUBCOMMANDS)
 
 
-def shell_may_mutate(command: str, tool: str, *, legacy_writes: re.Pattern | None = None) -> bool:
+def shell_may_mutate(command: str, tool: str, *, legacy_writes: re.Pattern[str] | None = None) -> bool:
     """Classify post-tool invalidation, not permission to write an anchor."""
     pending = [(command, 0)]
     remaining = 128
@@ -411,13 +419,14 @@ def shell_may_mutate(command: str, tool: str, *, legacy_writes: re.Pattern | Non
                     (child, depth + 1)
                     for child in _shell_command_substitutions(segment, tool, scan_budget=scan_budget)
                 )
-                effective, data_assignment = _normalize_post_command(
+                normalized, data_assignment = _normalize_post_command(
                     effective, tool, normalize=_effective_seg, scan_budget=scan_budget,
                 )
             except ValueError:
                 return True
-            if effective is None:
+            if normalized is None:
                 return True
+            effective = normalized
             syntax: set[str] = {"read"} if data_assignment else set()
             targets = _literal_write_targets(effective, tool, syntax=syntax)
             if targets or syntax & {"{", "evaluation", "write", "control", "unknown"} or (
@@ -475,7 +484,7 @@ def _truthy_off(v: str | None) -> bool:
     return (v or "").strip().lower() in {"off", "0", "false", "no"}
 
 
-def _mode(env) -> str:
+def _mode(env: Mapping[str, str]) -> str:
     m = (env.get("ANCHOR_WRITE_GUARD_MODE") or "").strip().lower()
     return m if m in {"deny", "ask", "warn", "off"} else "deny"
 
@@ -520,7 +529,7 @@ def is_linked_worktree(root: Path) -> bool:
         return False
 
 
-def _as_args(tool_args) -> dict:
+def _as_args(tool_args: object) -> dict[str, Any]:
     if isinstance(tool_args, str):
         try:
             parsed = json.loads(tool_args)
@@ -530,7 +539,7 @@ def _as_args(tool_args) -> dict:
     return tool_args if isinstance(tool_args, dict) else {}
 
 
-def _pick(args: dict, keys) -> str | None:
+def _pick(args: dict[str, Any], keys: Iterable[str]) -> str | None:
     for k in keys:
         v = args.get(k)
         if isinstance(v, str) and v:
@@ -552,149 +561,60 @@ def active_break_glass(repo_name: str, home: Path, *, registry_root: Path | None
         data = json.loads(
             ((registry_root or home / ".agent-worktrees") / "allow-edits.json").read_text("utf-8"))
         g = (data.get("grants") or {}).get(repo_name)
-        return bool(g) and float(g.get("expires_at_ms", 0)) > time.time() * 1000
+        return bool(g) and float(cast(dict[str, Any], g).get("expires_at_ms", 0)) > time.time() * 1000
     except (OSError, ValueError, TypeError, KeyError):
         return False
 
 
 # --- Worktree-class anchor discovery (repos.yaml, stdlib parse) ---------------
 
-def _repos_yaml(registry_root: Path) -> Path:
-    return registry_root / "repos.yaml"
-
-
-def _yaml_unquote(val: str) -> str:
-    val = val.strip()
-    if len(val) >= 2 and val[0] == val[-1] and val[0] in ("'", '"'):
-        quote = val[0]
-        val = val[1:-1]
-        if quote == '"':
-            # Double-quoted YAML: an escaped backslash ``\\`` is a single one
-            # (Windows paths are stored this way, e.g. "C:\\Data\\Src\\repo").
-            val = val.replace("\\\\", "\\")
-    return val
-
-
-def load_base_repo_names(registry_root: Path) -> set[str]:
-    """Names adopted in **base-repo (no-worktree)** mode in ``projects.yaml``.
-
-    A base-repo anchor is edited in place by design (the anchor *is* the working
-    checkout -- e.g. a CodeSpace dedicated to one task), so it is never guarded
-    even when ``repos.yaml`` lists it ``class: worktree``. Stdlib-only like
-    :func:`load_worktree_anchors`; never raises.
-    """
-    try:
-        text = (registry_root / "projects.yaml").read_text("utf-8")
-    except (OSError, UnicodeDecodeError):
-        return set()
-    try:
-        import yaml  # type: ignore
-        projects = (yaml.safe_load(text) or {}).get("projects") or {}
-        return {
-            str(name) for name, meta in projects.items()
-            if isinstance(meta, dict) and meta.get("base_repo") is True
-        } if isinstance(projects, dict) else set()
-    except Exception:
-        pass
-    names: set[str] = set()
-    in_projects = False
-    cur_name: str | None = None
-    for raw in text.splitlines():
-        if not raw.strip() or raw.lstrip().startswith("#"):
-            continue
-        indent = len(raw) - len(raw.lstrip())
-        stripped = raw.strip()
-        if indent == 0:
-            in_projects = stripped == "projects:"
-            cur_name = None
-        elif in_projects and indent == 2 and stripped.endswith(":"):
-            cur_name = _yaml_unquote(stripped[:-1])
-        elif in_projects and indent >= 4 and cur_name:
-            key, sep, val = stripped.partition(":")
-            if sep and key.strip() == "base_repo" and _yaml_unquote(val).lower() == "true":
-                names.add(cur_name)
-    return names
-
-
-def load_worktree_anchors(registry_root: Path) -> list[dict]:
+def load_worktree_anchors(
+    registry_root: Path, *, _observations: list[dict[str, str]] | None = None,
+) -> list[dict[str, str]]:
     """The guarded anchors: every ``class: worktree`` repo in ``repos.yaml``
     that is not adopted in base-repo mode (:func:`load_base_repo_names`)."""
-    base_repos = load_base_repo_names(registry_root)
-    return [a for a in _load_worktree_class_anchors(registry_root) if a["name"] not in base_repos]
+    if _observations is None:
+        base_repos = load_base_repo_names(registry_root)
+        anchors = _load_worktree_class_anchors(registry_root)
+    else:
+        if load_base_repo_names is _ORIGINAL_BASE_REPO_LOADER:
+            base_repos = load_base_repo_names(registry_root, _observations=_observations)
+        else:
+            base_repos = load_base_repo_names(registry_root)
+            _inventory_observation(_observations, registry_root / "projects.yaml", "opaque",
+                                   reason="owner-coverage-unavailable")
+        if _load_worktree_class_anchors is _ORIGINAL_CLASS_ANCHOR_LOADER:
+            anchors = _load_worktree_class_anchors(registry_root, _observations=_observations)
+        else:
+            anchors = _load_worktree_class_anchors(registry_root)
+            _inventory_observation(_observations, _repos_yaml(registry_root), "opaque",
+                                   reason="owner-coverage-unavailable")
+    return [a for a in anchors if a["name"] not in base_repos]
 
 
-def _load_worktree_class_anchors(registry_root: Path) -> list[dict]:
-    """Parse ``repos.yaml`` -> ``[{name, path}]`` for every ``class: worktree``
-    repo, across all platform path keys (windows/wsl/linux).
+_ORIGINAL_BASE_REPO_LOADER = load_base_repo_names
+_ORIGINAL_CLASS_ANCHOR_LOADER = _load_worktree_class_anchors
+_ORIGINAL_ANCHOR_LOADER = load_worktree_anchors
 
-    Stdlib-only (this hook runs under whatever ``python`` is on PATH, so PyYAML
-    may be unavailable); a tiny indentation-aware parser tailored to the known,
-    regular ``repos:`` shape. Prefers PyYAML when importable. Never raises.
-    """
-    try:
-        text = _repos_yaml(registry_root).read_text("utf-8")
-    except (OSError, UnicodeDecodeError):
-        return []
 
-    # Fast path: real YAML when the runtime happens to have it.
-    try:
-        import yaml  # type: ignore
-        data = yaml.safe_load(text)
-        anchors: list[dict] = []
-        repos = (data or {}).get("repos") or {}
-        if isinstance(repos, dict):
-            for name, meta in repos.items():
-                if not isinstance(meta, dict) or meta.get("class") != "worktree":
-                    continue
-                for plat in ("windows", "wsl", "linux"):
-                    p = meta.get(plat)
-                    if isinstance(p, str) and p.strip():
-                        anchors.append({"name": str(name), "path": p.strip()})
-        return anchors
-    except Exception:
-        pass  # fall through to the stdlib mini-parser
-
-    anchors = []
-    in_repos = False
-    cur_name: str | None = None
-    cur_class: str | None = None
-    cur_paths: list[str] = []
-
-    def flush() -> None:
-        if cur_name and cur_class == "worktree":
-            for p in cur_paths:
-                anchors.append({"name": cur_name, "path": p})
-
-    for raw in text.splitlines():
-        if not raw.strip() or raw.lstrip().startswith("#"):
-            continue
-        indent = len(raw) - len(raw.lstrip())
-        stripped = raw.strip()
-        if indent == 0:
-            flush()
-            cur_name, cur_class, cur_paths = None, None, []
-            in_repos = stripped.rstrip() == "repos:"
-            continue
-        if not in_repos:
-            continue
-        if indent == 2 and stripped.endswith(":"):
-            flush()
-            cur_name = _yaml_unquote(stripped[:-1])
-            cur_class, cur_paths = None, []
-            continue
-        if indent >= 4 and cur_name:
-            key, sep, val = stripped.partition(":")
-            if not sep:
-                continue
-            key = key.strip()
-            if key == "class":
-                cur_class = _yaml_unquote(val)
-            elif key in ("windows", "wsl", "linux"):
-                v = _yaml_unquote(val)
-                if v:
-                    cur_paths.append(v)
-    flush()
-    return anchors
+def anchor_inventory_report(registry_root: Path) -> dict[str, Any]:
+    """Observe the original acquisition once; this is not a reusable input proof."""
+    observations: list[dict[str, str]] = []
+    if load_worktree_anchors is _ORIGINAL_ANCHOR_LOADER:
+        rows = load_worktree_anchors(registry_root, _observations=observations)
+    else:
+        rows = load_worktree_anchors(registry_root)
+        _inventory_observation(observations, registry_root, "opaque",
+                               reason="owner-coverage-unavailable")
+    return {
+        "version": 1,
+        "status": "observed" if len(observations) == 2 and all(
+            item["status"] == "observed" for item in observations
+        ) else "unavailable",
+        "qualification": "managed-observation",
+        "rows": rows,
+        "observations": observations,
+    }
 
 
 # --- Delegation nudge ---------------------------------------------------------
@@ -727,7 +647,9 @@ def _anchor_token(root_str: str) -> str:
     return re.escape(root_str) + r"(?:[\\/][^\s\"';|&]*)?(?=[\"'\s;|&]|$)"
 
 
-def _cwd_anchor_dict(path: str, canon_anchor: dict) -> dict | None:
+def _cwd_anchor_dict(
+    path: str, canon_anchor: dict[str, dict[str, str]],
+) -> dict[str, str] | None:
     """The anchor dict whose repo-root contains ``path``, or None. A linked
     worktree cwd (.git is a file) is exempt. Used for a repo-scoped git write
     that names no path -- the target is the (effective) cwd's repo."""
@@ -738,8 +660,8 @@ def _cwd_anchor_dict(path: str, canon_anchor: dict) -> dict | None:
 
 
 def _git_target_anchor(
-    kind: str, path: str, canon_anchor: dict,
-) -> dict | None:
+    kind: str, path: str, canon_anchor: dict[str, dict[str, str]],
+) -> dict[str, str] | None:
     if kind != "git-dir":
         return _cwd_anchor_dict(path, canon_anchor)
     target = _real_canon(path)
@@ -797,8 +719,8 @@ def _linked_worktree_git_dir(
 
 
 def _shell_hit(
-    cmd: str, cwd: str, anchors: list[dict], tool: str,
-) -> dict | None:
+    cmd: str, cwd: str, anchors: list[dict[str, str]], tool: str,
+) -> dict[str, str] | None:
     """Return an anchor hit for a shell command that WRITES into an anchor, or
     None. Fires only on a real write target (redirect target / command-position
     write verb argument / git mutation via ``-C <anchor>`` or the effective cwd),
@@ -880,16 +802,16 @@ def _shell_hit(
             for kind, target in git_targets:
                 if kind == "git-dir" and _real_canon(target) == linked_git_dir:
                     continue
-                a = _git_target_anchor(kind, target, canon_anchor)
-                if a is not None:
-                    return {**a, "reason": _deny_reason(a["name"], a["path"])}
+                target_anchor = _git_target_anchor(kind, target, canon_anchor)
+                if target_anchor is not None:
+                    return {**target_anchor, "reason": _deny_reason(target_anchor["name"], target_anchor["path"])}
         # 3b. Without an explicit target, a repo-scoped git write targets the
         #     EFFECTIVE cwd's repo -- catches ``cd <anchor>; git commit`` as
         #     well as a session already inside the anchor.
         if git_write and not has_repo_override:
-            a = _cwd_anchor_dict(eff_cwd, canon_anchor)
-            if a is not None:
-                return {**a, "reason": _deny_reason(a["name"], a["path"])}
+            cwd_anchor = _cwd_anchor_dict(eff_cwd, canon_anchor)
+            if cwd_anchor is not None:
+                return {**cwd_anchor, "reason": _deny_reason(cwd_anchor["name"], cwd_anchor["path"])}
         # Follow an in-command ``cd`` to a resolvable path for later segments.
         nd = _cd_target(eff, eff_cwd)
         if nd:
@@ -897,7 +819,9 @@ def _shell_hit(
     return None
 
 
-def evaluate(tool: str, args: dict, cwd: str, anchors: list[dict]) -> dict | None:
+def evaluate(
+    tool: str, args: dict[str, Any], cwd: str, anchors: list[dict[str, str]],
+) -> dict[str, str] | None:
     """Return the anchor hit (with a ``reason``), or None to allow."""
     if not anchors:
         return None
@@ -921,7 +845,7 @@ def evaluate(tool: str, args: dict, cwd: str, anchors: list[dict]) -> dict | Non
     return None
 
 
-def _hit_to_output(hit: dict, mode: str) -> dict | None:
+def _hit_to_output(hit: dict[str, str], mode: str) -> dict[str, str] | None:
     if not hit or mode == "off":
         return None
     if mode == "warn":
@@ -933,8 +857,10 @@ def _hit_to_output(hit: dict, mode: str) -> dict | None:
             "permissionDecisionReason": hit["reason"]}
 
 
-def decide(payload: dict, *, env=None, home=None,
-           anchors=None) -> dict | None:
+def decide(
+    payload: dict[str, Any], *, env: Mapping[str, str] | None = None,
+    home: str | Path | None = None, anchors: list[dict[str, str]] | None = None,
+) -> dict[str, str] | None:
     """Return a hook-output decision dict, or None to allow. Pure/injectable."""
     env = env if env is not None else os.environ
     home = Path(home) if home is not None else Path.home()

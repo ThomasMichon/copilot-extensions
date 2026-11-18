@@ -224,3 +224,66 @@ def test_registration_cannot_turn_changed_or_unknown_load_into_cli_evidence(
         owner.require_current.side_effect = AcquisitionRefused("stopped", "stop hold")
     with pytest.raises(AcquisitionRefused):
         acceptance.registration(owner, original.client)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["target-settings", "caller-settings"])
+async def test_pending_configuration_preserves_original_intent_with_fresh_readback(
+    source: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_bridge.acp_client import AcpClient
+    from agent_bridge import retained_load_configuration as configuration
+
+    options = [
+        {"id": key, "currentValue": selected,
+         "options": [{"value": value} for value in (selected, "other")]}
+        for key, selected in (("model", "original-model"), ("reasoning_effort", "high"))
+    ]
+    first = AcpClient(preference_source=source, confirmed_preferences={
+        "model": "original-model", "reasoning_effort": "high",
+    })
+    monkeypatch.setattr(first, "_resolve_caller_preferences", lambda: {
+        "model": "original-model", "reasoning_effort": "high",
+    })
+    frozen = configuration.response(configuration.intent(first), SimpleNamespace(config_options=options))
+    client = AcpClient()
+    client.adopt_session("original-native")
+    client._connection = SimpleNamespace(set_config_option=AsyncMock(return_value=SimpleNamespace(config_options=options)))
+    fresh_defaults = Mock(side_effect=AssertionError("recovery must not resolve fresh defaults"))
+    monkeypatch.setattr(client, "_resolve_caller_preferences", fresh_defaults)
+    events: list[tuple[str, dict[str, Any]]] = []
+    await configuration.finish(
+        client, [{"event_type": acceptance.EVENT, "data": {"configuration": frozen}}],
+        Mock(), lambda name, data: events.append((name, data)),
+    )
+    assert client._preferences_ready
+    assert [call.kwargs for call in client._connection.set_config_option.await_args_list] == [
+        {"config_id": key, "session_id": "original-native", "value": selected}
+        for key, selected in (("model", "original-model"), ("reasoning_effort", "high"))
+    ]
+    fresh_defaults.assert_not_called()
+    if source == "target-settings":
+        assert ("preference_selected", {"model": "original-model", "reasoning_effort": "high"}) in events
+
+
+@pytest.mark.asyncio
+async def test_pending_target_configuration_cannot_use_stale_ack_as_current_readback() -> None:
+    from agent_bridge.acp_client import AcpClient
+    from agent_bridge import retained_load_configuration as configuration
+    from agent_remote_driver.session_preferences import PreferenceApplicationError
+
+    options = [{"id": "model", "currentValue": "original-model",
+                "options": [{"value": "original-model"}, {"value": "other"}]}]
+    client = AcpClient(preference_source="target-settings", confirmed_preferences={"model": "original-model"})
+    frozen = configuration.response(configuration.intent(client), SimpleNamespace(config_options=options))
+    client.adopt_session("original-native")
+    client._connection = SimpleNamespace(set_config_option=AsyncMock(
+        return_value=SimpleNamespace(config_options=[{**options[0], "currentValue": "other"}]),
+    ))
+    with pytest.raises(PreferenceApplicationError, match="required model/effort"):
+        await configuration.finish(
+            client, [{"event_type": acceptance.EVENT, "data": {"configuration": frozen}}],
+            Mock(), Mock(),
+        )
+    assert not client._preferences_ready
+    client._connection.set_config_option.assert_awaited_once()
