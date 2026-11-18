@@ -76,6 +76,15 @@ class FakeDocker:
                     "RW": True,
                 }
             )
+        if job.workspace is not None:
+            mounts.append(
+                {
+                    "Type": "bind",
+                    "Source": str(job.workspace),
+                    "Destination": "/job/workspace",
+                    "RW": self.case != "workspace-readonly",
+                }
+            )
         values: dict[str, Any] = {
             "Id": PHYSICAL if self.case != "foreign-id" else "b" * 64,
             "Name": "/" + job.name,
@@ -304,6 +313,68 @@ def test_control_metadata_and_cli_config_never_enter_payload_binds(
     with pytest.raises(plans.PlanRefusal, match="overlaps"):
         packet.run(control=roots[role] / "control")
     assert packet.docker.calls == []
+
+
+@pytest.fixture
+def workspace_packet(packet: Fixture, tmp_path: Path) -> Fixture:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(mode=0o700)
+    packet.job = replace(packet.job, workspace=workspace)
+    packet.docker.plan = plans.plan_job(
+        packet.job,
+        results=packet.results,
+        host_home=Path.home(),
+        repository=packet.repository,
+        deadline_epoch=packet.deadline,
+        now_epoch=time.time(),
+    )
+    return packet
+
+
+@pytest.mark.parametrize("case", ["", "workspace-readonly"])
+def test_workspace_mount_is_observed_before_start_and_retained(
+    workspace_packet: Fixture, case: str
+) -> None:
+    packet = workspace_packet
+    workspace = packet.job.workspace
+    retained = workspace / "existing-runtime"
+    retained.write_bytes(b"synthetic runtime state")
+    packet.docker.case = case
+    report = packet.run()
+    assert report.result == ("fail" if case else "pass")
+    assert report.owner_stop_verified
+    assert retained.read_bytes() == b"synthetic runtime state"
+    record = json.loads((packet.control / "owned-resources.json").read_text())
+    assert record["workspace"] == str(workspace)
+    if case:
+        assert not any(
+            call[3:5] == ("container", "start") for call in packet.docker.calls
+        )
+
+
+def test_control_metadata_cannot_be_nested_in_workspace(
+    workspace_packet: Fixture,
+) -> None:
+    packet = workspace_packet
+    with pytest.raises(plans.PlanRefusal, match="overlaps"):
+        packet.run(control=packet.job.workspace / "control")
+    assert packet.docker.calls == [] and not packet.control.exists()
+
+
+def test_workspace_custody_admission_precedes_docker(
+    workspace_packet: Fixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    packet = workspace_packet
+
+    def admit(path: Path) -> None:
+        if path == packet.job.workspace:
+            raise plans.PlanRefusal("synthetic workspace custody refusal")
+        host.private_directory(path)
+
+    monkeypatch.setattr(owner, "private_directory", admit)
+    with pytest.raises(plans.PlanRefusal, match="custody"):
+        packet.run()
+    assert packet.docker.calls == [] and not packet.control.exists()
 
 
 def test_redirected_home_cannot_hide_a_whole_registered_home_mount(
