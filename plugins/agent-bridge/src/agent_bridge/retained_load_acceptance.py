@@ -153,6 +153,8 @@ def registration(owner: Any, client: Any) -> dict[str, Any]:
     """Convey only the acknowledged load on its unchanged original transport."""
     owner.require_current()
     accepted = owner.accepted_load
-    if accepted is None or accepted != prepare(owner, client):
+    if accepted is None or {
+        key: value for key, value in accepted.items() if key != "configuration"
+    } != prepare(owner, client):
         raise _refuse("Retained registration has no matching accepted native load")
     return cast(dict[str, Any], json.loads(json.dumps(accepted["activation"])))

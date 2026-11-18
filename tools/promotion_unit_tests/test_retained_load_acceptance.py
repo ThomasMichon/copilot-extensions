@@ -243,6 +243,7 @@ def test_missing_or_changed_original_load_keeps_evidence_unqualified(postload: A
     elif changed == "marker":
         b.history[0]["data"]["request"] = {"operation_id": "other"}
     elif changed == "missing-ack":
+        b.history[5]["event_type"], b.history[5]["data"] = "connect_checkpoint", {}
         b.history[6]["data"]["state"] = "failed"
     elif changed == "nonce":
         b.owner.host_record.nonce = "other"
@@ -265,5 +266,51 @@ def test_missing_or_changed_original_load_keeps_evidence_unqualified(postload: A
         else:
             b.state["cwd"] = "/other"
         Path(b.owner.host_record.state_file).write_text(json.dumps(b.state), encoding="utf-8")
+    with pytest.raises(Refused):
+        b.qualify()
+
+
+@pytest.mark.parametrize("terminal", ["finished", "failed", "absent"])
+def test_durable_ack_does_not_depend_on_later_progress(postload: Any, terminal: str) -> None:
+    b = postload
+    if terminal == "absent":
+        b.history = b.history[:6]
+    else:
+        b.history[6]["data"]["state"] = terminal
+    assert b.qualify()["session_id"] == b.owner.request.native_session_id
+
+
+@pytest.mark.parametrize("historical", [False, True])
+def test_original_configured_load_events_are_not_turn_activity(postload: Any, historical: bool) -> None:
+    b = postload
+    additions = [
+        {"event_type": name, "data": {"model": "original-model"}}
+        for name in ("usage_update", "model_applied", "preference_application", "preference_selected")
+    ]
+    b.history[6:6] = additions
+    if historical:
+        b.history.pop(5)
+    for index, item in enumerate(b.history, 1):
+        item["event_id"] = index
+    assert b.qualify()["session_id"] == b.owner.request.native_session_id
+
+
+@pytest.mark.parametrize("changed", ["early-ack", "double-load", "turn-usage", "legacy-failed", "legacy-crash"])
+def test_ack_order_and_legacy_terminal_proof_remain_required(postload: Any, changed: str) -> None:
+    b = postload
+    if changed == "early-ack":
+        b.history[4], b.history[5] = b.history[5], b.history[4]
+    elif changed == "double-load":
+        b.history[6]["data"]["state"] = "started"
+    elif changed == "turn-usage":
+        b.history.append({"event_type": "usage_update", "data": {"model": "original-model", "input_tokens": 1}})
+    else:
+        b.history.pop(5)
+        if changed == "legacy-failed":
+            b.history[5]["data"]["state"] = "failed"
+        else:
+            b.history = b.history[:5]
+    for index, item in enumerate(b.history, 1):
+        item["event_id"] = index
     with pytest.raises(Refused):
         b.qualify()

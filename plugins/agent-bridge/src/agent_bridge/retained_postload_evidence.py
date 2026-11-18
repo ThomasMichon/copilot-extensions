@@ -10,6 +10,7 @@ from . import retained_load_acceptance as load
 from .acquisition_contract import WorktreeWriterRequirement
 from .models import RetainedRecoveryRequest
 from .retained_session_recovery import _refuse
+from .retained_load_configuration import configuration_event
 
 
 def physical(host: Any, request: RetainedRecoveryRequest) -> dict[str, Any]:
@@ -55,10 +56,10 @@ def _span(events: list[dict[str, Any]], request: RetainedRecoveryRequest) -> lis
     }:
         raise _refuse("Accepted load lost its original operation marker")
     span = events[markers[0] + 1:]
-    if any(item.get("event_type") not in {
+    if any(not configuration_event(item["event_type"], item["data"]) and (item.get("event_type") not in {
         "startup_progress", "connect_checkpoint", load.EVENT, "session_state_changed",
     } or item["event_type"] == "session_state_changed" and item["data"].get("status") != "stopped"
-           for item in span):
+    ) for item in span):
         raise _refuse("Original accepted load has conflicting subsequent activity")
     progress = [
         (item["data"].get("phase"), item["data"].get("state"))
@@ -66,11 +67,15 @@ def _span(events: list[dict[str, Any]], request: RetainedRecoveryRequest) -> lis
         and item["data"].get("state") != "waiting"
     ]
     if (
-        not progress or progress[0] != ("resume", "started") or progress[-1] != ("resume", "failed")
+        not progress or progress[0] != ("resume", "started")
         or [(phase, state) for phase, state in progress if phase == "resume"]
-        != [("resume", "started"), ("resume", "failed")]
+        not in ([("resume", "started")], [("resume", "started"), ("resume", "failed")])
         or [(phase, state) for phase, state in progress if phase == "native-session-load"]
-        != [("native-session-load", "started"), ("native-session-load", "finished")]
+        not in (
+            [("native-session-load", "started")],
+            [("native-session-load", "started"), ("native-session-load", "finished")],
+            [("native-session-load", "started"), ("native-session-load", "failed")],
+        )
         or any(phase in {"native-session-new", "ready"} for phase, _ in progress)
     ):
         raise _refuse("Original history does not prove a single acknowledged retained load")
@@ -135,6 +140,26 @@ def qualify(
     activation = physical(host, request)
     accepted = [(index, item["data"]) for index, item in enumerate(span) if item["event_type"] == load.EVENT]
     if not accepted:
+        progress = [
+            (item["data"].get("phase"), item["data"].get("state"))
+            for item in span if item["event_type"] == "startup_progress"
+            and item["data"].get("state") != "waiting"
+        ]
+        if progress[-1] != ("resume", "failed") or (
+            "native-session-load", "finished"
+        ) not in progress:
+            raise _refuse("Historical load lacks its original terminal acknowledgement")
+        load_steps = [
+            index for index, item in enumerate(span) if item["event_type"] == "startup_progress"
+            and item["data"].get("phase") == "native-session-load"
+            and item["data"].get("state") != "waiting"
+        ]
+        if any(
+            configuration_event(item["event_type"], item["data"])
+            and not load_steps[0] < index < load_steps[1]
+            for index, item in enumerate(span)
+        ):
+            raise _refuse("Historical configuration escaped its original load")
         _historical(host, span, activation, worktree_path)
         return activation
     try:
@@ -148,14 +173,25 @@ def qualify(
             and item["data"].get("state") != "waiting"
         ]
         if (
-            set(document) != {"version", "request", "bridge_session_id", "writer", "host", "activation"}
+            set(document) - {"configuration"} != {
+                "version", "request", "bridge_session_id", "writer", "host", "activation",
+            }
             or type(document["version"]) is not int or document["version"] != 1
             or document["request"] != request.model_dump()
             or document["bridge_session_id"] != host.session_id
             or document["host"] != load.host_binding(host) or document["activation"] != activation
             or writer.creation_nonce != requirement.creation_nonce
             or writer.identity.installation_root != requirement.identity.installation_root
-            or not load_steps[0] < index < load_steps[1]
+            or not load_steps[0] < index
+            or len(load_steps) > 1 and index >= load_steps[1]
+            or any(
+                position < index and (
+                    configuration_event(item["event_type"], item["data"])
+                    or item["event_type"] == "startup_progress"
+                    and item["data"].get("phase") == "resume" and item["data"].get("state") == "failed"
+                )
+                for position, item in enumerate(span)
+            )
         ):
             raise ValueError("changed accepted association")
     except (ValueError, KeyError, TypeError, IndexError) as exc:

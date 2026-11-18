@@ -48,6 +48,8 @@ async def complete(
         "native_session_id": request.native_session_id, "driver": "retained-recovery",
     }
     attached = None
+    expected_events = list(events)
+    event_fault = False
 
     def require_owner() -> None:
         saved = manager.db.get_session(session_id)
@@ -59,6 +61,7 @@ async def complete(
             or saved["acp_session_id"] != request.native_session_id
             or session.status != SessionStatus.STOPPED or saved["status"] != "stopped"
             or session.client is not attached or session.background_recovery_enabled
+            or attached is not None and not attached.is_running
             or session._native_turn_transport is not None or session._handoff_in_progress
             or session._turn_start_lock.locked()
             or session._prompt_task is not None and not session._prompt_task.done()
@@ -68,7 +71,7 @@ async def complete(
             or index is None or manager._host_index is not index
             or not generation or manager._generation_id != generation
             or session.event_log is None
-            or _events(manager, session_id) != events
+            or event_fault or _events(manager, session_id) != expected_events
         ):
             raise recovery._refuse("Post-load completion requires its stopped original owner")
         gates = manager.db.execute_read(
@@ -183,6 +186,29 @@ async def complete(
                     after = await idle(owned)
                     if after["host_generation"] != before["host_generation"]:
                         raise recovery._refuse("Original Host generation changed during reattachment")
+                    from .retained_load_configuration import configuration_event, finish
+
+                    def configuration_emitted(name: str, data: dict[str, Any]) -> None:
+                        nonlocal event_fault
+                        try:
+                            require_claim()
+                            if not configuration_event(name, data):
+                                raise recovery._refuse("Unexpected activity during original configuration")
+                            manager._route_acp_event(session, name, data)
+                            observed = _events(manager, session_id)
+                            if (
+                                observed[:-1] != expected_events or len(observed) != len(expected_events) + 1
+                                or observed[-1]["event_type"] != name or observed[-1]["data"] != data
+                            ):
+                                raise recovery._refuse("Concurrent activity changed original configuration history")
+                            expected_events[:] = observed
+                        except BaseException:
+                            event_fault = True
+                            raise
+
+                    await asyncio.wait_for(finish(
+                        attached, evidence._span(events, request), require_claim, configuration_emitted,
+                    ), timeout=manager._timeouts.session_new)
                     if not worktree_lineage.register_session(
                         scope.worktree_id, request.native_session_id,
                         pid=activation["child"]["pid"], worktree_dir=scope.worktree_path,
@@ -192,7 +218,7 @@ async def complete(
                     await require_head()
                     await idle(owned)
                     require_claim()
-                    if _events(manager, session_id) != events:
+                    if _events(manager, session_id) != expected_events:
                         raise recovery._refuse("Original accepted-load history changed during completion")
                     with manager.db._runtime_transaction(write=True, full_sync=True) as conn:
                         saved = conn.execute(

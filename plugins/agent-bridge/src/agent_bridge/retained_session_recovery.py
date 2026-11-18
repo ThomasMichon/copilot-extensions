@@ -170,10 +170,15 @@ class RetainedRecovery:
             ):
                 raise _refuse("Original retained recovery native request changed")
             from .retained_load_acceptance import prepare, record
+            from .retained_load_configuration import intent, response
 
             acceptance = prepare(self, client)
+            preferences = intent(client)
             self.native_rpc_started = True
             result = await method(**kwargs)
+            configuration = response(preferences, result)
+            if configuration is not None:
+                acceptance["configuration"] = configuration
             record(self, acceptance)
             return result
 

@@ -231,6 +231,9 @@ returning to preference application or registration. The association stores a
 nonce digest, not the Host's attach credential. A timeout without an
 acknowledgement never manufactures this event. A stop arriving during the RPC
 does not erase an acknowledgement, grant permission or complete registration.
+The additive configuration snapshot retains the load response's advertised
+options and original preference intent, including resolved caller settings.
+It is not proof that subsequent configuration succeeded.
 The recovery row's request/state schema remains unchanged, so an older reader
 preserves unknown custody and rejects accepted-load evidence as a no-load
 failure.
@@ -252,6 +255,17 @@ Host through its existing generation owner and authenticates a current idle
 child separately from the historical load acknowledgement. Reattachment only
 initializes the transport and adopts that same conversation: no new Host,
 native load, new conversation, prompt or queue drain.
+
+For a durable acknowledgement, missing terminal progress or a later failed
+configuration phase does not negate the accepted load. If configuration did
+not finish, reconciliation requires its original response snapshot and applies
+that original intent through the reattached client's existing configuration
+owner. Target-settings mode forces fresh configuration readback rather than
+treating old advertised values as current; missing required confirmation stays
+held. Only configuration events advance the checked history during this step;
+unrelated concurrent activity, stops and ownership changes refuse completion.
+An older acknowledgement without the snapshot can finish only when its original
+history affirmatively records completed configuration.
 
 An older writer's affirmative tagged load-finished history can be adapted only
 when the retained Host's immutable state and birth evidence associate its launch

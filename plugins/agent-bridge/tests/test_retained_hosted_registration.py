@@ -36,7 +36,8 @@ pytestmark = pytest.mark.contract("agent_bridge.retained_hosted_registration")
 @pytest.mark.asyncio
 @pytest.mark.parametrize("completion", [
     "direct", "accepted", "historical", "committed", "restart", "lost-response",
-    "stop", "foreign", "raced-stop",
+    "stop", "foreign", "raced-stop", "configured", "config-failed", "config-crash",
+    "config-missing", "config-stop", "config-activity",
 ])
 async def test_acknowledged_hosted_load_registers_without_a_cli_hold(
     session_manager: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
@@ -78,12 +79,14 @@ async def test_acknowledged_hosted_load_registers_without_a_cli_hold(
     policy.parent.mkdir(parents=True)
     policy.write_text("expose_agent: true\n", encoding="utf-8")
     transcript = tmp_path / "acp.jsonl"
+    configured = completion.startswith("config")
 
     async def resolve(*_args: Any, **_kwargs: Any) -> Any:
+        mode = "config-failed" if completion == "config-failed" else "configured"
         return [
             interpreter, str(Path(__file__).with_name("cold_drain_peer.py")),
             str(transcript), NATIVE,
-        ], str(checkout), dict(os.environ)
+        ] + ([mode] if configured else []), str(checkout), dict(os.environ)
 
     monkeypatch.setattr("agent_bridge.transport.resolve_local_launch", resolve)
     monkeypatch.setattr("agent_bridge.local_static_preparation.prepare_for_launch", AsyncMock())
@@ -108,13 +111,19 @@ async def test_acknowledged_hosted_load_registers_without_a_cli_hold(
         session.session_id, session.name, None, target.cwd, "local", "stopped", time.time(),
         acp_session_id=NATIVE, target_json=target.to_json(),
     )
-    session.event_log = EventLog(db=manager.db, session_id=session.session_id)
+    event_log = EventLog(db=manager.db, session_id=session.session_id)
+    session.event_log = event_log
     manager._sessions[session.session_id] = session
     request = RetainedRecoveryRequest(
         operation_id="original-load", journal_key="a" * 64, native_session_id=NATIVE,
         head_revision=before.head_revision, bridge_installation=str(tmp_path / "bridge"),
     )
     owner = RetainedRecovery(manager, session, request, target.to_json(), asyncio.current_task())
+    if configured:
+        monkeypatch.setattr("agent_bridge.session_host_connection.client_preferences", lambda *_args: {
+            "preference_source": "target-settings",
+            "confirmed_preferences": {"model": "original-model", "reasoning_effort": "high"},
+        })
     if completion == "direct":
         monkeypatch.setattr(owner, "require_current", Mock())
     else:
@@ -152,24 +161,53 @@ async def test_acknowledged_hosted_load_registers_without_a_cli_hold(
                 original.accepted_load = document
             monkeypatch.setattr(acceptance, "record", legacy_record)
         manager._set_background_recovery_enabled(session, False)
+        if completion == "config-crash":
+            event_log.append("startup_progress", {"phase": "native-session-load", "state": "finished"})
         session.event_log.append(settlement.START_EVENT, {"version": 1, "request": request.model_dump()})
     owner.hosted_epoch = acceptance.epoch()
     client = None
     try:
-        progress = startup_progress.StartupProgress(session.event_log.append)
+        def progress_event(name: str, data: dict[str, Any]) -> None:
+            if completion == "config-crash" and data.get("phase") in {"native-session-load", "resume"} and (
+                data.get("state") in {"finished", "failed"}
+            ):
+                return
+            event_log.append(name, data)
+
+        progress = startup_progress.StartupProgress(progress_event)
         token = startup_progress._active.set(progress)
         progress.update("resume", "started")
+        failed_config = configured and completion != "configured"
         try:
-            client, native = await manager._connect_via_session_host(
-                target, tracker=ConnectTracker(), session_id=session.session_id,
-                on_acp_event=lambda event, data: manager._route_acp_event(session, event, data),
-                permission_callback=None, load_session_id=NATIVE, recovery_operation=owner,
-            )
+            from agent_bridge.acp_client import AcpClient
+            apply = AcpClient._apply_model_config
+
+            async def fail_configuration(self: Any, *args: Any, **kwargs: Any) -> None:
+                assert owner.accepted_load is not None
+                raise RuntimeError("fixture frontend lost after durable ACK")
+
+            with monkeypatch.context() as startup:
+                if failed_config and completion != "config-failed":
+                    startup.setattr(AcpClient, "_apply_model_config", fail_configuration)
+                try:
+                    client, native = await manager._connect_via_session_host(
+                        target, tracker=ConnectTracker(), session_id=session.session_id,
+                        on_acp_event=lambda event, data: manager._route_acp_event(session, event, data),
+                        permission_callback=None, load_session_id=NATIVE, recovery_operation=owner,
+                    )
+                except RuntimeError as exc:
+                    assert failed_config
+                    assert (
+                        "required model/effort was not verified" in str(exc) if completion == "config-failed"
+                        else str(exc).endswith("fixture frontend lost after durable ACK")
+                    )
+                    client, native = session.client, NATIVE
+            assert AcpClient._apply_model_config is apply
         finally:
             # Fault after the actual ACK, before the caller can finish registration.
             progress.update("resume", "failed")
             startup_progress._active.reset(token)
-        assert native == NATIVE and owner.accepted_load is not None
+        assert native == NATIVE and owner.accepted_load is not None and client is not None
         activation = acceptance.registration(owner, client)
         child = activation["child"]["pid"]
         assert not session_liveness.session_process_owns_hold(
@@ -199,6 +237,48 @@ async def test_acknowledged_hosted_load_registers_without_a_cli_hold(
                 session = manager.get_session(previous_session.session_id)
                 assert session is not None and session is not previous_session and session.client is None
             original_events = manager.db.get_events(session.session_id)
+            if completion in {"config-stop", "config-activity"}:
+                route = manager._route_acp_event
+
+                def concurrent_activity(current: Any, name: str, data: dict[str, Any]) -> None:
+                    route(current, name, data)
+                    if name == "preference_resolution":
+                        if completion == "config-stop":
+                            manager.db.execute_write(
+                                "UPDATE sessions SET cold_recovery_stop_token='config-stop' WHERE id=?",
+                                (session.session_id,),
+                            )
+                        else:
+                            event_log.append("user_message", {"text": "concurrent fixture activity"})
+
+                lineage = path.read_bytes()
+                with monkeypatch.context() as held:
+                    held.setattr(manager, "_route_acp_event", concurrent_activity)
+                    with pytest.raises(AcquisitionRefused):
+                        await settlement.inspect(manager, session.session_id, request.operation_id, lambda: True)
+                assert session.client is None and session.status == SessionStatus.STOPPED
+                assert manager.db.execute_read("SELECT * FROM acquisition_launch_gates")
+                assert path.read_bytes() == lineage and manager._host_index.get(session.session_id) is not None
+                messages = [json.loads(line) for line in transcript.read_text().splitlines()]
+                assert [item["method"] for item in messages if "method" in item] == [
+                    "initialize", "session/load", "initialize",
+                ]
+                return
+            if completion == "config-missing":
+                accepted = next(item for item in original_events if item["event_type"] == acceptance.EVENT)
+                accepted["data"].pop("configuration")
+                manager.db.execute_write(
+                    "UPDATE events SET data_json=? WHERE session_id=? AND event_id=?",
+                    (json.dumps(accepted["data"]), session.session_id, accepted["event_id"]),
+                )
+                with pytest.raises(AcquisitionRefused, match="pending configuration response"):
+                    await settlement.inspect(manager, session.session_id, request.operation_id, lambda: True)
+                assert session.client is None and manager.db.execute_read("SELECT * FROM acquisition_launch_gates")
+                messages = [json.loads(line) for line in transcript.read_text().splitlines()]
+                assert [item["method"] for item in messages if "method" in item] == [
+                    "initialize", "session/load", "initialize",
+                ]
+                return
             if completion in {"stop", "foreign", "raced-stop"}:
                 if completion == "stop":
                     manager.db.execute_write(
@@ -269,7 +349,14 @@ async def test_acknowledged_hosted_load_registers_without_a_cli_hold(
             assert result == await settlement.inspect(
                 manager, session.session_id, request.operation_id, lambda: True,
             )
-            assert manager.db.get_events(session.session_id) == original_events
+            final_events = manager.db.get_events(session.session_id)
+            assert final_events[:len(original_events)] == original_events
+            if failed_config:
+                assert client._preferences_ready
+                assert client.confirmed_preferences == {"model": "original-model", "reasoning_effort": "high"}
+                assert any(item["event_type"] == "preference_selected" for item in final_events[len(original_events):])
+            else:
+                assert final_events == original_events
             assert session.status == SessionStatus.IDLE
             assert not manager.db.execute_read("SELECT * FROM acquisition_launch_gates")
             if completion == "lost-response":
@@ -295,6 +382,7 @@ async def test_acknowledged_hosted_load_registers_without_a_cli_hold(
         assert not (state / "resident-calls").exists()
         original_host = manager._host_index.get(session.session_id)
         if completion == "direct":
+            assert client is not None
             manager._set_background_recovery_enabled(session, False)
             await client.shutdown()
             session.client = None
@@ -310,9 +398,15 @@ async def test_acknowledged_hosted_load_registers_without_a_cli_hold(
         assert path.read_bytes() == registered
         messages = [json.loads(line) for line in transcript.read_text().splitlines()]
         assert sum("boot" in item for item in messages) == 1
-        assert [item["method"] for item in messages if "method" in item] == [
-            "initialize", "session/load", "initialize",
-        ] + (["initialize"] if completion == "lost-response" else [])
+        assert [item["method"] for item in messages if "method" in item] == (
+            ["initialize", "session/load"]
+            + (["session/set_config_option"] * 2 if configured and (
+                not failed_config or completion == "config-failed"
+            ) else [])
+            + ["initialize"]
+            + (["session/set_config_option"] * 2 if failed_config else [])
+            + (["initialize"] if completion == "lost-response" else [])
+        )
         assert not manager.db.execute_read("SELECT * FROM turns")
     finally:
         client = client or session.client

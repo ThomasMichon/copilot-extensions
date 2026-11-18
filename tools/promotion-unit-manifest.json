@@ -5418,7 +5418,17 @@
         "tools/promotion_unit_tests/test_retained_load_acceptance.py::test_missing_or_changed_original_load_keeps_evidence_unqualified[subsequent-prompt]",
         "tools/promotion_unit_tests/test_retained_load_acceptance.py::test_missing_or_changed_original_load_keeps_evidence_unqualified[historical-state]",
         "tools/promotion_unit_tests/test_retained_load_acceptance.py::test_missing_or_changed_original_load_keeps_evidence_unqualified[historical-time]",
-        "tools/promotion_unit_tests/test_retained_load_acceptance.py::test_missing_or_changed_original_load_keeps_evidence_unqualified[historical-cwd]"
+        "tools/promotion_unit_tests/test_retained_load_acceptance.py::test_missing_or_changed_original_load_keeps_evidence_unqualified[historical-cwd]",
+        "tools/promotion_unit_tests/test_retained_load_acceptance.py::test_durable_ack_does_not_depend_on_later_progress[finished]",
+        "tools/promotion_unit_tests/test_retained_load_acceptance.py::test_durable_ack_does_not_depend_on_later_progress[failed]",
+        "tools/promotion_unit_tests/test_retained_load_acceptance.py::test_durable_ack_does_not_depend_on_later_progress[absent]",
+        "tools/promotion_unit_tests/test_retained_load_acceptance.py::test_original_configured_load_events_are_not_turn_activity[False]",
+        "tools/promotion_unit_tests/test_retained_load_acceptance.py::test_original_configured_load_events_are_not_turn_activity[True]",
+        "tools/promotion_unit_tests/test_retained_load_acceptance.py::test_ack_order_and_legacy_terminal_proof_remain_required[early-ack]",
+        "tools/promotion_unit_tests/test_retained_load_acceptance.py::test_ack_order_and_legacy_terminal_proof_remain_required[double-load]",
+        "tools/promotion_unit_tests/test_retained_load_acceptance.py::test_ack_order_and_legacy_terminal_proof_remain_required[turn-usage]",
+        "tools/promotion_unit_tests/test_retained_load_acceptance.py::test_ack_order_and_legacy_terminal_proof_remain_required[legacy-failed]",
+        "tools/promotion_unit_tests/test_retained_load_acceptance.py::test_ack_order_and_legacy_terminal_proof_remain_required[legacy-crash]"
     ],
     "coverage_targets": [
         "plugins/agent-worktrees/src/agent_worktrees/resource_delivery.py",
@@ -5786,7 +5796,8 @@
         "plugins/agent-worktrees/src/agent_worktrees/retained_hosted_activation.py",
         "plugins/agent-worktrees/src/agent_worktrees/tracking_session_activations.py",
         "plugins/agent-bridge/src/agent_bridge/retained_load_acceptance.py",
-        "plugins/agent-bridge/src/agent_bridge/retained_postload_evidence.py"
+        "plugins/agent-bridge/src/agent_bridge/retained_postload_evidence.py",
+        "plugins/agent-bridge/src/agent_bridge/retained_load_configuration.py"
     ],
     "sources": {
         "plugins/agent-worktrees/src/agent_worktrees/git_process.py": "6cc675a4d988e7d1fd6b0d76a48fde5909f78f085ef194ec69625c6334b4f80f",
@@ -6649,8 +6660,9 @@
         "plugins/agent-vault/src/agent_vault/source_start.py": "9c023d7099a6aa762e82f91539018cbbd4f75ebd76e9061fe8bc10d9c6e74970",
         "tools/promotion_unit_tests/test_hosted_activation.py": "20b44b2d24ea15e988b07a81d15eb01643a137d62666ff9b23e29fe8cfaf7f1c",
         "plugins/agent-worktrees/src/agent_worktrees/retained_hosted_activation.py": "3e854addd94b96a577c4222b2808073fcd17224f8d97ca0f261fadb783f28c4a",
-        "plugins/agent-bridge/src/agent_bridge/retained_load_acceptance.py": "f315ca94adb740d0615b4db2f33e606a2869d098852f65c54b669bcb9a00f4d3",
-        "tools/promotion_unit_tests/test_retained_load_acceptance.py": "1ea57063547f6c7b7cd9f1e5d6e8c527f6a7596e2d9150f85fcda30b598412fa",
-        "plugins/agent-bridge/src/agent_bridge/retained_postload_evidence.py": "5429d6ad548694d19a6442e5f0c1b18a6dcdec31ce9be7f354e218aa28635da8"
+        "plugins/agent-bridge/src/agent_bridge/retained_load_acceptance.py": "a160be10ff0952804378346a5445f4186adb86feb66f8663c111605839706d3c",
+        "tools/promotion_unit_tests/test_retained_load_acceptance.py": "739161f95c1e4352288a3424ced7478bc0bfb50629ea793551f4c493d4181c6b",
+        "plugins/agent-bridge/src/agent_bridge/retained_postload_evidence.py": "4b0320daaf283ed6795555bdc8d5ba219d3edab2a8bf270a77ee38022b84cc03",
+        "plugins/agent-bridge/src/agent_bridge/retained_load_configuration.py": "ee6ac53a49f6ac85dc98891cf5ba74b0d73e4048a922a82bbf4fec90a5b54f35"
     }
 }
