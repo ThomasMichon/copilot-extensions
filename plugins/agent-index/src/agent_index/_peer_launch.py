@@ -572,8 +572,15 @@ def launch(
     if os.name != "nt":
         os.execve(python, command, environment)
     # Keep inherited stdio and process-tree ownership, not a detached child.
+    executable = str(python)
+    path_units = len(executable.encode("utf-16-le", errors="surrogatepass")) // 2
+    if path_units >= 260 and not executable.startswith("\\\\?\\"):
+        executable = (
+            "\\\\?\\UNC\\" + executable[2:] if executable.startswith("\\\\")
+            else "\\\\?\\" + executable
+        )
     return subprocess.call(
-        command, env=environment,
+        command, executable=executable, env=environment,
         stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr,
         **no_window_kwargs(),
     )

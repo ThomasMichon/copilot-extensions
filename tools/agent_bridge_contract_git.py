@@ -27,6 +27,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 _GIT_OBJECT_RE = re.compile(r"^[0-9a-f]{40}$")
 _LOCAL_GIT_TIMEOUT = 10
+_MAX_BATCH_QUERIES = 256
 _OBJECT_TYPES: dict[str, str | None] = {}
 _BLOB_HASHES: dict[str, str | None] = {}
 _SOURCE_BLOBS: dict[tuple[str, str], str | None] = {}
@@ -37,13 +38,21 @@ _MANIFEST = "plugins/agent-bridge/plugin.json"
 def _batch(
     queries: list[str], *, root: Path | None = None,
 ) -> Iterable[tuple[str, str | None, str | None, bytes]]:
+    """Keep each local child bounded as retained provenance grows."""
+    for offset in range(0, len(queries), _MAX_BATCH_QUERIES):
+        yield from _read_batch(queries[offset:offset + _MAX_BATCH_QUERIES], root=root)
+
+
+def _read_batch(
+    queries: list[str], *, root: Path | None = None,
+) -> Iterable[tuple[str, str | None, str | None, bytes]]:
     require_local_object_reads()
     result = subprocess.run(
         ["git", "-C", str(REPO if root is None else root), "cat-file", "--batch"],
         input=("\n".join(queries) + "\n").encode("utf-8"),
         capture_output=True, check=True, env=clean_git_environment(),
         timeout=_LOCAL_GIT_TIMEOUT,
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if sys.platform == "win32" else 0,
     )
     stream = io.BytesIO(result.stdout)
     for query in queries:
@@ -157,7 +166,7 @@ def require_local_object_reads() -> None:
     result = subprocess.run(
         ["git", "--version"], capture_output=True, text=True, check=True,
         env=clean_git_environment(), timeout=_LOCAL_GIT_TIMEOUT,
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if sys.platform == "win32" else 0,
     )
     match = re.search(r"\b(\d+)\.(\d+)(?:\.(\d+))?", result.stdout)
     if match is None or tuple(map(int, match.groups(default="0"))) < (2, 45, 0):
@@ -205,7 +214,7 @@ def git(*args: str) -> subprocess.CompletedProcess[str]:
         check=False,
         env=clean_git_environment(),
         timeout=_LOCAL_GIT_TIMEOUT,
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if sys.platform == "win32" else 0,
     )
 
 
@@ -241,7 +250,7 @@ def git_file_sha256(commit: str, path: str) -> str | None:
         check=False,
         env=clean_git_environment(),
         timeout=_LOCAL_GIT_TIMEOUT,
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if sys.platform == "win32" else 0,
     )
     if result.returncode != 0:
         return None
@@ -262,7 +271,7 @@ def blob_sha256(blob: str) -> str | None:
         check=False,
         env=clean_git_environment(),
         timeout=_LOCAL_GIT_TIMEOUT,
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if sys.platform == "win32" else 0,
     )
     if result.returncode != 0:
         return None
