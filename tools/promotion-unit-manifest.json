@@ -2,6 +2,15 @@
     "profile": "copilot-extensions.promotion-units/v1",
     "max_seconds": 300,
     "nodes": [
+        "tools/promotion_unit_tests/test_watch_storage_contract.py::test_incompatible_contract_refuses_read_and_final_write_guard[newer]",
+        "tools/promotion_unit_tests/test_watch_storage_contract.py::test_incompatible_contract_refuses_read_and_final_write_guard[future]",
+        "tools/promotion_unit_tests/test_watch_storage_contract.py::test_incompatible_contract_refuses_read_and_final_write_guard[invalid]",
+        "tools/promotion_unit_tests/test_watch_storage_contract.py::test_incompatible_contract_refuses_read_and_final_write_guard[schema]",
+        "tools/promotion_unit_tests/test_watch_storage_contract.py::test_incompatible_contract_refuses_read_and_final_write_guard[format]",
+        "tools/promotion_unit_tests/test_watch_storage_contract.py::test_legacy_or_missing_state_allows_unchanged_list_write[empty]",
+        "tools/promotion_unit_tests/test_watch_storage_contract.py::test_legacy_or_missing_state_allows_unchanged_list_write[legacy]",
+        "tools/promotion_unit_tests/test_watch_storage_contract.py::test_legacy_or_missing_state_allows_unchanged_list_write[missing]",
+        "tools/promotion_unit_tests/test_watch_storage_contract.py::test_guard_uses_latest_bytes_not_prior_read",
         "tools/promotion_unit_tests/test_git_launch_composition.py::test_parent_replaced_by_file_obeys_git_selection_policy[cache]",
         "tools/promotion_unit_tests/test_git_launch_composition.py::test_parent_replaced_by_file_obeys_git_selection_policy[hint]",
         "tools/promotion_unit_tests/test_git_launch_composition.py::test_parent_replaced_by_file_obeys_git_selection_policy[explicit]",
@@ -5485,6 +5494,7 @@
         "tools/promotion_unit_tests/test_typecheck_new_code.py::test_ordinary_installer_uses_its_composed_sdk_and_preserves_outer_scope[True-True]"
     ],
     "coverage_targets": [
+        "plugins/agent-pull-requests/src/agent_pull_requests/watch_storage.py",
         "plugins/agent-worktrees/src/agent_worktrees/resource_delivery.py",
         "libs/plugin-resolve/src/plugin_resolve/git.py",
         "plugins/agent-vault/src/agent_vault/config.py",
@@ -5857,6 +5867,8 @@
         "tools/promotion_source_history.py"
     ],
     "sources": {
+        "plugins/agent-pull-requests/src/agent_pull_requests/watch_storage.py": "c3e02e4ad35b5b0694dc840d8d826a21b06299716823e199d58b459a8184d5e1",
+        "tools/promotion_unit_tests/test_watch_storage_contract.py": "7833a5b98f9522ad308e408c0265bed848337b345043b7f29be468f0c2871db2",
         "plugins/agent-worktrees/src/agent_worktrees/git_process.py": "6cc675a4d988e7d1fd6b0d76a48fde5909f78f085ef194ec69625c6334b4f80f",
         "plugins/agent-worktrees/src/agent_worktrees/daemon_launch_context.py": "b8250e9aaef5fdc70f881b979d52d164c408aa08cf8322278be11569a01c3d30",
         "tools/promotion_unit_tests/test_git_launch_composition.py": "13cc8825da50b3d667d10ef7d38dedd9d52d98bcbef961535c9cc53834e76531",
