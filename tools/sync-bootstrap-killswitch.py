@@ -144,7 +144,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     pairs.extend((pretool.read_bytes(), REPO / target) for target in (
         "plugins/agent-worktrees/scripts/pretool_killswitch.py",
-        "plugins/copilot-extensions-harness/scripts/pretool_killswitch.py",
+        "plugins/copilot-extensions-maintainer/scripts/pretool_killswitch.py",
         "plugins/agent-machines/src/agent_machines/pretool_killswitch.py",
     ))
 
@@ -168,7 +168,7 @@ def main(argv: list[str] | None = None) -> int:
     call_site_gaps = _call_site_gaps(plugins)
     for entry, marker in (
         ("plugins/agent-worktrees/scripts/hook_client.py", "switch.is_active()"),
-        ("plugins/copilot-extensions-harness/scripts/copilot-mention-guard.py", "switch.is_active()"),
+        ("plugins/copilot-extensions-maintainer/scripts/copilot-mention-guard.py", "switch.is_active()"),
         ("plugins/agent-machines/src/agent_machines/__main__.py", "pretool_killswitch.register_parser(sub)"),
     ):
         source = REPO / entry

@@ -147,3 +147,12 @@ def record(owner: Any, acceptance: dict[str, Any]) -> None:
     owner.session.event_log.append(EVENT, acceptance)
     owner.manager.db.flush()
     owner.accepted_load = acceptance
+
+
+def registration(owner: Any, client: Any) -> dict[str, Any]:
+    """Convey only the acknowledged load on its unchanged original transport."""
+    owner.require_current()
+    accepted = owner.accepted_load
+    if accepted is None or accepted != prepare(owner, client):
+        raise _refuse("Retained registration has no matching accepted native load")
+    return cast(dict[str, Any], json.loads(json.dumps(accepted["activation"])))

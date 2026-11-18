@@ -555,22 +555,29 @@ plugin.)
 
 **A finding that touches an external plugin is outside your repo's control.**
 The scan says so, names the upstream `source` and version, and points at the fix
-path. You can't edit the plugin in-repo, so choose:
+path. A finding does not assign source work or authorize a report, configuration
+change or publication. Keep the assigned outcome and effect authority:
 
-1. **In-repo workaround** — reclaim the phrase with a local authority-override
-   skill, disable the offending plugin for this repo, or narrow *your* trigger.
-2. **Upstream fix** — file an issue / open a PR on the plugin's source repo. If a
-   **`<repo>-harness`** plugin is enabled for that source, use its
-   **`contributing-to-<repo>`** skill as the concrete fix path (for the
-   copilot-extensions suite that's **`copilot-extensions-harness` →
-   `contributing-to-copilot-extensions`**). This `<repo>-harness → contributing`
-   hop is the **skill bridge**: it turns "this is broken in an external plugin"
-   into "here is exactly where and how to fix it."
+1. **Authorized local workaround** — within the current assignment, reclaim a
+   phrase with a local authority override, disable the offending plugin, or
+   narrow an owned trigger. Local repair does not authorize upstream work.
+2. **Incidental product-task finding** — report the error, offer a bug report at
+   the established destination, and return to the product task. Do not
+   automatically file an issue, open a source PR, or wait for upstream review,
+   merge, release or rollout. Continue independent work or identify the exact
+   blocked step.
+3. **Separately assigned source fix** — use the owning repository's contribution
+   procedure and normal required tests, understood rebases and fork/PR flow.
+   The optional **`<repo>-maintainer` → `contributing-to-<repo>`** skill bridge
+   supplies procedures, not authority. Here that is
+   **`copilot-extensions-maintainer:contributing-to-copilot-extensions`**.
+   Repository docs and native adapters remain usable without enabling the
+   optional plugin; do not auto-enable it to act on a finding.
 
 Some collisions are intentional (an authority override that deliberately
 reclaims a phrase); judge each in the design critique rather than "fixing" it
-blindly. And **never edit an external plugin's installed payload in place** — it
-is overwritten on update; fix it in-repo or upstream.
+blindly. And **never edit an external plugin's installed payload in place**.
+Canonical installer-equivalent repair and assigned source work remain distinct.
 
 ### 1. Design critique (rubber-duck)
 
@@ -634,14 +641,18 @@ Cross-check each artifact against the skill that governs its format:
 Produce a **prioritized findings list** (blocking vs non-blocking), each with the
 file and the concrete fix. Then:
 
-- **Fix the minor issues in place** — trigger tweaks, missing frontmatter,
-  format nits, obvious contradictions — with atomic commits.
+- **Fix minor issues only within assigned edit scope** — trigger tweaks,
+  missing frontmatter, format nits and obvious contradictions may use atomic
+  commits when editing is authorized. A review-only request stays read-only.
 - **Surface the structural ones** to the operator — skills that should merge,
   a missing anti-recursion guard, an instruction that needs a new surface —
   before acting, since they change design.
-- **Treat external-plugin findings as upstream work.** Do not edit the installed
-  payload. Configure/disable it locally or use the reported source and
-  contribution path to fix the owning repository.
+- **Treat external-plugin findings as findings, not new assignments.** Do not
+  edit installed payloads, automatically file issues or open source PRs.
+  Supporting tooling/harness source stays frozen during another product's task.
+  Report, offer a bug report and return; do not wait for an upstream fix.
+  Local configuration changes need applicable authority. External source fixes
+  require a separate assignment and the owning repository's contribution flow.
 
-Re-run after fixes until the design critique is clean and every artifact
-conforms.
+Re-run after authorized in-scope fixes. Preserve unresolved external findings in
+the report rather than expanding the assignment to make every artifact clean.

@@ -129,6 +129,7 @@ def register_session(
     pane: str | None = None,
     worktree_dir: str | None = None,
     owner_prefix: tuple[str, ...] | None = None,
+    hosted_activation: dict[str, Any] | None = None,
 ) -> bool:
     """Register an ACP session into the ground layer (idempotent; fail-open).
 
@@ -157,6 +158,8 @@ def register_session(
         args += ["--pid", str(pid)]
     if pane:
         args += ["--pane", pane]
+    if hosted_activation is not None:
+        args += ["--retained-hosted-activation", json.dumps(hosted_activation, sort_keys=True)]
     proc = _run(args, cwd=worktree_dir, owner_prefix=owner_prefix)
     return bool(proc and proc.returncode == 0)
 

@@ -9,8 +9,8 @@ SCRIPT = Path(__file__).resolve().parent / "check-marketplace-isolation.py"
 REPO = SCRIPT.parent.parent
 
 _spec = importlib.util.spec_from_file_location("check_marketplace_isolation", SCRIPT)
-cmi = importlib.util.module_from_spec(_spec)
 assert _spec and _spec.loader
+cmi = importlib.util.module_from_spec(_spec)
 sys.modules[_spec.name] = cmi
 _spec.loader.exec_module(cmi)
 
@@ -213,7 +213,7 @@ def test_payload_catalog_adopter_capabilities_avoid_bare_global_commands() -> No
         "agent-vault",
         "agent-worktrees",
         "context-handoff",
-        "copilot-extensions-harness",
+        "copilot-extensions-maintainer",
         "customizing-copilot",
         "efforts",
         "harness-knowledge",

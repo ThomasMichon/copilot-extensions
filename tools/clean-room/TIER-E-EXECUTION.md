@@ -5,7 +5,7 @@
 > have it read our docs and act"* into a repeatable, judged PASS/FAIL. It fills
 > the gap between the Tier-E *concept* (already defined in
 > [`ARCHITECTURE.md`](./ARCHITECTURE.md) §1, the [vision](../../visions/clean-room-validation/README.md),
-> and the [`clean-room-judge`](../../plugins/copilot-extensions-harness/agents/clean-room-judge.agent.md)
+> and the [`clean-room-judge`](../../plugins/copilot-extensions-maintainer/agents/clean-room-judge.agent.md)
 > agent) and a working implementation. **Status: beachhead BUILT** — the runner
 > `-Mode eval` path, the `lib/literal-mode.md` fixture, and the reference
 > `agent-vault-eval` scenario are implemented and validated end-to-end (drive →
@@ -58,7 +58,7 @@ a green run. Every Tier-E run therefore puts the driven Copilot in a
   "probably fine."
 
 This is injected as **run-time instructions to the driven agent** (§6), never
-baked into the plugins, and the [`clean-room-judge`](../../plugins/copilot-extensions-harness/agents/clean-room-judge.agent.md)
+baked into the plugins, and the [`clean-room-judge`](../../plugins/copilot-extensions-maintainer/agents/clean-room-judge.agent.md)
 scores under the same rule: **a pass that depended on improvised self-repair is a
 FALSE-PASS → FAIL**, and the finding is a *scenario/plugin* defect.
 
@@ -484,9 +484,9 @@ see what it does*.
 - Operator guide: [`README.md`](./README.md)
 - Vision: [`visions/clean-room-validation/README.md`](../../visions/clean-room-validation/README.md)
   (turn-key assembly acceptance is the ultimate F3-E gate)
-- Judge: [`clean-room-judge`](../../plugins/copilot-extensions-harness/agents/clean-room-judge.agent.md)
+- Judge: [`clean-room-judge`](../../plugins/copilot-extensions-maintainer/agents/clean-room-judge.agent.md)
   (the evaluator this design feeds)
 - Skill: **`validating-in-clean-room`** (the caller that assembles the judge packet
-  and records the verdict) — `copilot-extensions-harness` plugin
+  and records the verdict) — `copilot-extensions-maintainer` plugin
 - Transport: [`bridge_register.py`](./bridge_register.py) (the `docker exec … copilot
   --acp --stdio` bridge agent used to drive the box)
