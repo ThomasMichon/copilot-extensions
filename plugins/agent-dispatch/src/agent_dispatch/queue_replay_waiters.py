@@ -9,24 +9,11 @@ from typing import Any, TYPE_CHECKING
 from .delegated_replay_contract import replay_scope
 from .queue_common import Task
 from .queue_records import TaskError
-from .repository_feed_waiter_contract import CACHE_PROTOCOL, feed_service_scope
+from .repository_feed_waiter_contract import CACHE_PROTOCOL, FeedWaiterPage, feed_service_scope
 
 
 def _service_scope(binding: dict[str, Any]) -> str:
     return feed_service_scope(binding) if binding.get("protocol") == CACHE_PROTOCOL else replay_scope(binding)
-
-
-def _binding_selector(binding: dict[str, Any]) -> tuple[str, tuple[str, ...]]:
-    if binding.get("protocol") == CACHE_PROTOCOL:
-        paths = ("protocol", "socket", "target", "consumer", "reviewer",
-                 "identity.namespace", "identity.provider", "identity.endpoint",
-                 "identity.account", "identity.repo")
-        values = tuple(binding[path] if "." not in path else binding["identity"][path[9:]]
-                       for path in paths)
-        return "".join(
-            f" AND json_extract(delegation_json, '$.feed.binding.{path}') = ?" for path in paths
-        ), values
-    return "", ()
 
 
 class ReplayWaiterProgressMixin:
@@ -66,25 +53,51 @@ class ReplayWaiterProgressMixin:
     ) -> list[dict[str, Any]]:
         if type(limit) is not int or not 1 <= limit <= 32 or type(after) is not int or after < 0:
             raise ValueError("invalid replay scan bound")
-        selector, binding_params = _binding_selector(binding)
+        if binding.get("protocol") == CACHE_PROTOCOL:
+            raise ValueError("repository-feed scans require scan_repository_feed_waiters continuation")
         with self._connect() as conn:
             rows = conn.execute(
                 "SELECT * FROM run_waiters WHERE replay_scope = ? AND replay_settled = 0 "
-                + selector + " AND id > ? ORDER BY id LIMIT ?",
-                (_service_scope(binding), *binding_params, after, limit),
+                "AND id > ? ORDER BY id LIMIT ?", (replay_scope(binding), after, limit),
             ).fetchall()
         return [self._run_waiter_from_row(row) for row in rows]
+
+    def scan_repository_feed_waiters(
+        self, binding: dict[str, Any], *, after: int = 0, limit: int = 16,
+    ) -> FeedWaiterPage:
+        """Bound scanned candidates, retaining a continuation even with no matches."""
+        if (
+            binding.get("protocol") != CACHE_PROTOCOL
+            or type(limit) is not int or not 1 <= limit <= 16
+            or type(after) is not int or after < 0
+        ):
+            raise ValueError("invalid repository-feed scan")
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM run_waiters WHERE replay_scope = ? AND replay_settled = 0 "
+                "AND id > ? ORDER BY id LIMIT ?", (feed_service_scope(binding), after, limit),
+            ).fetchall()
+        candidates = [self._run_waiter_from_row(row) for row in rows]
+        return FeedWaiterPage(
+            waiters=tuple(waiter for waiter in candidates
+                          if waiter["delegation"]["feed"]["binding"] == binding),
+            next_after=int(rows[-1]["id"]) if rows else 0, scanned=len(rows),
+        )
 
     def find_replay_waiter(
         self, binding: dict[str, Any], registration_id: str,
     ) -> dict[str, Any] | None:
-        selector, binding_params = _binding_selector(binding)
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT * FROM run_waiters WHERE replay_scope = ? AND replay_registration_id = ?"
-                + selector, (_service_scope(binding), registration_id, *binding_params),
+                "SELECT * FROM run_waiters WHERE replay_scope = ? AND replay_registration_id = ?",
+                (_service_scope(binding), registration_id),
             ).fetchone()
-        return self._run_waiter_from_row(row) if row else None
+        waiter = self._run_waiter_from_row(row) if row else None
+        if waiter is not None and binding.get("protocol") == CACHE_PROTOCOL and (
+            waiter["delegation"]["feed"]["binding"] != binding
+        ):
+            return None
+        return waiter
 
     def replay_waiter_progress(
         self, waiter: dict[str, Any], *, attempt: bool = False,

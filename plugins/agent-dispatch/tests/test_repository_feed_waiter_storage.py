@@ -66,7 +66,7 @@ def test_feed_and_prior_rows_keep_exact_custody_across_storage_restart(tmp_path:
     queue = TaskQueue(database)
     persisted = queue.find_delegated_preparation(tasks[-1], "feed")
     assert persisted is not None and persisted["delegation"] == original
-    waiter, = queue.list_replay_waiters(original["feed"]["binding"])
+    waiter, = queue.scan_repository_feed_waiters(original["feed"]["binding"]).waiters
     current_task = queue.get(tasks[-1])
     assert current_task is not None and waiter["task_generation"] == current_task.generation
     assert waiter["owner"] == "worker" and waiter["owner_session_id"] == "session"
@@ -134,14 +134,14 @@ def test_distinct_feed_requests_keep_full_binding_and_registration_isolation(tmp
     task_ids = [task(queue), task(queue)]
     for task_id, spec in zip(task_ids, specs):
         prepare(queue, task_id, spec)
-    first, = queue.list_replay_waiters(specs[0]["feed"]["binding"])
-    second, = queue.list_replay_waiters(specs[1]["feed"]["binding"])
+    first, = queue.scan_repository_feed_waiters(specs[0]["feed"]["binding"]).waiters
+    second, = queue.scan_repository_feed_waiters(specs[1]["feed"]["binding"]).waiters
     assert [first["task_id"], second["task_id"]] == task_ids
     queue.replay_waiter_progress(first, registration_id="original-registration")
     assert queue.find_replay_waiter(specs[1]["feed"]["binding"], "original-registration") is None
     with pytest.raises(TaskError, match="registration already bound"):
         queue.replay_waiter_progress(second, registration_id="original-registration")
-    second, = queue.list_replay_waiters(specs[1]["feed"]["binding"])
+    second, = queue.scan_repository_feed_waiters(specs[1]["feed"]["binding"]).waiters
     assert second["replay_registration_id"] is None
 
 
@@ -155,7 +155,7 @@ def test_explicit_namespace_and_consumer_boundaries_keep_independent_request_spa
     for spec in specs:
         task_id = task(queue)
         prepare(queue, task_id, spec)
-        waiter, = queue.list_replay_waiters(spec["feed"]["binding"])
+        waiter, = queue.scan_repository_feed_waiters(spec["feed"]["binding"]).waiters
         assert waiter["task_id"] == task_id
 
 
@@ -167,7 +167,7 @@ def test_feed_custody_never_becomes_a_local_pid_or_preparing_recovery(
     queue = TaskQueue(database)
     task_id, spec = task(queue), feed_intent(queue)
     prepared = prepare(queue, task_id, spec, now=1000)
-    waiter, = queue.list_replay_waiters(spec["feed"]["binding"])
+    waiter, = queue.scan_repository_feed_waiters(spec["feed"]["binding"]).waiters
     queue.replay_waiter_progress(waiter, attempt=True)
     if armed:
         queue.replay_waiter_progress(waiter, registration_id="original-registration")
@@ -185,7 +185,7 @@ def test_feed_custody_never_becomes_a_local_pid_or_preparing_recovery(
         delegated_owner_probe=forbidden, current_machine="host", arm_grace_seconds=0.01,
     )
     assert counts == {"checked": 0, "live": 0, "unknown": 0, "recovered": 0}
-    retained, = queue.list_replay_waiters(spec["feed"]["binding"])
+    retained, = queue.scan_repository_feed_waiters(spec["feed"]["binding"]).waiters
     assert retained["state"] == ("active" if armed else "preparing")
     assert retained["replay_attempted"] and not retained["replay_settled"]
     assert retained["delegation"]["feed"] == spec["feed"]
@@ -209,8 +209,12 @@ def test_changed_binding_cannot_adopt_original_unsettled_rows(
     changed = copy.deepcopy(spec["feed"]["binding"])
     selected = changed["identity"] if dimension in changed["identity"] else changed
     selected[dimension] += "-other"
-    assert queue.list_replay_waiters(changed) == []
-    assert len(queue.list_replay_waiters(spec["feed"]["binding"])) == 1
+    if dimension == "protocol":
+        with pytest.raises(ValueError, match="invalid repository-feed scan"):
+            queue.scan_repository_feed_waiters(changed)
+    else:
+        assert queue.scan_repository_feed_waiters(changed).waiters == ()
+    assert len(queue.scan_repository_feed_waiters(spec["feed"]["binding"]).waiters) == 1
     assert not queue.list_run_waiter_wakes(task_id)
 
 
@@ -300,18 +304,46 @@ def test_invalid_or_mixed_routing_does_not_suspend_a_task(
     assert not queue.list_pending_run_waiters()
 
 
-def test_corrupt_feed_row_is_refused_without_rewriting_original_storage(tmp_path: Path) -> None:
+@pytest.mark.parametrize("damage", ["protocol", "payload"])
+def test_corrupt_feed_row_is_refused_without_rewriting_original_storage(
+    tmp_path: Path, damage: str,
+) -> None:
     database = tmp_path / "tasks.db"
     queue = TaskQueue(database)
     spec = feed_intent(queue)
     prepare(queue, task(queue), spec)
     with sqlite3.connect(database) as conn:
-        conn.execute("UPDATE run_waiters SET delegation_json = replace(delegation_json, ?, ?)",
-                     (STORAGE_PROTOCOL, "unsupported/feed"))
+        if damage == "protocol":
+            conn.execute("UPDATE run_waiters SET delegation_json = replace(delegation_json, ?, ?)",
+                         (STORAGE_PROTOCOL, "unsupported/feed"))
+        else:
+            conn.execute("UPDATE run_waiters SET delegation_json = json_remove(delegation_json, '$.feed')")
     with sqlite3.connect(database) as conn:
         before, = conn.execute("SELECT delegation_json FROM run_waiters").fetchone()
     with pytest.raises(ValueError, match="repository-feed waiter identity"):
-        TaskQueue(database).list_replay_waiters(spec["feed"]["binding"])
+        TaskQueue(database).scan_repository_feed_waiters(spec["feed"]["binding"])
     with sqlite3.connect(database) as conn:
         after, = conn.execute("SELECT delegation_json FROM run_waiters").fetchone()
     assert after == before
+
+
+def test_sparse_feed_scan_advances_past_nonmatches_with_a_bounded_window(tmp_path: Path) -> None:
+    queue = TaskQueue(tmp_path / "tasks.db")
+    foreign_task = task(queue)
+    for index in range(17):
+        foreign = feed_intent(queue, f"foreign-{index}")
+        foreign["feed"]["binding"]["reviewer"] = "another-reviewer"
+        prepare(queue, foreign_task, foreign)
+    selected = feed_intent(queue, "selected")
+    selected_task = task(queue)
+    prepare(queue, selected_task, selected)
+    binding = selected["feed"]["binding"]
+    first = queue.scan_repository_feed_waiters(binding, limit=16)
+    assert first.waiters == () and first.scanned == 16 and first.next_after > 0
+    second = queue.scan_repository_feed_waiters(binding, after=first.next_after, limit=16)
+    assert second.scanned == 2 and second.next_after > first.next_after
+    assert [row["task_id"] for row in second.waiters] == [selected_task]
+    exhausted = queue.scan_repository_feed_waiters(binding, after=second.next_after, limit=16)
+    assert exhausted.waiters == () and exhausted.scanned == 0 and exhausted.next_after == 0
+    with pytest.raises(ValueError, match="continuation"):
+        queue.list_replay_waiters(binding)

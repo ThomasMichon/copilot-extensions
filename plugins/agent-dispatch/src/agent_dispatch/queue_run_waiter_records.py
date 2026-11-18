@@ -30,7 +30,7 @@ def select_waiter_row(
 
 def run_waiter_from_row(row: sqlite3.Row) -> dict[str, Any]:
     delegation = json.loads(row["delegation_json"] or "null")
-    if isinstance(delegation, dict) and "feed" in delegation:
+    if isinstance(delegation, dict) and ("feed" in delegation or "protocol" in delegation):
         from .repository_feed_waiter_contract import validate_feed_delegation
         delegation = validate_feed_delegation(
             delegation, armed="registration_id" in delegation,

@@ -69,7 +69,7 @@ def validate_delegation(value: object, *, armed: bool = False) -> dict[str, Any]
 
 def validate_retained_delegation(value: object, *, armed: bool = False) -> dict[str, Any]:
     """Expand native storage readers without enabling the callback wire variant."""
-    if isinstance(value, dict) and "feed" in value:
+    if isinstance(value, dict) and ("feed" in value or "protocol" in value):
         from .repository_feed_waiter_contract import validate_feed_delegation
         return validate_feed_delegation(value, armed=armed)
     return validate_delegation(value, armed=armed)

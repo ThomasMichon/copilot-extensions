@@ -285,14 +285,23 @@ conservatively retains the reservation across configured socket aliases in
 that namespace. Changing reviewer, account, target or socket cannot bind an
 original request to another task. Distinct namespace/consumer pairs retain
 independent request spaces. Indexed scope selection plus exact binding
-filtering keeps one reviewer's rows out of another binding's reads.
+comparison keeps one reviewer's rows out of another binding's reads.
+`scan_repository_feed_waiters` reads at most sixteen indexed candidates before
+comparing their complete bindings. Its `FeedWaiterPage` reports matching
+`waiters`, `scanned` count and `next_after` from the last scanned row, even when
+all candidates belong to another binding. Callers must retain that continuation;
+an exhausted candidate window returns zero `next_after` for an explicit wrap.
+The older list-only replay method refuses feed bindings rather than hide this
+progress. Exact registration lookup uses the existing unique scope/registration
+index and compares the decoded binding after fetching its single candidate.
 Feed rows remain outside the existing indexed local-only recovery queries,
 including while their consumer is absent. They cannot become missing local
 processes or preparing-arm timeouts. Changed selection leaves old rows
 unsettled for their original owner.
 
 The current native reader preserves callback, v1/v2 replay and feed rows
-together across reopening. Invalid/unknown feed intent refuses without
+together across reopening. Invalid/unknown feed intent, including an explicit
+feed protocol with its required payload missing, refuses without
 rewriting that row. This does not promise that arbitrary historical runtimes
 can execute the new variant: the current callback protocol still refuses it,
 and reader/consumer transition must retain reconciliation custody before a

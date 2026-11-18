@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+from dataclasses import dataclass
 from pathlib import PurePosixPath
 import re
 from typing import Any, cast
@@ -16,6 +17,15 @@ CACHE_PROTOCOL = "agent-pull-requests.repository-cache/v1"
 _IDENTITY = {"namespace", "provider", "endpoint", "account", "repo"}
 _BINDING = {"protocol", "socket", "identity", "target", "consumer", "reviewer"}
 _ORIGINAL = {"binding", "request_id", "issued_at", "deadline_at", "baseline"}
+
+
+@dataclass(frozen=True)
+class FeedWaiterPage:
+    """A bounded native candidate window, including progress past nonmatches."""
+
+    waiters: tuple[dict[str, Any], ...]
+    next_after: int
+    scanned: int
 
 
 def feed_service_scope(binding: dict[str, Any]) -> str:
