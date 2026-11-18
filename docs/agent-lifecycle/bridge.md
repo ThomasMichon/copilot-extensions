@@ -3,7 +3,9 @@
 [Run map](README.md) · [Task and reservation](dispatch.md) · [Worktree](worktree.md) · [Trace the IDs](trace.md)
 
 **A conversation can exist without a running process. A process can exist
-without a Bridge-owned session.** Ask which of these two paths the worker uses:
+without a Bridge-owned session.** The [Bridge service architecture](../../plugins/agent-bridge/docs/architecture.md#session-states)
+distinguishes hosted-session status from live CLI registration. Workers use
+either path:
 
 | Path | Who runs the process? | Where does the first prompt go? |
 |---|---|---|

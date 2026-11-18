@@ -7,6 +7,9 @@ attempt to provide a worker. They have separate lifetimes. In particular,
 `claimed` does **not** mean Copilot is running, and `spawned` does **not** mean
 the worker accepted the job.
 
+Component references: [queue state model](../../plugins/agent-dispatch/README.md#state-model)
+and [coordinator, supervisor and lanes](../../plugins/agent-dispatch/docs/spawn-supervisor.md#coordinator-supervisor-daemon-and-worker-lanes).
+
 ## Task
 
 The [task record](../../plugins/agent-dispatch/src/agent_dispatch/queue_records.py)

@@ -58,12 +58,12 @@ Landed content with open responsibilities is not final. `CLEAN` is a cleanup
 decision, not the next value written after `FINAL`. Neither a fetch-free view
 nor a quiet terminal grants permission to delete a checkout.
 
-**Known cleanup risk:** the [tracking override](../../plugins/agent-worktrees/src/agent_worktrees/worktree_git_facts.py)
-can promote a fresh WIP observation to completed for a previously finalized
-record. The [cleanup revalidation tests](../../plugins/agent-worktrees/tests/test_cleanup_revalidation_auto_clean.py)
-characterize that behavior. If new commits appeared after finalization, inspect
-their actual upstream content; don't rely on the label. An actual-Git
-“finalize, commit again, attempt normal cleanup” case is a high-priority safety test.
+For a previously finalized record, the [tracking override](../../plugins/agent-worktrees/src/agent_worktrees/worktree_git_facts.py)
+can display a fresh WIP observation as completed. If new commits appeared
+after finalization, inspect their upstream content separately. The
+[Worktrees architecture](../../plugins/agent-worktrees/docs/architecture.md#the-worktree-record----single-writer-contract-invariant)
+and [lifecycle reference](../../plugins/agent-worktrees/docs/worktree-lifecycle.md#worktree-states)
+distinguish the saved record from its displayed classification.
 
 ## Where Worktrees stores each fact
 
