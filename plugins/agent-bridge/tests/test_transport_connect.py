@@ -25,22 +25,27 @@ class TestBreadcrumb:
         assert "reached-device" in bc
 
     def test_remote_cmd_includes_breadcrumb_before_binstub(self) -> None:
-        target = SpawnTarget(type="ssh", host="h", project="my-project")
+        target = SpawnTarget(
+            type="ssh", host="h", project="my-project", cwd="/work",
+        )
         cmd = _build_remote_cmd(target, session_id="sess-9")
         assert "reached-device" in cmd
-        # Breadcrumb comes first, then the binstub invocation.
-        assert cmd.index("reached-device") < cmd.index("my-project")
+        # Policy comes first, then the breadcrumb and the launch invocation.
+        assert cmd.index("agent-policy check") < cmd.index("reached-device")
+        assert cmd.index("reached-device") < cmd.index("my-project --json")
         # Binstub args still intact.
         assert "--acp" in cmd and "--new" in cmd
 
     def test_remote_cmd_breadcrumb_has_no_cd_token(self) -> None:
         # Project mode must not introduce a 'cd ' (regression guard).
-        target = SpawnTarget(type="ssh", host="h", project="proj")
+        target = SpawnTarget(type="ssh", host="h", project="proj", cwd="/work")
         cmd = _build_remote_cmd(target, session_id="s")
         assert "cd " not in cmd
 
     def test_remote_cmd_legacy_still_has_exec(self) -> None:
-        target = SpawnTarget(type="ssh", host="h", cwd="/work")
+        target = SpawnTarget(
+            type="ssh", host="h", project="proj", cwd="/work", explicit_cwd=True,
+        )
         cmd = _build_remote_cmd(target, session_id="s")
         assert "reached-device" in cmd
         assert "exec" in cmd
@@ -49,7 +54,15 @@ class TestBreadcrumb:
 
 class TestSpawnSshStaged:
     @pytest.fixture
-    def mock_manager(self):
+    def mock_manager(self, monkeypatch):
+        # Stub the receiving owner's answer, not hosting-policy validation.
+        monkeypatch.setattr(
+            "agent_bridge.hosting_policy.query_ssh_policy",
+            AsyncMock(return_value={
+                "version": 1, "allowed": True, "repository": "/w",
+                "expose_agent": None, "sources": [], "denied_by": [],
+            }),
+        )
         mgr = MagicMock()
         mgr.ensure_connected = AsyncMock()
         proc = MagicMock()
@@ -63,7 +76,9 @@ class TestSpawnSshStaged:
         mock_manager.ensure_connected = AsyncMock(
             side_effect=ConnectionError("refused")
         )
-        target = SpawnTarget(type="ssh", host="badhost", cwd="/w")
+        target = SpawnTarget(
+            type="ssh", host="badhost", project="proj", cwd="/w", explicit_cwd=True,
+        )
         with patch(
             "agent_bridge.transport.get_default_manager", return_value=mock_manager
         ):
@@ -80,7 +95,9 @@ class TestSpawnSshStaged:
         mock_manager.ensure_connected = AsyncMock(
             side_effect=ConnectionError("ControlMaster failed")
         )
-        target = SpawnTarget(type="ssh", host="badhost", cwd="/w")
+        target = SpawnTarget(
+            type="ssh", host="badhost", project="proj", cwd="/w", explicit_cwd=True,
+        )
         with patch(
             "agent_bridge.transport.get_default_manager", return_value=mock_manager
         ):
@@ -91,7 +108,9 @@ class TestSpawnSshStaged:
     async def test_checkpoints_emitted_on_success(self, mock_manager) -> None:
         events: list[tuple[str, dict]] = []
         tracker = ConnectTracker(lambda e, d: events.append((e, d)))
-        target = SpawnTarget(type="ssh", host="h", cwd="/w")
+        target = SpawnTarget(
+            type="ssh", host="h", project="proj", cwd="/w", explicit_cwd=True,
+        )
         with patch(
             "agent_bridge.transport.get_default_manager", return_value=mock_manager
         ):
@@ -111,7 +130,7 @@ class TestSpawnSshStaged:
         events: list[tuple[str, dict]] = []
         tracker = ConnectTracker(lambda e, d: events.append((e, d)))
         target = SpawnTarget(
-            type="ssh", host="h", cwd="/w",
+            type="ssh", host="h", project="proj", cwd="/w", explicit_cwd=True,
             auth_hooks=[{"name": "relay", "local_port": 59999}],
         )
         with patch(

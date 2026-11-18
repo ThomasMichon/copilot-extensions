@@ -299,7 +299,7 @@ async def test_spawn_prepares_after_allocation_before_existing_productive_comman
         import base64
         command = base64.b64decode(command.rsplit(" ", 1)[1]).decode("utf-16-le")
         assert "'agent-policy' 'check'" in command
-        command = base64.b64decode(command.rsplit(" ", 1)[1]).decode("utf-16-le")
+        assert "-EncodedCommand" not in command
     else:
         assert "agent-policy check" in command
     assert "app" in command and "--worktree-id actual-child" in command
@@ -308,6 +308,63 @@ async def test_spawn_prepares_after_allocation_before_existing_productive_comman
     assert preparation.await_args.kwargs["environment"] == {
         "UNCHANGED": "request-value", "FROM_PLAN": "selected-profile",
     }
+
+
+def _decode_launch(command: str) -> str:
+    return base64.b64decode(command.rsplit(" ", 1)[1]).decode("utf-16-le")
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(os.name != "nt", reason="Windows receiver shell")
+async def test_long_windows_launch_is_staged_instead_of_inline(receiver, monkeypatch):
+    target, manager, _controller, child, _home = receiver
+    plugins = [f"C:\\Example\\plugins\\{index:03d}-{'p' * 60}" for index in range(90)]
+    for plugin in plugins:
+        target.copilot_args.extend(["--plugin-dir", plugin])
+    manager.ensure_connected = AsyncMock()
+    monkeypatch.setattr(transport, "get_default_manager", lambda: manager)
+    monkeypatch.setattr(transport, "_effective_auth_hooks", lambda hooks: hooks)
+    monkeypatch.setattr(transport, "_resolve_worktree_remote", AsyncMock(return_value={"launch": {
+        "worktree_id": "actual-child", "work_dir": str(child),
+    }}))
+    staged = {}
+
+    async def open_stdio(host, command):
+        assert len(command) < transport._WINDOWS_INLINE_COMMAND_LIMIT
+        launcher = _decode_launch(command)
+        name = launcher.split("'", 2)[1]
+        path = Path(os.environ.get("TMP") or os.environ["TEMP"]) / name
+        staged["text"] = path.read_text(encoding="utf-8")
+        path.unlink()
+        return SimpleNamespace(pid=999)
+
+    manager.open_stdio_channel = AsyncMock(side_effect=open_stdio)
+    await transport.spawn_ssh(target)
+    script = staged["text"]
+    assert "-EncodedCommand" not in script
+    assert script.index("'agent-policy' 'check'") < script.index("--worktree-id actual-child")
+    assert all(plugin in script for plugin in plugins)
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(os.name != "nt", reason="Windows receiver shell")
+async def test_staged_windows_launcher_runs_script_and_removes_it(tmp_path):
+    receiver = _Receiver(tmp_path, dict(os.environ))
+    target = SpawnTarget(type="ssh", host="receiver", ssh_shell="powershell")
+    launcher = await transport._stage_windows_launch(
+        receiver, target, "Write-Output 'staged-ok-é'; exit 7",
+    )
+    name = _decode_launch(launcher).split("'", 2)[1]
+    path = Path(os.environ.get("TMP") or os.environ["TEMP"]) / name
+    assert path.is_file()
+    args = launcher.split(" ")
+    args[0] = shutil.which(args[0])
+    result = subprocess.run(
+        args, capture_output=True, timeout=60, creationflags=no_window_flags(),
+    )
+    assert result.returncode == 7
+    assert b"staged-ok-" in result.stdout
+    assert not path.exists()
 
 
 @pytest.mark.asyncio

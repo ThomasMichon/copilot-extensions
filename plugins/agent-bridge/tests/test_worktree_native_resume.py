@@ -807,9 +807,9 @@ def test_windows_ssh_native_resume_keeps_encoded_owner_transport():
     assert command.startswith("pwsh -NoProfile")
     decoded = base64.b64decode(command.split("-EncodedCommand ", 1)[1]).decode("utf-16-le")
     assert "'agent-policy' 'check'" in decoded
-    assert decoded.index("$LASTEXITCODE -ne 0") < decoded.index("pwsh -NoProfile")
-    owner = base64.b64decode(decoded.split("-EncodedCommand ", 1)[1]).decode("utf-16-le")
-    assert "--native-resume-session" in owner and "native-original" in owner
+    assert "-EncodedCommand" not in decoded
+    assert decoded.index("$LASTEXITCODE -ne 0") < decoded.index("--native-resume-session")
+    assert "native-original" in decoded
     assert "exec copilot" not in decoded
     assert "native_resume_id" not in target.to_json()
 

@@ -345,7 +345,8 @@ def test_ssh_receiving_shell_rechecks_before_launch(shell: str) -> None:
     if shell == "powershell":
         command = base64.b64decode(command.split()[-1]).decode("utf-16-le")
         assert "if ($LASTEXITCODE -ne 0)" in command
-    assert command.index("agent-policy") < command.rindex("copilot" if shell == "bash" else "powershell")
+        assert "-EncodedCommand" not in command
+    assert command.index("agent-policy") < command.rindex("copilot")
 
 
 @pytest.mark.parametrize("payload", [
