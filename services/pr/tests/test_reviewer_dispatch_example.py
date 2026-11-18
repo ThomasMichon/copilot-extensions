@@ -198,3 +198,101 @@ def test_native_preparation_preserves_original_request_without_submission(
             fields={}, sender=None, message="Review activity",
             lane=LANE, task_key=lambda _number: KEY,
         )
+
+
+@pytest.fixture
+def native_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
+    root = SERVICE.parents[1]
+    monkeypatch.syspath_prepend(str(root / "plugins/agent-dispatch/src"))
+    monkeypatch.syspath_prepend(str(root / "libs/worktree-identity/src"))
+
+
+def test_native_recipe_binds_forge_and_preserves_task_across_landing_changes(
+    native_dispatch: None,
+) -> None:
+    from agent_dispatch.recipes.registry import RecipeError
+
+    first = adapter.reviewer_task_key("https://forge.example/owner/repo", land="author")
+    changed = adapter.reviewer_task_key("https://forge.example/owner/repo", land="self")
+    standard_port = adapter.reviewer_task_key("https://forge.example:443/owner/repo", land="author")
+    other = adapter.reviewer_task_key("https://other.example/owner/repo", land="author")
+    assert first(7) == changed(7) == standard_port(7)
+    assert first(7) == "recipe:reviewer:target=forge.example/owner/repo#7"
+    assert first(7) != other(7) and first(7) != first(8)
+    for target in (
+        "owner/repo", "http://forge.example/owner/repo",
+        "https://user@forge.example/owner/repo", "https://forge.example/owner/repo?q=1",
+        "https://forge.example:8443/owner/repo", "https://forge.example:9443/owner/repo",
+        "https://[2001:db8::1]/owner/repo", "https://[2001:db8::2]/owner/repo",
+    ):
+        with pytest.raises(ValueError, match="forge-qualified"):
+            adapter.reviewer_task_key(target, land="author")
+    for number in (True, 0, "7"):
+        with pytest.raises(ValueError, match="positive PR"):
+            first(number)
+    with pytest.raises(RecipeError, match="land"):
+        adapter.reviewer_task_key("https://forge.example/owner/repo", land="invalid")(7)
+
+
+def test_native_exact_lookup_and_recipe_feed_native_read_only_preparation(
+    tmp_path: Any, native_dispatch: None,
+) -> None:
+    from agent_dispatch.client_categories import CategoryClientMixin
+    from agent_dispatch.client_errors import DispatchUpgradeRequired
+    from agent_dispatch.client_steering_requests import PreparedSteeringClientMixin
+
+    class Transport:
+        def __init__(self) -> None:
+            self.rows: list[dict[str, Any]] = []
+            self.calls: list[tuple[str, dict[str, Any]]] = []
+
+        def get(self, path: str, *, params: dict[str, Any]) -> list[dict[str, Any]]:
+            self.calls.append((path, params))
+            return deepcopy(self.rows)
+
+    class Native(CategoryClientMixin, PreparedSteeringClientMixin, Client):
+        support = 1
+
+        def __init__(self, scope: Any) -> None:
+            super().__init__(scope)
+            self._http = Transport()
+
+        def health(self) -> dict[str, Any]:
+            return {"exact_dedup_lookup": self.support, "steering_request_context": 1}
+
+        def _unwrap(self, response: Any) -> Any:
+            return response
+
+    selected, scope, page = selection(tmp_path)
+    before = selected[1].path.read_bytes()
+    task_key = adapter.reviewer_task_key("https://forge.example/owner/repo", land="author")
+    client = Native(scope)
+    client.task["dedup_key"] = task_key(7)
+    client._http.rows = [deepcopy(client.task)]
+
+    def lookup(action: dict[str, Any]) -> Any:
+        return adapter.retained_task(
+            action, scope, client=client, lane=LANE, task_key=task_key,
+        )
+
+    proposal = example.propose(page, scope, lookup=lookup, notifications={}, now=1000)
+    request = adapter.prepare_notification(
+        proposal, scope, client=client, request_id="original-native-request",
+        fields={"action": proposal.action_key}, sender="consumer", message="Review activity",
+        lane=LANE, task_key=task_key,
+    )
+    expected = ("/tasks", {"repo": LANE, "dedup_key": task_key(7)})
+    assert proposal.kind == "steer" and client._http.calls == [expected, expected]
+    assert request["task_id"] == client.task["id"]
+    assert request["scope"] == client.task["draft_scope"]
+    assert request["expected_revision"] == proposal.revision
+    assert client.reads == [("get", "task-a")] * 3
+    assert not client.prepared and selected[1].path.read_bytes() == before
+
+    client._http.rows = []
+    assert example.propose(page, scope, lookup=lookup, notifications={}, now=1000).kind == "reconcile"
+    client.support = 0
+    calls = len(client._http.calls)
+    with pytest.raises(DispatchUpgradeRequired, match="exact repo-scoped"):
+        lookup({"pr": 7})
+    assert len(client._http.calls) == calls
