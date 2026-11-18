@@ -788,6 +788,12 @@ outage-expiry defect remains unfixed.
   secret-free persistence. Put the interim absolute-callback-path requirement
   in callback registration documentation; an attributable executable alone
   does not resolve a relative callback script.
+  Preserve saved-subscription and pending-delivery compatibility across the
+  supported upgrade/rollback window, not only registration negotiation. A prior
+  owner must restore the retained contract correctly, or the transition must
+  refuse before durable-state mutation or effects, preserving the original
+  state and pending event. Do not silently drop cwd, discard pending delivery
+  or relabel a supported rollback as unsupported.
 
 #### Local callback Validation
 
@@ -816,6 +822,11 @@ outage-expiry defect remains unfixed.
   the sufficient documented legacy-baseline positive control and reject a
   required unsupported subscriber cwd before registration without silently
   dropping the field. Verify the interim registration-documentation warning.
+  Persist new-owner subscriptions with cwd and pending acknowledged delivery,
+  then exercise prior-owner restore across the supported rollback window.
+  Verify preserved context and original pending event/replay identity, or an
+  explicit pre-effect transition refusal that leaves the original state intact.
+  Registration success alone is not rollback/restore qualification.
   Preserve finite source/consumer qualification and existing operational holds; add no
   native-all-host, installed-rollout or fleet prerequisite.
 
@@ -1724,6 +1735,11 @@ All items below are **agent-recommended** acceptance checks.
   warning in registration documentation, current domain/resource owners, real M1
   stage-5 custody/qualification conditions and operational holds without adding
   a generic ACK or whole-parent native/installed/fleet gate to this finite lane.
+  Separately qualify new-writer/prior-reader saved-state restore and pending
+  delivery across the supported rollback window: preserve cwd and original
+  event identity, or refuse the transition before mutation/effects with the
+  original state retained. No silent context loss, pending-event discard or
+  unsupported relabeling substitutes for that acceptance.
 
 ## Proposal
 
