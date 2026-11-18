@@ -1,0 +1,123 @@
+"""Actor-free admission and acknowledgement-journal controls."""
+
+from __future__ import annotations
+
+import importlib.util
+import sys
+from pathlib import Path
+from types import ModuleType, SimpleNamespace
+from typing import Any
+from unittest.mock import Mock
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[2]
+PACKAGE = "promotion_hosted_load"
+
+
+class Refused(RuntimeError):
+    def __init__(self, _code: str, message: str) -> None:
+        super().__init__(message)
+
+
+@pytest.fixture
+def original(monkeypatch: pytest.MonkeyPatch) -> Any:
+    root = ROOT / "plugins/agent-bridge/src/agent_bridge"
+    package = ModuleType(PACKAGE)
+    package.__path__ = [str(root)]
+    monkeypatch.setitem(sys.modules, PACKAGE, package)
+    contract = ModuleType(f"{PACKAGE}.acquisition_contract")
+    setattr(contract, "AcquisitionRefused", Refused)
+    monkeypatch.setitem(sys.modules, contract.__name__, contract)
+    spec = importlib.util.spec_from_file_location(
+        f"{PACKAGE}.retained_load_acceptance", root / "retained_load_acceptance.py",
+    )
+    assert spec and spec.loader
+    source = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, source.__name__, source)
+    spec.loader.exec_module(source)
+    epoch = {"platform": "linux", "environment_id": "original-environment", "boot_id": "original-boot"}
+    monkeypatch.setattr(source, "epoch", lambda: epoch.copy())
+    physical = {
+        41: {"pid": 41, "start_time": "100", "parent_pid": 1},
+        42: {"pid": 42, "start_time": "101", "parent_pid": 41},
+    }
+    monkeypatch.setattr(source, "process", lambda pid: physical[pid].copy())
+    events: list[tuple[str, dict[str, Any]]] = []
+    writer = {"version": 1, "identity": {"runtime_generation": "executing"}, "creation_nonce": "original"}
+    writers = ModuleType(f"{PACKAGE}.acquisition_worktree_writer")
+    setattr(writers, "current", lambda: SimpleNamespace(
+        execution_requirement=SimpleNamespace(model_dump=lambda: writer.copy()),
+    ))
+    monkeypatch.setitem(sys.modules, writers.__name__, writers)
+    owner = SimpleNamespace(
+        session_id="original-control", hosted_epoch=source.negotiate({"retained_hosted_activation": 1}),
+        host_record=SimpleNamespace(
+            session_id="original-control", host_pid=41, child_pid=42, boundary="local", endpoint={},
+            nonce="private-host-nonce", protocol_version=1, port=1234,
+            state_file="/example/original-host", created_at=1.0,
+            extra={"host_process_start": "100", "child_process_start": "101"},
+        ),
+        host_process=SimpleNamespace(pid=41, poll=lambda: None),
+        request=SimpleNamespace(
+            operation_id="original-operation", native_session_id="original-native", head_revision=7,
+            model_dump=lambda: {"operation_id": "original-operation"},
+        ),
+        socket=object(), streams=object(), accepted_load=None,
+        manager=SimpleNamespace(db=SimpleNamespace(flush=Mock())),
+        session=SimpleNamespace(event_log=SimpleNamespace(
+            append=lambda name, value: events.append((name, value)),
+        )),
+    )
+    client = SimpleNamespace(session_host_client=owner.socket)
+    owner.session.client = client
+    return SimpleNamespace(
+        source=source, owner=owner, client=client, physical=physical,
+        events=events, epoch=epoch, writer=writer,
+    )
+
+
+def test_original_transport_ack_is_durable_without_disclosing_nonce(original: Any) -> None:
+    b = original
+    document = b.source.prepare(b.owner, b.client)
+    b.source.record(b.owner, document)
+    b.owner.manager.db.flush.assert_called_once()
+    assert b.events == [(b.source.EVENT, document)]
+    assert document["activation"]["session_id"] == b.owner.request.native_session_id
+    assert document["activation"]["child"] == {"pid": 42, "start_time": "101"}
+    assert document["writer"] == b.writer
+    assert "nonce" not in document["host"] and len(document["host"]["nonce_digest"]) == 64
+    with pytest.raises(Refused, match="prior evidence"):
+        b.source.record(b.owner, document)
+    assert len(b.events) == 1
+
+
+@pytest.mark.parametrize("changed", ["birth", "parent", "epoch", "transport"])
+def test_changed_load_association_has_no_journal_effect(original: Any, changed: str) -> None:
+    b = original
+    if changed == "birth":
+        b.physical[42]["start_time"] = "102"
+    elif changed == "parent":
+        b.physical[42]["parent_pid"] = 99
+    elif changed == "epoch":
+        b.owner.hosted_epoch = {**b.epoch, "boot_id": "different"}
+    else:
+        b.client.session_host_client = object()
+    with pytest.raises(Refused):
+        b.source.prepare(b.owner, b.client)
+    assert b.events == [] and b.owner.accepted_load is None
+
+
+@pytest.mark.parametrize("support", [None, False, True, 0, "1", 2])
+def test_executor_capability_cannot_be_guessed(original: Any, support: object) -> None:
+    with pytest.raises(Refused, match="lacks retained hosted"):
+        original.source.negotiate({"retained_hosted_activation": support})
+
+
+def test_failed_commit_retains_unknown_acceptance(original: Any) -> None:
+    b = original
+    document = b.source.prepare(b.owner, b.client)
+    b.owner.manager.db.flush.side_effect = OSError("commit failed")
+    with pytest.raises(OSError, match="commit failed"):
+        b.source.record(b.owner, document)
+    assert b.owner.accepted_load is None

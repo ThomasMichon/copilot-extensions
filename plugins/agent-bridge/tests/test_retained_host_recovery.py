@@ -3,7 +3,9 @@
 from types import SimpleNamespace
 import asyncio
 import contextlib
+import importlib
 import os
+from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
@@ -26,29 +28,29 @@ pytestmark = pytest.mark.contract("agent_bridge.retained_host_recovery")
     "host-stop", "child-stop", "host-timeout", "load-stop", "load-retry", "permission-timeout",
 ])
 async def test_real_host_boundary_retains_stop_and_uncertain_custody(
-    writer_creation, monkeypatch, fault,  # noqa: F811
-):
+    writer_creation: Any, monkeypatch: pytest.MonkeyPatch, fault: str,  # noqa: F811
+) -> None:
     fixture, rig = writer_creation, writer_creation.rig
     session, request, _command = await recovery_fixture(fixture, monkeypatch)
-    host_records = []
+    host_records: list[Any] = []
     rig.manager._host_index.register = host_records.append
     monkeypatch.setattr(
         rig.manager, "_connect_via_session_host",
         _SessionHostConnectionMixin._connect_via_session_host.__get__(rig.manager),
     )
 
-    def stop():
+    def stop() -> None:
         rig.db.execute_write(
             "UPDATE sessions SET cold_recovery_stop_token='late-stop' WHERE id=?",
             (session.session_id,),
         )
 
-    async def resolve(target, **_kwargs):
+    async def resolve(target: Any, **_kwargs: Any) -> Any:
         if fault == "resolve-stop":
             stop()
         return ["copilot", "--acp", "--stdio"], target.cwd, target.env
 
-    async def guidance(_cwd):
+    async def guidance(_cwd: Any) -> None:
         if fault == "guidance-stop":
             stop()
 
@@ -61,7 +63,7 @@ async def test_real_host_boundary_retains_stop_and_uncertain_custody(
     )
     launches = []
 
-    def launch(args, *, acquisition_launch, **kwargs):
+    def launch(args: Any, *, acquisition_launch: Any, **kwargs: Any) -> Any:
         owner = acquisition_launch
         assert type(owner) is recovery.RetainedRecovery
         context = owner.child_context(args, kwargs["cwd"])
@@ -94,21 +96,21 @@ async def test_real_host_boundary_retains_stop_and_uncertain_custody(
     monkeypatch.setattr("agent_bridge.session_host.acp_adapter.open_acp_streams",
                         AsyncMock(return_value=streams))
 
-    async def initialize(*_args, **_kwargs):
+    async def initialize(*_args: Any, **_kwargs: Any) -> None:
         if fault == "initialize-stop":
             stop()
         if fault == "initialize-timeout":
             raise TimeoutError("original handshake outcome unknown")
         if fault == "permission-timeout":
-            from acp.schema import PermissionOption, ToolCallUpdate
+            schema = importlib.import_module("acp.schema")
 
             assert rig.client.auto_approve is False
             native = request.native_session_id
             rig.client._acp_session_id = native
             rig.client.current_requests.session_changed(native)
             pending = asyncio.create_task(rig.client._handle_permission_request(
-                [PermissionOption(option_id="allow", name="Allow", kind="allow_once")],
-                ToolCallUpdate(tool_call_id="fixture-tool", title="Fixture tool"),
+                [schema.PermissionOption(option_id="allow", name="Allow", kind="allow_once")],
+                schema.ToolCallUpdate(tool_call_id="fixture-tool", title="Fixture tool"),
                 session_id=native,
             ))
             try:
@@ -123,6 +125,12 @@ async def test_real_host_boundary_retains_stop_and_uncertain_custody(
 
     if fault in {"load-stop", "load-retry", "permission-timeout"}:
         from agent_bridge import acp_client
+        from agent_bridge import retained_load_acceptance as acceptance
+
+        monkeypatch.setattr(acceptance, "process", lambda pid: {
+            "pid": pid, "start_time": "100", "parent_pid": spawned.host_pid,
+        })
+        monkeypatch.setattr("zdd.diagnostics.process_start_time", lambda _pid: "100")
 
         rig.client = acp_client.AcpClient()
         connection = SimpleNamespace(load_session=AsyncMock(return_value=SimpleNamespace(config_options=None)))
@@ -131,7 +139,7 @@ async def test_real_host_boundary_retains_stop_and_uncertain_custody(
         rig.client.load_session = AsyncMock(wraps=load_session)
         monkeypatch.setattr("agent_bridge.session_manager.AcpClient", lambda **_kw: rig.client)
 
-        async def late_rpc(client, method, **kwargs):
+        async def late_rpc(client: Any, method: Any, **kwargs: Any) -> Any:
             if fault == "load-stop":
                 stop()
             else:
@@ -181,7 +189,9 @@ async def test_real_host_boundary_retains_stop_and_uncertain_custody(
 
 
 @pytest.mark.asyncio
-async def test_retained_recovery_cannot_enter_while_exact_session_end_is_active(writer_creation, monkeypatch):  # noqa: F811
+async def test_retained_recovery_cannot_enter_while_exact_session_end_is_active(
+    writer_creation: Any, monkeypatch: pytest.MonkeyPatch,  # noqa: F811
+) -> None:
     from agent_bridge.acquisition_contract import AcquisitionRefused
 
     fixture, rig = writer_creation, writer_creation.rig
@@ -190,7 +200,7 @@ async def test_retained_recovery_cannot_enter_while_exact_session_end_is_active(
     monkeypatch.setattr(rig.manager, "_connect_via_session_host", connect)
     ended = []
 
-    async def ending(session_id, *, force):
+    async def ending(session_id: str, *, force: bool) -> None:
         assert session_id == session.session_id and force is True
         with pytest.raises(AcquisitionRefused) as refused:
             await recovery.resume(

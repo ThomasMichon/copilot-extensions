@@ -5378,7 +5378,19 @@
         "tools/promotion_unit_tests/test_hosted_activation.py::test_hosted_source_refuses_ambiguous_interval_history[older-open-retry]",
         "tools/promotion_unit_tests/test_hosted_activation.py::test_hosted_source_refuses_ambiguous_interval_history[duplicate-ordinal]",
         "tools/promotion_unit_tests/test_hosted_activation.py::test_hosted_source_refuses_ambiguous_interval_history[duplicate-source]",
-        "tools/promotion_unit_tests/test_hosted_activation.py::test_hosted_source_refuses_ambiguous_interval_history[stale-ended]"
+        "tools/promotion_unit_tests/test_hosted_activation.py::test_hosted_source_refuses_ambiguous_interval_history[stale-ended]",
+        "tools/promotion_unit_tests/test_retained_load_acceptance.py::test_original_transport_ack_is_durable_without_disclosing_nonce",
+        "tools/promotion_unit_tests/test_retained_load_acceptance.py::test_changed_load_association_has_no_journal_effect[birth]",
+        "tools/promotion_unit_tests/test_retained_load_acceptance.py::test_changed_load_association_has_no_journal_effect[parent]",
+        "tools/promotion_unit_tests/test_retained_load_acceptance.py::test_changed_load_association_has_no_journal_effect[epoch]",
+        "tools/promotion_unit_tests/test_retained_load_acceptance.py::test_changed_load_association_has_no_journal_effect[transport]",
+        "tools/promotion_unit_tests/test_retained_load_acceptance.py::test_executor_capability_cannot_be_guessed[None]",
+        "tools/promotion_unit_tests/test_retained_load_acceptance.py::test_executor_capability_cannot_be_guessed[False]",
+        "tools/promotion_unit_tests/test_retained_load_acceptance.py::test_executor_capability_cannot_be_guessed[True]",
+        "tools/promotion_unit_tests/test_retained_load_acceptance.py::test_executor_capability_cannot_be_guessed[0]",
+        "tools/promotion_unit_tests/test_retained_load_acceptance.py::test_executor_capability_cannot_be_guessed[1]",
+        "tools/promotion_unit_tests/test_retained_load_acceptance.py::test_executor_capability_cannot_be_guessed[2]",
+        "tools/promotion_unit_tests/test_retained_load_acceptance.py::test_failed_commit_retains_unknown_acceptance"
     ],
     "coverage_targets": [
         "plugins/agent-worktrees/src/agent_worktrees/resource_delivery.py",
@@ -5742,7 +5754,8 @@
         "plugins/agent-bridge/src/agent_bridge/native_keyed_admission.py",
         "plugins/agent-vault/src/agent_vault/source_start.py",
         "plugins/agent-worktrees/src/agent_worktrees/retained_hosted_activation.py",
-        "plugins/agent-worktrees/src/agent_worktrees/tracking_session_activations.py"
+        "plugins/agent-worktrees/src/agent_worktrees/tracking_session_activations.py",
+        "plugins/agent-bridge/src/agent_bridge/retained_load_acceptance.py"
     ],
     "sources": {
         "plugins/agent-worktrees/src/agent_worktrees/git_process.py": "6cc675a4d988e7d1fd6b0d76a48fde5909f78f085ef194ec69625c6334b4f80f",
@@ -6602,6 +6615,8 @@
         "tools/promotion_unit_tests/test_vault_client_install.py": "566d53f41e7510169bccb286d0830ef24b2d7b208c8253433df1fbc38d77c7e0",
         "plugins/agent-vault/src/agent_vault/source_start.py": "9c023d7099a6aa762e82f91539018cbbd4f75ebd76e9061fe8bc10d9c6e74970",
         "tools/promotion_unit_tests/test_hosted_activation.py": "20b44b2d24ea15e988b07a81d15eb01643a137d62666ff9b23e29fe8cfaf7f1c",
-        "plugins/agent-worktrees/src/agent_worktrees/retained_hosted_activation.py": "3e854addd94b96a577c4222b2808073fcd17224f8d97ca0f261fadb783f28c4a"
+        "plugins/agent-worktrees/src/agent_worktrees/retained_hosted_activation.py": "3e854addd94b96a577c4222b2808073fcd17224f8d97ca0f261fadb783f28c4a",
+        "plugins/agent-bridge/src/agent_bridge/retained_load_acceptance.py": "a019c867fd8d231b7bf5f0a707c0da4e84dd462492548b36a3054d52baf8d219",
+        "tools/promotion_unit_tests/test_retained_load_acceptance.py": "323528d12443b09d2a5abc61928975a266ec453fd394832af918dd9b1cd28c82"
     }
 }
