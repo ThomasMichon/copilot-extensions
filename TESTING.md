@@ -3216,7 +3216,10 @@ still alive. It does not exercise complete Picker/embody preflight, actual
 PSMux, repo lifecycle fencing, POSIX parity or installation removal.
 Run it with `python tools/run-plugin-tests.py agent-worktrees --test-file tests/native/test_mux_creation_overlap_native.py --allow-explicit-tiers --timeout 180 --plugin-timeout 600 --test-timeout 60`.
 The synthetic mux is a small executable built with the system C# compiler,
-not a Python interpreter proxy; fixture startup never justifies extending the
+with passive file-version metadata from the existing creation owner's minimum.
+The fixture reads the compiled resource back through the native version reader
+before its actors run; production creation admission remains real and unchanged.
+It is not a Python interpreter proxy; fixture startup never justifies extending the
 production two-second query cap. An unavailable compiler is an explicit skip,
 not Windows acceptance evidence. Actors finish importing/loading their owners
 before a ready/go barrier admits native creation, matching the production
