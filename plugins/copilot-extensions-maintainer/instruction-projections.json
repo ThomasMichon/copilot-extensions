@@ -1,0 +1,42 @@
+{
+  "schema": "copilot-extensions.instruction-projections",
+  "version": 1,
+  "projections": [
+    {
+      "id": "contribution-boundary",
+      "deliveryMode": "selector",
+      "template": "instructions/contribution-boundary.instructions.md",
+      "destination": ".github/instructions/copilot-extensions-maintainer/contribution-boundary.instructions.md",
+      "customizationKind": "instructions",
+      "applyTo": "**",
+      "legacyMarkers": []
+    },
+    {
+      "id": "cross-repo-debug-tracking",
+      "deliveryMode": "selector",
+      "template": "instructions/cross-repo-debug-tracking.instructions.md",
+      "destination": ".github/instructions/copilot-extensions-maintainer/cross-repo-debug-tracking.instructions.md",
+      "customizationKind": "instructions",
+      "applyTo": "**",
+      "legacyMarkers": []
+    },
+    {
+      "id": "commented-review-verdict",
+      "deliveryMode": "selector",
+      "template": "instructions/commented-review-verdict.instructions.md",
+      "destination": ".github/instructions/copilot-extensions-maintainer/commented-review-verdict.instructions.md",
+      "customizationKind": "instructions",
+      "applyTo": "**",
+      "legacyMarkers": []
+    },
+    {
+      "id": "validate-and-promote-triage",
+      "deliveryMode": "selector",
+      "template": "instructions/validate-and-promote-triage.instructions.md",
+      "destination": ".github/instructions/copilot-extensions-maintainer/validate-and-promote-triage.instructions.md",
+      "customizationKind": "instructions",
+      "applyTo": "**",
+      "legacyMarkers": []
+    }
+  ]
+}

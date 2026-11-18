@@ -27,7 +27,8 @@ component owns its command and support contract.
 | Read current budget posture | [budget-guidance](../plugins/budget-guidance/README.md) | Offline configured readings, not automated billing access |
 | Separate portable harness and private state | [harness-knowledge](../plugins/harness-knowledge/README.md) | An explicitly selected private knowledge repo, not a fixed name |
 | Apply general conduct/publication guidance | [agent-conduct-guidance](../plugins/agent-conduct-guidance/README.md), [ai-attribution](../plugins/ai-attribution/README.md) | General policy and task-time procedures; host-specific policy remains host-owned |
-| Contribute to this toolkit | [copilot-extensions-harness](../plugins/copilot-extensions-harness/README.md) | Toolkit contribution/diagnosis guidance, not your complete harness |
+| Diagnose this toolkit | [copilot-extensions-harness](../plugins/copilot-extensions-harness/README.md) | Consumer diagnosis and canonical local repair, not automatic source work |
+| Contribute to this toolkit | [copilot-extensions-maintainer](../plugins/copilot-extensions-maintainer/README.md) | Optional source procedures; an explicit contribution can use repository docs without enabling it |
 
 ## Support and dependencies
 

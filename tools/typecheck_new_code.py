@@ -30,7 +30,7 @@ def select_new_code(
         for path in touched
     )
     for name, needed in (
-        ("lib-payload-invocation", invocation), ("copilot-extensions-harness", harness),
+        ("lib-payload-invocation", invocation), ("copilot-extensions-maintainer", harness),
     ):
         if needed and name not in projects:
             raise SourceViewError(f"{name}: changed program inputs lack their physical owner")
@@ -44,7 +44,7 @@ def select_new_code(
                 require_bootstrap_version(
                     "strict", (project.python_version, *project.additional_python_versions),
                 )
-        elif name == "copilot-extensions-harness":
+        elif name == "copilot-extensions-maintainer":
             complete = bool(changed) or harness
         if INSTALLATION_ENTRY in files and changed:
             complete = True

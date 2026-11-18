@@ -58,7 +58,7 @@ TIER_B: tuple[str, ...] = (
     "ai-attribution",
     "budget-guidance",
     "context-handoff",
-    "copilot-extensions-harness",
+    "copilot-extensions-maintainer",
     "customizing-copilot",
     "efforts",
     "harness-knowledge",

@@ -1,7 +1,7 @@
 """Guard test: every declared troubleshooting category has an ambient pointer.
 
 Parallel to
-``plugins/copilot-extensions-harness/tests/test_session_context_declarations.py``'s
+``plugins/copilot-extensions-maintainer/tests/test_session_context_declarations.py``'s
 ``test_dynamic_pointer_projections_have_exact_session_writers`` -- this scans
 each plugin's *static* instruction-projection templates (not skills, not a
 consumer repo's synced copies) and asserts every category a plugin's
@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -41,7 +42,7 @@ def _write_projected_plugin(
     name: str,
     *,
     template_body: str,
-    categories: list[dict],
+    categories: list[dict[str, Any]],
 ) -> Path:
     """Build a synthetic plugin with a static projection + a
     troubleshooting-index.json, mirroring the real on-disk shape."""
@@ -179,7 +180,7 @@ def test_declared_category_with_no_static_projections_is_uncovered(
         },
     ],
 )
-def test_malformed_declaration_fails_closed(tmp_path: Path, declaration: dict) -> None:
+def test_malformed_declaration_fails_closed(tmp_path: Path, declaration: dict[str, Any]) -> None:
     path = tmp_path / tix.DECLARATION_FILE
     path.write_text(json.dumps(declaration), encoding="utf-8")
 

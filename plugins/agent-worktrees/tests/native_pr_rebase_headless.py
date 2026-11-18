@@ -1,13 +1,16 @@
 """Bounded window observation from a fresh consoleless Windows interpreter."""
 
 import ctypes
+import importlib
 import json
 import os
 import sys
+import subprocess
 import threading
 import time
 from ctypes import wintypes as w
 from pathlib import Path
+from collections.abc import Callable
 
 steward_probes = sys.argv[1] == "--steward-probes"
 if steward_probes:
@@ -15,14 +18,14 @@ if steward_probes:
 
     root = Path(sys.argv[2])
     spec = importlib.util.spec_from_file_location(
-        "mention_guard", root / "plugins" / "copilot-extensions-harness"
+        "mention_guard", root / "plugins" / "copilot-extensions-maintainer"
         / "scripts" / "copilot-mention-guard.py",
     )
     assert spec and spec.loader
     guard = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(guard)
     sys.path.insert(0, str(root / "tools"))
-    from maintainer_pr_completion import invoke
+    invoke = importlib.import_module("maintainer_pr_completion").invoke
 else:
     sys.path.insert(0, sys.argv[1])
     from agent_worktrees import front_door_cli, git_ops, pr_ops, pr_rebase, state_root
@@ -37,8 +40,8 @@ class ProcessEntry(ctypes.Structure):
     ]
 
 
-kernel = ctypes.WinDLL("kernel32", use_last_error=True)
-user = ctypes.WinDLL("user32", use_last_error=True)
+kernel = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
+user = getattr(ctypes, "WinDLL")("user32", use_last_error=True)
 kernel.CreateToolhelp32Snapshot.argtypes = [w.DWORD, w.DWORD]
 kernel.CreateToolhelp32Snapshot.restype = w.HANDLE
 kernel.Process32FirstW.argtypes = [w.HANDLE, ctypes.POINTER(ProcessEntry)]
@@ -47,14 +50,14 @@ kernel.CloseHandle.argtypes = [w.HANDLE]
 user.GetForegroundWindow.restype = w.HWND
 user.GetWindowThreadProcessId.argtypes = [w.HWND, ctypes.POINTER(w.DWORD)]
 user.IsWindowVisible.argtypes = [w.HWND]
-callback_type = ctypes.WINFUNCTYPE(w.BOOL, w.HWND, w.LPARAM)
+callback_type = getattr(ctypes, "WINFUNCTYPE")(w.BOOL, w.HWND, w.LPARAM)
 user.EnumWindows.argtypes = [callback_type, w.LPARAM]
 
 
-def descendants():
+def descendants() -> set[int]:
     snapshot = kernel.CreateToolhelp32Snapshot(2, 0)
     if snapshot == ctypes.c_void_p(-1).value:
-        raise ctypes.WinError(ctypes.get_last_error())
+        raise getattr(ctypes, "WinError")(getattr(ctypes, "get_last_error")())
     pairs = []
     try:
         entry = ProcessEntry()
@@ -73,7 +76,7 @@ def descendants():
         owned.update(found)
 
 
-def window_pid(handle):
+def window_pid(handle: int | None) -> int:
     pid = w.DWORD()
     user.GetWindowThreadProcessId(handle, ctypes.byref(pid))
     return pid.value
@@ -81,32 +84,32 @@ def window_pid(handle):
 
 stop = threading.Event()
 ready = threading.Event()
-seen = set()
-visible = set()
-foreground = set()
-new_visible = set()
-focus_changes = []
-errors = []
+seen: set[int] = set()
+visible: set[int] = set()
+foreground: set[int] = set()
+new_visible: set[int] = set()
+focus_changes: list[int] = []
+errors: list[str] = []
 
 
-def observe():
-    baseline_windows = None
-    previous_foreground = None
+def observe() -> None:
+    baseline_windows: set[int] | None = None
+    previous_foreground: int | None = None
     try:
         while not stop.is_set():
             seen.update(descendants())
-            current_windows = set()
+            current_windows: set[int] = set()
 
-            @callback_type
-            def inspect(handle, _param):
+            def inspect(handle: int, _param: int) -> bool:
                 if user.IsWindowVisible(handle):
                     current_windows.add(int(handle))
                     if window_pid(handle) in seen:
                         visible.add(int(handle))
                 return True
 
-            if not user.EnumWindows(inspect, 0):
-                raise ctypes.WinError(ctypes.get_last_error())
+            callback = callback_type(inspect)
+            if not user.EnumWindows(callback, 0):
+                raise getattr(ctypes, "WinError")(getattr(ctypes, "get_last_error")())
             if baseline_windows is None:
                 baseline_windows = current_windows
             # Console hosts may be broker-owned rather than process descendants.
@@ -129,8 +132,6 @@ thread.start()
 assert ready.wait(5)
 cycles = 0
 try:
-    import subprocess
-
     assert not hasattr(subprocess.Popen.__init__, "_aw_headless")
     for _ in range(2):
         if steward_probes:
@@ -142,9 +143,13 @@ try:
             assert pr_ops._patch_id(sys.argv[3], sys.argv[4], cwd=sys.argv[2])
             assert pr_ops._commit_patch_ids(sys.argv[3], sys.argv[4], cwd=sys.argv[2])
             assert git_ops.resolve_to_anchor(Path(sys.argv[2])).exists()
-            assert front_door_cli._git_toplevel(Path(sys.argv[2])).exists()
+            get_front_door_toplevel: Callable[[Path], Path] = front_door_cli._git_toplevel
+            assert get_front_door_toplevel(Path(sys.argv[2])).exists()
             assert state_root._git_common_dir(Path(sys.argv[2])).is_dir()
-            assert Path(state_root._git_toplevel(sys.argv[2])).resolve() == Path(sys.argv[2]).resolve()
+            get_toplevel: Callable[[str], str | None] = state_root._git_toplevel
+            toplevel = get_toplevel(sys.argv[2])
+            assert toplevel is not None
+            assert Path(toplevel).resolve() == Path(sys.argv[2]).resolve()
         cycles += 1
         time.sleep(0.1)
 finally:

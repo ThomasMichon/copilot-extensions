@@ -161,10 +161,11 @@ map. Enable what the chosen workflow actually needs. Encode the choice in
 their phases apply. This is not the minimum for every use of the toolkit.
 
 > **Additional plugins are not implicitly excluded or required.**
-> `copilot-extensions-harness` is the operator harness for working *on* this
-> suite itself — enable it in a control repo that contributes to
-> copilot-extensions (it is the reference implementation of the `<repo>-harness`
-> standard). `wsl-setup` ships WSL2 provisioning/troubleshooting skills — enable
+> `copilot-extensions-harness` provides consumer diagnosis for this suite.
+> Its optional `copilot-extensions-maintainer` companion provides procedures
+> for explicitly assigned source work. Enabling either package does not assign
+> work or permit publication. An explicit contribution can use repository docs
+> without enabling the companion. `wsl-setup` ships WSL2 provisioning/troubleshooting skills — enable
 > it when a harness must stand up or debug a WSL host. Both are payload-only.
 > See [capabilities](capabilities.md) for SSH, indexing, machine requirements,
 > knowledge binding, conduct, attribution, budget, and opt-in remote drivability.

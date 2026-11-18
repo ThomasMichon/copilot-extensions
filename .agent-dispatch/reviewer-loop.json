@@ -16,5 +16,5 @@
     "copilot-pull-request-reviewer"
   ],
   "task_label": "self-hosted-review",
-  "guidance": "plugins/copilot-extensions-harness/references/reviewer-guidance.md"
+  "guidance": "plugins/copilot-extensions-maintainer/references/reviewer-guidance.md"
 }
