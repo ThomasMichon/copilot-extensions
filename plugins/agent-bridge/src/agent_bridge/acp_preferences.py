@@ -5,11 +5,13 @@ from __future__ import annotations
 import logging
 import os
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
-from .session_preferences import PreferenceApplicationError, SOURCES, clean
+from agent_remote_driver.session_preferences import PreferenceApplicationError, SOURCES, clean
 from .acp_continuation import idle_operation
 
+if TYPE_CHECKING:
+    from .acp_client import AcpClient
 log = logging.getLogger("agent-bridge")
 
 _ACP_MODEL_CONFIG_ID = "model"
@@ -73,7 +75,7 @@ class AcpPreferencesMixin:
         self.launch_preferences = dict(launch or {})
         self.confirmed_preferences = dict(confirmed or {})
         self.provider_intent = provider_intent
-        self._verified_options = None
+        self._verified_options: Any = None
         self._preferences_ready = source == "caller-settings"
         self._idle_operations = 0
 
@@ -84,6 +86,7 @@ class AcpPreferencesMixin:
     async def _apply_model_config(
         self, config_options: Any, *, resuming: bool = False,
         before_effect: Callable[[], None] | None = None,
+        caller_preferences: dict[str, str] | None = None, force_readback: bool = False,
     ) -> None:
         """Set the session's ``model`` / ``reasoning_effort`` via ACP.
 
@@ -96,7 +99,10 @@ class AcpPreferencesMixin:
         retains its degrade-safe fallback. Target-settings mode requires actual
         readback of model/effort and fails startup if that intent is unverified;
         unsupported context is reported without a false effectiveness claim.
+        Retained-load reconciliation supplies frozen caller intent and forces
+        readback because its original response may predate partial configuration.
         """
+        self = cast("AcpClient", self)
         if not self._connection or not self._acp_session_id:
             return
         target_mode = self.preference_source == "target-settings"
@@ -138,7 +144,10 @@ class AcpPreferencesMixin:
                 desired.update(self.launch_preferences)
         else:
             try:
-                desired = self._resolve_caller_preferences()
+                desired = (
+                    dict(caller_preferences) if caller_preferences is not None
+                    else self._resolve_caller_preferences()
+                )
             except Exception as exc:
                 log.debug("ACP model-config resolution failed: %s", exc)
                 desired = {}
@@ -203,7 +212,7 @@ class AcpPreferencesMixin:
                      "offered": sorted(allowed)}
                 )
                 continue
-            if current == value:
+            if current == value and not force_readback:
                 applied[config_id] = current
                 continue
             if before_effect is not None:
@@ -332,6 +341,7 @@ class AcpPreferencesMixin:
     def _remember_preferences(
         self, config_options: Any,
     ) -> None:
+        self = cast("AcpClient", self)
         self._verified_options = config_options
         self.confirmed_preferences = self._selected_preferences(config_options)
         self._emit("preference_selected", dict(self.confirmed_preferences))
