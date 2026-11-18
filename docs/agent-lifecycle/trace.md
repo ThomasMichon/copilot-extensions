@@ -10,7 +10,7 @@ There is no transaction that commits all three services at once.
 ### A worked example
 
 These are illustrative names, not real IDs. Suppose task `T` asks for the
-line count of `README.md`. The worker pool accepts tasks from queue `Q`,
+review of a change to `README.md` in PR 12033. The worker pool accepts tasks from queue `Q`,
 but runs workers in project `P`. The queue name need not be the project name,
 and neither proves which repository's files the worker is supposed to read.
 
@@ -29,10 +29,11 @@ sequenceDiagram
     D-->>B: Confirm binding for this delivery ID
     B->>A: Deliver the task
     A->>D: Accept work and report progress
-    A->>D: Submit the count for T
+    A->>D: Submit the review reference for T
     Note over D,W: Result, worker exit, slot release and checkout cleanup are separate
 ```
 
+For field values at each boundary, follow the [PR review snapshots](review-snapshots.md).
 The arrows show responsibilities on a local, worktree-backed path, not an RPC
 trace common to every provider. Bridge can compose workspace creation itself.
 A provider-managed container can supply its own workspace instead. A worker

@@ -1,9 +1,12 @@
 # How an automated task runs
 
-Suppose a repository needs one agent to count the lines in its README. **Dispatch**
-records the question and assigns a worker. **Bridge** connects that worker's
-conversation. **Worktrees** tracks the checkout in which the agent reads the file.
-The answer belongs to the task, not to the process that happened to compute it.
+Suppose a repository needs a review of pull request 12033. **Dispatch**
+records the job and assigns a worker. **Bridge** connects that worker's
+conversation. **Worktrees** tracks the checkout in which it inspects the change.
+The review belongs to the task, not to the process that happened to write it.
+
+**Start with the [PR review in snapshots](review-snapshots.md)** to see the
+records before a worker exists, after it accepts, and while it waits for a slot.
 
 ![Four records behind one automated task: a task, a reservation, a session and a checkout. The result and the cleanup are checked separately.](run-map.svg)
 
@@ -24,8 +27,8 @@ both the right conversation and the right checkout; the two boxes marked **3**
 are related resources, not consecutive status values. Existing workers can
 also claim tasks: not every task causes a new checkout or process.
 
-The worker reads this checkout's README, reports progress, and submits the
-line count. A tracker or evaluator can check the answer independently. A
+The worker inspects the requested PR revision, reports progress, and submits a
+reference to its review. A tracker or evaluator can check it independently. A
 worker saying “done” in chat is not a submission. Likewise, an accepted result
 does not prove that the process exited, the reservation is free, or the branch
 is safe to remove. A checkout can hold useful changes after the task ends.
