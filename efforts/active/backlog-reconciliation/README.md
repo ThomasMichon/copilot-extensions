@@ -3421,6 +3421,16 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [current create-credential qualification](journal/2026/11.17-current-create-credential-qualification.md)
+  records #13168's actual reviewed receipt and #5763's corrected current
+  gate/create/SSH-source credit. A three-row whole venue-domain proposal
+  retains the operation-wide same-credential union and precise availability/
+  status seam, preserving actual custodians and #5760 rather than claiming
+  a different-token reproduction. Three independent canonical contracts
+  remain OPEN; a recovered containing-source boundary required withdrawal
+  of #356's earlier whole-ROOT qualification and restoration to OPEN.
+  The complete census is 884 whole, 155 above fixed 729; #5763 remains
+  OPEN at proposal and the earlier invalid closure credit is withdrawn.
   The [manager receipt and native/transport retentions](journal/2026/11.17-manager-receipt-and-native-transport-retentions.md)
   records #13165's actual reviewed delivery and #5655's separate tracking
   retirement without technical completion or custody transfer. #5708's
