@@ -216,12 +216,16 @@ def test_direct_backend_refuses_before_product_writes(
         else:
             import runtime_install_modes as modes
 
-            target = backend.install if entry == "install" else modes.run
-            target(
-                root, binding_fixture["payload"], payload=binding_fixture["payload"],
-                uv=root / "unused", base_python=Path(sys.executable),
-                **({"mode": "repair"} if entry == "mode" else {}),
-            )
+            if entry == "install":
+                backend.install(
+                    root, binding_fixture["payload"], payload=binding_fixture["payload"],
+                    uv=root / "unused", base_python=Path(sys.executable),
+                )
+            else:
+                modes.run(
+                    root, binding_fixture["payload"], payload=binding_fixture["payload"],
+                    uv=root / "unused", base_python=Path(sys.executable), mode="repair",
+                )
     assert _snapshot(binding_fixture["home"]) == before
 
 
