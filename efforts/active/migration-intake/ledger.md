@@ -631,3 +631,30 @@ The [dated receipt and complete proposals](../backlog-reconciliation/journal/202
 retain #13154's bounded verifier/consumer claimant and the 884-open census.
 No #5559/#5579/#5616 disposition, implementation appointment, technical proof
 or source/resource release follows from publishing these proposed rows.
+
+## Registry/lifecycle/overlay receipt and retained manager mechanisms (2026-11-17 UTC)
+
+#13158 merged complete #5616 receiving and source-specific #5559/#5579
+administrative clarifications after current-head Copilot approval and required
+CI. Entire current three-ROOT/canonical-mini/source/custody readback and
+independent metadata/roster/document retention checks preceded separate
+audited `NOT_PLANNED` tracking retirements of all three originals.
+Originals and every earlier discussion remain exact; no technical checkbox,
+actual claim, owner, operational restriction or native authorization was
+completed, transferred or renewed by those judgments.
+
+| Whole contract | Original provenance | Proposed route | Direct receiving | Retained conditions |
+|---|---|---|---|---|
+| Original finite Windows manager lifetime-pipe/trusted-handle/Job/task-handoff mechanisms | Public #5655 whole original and all three discussions, qualified current manager pattern and existing ROOT | routed (proposed; effective after reviewed complete domain acceptance) | [versioned-singleton-manager](../versioned-singleton-manager/README.md), P5655-W/local V5655-W/actual G5655-W and same-custodian Coordination/Journal | Three unchecked rows; original Windows/passive-spawn scope, native gate and actual serial owner; no vacancy/accepted handoff from inquiry; pattern atomicity mismatch tracked against existing kernel synchronization; no new architecture, privilege, task or every-host programme |
+
+#5641 remains its complete conditional issue-local keeper; ordinary pivot/
+time/archive observations activate neither deferred lane. #5665 remains
+canonical OPEN under #5676's SPECIFIC final-OPEN/accepted-owner-preserving-
+handoff condition, not a generic ACK or permission to retire the parent.
+Neither is reassigned, closed or replaced by partial effort intake.
+
+The [dated receipt and keeper boundaries](../backlog-reconciliation/journal/2026/11.17-registry-lifecycle-receipt-and-manager-mechanisms.md)
+retain #13159's reported executable-resolution scope and the 880-open census.
+Ledger publication does not deliver the proposed #5655 domain receipt,
+implement Windows mechanisms, settle its administrative judgment or release
+any source/resource custody.

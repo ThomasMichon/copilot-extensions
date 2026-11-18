@@ -3421,6 +3421,19 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [manager receipt and native/transport retentions](journal/2026/11.17-manager-receipt-and-native-transport-retentions.md)
+  records #13165's actual reviewed delivery and #5655's separate tracking
+  retirement without technical completion or custody transfer. #5708's
+  reservation, #5716's complete canonical OPEN contract and #5761's genuine
+  source-author exclusion remain distinct; #13164/#13166 retain their
+  unfinished original scopes and owners. The complete census is 882 whole,
+  153 above fixed 729.
+  The [registry/lifecycle receipt and manager mechanisms](journal/2026/11.17-registry-lifecycle-receipt-and-manager-mechanisms.md)
+  records #13158's actual delivery and separate #5559/#5579/#5616 tracking
+  retirements, preserving every technical obligation and actual custodian.
+  #5655 receives a three-row mechanism proposal and explicit pattern-debt
+  home; #5641/#5665 retain their conditional/final-OPEN keeper boundaries.
+  The complete census is 880 whole, 151 above fixed 729.
   The [authentication/baseline receipt and overlay proposals](journal/2026/11.17-auth-baseline-receipt-and-overlay-proposals.md)
   records #13153's actual delivery and separate #5452/#5518/#5549 tracking
   retirements, with only the evidenced #5518 documentary routing row checked.
