@@ -23,7 +23,7 @@ from agent_bridge.acquisition_contract import AcquisitionRefused, WorktreeWriter
 from agent_bridge.connect import ConnectTracker
 from agent_bridge.creation_worktree_writer import CreationWriterScope, JOURNAL_KEY
 from agent_bridge.events import EventLog
-from agent_bridge.models import RetainedRecoveryRequest
+from agent_bridge.models import PhasedTimeouts, RetainedRecoveryRequest
 from agent_bridge.retained_session_recovery import RetainedRecovery
 from agent_bridge.session_manager import Session
 from agent_bridge.session_status import SessionStatus
@@ -38,6 +38,7 @@ pytestmark = pytest.mark.contract("agent_bridge.retained_hosted_registration")
     "direct", "accepted", "historical", "committed", "restart", "lost-response",
     "stop", "foreign", "raced-stop", "configured", "config-failed", "config-crash",
     "config-missing", "config-stop", "config-activity",
+    "config-retained", "config-timeout", "config-timeout-restart", "config-unqualified-client",
 ])
 async def test_acknowledged_hosted_load_registers_without_a_cli_hold(
     session_manager: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
@@ -82,7 +83,11 @@ async def test_acknowledged_hosted_load_registers_without_a_cli_hold(
     configured = completion.startswith("config")
 
     async def resolve(*_args: Any, **_kwargs: Any) -> Any:
-        mode = "config-failed" if completion == "config-failed" else "configured"
+        mode = (
+            "config-timeout" if completion.startswith("config-timeout")
+            else "config-failed" if completion in {"config-failed", "config-retained", "config-unqualified-client"}
+            else "configured"
+        )
         return [
             interpreter, str(Path(__file__).with_name("cold_drain_peer.py")),
             str(transcript), NATIVE,
@@ -119,6 +124,13 @@ async def test_acknowledged_hosted_load_registers_without_a_cli_hold(
         head_revision=before.head_revision, bridge_installation=str(tmp_path / "bridge"),
     )
     owner = RetainedRecovery(manager, session, request, target.to_json(), asyncio.current_task())
+    retained_frontend = completion in {
+        "config-retained", "config-timeout", "config-timeout-restart", "config-unqualified-client",
+    }
+    if retained_frontend:
+        session._retained_recovery_owner = owner
+    if completion.startswith("config-timeout"):
+        manager._timeouts = PhasedTimeouts(session_new=2)
     if configured:
         monkeypatch.setattr("agent_bridge.session_host_connection.client_preferences", lambda *_args: {
             "preference_source": "target-settings",
@@ -187,18 +199,33 @@ async def test_acknowledged_hosted_load_registers_without_a_cli_hold(
                 raise RuntimeError("fixture frontend lost after durable ACK")
 
             with monkeypatch.context() as startup:
-                if failed_config and completion != "config-failed":
+                if failed_config and completion != "config-failed" and not retained_frontend:
                     startup.setattr(AcpClient, "_apply_model_config", fail_configuration)
                 try:
-                    client, native = await manager._connect_via_session_host(
-                        target, tracker=ConnectTracker(), session_id=session.session_id,
-                        on_acp_event=lambda event, data: manager._route_acp_event(session, event, data),
-                        permission_callback=None, load_session_id=NATIVE, recovery_operation=owner,
-                    )
+                    if retained_frontend:
+                        from agent_bridge import retained_session_recovery as recovery
+                        recovery_token = recovery._current.set(owner)
+                        try:
+                            await manager.resume_session(
+                                session.session_id, drain=False, allow_recreate=False,
+                                owner_native_resume=True, recovery_operation=owner,
+                            )
+                        finally:
+                            recovery._current.reset(recovery_token)
+                        raise AssertionError("Original configuration must fail before recovery")
+                    else:
+                        client, native = await manager._connect_via_session_host(
+                            target, tracker=ConnectTracker(), session_id=session.session_id,
+                            on_acp_event=lambda event, data: manager._route_acp_event(session, event, data),
+                            permission_callback=None, load_session_id=NATIVE, recovery_operation=owner,
+                        )
                 except RuntimeError as exc:
                     assert failed_config
                     assert (
-                        "required model/effort was not verified" in str(exc) if completion == "config-failed"
+                        "timed out" in str(exc) if completion.startswith("config-timeout")
+                        else "required model/effort was not verified" in str(exc) if completion in {
+                            "config-failed", "config-retained", "config-unqualified-client",
+                        }
                         else str(exc).endswith("fixture frontend lost after durable ACK")
                     )
                     client, native = session.client, NATIVE
@@ -219,15 +246,18 @@ async def test_acknowledged_hosted_load_registers_without_a_cli_hold(
                     "host", NATIVE, pid=child, worktree_dir=str(checkout), hosted_activation=activation,
                 )
             manager._set_background_recovery_enabled(session, False)
-            await client.shutdown()
-            client, session.client = None, None
+            if not retained_frontend or completion == "config-timeout-restart":
+                await client.shutdown()
+                client, session.client = None, None
+            else:
+                assert session.client is client and session.status == SessionStatus.STOPPED
             owner.active = False
             manager.db.execute_write(
                 "UPDATE workspace_embodiments SET creation_recoveries_json=? WHERE key_digest=?",
                 (json.dumps({request.operation_id: {"request": request.model_dump(), "state": "unknown"}}),
                  request.journal_key),
             )
-            if completion == "restart":
+            if completion in {"restart", "config-timeout-restart"}:
                 index = manager._host_index
                 assert index.release(session.session_id, manager._generation_id)
                 previous_session = session
@@ -237,6 +267,15 @@ async def test_acknowledged_hosted_load_registers_without_a_cli_hold(
                 session = manager.get_session(previous_session.session_id)
                 assert session is not None and session is not previous_session and session.client is None
             original_events = manager.db.get_events(session.session_id)
+            if completion == "config-unqualified-client":
+                owner.socket = object()
+                with pytest.raises(AcquisitionRefused, match="unqualified frontend"):
+                    await settlement.inspect(manager, session.session_id, request.operation_id, lambda: True)
+                assert client is not None and session.client is client and client.is_running
+                assert manager.db.execute_read("SELECT * FROM acquisition_launch_gates")
+                return
+            if completion.startswith("config-timeout"):
+                assert any(item["event_type"] == "acp_launch_timeout" for item in original_events)
             if completion in {"config-stop", "config-activity"}:
                 route = manager._route_acp_event
 
@@ -401,7 +440,7 @@ async def test_acknowledged_hosted_load_registers_without_a_cli_hold(
         assert [item["method"] for item in messages if "method" in item] == (
             ["initialize", "session/load"]
             + (["session/set_config_option"] * 2 if configured and (
-                not failed_config or completion == "config-failed"
+                not failed_config or completion == "config-failed" or retained_frontend
             ) else [])
             + ["initialize"]
             + (["session/set_config_option"] * 2 if failed_config else [])

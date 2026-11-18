@@ -18,8 +18,9 @@ def main() -> None:
             stream.write(json.dumps(data) + "\n")
 
     record({"boot": os.getpid()})
-    configured = len(sys.argv) > 3 and sys.argv[3] in {"configured", "config-failed"}
+    configured = len(sys.argv) > 3 and sys.argv[3] in {"configured", "config-failed", "config-timeout"}
     fail_effort = len(sys.argv) > 3 and sys.argv[3] == "config-failed"
+    silence_effort = len(sys.argv) > 3 and sys.argv[3] == "config-timeout"
     options = [
         {"id": key, "name": key, "type": "select", "currentValue": default,
          "options": [{"value": value, "name": value} for value in (default, selected)]}
@@ -40,6 +41,9 @@ def main() -> None:
             result = {"configOptions": options} if configured else {}
         elif method == "session/set_config_option" and configured:
             assert message["params"]["sessionId"] == native
+            if silence_effort and message["params"]["configId"] == "reasoning_effort":
+                silence_effort = False
+                continue
             if fail_effort and message["params"]["configId"] == "reasoning_effort":
                 fail_effort = False
                 print(json.dumps({"jsonrpc": "2.0", "id": message["id"], "error": {

@@ -13,6 +13,39 @@ from .retained_session_recovery import _refuse
 from .retained_load_configuration import configuration_event
 
 
+def original_frontend(
+    manager: Any, session: Any, client: Any, host: Any,
+    request: RetainedRecoveryRequest, events: list[dict[str, Any]],
+) -> None:
+    """Qualify the inactive RPC owner's frontend before detaching its Host socket."""
+    from .acp_client import AcpClient
+    from .retained_session_recovery import RetainedRecovery
+
+    owner = getattr(session, "_retained_recovery_owner", None)
+    if (
+        not isinstance(client, AcpClient) or not isinstance(owner, RetainedRecovery)
+        or owner.manager is not manager or owner.session is not session or owner.request != request
+        or owner.active or not owner.native_rpc_started or not owner.native_started
+        or owner.host_record is None or load.host_binding(owner.host_record) != load.host_binding(host)
+        or owner.socket is None or getattr(client, "session_host_client", None) is not owner.socket
+        or owner.streams is None
+        or not client._host_mode or client.pid != host.child_pid
+        or client.acp_session_id not in {None, request.native_session_id}
+        or client._idle_operations or client._prompt_in_flight or client._prompt_lock.locked()
+        or client._pending_permission_future is not None or client._pending_elicitations
+        or client._out_of_turn_open
+        or [item["data"] for item in events if item["event_type"] == load.EVENT] != [owner.accepted_load]
+    ):
+        raise _refuse("Original accepted load retains an unqualified frontend transport")
+
+
+def _configuration_timeout(item: dict[str, Any]) -> bool:
+    return bool(
+        item["event_type"] == "acp_launch_timeout" and item["data"].get("stage") == "LAUNCH_ACP"
+        and item["data"].get("mode") == "session-host"
+    )
+
+
 def physical(host: Any, request: RetainedRecoveryRequest) -> dict[str, Any]:
     """Corroborate current births, independently of any historical load claim."""
     try:
@@ -56,7 +89,8 @@ def _span(events: list[dict[str, Any]], request: RetainedRecoveryRequest) -> lis
     }:
         raise _refuse("Accepted load lost its original operation marker")
     span = events[markers[0] + 1:]
-    if any(not configuration_event(item["event_type"], item["data"]) and (item.get("event_type") not in {
+    if any(not configuration_event(item["event_type"], item["data"]) and not _configuration_timeout(item)
+           and (item.get("event_type") not in {
         "startup_progress", "connect_checkpoint", load.EVENT, "session_state_changed",
     } or item["event_type"] == "session_state_changed" and item["data"].get("status") != "stopped"
     ) for item in span):
@@ -155,7 +189,7 @@ def qualify(
             and item["data"].get("state") != "waiting"
         ]
         if any(
-            configuration_event(item["event_type"], item["data"])
+            _configuration_timeout(item) or configuration_event(item["event_type"], item["data"])
             and not load_steps[0] < index < load_steps[1]
             for index, item in enumerate(span)
         ):
@@ -187,6 +221,7 @@ def qualify(
             or any(
                 position < index and (
                     configuration_event(item["event_type"], item["data"])
+                    or _configuration_timeout(item)
                     or item["event_type"] == "startup_progress"
                     and item["data"].get("phase") == "resume" and item["data"].get("state") == "failed"
                 )

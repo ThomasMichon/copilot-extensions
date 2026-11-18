@@ -47,7 +47,8 @@ async def complete(
         "mode": "cli", "session_id": session_id,
         "native_session_id": request.native_session_id, "driver": "retained-recovery",
     }
-    attached = None
+    original_client = session.client
+    attached = original_client
     expected_events = list(events)
     event_fault = False
 
@@ -61,7 +62,7 @@ async def complete(
             or saved["acp_session_id"] != request.native_session_id
             or session.status != SessionStatus.STOPPED or saved["status"] != "stopped"
             or session.client is not attached or session.background_recovery_enabled
-            or attached is not None and not attached.is_running
+            or attached is not None and attached is not original_client and not attached.is_running
             or session._native_turn_transport is not None or session._handoff_in_progress
             or session._turn_start_lock.locked()
             or session._prompt_task is not None and not session._prompt_task.done()
@@ -171,6 +172,14 @@ async def complete(
                     index.assert_inventory_current(fresh)
 
                 try:
+                    if original_client is not None:
+                        evidence.original_frontend(
+                            manager, session, original_client, owned, request, evidence._span(events, request),
+                        )
+                        require_claim()
+                        await asyncio.wait_for(original_client.shutdown(), timeout=manager._timeouts.session_start)
+                        require_claim()
+                        session.client = attached = None
                     if not await asyncio.wait_for(manager._reattach_one(
                         owned, session, new_status=SessionStatus.STOPPED, retained_check=require_claim,
                     ), timeout=manager._timeouts.session_start):
@@ -268,7 +277,7 @@ async def complete(
                         )
                     session.status = SessionStatus.IDLE
                 except BaseException:
-                    if attached is not None and session.client is attached:
+                    if attached is not None and attached is not original_client and session.client is attached:
                         await registration_pending(manager, session)
                     raise
     return recovery.inspect(manager, session_id, request.operation_id)

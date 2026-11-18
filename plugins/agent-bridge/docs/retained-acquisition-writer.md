@@ -267,6 +267,13 @@ unrelated concurrent activity, stops and ownership changes refuse completion.
 An older acknowledgement without the snapshot can finish only when its original
 history affirmatively records completed configuration.
 
+On the original frontend, a failed resume can still retain its ACP client.
+Completion first qualifies that inactive RPC owner's client, Host socket,
+acknowledgement and idle operation state under the existing ownership locks,
+then detaches only that frontend before reattaching. An unassociated client
+stays untouched. A configuration-timeout diagnostic is accepted only after the
+same durable acknowledgement, never as independent load evidence.
+
 An older writer's affirmative tagged load-finished history can be adapted only
 when the retained Host's immutable state and birth evidence associate its launch
 with that original event span. Missing or conflicting history, a foreign live

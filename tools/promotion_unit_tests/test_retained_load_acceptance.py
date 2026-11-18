@@ -314,3 +314,24 @@ def test_ack_order_and_legacy_terminal_proof_remain_required(postload: Any, chan
         item["event_id"] = index
     with pytest.raises(Refused):
         b.qualify()
+
+
+@pytest.mark.parametrize("position", ["post-ack", "pre-ack", "wrong-mode", "historical"])
+def test_configuration_timeout_requires_its_original_durable_ack(postload: Any, position: str) -> None:
+    b = postload
+    diagnostic: dict[str, Any] = {
+        "event_type": "acp_launch_timeout", "data": {"stage": "LAUNCH_ACP", "mode": "session-host"},
+    }
+    b.history[6]["data"]["state"] = "failed"
+    b.history.insert(5 if position == "pre-ack" else 7, diagnostic)
+    if position == "wrong-mode":
+        diagnostic["data"]["mode"] = "remote"
+    elif position == "historical":
+        b.history.pop(5)
+    for index, item in enumerate(b.history, 1):
+        item["event_id"] = index
+    if position == "post-ack":
+        assert b.qualify()["session_id"] == b.owner.request.native_session_id
+    else:
+        with pytest.raises(Refused):
+            b.qualify()
