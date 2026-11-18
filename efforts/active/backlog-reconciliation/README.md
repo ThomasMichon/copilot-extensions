@@ -3428,19 +3428,24 @@ sources, transferring owners or turning partial/planning gains into completion.
   inferred broader reservation. #6283's conditional remote intake remains
   unaccepted under the current local-only scope; two agent-invented umbrella/
   ACK gates were withdrawn while genuine source/ownership boundaries remain.
-  A [prospective #6137 tracking refinement](journal/2026/11.17-fleet-refinements-and-remote-scope.md#6137-positive-keeper-provenance-and-a-prospective-refinement)
-  has affirmative campaign-intake provenance and preserves every independent
-  condition: accepted review AND still-OPEN source reflection precede fresh
-  complete current readback and a separate judgment. No automatic closure.
-  The same journal's [delivery/inbox receiving](journal/2026/11.17-fleet-refinements-and-remote-scope.md#6394-whole-domain-receiving-without-a-second-protocol)
-  directly proposes seven Plan, seven local Validation and one actual global
-  Validation residuals in the existing delegation effort, reusing direct
-  identity/admission/audit and queued-steering gates. Actual source/publisher
-  conditions and bounded claims remain; the alternative file-drop design is
-  not selected implementation. #6394 also remains OPEN pending review, current
-  readback and separate judgment. All four sources stay OPEN.
-  The complete count remains 882 whole,
-  153 above 729.
+  The [reviewed receiving and separate judgments](journal/2026/11.17-fleet-refinements-and-remote-scope.md#reviewed-receiving-and-three-separate-tracker-retirements)
+  record #13193's actual merge and audited NOT_PLANNED retirements of
+  #6236/#6137/#6394. #6137's campaign-owned keeper refinement was explicitly
+  reviewed, reflected in the STILL-OPEN source and followed by fresh complete
+  readback and a separate judgment; no independent condition was waived.
+  #6394's seven Plan, seven local and actual global Validation rows remain
+  unchecked. The recorded bounded queued follow-up and next provider/API gate
+  answer its actual phase-choice condition, not technical completion or
+  publisher/custody release. File-drop remains unaccepted; #6283 remains OPEN.
+  The complete two-pass count is 879 whole, 150 above 729; all 24 parent
+  items remain open.
+  The same [whole Gateway/index comparison](journal/2026/11.17-fleet-refinements-and-remote-scope.md#whole-gatewayindex-receiving-and-an-explicit-keeper-continuation)
+  finds complete existing direct #6443/#6383 receiving without another
+  technical checklist. The affirmative campaign-owned #6383 OPEN-parent
+  representation is preserved, not dismissed. A proposed explicit tracking
+  continuation requires reviewed acceptance, STILL-OPEN #6443 reflection,
+  fresh complete current readback and separate judgment. #6443 stays OPEN;
+  no source/resource or technical condition is waived.
   The [reviewed lifecycle receiving receipt](journal/2026/11.17-lifecycle-receiving-and-timeout-retirement.md#reviewed-lifecycle-receiving-and-two-separate-tracker-retirements)
   records #13185's actual merge, complete current #6143 receiving and
   separately audited #6143/#6177 redundant-tracker retirements. Their

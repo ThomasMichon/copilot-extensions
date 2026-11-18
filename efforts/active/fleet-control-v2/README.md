@@ -80,6 +80,36 @@ neither live enrollment nor deployment, destructive retirement or capacity acces
   Concrete source/interface agreements remain required before affected wiring;
   no universal ACK or whole-parent completion prerequisite is added.
 
+### Proposed #6443 administrative tracking continuation
+
+The campaign's actual #6383 retirement
+[receipt](https://github.com/ThomasMichon/copilot-extensions/issues/6383#issuecomment-6668444722)
+affirmatively represented that its receiving parent #6443 remained OPEN.
+Preserve that keeper representation and historical receipt; do not dismiss it
+as inconsequential state wording or infer that complete documentation silently
+waives it.
+
+This proposal refines only that campaign-authored tracking convention.
+After explicit reviewed acceptance AND reflection in STILL-OPEN #6443,
+complete fresh permitted readback of its whole original and ALL discussions,
+the inherited #6383 contract, this whole Fleet ROOT/Gateway slice and the
+standalone Index ROOT/integration, eligibility and actual source-specific
+claim/resource/custody conditions. A SEPARATE administrative judgment may
+then continue the complete planned receiving in these existing Active domain
+efforts. Draft, merge, reflection or a link alone does not retire #6443.
+
+The Gateway/index integrator retains its bounded lease/controller/consumer
+and availability-coordinator contributions. Index, #5789, #6240/#6424,
+#6241, #6030 and Vault/provider owners retain their respective responsibilities.
+Keep original automatic-native-migration, credential-reuse, V1-replacement and
+retirement exclusions. No technical clause, source/resource reservation,
+interface agreement or operational condition is amended.
+
+Any independent physical-OPEN condition or unresolved actual applicability/
+custody retains #6443 OPEN. No generic ACK, universal reservation inventory,
+new all-parent technical witness, implementation, credential operation,
+native execution, source takeover or resource release is introduced.
+
 ## Context
 
 The completed finite [Gateway Role Tunnels](../../2026/10/19%20gateway-role-tunnels/README.md)
@@ -614,11 +644,34 @@ All entries are **agent-recommended implementation gates**, not completed tests.
   clause preserves #7343's finite completion credit and original exclusions
   separately from integrated-product, platform/provider and adoption proof.
 
+- [ ] `V.6443.tracking-continuation`: Verify explicit reviewed acceptance and
+  reflection of the campaign-owned keeper refinement in STILL-OPEN #6443,
+  THEN fresh complete permitted source/inherited/receiver/discussion/
+  eligibility and actual source-specific claim/resource/custody readback,
+  THEN a separate administrative judgment. Preserve every directly received
+  technical Plan/local/actual-global clause and independent owner condition;
+  unresolved applicability retains the tracker OPEN.
+
 ## Proposal
 
 [Architecture and migration contract](architecture.md).
 
 ## Journal
+
+### 2026-11-18 - Complete Gateway/index receiving and keeper continuation proposed
+
+Whole comparison of #6443 and inherited #6383 found complete direct planned
+receiving in this ROOT/Gateway slice and the standalone Index ROOT/integration,
+including the latest GI-S1/S2/S3 source/consumer and availability refinements.
+No duplicate implementation checklist is added.
+
+The actual #6383 disposition affirmatively retained OPEN parent #6443.
+Its campaign origin and preserved custody are verified. The proposed tracking
+continuation needs explicit review, still-OPEN source reflection and fresh
+complete readback before a separate judgment; it is not a silent keeper waiver.
+One administrative global gate is unchecked. Existing original, integrator,
+provider, Index, lifecycle, transaction and deployment owners and all technical
+acceptance remain unchanged; #6443 stays OPEN during this proposal.
 
 ### 2026-11-17 - Proposed two finite whole-source receiving refinements
 
