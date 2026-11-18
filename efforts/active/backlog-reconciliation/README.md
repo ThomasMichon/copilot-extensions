@@ -3421,6 +3421,17 @@ sources, transferring owners or turning partial/planning gains into completion.
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite
   for discovering thematic alignment.
+  The [credential receipt, callback receiving and protected contracts](journal/2026/11.17-credential-receipt-and-protected-contracts.md)
+  records #13175's actual delivery and complete current #5963/#5993/#6030
+  comparisons: contributed-kind admission remains unassessed at its real
+  containing-source boundary, startup source credit does not complete whole
+  guidance acceptance, and the role/lifecycle receiver already contains its
+  finite cohort continuation while preserving #7192's named-owner condition.
+  All three remain canonical OPEN; an evidence-handling failure is retained
+  without source clearance. A subsequent domain-ownership assessment proposes
+  twelve unchecked complete #5947 callback Plan/local/global Validation rows
+  in the existing PR-watch programme, without retiring the source or changing
+  custody. The complete count remains 883 whole, 154 above fixed 729.
   The [operation-credential receiving receipt](journal/2026/11.17-operation-credential-receiving-receipt.md)
   records #13171's actual reviewed whole-domain acceptance and #5763's
   separately audited redundant-tracker retirement after complete current

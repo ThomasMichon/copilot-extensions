@@ -710,3 +710,24 @@ account/credential/transport/resource custodians remain. #954's OPEN
 programme/P3 conditions are unchanged. This receipt authorizes no
 implementation, authentication/native test, provider mutation or custody
 transfer.
+
+## Complete subscriber callback receiving proposed (2026-11-18 UTC)
+
+The earlier #5947 comparison kept its complete canonical tracker OPEN because
+the current PR-watch ROOT lacked the whole legacy-fidelity and subscriber-cwd
+union. A subsequent finite domain assessment establishes that its Phase 2
+owns the reusable PR-watch subscription notification contract; Dispatch
+consumes that contract, and existing subprocess/consumer/resource owners
+retain their separate responsibilities.
+
+| Whole contract | Original provenance | Proposed route | Direct receiving | Retained conditions |
+|---|---|---|---|---|
+| Truthful legacy callback outcomes and persisted subscriber execution context | Public #5947 whole original and its complete discussion | routed (proposed; effective after reviewed complete domain acceptance in the SAME PR) | [Durable PR Watch Delegation](../durable-pr-watch-delegation/README.md), P5947-1..4/local V5947-1..4/actual global G5947-1..4 and continuing Coordination/Journal | Twelve unchecked rows preserve #6019 credit, outage-independent expiry, one-attempt legacy versus acknowledged durable retry/replay, subscriber cwd/missing-directory fallback, actual owner health negotiation and old-owner compatibility. Existing M1 stage-5 integration/qualification, operational holds and domain/resource owners remain. |
+
+#5947 remains OPEN through review. A complete canonical issue does not prevent
+planned aggregation into its existing rightful domain, but a proposal or
+topic link establishes no receiving acceptance. Actual reviewed whole receiving,
+current complete ROOT/source/discussion/custody readback and a separate
+administrative judgment precede any tracker supersession. No implementation,
+native/authentication operation, live migration, owner appointment or
+claim/resource release follows.
