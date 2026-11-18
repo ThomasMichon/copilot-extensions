@@ -540,7 +540,7 @@
     },
     {
       "name": "agent-worktrees",
-      "requirements": "tools/typecheck-build-requirements.txt",
+      "requirements": "tools/typecheck-worktrees-requirements.txt",
       "include": [
         "plugins/agent-worktrees"
       ],

@@ -35,6 +35,7 @@ daemon.
 
 | Next question | Read |
 |---------------|------|
+| How does a queued task become a working agent? | [Follow one automated task](docs/agent-lifecycle/README.md) |
 | What can I compose, and what does it depend on? | [Capabilities](docs/capabilities.md) |
 | How do I adopt a repo or grow a deployment? | [Adoption and hypothetical examples](docs/adoption.md) |
 | Where do settings, credentials, and machine state belong? | [Configuration](docs/configuration.md) |
