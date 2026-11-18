@@ -1,0 +1,9 @@
+{
+  "comment": "Declare optional Maintainer review coverage, peer posture, authorized coordinator completion and current-head rebase handling",
+  "changes": [
+    {
+      "plugin": "agent-roles",
+      "type": "patch"
+    }
+  ]
+}
