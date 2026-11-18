@@ -13,6 +13,25 @@ implement runtime configuration.
 - Scope owner, revocation/holds and escalation contact: `<existing owner>`.
 - Review rubric and contribution/PR-policy source: `<repository-owned source>`.
 
+## Optional declared Maintainer mode
+
+Apply [Maintainer mode](../references/maintainer-mode.md) only when selected.
+
+- Mode: `<generic reviewer | Maintainer-owned sustained role>`.
+- Authoritative role source and repository vocabulary: `<provider/repo policy;
+  unknown is not exemption, no universal permission mapping>`.
+- Population: `<all open selected-base PRs across all pages, excluding drafts
+  and self-review, including other Maintainer authors>`.
+- Assigned CODEOWNER scope, required qualified coverage and current-review
+  validity: `<actual policy/evidence; bot review is separate from Maintainer approval>`.
+- Peer posture: `<advisory/nonblocking default | explicit policy override/source>`.
+- Complementary rubric/lens and addressed-finding verification: `<selected rubric>`.
+- Coordinator completion for authors lacking merge permission:
+  `<authorized actor, existing adapter, actual consent and independent gates>`.
+- Current-authority sweep and clean-rebase assessment/carry:
+  `<native validity, explicit re-review requests, immutable POST/GET bindings,
+  non-atomic race and original caps; retained assessment is not a current vote>`.
+
 ## Execution and completion
 
 - Desired active independent reviewers: `<positive integer, not boolean;
@@ -107,6 +126,12 @@ Use the [offline failure scenarios](scenarios.json) as synthetic walkthrough
 inputs, not evidence that the actual adapters or model passed.
 
 - [ ] Complete paginated initial/final census; partial results remain unknown.
+- [ ] If Maintainer mode is adopted: peer authors included, qualified CODEOWNER
+  coverage assessed, advisory posture and authorized coordinator landing kept
+  separate from static lanes; unknown roles do not exempt.
+- [ ] Post/readback followed by a push preserves historical bindings; clean
+  rebase retains valid assessment but supplies a required first newer-head
+  official review without duplicate findings or reset caps.
 - [ ] Positive concurrency target, prompt refill/authorized expansion, genuine
   work/capacity shortage and no overlapping same-PR reviewer.
 - [ ] Intake population and priority order stay independent of lane capacity;
