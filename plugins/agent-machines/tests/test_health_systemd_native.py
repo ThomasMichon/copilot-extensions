@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import stat
+import sys
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -84,6 +85,44 @@ def snapshot_case(
     monkeypatch.setattr(pair, "_properties", lambda unit: properties[unit].copy())
     monkeypatch.setattr(native, "read_file", lambda path, _uid: (wanted["artifacts"][path.name], (1, 2, 3, 4)))
     return pair, scope, properties
+
+
+@pytest.mark.parametrize("missing", [".config", "systemd", "user", "timers.target.wants"])
+def test_first_preview_treats_absent_user_scope_as_absent_without_creating_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, missing: str,
+) -> None:
+    pair = native.NativePair(NAME, OWNER)
+    scope = tmp_path / ".config" / "systemd" / "user"
+    parts = [tmp_path / ".config", tmp_path / ".config" / "systemd", scope, scope / "timers.target.wants"]
+    for directory in parts:
+        if directory.name == missing:
+            break
+        directory.mkdir()
+    monkeypatch.setattr(pair, "_context", lambda: (1000, scope))
+    monkeypatch.setattr(pair, "_command", lambda *_args, **_kwargs: str(scope))
+    monkeypatch.setattr(pair, "_properties", lambda _unit: {
+        "LoadState": "not-found", "ActiveState": "inactive", "FragmentPath": "",
+        "DropInPaths": "", "UnitFileState": "", "MainPID": "0", "ControlPID": "0",
+    })
+    monkeypatch.setattr(sys, "platform", "linux")
+    before = sorted(tmp_path.rglob("*"))
+    observed = pair.snapshot()
+    assert not observed["configured"] and not observed["enabled"] and not observed["loaded"]
+    assert observed["definition"] is None and observed["link_identity"] is None
+    assert sorted(tmp_path.rglob("*")) == before
+
+
+def test_missing_scope_does_not_hide_non_directory_ancestry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = tmp_path / ".config"
+    config.write_text("not a directory")
+    scope = config / "systemd" / "user"
+    monkeypatch.setattr(sys, "platform", "linux")
+    with pytest.raises(ValueError, match="plain-path"):
+        native.read_file(scope / (NAME + ".service"), 1000)
+    with pytest.raises(ValueError, match="plain-path"):
+        native._link(scope, NAME + ".timer", 1000)
 
 
 def test_native_readback_keeps_timestamps_and_execution_unknown_when_absent(

@@ -695,9 +695,9 @@ class Enrollment:
             or native["instances"] or (self.platform == "linux" and not native["loaded"])
         ):
             raise slots.HealthError("native-health-task-readback-failed")
-        # Revalidate policy at the enable boundary, including replacement/rollback.
-        self._policy(candidate["desired"], native)
         if candidate["desired"]["enabled"]:
+            # Withdrawal must not depend on collection readiness.
+            self._policy(candidate["desired"], native)
             native = self._native_call("enable", expected=native["digest"])
         if self._signature(native["definition"]) != self._signature(target):
             raise slots.HealthError("native-health-task-readback-failed")
@@ -768,7 +768,6 @@ class Enrollment:
                 compatible = before or candidate
                 if compatible is None:
                     raise slots.HealthError("health-task-recovery-conflict")
-                self._qualify_record(compatible, native)
                 matched = {
                     **compatible, "desired": {**compatible["desired"], "enabled": False},
                     "definition": self._disabled(compatible["definition"]),
@@ -790,6 +789,7 @@ class Enrollment:
             )
         if not rollback and candidate and matched == candidate and (
             self._signature(native["definition"]) == self._signature(candidate["definition"])
+            and (self.platform == "win32" or native["loaded"])
         ):
             self._qualify_record(candidate, native)
             return self._settle(state, native, candidate, status="recovered-candidate")

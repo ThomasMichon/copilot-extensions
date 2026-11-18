@@ -69,10 +69,25 @@ def _stamp(info: os.stat_result, uid: int) -> tuple[int, int, int, int]:
     return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns
 
 
+def _optional_directory(path: Path) -> bool:
+    plain = cast(Callable[..., Path], slots._plain)
+    if not path.is_absolute() or ".." in path.parts:
+        raise slots.HealthError("absolute-plain-path-required")
+    for directory in (*reversed(path.parents), path):
+        try:
+            directory.lstat()
+        except FileNotFoundError:
+            return False
+        plain(directory, directory=True)
+    return True
+
+
 def read_file(path: Path, uid: int) -> tuple[str | None, tuple[int, int, int, int] | None]:
     if sys.platform != "linux":
         raise slots.HealthError("native-health-job-unsupported")
     plain = cast(Callable[..., Path], slots._plain)
+    if not _optional_directory(path.parent):
+        return None, None
     plain(path, optional=True)
     try:
         before = _stamp(path.lstat(), uid)
@@ -92,7 +107,8 @@ def read_file(path: Path, uid: int) -> tuple[str | None, tuple[int, int, int, in
 
 def _link(scope: Path, unit: str, uid: int) -> tuple[int, int, str] | None:
     path = scope / "timers.target.wants" / unit
-    cast(Callable[..., Path], slots._plain)(path.parent, directory=True, optional=True)
+    if not _optional_directory(path.parent):
+        return None
     try:
         info = path.lstat()
     except FileNotFoundError:

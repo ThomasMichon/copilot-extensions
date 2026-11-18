@@ -14,7 +14,7 @@ import pytest
 
 from agent_machines import (
     _peer_launch, cli_health, health_enrollment as enrollment,
-    health_enrollment_state as state, health_job_support, health_jobs, health_run,
+    health_enrollment_state as state, health_job_support, health_jobs, health_run, health_slots,
 )
 
 TOKEN = "a" * 64
@@ -167,6 +167,7 @@ class Pair:
         self.instances: list[str] = []
         self.fail_after = ""
         self.unavailable = False
+        self.loaded = True
 
     def call(
         self, operation: str, *, expected: str = "", definition: dict[str, Any] | None = None,
@@ -204,7 +205,7 @@ class Pair:
         return {
             "configured": self.definition is not None, "definition": copy.deepcopy(self.definition),
             "enabled": bool(self.definition and self.definition["enabled"]), "account_uid": 1000,
-            "instances": self.instances[:], "loaded": bool(
+            "instances": self.instances[:], "loaded": self.loaded and bool(
                 self.definition and len(self.definition["artifacts"]) == 2
             ),
             "digest": hashlib.sha256(json.dumps(self.definition, sort_keys=True).encode()).hexdigest(),
@@ -319,6 +320,65 @@ def test_disable_after_partial_replacement_restores_compatible_pair_without_reen
     assert result["status"] == "disabled" and not result["enabled"] and not result["recovery_required"]
     assert owner.read()["confirmed"]["version"] == "1.0"
     assert references.owners[enrollment.REFERENCE] == ["1.0"] and "enable" not in pair.calls
+
+
+@pytest.mark.parametrize("loss", ["policy", "support"])
+@pytest.mark.parametrize("withdrawal", ["disable", "remove"])
+def test_partial_publication_withdrawal_does_not_require_collection_readiness(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, loss: str, withdrawal: str,
+) -> None:
+    owner, pair, references, selected = linux_case(tmp_path, monkeypatch)
+    adopt(owner)
+    selected[0] = selected[1]("2.0")
+    pair.fail_after = "partial"
+    assert owner.converge()["status"] == "unknown"
+    pair.unavailable = False
+    pair.calls.clear()
+    if loss == "policy":
+        monkeypatch.setattr(health_run, "policy_preview", lambda _store: ({}, "", "b" * 64))
+    else:
+        def unavailable(*_args: Any, **_kwargs: Any) -> Any:
+            raise RuntimeError("installed-job-collection-unsupported")
+
+        owner.selector = unavailable
+        owner.qualifier = unavailable
+    result = owner.disable() if withdrawal == "disable" else owner.converge(remove=True)
+    assert result["status"] == ("disabled" if withdrawal == "disable" else "removed")
+    assert not result["enabled"] and not result["instances"] and not result["recovery_required"]
+    assert references.pending is None and "enable" not in pair.calls
+    assert references.owners[enrollment.REFERENCE] == (["1.0"] if withdrawal == "disable" else [])
+
+
+def test_disabled_candidate_is_not_accepted_until_manager_load_is_confirmed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner, pair, references, _ = linux_case(tmp_path, monkeypatch)
+    pair.fail_after = "create"
+    pair.loaded = False
+    wanted = {**desired(), "enabled": False}
+    # Keep the first failed publication pending rather than immediately rolling back.
+    switch = owner._switch
+
+    def interrupted(native: dict[str, Any], candidate: dict[str, Any] | None) -> dict[str, Any]:
+        try:
+            return switch(native, candidate)
+        except RuntimeError:
+            pair.unavailable = True
+            raise
+
+    monkeypatch.setattr(owner, "_switch", interrupted)
+    assert adopt(owner, wanted)["status"] == "unknown"
+    pending = owner.read()
+    # Exercise candidate acceptance, not the independent withdrawal intent.
+    pending["pending"]["intent"] = "replace"
+    health_slots._write(owner.path, pending)
+    pair.unavailable = False
+    monkeypatch.setattr(owner, "_switch", switch)
+    result = owner.converge()
+    assert result["status"] == "rolled-back" and result["rollback"] == "confirmed"
+    assert not owner.read()["confirmed"] and not owner.read()["pending"]
+    assert references.owners[enrollment.REFERENCE] == []
+    assert "enable" not in pair.calls
 
 
 def test_cross_platform_state_and_account_changes_refuse_before_native_calls(
