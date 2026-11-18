@@ -15,10 +15,17 @@ Finalization does not require deletion. Physical reclamation is a separate
 explicit cleanup decision, initiated by an agent or the user under applicable
 scope and retention policy. Record finalized-retained storage honestly.
 
-**Current runtime compatibility:** installed `finalize` implementations may
+**Explicit retention:** selected runtimes supporting
+`get finalize-retention` schema `agent-worktrees.finalize-retention`, version 1,
+accept `finalize --retain-checkout`. This completes the normal source, PR,
+effort, producer and child gates but deliberately keeps the checkout and branch.
+Use `claims retained [worktree-id] --json` for bounded known child discovery,
+including settled edges. Neither operation authorizes physical removal.
+
+**Legacy runtime compatibility:** older `finalize` implementations may
 also remove an eligible idle checkout as part of their existing lifecycle.
-This guidance does not change those implementations or introduce a retain-only
-flag. Inspect the selected command's actual behavior and preview. If logical-only
+Do not infer support from a newer payload's package version. Inspect the selected
+runtime's actual support and preview. If logical-only
 finalization is required but unavailable, keep the checkout and report that
 unsupported boundary rather than hand-editing state or running deletion anyway.
 An authorized removing closeout still uses the managed owner, never raw removal.

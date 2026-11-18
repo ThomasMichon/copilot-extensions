@@ -289,10 +289,12 @@ def dependency_fingerprint(
     return digest.hexdigest()
 
 
-def clear_cache_contents(path: Path) -> None:
+def clear_cache_contents(path: Path, *, preserve: frozenset[str] = frozenset()) -> None:
     """Clear an already-leased ordinary environment without replacing its root."""
     root = native_test_path(ordinary_cache_root(path))
     for child in root.iterdir():
+        if child.name in preserve:
+            continue
         if child.is_symlink():
             child.unlink()
         elif (
