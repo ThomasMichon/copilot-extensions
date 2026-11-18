@@ -226,3 +226,46 @@ def test_nonfinite_opaque_state_refuses_as_a_definite_write_failure(
     )
     with pytest.raises(storage.StateWriteRefused, match="invalid.*JSON"):
         storage.write_subscriptions_state([], Path("fixture-state"))
+
+
+@pytest.mark.parametrize("number", [
+    "0.1234567890123456789", "1e400", "1e-400",
+], ids=["precision-loss", "overflow", "underflow"])
+def test_opaque_number_without_lossless_round_trip_refuses_before_write(
+    storage: Any, monkeypatch: pytest.MonkeyPatch, number: str,
+) -> None:
+    raw = (
+        '{"schema":"agent-pull-requests.watch-subscriptions","version":2,'
+        '"engineGeneration":1,"activeStateVersion":1,'
+        '"stateByVersion":{"1":{"subscriptions":[]},"2":{"opaque":' + number + '}}}'
+    )
+    monkeypatch.setattr(Path, "read_text", lambda *_args, **_kwargs: raw)
+    monkeypatch.setattr(
+        storage, "_atomic_write_json",
+        lambda *_args, **_kwargs: pytest.fail("unrepresentable state must not reach serialization"),
+    )
+    with pytest.raises(ValueError, match="invalid.*JSON"):
+        storage.read_subscriptions_state(Path("fixture-state"))
+    with pytest.raises(storage.StateWriteRefused, match="invalid.*JSON"):
+        storage.write_subscriptions_state([], Path("fixture-state"))
+
+
+def test_round_trippable_numbers_remain_supported_in_retained_partitions(
+    storage: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    values = [0.1, 1.0, 1e100, -0.0, 9007199254740993]
+    raw = json.dumps({
+        "schema": "agent-pull-requests.watch-subscriptions", "version": 2,
+        "engineGeneration": 1, "activeStateVersion": 1,
+        "stateByVersion": {"1": {"subscriptions": []}, "2": {"opaque": values}},
+    })
+    monkeypatch.setattr(Path, "read_text", lambda *_args, **_kwargs: raw)
+    written: list[object] = []
+
+    def atomic(_path: Path, data: object, *, before_replace: Callable[[], None]) -> None:
+        before_replace()
+        written.append(data)
+
+    monkeypatch.setattr(storage, "_atomic_write_json", atomic)
+    storage.write_subscriptions_state([], Path("fixture-state"))
+    assert written == [json.loads(raw)]

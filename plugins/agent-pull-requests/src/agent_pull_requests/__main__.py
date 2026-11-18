@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from agent_procutil.daemon_instances import DaemonInstanceSpec, daemon_entrypoint as _daemon_entrypoint
+from agent_procutil.daemon_instances import DaemonInstanceSpec, daemon_entrypoint
 
 import argparse
 import json
@@ -28,9 +28,9 @@ from .watch_contract import PRSnapshot
 if TYPE_CHECKING:
     from .watch_invocation import WatchInvocation
 
-daemon_entrypoint = cast(
-    Callable[..., Callable[[Callable[..., int]], Callable[..., int]]], _daemon_entrypoint,
-)
+    daemon_entrypoint = cast(
+        Callable[..., Callable[[Callable[..., int]], Callable[..., int]]], daemon_entrypoint,
+    )
 _render_status = cast(Callable[[dict[str, Any]], str], _untyped_render_status)
 
 _WAIT_TERMINAL_STATES = frozenset({"MERGED", "CLOSED"})
@@ -626,7 +626,7 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     from .watch_storage import read_subscriptions_state
 
     read_subscriptions_state()
-    return _serve_legacy(args)
+    return cast(Callable[[argparse.Namespace], int], _serve_legacy)(args)
 
 
 @daemon_entrypoint("agent-pull-requests", source=__file__, purpose="production")
@@ -720,8 +720,7 @@ def _cmd_serve_restart(args: argparse.Namespace) -> int:
         return 0
     from single_instance_lease import AlreadyRunningError, SingleInstance
 
-    from .watch_daemon import state_dir
-    from .watch_storage import read_subscriptions_state
+    from .watch_storage import WATCH_ENGINE_GENERATION, read_subscriptions_state, state_dir
 
     read_subscriptions_state()
     lease = SingleInstance(state_dir(), service="agent-pull-requests-watch")
@@ -734,10 +733,11 @@ def _cmd_serve_restart(args: argparse.Namespace) -> int:
         was_running = False
     if was_running:
         stop_result = _watch_request(
-            "shutdown", {"repo": "", "number": 0}, boot_wait_s=0.0, boot=False
+            "shutdown", {"repo": "", "number": 0, "restart_engine_generation": WATCH_ENGINE_GENERATION},
+            boot_wait_s=0.0, boot=False,
         )
         if not stop_result.get("shutting_down"):
-            print("agent-pull-requests: could not reach the running daemon to stop it")
+            print(stop_result.get("error") or "agent-pull-requests: could not reach the running daemon to stop it")
             return 1
         # A persistent rendezvous file is not proof of lease availability.
         deadline = time.monotonic() + _WATCH_RESTART_STOP_TIMEOUT_S

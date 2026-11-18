@@ -265,10 +265,22 @@ class WatchDaemon:
                 "delivery_error": self._deliveries.start_error,
             }
         if kind == "shutdown":
-            with self._admission:
-                self._accepting_mutations = False
-                self._lifecycle_shutdown_event.set()
-                self._shutdown_event.set()
+            with self._persist_lock:
+                if "restart_engine_generation" in payload:
+                    from .watch_storage import WATCH_ENGINE_GENERATION
+
+                    requester = payload["restart_engine_generation"]
+                    if type(requester) is not int or requester < WATCH_ENGINE_GENERATION:
+                        return {"error": "watch restart requires a compatible executor generation"}
+                    if self._persist_enabled:
+                        try:
+                            self._read_state()
+                        except (OSError, ValueError):
+                            return {"error": "watch restart state admission refused"}
+                with self._admission:
+                    self._accepting_mutations = False
+                    self._lifecycle_shutdown_event.set()
+                    self._shutdown_event.set()
             return {"shutting_down": True}
         return {"error": f"unknown kind {kind!r}"}
 

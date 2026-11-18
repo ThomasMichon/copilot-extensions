@@ -22,6 +22,10 @@
         "tools/promotion_unit_tests/test_watch_storage_contract.py::test_invalid_or_newer_executor_state_refuses_without_replacement[non-list-partition]",
         "tools/promotion_unit_tests/test_watch_storage_contract.py::test_duplicate_partition_identity_is_not_silently_overwritten",
         "tools/promotion_unit_tests/test_watch_storage_contract.py::test_nonfinite_opaque_state_refuses_as_a_definite_write_failure",
+        "tools/promotion_unit_tests/test_watch_storage_contract.py::test_opaque_number_without_lossless_round_trip_refuses_before_write[precision-loss]",
+        "tools/promotion_unit_tests/test_watch_storage_contract.py::test_opaque_number_without_lossless_round_trip_refuses_before_write[overflow]",
+        "tools/promotion_unit_tests/test_watch_storage_contract.py::test_opaque_number_without_lossless_round_trip_refuses_before_write[underflow]",
+        "tools/promotion_unit_tests/test_watch_storage_contract.py::test_round_trippable_numbers_remain_supported_in_retained_partitions",
         "tools/promotion_unit_tests/test_git_launch_composition.py::test_parent_replaced_by_file_obeys_git_selection_policy[cache]",
         "tools/promotion_unit_tests/test_git_launch_composition.py::test_parent_replaced_by_file_obeys_git_selection_policy[hint]",
         "tools/promotion_unit_tests/test_git_launch_composition.py::test_parent_replaced_by_file_obeys_git_selection_policy[explicit]",
@@ -5878,8 +5882,8 @@
         "tools/promotion_source_history.py"
     ],
     "sources": {
-        "plugins/agent-pull-requests/src/agent_pull_requests/watch_storage.py": "27f5b33d4ccd44fa3181e31dfcb394eb0d4151cc5e011660138be6272f350c2c",
-        "tools/promotion_unit_tests/test_watch_storage_contract.py": "482f7b84a9535be2fc5d7327e4bf605652eae76d0f4b6e015ce9d9607d438199",
+        "plugins/agent-pull-requests/src/agent_pull_requests/watch_storage.py": "80eab4ba6ff7761c3b907ca060c5326a76252f4eb9867b8a3d8fe5b43ca1e8cb",
+        "tools/promotion_unit_tests/test_watch_storage_contract.py": "28fd51ad0125b849e2dae1cd6180b43bf4e4cd5eb66873646e5c53227a24e0f1",
         "plugins/agent-worktrees/src/agent_worktrees/git_process.py": "6cc675a4d988e7d1fd6b0d76a48fde5909f78f085ef194ec69625c6334b4f80f",
         "plugins/agent-worktrees/src/agent_worktrees/daemon_launch_context.py": "b8250e9aaef5fdc70f881b979d52d164c408aa08cf8322278be11569a01c3d30",
         "tools/promotion_unit_tests/test_git_launch_composition.py": "13cc8825da50b3d667d10ef7d38dedd9d52d98bcbef961535c9cc53834e76531",

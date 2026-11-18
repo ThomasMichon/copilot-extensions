@@ -567,9 +567,19 @@ checks before its transaction and again under custody; final adoption and
 activation/resume recheck through the actual executor. The epoch is not a
 comparison of arbitrary release dates or a claim that pre-awareness binaries
 enforce it. This expansion does not publish or advance an admitted epoch.
+Current restart requests carry `restart_engine_generation` on the existing
+shutdown operation. Under its persistence custody, the incumbent refuses an
+older/invalid requester and rechecks its state before setting shutdown flags.
+This closes an epoch change between the caller's first read and shutdown.
+Ordinary stop remains unchanged. A pre-awareness peer ignoring this additive
+field is only legacy behavior, not versioned-restart enforcement; historical
+transition qualification remains required.
 
 Unknown schemas, unsupported active versions, malformed/duplicate keys and
-incomparable generations refuse without changing state. Subscription writes
+incomparable generations refuse without changing state. Opaque JSON numbers
+must round-trip without numeric loss; precision loss, overflow or underflow
+refuses during decoding rather than rounding another version's state or
+escaping definite-write-failure recovery. Subscription writes
 hold the existing process-local atomic lock across read/modify/write, update
 only the selected legacy partition, and re-read the exact current bytes
 immediately before replacement. A changed document refuses rather than

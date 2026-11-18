@@ -194,6 +194,75 @@ def test_restart_refuses_newer_generation_before_lease_or_shutdown(
     assert path.read_bytes() == original
 
 
+def test_restart_epoch_change_at_lease_probe_cannot_stop_incumbent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import argparse
+    import single_instance_lease
+    from agent_pull_requests import __main__ as cli
+
+    monkeypatch.setattr(cli, "_WATCH_INVOCATION", None)
+    monkeypatch.setenv("AGENT_PULL_REQUESTS_HOME", str(tmp_path))
+    path = watch_storage.subscriptions_path(tmp_path)
+    path.write_text("[]", encoding="utf-8")
+    newer = partitioned_state(engineGeneration=2).encode()
+
+    class Lease:
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            pass
+
+        def acquire(self) -> NoReturn:
+            path.write_bytes(newer)
+            raise single_instance_lease.AlreadyRunningError(tmp_path / "lease", 123)
+
+    daemon = WatchDaemon(fetch=lambda *_args: pytest.fail("must not fetch"), state_root=tmp_path)
+    requests: list[dict[str, Any]] = []
+
+    def request(kind: str, payload: dict[str, Any], **_kwargs: Any) -> dict[str, Any]:
+        assert kind == "shutdown"
+        requests.append(payload)
+        return daemon.compute(kind, payload)
+
+    monkeypatch.setattr(single_instance_lease, "SingleInstance", Lease)
+    monkeypatch.setattr(cli, "_watch_request", request)
+    monkeypatch.setattr(cli, "_watch_boot", lambda: pytest.fail("must not boot"))
+    try:
+        assert cli._cmd_serve_restart(argparse.Namespace(json=True)) == 1
+        assert requests == [{
+            "repo": "", "number": 0, "restart_engine_generation": 1,
+        }]
+        assert not daemon._shutdown_event.is_set()
+        assert not daemon._lifecycle_shutdown_event.is_set()
+        assert path.read_bytes() == newer
+    finally:
+        daemon.close()
+
+
+@pytest.mark.parametrize("requester", [None, True, 0, 1])
+def test_newer_incumbent_refuses_invalid_or_older_restart_requester(
+    monkeypatch: pytest.MonkeyPatch, requester: object,
+) -> None:
+    monkeypatch.setattr(watch_storage, "WATCH_ENGINE_GENERATION", 2)
+    daemon = WatchDaemon(fetch=lambda *_args: pytest.fail("must not fetch"), persist=False)
+    try:
+        result = daemon.compute("shutdown", {"restart_engine_generation": requester})
+        assert "error" in result and not result.get("shutting_down")
+        assert not daemon._shutdown_event.is_set()
+        assert not daemon._lifecycle_shutdown_event.is_set()
+    finally:
+        daemon.close()
+
+
+def test_newer_requester_can_stop_an_older_incumbent_without_changing_legacy_stop() -> None:
+    for payload in ({}, {"restart_engine_generation": 2}):
+        daemon = WatchDaemon(fetch=lambda *_args: pytest.fail("must not fetch"), persist=False)
+        try:
+            assert daemon.compute("shutdown", payload) == {"shutting_down": True}
+            assert daemon._shutdown_event.is_set()
+        finally:
+            daemon.close()
+
+
 @pytest.mark.parametrize("command", ["serve", "restart"])
 def test_actual_cli_process_refuses_newer_generation_without_state_or_route_writes(
     tmp_path: Path, command: str,

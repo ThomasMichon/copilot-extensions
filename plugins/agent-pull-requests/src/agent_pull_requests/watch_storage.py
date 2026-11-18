@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import tempfile
 import threading
 from collections.abc import Callable
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, NoReturn
 
@@ -86,13 +88,26 @@ def _reject_constant(_value: str) -> NoReturn:
     raise ValueError("invalid persisted watch subscriptions JSON constant")
 
 
+def _round_trip_float(raw: str) -> float:
+    try:
+        value = float(raw)
+        if not math.isfinite(value) or Decimal(raw) != Decimal(str(value)):
+            raise ValueError("persisted watch subscriptions JSON number cannot round-trip")
+    except ArithmeticError:
+        raise ValueError("invalid persisted watch subscriptions JSON number") from None
+    return value
+
+
 def _read_subscriptions_document(path: Path) -> tuple[str | None, Any]:
     try:
         raw = path.read_text(encoding="utf-8")
     except FileNotFoundError:
         return None, []
     try:
-        data = json.loads(raw, object_pairs_hook=_unique_object, parse_constant=_reject_constant)
+        data = json.loads(
+            raw, object_pairs_hook=_unique_object, parse_constant=_reject_constant,
+            parse_float=_round_trip_float,
+        )
     except ValueError:
         raise ValueError("invalid persisted watch subscriptions JSON") from None
     return raw, data

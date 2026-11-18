@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from agent_procutil.daemon_instances import DaemonInstanceSpec, daemon_entrypoint as _daemon_entrypoint
+from agent_procutil.daemon_instances import DaemonInstanceSpec, daemon_entrypoint
 from pathlib import Path
 
 import argparse
@@ -10,7 +10,7 @@ import os
 import socket
 import sys
 from collections.abc import Callable
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 from uuid import uuid4
 
 from agent_procutil import spawn_daemon
@@ -27,9 +27,10 @@ from .watch_journal import WatchJournal, _regular_bytes, _target_selection, read
 from .watch_runtime import WatchInstance
 from .watch_retirement import WatchRetirement
 
-daemon_entrypoint = cast(
-    Callable[..., Callable[[Callable[..., int]], Callable[..., int]]], _daemon_entrypoint,
-)
+if TYPE_CHECKING:
+    daemon_entrypoint = cast(
+        Callable[..., Callable[[Callable[..., int]], Callable[..., int]]], daemon_entrypoint,
+    )
 
 
 def _client(invocation: WatchInvocation, document: dict[str, Any], role: str) -> WatchControlClient:
