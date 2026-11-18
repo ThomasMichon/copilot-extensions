@@ -342,10 +342,7 @@ def _mark_complete_result_violations(plugins_dir: Path) -> list[str]:
             )
         # Blank PowerShell block comments (keeping line numbers) so prose that
         # names the helper is not mistaken for a call.
-        def blank_comment(match: re.Match[str]) -> str:
-            return "\n" * match.group(0).count("\n")
-
-        text = re.sub(r"<#.*?#>", blank_comment, text, flags=re.S)
+        text = re.compile(r"<#.*?#>", re.S).sub(lambda match: "\n" * match.group(0).count("\n"), text)
         lines = text.split("\n")
         for lineno, line in enumerate(lines, 1):
             # Strings are prose, except a double-quoted `$(...)` that runs the helper.

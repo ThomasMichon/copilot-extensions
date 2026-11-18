@@ -6407,7 +6407,7 @@
         "worktree-manager/src/worktree_manager/runtime_source.py": "0a5147b874398f5e4e541e7e919eb82566563a603b314b436a73b9888b8dc2a5",
         "tools/artifact_release_discovery.py": "96d96fce933c6354714ede8f92ff3b941406789210d9e797bbadbe10a28d3157",
         "tools/update_machine_gate_contract.py": "286c31e2b5099e2e774617f86779dcec4917ebb332525722bc994ae9cda9bb74",
-        "tools/check-install-contract.py": "913fed0b493980ce3c7f8ddf7bd570bf19d0447d4f645c85953d6419b9f87378",
+        "tools/check-install-contract.py": "718dcaf510af270a0695033c66a0dc763ca4e69de781940e28ec4b6b557916ca",
         "tools/promotion_unit_tests/test_update_receipt_contract.py": "373b1a5fdc2485573f222eabb7c8371249335e499efb1346a5c744f10a785f67",
         "tools/promotion_unit_tests/test_monitor_outcome_contract.py": "aeec028e93d677a3e9e6c20ee3acb980ad82a7b8fd8bd621f68753e9058bb64e",
         "plugins/agent-worktrees/src/agent_worktrees/status_monitor_cutover.py": "4b72d33379121b3db4188d918b23c1c7eaf22a8d73f1aee1b5095ba2fe6257a9",
