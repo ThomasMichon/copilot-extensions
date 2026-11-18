@@ -375,6 +375,26 @@ not require operator attendance or block publication, CI or enrollment on its
 absence. Automated GUI/console-state, result and complete-tree cleanup controls
 remain independent requirements; unobserved is not a visual pass.
 
+### Linux retained finite-action foundation
+
+The internal installed-definition renderer can now describe an immutable Linux
+service/timer pair bound to one runtime generation and local UID. Unlike
+`prepare-job`, this action invokes the slot's retained bootstrap and
+`agent_machines.health_job` directly, without Bash, payload lookup, provisioning
+or a GUI interpreter. The finite root uses the existing 55-second owned budget
+and five-second cleanup reserve. Collection support must come from exactly one
+package beneath that selected virtual environment's Linux `lib/python3.x`
+directory; missing, ambiguous or unsupported declarations refuse before launch.
+
+This is a portable execution foundation, **not Linux enrollment support**.
+The normal `health job` lifecycle still rejects Linux. No unit publication,
+manager reload, account selection, lingering change or native systemd
+qualification is provided by this renderer. Native pair custody, interrupted
+publication/recovery, retained replacement and real-user-manager validation
+remain tracked in the
+[reviewed Linux amendment](../../../efforts/active/machine-health-heartbeats/local-collection.md#installed-linux-job-enrollment).
+Do not hand-register rendered units to bypass those gates.
+
 ## Installed Windows enrollment
 
 ```text

@@ -5,12 +5,35 @@ from __future__ import annotations
 import re
 import subprocess
 from pathlib import PurePosixPath, PureWindowsPath
+from typing import Literal, TypedDict
 from xml.etree import ElementTree as ET
 
 SCHEMA = "agent-machines.health.job-preparation"
 NAME = "agent-machines-health"
 ENROLLMENT_STATE = "agent-machines.health.enrollment.json"
 NS = "http://schemas.microsoft.com/windows/2004/02/mit/task"
+
+
+class JobPreparation(TypedDict):
+    schema: str
+    version: int
+    status: str
+    platform: str
+    artifacts: dict[str, str]
+    registered: bool
+    enabled: bool
+    qualification: str
+    carrier_publication: str
+
+
+class LinuxDefinition(TypedDict):
+    schema: str
+    version: Literal[1]
+    platform: Literal["linux"]
+    owner: str
+    account_uid: int
+    enabled: bool
+    artifacts: dict[str, str]
 
 
 class JobError(ValueError):
@@ -37,7 +60,7 @@ def _systemd_directory(value: str) -> str:
 def prepare(
     *, platform: str, payload: str, store: str, policy_token: str,
     user_id: str = "", windows_root: str = "", gui_python: str = "", runtime_site: str = "",
-) -> dict:
+) -> JobPreparation:
     """Render inert definitions for explicit review, never touch a scheduler."""
     if re.fullmatch(r"[a-f0-9]{64}", policy_token) is None:
         raise JobError("policy-token-required")
@@ -67,7 +90,9 @@ def prepare(
         ET.register_namespace("", NS)
         task = ET.Element(f"{{{NS}}}Task", version="1.4")
 
-        def element(parent, name, text=None, **attributes):
+        def element(
+            parent: ET.Element, name: str, text: str | None = None, **attributes: str,
+        ) -> ET.Element:
             node = ET.SubElement(parent, f"{{{NS}}}{name}", attributes)
             node.text = text
             return node
@@ -147,13 +172,70 @@ def installed_definition(
     info = ET.Element(f"{{{NS}}}RegistrationInfo")
     ET.SubElement(info, f"{{{NS}}}Description").text = owner
     root.insert(0, info)
-    ET.SubElement(root.find(f"{{{NS}}}Settings"), f"{{{NS}}}UseUnifiedSchedulingEngine").text = "true"
-    action = root.find(f"{{{NS}}}Actions/{{{NS}}}Exec")
-    action.find(f"{{{NS}}}Arguments").text = subprocess.list2cmdline([
+    ET.SubElement(_required(root, f"{{{NS}}}Settings"), f"{{{NS}}}UseUnifiedSchedulingEngine").text = "true"
+    action = _required(root, f"{{{NS}}}Actions/{{{NS}}}Exec")
+    _required(action, f"{{{NS}}}Arguments").text = subprocess.list2cmdline([
         "-I", "-S", "-B", "-X", "utf8", str(directory / ".runtime-bootstrap" / "runtime_launcher.py"),
         "--gui-runtime", "--runtime-identity", identity, "-m", "agent_machines.health_job",
         "--store", store, "--expect-policy", policy_token,
     ])
-    root.find(f"{{{NS}}}Triggers/{{{NS}}}TimeTrigger/{{{NS}}}Enabled").text = "true"
-    root.find(f"{{{NS}}}Settings/{{{NS}}}Enabled").text = "true" if enabled else "false"
+    _required(root, f"{{{NS}}}Triggers/{{{NS}}}TimeTrigger/{{{NS}}}Enabled").text = "true"
+    _required(root, f"{{{NS}}}Settings/{{{NS}}}Enabled").text = "true" if enabled else "false"
     return ET.tostring(root, encoding="unicode")
+
+
+def _required(root: ET.Element, path: str) -> ET.Element:
+    node = root.find(path)
+    if node is None:
+        raise JobError("invalid-native-job-definition")
+    return node
+
+
+def installed_linux_definition(
+    *, slot: str, python: str, identity: str, store: str,
+    policy_token: str, owner: str, account_uid: int, enabled: bool,
+) -> LinuxDefinition:
+    """Render a retained finite action, not the replaceable payload launcher."""
+    if re.fullmatch(r"[a-f0-9]{32}:[a-f0-9]{64}", identity) is None:
+        raise JobError("installed-build-identity-required")
+    if re.fullmatch(r"urn:copilot-extensions:health-job:[a-f0-9]{64}", owner) is None:
+        raise JobError("installed-job-owner-required")
+    directory, interpreter = PurePosixPath(_text(slot)), PurePosixPath(_text(python))
+    if (
+        not directory.is_absolute() or directory.parent.name != "versions"
+        or directory.name in {"", ".", "..", "dev"} or ".." in directory.parts
+        or interpreter.parent not in {directory / "bin", directory / ".venv" / "bin"}
+        or re.fullmatch(r"python(?:3(?:\.[0-9]+)?)?", interpreter.name) is None
+    ):
+        raise JobError("immutable-job-runtime-required")
+    if type(account_uid) is not int or account_uid < 0 or type(enabled) is not bool:
+        raise JobError("invalid-local-job-account")
+    if (
+        not PurePosixPath(_text(store)).is_absolute() or ".." in PurePosixPath(store).parts
+        or re.fullmatch(r"[a-f0-9]{64}", policy_token) is None
+    ):
+        raise JobError("invalid-local-job-enrollment")
+    name = "ce-health-" + owner.rsplit(":", 1)[1][:32]
+    command = " ".join(_systemd(value) for value in [
+        python, "-I", "-S", "-B", "-X", "utf8",
+        str(directory / ".runtime-bootstrap" / "runtime_launcher.py"),
+        "--runtime-identity", identity, "-m", "agent_machines.health_job",
+        "--store", store, "--expect-policy", policy_token,
+    ])
+    return {
+        "schema": "agent-machines.health.linux-definition", "version": 1,
+        "platform": "linux", "owner": owner, "account_uid": account_uid, "enabled": enabled,
+        "artifacts": {
+            f"{name}.service": (
+                f"[Unit]\nDescription={owner}\n\n[Service]\nType=oneshot\n"
+                f"ExecStart={command}\nWorkingDirectory={_systemd_directory(slot)}\n"
+                "TimeoutStartSec=55s\nTimeoutStopSec=5s\nKillMode=control-group\nRestart=no\n"
+            ),
+            f"{name}.timer": (
+                f"[Unit]\nDescription={owner}\n\n[Timer]\n"
+                "OnCalendar=*-*-* *:00:15 UTC\nPersistent=true\n"
+                "AccuracySec=1s\nRandomizedDelaySec=0\n"
+                f"Unit={name}.service\n\n[Install]\nWantedBy=timers.target\n"
+            ),
+        },
+    }

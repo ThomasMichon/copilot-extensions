@@ -294,8 +294,8 @@ enrollment authority/holds remain unchanged.
 - [x] Qualify isolated Windows scheduler execution, results, launch mechanism,
   overlap, deadlines, Unicode paths and exact cleanup; merge the reviewed source.
   Keep installed-runtime retention/replacement and production enrollment separate.
-- [ ] Review the [installed Linux enrollment amendment](local-collection.md#installed-linux-job-enrollment),
-  then prove its retained runtime and native pair lifecycle before any separately
+- [x] Review the [installed Linux enrollment amendment](local-collection.md#installed-linux-job-enrollment).
+- [ ] Prove the Linux retained runtime and native pair lifecycle before any separately
   authorized Linux adoption; mocked adapter checks do not qualify systemd.
 - [ ] Qualify the selected carrier's delayed delivery, weekly slot reuse,
   conflicts, offline catch-up and reader-side outage reporting.
@@ -354,6 +354,11 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   transaction and runtime-reference owners with a Linux native adapter; the
   amendment must clear review before implementation. No Linux registration,
   runtime installation, carrier write or receiving change was performed.
+- #12979 merged as `43e7dabf568f901842f1989ec13ae96f49ffd7ea` after exact-head
+  Copilot approval with no findings and green required CI. Pulled forward onto
+  the reviewed design. Linux runtime selection, platform-isolated enrollment
+  state, native implementation and real-user-manager qualification are next;
+  the platform acceptance is not satisfied by this design review.
 
 ### 2026-11-05 - Inception and source inventory
 - Claimed #10873 after deduplicating heartbeat/capture work.
