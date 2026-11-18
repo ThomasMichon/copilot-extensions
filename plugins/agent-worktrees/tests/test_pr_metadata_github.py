@@ -110,8 +110,9 @@ def test_title_and_composed_description_preserve_unrelated_state_and_retries(bac
         "title": {"status": "confirmed", "changed": True},
         "description": {"status": "confirmed", "changed": True},
     }
+    assert len(backend.calls) == 7
     assert update(title="After \u03bb", description=BODY)["ok"]
-    assert len(backend.writes) == 2
+    assert len(backend.writes) == 2 and len(backend.calls) == 10
     assert all(
         kw["env"] == {
             "GH_TOKEN": "fixture-token", "GITHUB_TOKEN": "fixture-token",
