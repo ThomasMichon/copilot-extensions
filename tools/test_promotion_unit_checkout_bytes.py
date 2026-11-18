@@ -37,6 +37,9 @@ def test_fresh_checkout_keeps_admitted_powershell_payload_bytes(
     payloads: list[str] = [name for name in manifest["sources"] if name.endswith(".ps1")]
     assert payloads
     admitted_payloads = tuple(payloads)
+    # These copies exist in a composed release but not in the development checkout.
+    for consumer in ("plugins/example", "worktree-manager/scripts/runtime-input-provider"):
+        payloads.extend(f"{consumer}/{path}" for path in admitted_payloads if path.startswith("libs/"))
     names = {Path(name).name for name in payloads}
     ignored = {
         "tests", "fixtures", "__pycache__", "node_modules", ".venv",
@@ -61,11 +64,14 @@ def test_fresh_checkout_keeps_admitted_powershell_payload_bytes(
     git("init", "--quiet")
     git("config", "core.autocrlf", autocrlf)
     git("config", "core.longpaths", "true")
-    git("add", "--", ".gitattributes", *payloads)
+    control = root / "ordinary.ps1"
+    control.write_bytes(content)
+    git("add", "--", ".gitattributes", control.name, *payloads)
 
     def materialize() -> None:
         for name in payloads:
             (root / name).unlink()
+        control.unlink()
         git("checkout-index", "--all", "--force")
 
     materialize()
@@ -77,3 +83,4 @@ def test_fresh_checkout_keeps_admitted_powershell_payload_bytes(
     verify_sources(root, sources)
     for name in payloads:
         assert (root / name).read_bytes() == content, name
+    assert control.read_bytes() == content.replace(b"\n", b"\r\n")
