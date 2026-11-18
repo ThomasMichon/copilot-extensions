@@ -126,6 +126,13 @@ bounded scan fairness, failure backoff and shutdown join/cancellation behavior.
 Unknown transmitted outcomes remain with the same native owner after drain.
 Do not force-release accepted tasks to demonstrate a clean shutdown.
 
+Preserve the native recovery partition: local PID probes and preparing-arm
+fallback must not recover service-feed rows, including while their consumer is
+disabled or an older runtime is selected. Unknown service custody is not a
+missing callback process. Changing/removing a consumer must settle or explicitly
+transfer every existing binding's reconciliation obligation through its owner;
+a new protocol must not strand older waits.
+
 Expand strict readers/validators before enabling the new retained variant.
 Qualify coexisting old/new rows and supported rollback through real storage.
 An incompatible reader must not rewrite or discard the new intent. If a
@@ -139,7 +146,8 @@ not a submit-time migration or authority label.
 - [ ] Review this owner/contract refinement before new protocol or storage code.
 - [ ] Qualify the new strict delegation variant through actual waiter storage,
   serializer and restart, preserving legacy/scoped-watch rows and unsupported
-  reader behavior. No parallel request journal or automatic adoption.
+  reader behavior and exclusion from local PID/preparing recovery. No parallel
+  request journal, stranded binding or automatic adoption.
 - [ ] Add the typed local feed client/adapter and inert preparation through
   existing owners. Preserve exact configured identity and refuse unsupported
   service/native combinations before task suspension.
