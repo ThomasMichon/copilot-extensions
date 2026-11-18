@@ -765,7 +765,7 @@ outage-expiry defect remains unfixed.
   scheduling notifications. Definite write failure prevents scheduling;
   uncertain durability after replacement follows the existing owner's recovery
   path without adding legacy replay. Do not reopen #6019's delivered repair.
-- [ ] **P5947-2:** Expose bounded, honest, inspectable failure/unknown outcomes
+- [x] **P5947-2:** Expose bounded, honest, inspectable failure/unknown outcomes
   for failed or indeterminate attempts on the retained legacy callback path.
   Successful callback completion remains a positive control, not a required
   failure/unknown result or proof of consumer acknowledgement.
@@ -806,7 +806,7 @@ outage-expiry defect remains unfixed.
   failure prevents notification scheduling, and uncertain post-replacement
   durability follows the existing owner path without introducing legacy replay.
   Subscription deadlines never expire resource/worktree claims.
-- [ ] **V5947-2:** Through the actual delivery owner, exercise applicable legacy
+- [x] **V5947-2:** Through the actual delivery owner, exercise applicable legacy
   success, exception, nonzero and timeout cases. Use successful callback
   completion as a positive control; require honest inspectable failure/unknown
   results for failed or indeterminate attempts, not successful ones. Preserve
@@ -1715,7 +1715,7 @@ All items below are **agent-recommended** acceptance checks.
   retirement. Verify persistence before scheduling, definite write-failure
   refusal and existing-owner handling of uncertain replacement durability
   without legacy replay. Subscription expiry cannot release resource/worktree claims.
-- [ ] **G5947-2:** Resolve P5947-2/V5947-2 through actual legacy and acknowledged
+- [x] **G5947-2:** Resolve P5947-2/V5947-2 through actual legacy and acknowledged
   delivery consumers. Successful legacy callback completion is a positive
   control, not a required failure/unknown outcome or consumer acknowledgement.
   Applicable exception, nonzero, timeout or indeterminate attempts must expose
@@ -1760,6 +1760,7 @@ callback an implicit credential store.
 
 ## Journal
 
+- [2026-11-18 - Bounded legacy callback outcome visibility qualified](journal/2026/11.18%20Legacy%20callback%20outcomes.md)
 - [2026-11-18 - Released GitHub shadow and continuing events qualified](journal/2026/11.18%20GitHub%20shadow%20qualification.md)
 - **2026-11-17 - Complete subscriber callback receiving proposed.** Added
   unchecked P5947-1..4/V5947-1..4/actual global G5947-1..4 and continuing
