@@ -116,10 +116,10 @@ async def test_live_first_owner_outlasts_middle_generation(
         inherited.awaiting_maintenance_refresh = True
         initial = session_manager._host_index.get(sid)
         await session_manager.stop_session(sid, cancel_turn=False, allow_background_recovery=True)
-        refresh_inherited_sessions(successor)
+        await refresh_inherited_sessions(successor, lambda: True)
         assert inherited.awaiting_maintenance_refresh
         assert release_own_host_claims(session_manager) == [sid]
-        refresh_inherited_sessions(successor)
+        await refresh_inherited_sessions(successor, lambda: True)
         assert not inherited.awaiting_maintenance_refresh
         try:
             assert await successor.recover_disconnected_hosts() == 1

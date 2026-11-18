@@ -449,6 +449,21 @@ class HostIndex:
         ]
 
     # -- query -------------------------------------------------------------
+    def independent_cache(self) -> HostIndex:
+        """Use the same locked durable index from an independent preparation thread."""
+        return HostIndex(self._path, load=False)
+
+    def accept_prepared(self, sid: str, expected: HostRecord | None, fresh: HostRecord | None) -> bool:
+        """Update only a still-current local projection. Never write a prepared snapshot to disk."""
+        current = self.get(sid)
+        if current != expected and current != fresh:
+            return False
+        if fresh is None:
+            self._records.pop(sid, None)
+        else:
+            self._records[sid] = fresh
+        return True
+
     def get(self, session_id: str) -> HostRecord | None:
         return self._records.get(session_id)
 

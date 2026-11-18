@@ -6,23 +6,29 @@ import asyncio
 import os
 import sqlite3
 import logging
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from fastapi import FastAPI
+from single_instance_lease import AlreadyRunningError
 from single_instance_lease.supersession import pid_alive
 from zdd import process_exit, routing
 from zdd.claims import ClaimConflict
 from zdd.diagnostics import process_start_time
 
+from .app_lifecycle import settled_thread_call
 from .config import config_dir
+from .db import Database
+from .passive_refresh import InheritedRefresh
+from .session_host.host_index import HostIndex
 from .session_status import SessionStatus
 
 if TYPE_CHECKING:
     from .session_manager import SessionManager
 
 
-def may_refresh_inherited(manager: SessionManager, row: dict[str, Any]) -> bool:
+def may_refresh_inherited(db: Database, index: HostIndex, generation: str, row: dict[str, Any]) -> bool:
     """Terminal/dormant metadata needs no transport. Otherwise acquire the Host."""
     status = row["status"]
     if status in {SessionStatus.ENDED.value, SessionStatus.FAILED.value} or (
@@ -31,24 +37,25 @@ def may_refresh_inherited(manager: SessionManager, row: dict[str, Any]) -> bool:
         )
     ):
         return True
-    if row.get("runtime_custody_json") is not None or manager.db.retained_recovery_held(row["id"]):
+    if row.get("runtime_custody_json") is not None or db.retained_recovery_held(row["id"]):
         return False
     try:
-        record = manager._host_index.claim(
-            row["id"], generation=manager._generation_id, owner_pid=os.getpid(),
+        record = index.claim(
+            row["id"], generation=generation, owner_pid=os.getpid(),
             pid_alive=pid_alive, require_owner_fields=True,
         )
         if record.boundary == "local":
             # Missing or ambiguous native evidence is neither admission nor exit.
-            exited = [
-                process_exit.observe_original_exit(
-                    getattr(record, name + "_pid"), record.extra.get(name + "_process_start"),
-                ) for name in ("host", "child")
-            ]
+            exited = []
+            for name in ("host", "child"):
+                birth = record.extra.get(name + "_process_start")
+                if not isinstance(birth, str) or not birth:
+                    return False
+                exited.append(process_exit.observe_original_exit(getattr(record, name + "_pid"), birth))
             if any(exited):
                 if all(exited):
-                    manager._host_index.release_exited_local(
-                        record, settle=lambda: manager.db.settle_exited_inherited_host(row, record.child_pid),
+                    index.release_exited_local(
+                        record, settle=lambda: db.settle_exited_inherited_host(row, record.child_pid),
                     )
                 # Even on settlement this read predates STOPPED; refresh it on the next pass.
                 return False
@@ -60,29 +67,57 @@ def may_refresh_inherited(manager: SessionManager, row: dict[str, Any]) -> bool:
     return True
 
 
-def refresh_inherited_sessions(manager: SessionManager) -> None:
-    """Run on the manager's event loop without yielding between refresh and admission."""
-    pending = [s for s in manager.list_sessions() if s.awaiting_maintenance_refresh]
-    if not pending:
-        return
-    manager._host_index.refresh(strict=True)
-    for session in pending:
-        manager._rehydrate(merge=True, session_id=session.session_id, promote_inherited=True)
+def _prepare(
+    db: Database, index: HostIndex, generation: str, sid: str, route: Callable[[], bool],
+) -> InheritedRefresh | None:
+    if not route():
+        return None
+    index.refresh(strict=True)
+    row = db.get_session(sid)
+    if row is None:
+        return InheritedRefresh(None, index.get(sid)) if route() else None
+    if not may_refresh_inherited(db, index, generation, row):
+        return None
+    host = index.get(sid)
+    result = InheritedRefresh.read(db, row, host)
+    index.refresh(strict=True)
+    return result if host == index.get(sid) and route() else None
+
+
+async def refresh_inherited_sessions(manager: SessionManager, route: Callable[[], bool]) -> None:
+    index: HostIndex = manager._host_index
+    for session in manager.list_sessions():
+        if not session.awaiting_maintenance_refresh or session.metadata_in_use(include_readers=False):
+            continue
+        sid = session.session_id
+        expected = index.get(sid)
+        stop_notices = session._stop_notices
+        try:
+            # Hold only this session; cancellation waits for the admitted worker before unlocking.
+            async with session._turn_start_lock, session._lifecycle_lock:
+                prepared = await settled_thread_call(
+                    _prepare, manager.db, index.independent_cache(), manager._generation_id, sid, route,
+                )
+        except (AlreadyRunningError, OSError, ValueError, sqlite3.Error):
+            logging.getLogger("agent-bridge").warning("Session %s refresh deferred", sid, exc_info=True)
+            continue
+        # No await between checking local ownership, publishing the projection and admission.
+        if (prepared is not None and manager.get_session(sid) is session and session.awaiting_maintenance_refresh
+                and session._stop_notices == stop_notices and not session.metadata_in_use(include_readers=False)
+                and index.accept_prepared(sid, expected, prepared.host)):
+            manager._rehydrate(merge=True, session_id=sid, prepared=prepared)
 
 
 async def passive_maintenance_ready(app: FastAPI) -> bool:
     if not getattr(app.state, "passive", False):
         return True
-    owns_route = await asyncio.to_thread(
-        owns_session_maintenance, Path(config_dir()), getattr(app.state, "bound_port", None),
-    )
-    if owns_route:
-        try:
-            refresh_inherited_sessions(app.state.session_manager)
-        except (OSError, ValueError, sqlite3.Error):
-            logging.getLogger("agent-bridge").warning("Passive session refresh deferred", exc_info=True)
-            return False
-    return owns_route
+    root, port = Path(config_dir()), getattr(app.state, "bound_port", None)
+    def route() -> bool:
+        return owns_session_maintenance(root, port)
+    if not await asyncio.to_thread(route):
+        return False
+    await refresh_inherited_sessions(app.state.session_manager, route)
+    return await asyncio.to_thread(route)
 
 
 def owns_session_maintenance(root: Path, port: int | None) -> bool:
