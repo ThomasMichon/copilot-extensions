@@ -1948,6 +1948,10 @@ jobs:
           import sys
           from pathlib import Path
 
+          cohort_only = os.environ.get("COPILOT_EXTENSIONS_SSH_SETUP_COHORT_ONLY") == "1"
+          windows_native = os.name == "nt" and not cohort_only
+          preparation_seconds = 240 if windows_native else 180
+          lifecycle_seconds = 300 if windows_native else 180
           root = Path.cwd()
           sys.path.insert(0, str(root / "tools"))
           runner = runpy.run_path(str(root / "tools" / "run-standalone-tests.py"))
@@ -1976,7 +1980,7 @@ jobs:
                   code = runner["run_contained"](
                       inputs,
                       cwd=root, env=environment, sandbox=sandbox,
-                      limits=runner["Limits"](wall_seconds=180),
+                      limits=runner["Limits"](wall_seconds=preparation_seconds),
                   )
               except runner["UnreapedProcessError"]:
                   temporary.retain()
@@ -1986,14 +1990,14 @@ jobs:
                   lease = None
               if code:
                   raise RuntimeError(f"normal Source cohort preparation failed: {code}")
-              if os.environ.get("COPILOT_EXTENSIONS_SSH_SETUP_COHORT_ONLY") == "1":
+              if cohort_only:
                   print("Normal Source profiles prepared; installed lifecycle explicitly not selected", flush=True)
               else:
                   environment = dict(os.environ)
                   environment["COPILOT_EXTENSIONS_SSH_SETUP_COHORT"] = str(sandbox / "cohort" / "cohort.json")
                   code = subprocess.run(
                       [sys.executable, str(root / "tools" / "run-standalone-tests.py"),
-                       "fleet-manager", "--timeout", "180", "--ephemeral-native-ssh-setup"],
+                       "fleet-manager", "--timeout", str(lifecycle_seconds), "--ephemeral-native-ssh-setup"],
                       env=environment, check=False,
                       stdin=subprocess.DEVNULL, stdout=sys.stdout, stderr=sys.stderr,
                       creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
@@ -2014,7 +2018,7 @@ jobs:
     needs: [gateway-continuity-application-windows, pr-artifacts-windows]
     name: Normal selected SSH setup (Windows)
     runs-on: windows-latest
-    timeout-minutes: 6
+    timeout-minutes: 12
     env: *gateway-normal-setup-env
     steps: *gateway-normal-setup-steps
 

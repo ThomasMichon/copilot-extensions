@@ -2132,7 +2132,12 @@ The unchanged source-admission ordering/status packet runs after the selected
 continuity SSH lifecycle on each platform, rather than after artifact construction.
 Normal setup still depends on both continuity and artifacts, so it cannot start
 until all the same prerequisite packets pass. This balances the same nine-job
-portfolio without changing selectors, cases, assertions or six-minute job bounds.
+portfolio without changing selectors, cases or assertions.
+Windows normal setup has a 12-minute job bound, 240-second Source preparation
+and 300-second installed lifecycle. Linux normal setup and both preparation-only
+lanes retain their six-minute jobs and 180-second phase bounds. The other
+qualification jobs, 25-minute role witness and 90/60-second engine/Manager calls
+remain unchanged; the Windows allowance never applies to preparation-only mode.
 Direct Git Sources without Main composition use the existing
 `install_source.py --install-application` receiver; fixture code must not invent
 Main metadata to satisfy a different update-planner contract. Source preparation

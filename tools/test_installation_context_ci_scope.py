@@ -364,7 +364,7 @@ def test_gateway_native_groups_preserve_the_complete_disjoint_selection(platform
     normal = workflow["jobs"]["gateway-normal-setup-" + platform]
     assert normal["if"] == "${{ inputs.pr_artifacts }}"
     assert normal["runs-on"] == ("ubuntu-latest" if platform == "linux" else "windows-latest")
-    assert normal["timeout-minutes"] == 6
+    assert normal["timeout-minutes"] == (12 if platform == "windows" else 6)
     assert normal["needs"] == [
         "gateway-continuity-application-" + platform, "pr-artifacts-" + platform,
     ]
@@ -409,11 +409,11 @@ def test_gateway_native_groups_preserve_the_complete_disjoint_selection(platform
         and node.func.slice.value == "Limits"
     ]
     assert len(limits) == 1
-    assert {keyword.arg: ast.literal_eval(keyword.value) for keyword in limits[0].keywords} == {
-        "wall_seconds": 180,
-    }
+    assert len(limits[0].keywords) == 1 and limits[0].keywords[0].arg == "wall_seconds"
+    assert isinstance(limits[0].keywords[0].value, ast.Name)
+    assert limits[0].keywords[0].value.id == "preparation_seconds"
     constants = {node.value for node in ast.walk(tree) if isinstance(node, ast.Constant)}
-    assert {"repository_ssh_cohort_fixture.py", "--source-commit", "--ephemeral-native-ssh-setup", "180"} <= constants
+    assert {"repository_ssh_cohort_fixture.py", "--source-commit", "--ephemeral-native-ssh-setup"} <= constants
     preparation = workflow["jobs"]["gateway-normal-preparation-" + platform]
     assert preparation["if"] == "${{ inputs.runtime_profiles && !inputs.pr_artifacts }}"
     assert preparation["timeout-minutes"] == 6
@@ -518,6 +518,104 @@ def test_gateway_native_groups_prepare_under_owned_scratch_root(
     with pytest.raises(Allocated):
         exec(compile(script, "normal-source-preparation", "exec"), {})
     assert observed == [private]
+
+
+@pytest.mark.parametrize("platform", ["posix", "nt"])
+@pytest.mark.parametrize("preparation_only", [False, True])
+def test_gateway_native_budgets_reach_the_owned_producer_and_native_consumer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, platform: str, preparation_only: bool,
+) -> None:
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-acceptance.yml").read_text(),
+    )
+    script = next(
+        step["run"] for step in workflow["jobs"]["gateway-normal-setup-windows"]["steps"]
+        if step.get("name") == "Normal Manager and engine SSH setup"
+    )
+    environment = {
+        **os.environ,
+        "COPILOT_EXTENSIONS_SSH_SETUP_COHORT_ONLY": "1" if preparation_only else "0",
+        "COPILOT_EXTENSIONS_SSH_SETUP_SOURCE_COMMIT": "a" * 40,
+    }
+    sandbox = tmp_path / "sandbox"
+    sandbox.mkdir()
+    receipt = tmp_path / "native-arguments.json"
+    observed: list[Limits] = []
+    cleanup: list[SimpleNamespace] = []
+    temporary = SimpleNamespace(name=str(sandbox), retained=False)
+
+    class Lease:
+        released = 0
+
+        def release(self) -> None:
+            self.released += 1
+
+    lease = Lease()
+
+    def producer(arguments: list[str], *, limits: Limits, **_options: object) -> int:
+        assert arguments[-2:] == ["--source-commit", "a" * 40]
+        observed.append(limits)
+        return 0
+
+    def consumer(
+        arguments: list[str], *, env: dict[str, str], check: bool,
+        stdin: int, stdout: object, stderr: object, creationflags: int,
+    ) -> subprocess.CompletedProcess[bytes]:
+        assert not check and stdin == subprocess.DEVNULL
+        assert stdout is sys.stdout and stderr is sys.stderr
+        assert creationflags == (_CREATION_FLAGS if platform == "nt" else 0)
+        return subprocess.run(
+            [
+                sys.executable, "-I", "-B", "-c",
+                "import json,sys;from pathlib import Path;"
+                "Path(sys.argv[1]).write_text(json.dumps(sys.argv[2:]))",
+                str(receipt), *arguments[2:],
+            ],
+            env=env, capture_output=True, check=False, timeout=10,
+            creationflags=_CREATION_FLAGS,
+        )
+
+    runner = {
+        "default_python": lambda _: tmp_path / "env/Scripts/python.exe",
+        "ordinary_cache_root": lambda _: tmp_path / "cache",
+        "runs_root": lambda _: tmp_path,
+        "acquire": lambda *_: lease,
+        "run_prefix": lambda _: "c-",
+        "TestSandbox": lambda **_: temporary,
+        "record_owner": lambda *_args, **_kwargs: None,
+        "prepare": lambda *_: None,
+        "isolated_environment": lambda *_: dict(environment),
+        "venv_root": lambda _: tmp_path / "venvs",
+        "run_contained": producer, "Limits": Limits,
+        "UnreapedProcessError": RuntimeError,
+        "cleanup_sandbox": cleanup.append,
+    }
+    monkeypatch.setattr(runpy, "run_path", lambda _: runner)
+    monkeypatch.setattr(sys, "path", list(sys.path))
+    tree = ast.parse(script)
+    for index, node in enumerate(tree.body):
+        if isinstance(node, ast.Import) and len(node.names) == 1 and node.names[0].name in {"os", "subprocess"}:
+            name = node.names[0].name
+            tree.body[index] = ast.Assign(
+                targets=[ast.Name(id=name, ctx=ast.Store())],
+                value=ast.Name(id="workflow_" + name, ctx=ast.Load()),
+            )
+    exec(compile(ast.fix_missing_locations(tree), "normal-native-budget", "exec"), {
+        "workflow_os": SimpleNamespace(name=platform, environ=environment),
+        "workflow_subprocess": SimpleNamespace(
+            run=consumer, DEVNULL=subprocess.DEVNULL, CREATE_NO_WINDOW=_CREATION_FLAGS,
+        ),
+    })
+    windows_native = platform == "nt" and not preparation_only
+    assert [limit.wall_seconds for limit in observed] == [240 if windows_native else 180]
+    if preparation_only:
+        assert not receipt.exists()
+    else:
+        assert json.loads(receipt.read_text()) == [
+            "fleet-manager", "--timeout", "300" if windows_native else "180",
+            "--ephemeral-native-ssh-setup",
+        ]
+    assert lease.released == 1 and cleanup == [temporary]
 
 
 def test_gateway_native_lifecycle_forwards_output_from_a_headless_parent(tmp_path: Path) -> None:
