@@ -1982,6 +1982,31 @@ the new command. These isolated source controls do not enable a logging consumer
 scheduled collection, native Windows qualification or actual archive acknowledgment.
 Required unit-only CI is unchanged.
 
+Efforts' optional `--test-file tests/test_agenda_rescue.py
+--test-file tests/test_agenda_managed.py --allow-explicit-tiers` packet checks
+complete format-2 history relocation, the durable source fence, interrupted
+destination activation, exact retry after later accepted work and refusal of
+changed identities, stale exports and unsupported legacy lanes. A preloaded
+writer reaches its real write-lock boundary before cutover and must refuse
+afterward. File-replacement controls inject before and after SQLite connection
+creation at source fencing, first reservation and activation, preserving both
+the foreign database/hot journal and the original selected file byte-for-byte.
+POSIX lock controls retain another in-process writer through successful reads,
+identity rejection and a real overlapping-write timeout. An independent
+process remains excluded until that writer rolls back, then acquires the lock.
+The source-fence directory-barrier control refuses activation after a committed
+fence when directory flush fails, preserves both fenced stores and finishes an
+exact retry. A checkout-relative canonical Goal refuses before allocation; the
+actual consumer retains a readable absolute Goal after relocation.
+Worktrees' `--test-file tests/test_agenda_rescue_consumer.py
+--allow-explicit-tiers` composes the actual isolated placement process, rescue
+parser, canonical locator readback and independent ordinary agenda readers.
+These synthetic native controls do not migrate operator data or grant checkout
+deletion. Seven in-process rescue units use SQLite memory only, substituting
+filesystem, placement and transaction ownership; they create no database file,
+child, listener or service. Their exact nodes, source closure and production
+coverage target are declared in `tools/promotion-unit-manifest.json`.
+
 Worktrees' optional `--test-file tests/test_worktree_data_store.py
 --test-file tests/test_worktree_data_cli.py --allow-explicit-tiers` packet checks
 passive project-wide retained-descriptor inventory, explicit count/byte
