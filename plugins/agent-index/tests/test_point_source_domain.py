@@ -1,8 +1,10 @@
-"""Cold owned-directory proofs; no point execution or component reads are enabled."""
+"""Owned-directory proofs for point selection and default-reader refusal."""
 
 from __future__ import annotations
 
+import asyncio
 import json
+import sys
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -232,4 +234,156 @@ def test_unmarked_native_handles_refuse_a_later_point_domain(
     for operation in operations:
         with pytest.raises(SourceLayoutError, match="newly selected"):
             operation()
+    assert snapshot(config.data_dir) == before
+
+
+@pytest.mark.parametrize("populated", [False, True])
+def test_query_frontdoors_refuse_point_domains_without_empty_success(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    populated: bool,
+) -> None:
+    from fastapi.testclient import TestClient
+
+    from agent_index import __main__ as cli
+    from agent_index import mcp_app, transport
+    from agent_index.client import AgentIndexClient
+    from agent_index.engine.client import EngineClient, EngineUnavailableError
+    from agent_index.search.engine import SearchEngine, create_search_engine
+    from agent_index.server import build_app
+
+    monkeypatch.setenv("AGENT_INDEX_STORE_LAYOUT", LAYOUT)
+    monkeypatch.setenv("AGENT_INDEX_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("AGENT_INDEX_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("AGENT_INDEX_SEARCH_IN_PROCESS", "0")
+    config = IndexConfig()
+    store = initialize_source_store(config)
+    queries: list[str] = []
+
+    def offline(self: EngineClient, query: str) -> np.ndarray[Any, Any]:
+        queries.append(query)
+        raise EngineUnavailableError("fixture engine offline")
+
+    monkeypatch.setattr(EngineClient, "embed_query", offline)
+    chunks = [
+        Chunk("searchable fixture", "42.md", "text", "markdown", 1, 1, "sample:components"),
+        Chunk("searchable fixture", "43.md", "text", "markdown", 1, 1, "sample:other"),
+    ]
+    if populated:
+        store.upsert_content(chunks)
+        assert store.ensure_fts_index()
+    clusters = ClusterStore(config.clusters_db)
+    clusters.replace_all([
+        Cluster("sample:components", "fixture", (
+            ClusterMember("sample:components", "42.md", 1.0, False),
+        ), False),
+    ] if populated else [])
+    app = build_app()
+    http = TestClient(app)  # No lifespan: never start a runner or publish an endpoint.
+    engine = app.state.get_search_engine()
+    assert engine is app.state.get_search_engine()
+    assert isinstance(engine, SearchEngine)
+    assert engine.search_authorized("searchable", families=()) == []
+    if populated:
+        assert SearchEngine({}, store).search("searchable") == []
+    for source, expected_path in (("sample:components", "42.md"), ("sample:other", "43.md")):
+        if populated:
+            hits = engine.search("searchable", source=source)
+            assert [hit.file_path for hit in hits] == [expected_path]
+        else:
+            with pytest.raises(SourceLayoutError, match="FTS is stale"):
+                engine.search("searchable", source=source)
+    legacy_search = http.get("/search", params={"q": "searchable", "source": "sample:components"})
+    assert legacy_search.json()["available"] is populated
+    if not populated:
+        assert "FTS is stale" in legacy_search.json()["error"]
+    assert len(legacy_search.json()["hits"]) == int(populated)
+    assert http.get("/similar", params={"id": "missing"}).json()["available"] is True
+    assert http.get("/clusters").json()["count"] == int(populated)
+
+    point_receipt = initialize_source_layout(tmp_path / "point", point_scope=claim().scope)
+    legacy_domain = store._source_domain
+    assert legacy_domain is not None
+    # Simulate externally changed selection without applying or migrating point data.
+    point_receipt["versions"] = legacy_domain.receipt()["versions"]
+    (config.lance_dir / MARKER).write_text(json.dumps(point_receipt))
+    selected = domain_for(config.lance_dir, point_scope=claim().scope)
+    assert selected is not None
+    scoped = MultiModelStore(config.lance_dir, point_scope=claim().scope)
+    scoped_engine = SearchEngine({}, scoped)
+    before = snapshot(config.data_dir)
+    queries.clear()
+    with selected.operation(scoped._content.db, point_scope=claim().scope):
+        for operation in (
+            lambda: engine.search("searchable"),
+            lambda: scoped_engine.search("searchable"),
+            lambda: scoped_engine.search_authorized("searchable", families=()),
+            lambda: scoped_engine.find_similar("missing"),
+            lambda: scoped.fts_search("searchable"),
+            lambda: scoped.get_document("sample:other", "43.md"),
+            clusters.list_clusters,
+        ):
+            with pytest.raises(SourceLayoutError):
+                operation()
+    with pytest.raises(SourceLayoutError):
+        create_search_engine()
+    for query_source in (None, "sample:components", "sample:other", "sample:unknown"):
+        params = (
+            {"q": "searchable"} if query_source is None
+            else {"q": "searchable", "source": query_source}
+        )
+        payload = http.get("/search", params=params).json()
+        assert payload["available"] is False
+        assert payload["hits"] == [] and "SourceLayoutError" in payload["error"]
+    for path, params in (("/similar", {"id": "missing"}), ("/clusters", {})):
+        payload = http.get(path, params=params).json()
+        assert payload["available"] is False and "SourceLayoutError" in payload["error"]
+    status = http.get("/status").json()["index"]
+    assert status["chunks"] is None and status["available"] is None
+    assert "SourceLayoutError" in status["error"]
+
+    async def get(path: str, params: dict[str, Any]) -> dict[str, Any]:
+        response = await asyncio.to_thread(http.get, path, params=params)
+        response.raise_for_status()
+        payload: dict[str, Any] = response.json()
+        return payload
+
+    monkeypatch.setattr(mcp_app, "_get", get)
+    for result in (
+        asyncio.run(mcp_app.agent_index_search("searchable")),
+        asyncio.run(mcp_app.agent_index_find_similar("missing")),
+        asyncio.run(mcp_app.agent_index_clusters()),
+    ):
+        assert "unavailable" in result and "SourceLayoutError" in result
+    status_text = asyncio.run(mcp_app.agent_index_status())
+    assert "Index available: unknown" in status_text and "Total chunks: unknown" in status_text
+
+    def request(
+        self: AgentIndexClient, method: str, path: str,
+        json: dict[str, Any] | None = None, params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        response = http.request(method, path, json=json, params={
+            key: value for key, value in (params or {}).items() if value is not None
+        })
+        response.raise_for_status()
+        payload: dict[str, Any] = response.json()
+        return payload
+
+    monkeypatch.setattr(AgentIndexClient, "_request", request)
+    monkeypatch.setattr(transport, "maybe_delegate", lambda _sub, _raw: None)
+    monkeypatch.setattr(cli, "client_url", lambda: "http://fixture.invalid")
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text("{}")
+    monkeypatch.setenv("AGENT_INDEX_CONFIG", str(config_file))
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    for role in ("host", "client"):
+        monkeypatch.setattr(transport, "plan_route", lambda: (role, {}))
+        for args in (
+            ["search", "searchable", "--json"], ["search", "searchable"],
+            ["similar", "missing"], ["clusters"],
+        ):
+            assert cli.main(args) != 0
+            emitted = capsys.readouterr()
+            assert "SourceLayoutError" in emitted.out + emitted.err
+            assert emitted.out.strip() != "[]"
+    assert queries == []
     assert snapshot(config.data_dir) == before
