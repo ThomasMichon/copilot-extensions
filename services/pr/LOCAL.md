@@ -313,6 +313,18 @@ values; nested collections and oversized inputs refuse before encoding or IPC.
 Headers, request bodies and response bodies retain the local byte budgets.
 The client rejects ambiguous framing rather than adding another HTTP profile.
 
+For `inspect-request` and `subscribe` with `not_after`, the asynchronous client
+reads fresh executing capabilities inside each call's original budget before
+sending the new form, even when its repository binding was already selected.
+Missing or incompatible original-request recovery support refuses before POST;
+it does not disable legacy operations or retry through an older form. This
+also covers a provider rollback after an earlier successful negotiation.
+Embeddings must account for that capability exchange in their aggregate call
+budget. A lost bounded-subscribe result can be recovered with
+`await client.request("inspect-request", {"request_id": original_id})`,
+then cancelled by its returned registration ID. Retain the immutable cutoff
+and uncertain-effect obligations described above; lookup is not renewal.
+
 Cancellation closes and joins the owned connection, with up to one additional
 second for close cleanup. It does not roll back an operation the service may
 already have accepted. Preserve the original request/registration/deadline and
