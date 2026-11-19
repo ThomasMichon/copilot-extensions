@@ -142,6 +142,10 @@ After the reviewed proposal, the operator admitted execution:
   and identity. Provider limitations must remain explicit; the
   [Azure DevOps proposal](azure-devops-acquisition.md) stages query-qualified
   exact identities before broader polling and repair coverage (#13363).
+  Its [point-component contract proposal](azure-devops-point-targets.md)
+  separates named target coverage from combined-document replacement (#13386);
+  representation, typed intake, ordered application and read isolation remain
+  unimplemented.
 - [ ] Persist acquisition progress so retry/restart does not restart a
   corpus-wide listing.
 - [ ] Move authoritative full enumeration into separately budgeted, resumable
