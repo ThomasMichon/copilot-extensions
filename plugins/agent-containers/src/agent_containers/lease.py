@@ -22,15 +22,17 @@ import sys
 import threading
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Any, TypeVar
 
 from ssh_manager.locks import pid_alive
 
+from . import fleet_growth
 from .config import LEASE_FILE, STATE_DIR, ContainersConfig, ensure_state_dir
-from .lifecycle import list_containers
+from .lifecycle import DockerContainerInfo, list_containers
 from .private_state import atomic_write_json
 from .lease_lock import (
     PROTOCOL, LockCutoverError, legacy_writer_quiesced, provider_lock,
@@ -43,6 +45,10 @@ _LOCK_FILE = STATE_DIR / "leases.lock"
 _LEASE_DETAILS_FILE = STATE_DIR / "lease-details.json"
 _DEPLOY_HOLDS_FILE = STATE_DIR / "deploy-holds.json"
 _SESSION_ADMISSIONS_FILE = STATE_DIR / "session-admissions.json"
+_RECLAIM_FIELDS = (
+    "reclaim_reason", "reclaimed_from_effort", "reclaimed_from_pid",
+    "reclaimed_from_environment", "reclaimed_at",
+)
 _LEASE_CORE_FIELDS = {
     "container",
     "effort",
@@ -113,6 +119,10 @@ class SessionAdmission:
     lock_protocol: str = PROTOCOL
 
 
+_ProviderRecord = DeployHold | SessionAdmission
+_R = TypeVar("_R", bound=_ProviderRecord)
+
+
 class ProviderAdmissionError(RuntimeError):
     """Provider lifecycle admission state is busy or indeterminate."""
 
@@ -173,15 +183,8 @@ def _read_leases() -> dict[str, Lease]:
         except (AttributeError, TypeError):
             continue
         detail = details.get(container)
-        if _lease_detail_matches(lease, detail):
-            for field in (
-                "environment",
-                "reclaim_reason",
-                "reclaimed_from_effort",
-                "reclaimed_from_pid",
-                "reclaimed_from_environment",
-                "reclaimed_at",
-            ):
+        if detail is not None and _lease_detail_matches(lease, detail):
+            for field in ("environment", *_RECLAIM_FIELDS):
                 setattr(lease, field, detail.get(field))
         leases[container] = lease
     return leases
@@ -222,7 +225,7 @@ def _write_leases(leases: dict[str, Lease]) -> None:
     _write_private_json(LEASE_FILE, payload)
 
 
-def _read_lease_details() -> dict[str, dict]:
+def _read_lease_details() -> dict[str, dict[str, Any]]:
     if not _LEASE_DETAILS_FILE.exists():
         return {}
     try:
@@ -239,7 +242,7 @@ def _read_lease_details() -> dict[str, dict]:
     }
 
 
-def _lease_detail_matches(lease: Lease, detail: dict | None) -> bool:
+def _lease_detail_matches(lease: Lease, detail: dict[str, Any] | None) -> bool:
     return bool(
         detail
         and detail.get("effort") == lease.effort
@@ -250,7 +253,9 @@ def _lease_detail_matches(lease: Lease, detail: dict | None) -> bool:
     )
 
 
-def _read_records(path, record_type, *, fail_closed: bool = False):
+def _read_records(
+    path: Path, record_type: Callable[..., _R], *, fail_closed: bool = False,
+) -> dict[str, _R]:
     if not path.exists():
         return {}
     try:
@@ -268,7 +273,7 @@ def _read_records(path, record_type, *, fail_closed: bool = False):
                 f"{path.name} does not contain a provider admission mapping"
             )
         return {}
-    records = {}
+    records: dict[str, _R] = {}
     for key, rec in (raw or {}).items():
         try:
             if not isinstance(rec, dict):
@@ -286,19 +291,19 @@ def _read_records(path, record_type, *, fail_closed: bool = False):
     return records
 
 
-def _write_records(path, records) -> None:
+def _write_records(path: Path, records: Mapping[str, _ProviderRecord]) -> None:
     _write_private_json(
         path,
         {key: asdict(value) for key, value in records.items()},
     )
 
 
-def _write_private_json(path: Path, payload: dict) -> None:
+def _write_private_json(path: Path, payload: dict[str, Any]) -> None:
     """Atomically publish owner-only coordination JSON."""
     atomic_write_json(path, payload, indent=2)
 
 
-def _record_live(record, ttl: float) -> bool:
+def _record_live(record: _ProviderRecord, ttl: float) -> bool:
     expires_at = getattr(record, "expires_at", None)
     if expires_at is not None and time.time() >= expires_at:
         return False
@@ -321,7 +326,9 @@ def _pid_alive(pid: int) -> bool:
     return pid_alive(pid)
 
 
-def _read_live_records(path, record_type, ttl: float):
+def _read_live_records(
+    path: Path, record_type: Callable[..., _R], ttl: float,
+) -> dict[str, _R]:
     records = _read_records(path, record_type, fail_closed=True)
     try:
         live = {
@@ -339,8 +346,8 @@ def _read_live_records(path, record_type, ttl: float):
 
 
 def _heartbeat_record(
-    path,
-    record_type,
+    path: Path,
+    record_type: Callable[..., _ProviderRecord],
     key: str,
     token: str,
     ttl: float,
@@ -362,7 +369,7 @@ def _heartbeat_record(
 
 def _cleanup_record_silent(
     path: Path,
-    record_type,
+    record_type: Callable[..., _ProviderRecord],
     ttl: float,
     key: str,
     token: str,
@@ -471,17 +478,34 @@ def borrow(
     fleet: str | None = None,
     ttl: float = DEFAULT_TTL,
     force: bool = False,
+    grow: bool = True,
 ) -> Lease:
     """Acquire an exclusive lease on a free fleet container for ``effort``.
 
     If ``container`` is given, lease that specific one (error if held by a
     different live effort, unless ``force`` or the current holder is in the
     same worktree family -- see ``same_worktree_family``). Otherwise pick the
-    first free fleet member, preferring already-running containers.
+    first free fleet member, preferring already-running containers; when none
+    is free and the fleet sets ``max_size``, grow it by one (``fleet_growth``).
 
     Re-borrowing the same container for the same effort is idempotent
     (refreshes the heartbeat).
     """
+    def attempt() -> Lease:
+        return _borrow_once(config, effort, container, fleet, ttl, force)
+
+    def lease_grown(name: str, token: str) -> Lease:
+        return _borrow_once(config, effort, name, fleet, ttl, False, token)
+
+    if container or not grow:
+        return attempt()
+    return fleet_growth.borrow_or_grow(
+        config, fleet, STATE_DIR, _lease_lock, attempt, lease_grown,
+    )
+
+
+def _borrow_once(config: ContainersConfig, effort: str, container: str | None,
+                 fleet: str | None, ttl: float, force: bool, grown: str | None = None) -> Lease:
     with _lease_lock():
         admissions = _read_live_records(
             _SESSION_ADMISSIONS_FILE,
@@ -498,11 +522,11 @@ def borrow(
             DeployHold,
             DEPLOY_HOLD_TTL,
         )
-        members = list_containers(config)
+        members = fleet_growth.admissible(list_containers(config), STATE_DIR, grown)
         if fleet:
             members = [c for c in members if c.fleet == fleet]
         if not members:
-            raise RuntimeError(
+            raise fleet_growth.FleetExhaustedError(
                 "No fleet containers found. Run `agent-containers up` first."
             )
 
@@ -563,7 +587,7 @@ def borrow(
             else:
                 # Treat a definitively dead same-host holder as available, but
                 # only when no lifecycle or connection admission protects it.
-                available = []
+                available: list[tuple[DockerContainerInfo, Lease | None]] = []
                 for member in members:
                     if member.name in holds or member.name in admitted:
                         continue
@@ -573,7 +597,7 @@ def borrow(
                     elif _lease_holder_liveness(held) is False:
                         available.append((member, held))
                 if not available:
-                    raise RuntimeError(
+                    raise fleet_growth.FleetExhaustedError(
                         "All fleet containers are currently leased or under "
                         "provider lifecycle hold. Release one or grow the fleet."
                     )
@@ -590,43 +614,29 @@ def borrow(
 
         now = time.time()
         previous = leases.get(chosen)
-        same_effort = previous is not None and previous.effort == effort
+        prior = previous if previous is not None and previous.effort == effort else None
         lease = Lease(
             container=chosen,
             effort=effort,
             pid=os.getpid(),
             host=_this_host(),
-            acquired_at=previous.acquired_at if same_effort else now,
+            acquired_at=prior.acquired_at if prior else now,
             heartbeat_at=now,
             environment=_this_environment(),
-            reclaim_reason=(
-                previous.reclaim_reason
-                if same_effort
-                else "dead-local-holder-pid" if reclaimed else None
-            ),
-            reclaimed_from_effort=(
-                previous.reclaimed_from_effort
-                if same_effort
-                else reclaimed.effort if reclaimed else None
-            ),
-            reclaimed_from_pid=(
-                previous.reclaimed_from_pid
-                if same_effort
-                else reclaimed.pid if reclaimed else None
-            ),
-            reclaimed_from_environment=(
-                previous.reclaimed_from_environment
-                if same_effort
-                else reclaimed.environment if reclaimed else None
-            ),
-            reclaimed_at=(
-                previous.reclaimed_at
-                if same_effort
-                else now if reclaimed else None
-            ),
         )
+        if prior is not None:  # a same-effort re-borrow keeps its reclaim audit
+            for field in _RECLAIM_FIELDS:
+                setattr(lease, field, getattr(prior, field))
+        elif reclaimed is not None:
+            lease.reclaim_reason = "dead-local-holder-pid"
+            lease.reclaimed_from_effort = reclaimed.effort
+            lease.reclaimed_from_pid = reclaimed.pid
+            lease.reclaimed_from_environment = reclaimed.environment
+            lease.reclaimed_at = now
         leases[chosen] = lease
         _write_leases(leases)
+        if grown is not None:  # lease and unhide the grown member atomically
+            fleet_growth.clear_marker(STATE_DIR, grown)
         if reclaimed is not None:
             log.info(
                 "Reclaimed lease on '%s' from effort '%s': "
@@ -707,7 +717,7 @@ def get_deploy_hold(container: str) -> DeployHold | None:
         return holds.get(container)
 
 
-def deploy_hold_status(container: str) -> dict:
+def deploy_hold_status(container: str) -> dict[str, Any]:
     """Return observable hold state without weakening strict admission reads."""
     try:
         hold = get_deploy_hold(container)
@@ -782,7 +792,7 @@ def clear_stale_provider_records(container: str | None = None) -> dict[str, int]
     """
     cleared = {"deploy_holds": 0, "session_admissions": 0}
     with _lease_lock(clear_expired_corruption=True, cleanup_only=True):
-        for path, record_type, ttl, counter in (
+        sources: tuple[tuple[Path, Callable[..., _ProviderRecord], float, str], ...] = (
             (
                 _DEPLOY_HOLDS_FILE,
                 DeployHold,
@@ -795,7 +805,8 @@ def clear_stale_provider_records(container: str | None = None) -> dict[str, int]
                 SESSION_ADMISSION_TTL,
                 "session_admissions",
             ),
-        ):
+        )
+        for path, record_type, ttl, counter in sources:
             try:
                 records = _read_records(path, record_type, fail_closed=True)
             except ProviderAdmissionError:
@@ -808,7 +819,7 @@ def clear_stale_provider_records(container: str | None = None) -> dict[str, int]
                 path.unlink(missing_ok=True)
                 cleared[counter] += 1
                 continue
-            kept = {}
+            kept: dict[str, _ProviderRecord] = {}
             for key, record in records.items():
                 selected = container is None or record.container == container
                 can_clear = (
@@ -894,7 +905,7 @@ def deploy_hold(
 def session_admission(
     container: str,
     *,
-    expected_assignment: dict | None = None,
+    expected_assignment: dict[str, Any] | None = None,
     dispatch_container_id: str | None = None,
     dispatch_binding_id: str | None = None,
 ) -> Iterator[SessionAdmission]:
@@ -938,6 +949,8 @@ def session_admission(
                 f"Container '{container}' is unavailable while provider "
                 f"{hold.operation} is in progress"
             )
+        if fleet_growth.is_provisioning(STATE_DIR, container):
+            raise ProviderAdmissionError(f"Container '{container}' is still being provisioned")
         admissions = _read_live_records(
             _SESSION_ADMISSIONS_FILE,
             SessionAdmission,

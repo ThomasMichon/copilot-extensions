@@ -232,6 +232,9 @@ class FleetConfig:
     # Container image to `docker run` when not using the devcontainer CLI.
     image: str | None = None
     size: int = 1
+    # Optional on-demand growth bound: ``borrow`` provisions one more member
+    # when none is free and the fleet has fewer than ``max_size`` members.
+    max_size: int | None = None
     name_prefix: str | None = None
     workspace_folder: str | None = None
     exec_user: str | None = None
@@ -352,6 +355,19 @@ class FleetConfig:
 
         validate_driver_fleet(self)
 
+    def validate_sizing(self) -> None:
+        """``max_size`` is an optional positive integer bound at or above ``size``."""
+        if self.max_size is None:
+            return
+        if isinstance(self.max_size, bool) or not isinstance(self.max_size, int):
+            raise RuntimeError(f"max_size must be an integer, not {self.max_size!r}")
+        if self.max_size < 1 or self.max_size < self.size:
+            raise RuntimeError(
+                f"max_size ({self.max_size}) must be a positive integer >= size ({self.size})"
+            )
+        if self.lifecycle_owner == EXTERNAL_LIFECYCLE_OWNER:
+            raise RuntimeError("max_size requires a fleet whose lifecycle agent-containers owns")
+
     def validate_restricted(self) -> None:
         """Validate cross-field invariants; restricted fleets get extra bounds.
 
@@ -361,6 +377,7 @@ class FleetConfig:
         not just a restricted-containment violation.
         """
         self.validate_driver()
+        self.validate_sizing()
         if self.lifecycle_owner not in (
             INTERNAL_LIFECYCLE_OWNER, EXTERNAL_LIFECYCLE_OWNER,
         ):
@@ -406,9 +423,10 @@ class FleetConfig:
                 "(host bind-mounts and CAP_SYS_ADMIN both defeat the restricted "
                 "containment contract)"
             )
-        if self.effective_cpus() <= 0 or not math.isfinite(self.effective_cpus()):
+        cpus, pids_limit = self.effective_cpus(), self.effective_pids_limit()
+        if cpus is None or cpus <= 0 or not math.isfinite(cpus):
             raise RuntimeError("Restricted fleet 'cpus' must be a positive finite value")
-        if self.effective_pids_limit() <= 0:
+        if pids_limit is None or pids_limit <= 0:
             raise RuntimeError("Restricted fleet 'pids_limit' must be positive")
         for field_name, value in (
             ("memory", self.effective_memory()),
@@ -884,6 +902,7 @@ def load_config(*, strict: bool = False) -> ContainersConfig:
             devcontainer_config=raw.get("devcontainer_config"),
             image=raw.get("image"),
             size=int(raw.get("size", 1)),
+            max_size=raw.get("max_size"),
             name_prefix=raw.get("name_prefix"),
             workspace_folder=raw.get("workspace_folder"),
             exec_user=raw.get("exec_user"),
