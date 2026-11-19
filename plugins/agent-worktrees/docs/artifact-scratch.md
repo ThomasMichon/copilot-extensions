@@ -127,3 +127,67 @@ pytest success/failure, proves actual finalize with retained bytes, separately
 reclaims that fixture and preserves a reusable-cache sentinel. It also proves
 unknown process cleanup is not converted into a settled diagnostic bundle.
 These fixtures are not a live installed rollout or legacy-data cleanup.
+
+## Other disposable producers
+
+The opt-in repository command below shares the same allocation context and
+process-containment owner. It is source tooling, not an installed Worktrees
+command. Use an interpreter that already contains the compatible Worktrees
+Python owner; it never installs one.
+
+```text
+python tools/run-owned-producer.py --owner <machine/project/worktree> --kind spike -- <absolute-python> -m ast <absolute-source-file>
+```
+
+`--kind` is one of `spike`, `build`, `archive-extraction`, `report` or
+`source-worker`. It classifies the diagnostic, not permission to act on an
+input, service or output. The required `--` separates a literal command argument
+vector. Its executable must be absolute. No shell is inserted, and unknown
+wrapper options are rejected.
+
+The command's working directory is the allocation's `work` child, separate from
+the owner's identity marker and process records. `{scratch}` in a command
+argument expands to that working directory; `OWNED_PRODUCER_SCRATCH` supplies
+the same value to the child. Other argument bytes, including spaces, empty
+arguments and unrelated braces, remain unchanged. The marker is not a shell
+expression; do not interpolate it into source code when it can be a separate
+path argument.
+
+The existing isolated environment places child temporary and test-state roots
+inside the allocation and detaches inherited suite/session/credential state.
+There is no host-state or daemon-escape option. This is process containment and
+environment redirection, not an OS filesystem/network sandbox. Input handling,
+explicit external writes and access to pre-existing services keep their existing
+authorization and isolation requirements.
+
+`--timeout` bounds the foreground work and checks for overrun after joined
+cleanup; the default is 900 seconds. `--max-processes`, `--max-memory-mb` and
+`--max-temp-mb` preserve the existing defaults of 128, 4096 MiB and 2048 MiB.
+All bounds must be finite and positive. Ordinary command exit codes are returned;
+a POSIX signal maps to `128 + signal`, timeout to 124, and an owner/containment
+failure to 125. A parser refusal returns 2 before allocation.
+
+Consume disposable results during the command, for example build and verify
+an archive, extract and inspect an admitted input, or generate and print a
+transient report. Successful work closes its exact consumed allocation.
+Known failure keeps only the configured bounded summary under diagnostic schema
+`copilot-extensions.owned-producer-diagnostic/v1`, not arbitrary files or child
+output. Unknown descendant cleanup retains the complete payload and open
+responsibility. Partial physical removal is reported as retained; command
+success is not a claim that every byte was removed.
+
+The wrapper does not own arbitrary external output paths. A durable report,
+published build or user deliverable needs its own admitted destination and
+verified disposition. Reusable caches and execution history are not disposable
+command output. A `source-worker` may consume a transient qualification image;
+an ongoing/editable source checkout still belongs in a registered worktree.
+
+The selected real consumer packet is `tests/test_owned_producer.py`: it runs
+the standard-library AST analyzer, builds and executes a Python zip application,
+extracts and consumes a ZIP input, produces and reads a profiling report, and
+consumes a Git-archive qualification image. It also checks actual command
+failure/timeout, exact disposition and unchanged cache/sibling data.
+`test_artifact_runner_contract.py` covers parsing, ordering and unsupported-owner
+refusal. Run both through the canonical runner with `--test-file` and select
+`--allow-explicit-tiers` for the T3 native packet. These are selected consumers,
+not universal producer adoption or installed rollout.

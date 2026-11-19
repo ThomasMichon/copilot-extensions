@@ -574,7 +574,8 @@
         "plugins/agent-worktrees/scripts/_runtime_admission/libs/versioned-runtime",
         "plugins/agent-worktrees/scripts/_runtime_admission/libs/zdd/src",
         "worktree-manager/tests",
-        "plugins/agent-worktrees/tests"
+        "plugins/agent-worktrees/tests",
+        "tools"
       ]
     },
     {
