@@ -48,6 +48,11 @@ class BoundRepositoryClient(LocalClient):
         """Read executing support without registering, adopting or preparing a task."""
         self._check_transport()
         selected = self._http("GET", "capabilities")
+        self._accept_expected_selection(selected)
+        return copy.deepcopy(selected)
+
+    def _accept_expected_selection(self, selected: dict[str, Any]) -> None:
+        self._check_transport()
         feature = selected.get("consumer_binding")
         if (
             selected.get("identity") != self._identity.document()
@@ -59,7 +64,6 @@ class BoundRepositoryClient(LocalClient):
         ):
             raise LocalClientError("configured repository/consumer binding unsupported or different")
         self._accept_selection(selected)
-        return copy.deepcopy(selected)
 
     def _select(self) -> None:
         self._check_transport()

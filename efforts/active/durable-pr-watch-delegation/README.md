@@ -787,7 +787,12 @@ while retaining legacy-list writes. Historical executor transition protection,
 map/cwd support and consumer acceptance remain open; source publication does
 not establish installed adoption. The subsequent operator direction adds
 older-engine restart refusal and per-version state protection; its revised
-design must clear review before realization.
+design cleared review in #13310. Implementation and transition qualification,
+not another design-approval request, follow that accepted direction. The
+[present-only receiver groundwork](journal/2026/11.18%20Per-version%20receiver%20groundwork.md)
+adds epoch-aware admission and opaque-partition preservation; physical
+historical-writer isolation and recoverable migration remain prerequisites to
+publishing versioned state or enabling context registrations.
 
 #6019 already delivered outage-independent expiry and the acknowledged-delivery
 foundation. Preserve that positive credit; the unchecked rows below retain
@@ -1799,6 +1804,7 @@ callback an implicit credential store.
 
 ## Journal
 
+- [2026-11-18 - Present-only per-version receiver groundwork](journal/2026/11.18%20Per-version%20receiver%20groundwork.md)
 - [2026-11-18 - Version-aware watch-state refusal baseline](journal/2026/11.18%20Watch%20state%20contract%20baseline.md)
 - **2026-11-18 - Versioned per-subscription map design reviewed.** #13277
   captures the operator-selected command/cwd map and explicit contract-version

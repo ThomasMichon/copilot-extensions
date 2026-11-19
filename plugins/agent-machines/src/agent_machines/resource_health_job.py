@@ -5,16 +5,20 @@ from __future__ import annotations
 import os
 import subprocess
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from .health_jobs import ENROLLMENT_STATE
 from .resources import (
     ResourceFinding, ResourceHandler, ResourceResult, _select_field,
 )
 
+if TYPE_CHECKING:
+    from .resources import ResourceContribution, ResourceContext, ResolvedResource
+
 
 def is_enrollment_state(target: Path) -> bool:
     """Reserve native local-consent state from ordinary file resources."""
-    def reserved(path):
+    def reserved(path: Path) -> bool:
         name = path.name
         if os.name == "nt":
             name = name.partition(":")[0].rstrip(" .").casefold()
@@ -26,16 +30,18 @@ def is_enrollment_state(target: Path) -> bool:
 class HealthJobResourceHandler(ResourceHandler):
     TYPE = "health-job"
 
-    def identity(self, decl):
+    def identity(self, decl: dict[str, Any]) -> tuple[str]:
         return (self.TYPE,)
 
-    def display_id(self, decl):
+    def display_id(self, decl: dict[str, Any]) -> str:
         return self.TYPE
 
-    def applies_on(self, decl, plat):
-        return super().applies_on(decl, plat) and plat == "windows"
+    def applies_on(self, decl: dict[str, Any], plat: str) -> bool:
+        return super().applies_on(decl, plat) and plat in {"windows", "linux"}
 
-    def merge(self, members):
+    def merge(
+        self, members: list[ResourceContribution],
+    ) -> tuple[dict[str, Any], list[ResourceFinding], list[dict[str, Any]]]:
         state, selected, _, conflict, decision, info = _select_field(
             members, (self.TYPE,), "state",
             lambda member: str(member.declaration.get("state", "present")),
@@ -54,7 +60,7 @@ class HealthJobResourceHandler(ResourceHandler):
             "maintenance_safe": any(bool(member.declaration.get("maintenance_safe")) for member in members),
         }, findings, [decision] if decision else []
 
-    def apply(self, resolved, ctx, dry_run):
+    def apply(self, resolved: ResolvedResource, ctx: ResourceContext, dry_run: bool) -> ResourceResult:
         from .health_enrollment import Enrollment, STATE, select, settle_native_cleanup
 
         owner = None
