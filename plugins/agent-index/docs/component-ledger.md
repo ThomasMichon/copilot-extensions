@@ -31,6 +31,24 @@ nonempty acquisition `scope` and `policy` identities, and the complete
 cover the caller's actual account, endpoint, query and selected policy; this
 helper neither derives them nor permits rebinding existing history.
 
+`ComponentVersion.identity` optionally retains a typed `ComponentIdentity`:
+`work_item_revision` with its parent item ID, or `comment_version` with both
+parent item and comment IDs. The identity excludes provider version and event
+correlations. Qualified named-version acquisition supplies it directly; prepared
+observations validate it against their typed target and retain it through the
+complete candidate, application binding, native evidence and snapshot. Neither
+paths nor chunk metadata supply identity. The pending manifest rejects two
+physical mutations carrying the same logical identity within one source.
+
+Legacy component records omit this optional field in their canonical encoding.
+Reopening or composing existing observations does not enrich them or alter an
+immutable application binding. They remain untyped, not qualified for a future
+identity-bearing read result. Typed/untyped rebinding and changed kind, parent
+or comment identity refuse at every version, before application embedding or
+native writes. There is no automatic migration or adoption path. Older strict
+readers reject identity-bearing records; no deployed producer or execution
+capability is advertised for this opt-in Python representation.
+
 `ledger.put(evidence, expected=prior_record, max_rows=point_budget)` requires an
 already-owned source-domain writer. It re-reads the exact prior record, compares
 versions with the shared component comparator, and recaptures the current raw

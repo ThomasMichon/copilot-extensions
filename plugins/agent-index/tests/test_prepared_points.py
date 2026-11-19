@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from agent_index.indexing.component_manifest import ComponentVersion
+from agent_index.indexing.component_manifest import ComponentIdentity, ComponentVersion
 from agent_index.indexing.manifest import CrawlManifest
 from agent_index.indexing.path_index import PathIndex
 from agent_index.indexing.pending_crawl import PendingCrawlConflict, PendingCrawls
@@ -150,6 +150,38 @@ def test_missing_old_version_or_correlation_is_not_covered_by_newest_manifest_po
     assert len(points.compose().upserts) == 3
 
 
+def test_typed_identity_survives_candidate_binding_without_path_or_metadata_inference(
+    retained: tuple[PreparedPoints, TaskStore],
+) -> None:
+    points, _tasks = retained
+    for target in _TARGETS:
+        observation = _observed(target, deleted=isinstance(target, CommentVersionTarget))
+        identity = ComponentIdentity(
+            target.kind, target.item_id,
+            target.comment_id if isinstance(target, CommentVersionTarget) else None,
+        )
+        path = "opaque-" + target.item_id + "-" + (identity.comment_id or "body")
+        observed = replace(
+            observation, component=replace(observation.component, path=path, identity=identity),
+            entry=replace(observation.entry, path=path, metadata={"item_id": "not-the-target"})
+            if observation.entry is not None else None,
+            deletion=replace(observation.deletion, path=path) if observation.deletion else None,
+        )
+        points.retain(observed, claim=points.claim)
+        assert _reopen(points).read(target) == observed
+    candidate = _reopen(points).compose()
+    assert candidate.component_versions is not None
+    assert {item.identity for item in candidate.component_versions} == {
+        ComponentIdentity("work_item_revision", "1"),
+        ComponentIdentity("comment_version", "1", "2"),
+        ComponentIdentity("comment_version", "3", "2"),
+    }
+    bound = _bind(points, candidate)
+    retained_manifest = json.loads(bound.get("named-point-application/v1", ["manifest"])["manifest"])
+    assert PendingCrawls.decode_manifest(retained_manifest, "selected", components=True) == candidate
+    assert _bind(_reopen(points), candidate).generation == bound.generation
+
+
 @pytest.mark.parametrize("change", ["text", "metadata", "deleted", "semantics"])
 def test_same_target_retry_is_immutable(
     retained: tuple[PreparedPoints, TaskStore], change: str,
@@ -244,7 +276,7 @@ def test_reverse_arrival_keeps_newest_upsert_or_tombstone(
 @pytest.mark.parametrize("invalid", [
     "extra-target", "wrong-version", "family", "mutation", "both", "neither",
     "metadata-key", "metadata-tuple", "metadata-dataclass", "metadata-dataclass-list",
-    "nan", "language", "text",
+    "nan", "language", "text", "identity",
 ])
 def test_invalid_target_or_outcome_refuses_without_cache_mutation(
     retained: tuple[PreparedPoints, TaskStore], invalid: str,
@@ -268,6 +300,10 @@ def test_invalid_target_or_outcome_refuses_without_cache_mutation(
         observed = replace(observed, deletion=DeletedFile(_FAMILY, observed.component.path))
     elif invalid == "neither":
         observed = replace(observed, entry=None)
+    elif invalid == "identity":
+        observed = replace(observed, component=replace(
+            observed.component, identity=ComponentIdentity("work_item_revision", "different"),
+        ))
     else:
         changes: dict[str, Any] = {
             "metadata-key": {"metadata": {1: "not-string"}},
