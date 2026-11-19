@@ -343,3 +343,161 @@ def test_observation_claim_binding_cannot_be_substituted(
     with pytest.raises(PendingCrawlConflict, match="whole bound claim"):
         points.retain(_observed(_TARGETS[0]), claim=claim)
     assert points.read(_TARGETS[0]) is None
+
+
+def _bind(points: PreparedPoints, manifest: CrawlManifest) -> PreparedJournal:
+    parent = points.journal
+    return PreparedJournal.for_point_application(
+        parent.paths, parent.source, parent.scope, parent.payload,
+        manifest=manifest, point_claim=points.claim,
+    )
+
+
+def test_complete_point_application_binding_survives_restart_without_parent_or_queue_effects(
+    retained: tuple[PreparedPoints, TaskStore],
+) -> None:
+    points, tasks = retained
+    parent = points.journal
+    for target in _TARGETS:
+        points.retain(_observed(target, deleted=isinstance(target, CommentVersionTarget)),
+                      claim=points.claim)
+    candidate = points.compose()
+    bound = _bind(points, candidate)
+    with closing(parent.paths._connect()) as conn:
+        after = list(conn.iterdump())
+    reopened = _bind(_reopen(points), candidate)
+    assert (bound.payload, bound.point_claim, bound.generation) == (
+        parent.payload, points.claim, parent.generation,
+    )
+    assert json.loads(bound.get("named-point-application/v1", ["manifest"])["manifest"]) == (
+        PendingCrawls.manifest_data(candidate)
+    )
+    assert reopened.generation == parent.generation
+    with closing(parent.paths._connect()) as conn:
+        assert list(conn.iterdump()) == after
+    for target in _TARGETS:
+        assert PreparedPoints(reopened).read(target) == points.read(target)
+    pending = PendingCrawls(parent.paths)
+    assert pending.read_payload(parent.source, parent.scope) == parent.payload
+    task = tasks.get_task(points.claim.task_id)
+    assert task is not None and task.status == TaskStatus.QUEUED_HINTS_V2
+    with pytest.raises(PendingCrawlConflict, match="manifest does not match"):
+        PreparedJournal(
+            parent.paths, parent.source, parent.scope, parent.payload,
+            manifest=candidate, full=False, point_claim=points.claim,
+        )
+    with pytest.raises(ValueError, match="explicit claim binding"):
+        pending.load(parent.source, parent.scope)
+    with pytest.raises(ValueError, match="completion is not supported"):
+        pending.clear(parent.source)
+
+
+@pytest.mark.parametrize("missing", [_TARGETS[0], _TARGETS[2]])
+def test_point_application_binding_requires_old_versions_and_correlations(
+    retained: tuple[PreparedPoints, TaskStore], missing: PointTarget,
+) -> None:
+    points, _tasks = retained
+    for target in _TARGETS:
+        if target != missing:
+            points.retain(_observed(target), claim=points.claim)
+    with closing(points.journal.paths._connect()) as conn:
+        before = list(conn.iterdump())
+    with pytest.raises(ValueError, match="incomplete"):
+        _bind(points, points.manifest)
+    with closing(points.journal.paths._connect()) as conn:
+        assert list(conn.iterdump()) == before
+
+
+@pytest.mark.parametrize("change", ["text", "metadata-type", "subset", "poll", "stats", "metadata-dataclass"])
+def test_point_application_binding_refuses_changed_candidate_without_writing(
+    retained: tuple[PreparedPoints, TaskStore], change: str,
+) -> None:
+    points, _tasks = retained
+    for target in _TARGETS:
+        observed = _observed(target)
+        assert observed.entry is not None
+        points.retain(replace(observed, entry=replace(observed.entry, metadata={
+            "qualifier": True, "component": {
+                "source": _FAMILY, "path": "example.md", "version": 1, "semantics": "text/v1",
+            },
+        })), claim=points.claim)
+    candidate = points.compose()
+    if change == "subset":
+        candidate.upserts.pop()
+        assert candidate.component_versions is not None
+        candidate.component_versions.pop()
+    elif change == "poll":
+        candidate.commit = "newer-poll"
+    elif change == "stats":
+        candidate.stats.files_scanned = 1
+    elif change == "text":
+        candidate.upserts[0] = replace(candidate.upserts[0], content="different")
+    elif change == "metadata-type":
+        candidate.upserts[0].metadata["qualifier"] = 1
+    else:
+        candidate.upserts[0].metadata["component"] = ComponentVersion(
+            _FAMILY, "example.md", 1, "text/v1",
+        )
+    with closing(points.journal.paths._connect()) as conn:
+        before = list(conn.iterdump())
+    with pytest.raises((PendingCrawlConflict, ValueError), match="does not match|JSON values"):
+        _bind(points, candidate)
+    with closing(points.journal.paths._connect()) as conn:
+        assert list(conn.iterdump()) == before
+
+
+def test_lost_point_binding_return_reuses_exact_durable_binding(
+    retained: tuple[PreparedPoints, TaskStore], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    points, _tasks = retained
+    for target in _TARGETS:
+        points.retain(_observed(target), claim=points.claim)
+    candidate = points.compose()
+    original = PreparedJournal.put_immutable
+
+    def lose_return(self: PreparedJournal, kind: str, key: str, payload: bytes) -> None:
+        original(self, kind, key, payload)
+        raise RuntimeError("binding return lost")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(PreparedJournal, "put_immutable", lose_return)
+        with pytest.raises(RuntimeError, match="return lost"):
+            _bind(points, candidate)
+    assert _bind(_reopen(points), candidate).generation == points.journal.generation
+
+
+def test_point_binding_refuses_conflicting_retained_binding(
+    retained: tuple[PreparedPoints, TaskStore],
+) -> None:
+    points, _tasks = retained
+    for target in _TARGETS:
+        points.retain(_observed(target), claim=points.claim)
+    candidate = points.compose()
+    bound = _bind(points, candidate)
+    bound.put("named-point-application/v1", [("manifest", b"conflicting binding")])
+    with pytest.raises(PendingCrawlConflict, match="intent changed"):
+        _bind(_reopen(points), candidate)
+    assert bound.get("named-point-application/v1", ["manifest"]) == {
+        "manifest": b"conflicting binding",
+    }
+
+
+def test_point_binding_rechecks_incarnation_after_composing(
+    retained: tuple[PreparedPoints, TaskStore], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    points, _tasks = retained
+    for target in _TARGETS:
+        points.retain(_observed(target), claim=points.claim)
+    candidate = points.compose()
+    original = PreparedPoints.compose
+
+    def replace_parent(self: PreparedPoints) -> CrawlManifest:
+        manifest = original(self)
+        with closing(self.journal.paths._connect()) as conn, conn:
+            conn.execute("UPDATE prepared_crawl_parents SET generation = 'different'")
+        return manifest
+
+    monkeypatch.setattr(PreparedPoints, "compose", replace_parent)
+    with pytest.raises(PendingCrawlConflict, match="no longer matches"):
+        _bind(points, candidate)
+    assert _reopen(points).journal.get("named-point-application/v1", ["manifest"]) == {}
