@@ -6,7 +6,8 @@
 # document (without a trailing newline), or nothing. Exit status 1 reports an
 # internal error, which the hook turns into the "skipped" stderr line. Keep
 # this file ASCII-only and compatible with bash 3.2. It must never start
-# Python; the only child process it may start is `git remote --verbose`.
+# Python; the only child process it may start is `git remote --verbose`, plus
+# `cat`, `head`, `tr` and `sleep` on bash before 4.4.
 #
 # Known deviations from the Python guard: JSON nesting deeper than 900 levels
 # is treated as invalid input (Python's limit depends on its recursion limit),
@@ -252,6 +253,35 @@ read_file() {
     fi
 } 2>/dev/null
 
+# kill_after PID SECS: SIGKILL PID after SECS unless this watchdog gets TERM
+# first; on TERM it stops its own `sleep` as well.
+kill_after() {
+    local sp=
+    trap 'kill "$sp" 2>/dev/null; exit 0' TERM
+    sleep "$2" &
+    sp=$!
+    wait "$sp"
+    kill -KILL "$1" 2>/dev/null
+} < /dev/null > /dev/null 2>&1
+
+# bounded_child SECS CMD...: run CMD, kill it after SECS, reap it and the
+# watchdog, then print \035 and CMD's exit status. Bash before 4.4 cannot
+# signal or wait for a process substitution, so the substitution runs this to
+# make sure no child outlives the decision budget.
+bounded_child() {
+    local secs=$1 cp wp st
+    shift
+    "$@" < /dev/null &
+    cp=$!
+    kill_after "$cp" "$secs" &
+    wp=$!
+    wait "$cp"
+    st=$?
+    kill "$wp" 2>/dev/null
+    wait "$wp" 2>/dev/null
+    printf '\035%s' "$st"
+}
+
 # read_file_bounded PATH LIMIT STRICT -> G_BUF (at most LIMIT bytes), or
 # return 1 when the read fails or does not finish within the decision budget.
 # A NUL byte becomes \001: like NUL, it is neither a word character nor
@@ -280,10 +310,9 @@ read_file_bounded() {
         fi
         return 0
     fi
-    # Older bash: read a bounded `head` through a pipe with a timeout. These
-    # versions cannot signal or wait for a process substitution, so a stalled
-    # `head` is left behind; it does not hold the hook's stdin or stdout.
-    exec 8< <(head -c "$lim" -- "$p" < /dev/null | tr '\000' '\001'; printf '\035%s' "${PIPESTATUS[0]}")
+    # Older bash: read a bounded `head` through a pipe with a timeout. The
+    # substitution kills and reaps a stalled `head` itself (bounded_child).
+    exec 8< <(bounded_child "$G_SECS" head -c "$lim" -- "$p" | tr '\000' '\001')
     IFS= read -r -d '' -t "$G_SECS" -u 8 data
     st=$?
     exec 8<&-
@@ -1245,15 +1274,14 @@ repo_has() {
         fi
         wait "$pid" 2>/dev/null || return 1
     else
-        # Older bash cannot signal or wait for a process substitution, so a
-        # stalled git is left behind after the timeout.
+        # Older bash cannot signal or wait for a process substitution, so the
+        # substitution kills and reaps a stalled git itself.
         IFS= read -r -d '' -t "$G_SECS" out < <(
             {
                 cd -- "$1" || exit 1
                 unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
                 if [[ -n $G_LCSET ]]; then export LC_ALL=$G_LCVAL; else unset LC_ALL; fi
-                git remote --verbose < /dev/null
-                printf '\035%s' "$?"
+                bounded_child "$G_SECS" git remote --verbose
             } 2>/dev/null
         )
         (( $? > 128 )) && return 1

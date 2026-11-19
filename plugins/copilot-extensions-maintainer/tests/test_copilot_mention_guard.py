@@ -980,10 +980,31 @@ def test_native_hook_bounds_a_stalled_body_reader(tmp_path: Path, variant: str) 
     assert not marker.exists(), "native mention-guard hook started a Python interpreter"
 
 
+def _legacy_bash_plugin(directory: Path, *, slow_forks: bool = False) -> Path:
+    """Copy the plugin with the guard forced onto its bash-before-4.4 paths.
+
+    ``slow_forks`` widens the decision budget for hosts (Windows) where each
+    helper process of the older path costs hundreds of milliseconds.
+    """
+    plugin = directory / "legacy-plugin"
+    shutil.copytree(PLUGIN, plugin, ignore=shutil.ignore_patterns("tests", "__pycache__"))
+    guard = plugin / "scripts" / "copilot-mention-guard.sh"
+    text = guard.read_text(encoding="utf-8")
+    edits = [("    G_44=1\n", "    G_44=0\n")]
+    if slow_forks:
+        edits += [("    G_BUDGET=1500000\n", "    G_BUDGET=15000000\n"), ("    G_BUDGET=2\n", "    G_BUDGET=15\n")]
+    for old, new in edits:
+        assert text.count(old) == 1, old
+        text = text.replace(old, new)
+    guard.write_text(text, encoding="utf-8", newline="\n")
+    return plugin
+
+
 @pytest.mark.portfolio_tier("T2")
 @pytest.mark.effect("process")
 @pytest.mark.effect("filesystem")
-def test_native_bash_hook_kills_and_reaps_a_stalled_git(tmp_path: Path) -> None:
+@pytest.mark.parametrize("legacy", [False, True])
+def test_native_bash_hook_kills_and_reaps_a_stalled_git(tmp_path: Path, legacy: bool) -> None:
     shell = _native_shell("bash")
     root = _guarded_workspace(tmp_path / "workspace")
     marker = _python_shims(tmp_path / "shims")
@@ -997,14 +1018,14 @@ def test_native_bash_hook_kills_and_reaps_a_stalled_git(tmp_path: Path) -> None:
     probe = tmp_path / "probe.sh"
     probe.write_text(
         'case $1 in\n'
-        '  ready) (( BASH_VERSINFO[0] * 100 + BASH_VERSINFO[1] >= 404 )) || exit 2\n'
+        '  ready) (( $3 || BASH_VERSINFO[0] * 100 + BASH_VERSINFO[1] >= 404 )) || exit 2\n'
         '         [ "$(command -v git)" -ef "$2" ] || exit 3 ;;\n'
         '  alive) kill -0 "$2" 2>/dev/null ;;\n'
         'esac\n',
         encoding="utf-8", newline="\n",
     )
     ready = subprocess.run(
-        [shell, _bash_path(probe), "ready", _bash_path(git)], timeout=15,
+        [shell, _bash_path(probe), "ready", _bash_path(git), str(int(legacy))], timeout=15,
         env={**os.environ, "PATH": str(marker.parent) + os.pathsep + os.environ.get("PATH", "")},
         creationflags=NO_WINDOW,
     ).returncode
@@ -1012,20 +1033,50 @@ def test_native_bash_hook_kills_and_reaps_a_stalled_git(tmp_path: Path) -> None:
         pytest.skip("bash before 4.4 cannot signal a process substitution")
     if ready != 0:
         pytest.skip("this bash puts its own git ahead of the caller's PATH")
+    plugin = _legacy_bash_plugin(tmp_path) if legacy else PLUGIN
     started = time.monotonic()
     result = _run_native("bash", root, {"toolName": "bash", "toolArgs": {
         "command": 'gh pr comment 1 --body "@copilot review"',
-    }}, marker.parent)
+    }}, marker.parent, plugin=plugin)
     assert time.monotonic() - started < 10
     assert result.returncode == 0, result.stderr
     # The repository check failed, so the guard treats the call as out of scope.
     assert result.stdout == ""
     pid = pidfile.read_text(encoding="utf-8").strip()
     assert pid.isdigit()
-    alive = subprocess.run(
-        [shell, _bash_path(probe), "alive", pid], timeout=15, creationflags=NO_WINDOW,
-    )
-    assert alive.returncode != 0, "the timed-out git process is still running"
+    # Older bash reaps from inside the process substitution, so allow it a moment.
+    deadline = time.monotonic() + 3
+    while True:
+        alive = subprocess.run(
+            [shell, _bash_path(probe), "alive", pid], timeout=15, creationflags=NO_WINDOW,
+        ).returncode == 0
+        if not alive or time.monotonic() > deadline:
+            break
+        time.sleep(0.1)
+    assert not alive, "the timed-out git process is still running"
+    assert not marker.exists(), "native mention-guard hook started a Python interpreter"
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+@pytest.mark.parametrize("command", [
+    "gh pr comment 1 --body-file body.txt",
+    "gh pr comment 1 --body-file clean.txt",
+    "gh pr comment 1 --body-file nul-split.txt",
+    "gh api repos/o/r/pulls/1/comments --input nul.json",
+    'gh pr comment 1 -R ThomasMichon/copilot-extensions --body "@copilot review"',
+])
+def test_legacy_bash_paths_match_reference(tmp_path: Path, command: str) -> None:
+    """The bash-before-4.4 reader and git paths keep the Python decisions."""
+    root = _guarded_workspace(tmp_path / "workspace")
+    marker = _python_shims(tmp_path / "shims")
+    event = {"toolName": "bash", "toolArgs": {"command": command}}
+    expected = _run_reference(root, event).stdout.strip()
+    plugin = _legacy_bash_plugin(tmp_path, slow_forks=True)
+    result = _run_native("bash", root, event, marker.parent, plugin=plugin)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == expected
     assert not marker.exists(), "native mention-guard hook started a Python interpreter"
 
 

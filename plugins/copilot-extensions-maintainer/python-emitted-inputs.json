@@ -52,10 +52,10 @@
     {
       "path": "plugins/copilot-extensions-maintainer/tests/test_copilot_mention_guard.py",
       "sha256": [
-        "8138eab45343a06e17c17e9aa1e8a8f5f20863c0f3589660f18aff5dce3be750",
-        "6ede38ab135af014655986c52cc1163f7c40745555b9ec3e8b12d372139c3479"
+        "36d5832f2c0cc481dd4cbf8598ae8db9c63d24c4e68e419cf8a91d52f2607b45",
+        "0d70bc5095b5513e4d3677dbd752878c77b1088f32e704bb741898b4970d4b97"
       ],
-      "structure": "d5af883e88d94dcb07a91b6c7022f1bac46df5aca2bc87b55c83eb2560b35b76"
+      "structure": "60c90253c3fe34d496c10854ca4d769e1ec68bba97e543865e8f0c999fcca2da"
     },
     {
       "path": "plugins/copilot-extensions-maintainer/tests/test_cross_repo_debug_tracking_projection.py",
@@ -172,12 +172,12 @@
     {
       "path": "plugins/copilot-extensions-maintainer/scripts/copilot-mention-guard.sh",
       "sha256": [
-        "e4155725ea5935e672bb417a132074807b0f96c2748a597b80d3a8730239c130",
-        "4d8ddfee4194ea91179944e1031c621395db0f58a1d0b97d568f78c07631792f"
+        "f7df45161f2fec86f5459f6d4f766cad2f1e10616471d8727cf4f5b17924559e",
+        "ec523fdcdc202f46130d2b50416a4e39405eeaa3e23b3d510804fd32a2718295"
       ],
       "structure": [
-        "e4155725ea5935e672bb417a132074807b0f96c2748a597b80d3a8730239c130",
-        "4d8ddfee4194ea91179944e1031c621395db0f58a1d0b97d568f78c07631792f"
+        "f7df45161f2fec86f5459f6d4f766cad2f1e10616471d8727cf4f5b17924559e",
+        "ec523fdcdc202f46130d2b50416a4e39405eeaa3e23b3d510804fd32a2718295"
       ]
     },
     {
@@ -235,9 +235,9 @@
       "classification": "portable-parameterized-source-not-native-input",
       "sites": [
         [
-          1221,
+          1272,
           8,
-          1221,
+          1272,
           52
         ]
       ]
@@ -708,11 +708,22 @@
     },
     {
       "path": "plugins/copilot-extensions-maintainer/tests/test_copilot_mention_guard.py",
+      "function": "_legacy_bash_plugin",
+      "site": [
+        999,
+        4,
+        999,
+        58
+      ],
+      "structure": "d67ac1b03d97a1b0c5c96587e7ebb1deea26236fda12e971463e59becd3bd3f9"
+    },
+    {
+      "path": "plugins/copilot-extensions-maintainer/tests/test_copilot_mention_guard.py",
       "function": "test_native_bash_hook_kills_and_reaps_a_stalled_git",
       "site": [
-        992,
+        1013,
         4,
-        995,
+        1016,
         5
       ],
       "structure": "0ccdabc4576b409f8166dea68eed676dd0cd016c2627c183ac330c1a584d36fc"
@@ -721,20 +732,20 @@
       "path": "plugins/copilot-extensions-maintainer/tests/test_copilot_mention_guard.py",
       "function": "test_native_bash_hook_kills_and_reaps_a_stalled_git",
       "site": [
-        998,
+        1019,
         4,
-        1005,
+        1026,
         5
       ],
-      "structure": "7b44a296a4e0ef9a67b9128faa47067948fe0f5630ed853409809c232b8413ce"
+      "structure": "996204c93db8b1f5199eb57c022ed9c9a5af23662817a8939593b207b037a358"
     },
     {
       "path": "plugins/copilot-extensions-maintainer/tests/test_copilot_mention_guard.py",
       "function": "test_windows_wrapper_module_attribution",
       "site": [
-        1054,
+        1105,
         4,
-        1054,
+        1105,
         59
       ],
       "structure": "f7586c07b62e24e452a3ac1d1465e09f9151a6dacc55b3dadac7e08fe8fd20a4"
@@ -743,9 +754,9 @@
       "path": "plugins/copilot-extensions-maintainer/tests/test_copilot_mention_guard.py",
       "function": "test_windows_wrapper_preserves_policy_and_failure_contract",
       "site": [
-        1143,
+        1194,
         4,
-        1147,
+        1198,
         5
       ],
       "structure": "eb33b874767c9f1765fb7437605c940d291044b496e944cfcc077886b23afd14"
@@ -754,9 +765,9 @@
       "path": "plugins/copilot-extensions-maintainer/tests/test_copilot_mention_guard.py",
       "function": "test_active_killswitch_returns_before_reading_input",
       "site": [
-        1255,
+        1306,
         4,
-        1255,
+        1306,
         58
       ],
       "structure": "0323fd78bd2a7504564a10f542b2ccfd6767f5f49c70acc4b64beb118a02e744"
@@ -765,9 +776,9 @@
       "path": "plugins/copilot-extensions-maintainer/tests/test_copilot_mention_guard.py",
       "function": "test_only_project_adopters_reach_repository_policy",
       "site": [
-        1286,
+        1337,
         4,
-        1286,
+        1337,
         110
       ],
       "structure": "12870c10d186ef6ef4d6bbee183acb136e8d5ed4281247c162213a06cc8870ef"
@@ -809,9 +820,9 @@
       "path": "plugins/copilot-extensions-maintainer/tests/test_copilot_mention_guard.py",
       "function": "test_hot_killswitch_restores_mention_guard",
       "site": [
-        1245,
+        1296,
         8,
-        1245,
+        1296,
         74
       ],
       "structure": "28fa5ac54160039cf335eea3010505e858a9587dcc2b5c6bf8c32906da0d11c0"
@@ -820,9 +831,9 @@
       "path": "plugins/copilot-extensions-maintainer/tests/test_copilot_mention_guard.py",
       "function": "test_only_project_adopters_reach_repository_policy",
       "site": [
-        1281,
+        1332,
         8,
-        1282,
+        1333,
         92
       ],
       "structure": "cb56128a893061464f77d40ba8f8c9052ce65e735e5143d62edd821ef029ad24"
@@ -831,9 +842,9 @@
       "path": "plugins/copilot-extensions-maintainer/tests/test_copilot_mention_guard.py",
       "function": "test_shipped_wrapper_fails_open_on_unavailable_guard",
       "site": [
-        1337,
+        1388,
         8,
-        1338,
+        1389,
         82
       ],
       "structure": "3052210dbe4901ba86f518008c6b568c9eb8ae86e8dccc8ea59e1441e92aeb50"
@@ -842,9 +853,9 @@
       "path": "plugins/copilot-extensions-maintainer/tests/test_copilot_mention_guard.py",
       "function": "test_shipped_wrapper_fails_open_on_unavailable_guard",
       "site": [
-        1339,
+        1390,
         8,
-        1340,
+        1391,
         86
       ],
       "structure": "72a7c6477d482381c5e66a5f22830039743bfd9658f282d3f6a84d9fe8bee275"
@@ -853,9 +864,9 @@
       "path": "plugins/copilot-extensions-maintainer/tests/test_copilot_mention_guard.py",
       "function": "test_shipped_wrapper_fails_open_on_unavailable_guard",
       "site": [
-        1342,
+        1393,
         8,
-        1343,
+        1394,
         68
       ],
       "structure": "7fc6790bd716f0cbd409be0263e36ace74b8b33d2d4e6bd468b14af5408a08dc"
@@ -864,9 +875,9 @@
       "path": "plugins/copilot-extensions-maintainer/tests/test_copilot_mention_guard.py",
       "function": "test_shipped_wrapper_fails_open_on_unavailable_guard",
       "site": [
-        1344,
+        1395,
         8,
-        1345,
+        1396,
         93
       ],
       "structure": "2157d6ab76d21be1bdb54afc95f7111c3e970de13bf782760009d0a1ef1c3e87"
@@ -875,9 +886,9 @@
       "path": "plugins/copilot-extensions-maintainer/tests/test_copilot_mention_guard.py",
       "function": "test_relative_body_reads_use_resolved_workspace",
       "site": [
-        1418,
+        1469,
         8,
-        1418,
+        1469,
         67
       ],
       "structure": "a7fddb122132ab776a79d247fdece1d10d61bc46f6d899d0500b8329296b6fc2"
@@ -886,9 +897,9 @@
       "path": "plugins/copilot-extensions-maintainer/tests/test_copilot_mention_guard.py",
       "function": "test_relative_body_reads_use_resolved_workspace",
       "site": [
-        1419,
+        1470,
         8,
-        1419,
+        1470,
         90
       ],
       "structure": "686cb78f1f5c0055cbd6a8bf6aa3c86f67d3fe4041730e9950c75b5092b77fc8"
@@ -897,9 +908,9 @@
       "path": "plugins/copilot-extensions-maintainer/tests/test_copilot_mention_guard.py",
       "function": "test_windows_wrapper_preserves_policy_and_failure_contract",
       "site": [
-        1154,
+        1205,
         12,
-        1156,
+        1207,
         13
       ],
       "structure": "a15100626b13461b6aecd54bef8181eedd9af9ce21778d276403441723079ec5"
@@ -908,9 +919,9 @@
       "path": "plugins/copilot-extensions-maintainer/tests/test_copilot_mention_guard.py",
       "function": "test_only_project_adopters_reach_repository_policy",
       "site": [
-        1275,
+        1326,
         8,
-        1275,
+        1326,
         108
       ],
       "structure": "e23b9a5cc4b10d77041e26da5c6c687a4dd16fd4cd5db32b4190910ff82750eb"
@@ -919,9 +930,9 @@
       "path": "plugins/copilot-extensions-maintainer/tests/test_copilot_mention_guard.py",
       "function": "test_windows_wrapper_preserves_policy_and_failure_contract",
       "site": [
-        1159,
+        1210,
         12,
-        1161,
+        1212,
         13
       ],
       "structure": "5509ed55f97e4f79d4ebfdd31e2bffdedb08c2e7b63ab7c910dcf44eb56f6ff4"
@@ -930,9 +941,9 @@
       "path": "plugins/copilot-extensions-maintainer/tests/test_copilot_mention_guard.py",
       "function": "test_only_project_adopters_reach_repository_policy",
       "site": [
-        1277,
+        1328,
         8,
-        1277,
+        1328,
         104
       ],
       "structure": "386edba139ce15bcabff9b604378e7fe489fe0a79fb3153192a43afac0c2311c"
@@ -941,9 +952,9 @@
       "path": "plugins/copilot-extensions-maintainer/tests/test_copilot_mention_guard.py",
       "function": "test_only_project_adopters_reach_repository_policy",
       "site": [
-        1279,
+        1330,
         8,
-        1279,
+        1330,
         32
       ],
       "structure": "3580ad4b278940382cd2074bd4be3814ab03f602de0e9ebfe3b273abc542fe37"
