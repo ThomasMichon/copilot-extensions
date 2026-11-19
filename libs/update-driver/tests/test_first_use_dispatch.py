@@ -206,6 +206,7 @@ def test_installed_fixture_provenance_uses_its_private_copilot_home(
 
 
 @pytest.mark.portfolio_tier("T2")
+@pytest.mark.timeout(120)
 def test_dispatch_faulthandler_observes_finite_finalizer_without_disabling_capture(
     area: Path,
 ) -> None:
