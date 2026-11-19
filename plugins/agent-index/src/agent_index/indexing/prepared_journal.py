@@ -52,6 +52,7 @@ class PreparedJournal:
                 raise PendingCrawlConflict("Prepared manifest does not match its acquired pending crawl")
         self.paths, self.source, self.scope, self.payload = paths, source, scope, payload
         self.point_claim = point_claim
+        self._batch_plan: bytes | None = None
         with closing(paths._connect()) as conn, conn:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
@@ -115,6 +116,8 @@ class PreparedJournal:
         with closing(self.paths._connect()) as conn, conn:
             conn.execute("BEGIN IMMEDIATE")
             self._require_parent(conn)
+            if kind == "batch":
+                self._require_batch_plan(conn)
             conn.executemany(
                 "INSERT OR REPLACE INTO prepared_crawl_rows VALUES (?, ?, ?, ?, ?)",
                 [(self.source, kind, key, payload, hashlib.sha256(payload).hexdigest())
@@ -126,6 +129,8 @@ class PreparedJournal:
         with closing(self.paths._connect()) as conn, conn:
             conn.execute("BEGIN")
             self._require_parent(conn)
+            if kind == "batch":
+                self._require_batch_plan(conn)
             for start in range(0, len(keys), 200):
                 selected = keys[start:start + 200]
                 placeholders = ",".join("?" for _ in selected)
@@ -159,13 +164,36 @@ class PreparedJournal:
                 (self.source, kind, key, payload, digest),
             )
 
-    def reset_batches(self) -> None:
+    def _require_batch_plan(self, conn: sqlite3.Connection) -> None:
+        plan = self._batch_plan
+        if plan is None:
+            return
+        row = conn.execute(
+            "SELECT payload, digest FROM prepared_crawl_rows "
+            "WHERE source = ? AND kind = 'batch-plan/v1' AND key = 'current'", (self.source,),
+        ).fetchone()
+        if row is None or (row["payload"], row["digest"]) != (
+            plan, hashlib.sha256(plan).hexdigest(),
+        ):
+            raise PendingCrawlConflict("Prepared batch plan was replaced")
+
+    def reset_batches(self, *, bind_plan: bool = False) -> None:
+        """Replace batches, optionally binding this handle to that exact plan."""
+        plan = uuid.uuid4().hex.encode("ascii") if bind_plan else None
         with closing(self.paths._connect()) as conn, conn:
             conn.execute("BEGIN IMMEDIATE")
             self._require_parent(conn)
             conn.execute(
-                "DELETE FROM prepared_crawl_rows WHERE source = ? AND kind = 'batch'", (self.source,),
+                "DELETE FROM prepared_crawl_rows WHERE source = ? AND kind IN ('batch', 'batch-plan/v1')",
+                (self.source,),
             )
+            if plan is not None:
+                conn.execute(
+                    "INSERT OR REPLACE INTO prepared_crawl_rows VALUES (?, ?, ?, ?, ?)",
+                    (self.source, "batch-plan/v1", "current", plan,
+                     hashlib.sha256(plan).hexdigest()),
+                )
+        self._batch_plan = plan
 
     def put_batch(self, index: int, batch: FileBatch) -> None:
         init_fields = [field.name for field in fields(Chunk) if field.init]
@@ -177,6 +205,8 @@ class PreparedJournal:
         self.put("batch", [(str(index), payload)])
 
     def batches(self, count: int) -> Iterator[FileBatch]:
+        if self._batch_plan is not None:
+            self.get("batch", [])
         for index in range(count):
             stored = self.get("batch", [str(index)])
             if str(index) not in stored:

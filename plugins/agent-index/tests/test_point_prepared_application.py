@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import sqlite3
 from contextlib import closing
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable, cast
@@ -13,7 +15,8 @@ import pytest
 from agent_index.engine.client import EngineClient
 from agent_index.index_config import IndexConfig, ModelProfile
 from agent_index.indexing.component_manifest import ComponentIdentity, ComponentVersion
-from agent_index.indexing.embedding_coverage import input_hash, vector_hash
+from agent_index.indexing.embedding_coverage import EmbeddingCoverage, input_hash, vector_hash
+from agent_index.indexing.file_batches import FileBatch
 from agent_index.indexing.manifest import CrawlManifest
 from agent_index.indexing.path_index import PathIndex
 from agent_index.indexing.pending_crawl import PendingCrawlConflict, PendingCrawls
@@ -77,7 +80,9 @@ class Client:
 
 
 @pytest.fixture
-def application(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Fixture:
+def application(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest,
+) -> Fixture:
     monkeypatch.setenv("AGENT_INDEX_STORE_LAYOUT", LAYOUT)
     targets = (
         WorkItemRevisionTarget("one", 1, ("old-event",)),
@@ -106,6 +111,7 @@ def application(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Fixture:
     observations = []
     for target in targets:
         comment = isinstance(target, CommentVersionTarget)
+        deleted = comment and getattr(request, "param", True)
         version = target.version if isinstance(target, CommentVersionTarget) else target.revision
         path = "opaque-comment" if comment else "opaque-body"
         component = ComponentVersion(
@@ -114,8 +120,11 @@ def application(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Fixture:
         )
         observations.append(PointAcquisition(
             target, component,
-            None if comment else FileEntry(path, f"Version {version}", "text", FAMILY, {"key": True}),
-            DeletedFile(FAMILY, path) if comment else None,
+            None if deleted else FileEntry(
+                path, f"Version {version}", "text", FAMILY,
+                {"key": True, "nested": {"original": [True]}},
+            ),
+            DeletedFile(FAMILY, path) if deleted else None,
         ))
     first = observations[0]
     assert first.entry is not None
@@ -290,18 +299,144 @@ def test_point_preparation_reuses_only_native_vectors_with_exact_coverage(
     assert f.paths.get_all_entries() == {}
 
 
-def test_dirty_point_domain_refuses_before_changing_existing_preparation(application: Fixture) -> None:
+@pytest.mark.parametrize("stage", ["before", "during-recomposition"])
+def test_dirty_point_domain_refuses_before_changing_existing_preparation(
+    application: Fixture, monkeypatch: pytest.MonkeyPatch, stage: str,
+) -> None:
     f = application
     f.prepare()
     before = f.cache()
     domain = f.store._source_domain
     assert domain is not None
-    with pytest.raises(RuntimeError, match="fixture uncertain effect"):
-        with domain._write(f.store.content_store.db, point_scope=f.points.claim.hints.scope):
-            domain.effect("fixture-point-uncertainty")
-            raise RuntimeError("fixture uncertain effect")
+    def dirty() -> None:
+        with pytest.raises(RuntimeError, match="fixture uncertain effect"):
+            with domain._write(f.store.content_store.db, point_scope=f.points.claim.hints.scope):
+                domain.effect("fixture-point-uncertainty")
+                raise RuntimeError("fixture uncertain effect")
+
+    if stage == "before":
+        dirty()
+    else:
+        compose = PreparedPoints.compose
+
+        def interleave(self: PreparedPoints) -> CrawlManifest:
+            manifest = compose(self)
+            dirty()
+            return manifest
+
+        monkeypatch.setattr(PreparedPoints, "compose", interleave)
     f.calls.clear()
     with pytest.raises(SourceLayoutError):
         f.prepare()
     assert f.calls == []
     assert f.cache() == before
+
+
+def test_point_preparation_snapshots_metadata_before_binding_and_embedding(application: Fixture) -> None:
+    f = application
+    entry = f.candidate.upserts[0]
+
+    def mutate(_model: str) -> None:
+        entry.metadata["key"] = 1
+        entry.metadata["nested"]["original"][0] = False
+        entry.metadata["extra"] = {"changed": [False]}
+
+    f.hook = mutate
+    prepared = f.prepare()
+    chunks = list(prepared.batches())[0].chunks
+    assert chunks and all(
+        chunk.metadata == {"key": True, "nested": {"original": [True]}} for chunk in chunks
+    )
+    assert entry.metadata == {
+        "key": 1, "nested": {"original": [False]}, "extra": {"changed": [False]},
+    }
+    with pytest.raises(PendingCrawlConflict, match="manifest does not match"):
+        f.prepare()
+
+
+@pytest.mark.parametrize("application", [False], indirect=True)
+def test_point_batch_plan_replacement_invalidates_only_old_plan_handles(application: Fixture) -> None:
+    f = application
+    body = (FAMILY, "opaque-body")
+    comment = (FAMILY, "opaque-comment")
+    first = f.prepare(component_selection=frozenset({body}))
+    first_chunks = list(first.batches())[0].chunks
+    second = f.prepare(component_selection=frozenset({comment}))
+    assert {chunk.file_path for batch in second.batches() for chunk in batch.chunks} == {comment[1]}
+    second.require_current_checkpoints()
+    for read in (lambda: list(first.batches()), first.require_current_checkpoints):
+        with pytest.raises(PendingCrawlConflict, match="batch plan was replaced"):
+            read()
+    # Vector inputs belong to the exact claim cache, not the replaceable file plan.
+    assert first.vectors("first", first_chunks).shape == (1, 2)
+
+
+def test_point_recomposition_does_not_exclude_native_readers(
+    application: Fixture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    f = application
+    domain = f.store._source_domain
+    assert domain is not None
+    compose = PreparedPoints.compose
+    observed = []
+
+    def read_native() -> None:
+        with domain.read(f.store.content_store.db, point_scope=f.points.claim.hints.scope):
+            observed.append(domain.receipt()["state"])
+
+    def compose_without_native_fence(self: PreparedPoints) -> CrawlManifest:
+        assert not getattr(domain._local, "reading", False)
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            pool.submit(read_native).result(timeout=5)
+        return compose(self)
+
+    monkeypatch.setattr(PreparedPoints, "compose", compose_without_native_fence)
+    f.prepare()
+    assert observed == ["clean"]
+
+
+def test_point_preparation_reads_coverage_with_an_open_wal_without_relaxing_qualification(
+    application: Fixture,
+) -> None:
+    f = application
+    with closing(f.paths._connect()) as conn:
+        assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+        prepared = f.prepare()
+        chunks = list(prepared.batches())[0].chunks
+        prepared.require_current_checkpoints()
+        profile = f.config.model_profiles["first"]
+        with pytest.raises(sqlite3.OperationalError, match="checkpointed path evidence"):
+            EmbeddingCoverage(f.paths).missing(
+                f.store.get_vector_table("first"), chunks, profile,
+                point_scope=f.points.claim.hints.scope, read_only=True,
+            )
+    assert [model for model, _texts in f.calls] == ["first", "second"]
+    assert f.paths.get_all_entries() == {}
+
+
+@pytest.mark.parametrize("bind_second", [False, True])
+def test_legacy_journal_plan_replacement_also_revokes_only_bound_plans(
+    tmp_path: Path, bind_second: bool,
+) -> None:
+    paths = PathIndex(tmp_path / "paths.db")
+    pending = PendingCrawls(paths)
+    manifest = CrawlManifest(
+        "sample:legacy", accounting_family="sample:legacy",
+        upserts=[FileEntry("one.md", "Legacy input", "text", "sample:legacy")],
+    )
+    pending.save(manifest, scope=SCOPE, full=False)
+    payload = pending.read_payload(manifest.source, SCOPE)
+    assert payload is not None
+    first = PreparedJournal(paths, manifest.source, SCOPE, payload)
+    first.reset_batches(bind_plan=True)
+    batch = FileBatch([], [("sample:legacy", "one.md", "fingerprint", 0)])
+    first.put_batch(0, batch)
+    first.put_vectors(["pair"], np.array([[1, 0]], dtype=np.float32), 2)
+    second = PreparedJournal(paths, manifest.source, SCOPE, payload)
+    second.reset_batches(bind_plan=bind_second)
+    second.put_batch(0, batch)
+    for operation in (lambda: list(first.batches(1)), lambda: first.put_batch(0, batch)):
+        with pytest.raises(PendingCrawlConflict, match="batch plan was replaced"):
+            operation()
+    assert list(second.batches(1)) == [batch]
+    assert np.array_equal(first.vectors(["pair"], 2)["pair"], [1, 0])

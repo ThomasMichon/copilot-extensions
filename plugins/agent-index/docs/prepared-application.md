@@ -39,6 +39,13 @@ clears the manifest. Returning to identical manifest bytes cannot revive an old
 binding. Neither table has a cursor, source lease, completion marker or repair
 authority.
 
+Each `PreparedApplication` also binds its replaceable batch plan in the existing
+prepared rows. A later plan reset invalidates older application handles, including
+different component selections for the same claim. Batch reads/writes and the
+pre-publication checkpoint check verify that plan binding in the same SQLite
+transaction as cache access. Exact vector pairs remain shared under the unchanged
+pending-parent incarnation. Bare journal round-trips keep their existing behavior.
+
 The journal can bind a completed component envelope for subordinate cache work.
 The explicit [native component application](component-ledger.md#explicit-native-application)
 can supply `component_selection`, a frozen subset of acquired upsert identities.
@@ -133,19 +140,24 @@ original pending manifest, even after this explicit binding.
 
 Binding alone does not invoke preparation or native application.
 `PreparedApplication` can explicitly consume the candidate by supplying both
-`point_claim` and `component_selection`, with `full=False`. It validates the
-selected domain against the whole claim's typed scope, then uses
+`point_claim` and `component_selection`, with `full=False`. It deep-copies the
+manifest, including nested metadata, before validation and file selection.
+It validates the selected domain against the whole claim's typed scope, then uses
 `for_point_application()` to recompose and bind every exact target before
 resetting batches or calling an embedding client. Selection narrows chunking,
 not the complete candidate or claim. Missing observations, changed claims,
 scope/family mismatches, candidate changes and dirty domains refuse before
-changing existing preparation.
+changing existing preparation. Recomposition holds no native-domain exclusion;
+short native checks precede it and recheck cleanliness before batch reset.
 
 Point preparation uses the same subordinate journal, batch plan, checkpoint
 snapshot and exact vector cache. Its existing coverage/vector readers receive
 the explicit scope; reusable native vectors still need matching receipts and
-actual indexed bytes. Those qualification reads do not write coverage or
-repair indices. Chunking and embedding remain outside native writer exclusion.
+actual indexed bytes. Preparation uses the existing WAL-aware path-index
+connection for coverage reads; committed journal work does not require the WAL
+to be empty. Side-effect-free qualification still uses immutable reads and
+refuses nonempty WALs. Neither mode writes coverage or repairs indices.
+Chunking and embedding remain outside native writer exclusion.
 Restart can reuse completed model pairs without changing canonical rows, file
 checkpoints, source state, pending work or the parked queue claim.
 Default preparation still refuses point envelopes, and
