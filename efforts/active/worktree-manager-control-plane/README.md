@@ -113,6 +113,7 @@ item in this umbrella.
 | Profile preparation implementer | Owns only the reviewed pre-adoption dependency-preparation follow-up under #11989; preserves #356/#8545 setup and #11976 acquisition ownership. | Managed source worktree; public source handle `sluggish-gasket`; coordination through #11989 and the linked subplan. |
 | First-run front-door implementer | Bounded #542 Manager entry, no-project presentation and existing-owner diagnostic/action composition; no configuration writer or rollout takeover. | Managed source worktree; public source handle `patient-knob`; coordination through #542 and the linked Phase 4 plan. |
 | Optional Sync-progress implementer | Bounded #4183 LP1-LP3/LPV Sync producer/local-consumer source increment accepted, including complete CLI comparison; other verbs/runtime/platform lanes stay separate, with no PK/WI ownership or rollout. | Managed source worktree; public source handle `patient-knob`; coordination through #4183 and the linked optional-progress plan. |
+| Native-wheel configuration implementer | Finite #4102/#4305 helper/fragment configuration and scope/default documentation under the linked plan; no native-wheel, version-selection, installer or legacy-file-retirement takeover. | Managed source worktree; public source handle `patient-knob`; finite discussion reservation on #4102. |
 
 ## Context
 
@@ -2453,6 +2454,10 @@ not an implementation assignment or accepted source disposition.)_
 
 #### #4305 - Supported wheel forwarding
 
+The [native-wheel configuration proposal](phase-psmux-native-wheel.md)
+defines a bounded source increment and its evidence limits. It does not check
+off the whole wheel or #4102 acceptance by removing unsupported declarations.
+
 - [ ] **M4305-P1:** Preserve original reported PSMux 3.3.4 context:
   `send-keys -M` was unsupported after clearing default bindings. Establish
   an actually supported forwarding mechanism OR an explicit reviewed,
@@ -2975,6 +2980,15 @@ tiers without imposing every-host or native-on-every-leaf requirements.
 
 ## Coordination
 
+The [finite native-wheel plan](phase-psmux-native-wheel.md) uses #4102's
+discussion reservation for helper/fragment source and directly related
+scope/default documentation only. Preserve #13507's version-selection,
+side-by-side installation and path/launcher ownership, ordinary tmux and
+all existing native/session/configuration/resource custodians. No live mux
+query, key event, installation, personal configuration edit or legacy-file
+retirement is admitted. M4305-LV/G and the parent remain open until their
+actual evidence and accepted capability disposition are reconciled.
+
 **FA356:** Keep the existing Manager/domain claim process, #542 assignment,
 bounded #8545 shared setup transfer and #11989/#11976 dependency/acquisition
 owners. The [complete Phase 5 intake](phase-5-configuration-workbench.md#complete-finite-first-repository-adoption-from-356)
@@ -3178,6 +3192,22 @@ receiver readback; all other source-specific intake conditions remain in their
 own scopes. No source/resource/physical custody or updater authority transfers.
 
 ## Journal
+
+### 2026-11-19 - Finite native-wheel configuration proposal
+
+The complete current #4102 discussion and #4305 tracking-only subsumption
+retain the supported-wheel and default-policy contracts. Both current
+PowerShell configuration producers still emit tmux-style mouse bindings.
+Upstream PSMux 3.3.4 and 3.4.0 sources instead expose native, bidirectional
+mouse-event paths, with different application-capability gates. The linked
+[proposal](phase-psmux-native-wheel.md) distinguishes those gates and retains
+unqualified native/installed acceptance rather than presenting source-file
+application or binding removal as proof that a frontend receives events.
+
+The finite discussion reservation is held by `patient-knob`. The current
+open side-by-side installation PR remains independently owned. This proposal
+changes no production code, runtime policy, version floor, settings or
+resource custody.
 
 ### 2026-11-16 - Complete finite first-repository adoption proposal
 
