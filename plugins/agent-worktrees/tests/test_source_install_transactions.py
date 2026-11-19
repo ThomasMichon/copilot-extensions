@@ -90,11 +90,11 @@ def _run(argv: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
         argv, cwd=cwd, capture_output=True, text=True, encoding="utf-8",
         timeout=40, check=False,
         env={**os.environ, "COPILOT_EXTENSIONS_TEST_CONTAINED": "1"},
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        **no_window_kwargs(),
     )
 
 
-def test_python_frontend_keeps_selected_bash_when_path_changes(tmp_path):
+def test_python_frontend_keeps_selected_bash_when_path_changes(tmp_path: Path) -> None:
     assert _BASH is not None, "native frontend qualification requires Bash"
     scripts = tmp_path / "scripts"
     scripts.mkdir()
@@ -145,7 +145,7 @@ esac
 
 @pytest.mark.parametrize("host", HOSTS or [None])
 @pytest.mark.parametrize("code", [0, 7])
-def test_python_lifecycle_relays_stderr_before_completion(tmp_path, host, code):
+def test_python_lifecycle_relays_stderr_before_completion(tmp_path: Path, host: str | None, code: int) -> None:
     if not host:
         pytest.skip("PowerShell unavailable")
     scripts = tmp_path / "scripts"
@@ -219,7 +219,7 @@ Write-Output 'caller-finished'
 
 
 @pytest.mark.parametrize("committed,valid", [(False, True), (True, True), (True, False)])
-def test_bash_lifecycle_refusal_detail_survives_frontend_cleanup(tmp_path, committed, valid):
+def test_bash_lifecycle_refusal_detail_survives_frontend_cleanup(tmp_path: Path, committed: bool, valid: bool) -> None:
     assert _BASH is not None, "native frontend qualification requires Bash"
     scripts = tmp_path / "scripts"
     scripts.mkdir()
@@ -269,7 +269,9 @@ if _deploy_python_runtime; then exit 91; else exit "$?"; fi
 
 @pytest.mark.parametrize("host", HOSTS or [None])
 @pytest.mark.parametrize("committed,valid", [(False, True), (True, True), (True, False)])
-def test_python_lifecycle_refusal_detail_survives_frontend_cleanup(tmp_path, host, committed, valid):
+def test_python_lifecycle_refusal_detail_survives_frontend_cleanup(
+    tmp_path: Path, host: str | None, committed: bool, valid: bool,
+) -> None:
     if not host:
         pytest.skip("PowerShell unavailable")
     scripts = tmp_path / "scripts"
@@ -799,7 +801,7 @@ def test_source_reader_windowless_parent_two_cycles(tmp_path: Path, host: str | 
         with observer._WindowObserver(user32, kernel32, callback) as windows:
             process = subprocess.Popen(
                 [str(pythonw), "-I", "-B", str(parent), host, str(script)],
-                stdout=output, stderr=output, creationflags=subprocess.CREATE_NO_WINDOW,
+                stdout=output, stderr=output, **no_window_kwargs(),
             )
             result = process.wait(timeout=40)
     assert result == 0, log.read_text(encoding="utf-8")
