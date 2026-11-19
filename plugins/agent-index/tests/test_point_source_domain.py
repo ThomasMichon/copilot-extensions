@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -373,9 +374,13 @@ def test_query_frontdoors_refuse_point_domains_without_empty_success(
     config_file = tmp_path / "config.yaml"
     config_file.write_text("{}")
     monkeypatch.setenv("AGENT_INDEX_CONFIG", str(config_file))
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
     for role in ("host", "client"):
         monkeypatch.setattr(transport, "plan_route", lambda: (role, {}))
-        for args in (["search", "searchable", "--json"], ["similar", "missing"], ["clusters"]):
+        for args in (
+            ["search", "searchable", "--json"], ["search", "searchable"],
+            ["similar", "missing"], ["clusters"],
+        ):
             assert cli.main(args) != 0
             emitted = capsys.readouterr()
             assert "SourceLayoutError" in emitted.out + emitted.err
