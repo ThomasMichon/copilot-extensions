@@ -239,13 +239,20 @@ def _installation_context(context: dict[str, str]) -> dict[str, str]:
 
 def _toolchain_context(configuration: str) -> dict[str, str]:
     """Capture credential-free routing only for requests selecting the new provider."""
-    selected = {key: os.environ[key] for key in _TOOLCHAIN_CONTEXT_KEYS if key in os.environ}
+    from .toolchain_config import _routing_environment, environment, read_configuration
+
+    _validate_toolchain_urls(os.environ)
+    current = environment(
+        read_configuration(Path(configuration).expanduser().absolute()),
+        _routing_environment(os.environ),
+    )
+    selected = {key: current[key] for key in _TOOLCHAIN_CONTEXT_KEYS if key in current}
     selected["COPILOT_EXTENSIONS_TOOLCHAIN_CONFIG"] = configuration
     selected[_TOOLCHAIN_REQUEST_KEY] = "1"
     if os.name != "nt":
         for encoded, original in _NPM_CONTEXT_ALIASES.items():
-            if original in os.environ:
-                selected[encoded] = os.environ[original]
+            if original in current:
+                selected[encoded] = current[original]
     for key in (
         "COPILOT_EXTENSIONS_TOOLCHAIN_CONFIG", "PIP_CONFIG_FILE", "UV_CONFIG_FILE",
         "NPM_CONFIG_USERCONFIG", "npm_config_userconfig",
@@ -261,19 +268,23 @@ def _toolchain_context(configuration: str) -> dict[str, str]:
             str(Path(value).expanduser().absolute()) for value in selected["XDG_CONFIG_DIRS"].split(os.pathsep)
             if value
         )
+    _validate_toolchain_urls(selected)
+    return selected
+
+
+def _validate_toolchain_urls(selected: Mapping[str, str]) -> None:
     for key, value in selected.items():
         if key in {
             "UV_DEFAULT_INDEX", "UV_INDEX_URL", "UV_INDEX", "UV_EXTRA_INDEX_URL",
             "UV_FIND_LINKS", "UV_PYTHON_INSTALL_MIRROR", "UV_INSTALLER_GITHUB_BASE_URL",
             "UV_INSTALLER_GHE_BASE_URL", "UV_DOWNLOAD_URL", "INSTALLER_DOWNLOAD_URL",
             "PIP_INDEX_URL", "PIP_EXTRA_INDEX_URL", "PIP_FIND_LINKS", "NPM_CONFIG_REGISTRY",
-            "COPILOT_EXTENSIONS_NPM_REGISTRY",
+            "COPILOT_EXTENSIONS_NPM_REGISTRY", "npm_config_registry",
         }:
             for url in re.findall(r"[A-Za-z][A-Za-z0-9+.-]*://\S+", value):
                 parsed = urlsplit(url)
                 if parsed.username or parsed.password or parsed.query or parsed.fragment:
                     raise ValueError("Request routing requires URLs without credentials, queries or fragments")
-    return selected
 
 
 def _runner_context_keys(context: Mapping[str, str]) -> tuple[str, ...]:

@@ -110,7 +110,10 @@ organization-neutral.
 ## Queued installation and update
 
 When configuration is selected, the existing execution request captures its
-selection and the bounded native routing selectors, including their absence.
+selection and the validated effective native routing selectors, including
+defaults derived from the data file and the absence of other selectors.
+This keeps file-only mirror values intact when a downstream participant
+restores the original request rather than trusting its inherited environment.
 Participants restore those inputs before configuration preflight rather than
 inheriting a different draining worker's selection. Relative native config paths
 are anchored at submission. Lowercase npm selectors are preserved through

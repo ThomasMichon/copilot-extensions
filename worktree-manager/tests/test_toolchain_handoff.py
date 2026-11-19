@@ -49,7 +49,12 @@ def test_toolchain_context_negotiates_actual_queued_manager_to_engine_handoff(
         "COPILOT_EXTENSIONS_TOOLCHAIN_CONFIG": str(home / "toolchain.conf"),
     }.items():
         monkeypatch.setenv(key, value)
-    (home / "toolchain.conf").write_text("schema=1\npython_index_url=https://caller.example.invalid/simple/\n")
+    mirror = "https://downloads.example.invalid/uv/"
+    (home / "pip.ini").write_text("[global]\ntimeout = 73\n", encoding="ascii")
+    (home / "toolchain.conf").write_text(
+        f"schema=1\nuv_install_mirror={mirror}\n",
+        encoding="ascii",
+    )
     context = update_driver_cli.installation_request_context()
     fixture, report = tmp_path / "engine.py", tmp_path / "result.json"
     fixture.write_text(_ENGINE, encoding="utf-8")
@@ -57,11 +62,13 @@ def test_toolchain_context_negotiates_actual_queued_manager_to_engine_handoff(
     paths = [str(repository / "plugins" / "agent-worktrees" / "src"), *sys.path]
     command = [sys.executable, "-I", "-B", str(fixture), json.dumps(paths), str(report), provider]
     program = """
-import json,sys,update_driver
+import json,os,sys,update_driver
+from pathlib import Path
 sys.path[:0]=json.loads(sys.argv[1])
-from worktree_manager import engine_client
+from worktree_manager import engine_client,toolchain_config
 try:
     with update_driver.borrowed_custody():
+        toolchain_config.configure_selected(root=Path(os.environ["WORKTREE_MANAGER_ROOT"]),apply=True)
         result=engine_client.run_engine_passthrough(None,["update","--no-manager"],
                                                   engine_command=json.loads(sys.argv[2]))
 except engine_client.EngineError as error:
@@ -82,6 +89,7 @@ raise SystemExit(result)
     )
     monkeypatch.setenv("PIP_INDEX_URL", "https://drainer.example.invalid/simple/")
     monkeypatch.setenv("UV_CONFIG_FILE", "foreign-drainer-config")
+    monkeypatch.setenv("UV_INSTALLER_GITHUB_BASE_URL", "https://drainer.example.invalid/uv/")
     assert update_driver.drain(root=queue) == 0
     result = update_driver.status(request.id, root=queue)
     assert not isinstance(result, tuple)
@@ -93,12 +101,14 @@ raise SystemExit(result)
         assert received["PIP_INDEX_URL"] == context["PIP_INDEX_URL"]
         assert received["PIP_CONFIG_FILE"] == context["PIP_CONFIG_FILE"]
         assert received["COPILOT_EXTENSIONS_TOOLCHAIN_CONFIG"] == context["COPILOT_EXTENSIONS_TOOLCHAIN_CONFIG"]
+        assert received["UV_INSTALLER_GITHUB_BASE_URL"] == mirror
         assert "UV_CONFIG_FILE" not in received
     else:
         assert result.exit_code == 19, log
         assert "lacks toolchain request context v1" in log
         assert not report.exists()
     assert os.environ["UV_CONFIG_FILE"] == "foreign-drainer-config"
+    assert os.environ["UV_INSTALLER_GITHUB_BASE_URL"] == "https://drainer.example.invalid/uv/"
 
 
 @pytest.mark.parametrize("capability", [None, {}, {"schema": "wrong", "version": 1},
@@ -147,9 +157,11 @@ def test_queued_manager_update_applies_toolchain_before_first_effect(
         "COPILOT_EXTENSIONS_TOOLCHAIN_CONFIG": str(config),
     }.items():
         monkeypatch.setenv(key, value)
-    if conflict:
-        monkeypatch.setenv("PIP_INDEX_URL", "https://other.example.invalid/simple/")
     context = update_driver_cli.installation_request_context()
+    if conflict:
+        config.write_text(
+            "schema=1\npython_index_url=https://other.example.invalid/simple/\n", encoding="ascii",
+        )
     report = tmp_path / "result.json"
     program = """
 import json,os,sys
@@ -187,7 +199,7 @@ raise SystemExit(update_driver_cli.cmd_update_request([]))
     assert result.exit_code == (1 if conflict else 7), result.log_path.read_text(encoding="utf-8")
     assert report.exists() is not conflict
     if conflict:
-        assert "PIP_INDEX_URL conflicts" in result.log_path.read_text(encoding="utf-8")
+        assert "conflicts with toolchain configuration" in result.log_path.read_text(encoding="utf-8")
         assert not (root / "toolchain.conf").exists()
 
 
