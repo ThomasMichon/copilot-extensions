@@ -1519,8 +1519,11 @@ function Resolve-AwPsmuxBin {
     $pathHelper = Join-Path $PSScriptRoot 'psmux-path.ps1'
     if (Test-Path -LiteralPath $pathHelper) {
         . $pathHelper
+        # Side-by-side copies let a newer client create sessions while an older
+        # provider keeps serving its live sessions.
         $desired = Find-AwCompatiblePsmuxPackageBinary `
-            -PackageRoot (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages')
+            -PackageRoot (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages') `
+            -SideBySideRoot (Get-AwPsmuxSideBySideRoot)
         if ($desired) { return $desired.Path }
     }
     $src = $Cmd.Source
@@ -1881,7 +1884,11 @@ function Assert-AwPsmuxCreationVersion {
     . (Join-Path $PSScriptRoot 'psmux-path.ps1')
     $version = Get-AwPsmuxCreationVersion
     if (-not (Test-AwPsmuxVersionCompatible -Version $version -MinimumVersion '3.4.0')) {
-        throw 'New PSMux sessions require version 3.4.0 or newer with readable file metadata. Existing sessions were not changed.'
+        $shown = if ($version) { $version } else { 'unknown' }
+        throw ("New PSMux sessions require version 3.4.0 or newer with readable file metadata " +
+            "(selected '$($script:AwPsmuxBin)', version $shown). Existing sessions were not changed. " +
+            "Run the agent-worktrees update to install PSMux 3.4.0 side by side under " +
+            "$(Get-AwPsmuxSideBySideRoot)\<version> without stopping live sessions.")
     }
 }
 
