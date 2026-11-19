@@ -27,6 +27,22 @@ The fixed whole-queue target and the Plan and Validation Plan remain the
 completion gate. Standing research authorization does not transfer other
 owners' resources or bypass repository review, eligibility, privacy or safety.
 
+On 2026-11-19, the campaign adopted this operator-authorized class through a
+delegated source-form answer:
+
+> Reconcile reference-derived holds campaign-wide, preserving actual content/copy and ownership restrictions
+
+This is a non-live cause-reconciliation class, not a blanket content-access
+exception. Reconcile inherited reference-triggered stops prospectively, case
+by case, with current original/editor/comment and source qualification.
+A numerical citation alone does not establish that held content was copied;
+authorship plus numerical references alone does not clear an unknown actual
+copied-content case. Such cases remain held until admission qualifies.
+Preserve actual excluded-content, organization, whole-source/containing-copy
+and ownership restrictions and every receiving, review and disposition gate.
+The class authorizes no automatic closure, implementation, native tests,
+rollout, access, spend, administrative bypass or resource transfer.
+
 - **Slug:** `backlog-reconciliation`
 - **Repo:** copilot-extensions
 - **Branch(es):** Independent documentation-only campaign checkpoints
@@ -272,6 +288,26 @@ startup signatures remain finite and independently owned. Canonical OPEN,
 claimed Phase 1, conditional-trigger and source-specific handoff gates survive.
 
 ## Request
+
+### Current reference-derived hold clarification - 2026-11-19
+
+The delegated source-form answer adopted this class-level option:
+
+> Reconcile reference-derived holds campaign-wide, preserving actual content/copy and ownership restrictions
+
+The question identified inherited whole-original stops triggered by references
+to other held reports, including #11123's recorded #6030/#6804 stop despite
+passing current author/editor/comment checks. The delegated clarification
+retains actual excluded-content, organization, whole-source/copy and ownership
+restrictions: unknown actual copied-content cases remain held until admission
+qualifies, and authorship plus numerical references alone is not clearance.
+Complete whole-original and receiving acceptance/review evidence remains
+necessary before disposition. The class is campaign-wide, not permission for
+three examples or a renewal of per-batch quotas. It is not a shared live/runtime
+recovery grant. Original private approval evidence and delegated bounds remain
+with the continuing owner; historical refusal/use/unknown accounting is retained
+without retrospective compliance or counter resets. The earlier unanswered
+revisit was not an expiry on the adopted class.
 
 ### Current authorship clarification - 2026-11-16
 
@@ -3506,6 +3542,11 @@ sources, transferring owners or turning partial/planning gains into completion.
   identities, including its explicit empty/changed-closed exceptions.
 - [ ] Maintain that graph for new inflow, changed acceptance and current custody;
   refresh deltas rather than repeat unchanged whole-backlog research.
+  The [non-live cause-reconciliation checkpoint](journal/2026/11.19-non-live-cause-reconciliation-and-identity-accounting.md)
+  distinguishes complete identity accounting from source/receiving admission,
+  retains actual copied-content boundaries and records #11113's six paired
+  contract-evolution intake clauses plus #13473's distinct unfinished request.
+  Complete receiving readback and separate source disposition remain required.
 - [x] _(Agent-recommended)_ Establish the [graph-first sweep](graph-sweep.md)
   through the same four researchers, with explicit primary coverage, cross-theme
   edges, retained uncertainties and reconstructible operational state. Continuing
