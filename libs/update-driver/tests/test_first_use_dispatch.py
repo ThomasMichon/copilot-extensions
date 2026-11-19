@@ -1,6 +1,7 @@
 """Dispatch's fixed legacy recipes, separately from ordinary publisher adoption."""
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator, Iterator
+import faulthandler
 import json
 import os
 from pathlib import Path
@@ -16,6 +17,7 @@ import zipfile
 
 import pytest
 from _pytest.capture import CaptureManager
+from _pytest.faulthandler import fault_handler_stderr_fd_key
 from packaging.version import Version
 
 from agent_procutil import no_window_kwargs
@@ -93,6 +95,112 @@ pytestmark = pytest.mark.skipif(
 REPOSITORY = Path(__file__).resolve().parents[3]
 
 
+class _DispatchColdFailureTrace:
+    def __init__(self, item: pytest.Item, timeout: float, stderr: int) -> None:
+        self.item, self.timeout, self.stderr = item, timeout, stderr
+
+    @pytest.hookimpl(wrapper=True, tryfirst=True)
+    def pytest_exception_interact(
+        self, node: pytest.Item, report: pytest.TestReport,
+    ) -> Generator[None, object, object]:
+        outcome = yield
+        if node is self.item and report.when == "call" and report.failed:
+            faulthandler.dump_traceback_later(self.timeout, file=self.stderr, exit=False)
+        return outcome
+
+
+def _register_dispatch_failure_trace(request: pytest.FixtureRequest, *, active: bool) -> None:
+    if not active:
+        return
+    config = request.config
+    if config.getoption("usepdb", False) or config.getoption("trace", False):
+        return
+    timeout = float(config.getini("faulthandler_timeout") or 0)
+    if timeout != 60 or config.getini("faulthandler_exit_on_timeout") is not False:
+        return
+    plugin = _DispatchColdFailureTrace(
+        cast(pytest.Item, request.node), timeout, config.stash[fault_handler_stderr_fd_key],
+    )
+    config.pluginmanager.register(plugin, "dispatch-cold-failure-trace")
+    request.addfinalizer(lambda: config.pluginmanager.unregister(plugin))
+
+
+def test_dispatch_failure_trace_wraps_normal_hooks_without_masking_outcomes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    calls: list[tuple[float, int, bool]] = []
+    monkeypatch.setattr(
+        faulthandler, "dump_traceback_later",
+        lambda timeout, *, file, exit: calls.append((timeout, file, exit)),
+    )
+    item = cast(pytest.Item, object())
+    plugin = _DispatchColdFailureTrace(item, 60, 7)
+    for when, failed, same_item, expected in (
+        ("call", True, True, [(60, 7, False)]),
+        ("call", False, True, []),
+        ("setup", True, True, []),
+        ("call", True, False, []),
+    ):
+        calls.clear()
+        report = cast(pytest.TestReport, SimpleNamespace(when=when, failed=failed))
+        interaction = plugin.pytest_exception_interact(
+            item if same_item else cast(pytest.Item, object()), report,
+        )
+        next(interaction)
+        assert calls == []
+        with pytest.raises(StopIteration) as finished:
+            interaction.send("ordinary hook result")
+        assert finished.value.value == "ordinary hook result"
+        assert calls == expected
+    calls.clear()
+    interaction = plugin.pytest_exception_interact(
+        item, cast(pytest.TestReport, SimpleNamespace(when="call", failed=True)),
+    )
+    next(interaction)
+    failure = RuntimeError("controlled hook failure")
+    with pytest.raises(RuntimeError, match="controlled hook failure") as raised:
+        interaction.throw(failure)
+    assert raised.value is failure
+    assert calls == []
+
+
+@pytest.mark.parametrize("debugger", [None, "usepdb", "trace"])
+def test_dispatch_failure_trace_registration_preserves_protocol_and_debugger_ownership(
+    monkeypatch: pytest.MonkeyPatch, debugger: str | None,
+) -> None:
+    from types import SimpleNamespace
+
+    timer_calls: list[str] = []
+    events: list[str] = []
+    finalizers: list[Callable[[], object]] = []
+    monkeypatch.setattr(faulthandler, "dump_traceback_later", lambda *a, **k: timer_calls.append("arm"))
+    monkeypatch.setattr(faulthandler, "cancel_dump_traceback_later", lambda: timer_calls.append("cancel"))
+    config = SimpleNamespace(
+        getoption=lambda name, default=False: name == debugger,
+        getini=lambda name: {
+            "faulthandler_timeout": 60, "faulthandler_exit_on_timeout": False,
+        }[name],
+        stash={fault_handler_stderr_fd_key: 7},
+        pluginmanager=SimpleNamespace(
+            register=lambda *a: events.append("register"),
+            unregister=lambda *a: events.append("unregister"),
+        ),
+    )
+    request = cast(pytest.FixtureRequest, SimpleNamespace(
+        config=config, node=object(), addfinalizer=finalizers.append,
+    ))
+    _register_dispatch_failure_trace(request, active=False)
+    assert events == []
+    _register_dispatch_failure_trace(request, active=True)
+    assert events == ([] if debugger else ["register"])
+    for finalize in finalizers:
+        finalize()
+    assert events == ([] if debugger else ["register", "unregister"])
+    assert timer_calls == []
+
+
 def _dispatch_phase_reporter(capture: CaptureManager, *, active: bool) -> Phase:
     allowed = {
         "fixture-enter", "materialize-start", "materialize-ready", "body-enter", "body-exit",
@@ -123,10 +231,12 @@ def _dispatch_phase_reporter(capture: CaptureManager, *, active: bool) -> Phase:
 @pytest.fixture
 def dispatch_cold_phase(request: pytest.FixtureRequest) -> Phase:
     capture = cast(CaptureManager, request.config.pluginmanager.getplugin("capturemanager"))
+    active = os.name == "nt" and request.node.name == (
+        "test_actual_dispatch_original_provision_survives_caller_loss"
+    )
+    _register_dispatch_failure_trace(request, active=active)
     phase = _dispatch_phase_reporter(
-        capture, active=os.name == "nt" and request.node.name == (
-            "test_actual_dispatch_original_provision_survives_caller_loss"
-        ),
+        capture, active=active,
     )
     phase("fixture-enter")
     return phase
@@ -253,6 +363,72 @@ def test_dispatch_faulthandler_observes_finite_finalizer_without_disabling_captu
     assert "1 passed" in result.stdout
     assert "controlled body remains captured" not in result.stdout + result.stderr
     assert "controlled finalizer remains captured" not in result.stdout + result.stderr
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.timeout(120)
+def test_dispatch_faulthandler_preserves_failed_body_through_finite_finalizer(
+    area: Path,
+) -> None:
+    suite = area / "controlled-failed-pytest"
+    suite.mkdir()
+    target = suite / "test_controlled_failure_finalizer.py"
+    target.write_text(
+        "from pathlib import Path\n"
+        "import faulthandler\n"
+        "import sys\n"
+        "import time\n"
+        "import pytest\n"
+        f"sys.path.insert(0, {str(Path(__file__).parent)!r})\n"
+        "from test_first_use_dispatch import _register_dispatch_failure_trace\n"
+        "@pytest.fixture\n"
+        "def controlled_failure_finalizer(request, monkeypatch):\n"
+        "    events = []\n"
+        "    original_cancel = faulthandler.cancel_dump_traceback_later\n"
+        "    original_arm = faulthandler.dump_traceback_later\n"
+        "    def cancel():\n"
+        "        events.append('cancel')\n"
+        "        return original_cancel()\n"
+        "    def arm(*args, **kwargs):\n"
+        "        events.append('arm')\n"
+        "        return original_arm(*args, **kwargs)\n"
+        "    monkeypatch.setattr(faulthandler, 'cancel_dump_traceback_later', cancel)\n"
+        "    monkeypatch.setattr(faulthandler, 'dump_traceback_later', arm)\n"
+        "    _register_dispatch_failure_trace(request, active=True)\n"
+        "    yield\n"
+        "    assert events[:2] == ['cancel', 'arm']\n"
+        "    assert request.config.getoption('capture') == 'fd'\n"
+        "    print('controlled failure finalizer remains captured')\n"
+        "    time.sleep(61)\n"
+        "    Path(__file__).with_suffix('.completed').write_text('completed')\n"
+        "def test_failed_body(request, controlled_failure_finalizer):\n"
+        "    assert float(request.config.getini('faulthandler_timeout')) == 60.0\n"
+        "    assert request.config.getini('faulthandler_exit_on_timeout') is False\n"
+        "    assert request.config.getoption('capture') == 'fd'\n"
+        "    pytest.fail('controlled-call-failure', pytrace=False)\n",
+        encoding="utf-8",
+    )
+    environment = {
+        **os.environ,
+        "PYTEST_ADDOPTS": "-o faulthandler_timeout=60 -o faulthandler_exit_on_timeout=false",
+        "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "PYTHONDONTWRITEBYTECODE": "1",
+    }
+    try:
+        result = subprocess.run(
+            [sys.executable, "-B", "-m", "pytest", "-q", "--color=no",
+             "-p", "no:cacheprovider", "-o", "addopts=", "--confcutdir", str(suite), str(target)],
+            env=environment, cwd=suite, stdin=subprocess.DEVNULL,
+            capture_output=True, text=True, timeout=90, **no_window_kwargs(),
+        )
+    except subprocess.TimeoutExpired:
+        pytest.fail("controlled failed-body finalizer did not finish")
+    if result.returncode != 1 or "controlled-call-failure" not in result.stdout:
+        pytest.fail("controlled pytest did not preserve its original failed-body result")
+    if "controlled_failure_finalizer" not in result.stderr or "pytest_runtest_teardown" not in result.stderr:
+        pytest.fail("failure-unwind traceback did not observe the controlled fixture finalizer")
+    assert target.with_suffix(".completed").read_text() == "completed"
+    assert "1 failed" in result.stdout
+    assert "controlled failure finalizer remains captured" not in result.stderr
 
 
 @pytest.mark.parametrize("action", ["stamp", "provision"])

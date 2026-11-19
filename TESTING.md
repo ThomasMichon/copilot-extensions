@@ -5655,6 +5655,13 @@ runner preserves these diagnostic options without disabling ordinary capture.
 The one-shot whole-protocol dump can expose a capture-restoration or finalizer
 stack; sixty seconds is an observation point, not a test deadline or process exit.
 Other cells receive no additional pytest options and all portfolio bounds remain.
+An owner-scoped wrapper re-arms that same non-exiting timer only after ordinary
+exception-interaction hooks return for an unexpected call failure. Passing calls,
+debugger modes and hook exceptions leave existing pytest behavior untouched.
+Pytest's whole-protocol finalizer still owns cancellation after teardown; fixture
+unregistration does not cancel early. Separate pure passing-body and failed-body
+controls retain ordinary capture and a finite 61-second finalizer wait, each with
+its own 120-second item marker covering the 90-second child bound.
 Bounded independent packets cover Python/native
 no-write refusals, exact `stamp`/`provision` action custody, source replacement,
 deferred real stamping, and actual cold construction after the original caller's
