@@ -2,6 +2,8 @@
     "profile": "copilot-extensions.promotion-units/v1",
     "max_seconds": 300,
     "nodes": [
+        "tools/promotion_unit_tests/test_component_manifest_contract.py::test_component_versions_preserve_exact_mutation_coverage_and_semantics",
+        "tools/promotion_unit_tests/test_component_manifest_contract.py::test_unqualified_component_application_refuses_without_reinterpreting_legacy",
         "tools/promotion_unit_tests/test_point_hint_contract.py::test_v2_wire_union_preserves_binding_target_versions_and_v1_refusal",
         "tools/promotion_unit_tests/test_point_hint_contract.py::test_v2_refuses_broad_unknown_or_unbound_targets_before_admission",
         "tools/promotion_unit_tests/test_paged_acquisition_requirement.py::test_selected_callable_and_connector_require_explicit_v1_without_legacy_effects",
@@ -5551,6 +5553,7 @@
         "tools/promotion_unit_tests/test_typecheck_new_code.py::test_ordinary_installer_uses_its_composed_sdk_and_preserves_outer_scope[True-True]"
     ],
     "coverage_targets": [
+        "plugins/agent-index/src/agent_index/indexing/component_manifest.py",
         "plugins/agent-index/src/agent_index/indexing/point_hints.py",
         "plugins/agent-index/src/agent_index/indexing/change_hints.py",
         "plugins/agent-index/src/agent_index/indexing/acquisition_requirement.py",
@@ -5930,6 +5933,8 @@
         "tools/promotion_source_history.py"
     ],
     "sources": {
+        "tools/promotion_unit_tests/test_component_manifest_contract.py": "a60b524ec9c54544284b44eab463e52323178b328d6b88205dc932e6d01577e0",
+        "plugins/agent-index/src/agent_index/indexing/component_manifest.py": "6969e9818b917e74844ab7cae1951e795001914d0c1bb25713280d078347a0bf",
         "tools/promotion_unit_tests/test_point_hint_contract.py": "730bf4cbea18d6f75d0b13c49df91848e5afe2ca6c4301f622f3989b4ffb0de6",
         "plugins/agent-index/src/agent_index/indexing/point_hints.py": "5a7262c02c64f9b9563725c3a9152997304c22d3df0be5fa7fc0d973a71edb02",
         "plugins/agent-index/src/agent_index/indexing/change_hints.py": "76b8e295f0efffcf43c0b5188740fcfca9075eb649df86849a04d42eccac192f",

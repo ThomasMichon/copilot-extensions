@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from agent_index.indexing.component_manifest import require_unordered_application
 from agent_index.indexing.embedding_batch import routed_model_chunks
 from agent_index.indexing.embedding_coverage import EmbeddingCoverage, input_hash
 from agent_index.indexing.file_batches import FileBatch, file_batches
@@ -32,6 +33,7 @@ def publish_prepared_manifest(
     *, manifest: CrawlManifest, full: bool, application: Callable[..., tuple[int, int, int]],
     store: MultiModelStore, prepared: PreparedApplication,
 ) -> tuple[int, int, int]:
+    require_unordered_application(manifest)
     from agent_index.store.ingestion_index import prepare_ingestion_indices
 
     domain = store._source_domain
@@ -62,6 +64,7 @@ class PreparedApplication:
         before_model_embed: Callable[[str], None] | None = None,
         progress_cb: ProgressCallback | None = None,
     ) -> None:
+        require_unordered_application(manifest)
         profiles = dict(config.model_profiles)
         if any(model not in profiles for model in clients):
             raise ValueError("Prepared application requires every embedding client's model profile")

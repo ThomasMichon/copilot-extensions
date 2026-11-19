@@ -721,6 +721,9 @@ def _apply_source_manifest(
     Returns:
         Tuple of (chunks_stored, chunks_deleted, files_crawled).
     """
+    from agent_index.indexing.component_manifest import require_unordered_application
+
+    require_unordered_application(manifest)
     print(f"Indexing source: {source_name}")
     counts = current_counts()
     if manifest.is_empty:

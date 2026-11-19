@@ -7487,6 +7487,14 @@ evidence separate.
 
 ## Unit-only promotion packet
 
+The component-manifest units exercise strict provider-version/semantics records,
+exact mutation coverage and pre-application refusal without importing stores,
+opening SQLite or starting an actor. The plugin's
+`tests/test_component_manifest.py` separately covers native SQLite reopen/CAS,
+legacy-envelope compatibility, preserved polling state and refusal at actual
+recovery/prepared/application entrypoints. Neither lane qualifies ordered store
+application or component read isolation.
+
 The exclusive attachment-export consumer packet executes the real export
 entrypoint, health-selected command transport, extension registry, provider
 dispatch and descriptor-pinned writer with an in-memory filesystem and
