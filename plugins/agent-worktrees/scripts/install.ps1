@@ -3212,8 +3212,11 @@ function Deploy-PythonRuntime {
             $failureDetail = ''
             if ($runtimeExitCode -eq 1) {
                 try {
-                    $failedResult = Get-Content -LiteralPath $resultPath -Raw -ErrorAction Stop |
-                        ConvertFrom-Json -ErrorAction Stop
+                    $failedJson = Get-Content -LiteralPath $resultPath -Raw -Encoding UTF8 -ErrorAction Stop
+                    if (-not $failedJson.TrimStart().StartsWith('{')) {
+                        throw 'Lifecycle refusal result must be a JSON object'
+                    }
+                    $failedResult = $failedJson | ConvertFrom-Json -ErrorAction Stop
                     $refusal = $failedResult.installation_refused
                     $fields = @($refusal.PSObject.Properties.Name)
                     if (@($failedResult.PSObject.Properties.Name) -ccontains 'runtime_version' -and

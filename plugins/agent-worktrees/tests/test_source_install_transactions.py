@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+from functools import lru_cache
 import json
 import os
 from pathlib import Path
@@ -60,18 +61,31 @@ def _payload(root: Path) -> tuple[Path, dict[str, object]]:
     return payload, receipt
 
 
+@lru_cache(maxsize=None)
 def _function(name: str, suffix: str) -> str:
     text = (SCRIPTS / f"install.{suffix}").read_text(encoding="utf-8")
     if suffix == "sh":
         start = text.index(f"\n{name}() {{")
         return text[start:text.index("\n}\n\n", start) + 3]
-    start = text.index(f"function {name} {{")
-    depth = 0
-    for index in range(text.index("{", start), len(text)):
-        depth += (text[index] == "{") - (text[index] == "}")
-        if depth == 0:
-            return text[start:index + 1].replace("$PSScriptRoot", "$ScriptDir")
-    raise AssertionError(name)
+    if not HOSTS:
+        pytest.skip("PowerShell unavailable")
+    query = f"""
+$tokens = $null
+$errors = $null
+$ast = [Management.Automation.Language.Parser]::ParseFile(
+    {_ps(SCRIPTS / 'install.ps1')}, [ref]$tokens, [ref]$errors)
+$functions = @($ast.FindAll({{
+    param($node)
+    $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -ceq {_ps(name)}
+}}, $true))
+if ($errors.Count -or $functions.Count -ne 1) {{ throw 'Installer function is ambiguous' }}
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+[Console]::Write($functions[0].Extent.Text)
+"""
+    completed = _run([HOSTS[0], "-NoProfile", "-NonInteractive", "-Command", query], SCRIPTS.parent)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    return completed.stdout.replace("$PSScriptRoot", "$ScriptDir")
 
 
 def _ps(value: Path | str) -> str:
@@ -218,22 +232,23 @@ Write-Output 'caller-finished'
     assert diagnostic.read_bytes().count(b"native-progress") == 1
 
 
-@pytest.mark.parametrize("committed,valid", [(False, True), (True, True), (True, False)])
-def test_bash_lifecycle_refusal_detail_survives_frontend_cleanup(tmp_path: Path, committed: bool, valid: bool) -> None:
+@pytest.mark.parametrize("committed,shape", [(False, "valid"), (True, "valid"), (True, "version"), (True, "array")])
+def test_bash_lifecycle_refusal_detail_survives_frontend_cleanup(tmp_path: Path, committed: bool, shape: str) -> None:
     assert _BASH is not None, "native frontend qualification requires Bash"
     scripts = tmp_path / "scripts"
     scripts.mkdir()
     result = {
         "runtime_version": "fixture",
         "installation_refused": {
-            "version": 1 if valid else 2, "settled": True,
+            "version": 2 if shape == "version" else 1, "settled": True,
             "publication_committed": committed, "error": "fixture ownership refusal",
         },
     }
+    payload = [result] if shape == "array" else result
     (scripts / "runtime_install.py").write_text(
         "import json,pathlib,sys\n"
-        f"result={result!r}\n"
-        "pathlib.Path(sys.argv[sys.argv.index('--result')+1]).write_text(json.dumps(result))\n"
+        f"result={payload!r}\n"
+        "pathlib.Path(sys.argv[sys.argv.index('--result')+1]).write_text(' \\n\\t'+json.dumps(result))\n"
         "raise SystemExit(1)\n",
         encoding="utf-8",
     )
@@ -259,7 +274,7 @@ if _deploy_python_runtime; then exit 91; else exit "$?"; fi
     completed = _run([str(_BASH), "-c", script], tmp_path)
     assert completed.returncode == 1, completed.stdout + completed.stderr
     assert "Python runtime lifecycle failed (exit 1)" in completed.stderr
-    if valid:
+    if shape == "valid":
         assert "fixture ownership refusal" in completed.stderr
         assert f"publication_committed={str(committed).lower()}" in completed.stderr
     else:
@@ -268,9 +283,9 @@ if _deploy_python_runtime; then exit 91; else exit "$?"; fi
 
 
 @pytest.mark.parametrize("host", HOSTS or [None])
-@pytest.mark.parametrize("committed,valid", [(False, True), (True, True), (True, False)])
+@pytest.mark.parametrize("committed,shape", [(False, "valid"), (True, "valid"), (True, "version"), (True, "array")])
 def test_python_lifecycle_refusal_detail_survives_frontend_cleanup(
-    tmp_path: Path, host: str | None, committed: bool, valid: bool,
+    tmp_path: Path, host: str | None, committed: bool, shape: str,
 ) -> None:
     if not host:
         pytest.skip("PowerShell unavailable")
@@ -279,14 +294,15 @@ def test_python_lifecycle_refusal_detail_survives_frontend_cleanup(
     result = {
         "runtime_version": "fixture",
         "installation_refused": {
-            "version": 1 if valid else 2, "settled": True,
+            "version": 2 if shape == "version" else 1, "settled": True,
             "publication_committed": committed, "error": "fixture ownership refusal",
         },
     }
+    payload = [result] if shape == "array" else result
     (scripts / "runtime_install.py").write_text(
         "import json,pathlib,sys\n"
-        f"result={result!r}\n"
-        "pathlib.Path(sys.argv[sys.argv.index('--result')+1]).write_text(json.dumps(result))\n"
+        f"result={payload!r}\n"
+        "pathlib.Path(sys.argv[sys.argv.index('--result')+1]).write_text(' \\n\\t'+json.dumps(result))\n"
         "raise SystemExit(1)\n",
         encoding="utf-8",
     )
@@ -332,7 +348,7 @@ exit 0
     observed = json.loads(completed.stdout)
     assert observed["native_exit"] == 1 and observed["remaining_results"] == 0
     assert "Python runtime lifecycle failed (exit 1)" in observed["diagnostic"]
-    if valid:
+    if shape == "valid":
         assert "fixture ownership refusal" in observed["diagnostic"]
         assert f"publication_committed={str(committed).lower()}" in observed["diagnostic"]
     else:
