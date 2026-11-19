@@ -140,13 +140,24 @@ The initial focused packet passed 41 tests on Windows x64 and 40 tests on
 Linux, with one Windows-only junction skip. The two test files corrected
 for strict typing then passed 26 tests on each platform.
 The unchanged allocator's qualified root, link, permission, identity and
-partial-reclaim controls remain the provider boundary from #13314; the new
+partial-reclaim controls remain the provider boundary from #12508; the new
 consumer does not override them. This is reuse of that provider qualification,
 not a claim that every negative was newly executed through every command kind.
 Unknown-cleanup fault injection preserves the full payload and open
 responsibility. Actual command failure and timeout retain only bounded
 diagnostics; successful consumers close the exact allocation and preserve
 the independent cache sentinel.
+
+The explicit two-allocation control is
+`test_owned_producer.py::test_target_disposition_preserves_an_unrelated_sibling_allocation`.
+It holds a sibling allocation live while the target succeeds, fails, times out
+or reports injected unknown cleanup. The sibling's device/inode identity,
+owner-marker bytes, payload and open ledger state must remain unchanged across
+the target's disposition. Unknown target cleanup also preserves the enclosing
+scope instead of treating it as settled. The other cases separately close
+only the consumed sibling after that identity check.
+All four cases passed on Windows x64 in 17.73 seconds and Linux in
+6.11 seconds. The changed test file also passed the strict target matrix.
 
 The parser rejects long-option abbreviations. Three actor-free regressions
 and actual Windows CLI calls cover `--own`, `--ki` and `--time`, each refused
@@ -163,10 +174,53 @@ The focused reproducible entry points are:
 
 ```text
 python tools/run-plugin-tests.py agent-worktrees --retirement-ready --test-file tests/test_artifact_runner_contract.py --test-file tests/test_artifact_runner.py --test-file tests/test_owned_producer.py --allow-explicit-tiers
+python tools/run-plugin-tests.py agent-worktrees --retirement-ready --test-file tests/test_owned_producer.py -k target_disposition_preserves_an_unrelated_sibling_allocation --allow-explicit-tiers
 python tools/typecheck.py --new-code --base <pinned-comparison-commit>
 python tools/typecheck.py --enforced
 python tools/run-promotion-unit-tests.py --source-sha <full-source-commit> --output-dir <new-owned-evidence-directory>
 ```
+
+The exact five consumer argument vectors and their synthetic inputs are
+preserved at the reviewed implementation revision:
+[`_CONSUMERS` and the invoking control](https://github.com/ThomasMichon/copilot-extensions/blob/ff14f14b42fa04b81942aa5c81e1f85d92240c0f/plugins/agent-worktrees/tests/test_owned_producer.py#L48-L170).
+That control defines the input Python application and ZIP member, each child
+command and the assertions that consume its result. Its Git input comes from
+the [isolated owner seed](https://github.com/ThomasMichon/copilot-extensions/blob/ff14f14b42fa04b81942aa5c81e1f85d92240c0f/plugins/agent-worktrees/tests/test_resource_producer_finalize.py#L22-L72)
+and [anchor/origin fixture](https://github.com/ThomasMichon/copilot-extensions/blob/ff14f14b42fa04b81942aa5c81e1f85d92240c0f/plugins/agent-worktrees/tests/test_transitive_finalize_integration.py#L71-L115).
+
+The separate standalone real-ledger analysis used this program and argument
+vector. Substitute an already-compatible interpreter, an owner under the
+caller's control and an absolute admitted source file; the selected interpreter
+must satisfy the artifact guide's prerequisites. The program writes only inside
+its allocated working directory:
+
+```python
+from pathlib import Path
+import subprocess
+import sys
+
+program = """import ast,json,pathlib,sys
+source=pathlib.Path(sys.argv[1]); tree=ast.parse(source.read_text())
+report=pathlib.Path('analysis.json')
+report.write_text(json.dumps({'functions':sum(isinstance(n,(ast.FunctionDef,ast.AsyncFunctionDef)) for n in ast.walk(tree))}))
+result=json.loads(report.read_text()); assert result['functions']>0
+print(json.dumps({'consumed_ast_analysis':result},sort_keys=True))
+"""
+command = [
+    sys.executable, str(Path("tools/run-owned-producer.py").resolve()),
+    "--owner", "<machine/project/worktree>", "--kind", "spike", "--timeout", "20",
+    "--", sys.executable, "-c", program, "<absolute-source-file>",
+]
+subprocess.run(
+    command, check=True, timeout=90,
+    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+)
+```
+
+The recorded invocation additionally read the exact owner ledger before and
+afterward and confirmed one new closed, non-unsettled allocation. A successful
+command exit alone is not independent proof of physical absence when the owner
+reports a partial retained disposition.
 
 The selected interpreter must already satisfy each command's documented
 prerequisites. Windows x64 and Linux were exercised; native ARM64 and macOS

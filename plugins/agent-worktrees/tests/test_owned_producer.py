@@ -1,6 +1,7 @@
 """Explicit native consumers of owned disposable command allocations."""
 
 import json
+from contextlib import nullcontext
 from pathlib import Path
 import secrets
 import shutil
@@ -221,3 +222,71 @@ def test_unknown_cleanup_preserves_payload_and_open_responsibility(
     assert producer["phase"] == "bound" and claim.is_unsettled
     assert (allocation / "work" / "unsettled.bin").read_bytes() == b"keep"
     assert not (allocation / "runner-diagnostic.txt").exists()
+
+
+@pytest.mark.timeout(60)
+@pytest.mark.parametrize("disposition", ["success", "failure", "timeout", "unknown"])
+def test_target_disposition_preserves_an_unrelated_sibling_allocation(
+    producer_owner: ProducerOwner, monkeypatch: pytest.MonkeyPatch, disposition: str,
+) -> None:
+    from owned_producer import OwnedProducerSandbox
+    from plugin_test_containment import UnreapedProcessError
+
+    runner, owner, selected, _, ledger = producer_owner
+    repository = Path(__file__).resolve().parents[3]
+    sibling = OwnedProducerSandbox(owner, repository, stage="sibling-control")
+    if disposition == "unknown":
+        def unknown(*args: object, cwd: Path, **kwargs: object) -> int:
+            (cwd / "unsettled.bin").write_bytes(b"target")
+            raise UnreapedProcessError("fixture-only unknown target cleanup")
+
+        monkeypatch.setattr(runner, "run_contained", unknown)
+    expected = {"success": 0, "failure": 7, "timeout": 124, "unknown": 125}[disposition]
+    program = "from pathlib import Path; import time; Path('payload.bin').write_bytes(b'target'); "
+    program += "time.sleep(30)" if disposition == "timeout" else f"raise SystemExit({7 if disposition == 'failure' else 0})"
+    with (pytest.raises(UnreapedProcessError) if disposition == "unknown" else nullcontext()):
+        with sibling as raw_sibling:
+            sibling_path = Path(raw_sibling)
+            sentinel = sibling_path / "sibling.bin"
+            sentinel.write_bytes(b"sibling-owned")
+            original = sibling_path.stat()
+            marker = (sibling_path / "scratch-owner.json").read_bytes()
+            assert sibling.allocation is not None
+            sibling_token = sibling.allocation["token"]
+            assert runner.main([
+                "--owner", owner, "--kind", "spike",
+                "--timeout", "2" if disposition == "timeout" else "20",
+                "--", sys.executable, "-c", program,
+            ]) == expected
+            current = sibling_path.stat()
+            assert (current.st_dev, current.st_ino) == (original.st_dev, original.st_ino)
+            assert sentinel.read_bytes() == b"sibling-owned"
+            assert (sibling_path / "scratch-owner.json").read_bytes() == marker
+            claims = tracking.load_record(ledger).resources
+            assert len(claims) == 2
+            states = [claim.producer for claim in claims]
+            assert all(isinstance(state, dict) for state in states)
+            sibling_claim = next(claim for claim in claims if isinstance(claim.producer, dict)
+                                 and claim.producer["token"] == sibling_token)
+            target_claim = next(claim for claim in claims if claim is not sibling_claim)
+            sibling_state, target_state = sibling_claim.producer, target_claim.producer
+            assert isinstance(sibling_state, dict) and isinstance(target_state, dict)
+            assert sibling_state["phase"] == "bound" and sibling_claim.is_unsettled
+            assert target_state["phase"] == {
+                "success": "closed", "failure": "retained", "timeout": "retained", "unknown": "bound",
+            }[disposition]
+            assert target_claim.is_unsettled == (disposition == "unknown")
+            target_path = selected / artifact_scratch._name(target_state["recovery"])
+            if disposition == "success":
+                assert not target_path.exists()
+            elif disposition == "unknown":
+                assert (target_path / "work" / "unsettled.bin").read_bytes() == b"target"
+                raise UnreapedProcessError("preserve the enclosing scope while target cleanup is unknown")
+            else:
+                assert {entry.name for entry in target_path.iterdir()} == {
+                    "scratch-owner.json", "runner-diagnostic.txt",
+                }
+    if disposition == "unknown":
+        assert sibling_path.exists() and sentinel.read_bytes() == b"sibling-owned"
+    else:
+        assert not sibling_path.exists()
