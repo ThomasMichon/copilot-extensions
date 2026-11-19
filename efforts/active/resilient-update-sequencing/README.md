@@ -67,9 +67,12 @@ body readback, preserved original/claimed/#3453 obligations and separate fresh
 source/actor/custody judgments. Retain a source independently if its complete
 scope or custody cannot be preserved.
 
-Preserve these actual administrative conditions separately from the owner's
-technical-status statements about partial auditing and unknown historical
-requester. This proposal leaves #6137 OPEN through receiving delivery;
+Preserve these campaign-authored administrative conditions separately from
+independent original-owner intent. The original owner explicitly said,
+"This issue intentionally remains open: the historical disable requester is
+unknown." Whether that requires the physical token to remain OPEN is unresolved;
+do not classify it as merely technical status without establishing applicability.
+The proposal left #6137 OPEN through receiving delivery;
 neither planned-row acceptance nor a later source-status judgment silently
 revises its final-OPEN/OPEN-keeper conditions. Their actual origin, authority
 and continuing applicability must be reconciled before any subsequent #6137
@@ -83,19 +86,22 @@ complete receiving in final-OPEN/OPEN #6137 while preserving unfinished
 technical work and incumbent custody. Their historical conditions and
 receipts remain recorded without retrospective revision.
 
-This proposal prospectively permits a later, SEPARATE judgment about redundant
+This reviewed refinement permits a SEPARATE judgment about redundant
 #6137 tracking after complete receiving in this existing same-domain effort.
 It changes only the identified campaign-authored physical-keeper convention,
 not an original runtime agreement, technical acceptance, owner/resource
-reservation or operational condition. Earlier keeper wording remains binding
-until the specifically reviewed and reflected refinement becomes effective.
+reservation or operational condition. Earlier keeper wording remained binding
+until the specifically reviewed and reflected refinement became effective.
 
 Drafting or receiver merge alone is insufficient. Normal reviewed explicit
 acceptance AND explicit reflection in STILL-OPEN #6137 must precede fresh
-complete permitted readback of the whole current receiver, original and ALL
-then-current discussions, eligibility and actual source-specific claim/
-resource/custody conditions. A separate administrative judgment follows.
-#6137 remains OPEN through proposal, receiving delivery and reconciliation;
+complete permitted readback of the original and ALL then-current discussions,
+current receiving Goal/scope, Coordination, Plan/local and actual global
+Validation, and relevant changed contract/Journal sections via the effort
+digest. Reuse unchanged whole-read coverage after current binding checks;
+verify eligibility and actual source-specific claim/resource/custody conditions.
+A separate administrative judgment follows.
+#6137 remained OPEN through proposal, receiving delivery and reconciliation;
 no automatic disposition is authorized.
 
 Preserve every R6137/R3453/R6218/R6294 Plan/local/actual-global clause,
@@ -111,6 +117,14 @@ appointment, universal reservation inventory, generic ACK, every-host witness,
 implementation or operational authority is introduced. Existing scoped
 retirement/refusal/native-consumer duties remain; outgoing uncertainty adds
 no ordinary incoming-completion/current-selection veto.
+
+The campaign-owned refinement was reviewed in #13193 and explicitly reflected
+in still-OPEN #6137. That did not resolve the independent original-owner
+OPEN-condition applicability. The subsequent retirement judgment was withdrawn
+and #6137 restored OPEN with no reduction credit. The historical receipts,
+original observability/native-lifetime owner, all directly retained technical
+clauses and independent holds remain. Actual original-owner intent must be
+resolved before a future separate source judgment.
 
 The [installation convergence map](../source-managed-runtime-installs/installation-convergence.md)
 connects this effort's remaining Phase3 sequencing to the common incoming
@@ -518,6 +532,29 @@ preparation barrier requires actual installer adapter support; it is not
 achieved by rearranging today's combined installer invocations.
 
 ## Journal
+
+### 2026-11-18 - Reflected tracking refinement and withdrawn source judgment
+
+#13193 merged as `f88fdfbd72e49903a4a60764e2507b25acc8eca6` after current-head
+Copilot approval with no findings and all three required checks passing.
+The prospective campaign-owned keeper refinement was explicitly
+[reflected in STILL-OPEN #6137](https://github.com/ThomasMichon/copilot-extensions/issues/6137#issuecomment-6970004804).
+Fresh complete current original/ALL seven discussions and receiving coverage
+were read back before the
+[retirement attempt](https://github.com/ThomasMichon/copilot-extensions/issues/6137#issuecomment-6970124969).
+However, its classification of the original owner's intentional-OPEN statement
+as technical status did not establish that condition's applicability. The
+[explicit correction](https://github.com/ThomasMichon/copilot-extensions/issues/6137#issuecomment-6970794480)
+withdrew the judgment, restored #6137 OPEN and removed its reduction credit.
+The campaign-owned keeper refinement did not waive original-owner intent.
+
+Both documentary checks above remain unchecked pending that actual condition.
+Unknown historical attribution, bounded observability/native-lifetime ownership,
+the Low documentation follow-up and every technical Plan/local/global item
+remain at their original evidence tiers. #5574's native-loop/rollout duty,
+#7711's operational hold, #9096's release/authorized-rollout owner and
+MCP #5785 remain independent. No implementation, native or operational effect,
+owner transfer or claim/resource release followed.
 
 ### 2026-11-17 - Proposed prospective keeper-tracking refinement
 

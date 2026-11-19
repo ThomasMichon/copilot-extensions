@@ -3,7 +3,7 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
-- [2026-11-17 - Fleet receiving refinements and remote configuration scope](journal/2026/11.17-fleet-refinements-and-remote-scope.md)
+- [2026-11-17 - Fleet/delivery receiving, remote scope and corrected tracker dispositions](journal/2026/11.17-fleet-refinements-and-remote-scope.md)
 
 - [2026-11-17 - Finite lifecycle receiving and accepted timeout tracking](journal/2026/11.17-lifecycle-receiving-and-timeout-retirement.md)
 
