@@ -383,3 +383,45 @@ controls do not qualify installed reader transition or consumer activation.
 Subscription recovery, useful activity selection, native feed completion/
 expiry, wake-before-ACK and shared coordinator cadence/drain enrollment remain
 subsequent implementation and validation exits.
+
+### Retained admission and subscription attempts
+
+Native preparation retains its original `FeedWaiterAdmission` in nullable
+`run_waiters.feed_admission_json`, in the same suspension transaction. This
+versioned record holds the original task/lane/recipe-dedup/owner/session/
+generation and steering revision. It also retains the revision expected after
+the owner's intentional suspension. Suspension itself changes that revision;
+later preparation retries reuse the original record rather than replacing it
+with a snapshot of a subsequently changed task. It contains no copied task,
+credential, service receipt or separate request journal.
+
+The in-process `repository_feed_attempt_protocol` is
+`agent-dispatch.repository-feed-attempt/v1`. A consumer must require that
+executing support before attempting this variant. Calling the existing
+`replay_waiter_progress(waiter, attempt=True)` on a feed row atomically checks
+the retained basis, current owner/session/generation/steering, finite recipe
+and live dedup association, holds/forms, execution and relationship admission,
+native resume requests (including headless steering or pool lane recovery),
+current ordinary wakes, waiter wakes/successors and original deadline. Only
+then does it record possible transmission. Repeating an attempted registration
+refuses: recover the original request through provider inspection, never
+replay subscription creation because a response was lost.
+
+Service IO remains outside SQLite. Recording a recovered registration receipt
+does not require an unchanged task: an uncertain remote effect still belongs
+to its original native row. Arming that receipt rechecks the same custody,
+wake and deadline guards and requires its retained attempt/registration.
+A changed task can therefore retain a cancellation/reconciliation obligation
+without becoming active or waking. These library guards do not implement
+subscription transmission, cancellation, expiry completion or ACK.
+
+Existing callback and watch-replay rows retain null admission and unchanged
+behavior. Historical feed rows without an admission record remain readable
+and outside PID recovery, but cannot attempt or arm through the new guarded
+path. No migration invents their original steering basis. Malformed or unknown
+non-null admission refuses on read without rewriting it. The added nullable
+column leaves prior projected fields unchanged; this is not a promise that
+arbitrary older readers enforce it, operational adoption or a qualified
+rollback. The lifecycle owner must preserve reconciliation custody.
+`test_repository_feed_attempts.py` exercises reopen, strict retained records,
+native task/wake/closure races, original deadlines and late receipt retention.

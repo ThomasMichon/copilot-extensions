@@ -92,7 +92,7 @@ refuse it rather than interpreting partial acquisition as a complete manifest.
 Finish pending work before rollback or switching to hints, full reconciliation
 or a connector without paged support. An explicit caller-authorized
 `indexing.paged_crawl.discard_acquisition` repair may instead abandon only an
-**unapplied v2 or v4** acquisition. It requires the original actual connector,
+**unapplied v2, v4 or v5** acquisition. It requires the original actual connector,
 configuration scope, path database and exact observed payload; the owning
 journal compares those under its existing SQLite transaction before removing
 the row. Concurrent progress or promotion to a complete v1 manifest refuses
@@ -197,6 +197,35 @@ cursor. Ineligibility is **not** physical-deletion or complete-reconciliation
 authority. Synthetic transport controls qualify request construction, refusal,
 bindings and counts; live field/parser semantics and complete event/polling/
 repair coverage remain separate gates before adapter enablement.
+
+`sources.azure_devops_work_item.acquire_work_item` is a stateless helper for
+one previously qualified candidate and one positive int32 item revision.
+It rechecks the full current selection binding before body acquisition and
+afterwards, requires two matching fresh item bodies at that revision, and
+reuses the connector's renderer and acquisition counters. Empty configuration
+or bound negative membership returns `None`, never a tombstone. Unavailable
+responses, identity/revision changes, partial comments and exhausted budgets
+raise instead of returning a truncated entry or falling back to legacy discovery.
+
+The fixed ceiling is two eligibility checks, two body reads and four comment
+pages: 72 logical requests / 360 shared-client attempts with at most four retries
+per request. Larger retry configurations refuse before I/O. Comment requests use
+the documented `7.1-preview.4` API with `$top=100`, ascending order and deleted
+records included; deleted text is not rendered. Counts, unique item/comment
+identities and versions, stable total counts, bounded noncycling continuation
+tokens and terminal record coverage are validated. At most 400 comments and
+2 MiB of serialized decoded body/comment responses are accepted, with a separate
+2 MiB rendered-content cap. These checks occur **after** HTTP buffering and JSON
+decoding; they do not bound wire bytes, peak native memory, parsing time or
+provider-directed backoff. Cancellation is checked between logical requests.
+
+The result carries observed item/comment versions and selection evidence, not
+an atomic snapshot, polling checkpoint or complete discussion-change coverage.
+The [comments API](https://learn.microsoft.com/en-us/rest/api/azure/devops/wit/comments/get-comments?view=azure-devops-rest-7.1)
+documents pagination but no snapshot fence. Matching item reads cannot prove
+that comment edits/deletes did not race traversal. This helper therefore emits
+neither `SourceDelta` nor `AcquisitionPage` and is not wired into discovery;
+adapter composition and target-coverage qualification remain separate work.
 
 Azure DevOps retains operator-supplied WIQL and saved queries verbatim. Its
 work-item-only timestamp discovery first requests only `System.Id` and
@@ -1109,7 +1138,7 @@ using postponed concrete annotations rather than newer `typing` exports.
 Deploy receivers before producers, and enable hinted execution only with a
 qualified capable engine. The shared engine now advertises v1 execution and
 preflights one exact configured source, the actual connector's
-`discover_hints` callable capability, and its explicit
+selected hinted-discovery callable capability, and its explicit
 `hint_scope == (canonical_family, account_id)` before opening stores or embedding
 clients. Aliases, synthesized sources and unsupported connectors are refused;
 there is no source-only polling fallback. The same connector supplies recovery
@@ -1124,6 +1153,44 @@ exactly, including `None`: targeted events do not prove coverage of intervening
 poll changes. An unchanged or changed polling cursor is not inferred from event
 IDs. Existing unadvertised workers still park hinted tasks after rollback.
 External CLI providers do not yet support hinted acquisition.
+
+For bounded in-process work, a connector can instead expose
+`discover_hints_page(hints, last_commit, cursor, *, cancel_check=None)`.
+The actual callable must advertise both `change_hints_versions = (1,)` and
+`acquisition_page_versions = (1,)`. It returns `AcquisitionPage` units, preserving
+`last_commit` on **every** page. Units must bound nested item/comment work too;
+an unbounded document acquisition wrapped in a page is not this contract.
+Only a terminal cursor completes the claimed hints, never polling coverage.
+
+The collector selects negotiated hinted pages before the legacy single-delta
+callable. With no negotiated page capability, existing nonpaged hinted callers
+retain their original contract; once paged work is pending, losing that
+capability refuses rather than downgrading. The same `pending_crawls` owner uses
+an incomplete v5 envelope containing the immutable full hint union (including
+events, ref ranges and metadata revisions), refresh-retention policy, base
+checkpoint, opaque cursor and generation. Recovery scope still binds the
+effective connector/account. A changed binding refuses before requesting
+another unit. The existing 128-unit invocation and 65,536-byte cursor limits,
+CAS, family exclusion, cancellation and explicit-discard rules apply. Older
+readers reject incomplete v5 state; finish or explicitly discard it before
+rollback. Ordinary v2 pages, full v4 snapshots and nonpaged hints are unchanged.
+
+Terminal acquisition hands its completed manifest to the existing replay owner,
+preserving store-before-checkpoint ordering. For a connector already requiring poll refresh,
+candidate generations are retained atomically with terminal promotion in the
+current refresh owner. Partial hinted pages certify no refresh coverage,
+and completion does not clear candidates or advance the polling cursor.
+This shared seam does not enable any additional built-in connector.
+
+Hinted progress retains per-generation cursor digests, including across restart,
+so multi-step cycles refuse without replacing the last accepted unit. Terminal
+hinted work uses a ready v6 envelope retaining its immutable claim identity.
+After an embedding or state-publication failure, matching claimed hints replay
+that ready manifest without reacquiring remote units. Different claims and
+legacy nonpaged requests retain their acquisition behavior. Completion clears
+only the exact observed payload; ready v6 work is mandatory replay and never
+eligible for acquisition discard. Finish its replay before rollback to an older
+reader. This is retained ready work, not a ledger of every completed hint claim.
 
 Git implements ref-range hints with immutable full hexadecimal commit identities.
 It requires the exact configured source and an explicit nonsecret `hint_account`;

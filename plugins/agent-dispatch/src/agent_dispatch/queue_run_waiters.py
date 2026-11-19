@@ -17,6 +17,7 @@ from .queue_run_waiter_records import run_waiter_from_row, select_waiter_row
 from .queue_feed_preparation import (
     FeedWaiterAdmission, require_feed_preparation, require_feed_waiter_reconciliation,
 )
+from .queue_feed_attempts import require_feed_arm
 
 
 class QueueRunWaitersMixin(DelegatedWaiterBindingMixin):
@@ -75,7 +76,9 @@ class QueueRunWaitersMixin(DelegatedWaiterBindingMixin):
                     expected = {k: v for k, v in existing["delegation"].items() if k != "registration_id"}
                     if (expected != delegation or existing["command"] != command
                             or existing["owner"] != worker_id or existing["host"] != host
-                            or existing["resume_worktree"] != resume_worktree):
+                            or existing["resume_worktree"] != resume_worktree
+                            or (_feed_admission is not None
+                                and existing["feed_admission"] != _feed_admission.record())):
                         raise TaskError("delegated preparation identity conflict")
                     conn.execute("COMMIT")
                     return existing
@@ -153,8 +156,11 @@ class QueueRunWaitersMixin(DelegatedWaiterBindingMixin):
                 note=f"run waiter prepared (generation {generation})",
             )
             conn.execute(
-                "UPDATE run_waiters SET kind = ?, delegation_json = ? WHERE task_id = ? AND generation = ?",
-                (kind, json.dumps(delegation) if delegation is not None else None, task_id, generation),
+                "UPDATE run_waiters SET kind = ?, delegation_json = ?, feed_admission_json = ?"
+                " WHERE task_id = ? AND generation = ?",
+                (kind, json.dumps(delegation) if delegation is not None else None,
+                 json.dumps(_feed_admission.record()) if _feed_admission is not None else None,
+                 task_id, generation),
             )
             self._store_replay_intent(conn, delegation, task_id, generation)
             conn.execute("COMMIT")
@@ -170,6 +176,7 @@ class QueueRunWaitersMixin(DelegatedWaiterBindingMixin):
             "resume_worktree": resume_worktree,
             "command": list(command),
             "state": "preparing",
+            "feed_admission": _feed_admission.record() if _feed_admission is not None else None,
             **({"kind": kind, "delegation": delegation} if kind == "delegated" else {}),
         }
 
@@ -199,6 +206,7 @@ class QueueRunWaitersMixin(DelegatedWaiterBindingMixin):
             if not self._run_waiter_matches_task(waiter, task):
                 conn.execute("COMMIT")
                 return None
+            require_feed_arm(conn, task, waiter, delegation, now=self._now(now))
             conn.execute(
                 "UPDATE run_waiters SET state = 'active', pid = ?, host = ?, start_token = ?,"
                 " updated_at = ? WHERE id = ? AND state = 'preparing'",

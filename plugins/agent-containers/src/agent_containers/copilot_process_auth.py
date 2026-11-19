@@ -5,16 +5,21 @@ from __future__ import annotations
 import json
 import posixpath
 import shlex
+from collections.abc import Callable, Mapping
+from typing import TYPE_CHECKING
 
 from . import ssh_transport as transport
 from .copilot_auth_policy import LEGACY, trusted_auth_mode
 from .launch_storage import directory_guard, executable_directory
 from .resolver import resolve_copilot_cli_token_or_raise
 
+if TYPE_CHECKING:
+    from .config import ContainersConfig, FleetConfig
+
 TOKEN_VARIABLE = "COPILOT_GITHUB_TOKEN"
 
 
-def without_inference_token(environment: dict[str, str]) -> dict[str, str]:
+def without_inference_token(environment: Mapping[str, str]) -> dict[str, str]:
     return {key: value for key, value in environment.items() if key != TOKEN_VARIABLE}
 
 
@@ -22,7 +27,12 @@ def launcher_directory(auth_env: str) -> str:
     return executable_directory(auth_env)
 
 
-def stage_env(container, user, values, writer, *, require_owner=False, config=None, fleet=None):
+def stage_env(
+    container: str, user: str, values: Mapping[str, str],
+    writer: Callable[[str, str, dict[str, str]], str | None], *,
+    require_owner: bool = False, config: ContainersConfig | None = None,
+    fleet: FleetConfig | None = None,
+) -> str | None:
     preserve_legacy = (
         config is not None
         and getattr(fleet, "security_profile", "trusted") != "restricted"
@@ -91,7 +101,8 @@ def created_child(result: object) -> bool:
         or result["created"] == result["resumed"]
     ):
         raise RuntimeError("Copilot launch returned no explicit create-or-resume receipt")
-    return result["created"]
+    created: bool = result["created"]
+    return created
 
 
 def attached_created_child(container: str, user: str, auth_env: str) -> bool:
@@ -129,7 +140,8 @@ def wait_for_consumption(
 
 
 def prepare_launch(
-    config, fleet, container: str, user: str, *, cleanup_owner: str | None = None,
+    config: ContainersConfig, fleet: FleetConfig | None, container: str, user: str, *,
+    cleanup_owner: str | None = None,
 ) -> str | None:
     """Re-read the existing account source immediately before a launch."""
     mode = trusted_auth_mode(config, fleet)
@@ -204,7 +216,10 @@ def prepare_launch(
     return auth_env
 
 
-def prepare_acp_launch(config, fleet, container, user, command, remote_env):
+def prepare_acp_launch(
+    config: ContainersConfig, fleet: FleetConfig, container: str, user: str,
+    command: str, remote_env: str | None,
+) -> tuple[str | None, str]:
     auth_env = None
     try:
         auth_env = prepare_launch(config, fleet, container, user, cleanup_owner=remote_env)

@@ -32,7 +32,8 @@ function consumerValid(value, sid, compatible = false) {
 }
 
 function receiptValid(value, sid) {
-  return value?.session_id === sid && positive(value.message_id)
+  return value != null && typeof value === "object"
+    && value.session_id === sid && positive(value.message_id)
     && nonblank(value.handoff_id) && consumerValid(value.consumer, sid, true)
     && STAGES.has(value.stage) && time(value.admitted_at)
     && nullableTime(value.handoff_started_at) && nullableTime(value.sdk_accepted_at)
@@ -47,18 +48,29 @@ function retainedHeader(receipt) {
     + `retained-handoff="${escAttr(receipt.handoff_id)}" `;
 }
 
-export function retainedConsumption(event, receipt, sourceAllowed = (source) => source === "agent-bridge") {
-  if (!receiptValid(receipt, receipt?.session_id) || receipt.handoff_started_at === null
-      || event?.type !== "user.message" || isSubAgentEvent(event)
-      || (event.sessionId !== undefined && event.sessionId !== receipt.session_id)
-      || !sourceAllowed(event.data?.source)) return false;
-  const content = event.data.transformedContent ?? event.data.content;
-  if (typeof content !== "string" || !content.startsWith(retainedHeader(receipt))) return false;
+const RUNTIME_DATETIME_PREFIX = /^<current_datetime>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})<\/current_datetime>\r?\n\r?\n/;
+
+export function retainedConsumptionReason(event, receipt, sourceAllowed = (source) => source === "agent-bridge") {
+  if (!receiptValid(receipt, receipt?.session_id)) return "invalid_receipt";
+  if (receipt.handoff_started_at === null) return "handoff_not_started";
+  if (event?.type !== "user.message" || isSubAgentEvent(event)) return "not_root_input";
+  if (event.sessionId !== undefined && event.sessionId !== receipt.session_id) return "session_mismatch";
+  if (!sourceAllowed(event.data?.source)) return "source_mismatch";
+  let content = event.data.transformedContent ?? event.data.content;
+  if (typeof content !== "string") return "content_unavailable";
+  const prefix = RUNTIME_DATETIME_PREFIX.exec(content);
+  if (prefix) content = content.slice(prefix[0].length);
+  if (!content.startsWith(retainedHeader(receipt))) return "header_mismatch";
   const end = content.indexOf(">");
-  if (end < 0) return false;
+  if (end < 0) return "header_unterminated";
   const header = content.slice(0, end);
   const ids = [...header.matchAll(/(?:^| )msg-id="(\d+)"(?= |$)/g)];
-  return ids.length === 1 && Number(ids[0][1]) === receipt.message_id;
+  return ids.length === 1 && Number(ids[0][1]) === receipt.message_id
+    ? "matched" : "message_id_mismatch";
+}
+
+export function retainedConsumption(event, receipt, sourceAllowed) {
+  return retainedConsumptionReason(event, receipt, sourceAllowed) === "matched";
 }
 
 export function createRetainedInbox({
@@ -69,6 +81,7 @@ export function createRetainedInbox({
   onPending = () => {},
   onSubmitted = () => {},
   onConsumed = () => {},
+  onObservation = () => {},
   receivingApi,
   validateSendContext,
   replayHistory,
@@ -106,6 +119,15 @@ export function createRetainedInbox({
     contract: CONTRACT, ...selector, consumer: receipt.consumer, message_id: receipt.message_id,
     handoff_id: receipt.handoff_id, outcome,
   });
+  const observe = (stage, receipt, fields = {}) => {
+    try {
+      onObservation({
+        stage, source: "retained-sdk-recovery", session_id: receipt.session_id,
+        message_id: receipt.message_id, handoff_id: receipt.handoff_id,
+        consumer_incarnation: receipt.consumer.incarnation, ...fields,
+      });
+    } catch { /* diagnostics cannot change delivery or receipt settlement */ }
+  };
 
   // A timeout does not cancel a native effect. Keep the unresolved promise
   // fenced, rather than starting another native call every polling tick.
@@ -211,13 +233,25 @@ export function createRetainedInbox({
     let held = response.next_after !== null;
     for (const receipt of receipts) {
       if (receipt.stage === "consumed" || receipt.stage === "rejected") continue;
-      if (events.some((event) => retainedConsumption(event, receipt, sourceAllowed))) {
+      const failures = {};
+      let matched = false;
+      for (const event of events) {
+        const reason = retainedConsumptionReason(event, receipt, sourceAllowed);
+        if (reason === "matched") { matched = true; break; }
+        failures[reason] = (failures[reason] || 0) + 1;
+      }
+      if (matched) {
         onConsumed(sid, receipt.message_id);
         await report(receipt, "consumed");
-      } else if (receipt.stage !== "offered"
-          || (!compatible && !sameConsumer(receipt.consumer, context.consumer))) {
-        if (!compatible) held = true;
-        note(`original handoff ${receipt.message_id}/${receipt.handoff_id} remains ${receipt.stage}; no resend`);
+      } else {
+        if (receipt.handoff_started_at !== null && attempts.length) {
+          observe("match_failed", receipt, { event_count: events.length, failures });
+        }
+        if (receipt.stage !== "offered"
+            || (!compatible && !sameConsumer(receipt.consumer, context.consumer))) {
+          if (!compatible) held = true;
+          note(`original handoff ${receipt.message_id}/${receipt.handoff_id} remains ${receipt.stage}; no resend`);
+        }
       }
     }
     after = response.next_after ?? 0;
@@ -434,6 +468,9 @@ export function createRetainedInbox({
   }
 
   return {
+    consumerIncarnation(sid) {
+      return current(sid) && context?.sid === sid ? context.consumer.incarnation : null;
+    },
     async tick(sid, { allowSend = true } = {}) {
       if (stopped || busy || !nonblank(sid) || now() < retryAt) return;
       busy = true;
