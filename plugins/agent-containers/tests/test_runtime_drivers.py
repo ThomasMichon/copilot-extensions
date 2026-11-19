@@ -697,9 +697,22 @@ def test_exec_admits_driver_member_through_portable_policy_without_guest_worktre
         launch = json.loads(seen["argv"][seen["argv"].index("--request") + 1])["argv"][2]
         # No guest guard, but a relative custom command still runs in the workspace.
         assert "agent-policy" not in launch
-        assert f"cd -- {workspace} && ./start-agent --acp" in launch
+        assert f"cd -- {workspace} || return $?\n  ./start-agent --acp" in launch
     else:
         assert "argv" not in seen
+
+
+@posix_only
+def test_portable_exec_launch_stops_compound_command_when_workspace_is_missing(
+    tmp_path: Path,
+) -> None:
+    marker = tmp_path / "started"
+    script = hosting_policy.exec_launch(
+        f"true; touch {marker}", str(tmp_path / "missing"), portable=True,
+    )
+    done = subprocess.run(["bash", "-c", script], capture_output=True, timeout=30)
+    assert done.returncode != 0
+    assert not marker.exists()
 
 
 def test_copilot_verb_requires_ssh_capability(

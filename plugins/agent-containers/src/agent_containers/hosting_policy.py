@@ -60,7 +60,13 @@ def exec_launch(command: str, workspace: str, *, portable: bool) -> str:
         return guarded_launch(command, workspace)
     if not isinstance(workspace, str) or not workspace.startswith("/") or "\0" in workspace:
         raise RuntimeError("Repository hosting admission requires an absolute guest checkout")
-    return f"cd -- {shlex.quote(workspace)} && {command}"
+    # A function, like guarded_launch, so a failed cd stops even a compound command.
+    return (
+        "repository_policy_launch() {\n"
+        f"  cd -- {shlex.quote(workspace)} || return $?\n"
+        f'  {command} "$@"\n'
+        "}\nrepository_policy_launch"
+    )
 
 
 def require_exec_hosting(target: LiveExecTarget) -> bool:
