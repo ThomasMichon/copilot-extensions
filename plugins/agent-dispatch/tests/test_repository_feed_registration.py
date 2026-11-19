@@ -132,21 +132,25 @@ def test_lost_reply_uses_original_inspection_without_creation_replay(
     assert not queue.list_run_waiter_wakes(task_id)
 
 
-@pytest.mark.parametrize("feature", ["service", "native", "registration"])
+@pytest.mark.parametrize("feature", ["service", "native", "registration", "receipt"])
 def test_unsupported_recovery_refuses_before_suspension(tmp_path: Path, feature: str) -> None:
     queue, task_id, spec, client, registrar = setup(tmp_path)
     if feature == "service":
         client.capabilities.pop("request_recovery")
     elif feature == "native":
         queue.repository_feed_attempt_protocol = "unsupported"
-    else:
+    elif feature == "registration":
         queue.repository_feed_registration_protocol = "unsupported"
+    else:
+        queue.repository_feed_receipt_protocol = "unsupported"
     with pytest.raises((ValueError, TaskError), match="unsupported"):
         asyncio.run(preparation.prepare(registrar, task_id, spec))
     task = queue.get(task_id)
     assert task is not None and task.status == "started"
     assert queue.find_delegated_preparation(task_id, spec["preparation_id"]) is None
     assert "subscribe" not in client.calls and not queue.list_run_waiter_wakes(task_id)
+    if feature == "receipt":
+        assert client.calls == []
 
 
 def test_preparation_only_retains_its_broader_storage_lifetime(tmp_path: Path) -> None:
@@ -235,6 +239,7 @@ def test_changed_task_retains_late_receipt_without_native_activation(tmp_path: P
     assert result["waiter_state"] == "preparing"
     waiter = queue.find_delegated_preparation(task_id, spec["preparation_id"])
     assert waiter is not None and waiter["replay_registration_id"] and waiter["state"] == "preparing"
+    assert waiter["replay_registration_expires_at"] == math.floor(spec["feed"]["deadline_at"])
     assert not waiter["replay_settled"] and not queue.list_run_waiter_wakes(task_id)
 
 

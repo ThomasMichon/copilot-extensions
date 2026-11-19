@@ -88,3 +88,8 @@ def require_feed_arm(
         or waiter["replay_registration_id"] != delegation["registration_id"]
     ):
         raise TaskError("repository-feed arming requires its retained attempt and receipt")
+    expiry = waiter.get("replay_registration_expires_at")
+    if type(expiry) is not int:
+        raise TaskError("original repository-feed receipt expiry unavailable")
+    if now >= expiry:
+        raise TaskError("original repository-feed receipt expired")

@@ -43,7 +43,8 @@ content alone therefore does not certify deletion, and omitting earlier IDs is
 not a way to prove their vectors are absent.
 
 The helper changes no default reader or writer and enables no component receiver
-or v2 executor. Durable ordering/tombstones, backup reconciliation, exact pending
+or v2 executor. The opt-in [native component ledger](component-ledger.md) can
+retain ordering/tombstone observations, but backup reconciliation, exact pending
 parent ownership, prepare/revalidate/publish sequencing and component read
 isolation remain separate application obligations.
 

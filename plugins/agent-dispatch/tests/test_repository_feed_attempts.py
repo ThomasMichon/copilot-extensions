@@ -31,6 +31,16 @@ def prepared(tmp_path: Path) -> tuple[TaskQueue, str, dict[str, Any], dict[str, 
     return queue, task_id, spec, waiter
 
 
+def record_receipt(
+    queue: TaskQueue, waiter: dict[str, Any], spec: dict[str, Any],
+    registration_id: str = "receipt",
+) -> dict[str, Any]:
+    return queue.replay_waiter_progress(
+        waiter, registration_id=registration_id,
+        registration_expires_at=int(spec["feed"]["deadline_at"]),
+    )
+
+
 def test_original_basis_survives_reopen_and_attempt_is_not_replayed(tmp_path: Path) -> None:
     queue, task_id, spec, waiter = prepared(tmp_path)
     task = queue.get(task_id)
@@ -157,7 +167,7 @@ def test_original_deadline_remains_effective(
     queue, task_id, spec, waiter = prepared(tmp_path)
     if stage == "arm":
         queue.replay_waiter_progress(waiter, attempt=True)
-        queue.replay_waiter_progress(waiter, registration_id="receipt")
+        record_receipt(queue, waiter, spec)
     monkeypatch.setattr("time.time", lambda: spec["feed"]["deadline_at"])
     with pytest.raises(TaskError, match="deadline elapsed"):
         if stage == "attempt":
@@ -177,7 +187,7 @@ def test_changed_task_retains_unknown_result_but_cannot_arm_it(tmp_path: Path) -
     queue.replay_waiter_progress(waiter, attempt=True)
     with queue._connect() as conn:
         conn.execute("UPDATE tasks SET awaiting_steer=1 WHERE id=?", (task_id,))
-    recovered = queue.replay_waiter_progress(waiter, registration_id="original-receipt")
+    recovered = record_receipt(queue, waiter, spec, "original-receipt")
     with pytest.raises(TaskError, match="task changed"):
         queue.arm_run_waiter(
             task_id, generation=waiter["generation"], kind="delegated",
@@ -193,7 +203,7 @@ def test_changed_task_retains_unknown_result_but_cannot_arm_it(tmp_path: Path) -
 def test_admitted_receipt_arms_without_another_request_or_wake(tmp_path: Path) -> None:
     queue, task_id, spec, waiter = prepared(tmp_path)
     queue.replay_waiter_progress(waiter, attempt=True)
-    queue.replay_waiter_progress(waiter, registration_id="original-receipt")
+    record_receipt(queue, waiter, spec, "original-receipt")
     armed = queue.arm_run_waiter(
         task_id, generation=waiter["generation"], kind="delegated",
         delegation={**spec, "registration_id": "original-receipt"},
@@ -209,7 +219,7 @@ def test_feed_arm_rechecks_admission_before_commit(
 ) -> None:
     queue, task_id, spec, waiter = prepared(tmp_path)
     queue.replay_waiter_progress(waiter, attempt=True)
-    queue.replay_waiter_progress(waiter, registration_id="receipt")
+    record_receipt(queue, waiter, spec)
     task_before = queue.get(task_id)
     waiter_before = queue.find_delegated_preparation(task_id, spec["preparation_id"])
     clock = spec["feed"]["issued_at"]
@@ -246,7 +256,7 @@ def test_invalid_clock_cannot_attempt_or_arm_feed(
     queue, task_id, spec, waiter = prepared(tmp_path)
     if stage == "arm":
         queue.replay_waiter_progress(waiter, attempt=True)
-        queue.replay_waiter_progress(waiter, registration_id="receipt")
+        record_receipt(queue, waiter, spec)
     before = queue.find_delegated_preparation(task_id, spec["preparation_id"])
     monkeypatch.setattr("time.time", lambda: clock)
     with pytest.raises(TaskError, match="clock invalid"):
@@ -306,7 +316,7 @@ def test_native_resume_requests_fence_feed_even_without_an_ordinary_wake(
     assert waiter is not None
     if stage == "arm":
         queue.replay_waiter_progress(waiter, attempt=True)
-        queue.replay_waiter_progress(waiter, registration_id="receipt")
+        record_receipt(queue, waiter, spec)
     if kind == "headless-steer":
         queue.submit_steer(task.id, fields={"decision": "continue"}, sender="operator",
                            wake_requested=True, now=103)

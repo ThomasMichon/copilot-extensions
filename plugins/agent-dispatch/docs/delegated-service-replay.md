@@ -419,6 +419,28 @@ A changed task can therefore retain a cancellation/reconciliation obligation
 without becoming active or waking. These library guards do not implement
 subscription transmission, cancellation, expiry completion or ACK.
 
+The optional registrar additionally requires the native in-process
+`repository_feed_receipt_protocol` equal to
+`agent-dispatch.repository-feed-receipt/v1` before preparation or service IO.
+The existing waiter row's nullable `replay_registration_expires_at` retains
+the actual validated subscription expiry, not a copy of the native deadline.
+Recording it uses the same progress transaction as the original registration
+ID and preserves late results after task admission changes. The value is
+immutable for that receipt; conflicts refuse without overwriting prior custody.
+No separate receipt table or request journal is added.
+
+Feed arming requires known receipt expiry and checks it both under the original
+write lock and before commit. The provider's shorter expiry, including its
+integer cutoff, cannot be extended by a fractional native deadline.
+Historical rows retain null expiry across schema adoption and remain readable,
+but cannot arm until their original receipt is recovered through the selected
+owner. A registrar paired with a native owner lacking the receipt capability
+refuses before suspension; no package-version guess or registration replay
+supplies missing support.
+Callback and watch-replay rows keep their existing null metadata and behavior.
+This does not arm the registrar or qualify historical runtime transition,
+remote settlement, wake delivery, ACK or consumer activation.
+
 Existing callback and watch-replay rows retain null admission and unchanged
 behavior. Historical feed rows without an admission record remain readable
 and outside PID recovery, but cannot attempt or arm through the new guarded
