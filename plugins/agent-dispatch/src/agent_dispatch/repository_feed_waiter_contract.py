@@ -75,6 +75,12 @@ def _validate_binding(binding: object, repo: str) -> None:
     endpoint.port
 
 
+def validate_feed_binding(binding: object, *, repo: str) -> dict[str, Any]:
+    """Detach trusted local selection before asynchronous preparation."""
+    _validate_binding(binding, repo)
+    return cast(dict[str, Any], json.loads(json.dumps(binding, allow_nan=False)))
+
+
 def validate_feed_delegation(value: object, *, armed: bool = False) -> dict[str, Any]:
     """Validate detached storage intent without importing optional PR packages."""
     fields = {

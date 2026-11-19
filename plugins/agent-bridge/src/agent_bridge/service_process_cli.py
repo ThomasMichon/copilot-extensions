@@ -504,17 +504,25 @@ def _spawn_watchdog_replacement(
     _core()._spawn_detached_argv(argv)
 
 
-def _watchdog_dead(reason: str, *, active_port: int | None = None) -> None:
-    """Restart the Windows frontend promptly, then hard-exit the wedged one."""
+def _watchdog_dead(reason: str, *, active_port: int | None = None) -> bool:
+    """Restart the Windows frontend promptly, then hard-exit the wedged one.
+
+    When no durable replacement can be scheduled (for example a WMI launch
+    timing out on a loaded host), exiting would leave no Bridge at all, while
+    this process may merely be slow. Keep it alive and return False so the
+    watchdog keeps supervising and retries the handoff after a longer wait.
+    """
     from .watchdog import _force_exit, _record_event
 
     _record_event("replacement-requested", reason)
     try:
         _core()._spawn_watchdog_replacement(active_port=active_port)
-        _record_event("replacement-scheduled", reason)
     except Exception as exc:
-        _record_event("replacement-failed", type(exc).__name__)
+        _record_event("replacement-failed", f"{type(exc).__name__}; continuing to serve")
+        return False
+    _record_event("replacement-scheduled", reason)
     _force_exit(reason)
+    return True
 
 
 def _acquire_ensure_lock() -> int | None:

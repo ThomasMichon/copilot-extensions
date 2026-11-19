@@ -160,8 +160,12 @@ Persistent Bridge service starts, command-triggered ensures and watchdog
 replacements require an independently owned daemon lifetime. If the canonical
 Windows durable launch refuses, they propagate that failure rather than retrying
 inside the caller's cleanup Job. A failed watchdog launch records
-`replacement-failed`, not `replacement-scheduled`; the wedged frontend still
-exits to release its singleton lock. Direct starts and passive generations
+`replacement-failed`, not `replacement-scheduled`, and the frontend keeps
+serving: it may be merely slow, so the watchdog retries after a doubling wait
+(capped at 300s) and resets that wait and its decline count after any healthy
+probe. After four consecutive declines with no healthy probe, the frontend
+hard-exits to release its singleton lock; nothing then serves until a later
+ensure restarts it. Direct starts and passive generations
 retain the same strict policy. Contained test mode remains deliberately
 contained and does not qualify production caller-exit survival.
 
