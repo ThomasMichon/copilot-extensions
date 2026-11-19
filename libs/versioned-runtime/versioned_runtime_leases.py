@@ -333,6 +333,28 @@ def _windows_account_full_control(kind: int, flags: int, mask: int, sid: str, ac
     return kind == 0 and not flags & 8 and mask & 0x1F01FF == 0x1F01FF and sid == account
 
 
+if os.name == "nt":
+    import ctypes as _ctypes
+    from ctypes import wintypes as _wintypes
+
+    # Module scope: ctypes caches pointer/array types per class forever, so
+    # per-call classes leaked memory in long-lived owners polling this check.
+    class _OwnedSidAttributes(_ctypes.Structure):
+        _fields_ = [("sid", _wintypes.LPVOID), ("attributes", _wintypes.DWORD)]
+
+    class _OwnedGroups(_ctypes.Structure):
+        _fields_ = [("count", _wintypes.DWORD), ("entries", _OwnedSidAttributes * 1)]
+
+    class _OwnedAclSize(_ctypes.Structure):
+        _fields_ = [("count", _wintypes.DWORD), ("used", _wintypes.DWORD),
+                    ("free", _wintypes.DWORD)]
+
+    class _OwnedAce(_ctypes.Structure):
+        _fields_ = [("kind", _ctypes.c_ubyte), ("flags", _ctypes.c_ubyte),
+                    ("size", _wintypes.WORD), ("mask", _wintypes.DWORD),
+                    ("sid", _wintypes.DWORD)]
+
+
 def windows_owned_file(fd: int, *, require_user_access: bool = False) -> bool:
     """Admit the current user/enabled owner groups and a non-public write DACL."""
     import ctypes
@@ -360,19 +382,8 @@ def windows_owned_file(fd: int, *, require_user_access: bool = False) -> bool:
     security.GetAclInformation.restype = wintypes.BOOL
     security.GetAce.argtypes = (wintypes.LPVOID, wintypes.DWORD, ctypes.POINTER(wintypes.LPVOID))
     security.GetAce.restype = wintypes.BOOL
-
-    class SidAttributes(ctypes.Structure):
-        _fields_ = [("sid", wintypes.LPVOID), ("attributes", wintypes.DWORD)]
-
-    class Groups(ctypes.Structure):
-        _fields_ = [("count", wintypes.DWORD), ("entries", SidAttributes * 1)]
-
-    class AclSize(ctypes.Structure):
-        _fields_ = [("count", wintypes.DWORD), ("used", wintypes.DWORD), ("free", wintypes.DWORD)]
-
-    class Ace(ctypes.Structure):
-        _fields_ = [("kind", ctypes.c_ubyte), ("flags", ctypes.c_ubyte),
-                    ("size", wintypes.WORD), ("mask", wintypes.DWORD), ("sid", wintypes.DWORD)]
+    SidAttributes, Groups, AclSize, Ace = (
+        _OwnedSidAttributes, _OwnedGroups, _OwnedAclSize, _OwnedAce)
 
     def sid_string(sid: int) -> str:
         value = wintypes.LPWSTR()
