@@ -215,12 +215,16 @@ def test_windows_pid_guard_reads_real_process_arguments(
 ) -> None:
     script = tmp_path / name
     script.write_text("import time; time.sleep(30)\n", encoding="utf-8")
+    if sys.platform == "win32":
+        creationflags = subprocess.CREATE_NO_WINDOW
+    else:
+        creationflags = 0
     process = subprocess.Popen(
         [sys.executable, str(script), command],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
-        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+        creationflags=creationflags,
     )
     try:
         assert process.poll() is None
