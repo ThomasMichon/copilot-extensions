@@ -90,6 +90,34 @@ session's input, and native hook/SDK acknowledgement alone creates no event.
 Sub-agent events likewise cannot change the parent session's registration or
 native binding; only root events can adopt a resumed conversation ID.
 
+## Consumption matching and diagnostics
+
+The original-receipt matcher accepts a root `user.message` from an admitted
+delivery source only when its session, consumer incarnation, handoff and message
+ID agree. It uses transformed input when present. One bounded runtime
+`current_datetime` ISO-timestamp preamble may precede the exact opening message
+header; arbitrary prefixes, quoted or nested headers and repeated preambles do
+not match. Matching durable native history records mechanical input observation,
+not model understanding, an answer or completion. It never authorizes another
+SDK send.
+
+The existing optional `agent_bridge.telemetry` sink receives `inbox_delivery`
+metadata events. Backend `admitted`, `handoff_started`, `sdk_accepted`, `consumed`
+and `unknown` observations run after their corresponding database operation
+commits. A fresh admission has no invented consumer or handoff identity.
+Available original message, handoff, native-session and consumer-incarnation
+identities correlate later stages; `observed_at` is the telemetry observation
+time, not a new native-event timestamp or delivery receipt.
+
+The extension uses its existing bounded represented-event buffer and flusher
+for `match_failed` reason counts and `hook_notice` observations. The latter names
+`pending-input-set-v1`, its count, incomplete flag and retained/legacy source;
+this is the hook's derived set, not an authoritative native SDK queue count.
+Reason codes and scalar fields are allow-listed. Prompt, response, event body,
+tool content, error text and filesystem paths are excluded. Diagnostic ingress
+never changes receipts or status projections. Sink absence is a no-op, failures
+remain best-effort, and no new endpoint, poller, service or replay path is added.
+
 ## Prerequisites and unsupported cases
 
 The current consumer requires HTTP protocol **50** or newer and the independently

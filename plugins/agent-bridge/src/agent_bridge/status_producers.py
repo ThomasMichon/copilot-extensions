@@ -30,8 +30,18 @@ def source_key(session_id: str, identity: str) -> str:
 
 
 def represented(db: Database, session_id: str, events: list[dict[str, Any]]) -> None:
+    from . import delivery_telemetry
     from .live_representation import translate_sdk_event
     for event in events:
+        if event.get("type") == "bridge.delivery_observation":
+            diagnostic = event.get("data")
+            if (
+                isinstance(diagnostic, dict) and not event.get("agentId")
+                and not diagnostic.get("agentId") and not diagnostic.get("parentToolCallId")
+                and not is_nested_event_data(diagnostic)
+            ):
+                delivery_telemetry.represented(session_id, diagnostic)
+            continue
         # Native identities survive redelivery and daemon restart. Missing
         # identity cannot safely deduplicate a historical transition.
         identity = event.get("id")
