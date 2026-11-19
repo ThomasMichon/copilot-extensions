@@ -494,3 +494,36 @@ It covers reopen, lost committed replies, absent requests without creation
 replay, unsupported selection before suspension, changed-task late receipts,
 foreign intent, original cutoff, unknown baseline, cancellation and expiry.
 No case starts a production consumer or asserts a task wake/ACK occurred.
+
+### Original native deadline recovery
+
+The executing queue exposes `repository_feed_expiry_protocol` equal to
+`agent-dispatch.repository-feed-expiry/v1` for the optional in-process
+`expire_repository_feed_waiter(waiter)` operation. It is not a timer, callback
+event, factory selection or service request. The embedding must retain its
+current active-owner/drain checkpoint and existing bounded cadence.
+
+At the original retained deadline, this owner can retire a preparing or active
+feed waiter and enqueue its timeout notification through the existing native
+wake table in one SQLite transaction. It rechecks original task/admission,
+recipe/dedup association, owner/session/generation/steering, holds/forms,
+execution/relationship protection, native resume requests and existing
+wakes/successors. Invalid clocks or a deadline that has not elapsed refuse.
+A different native transition's wake is not replaced.
+
+Concurrent calls, reopen and a lost committed result return the original
+timeout wake instead of adding another. Interrupted pre-commit work rolls back
+both retirement and outbox insertion. The native task stays suspended under
+its existing owner; ordinary wake delivery and its independent admission remain
+with their existing owner. This operation does not deliver a wake itself.
+
+`event_id` stays null: repository subscription expiry is not a watch/v2 timeout
+event. Original attempted/registration metadata remains intact and
+`replay_settled` remains false. Remote cancellation, original-request inspection
+and delivery settlement remain separate; this timeout cannot authorize a
+service ACK or forget a possibly accepted registration.
+
+`test_repository_feed_expiry.py` covers actual SQLite preparation/active states,
+original-deadline refusal, hold/form/owner/instruction races, an operator wake,
+pre-commit rollback, lost-result reopening and concurrent one-wake publication.
+No default recovery loop, callback protocol or consumer is activated.

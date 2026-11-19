@@ -867,3 +867,29 @@ introduced. Preserve its applicable current OPEN-parent/full-readback condition
 and independent publisher/planning/resource custodians. All ten technical
 receiving rows remain unchecked; the source trackers stay OPEN through this
 proposal and any later disposition is separate.
+
+## Accepted finite reaper and publication receiving - 2026-11-19 UTC
+
+#13402 actually merged the complete domain Plan, local and actual global
+Validation, Coordination, dated Journal and both intake routes after normal
+review explicitly covering whole domain acceptance, deduplication and ownership.
+Complete permitted current receiving/source/custody readback confirms delivery;
+ledger publication alone was not substituted. Prior conditional proposals
+remain unchanged history.
+
+| Source | Disposition | Canonical owner | Current tracker outcome |
+|---|---|---|---|
+| #13207 and its terminal-client/victim-argv refinement | routed | [Installation-Independent Sessions](../installation-independent-sessions/README.md), P13207/V13207/G13207 | Separate redundant-tracking retirement `NOT_PLANNED`, audited explanation 7003450544; all five technical rows remain unchecked, with original/refinement and actual custodians preserved |
+| #13208 bounded observation-ticket, degraded-publication and current-owner recovery contract | routed | [Authoritative Write-Through Daemon](../agent-worktrees-authoritative-daemon/README.md), P13208/V13208/G13208 | Separate redundant-tracking retirement `NOT_PLANNED`, audited explanation 7003459171; all five technical rows remain unchecked, with full current OPEN #6748 readback and existing recovery/planning/resource boundaries preserved |
+
+The separately recorded #13203 placement uses its existing Dispatch lifecycle
+Plan/local/global acceptance and ROOT Journal, not an invented administrative
+checkbox or additional intake gate. Its separate explanation 7003442792 retains
+all five unchecked Plan/link/local/global rows.
+
+Diagnostic proposals grant no process-kill authority; observation-ticket
+handling does not expire resource duties or claims. Existing #5579/#6748
+coordination, actual nonexpiry reservations, owner/effect agreements and
+independent technical acceptance remain. No implementation, native job,
+restart, ticket/resource release, custody transfer or new tracker effect
+follows from recording these completed administrative placements.

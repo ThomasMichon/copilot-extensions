@@ -12,6 +12,9 @@ from pathlib import Path
 from typing import Any, Protocol, cast
 
 from agent_index.indexing.change_hints import ChangeHints
+from agent_index.indexing.component_manifest import (
+    ComponentVersion, require_unordered_application, validate_components,
+)
 from agent_index.indexing.manifest import CrawlManifest, CrawlStats, PollRefresh
 from agent_index.indexing.poll_refresh import PollRefreshJournal, validate_refresh
 from agent_index.indexing.path_index import PathIndex
@@ -160,10 +163,13 @@ class PendingCrawls(PollRefreshJournal):
     ) -> None:
         """Publish acquisition progress under the same family exclusion and journal key."""
         data = json.loads(payload)
-        completed = (
-            self.decode_manifest(data["manifest"], source)
-            if isinstance(data, dict) and data.get("version") in (3, 6, 7) else None
-        )
+        completed = None
+        if isinstance(data, dict) and data.get("version") == 8:
+            decoded = self.decode_pending(payload, source)
+            assert decoded is not None
+            completed = decoded[0]
+        elif isinstance(data, dict) and data.get("version") in (3, 6, 7):
+            completed = self.decode_manifest(data["manifest"], source)
         with closing(self._paths._connect()) as conn, conn:
             conn.execute("BEGIN IMMEDIATE")
             self._assert_family_available(conn, source, family)
@@ -203,6 +209,10 @@ class PendingCrawls(PollRefreshJournal):
             from agent_index.indexing.acquisition_requirement import require_pending_pages
 
             require_pending_pages(data, full=requested_full, change_hints=change_hints)
+        if isinstance(data, dict) and type(data.get("version")) is int and data["version"] == 8:
+            if set(data) != {"version", "full", "manifest"} or data["full"] is not False:
+                raise ValueError("Invalid pending component envelope")
+            return cls.decode_manifest(data["manifest"], source, components=True), False
         if isinstance(data, dict) and type(data.get("version")) is int and data["version"] == 7:
             if set(data) != {"version", "full", "manifest", "page_protocol"} or (
                 type(data["full"]) is not bool
@@ -245,7 +255,7 @@ class PendingCrawls(PollRefreshJournal):
             if row is None or row["scope"] != scope or row["payload"] != expected_payload:
                 raise PendingCrawlConflict("Pending acquisition changed before explicit discard")
             data = json.loads(row["payload"])
-            if isinstance(data, dict) and data.get("version") in (6, 7):
+            if isinstance(data, dict) and data.get("version") in (6, 7, 8):
                 raise ValueError("Completed acquisition requires mandatory replay")
             progress = (
                 decode_snapshot(row["payload"], source)
@@ -257,8 +267,10 @@ class PendingCrawls(PollRefreshJournal):
             conn.execute("DELETE FROM pending_crawls WHERE source = ?", (source,))
 
     @classmethod
-    def decode_manifest(cls, raw: object, source: str) -> CrawlManifest:
-        fields = set(CrawlManifest.__dataclass_fields__)
+    def decode_manifest(cls, raw: object, source: str, *, components: bool = False) -> CrawlManifest:
+        fields = set(CrawlManifest.__dataclass_fields__) - {"component_versions"}
+        if components:
+            fields.add("component_versions")
         if not isinstance(raw, dict) or set(raw) not in (fields, fields - {"poll_refresh"}):
             raise ValueError("Invalid pending crawl manifest")
         if raw["source"] != source:
@@ -275,7 +287,13 @@ class PendingCrawls(PollRefreshJournal):
             commit=raw["commit"], stats=CrawlStats(**raw["stats"]),
             stored_family=raw["stored_family"], accounting_family=raw["accounting_family"],
             poll_refresh=PollRefresh(**raw["poll_refresh"]) if raw.get("poll_refresh") is not None else None,
+            component_versions=(
+                [ComponentVersion.from_dict(item) for item in raw["component_versions"]]
+                if components and isinstance(raw.get("component_versions"), list) else None
+            ),
         )
+        if components and manifest.component_versions is None:
+            raise ValueError("Pending component envelope requires component versions")
         cls._validate(manifest)
         return manifest
 
@@ -296,11 +314,16 @@ class PendingCrawls(PollRefreshJournal):
         SourceDelta(
             upserts=manifest.upserts, deletions=manifest.deletions, commit=manifest.commit,
         ).validate(manifest.accounting_family or manifest.stored_family or manifest.source)
+        validate_components(manifest)
 
     def save(self, manifest: CrawlManifest, *, scope: str, full: bool) -> None:
         self._validate(manifest)
+        if manifest.component_versions is not None and full:
+            raise ValueError("Component recovery cannot authorize full reconciliation")
         payload = json.dumps({
-            "version": 3 if manifest.poll_refresh is not None else 1,
+            "version": 8 if manifest.component_versions is not None else (
+                3 if manifest.poll_refresh is not None else 1
+            ),
             "full": full, "manifest": self.manifest_data(manifest),
         })
         with closing(self._paths._connect()) as conn, conn:
@@ -320,6 +343,8 @@ class PendingCrawls(PollRefreshJournal):
         data = asdict(manifest)
         if manifest.poll_refresh is None:
             data.pop("poll_refresh")
+        if manifest.component_versions is None:
+            data.pop("component_versions")
         return data
 
     def clear(
@@ -395,6 +420,7 @@ def recover_source(
     def publish(
         manifest: CrawlManifest, *, full: bool, clear: bool, expected_payload: str | None = None,
     ) -> tuple[int, int, int]:
+        require_unordered_application(manifest)
         application = prepare(manifest=manifest, full=full) if prepare is not None else apply
         with publication() if publication is not None else nullcontext():
             result = apply_and_save(manifest, full=full, application=application)

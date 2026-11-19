@@ -145,8 +145,9 @@ After the reviewed proposal, the operator admitted execution:
   Its [point-component contract proposal](azure-devops-point-targets.md)
   separates named target coverage from combined-document replacement (#13386);
   typed intake now retains parked v2 claims with v1-only dequeue isolation.
-  Representation, v2 execution, ordered application and read isolation remain
-  unimplemented.
+  A [retained component carrier](../../../plugins/agent-index/docs/architecture.md#component-recovery-carrier-application-unsupported)
+  preserves ordering inputs behind pre-application refusal. Representation,
+  v2 execution, ordered application and read isolation remain unimplemented.
 - [ ] Persist acquisition progress so retry/restart does not restart a
   corpus-wide listing.
 - [ ] Move authoritative full enumeration into separately budgeted, resumable

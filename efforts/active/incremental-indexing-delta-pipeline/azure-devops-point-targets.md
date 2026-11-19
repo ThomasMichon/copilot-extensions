@@ -5,7 +5,10 @@ and [canonical effort](README.md), Phase 3. Owner:
 [#13386](https://github.com/ThomasMichon/copilot-extensions/issues/13386).
 This is an **agent-recommended contract**. Shared typed-target intake now retains
 parked v2 claims with v1-only queue selection; component execution, application
-and read isolation remain unimplemented. The
+and read isolation remain unimplemented. The shared
+[component recovery carrier](../../../plugins/agent-index/docs/architecture.md#component-recovery-carrier-application-unsupported)
+retains per-mutation ordering inputs but refuses application; it supplies no
+applied-version or deletion proof. The
 [provider evidence matrix](azure-devops-acquisition.md#work-item-target-coverage-evidence)
 remains authoritative: named item revisions and comment versions have positive
 point-read evidence; a complete combined discussion does not.
