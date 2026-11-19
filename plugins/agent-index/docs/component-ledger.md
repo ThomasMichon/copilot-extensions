@@ -205,8 +205,11 @@ an in-process observation, not a durable certificate or a complete discussion.
 
 All legacy-shaped reads, including nested/lazy reads on the selected handles,
 continue to refuse. Search, clusters, HTTP, MCP, CLI and consumer presentation
-routes remain unsupported for point domains. Protocol-2 writer/bootstrap,
-v2 execution/producer and current-claim completion remain disabled; there is
+routes remain unsupported for point domains. The separate
+[cold schema bootstrap](source-aware-store.md#point-domain-binding-foundation)
+creates only configured content/model tables, not this ledger or its indices.
+Protocol-2 ledger/index bootstrap and application, v2 execution/producer and
+current-claim completion remain disabled; there is
 no migration or conversion of existing protocol-1 state.
 
 ### Sealed native publication suffix

@@ -1,0 +1,9 @@
+{
+  "comment": "Bootstrap cold point-domain content and model schemas with exact selection",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}
