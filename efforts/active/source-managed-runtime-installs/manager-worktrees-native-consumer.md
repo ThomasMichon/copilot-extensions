@@ -305,6 +305,17 @@ environment required restoration of its existing hash-locked packages after
 its bundled extension stubs were found missing. No dependency manifest changed.
 Fresh source review, required CI and hosted qualification remain open.
 
+Current-Dev reconciliation preserves the independent fresh-suite fixture,
+typed coordinator report, fresh prerequisites, native diagnostic artifacts and
+all four explicit modes. The coordinator's 58 contained controls pass after
+retaining Dev's missing-PowerShell exception contract. The source transport
+remains separate from fresh whole-suite qualification.
+On the reconciled source, the complete 28-case contained fixture selection
+passes in one run at unchanged limits. Strict typing of all seven physical
+Python files passes for Linux and Windows; required Python lint and the
+25-plugin documentation consistency check also pass. No hosted retry has been
+submitted.
+
 The independent cold-runner bootstrap repair is offered as a bootstrap-only
 handoff in [the source coordination comment](https://github.com/ThomasMichon/copilot-extensions/pull/12708#issuecomment-7005272566),
 pending the reporting author's acceptance. It carries no native or lifecycle

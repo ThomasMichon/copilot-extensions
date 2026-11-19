@@ -364,7 +364,7 @@ def test_process_observer_missing_executable_refuses_before_any_observer_work(
     monkeypatch.setattr(runner, "_run", lambda *args, **kwargs: pytest.fail(
         "Missing PowerShell must refuse before starting a process",
     ))
-    with pytest.raises(RuntimeError, match="requires pwsh"):
+    with pytest.raises(FileNotFoundError, match="requires PowerShell 7"):
         with runner._observe_processes(tmp_path, "normal", lambda *args: pytest.fail(
             "Missing PowerShell must refuse before constructing the observer",
         )):
@@ -379,7 +379,7 @@ def test_process_observer_report_is_retained_by_the_actual_native_job() -> None:
     upload = next(step for step in workflow["jobs"]["manager-suite-windows"]["steps"]
                   if step.get("uses") == "actions/upload-artifact@v4")
     paths = upload["with"]["path"].splitlines()
-    for mode in ("normal", "repair", "fresh"):
+    for mode in ("normal", "repair", "fresh", "source"):
         report = Path(".v") / f"{mode}-process-trace.json"
         assert any(report.match(pattern.strip()) for pattern in paths), str(report)
 
