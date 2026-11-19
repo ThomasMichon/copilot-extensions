@@ -7,8 +7,6 @@ that ensures only one eligible supervisor invokes the command.
 
 from __future__ import annotations
 
-from agent_procutil.daemon_instances import daemon_entrypoint
-
 import _thread
 import contextlib
 import json
@@ -20,9 +18,16 @@ import threading
 import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import Any, TypedDict, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Literal, TypedDict, TypeVar
 
 from agent_procutil import no_window_kwargs
+
+if TYPE_CHECKING:
+    _F = TypeVar("_F", bound=Callable[..., Any])
+
+    def daemon_entrypoint(service: str, *, source: str, purpose: Literal["production"]) -> Callable[[_F], _F]: ...
+else:
+    from agent_procutil.daemon_instances import daemon_entrypoint
 
 from ..client import DispatchClient
 from .. import emission_trace
@@ -732,14 +737,7 @@ def _parse_tick_process_output(completed: Any) -> dict[str, Any]:
     }
 
 
-_F = TypeVar("_F", bound=Callable[..., Any])
-
-
-def _admitted(function: _F) -> _F:
-    return cast(_F, daemon_entrypoint("agent-dispatch-emitter", source=__file__, purpose="production")(function))
-
-
-@_admitted
+@daemon_entrypoint("agent-dispatch-emitter", source=__file__, purpose="production")
 def serve(
     spec_path: str | Path,
     *,
