@@ -2,7 +2,6 @@
 
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
-import json
 
 import pytest
 
@@ -72,7 +71,7 @@ def test_retained_provenance_never_promotes_unknown_or_different_mode_work(api: 
             else {"version": 7, "page_protocol": mode}
         )
         api.require_pending_pages(
-            json.dumps(qualified), full=full, change_hints=current_hints,
+            qualified, full=full, change_hints=current_hints,
         )
         for unknown in (
             None, {"version": 1}, {"version": 3},
@@ -80,7 +79,11 @@ def test_retained_provenance_never_promotes_unknown_or_different_mode_work(api: 
             {"version": 6, "hints": {"item_ids": ["other"]}},
         ):
             with pytest.raises(ValueError, match="preserve it"):
-                api.require_pending_pages(
-                    json.dumps(unknown) if unknown is not None else None,
-                    full=full, change_hints=current_hints,
-                )
+                if unknown is None:
+                    unknown = {}
+                api.require_pending_pages(unknown, full=full, change_hints=current_hints)
+    # Already-decoded document bodies remain opaque to policy, regardless of size.
+    api.require_pending_pages(
+        {"version": 7, "page_protocol": "incremental", "manifest": object()},
+        full=False, change_hints=None,
+    )

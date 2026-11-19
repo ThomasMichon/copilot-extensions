@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -55,10 +54,11 @@ def require_connector_pages(
 
 
 def require_pending_pages(
-    payload: str | None, *, full: bool, change_hints: ChangeHints | None,
+    data: object, *, full: bool, change_hints: ChangeHints | None,
 ) -> None:
-    """Require known page provenance; never infer it from a ready legacy manifest."""
-    data = json.loads(payload) if payload is not None else {}
+    """Reuse the owner's decoded envelope without traversing manifest bodies."""
+    if not isinstance(data, dict):
+        raise ValueError("Required page protocol needs a decoded pending envelope")
     version = data.get("version")
     if change_hints is not None:
         qualified = version in (5, 6) and data.get("hints") == change_hints.to_dict()

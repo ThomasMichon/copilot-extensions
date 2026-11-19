@@ -300,3 +300,30 @@ def test_ready_provenance_codec_is_strict_and_legacy_modes_still_decode(acquisit
     assert a.journal().decode_pending(json.dumps(legacy), "alias") == (
         a.journal().decode_pending(payload, "alias")
     )
+
+
+@pytest.mark.parametrize("items", [1, 1000])
+def test_required_ready_codec_reuses_its_one_manifest_parse(
+    acquisition: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, items: int,
+) -> None:
+    a = acquisition
+    a.responses.append(unit("incremental"))
+    with pytest.raises(RuntimeError, match="interrupted application"):
+        a.run(fail=True)
+    data = json.loads(a.journal().read_payload("alias", a.scope))
+    template = data["manifest"]["upserts"][0]
+    data["manifest"]["upserts"] = [
+        {**template, "path": str(i), "content": "x" * 256} for i in range(items)
+    ]
+    payload = json.dumps(data)
+    loads = json.loads
+    calls: list[Any] = []
+
+    def observe(value: Any, *args: Any, **kwargs: Any) -> Any:
+        calls.append(value)
+        return loads(value, *args, **kwargs)
+
+    monkeypatch.setattr(json, "loads", observe)
+    decoded = PendingCrawls.decode_pending(payload, "alias", required_pages=True)
+    assert decoded is not None and len(decoded[0].upserts) == items
+    assert calls == [payload]

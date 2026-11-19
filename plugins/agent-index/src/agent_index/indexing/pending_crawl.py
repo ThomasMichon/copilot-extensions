@@ -193,9 +193,16 @@ class PendingCrawls(PollRefreshJournal):
         return self.decode_pending(payload, source)
 
     @classmethod
-    def decode_pending(cls, payload: str, source: str) -> tuple[CrawlManifest, bool] | None:
+    def decode_pending(
+        cls, payload: str, source: str, *, required_pages: bool = False,
+        requested_full: bool = False, change_hints: ChangeHints | None = None,
+    ) -> tuple[CrawlManifest, bool] | None:
         """Decode one observed payload without rereading a possibly newer generation."""
         data = json.loads(payload)
+        if required_pages:
+            from agent_index.indexing.acquisition_requirement import require_pending_pages
+
+            require_pending_pages(data, full=requested_full, change_hints=change_hints)
         if isinstance(data, dict) and type(data.get("version")) is int and data["version"] == 7:
             if set(data) != {"version", "full", "manifest", "page_protocol"} or (
                 type(data["full"]) is not bool
@@ -398,11 +405,10 @@ def recover_source(
             return result
 
     pending_raw = journal.read_payload(source, scope)
-    pending = journal.decode_pending(pending_raw, source) if pending_raw is not None else None
-    from agent_index.indexing.acquisition_requirement import require_pending_pages
-
-    if require_paged_acquisition and pending_raw is not None:
-        require_pending_pages(pending_raw, full=full, change_hints=change_hints)
+    pending = journal.decode_pending(
+        pending_raw, source, required_pages=require_paged_acquisition,
+        requested_full=full, change_hints=change_hints,
+    ) if pending_raw is not None else None
     if pending is not None:
         manifest, pending_full = pending
         data = json.loads(pending_raw or "")
@@ -420,11 +426,12 @@ def recover_source(
     state.require_family_cursor(source, family or source, full=full)
     manifest = acquire()
     acquired_raw = journal.read_payload(source, scope)
-    acquired = journal.decode_pending(acquired_raw, source) if acquired_raw is not None else None
-    if require_paged_acquisition:
-        require_pending_pages(acquired_raw, full=full, change_hints=change_hints)
-        if acquired is None:
-            raise PendingCrawlConflict("Required acquisition did not finish its pending pages")
+    acquired = journal.decode_pending(
+        acquired_raw, source, required_pages=require_paged_acquisition,
+        requested_full=full, change_hints=change_hints,
+    ) if acquired_raw is not None else None
+    if require_paged_acquisition and acquired is None:
+        raise PendingCrawlConflict("Required acquisition did not finish its pending pages")
     if acquired is not None and acquired != (manifest, full):
         raise PendingCrawlConflict("Acquired manifest does not match pending publication")
     if acquired is None and (not manifest.is_empty or manifest.poll_refresh is not None):

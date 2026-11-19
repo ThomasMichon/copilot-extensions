@@ -206,6 +206,8 @@ or hinted claim. It preserves those bytes and indexed state; complete the
 original policy's pending work before opting in, rather than relabelling or
 discarding it. Required acquisition still resumes its own partial or ready work
 after a failed application and process reopen.
+The policy reuses the pending owner's already-decoded envelope. It does not
+reparse or traverse retained document bodies to verify page provenance.
 
 Expand this engine before migrating a caller. Rollback callers can omit the
 keyword and the expanded engine can still finish v7 work; an older engine's
