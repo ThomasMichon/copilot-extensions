@@ -27,6 +27,9 @@ Save the complete preview JSON in an owner-claimed scratch location before the
 second command. On other platforms use their path separator. The optional
 `--platform` must name the current native Python platform; this tool does not
 retire another operating system's environment.
+For a standalone distribution, use its canonical component name, such as
+`fleet-manager` or `services/index`. Only the declared standalone allowlist
+accepts nested names; other targets keep the plugin-name validation.
 
 Create a retirement-aware environment by explicitly selecting
 `--retirement-ready` on `tools/run-plugin-tests.py` or

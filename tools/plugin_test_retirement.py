@@ -21,6 +21,7 @@ from native_test_paths import native_test_path
 from plugin_test_cache import clear_cache_contents as clear_cache_contents
 from plugin_test_resources import ENVIRONMENT_LAYOUT, resource_path
 from plugin_test_selection import resolve_plugin_root
+from standalone_consumers import STANDALONE_CONSUMERS
 
 SCHEMA = "copilot-extensions.test-environment-retirement"
 MARKER = ".retired-environment.json"
@@ -70,7 +71,8 @@ def _metadata(path: Path) -> dict[str, object]:
 def _environment(source: Path, target: str, platform: str) -> Path:
     if platform != sys.platform:
         raise ValueError("Retirement requires the environment's native platform")
-    if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,63}", target):
+    standalone = target in STANDALONE_CONSUMERS
+    if not standalone and not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,63}", target):
         raise ValueError("Invalid test target")
     source = source.resolve(strict=True)
     support = _metadata(source / "tools" / "test-environment-capabilities.json")
@@ -83,7 +85,8 @@ def _environment(source: Path, target: str, platform: str) -> Path:
         or type(retirement.get("version")) is not int
     ):
         raise ValueError("Selected source does not support terminal test-environment retirement")
-    if not resolve_plugin_root(source, target).is_dir():
+    project = source / target if standalone else resolve_plugin_root(source, target)
+    if not project.is_dir():
         raise ValueError("Test target does not belong to the selected source")
     root = ordinary_cache_root(resource_path(source))
     owner = _metadata(root / "scratch-owner.json")

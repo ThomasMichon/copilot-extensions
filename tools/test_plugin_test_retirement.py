@@ -127,6 +127,44 @@ def test_standalone_prepare_cannot_recreate_retired_shared_environment(
     acquire(0, root).release()
 
 
+@pytest.mark.parametrize("target", ["fleet-manager", "services/index"])
+def test_standalone_preparation_and_retirement_select_the_same_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, target: str,
+) -> None:
+    from test_run_standalone_tests import runner as standalone
+
+    source = tmp_path / "source"
+    project = source / target
+    (project / "tests").mkdir(parents=True)
+    declare_support(source)
+    monkeypatch.setenv("AGENT_SCRATCH_ROOT", str(tmp_path / "cache"))
+    monkeypatch.setattr(standalone, "REPO", source)
+    python = standalone.default_python(target, retirement_ready=True)
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b"fixture")
+    root = python.parent.parent
+    before = root.stat()
+
+    plan = retirement.preview(source, target)
+    assert Path(plan.environment) == root
+    result = retirement.apply(plan)
+
+    assert result["outcome"] == "retired"
+    assert not python.exists() and project.is_dir()
+    assert (root.stat().st_dev, root.stat().st_ino) == (before.st_dev, before.st_ino)
+    assert [child.name for child in root.iterdir()] == [retirement.MARKER]
+
+
+@pytest.mark.parametrize("target", ["services/unregistered", "services/../index", "../fleet-manager"])
+def test_nested_target_allowlist_does_not_admit_arbitrary_paths(
+    environment: tuple[Path, Path], target: str,
+) -> None:
+    source, root = environment
+    with pytest.raises(ValueError, match="Invalid test target"):
+        retirement.preview(source, target)
+    assert (root / "interpreter").read_bytes() == b"fixture"
+
+
 @pytest.mark.parametrize("support", ["missing", "incompatible", "boolean-version"])
 def test_legacy_source_is_not_retired_by_a_new_tool(
     environment: tuple[Path, Path], support: str,
