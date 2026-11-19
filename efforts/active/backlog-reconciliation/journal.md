@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-19 - Managed metadata and finite source completions](journal/2026/11.19-managed-metadata-and-finite-source-completions.md)
+
 - [2026-11-19 - Original-reviewer completion and retained presentation acceptance](journal/2026/11.19-original-reviewer-and-presentation-acceptance.md)
 
 - [2026-11-19 - Cache source acceptance and actual delivery boundaries](journal/2026/11.19-cache-source-acceptance-and-delivery-boundaries.md)
