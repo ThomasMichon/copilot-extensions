@@ -104,12 +104,12 @@ function Invoke-ResidentPostTool {
     $bytes = $utf8.GetBytes((ConvertTo-PostToolJson $request) + "`n")
     $requestLimit = if ($Kind -ceq 'preToolUse') { 2 * 1024 * 1024 } else { 65536 }
     if ($bytes.Length -gt $requestLimit) { return $null }
-    $client = [Net.Sockets.TcpClient]::new()
+    $client = [Net.Sockets.TcpClient]::new([Net.Sockets.AddressFamily]::InterNetwork)
     $response = [IO.MemoryStream]::new()
     try {
         $remaining = 500 - [int]$timer.ElapsedMilliseconds
         if ($remaining -le 0) { return $null }
-        $connect = $client.ConnectAsync('127.0.0.1', $port)
+        $connect = $client.ConnectAsync([Net.IPAddress]::Loopback, $port)
         if (-not $connect.Wait($remaining)) { return $null }
         $stream = $client.GetStream()
         $remaining = 500 - [int]$timer.ElapsedMilliseconds

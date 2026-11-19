@@ -925,8 +925,6 @@ def test_registered_prepared_cell_post_tool_uses_selected_original_owners(
                 "version": 1, "root": str(root), "revision": "b" * 32,
             }))
         payload = {**fixture["payload"], "toolResult": "must-not-be-sent"}
-        if case in {"changed-receipt", "changed-payload", "unadmitted", "old-membership"}:
-            fixture["env"]["EXPECTED_PYTHON_LOOKUPS"] = "1"
         if case == "native":
             payload.update(toolName="multi_edit", toolArgs={"edits": [{"path": target}]})
         elif case in {"batch", "mixed-targets", "mixed-write"}:
@@ -951,6 +949,13 @@ def test_registered_prepared_cell_post_tool_uses_selected_original_owners(
             env=fixture["env"], **no_window_kwargs(),
         )
         assert result.returncode == 0, result.stderr
+        if case in {"changed-receipt", "changed-payload", "unadmitted", "old-membership"}:
+            warning = (
+                "agent-worktrees postToolUse: selected native resident unavailable; "
+                "advisory/accounting completion is unconfirmed; no local fallback or retry was run\n"
+            )
+            assert result.stderr.startswith(warning), result.stderr
+            result.stderr = result.stderr.removeprefix(warning)
         assert result.stderr.startswith("entry_seconds="), result.stderr
         print(f"{shell}/cell/{case}: {result.stderr.strip()}")
         if case == "late-guidance":

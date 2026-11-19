@@ -15,7 +15,7 @@ from collections.abc import Callable
 
 import pytest
 
-from agent_procutil import spawn_sync_in_kill_on_close_job
+from agent_procutil import no_window_kwargs, spawn_sync_in_kill_on_close_job
 
 PLUGIN = Path(__file__).resolve().parents[1]
 pytestmark = pytest.mark.skipif(
@@ -27,7 +27,7 @@ pytestmark = pytest.mark.skipif(
 def _pin_descendant(pid: int, expected_birth: str) -> tuple[Callable[[], bool], Callable[[], bool]]:
     from ctypes import wintypes
 
-    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
     kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
     kernel.OpenProcess.restype = wintypes.HANDLE
     kernel.GetProcessTimes.argtypes = [
@@ -43,7 +43,7 @@ def _pin_descendant(pid: int, expected_birth: str) -> tuple[Callable[[], bool], 
     kernel.CloseHandle.argtypes = [wintypes.HANDLE]
     kernel.CloseHandle.restype = wintypes.BOOL
     handle = kernel.OpenProcess(0x100000 | 0x1000, False, pid)
-    assert handle, ctypes.get_last_error()
+    assert handle, getattr(ctypes, "get_last_error")()
     try:
         created, exited, kernel_time, user_time = (wintypes.FILETIME() for _ in range(4))
         assert kernel.GetProcessTimes(
@@ -52,7 +52,7 @@ def _pin_descendant(pid: int, expected_birth: str) -> tuple[Callable[[], bool], 
             ctypes.byref(exited),
             ctypes.byref(kernel_time),
             ctypes.byref(user_time),
-        ), ctypes.get_last_error()
+        ), getattr(ctypes, "get_last_error")()
         birth = created.dwLowDateTime | created.dwHighDateTime << 32
         assert expected_birth == f"windows:{birth}"
     except BaseException:
@@ -166,7 +166,7 @@ console.log("policy timeout reported after its owned scope was retired");
         stdin=subprocess.DEVNULL if consumer == "resident" else subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        creationflags=subprocess.CREATE_NO_WINDOW,
+        **no_window_kwargs(),
     )
     assert job is not None
     close_observer = None
@@ -194,7 +194,7 @@ console.log("policy timeout reported after its owned scope was retired");
         try:
             record = json.loads(marker.read_text(encoding="utf-8"))
         except OSError as error:
-            native_error = ctypes.GetLastError()
+            native_error = getattr(ctypes, "GetLastError")()
             dos_error = ctypes.c_ulong()
             crt_result = crt._get_doserrno(ctypes.byref(dos_error))
             add_note = getattr(error, "add_note", lambda _note: None)
@@ -313,12 +313,12 @@ raise AssertionError('unconfirmed cleanup must not return a decision')
          str(interpreter), str(supervisor), str(source), str(scripts)],
         require_job=True, allow_breakaway=False, env=environment, cwd=tmp_path,
         stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        creationflags=subprocess.CREATE_NO_WINDOW,
+        **no_window_kwargs(),
     )
     assert job is not None
     observers = []
     try:
-        observers.append(_pin_descendant(process.pid, _windows_birth(int(process._handle))))
+        observers.append(_pin_descendant(process.pid, _windows_birth(int(getattr(process, "_handle")))))
         records = {}
         deadline = time.monotonic() + 10
         for name in ("lookup", "pending"):
@@ -334,7 +334,7 @@ raise AssertionError('unconfirmed cleanup must not return a decision')
                 observers.append(_pin_descendant(record["child"], record["child_birth"]))
         assert records["pending"]["launcher"] != process.pid, "fixture bypassed the real venv redirector"
         from ctypes import wintypes
-        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
         kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
         kernel.OpenProcess.restype = wintypes.HANDLE
         kernel.QueryFullProcessImageNameW.argtypes = [

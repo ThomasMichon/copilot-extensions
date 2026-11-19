@@ -7,7 +7,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
-from typing import Any
+from typing import Any, cast
 
 POLICY_SWITCHES = (
     "AGENT_WORKTREES_STATELESS_GUARD",
@@ -32,7 +32,7 @@ def dispatch_pre(
 ) -> dict[str, Any]:
     metadata = payload.get("_agentWorktrees")
     if not isinstance(metadata, dict) or "nativePolicy" not in metadata:
-        return policy.pre(payload)
+        return cast(dict[str, Any], policy.pre(payload))
     if (
         type(metadata["nativePolicy"]) is not int or metadata["nativePolicy"] != 1
         or policy.hook_client is None or deadline is None

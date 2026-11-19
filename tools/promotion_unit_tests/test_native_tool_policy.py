@@ -4,7 +4,7 @@ import importlib.util
 import time
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
-from typing import Any, NoReturn
+from typing import Any, NoReturn, cast
 
 import pytest
 
@@ -30,7 +30,7 @@ def load(name: str) -> ModuleType:
 
 
 def merge(current: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
-    return load("hook_client.py")._merge_pre_decisions(current, new)
+    return cast(dict[str, Any], load("hook_client.py")._merge_pre_decisions(current, new))
 
 
 def event(**values: Any) -> dict[str, Any]:

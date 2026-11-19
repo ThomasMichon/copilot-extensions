@@ -265,7 +265,7 @@ function Invoke-FixtureOriginalResidentPolicy {""", 1)
         builds = [line.removeprefix("NATURAL_SHELL_BUILD ") for line in result.stderr.splitlines()
                   if line.startswith("NATURAL_SHELL_BUILD ")]
         assert len(builds) == 1
-        actual = json.loads(result.stdout)
+        actual: dict[str, Any] = json.loads(result.stdout)
         if case == "anchor-unavailable":
             assert actual.get("permissionDecision") is None
             assert "anchor_write_guard.py unavailable" in actual["additionalContext"]

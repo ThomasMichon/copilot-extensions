@@ -269,7 +269,7 @@ def qualify_complete_native_entry(
     entry_started = time.monotonic()
     shell_event = "toolCalls" not in event and event.get("toolName") == "powershell"
     shell_proof = shell_event or literal_batch
-    source_names = (
+    source_names: tuple[str, ...] = (
         "pre-tool-hook.ps1", "post-tool-hook.ps1", "hook-facts.ps1",
         "managed-session.ps1", "hook-read-policy.json",
         "statelessness_guard.py", "cross_repo_guard.py", "anchor_write_guard.py",
@@ -2354,21 +2354,21 @@ def test_registered_file_local_write_reuses_original_guard_facts(
         source = native_entry.read_text(encoding="utf-8")
         boundary = "\ntry {\n    $reader = [IO.StreamReader]"
         assert source.count(boundary) == 1
-        reader = NATIVE_READ_V1 if case == "literal-shell-prior-reader" else NATIVE_SHELL_READ_V1
-        native_entry.write_text(source.replace(boundary, "\n" + reader + boundary, 1), encoding="utf-8")
+        prior_reader = NATIVE_READ_V1 if case == "literal-shell-prior-reader" else NATIVE_SHELL_READ_V1
+        native_entry.write_text(source.replace(boundary, "\n" + prior_reader + boundary, 1), encoding="utf-8")
     # Fixture-only markers classify a timeout without retrying or extending the child.
     instrumented = native_entry.read_text(encoding="utf-8")
-    for boundary, source in (
+    for boundary, statement in (
         ("script-entry", "$ErrorActionPreference = 'Stop'"),
         ("membership-start", "    $preparedMembership = Test-PreparedManagedWorktreesSession -Raw $raw -Facts ([ref]$membershipFacts)"),
         ("membership-complete", "    $stop = Get-NativePreToolStop"),
         ("native-proof-start", "function Test-NativePreToolWrite([object]$Payload, [object]$Facts) {"),
         ("policy-start", "    $result = Invoke-SelectedResidentToolHook -Kind preToolUse -Raw $raw -PreparedMembership $preparedMembership"),
     ):
-        assert instrumented.count(source) == 1
+        assert instrumented.count(statement) == 1
         marker = f"Write-NativeWriteFixturePhase '{boundary}'"
         instrumented = instrumented.replace(
-            source, source + "\n" + marker if source.endswith("{") else marker + "\n" + source,
+            statement, statement + "\n" + marker if statement.endswith("{") else marker + "\n" + statement,
         )
     native_entry.write_text(instrumented, encoding="utf-8")
     admission = scripts / "managed-session.ps1"
@@ -2402,7 +2402,7 @@ def test_registered_file_local_write_reuses_original_guard_facts(
     if "prepared-marker-json" in phase_names:
         assert "prepared-marker-opened" in phase_names, progress
         assert phase_names.index("prepared-marker-opened") < phase_names.index("prepared-marker-json"), progress
-    assert result.returncode == 0 and not result.stderr, result.stdout + result.stderr
+    assert result.returncode == 0 and not result.stderr, (result.stdout, result.stderr, progress)
     with capsys.disabled():
         print(json.dumps({"native_write_launch": {
             "shell": shell, "case": case, "start_ms": started_ms,
@@ -3621,7 +3621,7 @@ console.log(JSON.stringify(await check({sessionId: "timeout-fixture", workingDir
         if process.poll() is None:
             process.kill()
             process.communicate(timeout=5)
-        if close:
+        if close is not None:
             close()
 
 

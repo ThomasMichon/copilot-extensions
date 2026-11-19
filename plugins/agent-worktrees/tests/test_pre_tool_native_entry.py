@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 
 import pytest
+from agent_procutil import no_window_kwargs
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 pytestmark = pytest.mark.skipif(
@@ -20,7 +21,7 @@ pytestmark = pytest.mark.skipif(
 
 @pytest.mark.parametrize("case", ["read", "guard-drift", "missing-contract", "write", "context", "active", "invalid-flag", "future-flag-contract", "array-flag", "array-contract-id", "empty-contract-id", "drive-relative-flag", "root-relative-flag", "array-contract", "non-utf8-environment", "case-flag", "case-payload", "read-compatibility-home", "active-compatibility-home"])
 @pytest.mark.parametrize("native_shell", ["powershell.exe", "pwsh"])
-def test_native_entry_keeps_uncertain_input_off_python(case, native_shell, tmp_path):
+def test_native_entry_keeps_uncertain_input_off_python(case: str, native_shell: str, tmp_path: Path) -> None:
     shell = shutil.which(native_shell)
     if shell is None:
         pytest.skip(f"{native_shell} is unavailable")
@@ -122,7 +123,7 @@ def test_native_entry_keeps_uncertain_input_off_python(case, native_shell, tmp_p
     result = subprocess.run(
         [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command],
         input=original, capture_output=True, text=True, encoding="utf-8", env=env,
-        cwd=home, timeout=10, creationflags=subprocess.CREATE_NO_WINDOW,
+        cwd=home, timeout=10, **no_window_kwargs(),
     )
     assert result.returncode == 0, result.stderr
     assert not observed.exists(), (result.stdout, result.stderr)
@@ -136,7 +137,7 @@ def test_native_entry_keeps_uncertain_input_off_python(case, native_shell, tmp_p
 
 @pytest.mark.parametrize("native_shell", ["powershell.exe", "pwsh"])
 @pytest.mark.parametrize("invalid_context", [False, True])
-def test_native_entry_never_bootstraps_cell_validation(native_shell, invalid_context, tmp_path):
+def test_native_entry_never_bootstraps_cell_validation(native_shell: str, invalid_context: bool, tmp_path: Path) -> None:
     shell = shutil.which(native_shell)
     if shell is None:
         pytest.skip(f"{native_shell} is unavailable")
@@ -164,7 +165,7 @@ def test_native_entry_never_bootstraps_cell_validation(native_shell, invalid_con
     home = tmp_path / "home"
     home.mkdir()
     durable = tmp_path / "durable"
-    flags = {"creationflags": subprocess.CREATE_NO_WINDOW}
+    flags = no_window_kwargs()
     result = subprocess.run(
         [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-File",
          str(scripts / "installation-context" / "installation-context.ps1"),
@@ -202,7 +203,9 @@ def test_native_entry_never_bootstraps_cell_validation(native_shell, invalid_con
     assert not observed.exists()
 
 
-def test_ps7_pre_tool_json_engine_parity_and_first_use(tmp_path, capsys):
+def test_ps7_pre_tool_json_engine_parity_and_first_use(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
     shell = shutil.which("pwsh")
     if shell is None:
         pytest.skip("pwsh is unavailable")
@@ -264,7 +267,7 @@ foreach ($raw in @('[]','{"value":','{}{}')) {
         result = subprocess.run(
             [shell, "-NoProfile", "-NonInteractive", "-File", str(script)],
             input="\n".join(inputs), text=True, encoding="utf-8", capture_output=True,
-            timeout=10, creationflags=subprocess.CREATE_NO_WINDOW,
+            timeout=10, **no_window_kwargs(),
             env={**os.environ, "JSON_VARIANT": variant},
         )
         elapsed = time.perf_counter() - started
