@@ -31,6 +31,44 @@ layout/protocol 1, clean/dirty state, and exact current Lance table versions.
 It is layout/readiness evidence, not a task/objective ledger or authentication
 grant. The domain UUID is not a source permission.
 
+### Point-domain binding foundation
+
+The in-process `initialize_source_layout(path, point_scope=hints.scope)` seam
+can bind a **cold, separately owned** directory to one complete
+`PointChangeHints.scope`. Its protocol-2 receipt retains the exact configured
+source, component family, account and `PointBinding`: representation/version,
+effective endpoint, query union and query context. Reopening requires that
+same typed selection through `domain_for(path, point_scope=hints.scope)`.
+A different scope, protocol or nonempty unmarked directory refuses without
+rebinding or adopting its data. Receipt publication cannot downgrade or
+replace a different binding.
+
+This is receipt preparation only, not a component-store initializer or a
+configuration/wire selector. Existing `ContentStore`, `MultiModelStore`,
+`ClusterStore`, search and presentation paths remain legacy-only and reject
+protocol 2 before opening their native stores. Default and explicitly selected
+domain handles do not share cached selection; existing nested/lazy guards
+recheck the receipt instead of trusting an earlier open. Legacy handles opened
+before marking also check for later selection before native reads or writes,
+including direct vector access and sibling cluster state. Guards use the native
+connection's stable URI or an absolute retained sibling path, not a relative
+caller path that can retarget after a working-directory change. The cluster
+database and its sibling guard derive from the same constructor-resolved
+absolute database path. Every receipt
+reader rejects duplicate fields. Protocol 1 otherwise retains its existing
+meaning and forward-compatible metadata handling.
+The content store also retains its native connection URI for FTS lock paths
+and child arguments, so maintenance cannot retarget after a caller-directory
+change while its read guard stays on the original connection.
+
+Even an exactly selected point-domain handle refuses the current legacy-shaped
+`read`, `operation`, `write` and reconciliation paths. Component result types,
+applied-version qualification, qualified point application and every v2
+executor/producer remain unimplemented or disabled. The binding is not
+acquisition, application, completion or deployment authority. There is no live
+directory allocation, migration, new service, HTTP parameter, CLI flag or MCP
+form in this foundation.
+
 ## Participating ownership and consistency
 
 The domain uses a process-local reentrancy guard **plus actual nonblocking

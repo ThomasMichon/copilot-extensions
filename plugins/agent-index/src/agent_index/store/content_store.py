@@ -21,9 +21,9 @@ import time
 from collections import Counter
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Any
+from importlib import import_module
+from typing import TYPE_CHECKING, Any, cast
 
-import pyarrow as pa
 from agent_procutil import no_window_kwargs as no_window_kwargs
 
 from agent_index.store.content_fts_worker import _ContentFtsWorkerMixin, fts_retryable
@@ -44,6 +44,7 @@ if TYPE_CHECKING:
 
     from agent_index.chunking.base import Chunk
 
+pa = import_module("pyarrow")
 logger = logging.getLogger(__name__)
 
 
@@ -99,7 +100,7 @@ class ChunkRecord:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
-def _decode_metadata(raw: object) -> dict:
+def _decode_metadata(raw: object) -> dict[str, Any]:
     """Safely decode a JSON metadata string to a dict."""
     if not raw or not isinstance(raw, str):
         return {}
@@ -125,7 +126,7 @@ class ContentStore(_ContentFtsWorkerMixin, _ContentItemReadsMixin, _ContentSnaps
     ) -> None:
         self._source_domain = domain_for(db_path)
         self._db = connect_content_store(db_path, source_aware=self._source_domain is not None)
-        self._db_path = str(db_path)
+        self._db_path = str(self._db.uri)
         self._table_name = table_name
         self._table = None
         self._fts_available = False
@@ -136,11 +137,11 @@ class ContentStore(_ContentFtsWorkerMixin, _ContentItemReadsMixin, _ContentSnaps
         self._fts_next_retry_at = 0.0  # time.monotonic() gate; 0 = due now
 
     @property
-    def db(self):
+    def db(self) -> Any:
         """Expose the LanceDB connection for VectorTable instances."""
         return self._db
 
-    def _get_or_create_table(self):
+    def _get_or_create_table(self) -> Any:
         if self._table is not None:
             if self._source_domain is not None:
                 self._table.checkout_latest()
@@ -159,7 +160,7 @@ class ContentStore(_ContentFtsWorkerMixin, _ContentItemReadsMixin, _ContentSnaps
         self._table = table
         return self._table
 
-    def _migrate_table(self, table) -> None:
+    def _migrate_table(self, table: Any) -> None:
         """Add columns introduced after a table was first created.
 
         Tables created before the ``metadata`` column existed lack it, so an
@@ -229,24 +230,25 @@ class ContentStore(_ContentFtsWorkerMixin, _ContentItemReadsMixin, _ContentSnaps
         return len(records)
 
     @source_write
-    def delete_by_source(self, source: str) -> None:
+    def delete_by_source(self, source: str) -> int | None:
         """Remove all chunks from a specific source (prefix-matching)."""
         if self._source_domain is not None:
             from .source_projection import delete_canonical
 
-            return delete_canonical(self, (
+            return cast(int, delete_canonical(self, (
                 f"(source = '{_sql_str(source)}' OR "
                 f"source LIKE '{_like_pattern(source)}:%' ESCAPE '\\')"
-            ))
+            )))
         table = self._get_or_create_table()
         try:
             table.delete(f"source = '{source}' OR source LIKE '{source}:%'")
             logger.info("Deleted content for source: %s", source)
         except Exception:
             logger.debug("No content to delete for source: %s", source)
+        return None
 
     @source_write
-    def delete_by_source_exact(self, source: str) -> None:
+    def delete_by_source_exact(self, source: str) -> int | None:
         """Remove chunks for an EXACT source value (no prefix matching).
 
         Unlike :meth:`delete_by_source`, this only deletes rows whose
@@ -257,13 +259,14 @@ class ContentStore(_ContentFtsWorkerMixin, _ContentItemReadsMixin, _ContentSnaps
         if self._source_domain is not None:
             from .source_projection import delete_canonical
 
-            return delete_canonical(self, f"source = '{_sql_str(source)}'")
+            return cast(int, delete_canonical(self, f"source = '{_sql_str(source)}'"))
         table = self._get_or_create_table()
         try:
             table.delete(f"source = '{_sql_str(source)}'")
             logger.info("Deleted content for exact source: %s", source)
         except Exception:
             logger.debug("No content to delete for exact source: %s", source)
+        return None
 
     @source_read
     def get_chunk_ids_by_source_exact(self, source: str) -> list[str]:
@@ -314,9 +317,9 @@ class ContentStore(_ContentFtsWorkerMixin, _ContentItemReadsMixin, _ContentSnaps
         if self._source_domain is not None:
             from .source_projection import delete_canonical
 
-            return delete_canonical(self, (
+            return cast("list[str]", delete_canonical(self, (
                 f"source = '{_sql_str(source)}' AND file_path = '{_sql_str(file_path)}'"
-            ), return_ids=True)
+            ), return_ids=True))
         table = self._get_or_create_table()
         # Query chunk_ids before deleting so callers can clean up vector tables
         chunk_ids = self.get_chunk_ids_by_file(source, file_path)
@@ -345,10 +348,10 @@ class ContentStore(_ContentFtsWorkerMixin, _ContentItemReadsMixin, _ContentSnaps
         if self._source_domain is not None:
             from .source_projection import delete_canonical
 
-            return delete_canonical(self, (
+            return cast(int, delete_canonical(self, (
                 f"(source = '{_sql_str(source)}' OR "
                 f"source LIKE '{_like_pattern(source)}:%' ESCAPE '\\') AND indexed_at < {before}"
-            ))
+            )))
         table = self._get_or_create_table()
         try:
             initial = table.count_rows()
@@ -362,7 +365,7 @@ class ContentStore(_ContentFtsWorkerMixin, _ContentItemReadsMixin, _ContentSnaps
                 logger.info(
                     "Deleted %d stale chunks for source %s", removed, source
                 )
-            return removed
+            return cast(int, removed)
         except Exception:
             return 0
 
@@ -400,10 +403,10 @@ class ContentStore(_ContentFtsWorkerMixin, _ContentItemReadsMixin, _ContentSnaps
         if self._source_domain is not None:
             from .source_projection import delete_canonical
 
-            return delete_canonical(self, (
+            return cast(int, delete_canonical(self, (
                 f"source = '{_sql_str(source)}' AND file_path = '{_sql_str(file_path)}' "
                 f"AND indexed_at < {before}"
-            ))
+            )))
         table = self._get_or_create_table()
         predicate = (
             f"source = '{_sql_str(source)}' AND file_path = '{_sql_str(file_path)}' "
@@ -412,7 +415,7 @@ class ContentStore(_ContentFtsWorkerMixin, _ContentItemReadsMixin, _ContentSnaps
         removed = table.count_rows(predicate)
         if removed:
             table.delete(predicate)
-        return removed
+        return cast(int, removed)
 
     # -- maintenance ---------------------------------------------------------
 
@@ -623,7 +626,7 @@ class ContentStore(_ContentFtsWorkerMixin, _ContentItemReadsMixin, _ContentSnaps
             raw = getattr(index, "index_type", None) or getattr(index, "type", None)
         return str(raw or "").upper()
 
-    def _durable_fts_index_exists(self, table) -> bool:
+    def _durable_fts_index_exists(self, table: Any) -> bool:
         """Best-effort check of LanceDB metadata for an existing content FTS index."""
         try:
             list_indices = table.list_indices

@@ -7521,6 +7521,27 @@ evidence separate.
 
 ## Unit-only promotion packet
 
+The point-domain receipt units use in-memory receipt bytes to check exact
+scope/protocol selection, malformed and duplicate binding refusal, unchanged
+protocol-1 metadata, save-time downgrade refusal, late marking and nested/lazy default-reader
+drift. They start no actor or native database and create no domain directory.
+`plugins/agent-index/tests/test_point_source_domain.py` separately covers cold
+directory bootstrap/reopen, both cross-domain refusals, default store and
+cluster constructors, cached-handle separation and unchanged bytes on refusal.
+Late-marked native content, vector, combined-store and sibling-cluster handles
+refuse before reads or writes, including empty input and empty inventory.
+The same native controls cover relative opens followed by a working-directory
+change; in-memory controls cover both duplicate-protocol orders for default
+and explicitly selected readers.
+The cluster connection regression also marks a destination reached only after
+`chdir`: the original handle must keep reading and mutating its original
+database without changing the marked destination's files.
+The FTS maintenance case uses a real contained child build after a relative
+content-store open and `chdir`, proves the original content becomes searchable,
+and preserves every marked-destination file without creating a lock there.
+Neither lane enables component-shaped reads, applied-version qualification or
+v2 execution; selected point-domain handles still refuse legacy operations.
+
 The component-manifest units exercise strict provider-version/semantics records,
 exact mutation coverage, monotonic/deletion ordering, equal-version conflicts
 and pre-application refusal without importing stores, opening SQLite or starting
