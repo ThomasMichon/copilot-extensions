@@ -62,6 +62,12 @@ recording refuse a fenced database, including a previously loaded writer that
 waits for the write lock. The writer's existing version check runs after that
 lock; no new marker file is assumed to constrain old code.
 
+Source fencing, initial reservation and destination activation bind their
+expected database identity in the common opener. It holds an operating-system
+file descriptor and checks the named and opened file identities before SQLite
+can run a recovery-capable statement, then checks again under the transaction
+lock. A replaced file refuses without recovering its unrelated hot journal.
+
 Destination activation copies the complete original tables in one transaction
 and verifies their exact content hashes. Only then does the destination become
 an ordinary format-2 agenda. A failed or interrupted copy rolls back to its

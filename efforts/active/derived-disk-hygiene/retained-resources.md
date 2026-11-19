@@ -330,3 +330,24 @@ The first hosted Windows requests for #13403 executed all applicable tests
 successfully but remain incomplete because their selections included expected
 POSIX-only skips. They are not qualification passes. The corrected source needs
 a new native-only selection; the POSIX controls retain their Linux evidence.
+
+### 2026-11-19 - Bind database identity before recovery
+
+The common opener now binds an expected ordinary-file identity before any
+recovery-capable SQLite statement. It retains an operating-system descriptor
+through the transaction and revalidates the name after connection creation,
+under the database lock and before commit. Source fencing, first reservation
+and activation all use that binding, rather than detecting replacement only
+after SQLite could modify a different database.
+
+Six native controls inject replacement before and after connection creation at
+all three write boundaries. They preserve the original selected file, foreign
+database and foreign hot journal byte-for-byte. Disabling only the binding in a
+contained negative control reproduces the foreign-database modification.
+
+The broader Linux packet passes 334 cases with two platform skips, and its
+actual allocation/CLI selection passes all 21 cases. The broader Windows packet
+passes 271 cases with 65 platform skips; it reports one non-fatal asynchronous
+pipe warning. Five in-process rescue units, fatal-error lint and strict typing
+of all six changed Python files for both target platforms pass. Current-head
+review, required CI and hosted native qualification remain separate gates.

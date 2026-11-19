@@ -72,7 +72,9 @@ def _reserve(home: Path, request: dict[str, Any]) -> list[int]:
     _members(home)
     path = store.safe_path(home / store.DATABASE)
     if path.exists():
-        with store.transaction(home, readonly=True, relocation=True) as db:
+        expected = _identity(path)
+        with store.transaction(home, readonly=True, relocation=True,
+                               expected_file_id=(expected[0], expected[1])) as db:
             identity = _identity(path)
             if db.execute("PRAGMA user_version").fetchone()[0] != store.RELOCATED_VERSION or (
                     _record(db) != {"request": request, "database_identity": identity}):
@@ -86,7 +88,8 @@ def _reserve(home: Path, request: dict[str, Any]) -> list[int]:
         identity = [info.st_dev, info.st_ino]
     finally:
         os.close(fd)
-    with store.transaction(home, create=True, write=True, store_version=2) as db:
+    with store.transaction(home, create=True, write=True, store_version=2,
+                           expected_file_id=(identity[0], identity[1])) as db:
         if _identity(path) != identity or _identity(home) != request["destination_directory"]:
             raise AgendaError("destination changed during reservation")
         if db.execute("SELECT 1 FROM state").fetchone():
@@ -132,7 +135,9 @@ def _activate(
     _members(home)
     if _identity(store.safe_path(home / store.DATABASE)) != record["destination_database"]:
         raise AgendaError("reserved destination database identity changed; preserve and reconcile")
-    with store.transaction(home, write=True, relocation=True) as db:
+    selected = record["destination_database"]
+    with store.transaction(home, write=True, relocation=True,
+                           expected_file_id=(selected[0], selected[1])) as db:
         db.set_progress_handler(budget.progress, 1000)
         if _identity(store.safe_path(home / store.DATABASE)) != record["destination_database"] or (
                 _identity(home) != request["destination_directory"]):
@@ -201,7 +206,9 @@ def relocate(
         }
         # Both homes must support the same durability contract as complete export.
         with export._pinned_directory(source_home), export._pinned_directory(destination) as directory_fd:
-            with store.transaction(source_home, write=True, relocation=True) as source:
+            selected = request["source_database"]
+            with store.transaction(source_home, write=True, relocation=True,
+                                   expected_file_id=(selected[0], selected[1])) as source:
                 if _identity(store.safe_path(source_home / store.DATABASE)) != request["source_database"] or (
                         _identity(source_home) != request["source_directory"]):
                     raise AgendaError("source database changed during open")

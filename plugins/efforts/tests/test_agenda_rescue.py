@@ -139,6 +139,80 @@ def test_destination_directory_barrier_precedes_source_writer_fence(
     assert rescue(packet)["activated"] is True
 
 
+@pytest.mark.parametrize("stage", ["source-fence", "reservation", "activation"])
+@pytest.mark.parametrize("when", ["before-open", "after-open"])
+def test_database_replacement_before_sqlite_recovery_preserves_all_files(
+    packet: dict[str, Any], monkeypatch: pytest.MonkeyPatch, stage: str, when: str,
+) -> None:
+    foreign = destination(packet["source"], "replacement-foreign")
+    foreign_database = foreign / STORE.DATABASE
+    script = r'''
+import os,sqlite3,sys
+db=sqlite3.connect(sys.argv[1],isolation_level=None)
+db.execute("CREATE TABLE sentinel(value TEXT)")
+db.execute("INSERT INTO sentinel VALUES (?)",("retained"*30000,))
+db.execute("PRAGMA cache_size=1")
+db.execute("BEGIN IMMEDIATE")
+db.execute("UPDATE sentinel SET value=?",("uncommitted"*30000,))
+os._exit(0)
+'''
+    flags = 0
+    if sys.platform == "win32":
+        flags = subprocess.CREATE_NO_WINDOW
+    seeded = subprocess.run(
+        [sys.executable, "-B", "-c", script, str(foreign_database)],
+        capture_output=True, text=True, timeout=10, creationflags=flags,
+    )
+    assert seeded.returncode == 0, seeded.stderr
+    foreign_journal = foreign / (STORE.DATABASE + "-journal")
+    assert foreign_journal.is_file()
+    foreign_bytes, journal_bytes = foreign_database.read_bytes(), foreign_journal.read_bytes()
+    home = packet["source"] if stage == "source-fence" else packet["target"]
+    selected = home / STORE.DATABASE
+    retained = home / "retained-original.sqlite3"
+    selected_journal = home / (STORE.DATABASE + "-journal")
+    mode = "rwc" if stage == "reservation" else "rw"
+    uri = selected.as_uri() + "?mode=" + mode
+    native = sqlite3.connect
+    triggered, moved = False, False
+    original: bytes | None = None
+
+    def replace() -> None:
+        nonlocal moved
+        selected.rename(retained)
+        foreign_database.rename(selected)
+        foreign_journal.rename(selected_journal)
+        moved = True
+
+    def connect(*args: Any, **kwargs: Any) -> sqlite3.Connection:
+        nonlocal triggered, original
+        inject = bool(args) and args[0] == uri and not triggered
+        if inject:
+            triggered = True
+            original = selected.read_bytes()
+            if when == "before-open":
+                replace()
+        connection: sqlite3.Connection = native(*args, **kwargs)
+        if inject and when == "after-open":
+            try:
+                replace()
+            except BaseException:
+                connection.close()
+                raise
+        return connection
+
+    with monkeypatch.context() as patch:
+        patch.setattr(sqlite3, "connect", connect)
+        with pytest.raises(RESCUE.AgendaError):
+            rescue(packet)
+    assert triggered
+    actual_database = selected if moved else foreign_database
+    actual_journal = selected_journal if moved else foreign_journal
+    assert actual_database.read_bytes() == foreign_bytes
+    assert actual_journal.read_bytes() == journal_bytes
+    assert (retained if moved else selected).read_bytes() == original
+
+
 def test_export_longer_than_a_history_page_moves_every_accepted_operation(
     packet: dict[str, Any],
 ) -> None:

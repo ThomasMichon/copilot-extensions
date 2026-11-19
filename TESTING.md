@@ -1982,7 +1982,10 @@ complete format-2 history relocation, the durable source fence, interrupted
 destination activation, exact retry after later accepted work and refusal of
 changed identities, stale exports and unsupported legacy lanes. A preloaded
 writer reaches its real write-lock boundary before cutover and must refuse
-afterward. Worktrees' `--test-file tests/test_agenda_rescue_consumer.py
+afterward. File-replacement controls inject before and after SQLite connection
+creation at source fencing, first reservation and activation, preserving both
+the foreign database/hot journal and the original selected file byte-for-byte.
+Worktrees' `--test-file tests/test_agenda_rescue_consumer.py
 --allow-explicit-tiers` composes the actual isolated placement process, rescue
 parser, canonical locator readback and independent ordinary agenda readers.
 These synthetic native controls do not migrate operator data or grant checkout
