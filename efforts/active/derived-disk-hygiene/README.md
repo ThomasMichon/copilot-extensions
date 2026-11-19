@@ -40,6 +40,7 @@ exclusive mutation lock.
 | Track C claim-engine driver | Derived claim engine; producer integration remains separate | #11103, #10967 |
 | Track D PR driver | Scratch ownership, cleanup and lock compatibility | #11125 |
 | Retained-resource driver | Explicit retained finalization, child discovery and test environment/source lifetime | #10968; [bounded subplan](retained-resources.md) |
+| Producer-adoption driver | Selected opt-in contained consumers of the existing artifact owner | #10968; [bounded subplan](producer-adoption.md) |
 
 ## Coordination
 
@@ -98,6 +99,12 @@ The next retained-resource continuation follows the
 finalization, settled-child discovery and test environment/source lifetime.
 Its source review precedes runtime implementation. It preserves the other
 tracks and each resource owner's independent effect authority.
+
+The next selected producer expansion follows the
+[owned producer-adoption subplan](producer-adoption.md). Its reviewed source
+contract must land before implementation. It reuses the allocation and process
+owners, preserves the existing test pilot and leaves installed adoption,
+historical cleanup and the other tracks with their current owners.
 
 ### Track A — Reclaim legacy `.test-venvs` (#10965)
 - [x] Standalone `tools/reclaim_legacy_test_dirs.py`: inventory root
