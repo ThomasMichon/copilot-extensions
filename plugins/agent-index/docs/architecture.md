@@ -1191,6 +1191,23 @@ JSON refuses it; old task readers see the unfamiliar status and no v1 payload,
 not reinterpreted targets. Retry/cancellation and a current
 decoder preserve the complete claim across reopen. No exact-build pin is kept.
 
+`TaskStore.pin_point_claim(task_id, expected_hints=...)` can explicitly freeze
+the **entire** observed v2 envelope while leaving the task parked. Under the
+existing SQLite writer transaction it compares every typed target, correlation
+and binding before assigning an opaque `point_claim_id`. A stale/partial
+snapshot refuses without changing the queue. Repeating the same pin returns
+the retained identity; retries retain it as well. This is a queue-snapshot
+identity, not a build pin or proof of acquisition/application.
+
+New arrivals union only into unpinned rows, so deliveries after the pin create
+or extend trailing work, even if they repeat an already pinned target. A
+separate durable trigger rejects changes to a pinned task's identity, full
+flag, source, hint version, complete payload or pin; an older runtime replacing
+the original hints trigger cannot remove this protection. An old union writer
+that selects the pinned row fails visibly rather than modifying it. Legacy
+plain/v1 rows and their positional `TaskRecord` constructor remain unchanged.
+No runner or HTTP/CLI producer calls this Python-only pin operation.
+
 There is **no v2 execution capability**, even if a selected callable has v1
 support. No runner selects point work, no engine/connector is invoked for it,
 and intake does not enable a producer or source. Ordered component application,

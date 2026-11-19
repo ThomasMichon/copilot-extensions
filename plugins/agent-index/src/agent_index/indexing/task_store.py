@@ -121,6 +121,7 @@ class TaskRecord:
     finished_at: float | None
     updated_at: float
     change_hints: AcquisitionHints | None = field(default=None, kw_only=True)
+    point_claim_id: str | None = field(default=None, kw_only=True)
 
     def to_dict(self) -> dict[str, Any]:
         result = {
@@ -144,6 +145,8 @@ class TaskRecord:
         }
         if self.change_hints is not None:
             result["change_hints"] = self.change_hints.to_dict()
+        if self.point_claim_id is not None:
+            result["point_claim_id"] = self.point_claim_id
         return result
 
 
@@ -163,6 +166,12 @@ def _row_to_record(row: sqlite3.Row) -> TaskRecord:
         raise ValueError("Persisted change hints do not match incremental task scope")
     if row["status"] in {TaskStatus.QUEUED_HINTS, TaskStatus.QUEUED_HINTS_V2} and hints is None:
         raise ValueError("Parked hinted task has no change hints")
+    claim_id = row["point_claim_id"] if "point_claim_id" in row.keys() else None
+    if claim_id is not None and (
+        type(hints) is not PointChangeHints or not isinstance(claim_id, str)
+        or len(claim_id) != 32 or any(char not in "0123456789abcdef" for char in claim_id)
+    ):
+        raise ValueError("Invalid pinned point claim")
     # Parse result_stats JSON if present
     raw_stats = row["result_stats"] if "result_stats" in row.keys() else None
     result_stats: dict[str, Any] | None = None
@@ -195,6 +204,7 @@ def _row_to_record(row: sqlite3.Row) -> TaskRecord:
         finished_at=row["finished_at"],
         updated_at=row["updated_at"],
         change_hints=hints,
+        point_claim_id=claim_id,
     )
 
 
@@ -399,7 +409,7 @@ class TaskStore:
             conn.execute("BEGIN IMMEDIATE")
             rows = conn.execute(
                 "SELECT * FROM tasks WHERE status IN ('queued_hints', 'queued_hints_v2') "
-                "AND source = ? AND change_hints_version = ? "
+                "AND source = ? AND change_hints_version = ? AND point_claim_id IS NULL "
                 "ORDER BY created_at, id",
                 (hints.source, hints.version),
             ).fetchall()
@@ -436,6 +446,44 @@ class TaskStore:
             record = _row_to_record(row)
             conn.commit()
             return record
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def pin_point_claim(
+        self, task_id: str, *, expected_hints: PointChangeHints,
+    ) -> TaskRecord:
+        """Freeze an entire parked v2 target set without admitting execution.
+
+        Compare the complete typed snapshot under the queue writer lock. Later
+        arrivals union into a different row; retries retain this claim identity.
+        No worker, acquisition, completion or polling-cursor authority is granted.
+        """
+        if type(expected_hints) is not PointChangeHints:
+            raise ValueError("Point claims require complete typed v2 hints")
+        conn = self._connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+            if row is None:
+                raise ValueError("Point claim task does not exist")
+            record = _row_to_record(row)
+            if (
+                record.status != TaskStatus.QUEUED_HINTS_V2
+                or record.change_hints != expected_hints
+            ):
+                raise ValueError("Point claim no longer matches the parked target set")
+            if record.point_claim_id is None:
+                conn.execute(
+                    "UPDATE tasks SET point_claim_id = ?, updated_at = ? WHERE id = ?",
+                    (uuid.uuid4().hex, time.time(), task_id),
+                )
+            fresh = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+            result = _row_to_record(fresh)
+            conn.commit()
+            return result
         except Exception:
             conn.rollback()
             raise
