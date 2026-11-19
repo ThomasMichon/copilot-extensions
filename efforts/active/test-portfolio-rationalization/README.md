@@ -1078,7 +1078,7 @@ a different selection. Any changed controlled selection must be named as changed
   disposition.
 - [ ] Place each accepted public tracker item in exactly one existing phase,
   extending this plan before implementation when necessary.
-- [ ] **I13278:** Record deduplicated acceptance of the finite P13278/
+- [x] **I13278:** Record deduplicated acceptance of the finite P13278/
   V13278/G13278 Phase 4 lane through the existing migration-intake and
   domain-review process, preserving the continuing source claimant and
   actual resource custody. This administrative intake is not technical
@@ -1089,11 +1089,11 @@ a different selection. Any changed controlled selection must be named as changed
   process. Preserve its independent source status and existing cleanup
   owner; this does not add #7643 to F4 or #10225, run a test or release custody.
 
-- [ ] **I13300:** Route the complete P13300/V13300/G13300 family through
+- [x] **I13300:** Route the complete P13300/V13300/G13300 family through
   existing migration-intake deduplication/ownership review into Phase 4 only.
   Existing #13300 supplies its tracker; mark this administrative row complete
   only after actual reviewed intake delivery/readback.
-- [ ] **I13334:** Route the complete P13334/V13334/G13334 family through the
+- [x] **I13334:** Route the complete P13334/V13334/G13334 family through the
   same gate into Phase 4 only, retaining the original Windows evidence tier
   and existing tracker. Mark this administrative row complete only after
   actual reviewed intake delivery/readback.
@@ -2547,6 +2547,25 @@ with another unbounded full-suite run. Portfolio reductions follow only after
 the inventory and evidence gates are available.
 
 ## Journal
+
+### 2026-11-19 UTC - Reviewed finite domain and intake acceptance recorded
+
+#13384 merged the complete P13278/V13278/G13278, P13300/V13300/G13300 and
+P13334/V13334/G13334 Phase 4 domain amendments, their local and actual
+global Validation, continuing Coordination, dated Journal and all three
+migration-intake registrations. Review explicitly covered the complete
+domain plans, deduplication ownership and intake routes. Approval 5970281763
+on head 9775b5fa73b642d52962ae0d5e8d43b3c324936c preceded merge
+680fd7c05fc4b14a45faec65617996bfd40bfa2b; current receiving readback confirms
+the delivered clauses and preserved incumbent requirements/check states.
+
+Record I13278/I13300/I13334 as administrative acceptance of those single
+Phase 4 placements. These are the only three checked additions; all
+twenty-two new technical portfolio rows remain unchecked. The append-only
+migration ledger records the current routed statuses without rewriting the
+earlier conditional proposal. Existing source trackers remain OPEN pending
+separate source-specific judgments. No technical completion, implementation
+appointment, execution authorization or claim/resource release follows.
 
 ### 2026-11-19 UTC - Proposed finite fixture qualification receiving
 

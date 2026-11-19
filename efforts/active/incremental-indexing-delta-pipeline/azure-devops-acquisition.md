@@ -40,6 +40,71 @@ event-led, query-scoped ingestion gap. It follows the patterns'
 [right-sized surface and explicit failure](../../../docs/patterns/README.md#design-principles):
 extend the existing connector/intake owners, not another service or scheduler.
 
+## Work-item target coverage evidence
+
+Qualification owner:
+[#13386](https://github.com/ThomasMichon/copilot-extensions/issues/13386).
+These conclusions distinguish documented point reads from proposed composition;
+they do not advertise a new adapter capability. A bounded event delta needs
+coverage of its **declared claimed target**, not an atomic snapshot of every
+source object. The target must nevertheless cover everything that a successful
+write replaces or that acknowledgement would retire.
+
+| Target class | Positive provider evidence | Remaining coverage condition / current disposition |
+|--------------|----------------------------|---------------------------------------------------|
+| One work-item revision | [Revisions Get](https://learn.microsoft.com/en-us/rest/api/azure/devops/wit/revisions/get?view=azure-devops-rest-7.1) returns a fully hydrated item at the requested `revisionNumber`. Its `commentVersionRef` is a reference to the specific comment version added/edited/deleted in that revision. | This supports a named item-revision point read and an associated comment-version reference when present. It does not by itself enumerate the discussion or establish that every discussion mutation advances the item's current revision. |
+| One named comment version | [Comments Versions Get](https://learn.microsoft.com/en-us/rest/api/azure/devops/wit/comments-versions/get?view=azure-devops-rest-7.1), API `7.1-preview.1`, addresses parent item, comment ID and version explicitly. `CommentVersion` includes text, version and `isDeleted`. | This supports a named comment-version point read, including that version's deletion state. It is not a manifest of all comments; the documented response model has no parent `workItemId`, so the request path supplies that binding. A comment's deletion state is not a work-item tombstone. |
+| Current comment / paginated discussion | [Get Comment](https://learn.microsoft.com/en-us/rest/api/azure/devops/wit/comments/get-comment?view=azure-devops-rest-7.1) and [Get Comments](https://learn.microsoft.com/en-us/rest/api/azure/devops/wit/comments/get-comments?view=azure-devops-rest-7.1), API `7.1-preview.4`, expose current comment versions and optional deleted comments; the list supplies continuation and counts. | These operations document no item-revision or `asOf` input that fences the list. A terminal page, stable count, matching item-body reads or per-comment versions alone does not establish a complete discussion at one target. Keep the existing combined item-plus-discussion replacement unqualified. |
+| Discussion edit/delete linked to an item revision | The item revision model explicitly associates `commentVersionRef` with comment add/edit/delete. [Update Work Item Comment](https://learn.microsoft.com/en-us/rest/api/azure/devops/wit/comments/update-work-item-comment?view=azure-devops-rest-7.1) returns a versioned comment; [Delete](https://learn.microsoft.com/en-us/rest/api/azure/devops/wit/comments/delete?view=azure-devops-rest-7.1) documents comment deletion. | The association is useful positive evidence, not proof of an exhaustive ordered mutation ledger. Reconstructing a whole discussion requires a complete trusted base plus proof that every admitted mutation between base and target is represented, with bounded resumable acquisition. No such reconstruction is qualified here. |
+| Work-item create/update/delete/restore/comment event | [Service-hook events](https://learn.microsoft.com/en-us/azure/devops/service-hooks/events?view=azure-devops) declare `workitem.created`, `workitem.updated`, `workitem.deleted`, `workitem.restored` and `workitem.commented`. | Event names and example `id`/`rev`/history fields do not establish exhaustive edit/delete delivery or an exact comment-version binding. Validate the admitted event form and positive provider evidence before acknowledgement; opaque hint revisions/event IDs are not event-kind or tombstone authority. Physical deletion and restoration remain separate qualification gates. |
+| Complete event/polling coverage | The hooks identify subjects, while the existing proposal records probation loss and query/feed limits. | A successful point-target acquisition does not certify complete event delivery, query membership across time or ordinary polling coverage. Lost events, query-definition/context changes, non-item membership and PR/thread coverage retain their separate repair/qualification requirements below. |
+
+The revision schema marks `WorkItemCommentVersionRef.createdInRevision`,
+`isDeleted` and `text` as **internal**. Do not promote those fields into an
+adapter-wide fence or a supported public reconstruction protocol. The
+documented `commentId`/`version` pair is still useful; neither ignoring that
+evidence nor assuming a complete collection from it is justified.
+
+### Composition decision and next proof
+
+The existing work-item renderer writes one document containing the item and
+its discussion. It cannot safely replace that document using only a qualified
+item point read or one comment version while silently dropping the rest.
+Two matching fresh item bodies around a finite comment traversal remain an
+**observation**, not a qualified `SourceDelta` or `AcquisitionPage`. The
+finite-observation helper therefore stays disconnected from discovery.
+
+Before that boundary changes, qualify one of these paths through the existing
+shared owners:
+
+- **Combined-document target:** obtain an authoritative provider guarantee
+  covering the complete discussion being replaced. A proposed revision-linked
+  reconstruction must establish an exhaustive mutation-to-revision mapping,
+  a complete base, exact version reads, deletion/restore semantics and a finite
+  resume protocol. Samples, UI history and a stable response are not that proof.
+- **Explicit point-target representation:** if only named item/comment versions
+  can be qualified, first review the shared document-identity, rendering and
+  acknowledgement contract needed to represent those targets without replacing
+  uncovered content. Preserve existing indexed content and reader behavior,
+  use negotiated old/new compatibility, and do not silently introduce a
+  body-only projection or a connector-private progress store.
+
+In either path, bind endpoint/account, query union and current
+definition/context, candidate identity and the precise claimed target. Refuse
+an unrelated or inconsistent revision/reference/version before a successful
+page or hint acknowledgement. A newer provider response may justify later
+trailing work; it cannot silently expand or retire the claimed target.
+Preserve the ordinary polling checkpoint, foreign-source paths and pending
+work on an unsupported or incomplete result.
+
+Focused qualification must include the positive exact-revision/comment-version
+case and negative cases for missing references, wrong parent/identity/version,
+concurrent discussion edits/deletes, incomplete bases, query exit versus
+physical deletion, cancellation and exhausted per-unit budgets. Synthetic
+transport tests prove local controls, not undocumented provider guarantees.
+No live provider reads, subscription changes, source repair or rollout are
+authorized by this evidence matrix.
+
 ## Dependency-ordered implementation
 
 1. **Qualify finite candidate selection before enabling it.** Start with flat,
