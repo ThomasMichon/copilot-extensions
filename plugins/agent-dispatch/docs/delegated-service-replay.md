@@ -363,6 +363,10 @@ by a fresh request. A suspended task permits reconciliation of that same live,
 owner-matching waiter only, not a new preparation. In particular, an event-note
 wake that supersedes the waiter during negotiation must retain its generation
 and pending wake; preparation cannot invalidate it by creating another waiter.
+A started task also cannot suspend while its current owner wake is pending,
+delivering or has unresolved send custody. These outbox checks occur under the
+same lock; a new event note need not change the steering revision to remain
+protected. A confirmed delivered wake does not permanently block later waits.
 
 There is at most one preparation in flight per adapter and two finite service
 operations per call. The original monotonic deadline bounds the SDK operations;

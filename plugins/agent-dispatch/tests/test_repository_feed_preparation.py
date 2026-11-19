@@ -167,6 +167,60 @@ def test_event_note_racing_negotiation_preserves_its_current_pending_wake(
         assert queue.find_delegated_preparation(task_id, "replacement") is None
 
 
+@pytest.mark.parametrize("timing", ["before", "during"])
+@pytest.mark.parametrize("delivery", ["pending", "delivering", "unknown"])
+def test_started_task_preserves_current_owner_wake_before_and_during_negotiation(
+    tmp_path: Path, timing: str, delivery: str,
+) -> None:
+    queue, task_id, spec, client, preparer = setup(tmp_path)
+
+    def event_note() -> None:
+        queue.append_event_note(
+            task_id, sender="operator", note="new accepted instruction", wake_agent=True,
+        )
+        if delivery == "delivering":
+            assert queue.claim_due_wake() is not None
+        elif delivery == "unknown":
+            with queue._connect() as conn:
+                conn.execute(
+                    "UPDATE wake_outbox SET status='failed', execution_send_state='unknown'"
+                    " WHERE task_id=?", (task_id,),
+                )
+
+    if timing == "before":
+        event_note()
+    else:
+        client.during = event_note
+    before = queue.get(task_id)
+    assert before is not None
+    with pytest.raises(TaskError, match="current owner wake"):
+        asyncio.run(prepare(preparer, task_id, spec))
+    current = queue.get(task_id)
+    assert current is not None and current.status == "started"
+    assert current.steering_revision == before.steering_revision
+    wake, = queue.list_wakes(task_id)
+    assert wake.status == ("failed" if delivery == "unknown" else delivery)
+    with queue._connect() as conn:
+        assert queue._wake_is_current(current, wake, conn=conn)
+    assert not queue.list_pending_run_waiters() and not queue.list_run_waiter_wakes(task_id)
+
+
+def test_confirmed_delivered_owner_wake_does_not_permanently_block_another_wait(tmp_path: Path) -> None:
+    queue, task_id, spec, _, preparer = setup(tmp_path)
+    queue.append_event_note(
+        task_id, sender="operator", note="previously delivered instruction", wake_agent=True,
+    )
+    with queue._connect() as conn:
+        conn.execute(
+            "UPDATE wake_outbox SET status='delivered' WHERE task_id=?", (task_id,),
+        )
+        conn.execute("UPDATE tasks SET wake_status='delivered' WHERE id=?", (task_id,))
+    asyncio.run(prepare(preparer, task_id, spec))
+    task = queue.get(task_id)
+    assert task is not None and task.status == "suspended"
+    assert len(queue.list_pending_run_waiters()) == 1
+
+
 @pytest.mark.parametrize("change", [
     {"hold_reason": "operator hold"}, {"awaiting_steer": 1},
     {"owner_session_id": "successor"}, {"generation": 2}, {"owner": "other"},

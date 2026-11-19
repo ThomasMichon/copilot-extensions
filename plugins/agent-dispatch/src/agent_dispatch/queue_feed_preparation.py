@@ -62,6 +62,14 @@ def require_feed_preparation(
         raise TaskError("repository-feed task changed during preparation")
     if task.hold_reason is not None or task.awaiting_steer:
         raise TaskError("repository-feed preparation cannot override a hold or operator form")
+    if task.status == Status.STARTED and conn.execute(
+        "SELECT 1 FROM wake_outbox WHERE task_id=? AND id=? AND owner=?"
+        " AND owner_session_id=? AND generation=? AND pool_recovery_revision IS NULL"
+        " AND (status IN ('pending', 'delivering')"
+        " OR execution_send_state IN ('pending', 'unknown')) LIMIT 1",
+        (task.id, task.wake_operation_id, task.owner, task.owner_session_id, task.generation),
+    ).fetchone():
+        raise TaskError("repository-feed suspension would invalidate a current owner wake")
     associated = find_live_dedup_task(conn, expected.lane, expected.dedup_key)
     if associated is None or associated.id != task.id:
         raise TaskError("repository-feed task association changed during preparation")
