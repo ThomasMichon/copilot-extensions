@@ -8,14 +8,14 @@
         ".github/workflows/copilot-code-review.yml": "e4e9b375d839f3b791c128739f59da3c9d6051a4",
         ".github/workflows/validate-and-promote.yml": "397113c4cf5c5a8846970d67c6207c112c7bc0ee"
       },
-      "main_head": "dd1f953f26f0a2ca374f23d9676d851db083d784",
+      "main_head": "e2454d7ef8a0f9e2da1f9b7bfa8a2ef864480380",
       "manifest_blob": "afab28d33694384f5167b7d268e0586be2b691c5"
     },
-    "dev_head": "a979fe8c38516bf49d1098455bea0de3c483ff5b",
-    "main_before": "dd1f953f26f0a2ca374f23d9676d851db083d784",
-    "promoted_at": "2026-11-19T01:03:49Z",
-    "release_id": "a979fe8c38516bf49d1098455bea0de3c483ff5b",
-    "tag": "promote-dev-a979fe8c38516bf49d1098455bea0de3c483ff5b"
+    "dev_head": "5d75bc2ea0d472efe07526ef66bd0f9c19bcac66",
+    "main_before": "e2454d7ef8a0f9e2da1f9b7bfa8a2ef864480380",
+    "promoted_at": "2026-11-19T01:17:05Z",
+    "release_id": "5d75bc2ea0d472efe07526ef66bd0f9c19bcac66",
+    "tag": "promote-dev-5d75bc2ea0d472efe07526ef66bd0f9c19bcac66"
   },
   "last_rollback": null,
   "pause_reason": null,
