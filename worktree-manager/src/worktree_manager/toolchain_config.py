@@ -196,6 +196,7 @@ def _check_uv_sources(config: dict[str, object], values: Mapping[str, str]) -> b
     if indexes is not None and (
         legacy is not None or not isinstance(indexes, list) or len(indexes) != 1
         or not isinstance(indexes[0], dict) or indexes[0].get("default") is not True
+        or indexes[0].get("explicit", False) is not False
         or not isinstance(indexes[0].get("url"), str) or not _same(indexes[0]["url"], index)
     ):
         raise ValueError("Existing uv indexes conflict with toolchain configuration")

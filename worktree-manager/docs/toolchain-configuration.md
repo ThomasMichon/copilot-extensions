@@ -82,7 +82,10 @@ suppresses the normal user files; setup persists into that selected file
 instead, preserving its options. Darwin
 uses pip's native Application Support locations, with its normal user fallback.
 A matching legacy uv `index-url` or a single matching default `[[index]]` is
-preserved. Uv checks include `[pip]` selectors and the effective system file
+preserved. That default must not be `explicit = true`: uv would then reserve it
+for explicitly pinned packages rather than ordinary dependency resolution.
+Such a selection requires reconciliation; an explicit `false` is preserved.
+Uv checks include `[pip]` selectors and the effective system file
 (the first discovered XDG system file, otherwise the platform system file).
 System configuration is never modified, and an existing matching system default
 does not cause setup to append a second default index.

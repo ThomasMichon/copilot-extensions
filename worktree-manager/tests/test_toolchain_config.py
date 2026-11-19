@@ -257,6 +257,7 @@ def test_toolchain_config_conflicts_do_not_partially_write(
 @pytest.mark.parametrize("kind", ["ps1", "sh"])
 @pytest.mark.parametrize("invalid", [
     "", "empty-option", "unknown", "pip", "pip-colon", "uv", "uv-pip", "uv-system", "uv-system-default",
+    "uv-explicit", "uv-explicit-false",
     "uv-inline", "uv-dotted", "npm", "environment", "npm-upper-environment", "npm-config-aliases",
     "mirror-only", "mirror-configfile", "mirror-noconfig",
 ])
@@ -319,7 +320,8 @@ def test_toolchain_config_native_entry_precedes_first_prerequisite(
             env["UV_CONFIG_FILE"] = str(target)
         elif invalid == "mirror-noconfig":
             env["UV_NO_CONFIG"] = "1"
-    elif invalid in {"pip", "pip-colon", "uv", "uv-pip", "uv-system", "uv-system-default", "uv-inline", "uv-dotted", "npm"}:
+    elif invalid in {"pip", "pip-colon", "uv", "uv-pip", "uv-system", "uv-system-default",
+                     "uv-explicit", "uv-explicit-false", "uv-inline", "uv-dotted", "npm"}:
         family = "pip" if invalid.startswith("pip") else "uv" if invalid.startswith("uv") else "npm"
         target = {
             "pip": home / "appdata" / "pip" / "pip.ini" if os.name == "nt" else home / ".config" / "pip" / "pip.conf",
@@ -345,6 +347,9 @@ def test_toolchain_config_native_entry_precedes_first_prerequisite(
             content = 'pip = { extra-index-url = ["https://other.example.invalid/simple/"] }\n'
         elif invalid == "uv-dotted":
             content = 'pip.extra-index-url = ["https://other.example.invalid/simple/"]\n'
+        elif invalid.startswith("uv-explicit"):
+            explicit = "false" if invalid.endswith("-false") else "true"
+            content = f'[[index]]\nname = "selected"\nurl = "{INDEX}"\ndefault = true\nexplicit = {explicit}\n'
         target.write_text(content, encoding="utf-8")
     if kind == "ps1":
         escaped = str(bootstrap).replace("'", "''")
@@ -383,7 +388,7 @@ def test_toolchain_config_native_entry_precedes_first_prerequisite(
     )
     assert result.returncode != 0
     output = result.stdout + result.stderr
-    if invalid not in {"", "mirror-only"}:
+    if invalid not in {"", "mirror-only", "uv-explicit-false"}:
         assert INDEX not in output
         assert PYTHON_MIRROR not in output
         assert "FIRST_CONSUMER" not in output
@@ -634,6 +639,7 @@ def test_toolchain_config_request_receiver_refuses_unsupported_context(
 
 @pytest.mark.parametrize("selector", [
     "user-pip", "system-pip", "system-index", "system-mirror", "system-matching", "mirror-only",
+    "user-explicit", "system-explicit",
 ])
 def test_toolchain_config_checks_merged_uv_sources_before_writes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, selector: str,
@@ -647,9 +653,11 @@ def test_toolchain_config_checks_merged_uv_sources_before_writes(
     elif selector == "system-mirror":
         content = 'python-install-mirror = "https://other.example.invalid/python/"\n'
     elif selector == "system-matching":
-        content = f'[[index]]\nurl = "{INDEX}"\ndefault = true\n'
-    system.write_text("" if selector in {"user-pip", "mirror-only"} else content, encoding="utf-8")
-    if selector in {"user-pip", "mirror-only"}:
+        content = f'[[index]]\nurl = "{INDEX}"\ndefault = true\nexplicit = false\n'
+    elif selector in {"user-explicit", "system-explicit"}:
+        content = f'[[index]]\nname = "selected"\nurl = "{INDEX}"\ndefault = true\nexplicit = true\n'
+    system.write_text("" if selector in {"user-pip", "user-explicit", "mirror-only"} else content, encoding="utf-8")
+    if selector in {"user-pip", "user-explicit", "mirror-only"}:
         uv.parent.mkdir()
         uv.write_text(content, encoding="utf-8")
     config = tmp_path / "toolchain.conf"

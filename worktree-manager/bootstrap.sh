@@ -198,6 +198,8 @@ if [ -n "$toolchain_config" ]; then
                     if (idx == "" && line !~ /^[[:space:]]*["\047]?python-install-mirror["\047]?[[:space:]]*[=.]/) next
                     if (mirror == "" && line ~ /^[[:space:]]*["\047]?python-install-mirror["\047]?[[:space:]]*[=.]/) next
                     if (line ~ /^[[:space:]]*["\047]?pip["\047]?[[:space:]]*[=.]/ && line ~ /index|find-links|insecure-host/) exit 1
+                    if (line ~ /^[[:space:]]*["\047]?explicit["\047]?[[:space:]]*[=.]/ &&
+                        line !~ /^[[:space:]]*["\047]?explicit["\047]?[[:space:]]*=[[:space:]]*false[[:space:]]*(#.*)?$/) exit 1
                     if (line ~ /^[[:space:]]*["\047]?(extra-index-url|find-links|no-index|no-default-index|allow-insecure-host|index)["\047]?[[:space:]]*=/) exit 1
                     if (line ~ /^[[:space:]]*\[\[[[:space:]]*["\047]?index["\047]?[[:space:]]*\]\][[:space:]]*(#.*)?$/) indexes++
                     if (line ~ /^[[:space:]]*["\047]?default["\047]?[[:space:]]*=[[:space:]]*true[[:space:]]*(#.*)?$/) defaults++

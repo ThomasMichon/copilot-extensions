@@ -246,6 +246,10 @@ if ($ToolchainConfig) {
                     $line -match 'index|find-links|insecure-host') {
                     throw 'Inline or dotted uv pip sources require reconciliation.'
                 }
+                if ($line -match '^\s*["'']?explicit["'']?\s*[=.]' -and
+                    $line -notmatch '^\s*["'']?explicit["'']?\s*=\s*false\s*(?:#.*)?$') {
+                    throw 'Explicit-only uv indexes require reconciliation.'
+                }
                 if ($line -match '^\s*["'']?(?:extra-index-url|find-links|no-index|no-default-index|allow-insecure-host|index)["'']?\s*=') {
                     throw 'Legacy or additional uv sources require reconciliation.'
                 }
