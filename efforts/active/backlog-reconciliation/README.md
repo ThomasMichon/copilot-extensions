@@ -374,6 +374,13 @@ the non-public approval conversation.
 
 ## Plan
 
+The [cache-source acceptance audit](journal/2026/11.19-cache-source-acceptance-and-delivery-boundaries.md)
+records #13431's actual delivery and parent return, reconciles #12216's complete
+source/review/qualification evidence and #12697's finite carrier correction
+before their separately audited completions, and retains eight distinct source
+gaps. The complete 12:19:26 UTC census is 907 whole open, 178 above fixed 729;
+all broader gates remain unfinished.
+
 The [accepted liveness, reaper and publisher record](journal/2026/11.19-keeper-continuation-and-liveness-receipts.md)
 records #13402's actual reviewed delivery, full current readback and the
 three separately audited #13203/#13207/#13208 redundant-tracking retirements.
