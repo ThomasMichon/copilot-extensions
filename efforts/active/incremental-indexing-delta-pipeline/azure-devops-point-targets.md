@@ -113,8 +113,10 @@ existing bindings without altering them.
 The explicit in-process
 [cold schema bootstrap](../../../plugins/agent-index/docs/source-aware-store.md#point-domain-binding-foundation)
 can now prepare the configured empty content/model tables for that exact scope.
-It does not initialize component-ledger or point indices, admit ordinary writers
-or implement selected point application.
+The existing [ledger/index preparation owners](../../../plugins/agent-index/docs/component-ledger.md)
+also accept that same explicit selection while retaining cold-ledger refusal,
+index budgets and dirty/uncertain recovery. Neither preparation seam admits
+ordinary data writers or implements selected point application.
 
 #### Default refusal and explicit reads
 

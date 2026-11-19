@@ -53,6 +53,8 @@ fleets:
     # --config. Relative paths resolve against devcontainer_path.
     devcontainer_config: .devcontainer/docker/devcontainer.json
     size: 1                              # number of warm containers in the fleet
+    # max_size: 3                        # optional: borrow grows the fleet one member
+    #                                    # at a time up to this bound (>= size)
     name_prefix: myrepo                  # default is the fleet name
     workspace_folder: /workspaces/myrepo # overrides the global workspace for ACP
     exec_user: vscode                    # overrides the global exec user
