@@ -1185,6 +1185,8 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         "gateway-continuity-application-linux", "gateway-continuity-application-windows",
         "gateway-normal-setup-linux", "gateway-normal-setup-windows",
         "dependency-compile-linux", "dependency-compile-windows",
+        "packaging-seed-linux", "packaging-seed-windows",
+        "update-diagnostics-linux", "update-diagnostics-windows",
         "source-build-linux", "source-build-windows",
         "source-cache-linux", "source-cache-windows",
         "uv-deployment-compatibility-linux", "uv-deployment-compatibility-windows",
@@ -2253,6 +2255,73 @@ def test_bridge_snapshots_use_explicit_bounded_native_portfolio() -> None:
              "--test-file", "tests/test_bootstrap_driver.py",
              "--test-timeout", "60", "--timeout", "180"],
         ]
+
+
+@pytest.mark.parametrize(("platform", "runner", "opt_in"), [
+    ("linux", "ubuntu-latest", "UPDATE_DRIVER_NATIVE_LINUX_GENESIS"),
+    ("windows", "windows-latest", "UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS"),
+])
+def test_dispatch_recipes_keep_literal_native_runners_and_bounded_packets(
+    platform: str, runner: str, opt_in: str,
+) -> None:
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-full.yml").read_text()
+    )
+    trigger = workflow.get("on", workflow.get(True))
+    assert "dispatch-recipes" in trigger["workflow_dispatch"]["inputs"]["portfolio"]["options"]
+    name = f"dispatch-recipes-{platform}"
+    job = workflow["jobs"][name]
+    assert job["if"] == (
+        "github.event_name == 'workflow_dispatch' && inputs.portfolio == 'dispatch-recipes'"
+    )
+    assert job["runs-on"] == runner and job["timeout-minutes"] == 35
+    assert job["env"][opt_in] == "1" and not job.get("continue-on-error")
+    assert job["strategy"]["fail-fast"] is False
+    assert set(job["strategy"]["matrix"]) == {"packet"}
+    packets = job["strategy"]["matrix"]["packet"]
+    assert {item["name"]: item["file"] for item in packets} == {
+        "python-refusals": "test_first_use_dispatch.py",
+        "native-policy-refusals": "test_first_use_dispatch.py",
+        "native-source-refusals": "test_first_use_dispatch.py",
+        "recipe-controls": "test_first_use_dispatch.py",
+        "deferred-stamp": "test_first_use_dispatch.py",
+        "cold-original": "test_first_use_dispatch.py",
+        "concurrent": "test_first_use_dispatch.py",
+        "reuse-failed-source": "test_first_use_dispatch.py",
+        "supervisor-failure": "test_first_use_dispatch.py",
+        "bridge-python-refusals": "test_first_use_bridge.py",
+        "bridge-native-refusals": "test_first_use_bridge.py",
+        "bridge-recipe-controls": "test_first_use_bridge.py",
+    }
+    policy = (
+        "(client-only or no-self or pinned or managed or malformed or custom-root "
+        "or cell or installation-policy or nested or dispatcher or module)"
+    )
+    assert {item["name"]: item["select"] for item in packets} == {
+        "python-refusals": "refusal and python-api",
+        "native-policy-refusals": "refusal and native-front and " + policy,
+        "native-source-refusals": "refusal and native-front and not " + policy,
+        "recipe-controls": "not refusal and not actual",
+        "deferred-stamp": "actual and stamp",
+        "cold-original": "original_provision",
+        "concurrent": "actual and concurrent",
+        "reuse-failed-source": "reuse_failed",
+        "supervisor-failure": "supervisor_effect_failure",
+        "bridge-python-refusals": "refusal and False",
+        "bridge-native-refusals": "refusal and True",
+        "bridge-recipe-controls": "not refusal and not actual",
+    }
+    checkout = next(step for step in job["steps"] if step.get("uses") == "actions/checkout@v4")
+    assert checkout["with"]["persist-credentials"] is False
+    execution, = [step["run"] for step in job["steps"] if "run" in step]
+    assert execution.split() == [
+        "python", "tools/run-plugin-tests.py", "update-driver",
+        "--test-file", "tests/${{", "matrix.packet.file", "}}",
+        "-k", '"${{', "matrix.packet.select", '}}"',
+        "--test-timeout", "900", "--timeout", "1080",
+    ]
+    required = yaml.safe_load((HERE.parent / ".github/workflows/ci.yml").read_text())
+    assert name not in required["jobs"]
 
 
 def test_bridge_recipes_use_explicit_bounded_native_portfolio() -> None:

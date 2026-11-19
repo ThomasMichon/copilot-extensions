@@ -1,0 +1,9 @@
+{
+  "comment": "Retain fixed Dispatch recipe admission in all update-driver consumers.",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}

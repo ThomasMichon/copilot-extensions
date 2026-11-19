@@ -1,25 +1,31 @@
 """Keep mutable fixtures out of source retained by concurrent installer checks."""
 
+from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager
 import json
 import os
 from pathlib import Path
 import shutil
 import time
+from types import ModuleType
+from typing import Any, cast
 
 import pytest
 
 from update_driver.foundation_inputs import PACKAGES, SUPPORT
 from update_driver import first_use as provision
 
+OwningPayload = tuple[Path, Path, Path]
+
 
 @pytest.fixture
-def area(tmp_path_factory):
+def area(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return tmp_path_factory.mktemp("ud")
 
 
 @pytest.fixture
-def rename_source():
-    def rename(source, destination):
+def rename_source() -> Callable[[Path, Path], Path]:
+    def rename(source: Path, destination: Path) -> Path:
         for attempt in range(5):
             try:
                 return source.rename(destination)
@@ -27,25 +33,27 @@ def rename_source():
                 if os.name != "nt" or getattr(error, "winerror", None) not in (5, 32, 33) or attempt == 4:
                     raise
                 time.sleep(.05 * (attempt + 1))
+        raise AssertionError("bounded source rename exhausted")
 
     return rename
 
 
 @pytest.fixture
-def native_window_observation():
+def native_window_observation() -> Iterator[None]:
     if os.name != "nt":
         yield
         return
     from test_foundation_genesis_process import window_observer
 
-    with window_observer(Path(__file__).resolve().parents[2]) as observation:
+    observer = cast(Callable[[Path], AbstractContextManager[Any]], window_observer)
+    with observer(Path(__file__).resolve().parents[2]) as observation:
         yield
         assert observation.surfaced == {}
         assert observation.focus_changes == {}
 
 
 @pytest.fixture
-def native_source(area):
+def native_source(area: Path) -> Path:
     common = area / "source"
     for directory, (name, dependencies) in PACKAGES.items():
         package = common / directory
@@ -74,7 +82,7 @@ def native_source(area):
 
 
 @pytest.fixture
-def owning_context(area, monkeypatch):
+def owning_context(area: Path, monkeypatch: pytest.MonkeyPatch) -> OwningPayload:
     profile = area / "profile"
     profile.mkdir()
     project = area / "project"
@@ -95,6 +103,7 @@ def owning_context(area, monkeypatch):
         *provision.CODESPACES_CONTEXT_KEYS,
         *provision.LOGGER_CONTEXT_KEYS,
         *provision.BRIDGE_CONTEXT_KEYS,
+        *provision.DISPATCH_CONTEXT_KEYS,
         "AGENT_VAULT_VALIDATED_CONTEXT", "AGENT_PULL_REQUESTS_VALIDATED_CONTEXT",
         "AGENT_PULL_REQUESTS_ACTION", "AGENT_PULL_REQUESTS_FORCE",
         "AGENT_PULL_REQUESTS_INSTALL_DIR", "UPDATE_DRIVER_WITNESS",
@@ -107,6 +116,11 @@ def owning_context(area, monkeypatch):
         "AGENT_BRIDGE_VALIDATED_CONTEXT", "AGENT_BRIDGE_PAYLOAD_ROOT",
         "AGENT_BRIDGE_ACTION", "AGENT_BRIDGE_DRY_RUN", "AGENT_BRIDGE_FORCE",
         "AGENT_BRIDGE_CONFIG_DIR", "AGENT_BRIDGE_INSTALL_DIR",
+        "AGENT_DISPATCH_VALIDATED_CONTEXT", "AGENT_DISPATCH_PAYLOAD_ROOT",
+        "AGENT_DISPATCH_ACTION", "AGENT_DISPATCH_DRY_RUN", "AGENT_DISPATCH_FORCE",
+        "AGENT_DISPATCH_CONFIG_DIR", "AGENT_DISPATCH_INSTALL_DIR",
+        "AGENT_DISPATCH_ROUTING_DIR", "AGENT_DISPATCH_RUN_DIR",
+        "AGENT_DISPATCH_COMMAND_MODULE",
         "COPILOT_PROJECT_DIR", "COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT",
     ):
         monkeypatch.delenv(key, raising=False)
@@ -117,7 +131,7 @@ def owning_context(area, monkeypatch):
 
 
 @pytest.fixture
-def owning_payload(owning_context):
+def owning_payload(owning_context: OwningPayload) -> OwningPayload:
     library = Path(__file__).resolve().parents[2]
     payload, installation, project = owning_context
     scripts = payload / "scripts"
@@ -145,9 +159,9 @@ def owning_payload(owning_context):
         "param([string]$Action,[string]$InstallDir,[switch]$NoService)\n"
         "if ($Action -cnotin @('provision', 'stamp')) { exit 90 }\n"
         "$plugin = (Get-Content -Raw (Join-Path $PSScriptRoot '..\\plugin.json') | ConvertFrom-Json).name\n"
-        "if ($plugin -eq 'agent-vault' -and $Action -eq 'provision') {\n"
+        "if ($plugin -in @('agent-vault', 'agent-dispatch') -and $Action -eq 'provision') {\n"
         "if ($env:COPILOT_EXTENSIONS_COMMAND_LIFECYCLE -or -not $env:UPDATE_DRIVER_WITNESS -or "
-        "$env:COPILOT_EXTENSIONS_NATIVE_INSTALLER -cne 'agent-vault') { exit 91 }\n"
+        "$env:COPILOT_EXTENSIONS_NATIVE_INSTALLER -cne $plugin) { exit 91 }\n"
         "} else {\n"
         "if ($env:UPDATE_DRIVER_WITNESS -or $env:COPILOT_EXTENSIONS_COMMAND_LIFECYCLE) { exit 91 }\n"
         "}\n"
@@ -178,7 +192,7 @@ def owning_payload(owning_context):
 
 
 @pytest.fixture
-def owning_pull_requests(owning_payload):
+def owning_pull_requests(owning_payload: OwningPayload) -> OwningPayload:
     payload, installation, project = owning_payload
     # Keep fixture inputs until framework cleanup; no directory-rename custody is needed.
     payload = Path(shutil.copytree(payload, payload.with_name("agent-pull-requests")))
@@ -219,7 +233,7 @@ def owning_pull_requests(owning_payload):
 
 
 @pytest.fixture
-def owning_ssh(owning_pull_requests):
+def owning_ssh(owning_pull_requests: OwningPayload) -> OwningPayload:
     payload, installation, project = owning_pull_requests
     payload = Path(shutil.copytree(payload, payload.with_name("agent-ssh")))
     for name in ("plugin.json", "payload-invocation.json", "pyproject.toml"):
@@ -251,7 +265,7 @@ def owning_ssh(owning_pull_requests):
 
 
 @pytest.fixture
-def owning_codespaces(owning_ssh):
+def owning_codespaces(owning_ssh: OwningPayload) -> OwningPayload:
     payload, installation, project = owning_ssh
     payload = Path(shutil.copytree(payload, payload.with_name("agent-codespaces")))
     for name in ("plugin.json", "payload-invocation.json", "pyproject.toml",
@@ -267,7 +281,7 @@ def owning_codespaces(owning_ssh):
 
 
 @pytest.fixture
-def owning_bridge(owning_codespaces):
+def owning_bridge(owning_codespaces: OwningPayload) -> OwningPayload:
     payload, installation, project = owning_codespaces
     payload = Path(shutil.copytree(payload, payload.with_name("agent-bridge")))
     for name in ("plugin.json", "pyproject.toml", "scripts/install.ps1", "scripts/install.sh"):
@@ -303,7 +317,79 @@ def owning_bridge(owning_codespaces):
 
 
 @pytest.fixture
-def owning_logger(owning_codespaces):
+def owning_dispatch(owning_payload: OwningPayload) -> OwningPayload:
+    payload, installation, project = owning_payload
+    installed = installation.parent / ".copilot" / "installed-plugins" / "fixture-market" / "agent-dispatch"
+    payload = Path(shutil.copytree(payload, installed))
+    for name in ("plugin.json", "pyproject.toml", "scripts/install.ps1", "scripts/install.sh"):
+        path = payload / name
+        content = path.read_text()
+        if not name.startswith("scripts/"):
+            content = content.replace("agent-vault", "agent-dispatch").replace(
+                "agent_vault", "agent_dispatch",
+            )
+        content = content.replace("AGENT_VAULT_ALLOW_DOWNGRADE", "AGENT_DISPATCH_ALLOW_DOWNGRADE")
+        path.write_text(content, encoding="utf-8")
+    (installation.parent / ".copilot" / "settings.json").write_text(json.dumps({
+        "extraKnownMarketplaces": {
+            "fixture-market": {"source": {"source": "github", "repo": "example/fixture-market"}},
+        },
+    }), encoding="utf-8")
+    controls = ("ACTION", "DRY_RUN", "FORCE", "PAYLOAD_ROOT", "VALIDATED_CONTEXT",
+                "CONFIG_DIR", "INSTALL_DIR", "ROUTING_DIR", "RUN_DIR", "COMMAND_MODULE",
+                "INSTALLATION_CONFIG")
+    windows = payload / "scripts/install.ps1"
+    windows.write_text(windows.read_text().replace(
+        "[switch]$NoService", "[switch]$Unsupported",
+    ).replace("[bool]$NoService", "[bool]$Unsupported").replace(
+        "[IO.Directory]::CreateDirectory",
+        "if (" + " -or ".join("$env:AGENT_DISPATCH_" + key for key in controls) +
+        ") { exit 94 }\n[IO.Directory]::CreateDirectory", 1,
+    ).replace(
+        "exit 7\n",
+        "[IO.File]::AppendAllText((Join-Path $InstallDir 'wsl-client-history'), "
+        "('[' + [string]$env:AGENT_DISPATCH_WSL_WINDOWS_CLIENT + ']' + [Environment]::NewLine))\n"
+        "[IO.File]::WriteAllText((Join-Path $InstallDir 'supervise-machine'), "
+        "[string]$env:AGENT_DISPATCH_SUPERVISE_MACHINE)\n"
+        "[IO.File]::WriteAllText((Join-Path $InstallDir 'base-python'), "
+        "[string]$env:AGENT_DISPATCH_BASE_PYTHON)\n"
+        "exit 7\n",
+    ), encoding="utf-8")
+    posix = payload / "scripts/install.sh"
+    posix.write_text(posix.read_text().replace(
+        "mkdir -p", "[[ " + " && ".join(
+            '-z "${AGENT_DISPATCH_' + key + ':-}"' for key in controls
+        ) + " ]]\n[[ \"$#\" == 3 ]]\nmkdir -p", 1,
+    ).replace(
+        "exit 7\n",
+        'printf "[%s]\\n" "${AGENT_DISPATCH_WSL_WINDOWS_CLIENT:-}" >>"$3/wsl-client-history"\n'
+        'printf "%s" "${AGENT_DISPATCH_SUPERVISE_MACHINE:-}" >"$3/supervise-machine"\n'
+        'printf "%s" "${AGENT_DISPATCH_BASE_PYTHON:-}" >"$3/base-python"\n'
+        "exit 7\n",
+    ), encoding="utf-8")
+    repository = Path(__file__).resolve().parents[3]
+    shutil.copyfile(
+        repository / "plugins/agent-dispatch/payload-invocation.json",
+        payload / "payload-invocation.json",
+    )
+    for name in provision.DISPATCH_HELPERS:
+        path = payload / "scripts" / name
+        if not path.exists():
+            source = repository / (
+                "libs/installer-engine" if name in ("installer-engine.ps1", "installer-engine.sh")
+                else "plugins/agent-dispatch/scripts"
+            ) / name
+            shutil.copyfile(source, path)
+    scheduling = payload / "src/agent_dispatch/windows-scheduling.ps1"
+    scheduling.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(
+        repository / "plugins/agent-dispatch/src/agent_dispatch/windows-scheduling.ps1", scheduling,
+    )
+    return payload, installation.with_name(".agent-dispatch"), project
+
+
+@pytest.fixture
+def owning_logger(owning_codespaces: OwningPayload) -> OwningPayload:
     payload, installation, project = owning_codespaces
     payload = Path(shutil.copytree(payload, payload.with_name("agent-logger")))
     for name in ("plugin.json", "pyproject.toml", "scripts/install.ps1", "scripts/install.sh"):
@@ -338,11 +424,12 @@ def owning_logger(owning_codespaces):
 
 
 @pytest.fixture
-def selected_logger_snapshot(owning_logger):
+def selected_logger_snapshot(owning_logger: OwningPayload) -> OwningPayload:
     from test_first_use import primitive
 
     payload, installation, project = owning_logger
-    captured = primitive(payload).resolve_context(
+    load = cast(Callable[[Path], ModuleType], primitive)
+    captured = load(payload).resolve_context(
         payload_root=payload, plugin_id="agent-logger", project_root=project,
     )
     snapshot = installation / "snapshots/1.0.0-retained"

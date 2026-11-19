@@ -5,6 +5,7 @@
 # Installation driver lifecycle contract: logger-command-v1
 # Installation driver lifecycle contract: bridge-command-v1
 # Installation driver lifecycle contract: mcp-recipes-v1
+# Installation driver lifecycle contract: dispatch-first-use-v1
 param(
     [Parameter(Mandatory)][string]$Root,
     [Parameter(Mandatory)][string]$Payload,
@@ -55,6 +56,7 @@ switch -CaseSensitive ($plugin) {
     'agent-logger' { $prefix = 'AGENT_LOGGER' }
     'agent-bridge' { $prefix = 'AGENT_BRIDGE' }
     'agent-mcp' { $prefix = 'AGENT_MCP' }
+    'agent-dispatch' { $prefix = 'AGENT_DISPATCH' }
     default { throw 'Owning payload does not declare the fixed first-use provision recipe.' }
 }
 if ($InstallerAction -ceq 'stamp-provision' -and $plugin -cne 'agent-ssh') {
@@ -73,7 +75,8 @@ if ($plugin -ceq 'agent-logger') {
         }
     }
 }
-if ($plugin -ceq 'agent-bridge') {
+if ($plugin -cin @('agent-bridge', 'agent-dispatch')) {
+    $label = if ($plugin -ceq 'agent-bridge') { 'Bridge' } else { 'Dispatch' }
     foreach ($helper in @(
         'installer-engine.ps1', 'installer-engine.sh',
         'installer_engine.py', 'installer_engine_process.py', 'runtime_launcher.py',
@@ -81,13 +84,36 @@ if ($plugin -ceq 'agent-bridge') {
         'installer_dependency_policy.py', 'installer_dependency_config.py', 'installer_dependency_arguments.py',
         'installation-context\installation_context.py',
         'installation-context\installation-context.ps1', 'installation-context\installation-context.sh',
-        'install.ps1', 'install.sh', 'repair-scheduled-task.ps1',
+        'install.ps1', 'install.sh',
         'versioned_runtime_native.ps1', 'versioned_runtime.py',
         'versioned_runtime_construction.py', 'versioned_runtime_source.py',
         'versioned_runtime_publication.py', 'versioned_runtime_leases.py'
     )) {
         if (-not [IO.File]::Exists((Join-Path $Payload "scripts\$helper"))) {
-            throw 'Bridge first use requires its complete materialized installation helpers.'
+            throw "$label first use requires its complete materialized installation helpers."
+        }
+    }
+    $ownHelpers = if ($plugin -ceq 'agent-bridge') { @('repair-scheduled-task.ps1') } else {
+        @('installer_driver.py', 'installer-instance-reconcile.ps1', 'installer-instance-reconcile.sh',
+          'installer_instance_reconcile.py', 'installer_engine_health.py', 'installer_retained_content.py',
+          'installer_source_build.py', 'installer_source_wheel_cache.py',
+          'versioned_runtime_cache.py', 'daemon_instance_runtime.pyz',
+          'source-runtime.ps1', 'source-runtime.sh', 'supervisor-lifecycle.ps1', 'base-python.ps1',
+          'runtime-gate.ps1', 'runtime-gate.sh', 'resolve-runtime.ps1', 'resolve-runtime.sh')
+    }
+    foreach ($helper in $ownHelpers) {
+        if (-not [IO.File]::Exists((Join-Path $Payload "scripts\$helper"))) {
+            throw "$label first use requires its complete materialized installation helpers."
+        }
+    }
+    if ($plugin -ceq 'agent-dispatch') {
+        if (-not [IO.File]::Exists((Join-Path $Payload 'src\agent_dispatch\windows-scheduling.ps1')) -or
+            ((Test-Path -LiteralPath (Join-Path $RuntimeRoot 'action-controls.json')) -and
+             -not [IO.File]::Exists((Join-Path $Payload 'scripts\action_controls.py')))) {
+            throw 'Dispatch first use requires its complete materialized installation helpers.'
+        }
+        if (Test-Path Env:AGENT_DISPATCH_INSTALLATION_CONFIG) {
+            throw 'Dispatch first use requires its default installation policy.'
         }
     }
 }
@@ -116,8 +142,14 @@ if ($plugin -ceq 'agent-mcp') {
         }
     }
 }
-if ($plugin -cin @('agent-ssh', 'agent-codespaces', 'agent-logger', 'agent-bridge', 'agent-mcp')) {
-    $label = @{ 'agent-ssh' = 'SSH'; 'agent-codespaces' = 'CodeSpaces'; 'agent-logger' = 'Logger'; 'agent-bridge' = 'Bridge'; 'agent-mcp' = 'MCP' }[$plugin]
+if ($plugin -ceq 'agent-dispatch' -and (
+    $invocation.installerLifecycle -isnot [bool] -or -not $invocation.installerLifecycle -or
+    $invocation.windowsCatalogShim -isnot [string] -or $invocation.windowsCatalogShim -cne 'cmd'
+)) {
+    throw 'Dispatch first use requires its native lifecycle and CMD catalog declaration.'
+}
+if ($plugin -cin @('agent-ssh', 'agent-codespaces', 'agent-logger', 'agent-bridge', 'agent-mcp', 'agent-dispatch')) {
+    $label = @{ 'agent-ssh' = 'SSH'; 'agent-codespaces' = 'CodeSpaces'; 'agent-logger' = 'Logger'; 'agent-bridge' = 'Bridge'; 'agent-mcp' = 'MCP'; 'agent-dispatch' = 'Dispatch' }[$plugin]
     $sshDeclaration = @{
         legacyRuntimeRoot = '.' + $plugin
         payloadRootEnv = $prefix + '_PAYLOAD_ROOT'
@@ -138,7 +170,7 @@ if ($plugin -cin @('agent-ssh', 'agent-codespaces', 'agent-logger', 'agent-bridg
         throw "$label first use requires its declared native runtime gate."
     }
 }
-if ($plugin -cin @('agent-codespaces', 'agent-logger', 'agent-bridge', 'agent-mcp') -and (
+if ($plugin -cin @('agent-codespaces', 'agent-logger', 'agent-bridge', 'agent-mcp', 'agent-dispatch') -and (
     (Test-Path ("Env:" + $prefix + '_INSTALLATION_ID')) -or
     $RuntimeRoot -ine (Join-Path $env:USERPROFILE ('.' + $plugin)) -or
     -not (
