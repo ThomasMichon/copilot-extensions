@@ -136,8 +136,8 @@ def test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop(
         json.dumps([url, "harness-a"], separators=(",", ":")).encode(),
     ).hexdigest())
     from repository_ssh_cohort_fixture import (
-        manager_stack_diagnostic, native_setup_environment, original_engine_owner,
-        source_application_command,
+        manager_activation_diagnostic, manager_stack_diagnostic, native_setup_environment,
+        original_engine_owner, source_application_command,
     )
 
     clean = native_setup_environment(os.environ, home, root)
@@ -208,7 +208,10 @@ def test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop(
         stack = text.partition("Timeout (")[2]
         if stack:
             progress("Manager fixture stack:\nTimeout (" + stack)
+        progress(manager_activation_diagnostic(home / ".worktree-manager"))
         raise
+    if installed.returncode:
+        progress(manager_activation_diagnostic(home / ".worktree-manager"))
     assert installed.returncode == 0, installed.stdout + installed.stderr
     launcher = home / ".local" / "bin" / (
         "worktree-manager.ps1" if os.name == "nt" else "worktree-manager"

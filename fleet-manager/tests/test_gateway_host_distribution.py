@@ -410,6 +410,18 @@ def test_manager_stack_diagnostic_preserves_script_entry_and_emits_stack(tmp_pat
     assert "run_path" in result.stderr
 
 
+def test_manager_activation_diagnostic_bounds_the_actual_startup_log(tmp_path: Path) -> None:
+    from repository_ssh_cohort_fixture import manager_activation_diagnostic
+
+    assert "FileNotFoundError" in manager_activation_diagnostic(tmp_path)
+    log = tmp_path / "mux-daemon-passive.log"
+    log.write_bytes(b"old-startup-entry\n" + b"x" * 20_000 + b"\nactual-startup-failure\n")
+    diagnostic = manager_activation_diagnostic(tmp_path)
+    assert diagnostic.endswith("\nactual-startup-failure\n")
+    assert "old-startup-entry" not in diagnostic
+    assert len(diagnostic.removeprefix("Manager passive startup log:\n")) == 16_384
+
+
 def test_native_manager_launcher_uses_fixture_root_despite_runner_override(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

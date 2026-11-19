@@ -2076,6 +2076,11 @@ arguments and script import root. A timed-out Manager support call reports that
 stack plus bounded Source phase/progress lines; its 60-second limit is unchanged.
 The wrapper's real subprocess control verifies argument forwarding and stack
 delivery without constructing or modifying a prepared Source.
+Failed or timed-out activation also reports at most the final 16 KiB of the
+fixture Manager's passive-startup log; missing or linked logs remain explicit.
+The workflow forwards native lifecycle stdout/stderr explicitly through its
+headless Windows parent. A real nested-subprocess control exercises that
+workflow call, rather than only checking creation flags.
 The fixture explicitly selects its Manager root as well as its private homes;
 a real generated-launcher control retains an inherited runner root override and
 verifies that the fixture still reaches its own selected slot.

@@ -120,6 +120,20 @@ def manager_stack_diagnostic(command: list[str], *, dump_after: float = 40) -> l
     return [*command[:3], "-c", script, str(dump_after), *command[3:]]
 
 
+def manager_activation_diagnostic(root: Path) -> str:
+    log = root / "mux-daemon-passive.log"
+    if log.is_symlink():
+        return "Manager passive startup log unavailable: linked path"
+    try:
+        with log.open("rb") as stream:
+            stream.seek(0, os.SEEK_END)
+            stream.seek(max(0, stream.tell() - 16_384))
+            content = stream.read(16_384)
+    except OSError as error:
+        return "Manager passive startup log unavailable: " + type(error).__name__
+    return "Manager passive startup log:\n" + content.decode("utf-8", errors="replace")
+
+
 class ProfileBuilder(Protocol):
     def prepare_registry_lock(
         self, snapshot: Path, output: Path, *, uv: str, deadline: float,

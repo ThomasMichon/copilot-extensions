@@ -1995,6 +1995,7 @@ jobs:
                       [sys.executable, str(root / "tools" / "run-standalone-tests.py"),
                        "fleet-manager", "--timeout", "180", "--ephemeral-native-ssh-setup"],
                       env=environment, check=False,
+                      stdin=subprocess.DEVNULL, stdout=sys.stdout, stderr=sys.stderr,
                       creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
                   ).returncode
                   if code:

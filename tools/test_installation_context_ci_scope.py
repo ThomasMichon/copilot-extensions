@@ -515,6 +515,42 @@ def test_gateway_native_groups_prepare_under_owned_scratch_root(
     assert observed == [private]
 
 
+def test_gateway_native_lifecycle_forwards_output_from_a_headless_parent(tmp_path: Path) -> None:
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-acceptance.yml").read_text(),
+    )
+    script = next(
+        step["run"] for step in workflow["jobs"]["gateway-normal-setup-windows"]["steps"]
+        if step.get("name") == "Normal Manager and engine SSH setup"
+    )
+    calls = [
+        node for node in ast.walk(ast.parse(script))
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name) and node.func.value.id == "subprocess"
+        and node.func.attr == "run"
+    ]
+    assert len(calls) == 1
+    call = calls[0]
+    call.args = [ast.Name(id="child_command", ctx=ast.Load())]
+    parent = tmp_path / "workflow_parent.py"
+    parent.write_text(
+        "import os,subprocess,sys\n"
+        "environment=dict(os.environ)\n"
+        "child_command=[sys.executable,'-I','-c',"
+        "\"import sys;print('native-stdout');print('native-stderr',file=sys.stderr)\"]\n"
+        "result=" + ast.unparse(call) + "\n"
+        "raise SystemExit(result.returncode)\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [sys.executable, "-I", str(parent)], capture_output=True, text=True,
+        timeout=10, creationflags=_CREATION_FLAGS,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == "native-stdout"
+    assert result.stderr.strip() == "native-stderr"
+
+
 @pytest.mark.parametrize(
     "path",
     [
