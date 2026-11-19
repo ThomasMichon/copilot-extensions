@@ -49,9 +49,13 @@ python <efforts-payload>/skills/driving-effort-agendas/scripts/agenda_rescue.py 
 
 ## Cutover and recovery
 
-The owner reserves the destination with an unsupported SQLite format marker.
-It then commits a source fence and recovery record before activating the
-destination. The record binds the exact export, placement, operation and
+The owner reserves the destination with an unsupported SQLite format marker and
+flushes its new directory entry before committing the source writer fence.
+First creation requires a genuinely empty directory; orphan SQLite sidecars
+remain untouched. Existing reservations are inspected read-only before they
+can authorize source cutover, without recovering an unrelated hot journal.
+The owner then commits the source fence and recovery record before activating
+the destination. The record binds the exact export, placement, operation and
 filesystem identities. Additive provider presentation fields are not part of
 this stable identity. Ordinary readers, updates, initialization and delivery
 recording refuse a fenced database, including a previously loaded writer that

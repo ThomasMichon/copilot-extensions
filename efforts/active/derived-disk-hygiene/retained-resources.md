@@ -310,3 +310,23 @@ advertises `agenda-managed-rescue-v1` independently, reuses the existing
 format-2 commands compatible. Old readers refuse the fenced source through
 their existing transaction-time format check; the new destination remains
 ordinary format 2. Source adoption does not require peers to upgrade together.
+
+### 2026-11-19 - Reservation preservation and publication barriers
+
+The rescue owner now requires a genuinely empty home before first database
+creation. Existing reservations are inspected read-only, so SQLite cannot
+recover or delete an unrecognized hot journal before ownership is established.
+The new reservation's directory entry is flushed after its commit and before
+the source writer fence. A failed barrier leaves the source usable and the
+destination reserved for an exact retry.
+
+The focused Linux packet passes 38 cases; the Windows packet passes 36 with
+two POSIX-only skips. Controls preserve all three orphan-sidecar forms and a
+real foreign hot journal byte-for-byte, and exercise a failed directory barrier
+followed by recovery. Five in-process units, fatal-error lint and whole-file
+strict typing for both target platforms pass.
+
+The first hosted Windows requests for #13403 executed all applicable tests
+successfully but remain incomplete because their selections included expected
+POSIX-only skips. They are not qualification passes. The corrected source needs
+a new native-only selection; the POSIX controls retain their Linux evidence.

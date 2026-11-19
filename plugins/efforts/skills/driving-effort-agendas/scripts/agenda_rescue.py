@@ -72,12 +72,14 @@ def _reserve(home: Path, request: dict[str, Any]) -> list[int]:
     _members(home)
     path = store.safe_path(home / store.DATABASE)
     if path.exists():
-        with store.transaction(home, write=True, relocation=True) as db:
+        with store.transaction(home, readonly=True, relocation=True) as db:
             identity = _identity(path)
             if db.execute("PRAGMA user_version").fetchone()[0] != store.RELOCATED_VERSION or (
                     _record(db) != {"request": request, "database_identity": identity}):
                 raise AgendaError("relocation destination is not this attempt's reserved store")
             return identity
+    if any(home.iterdir()):
+        raise AgendaError("first relocation reservation requires a genuinely empty destination")
     fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
     try:
         info = os.fstat(fd)
@@ -198,7 +200,7 @@ def relocate(
             "worktree": worktree, "store_id": store_id, "revision": manifest["revision"],
         }
         # Both homes must support the same durability contract as complete export.
-        with export._pinned_directory(source_home), export._pinned_directory(destination):
+        with export._pinned_directory(source_home), export._pinned_directory(destination) as directory_fd:
             with store.transaction(source_home, write=True, relocation=True) as source:
                 if _identity(store.safe_path(source_home / store.DATABASE)) != request["source_database"] or (
                         _identity(source_home) != request["source_directory"]):
@@ -209,6 +211,7 @@ def relocate(
                     if export._table_hashes(source, budget) != manifest["tables"]:
                         raise AgendaError("source changed after export; no writer cutover")
                     destination_id = _reserve(destination, request)
+                    export._sync_directory(destination, directory_fd)
                     record = {"request": request, "destination_database": destination_id}
                     _fence(source, record)
                 else:

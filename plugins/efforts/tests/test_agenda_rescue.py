@@ -84,6 +84,61 @@ def test_additive_provider_metadata_does_not_invalidate_cutover_recovery(packet:
     assert STORE.read(packet["target"])["revision"] == 3
 
 
+@pytest.mark.parametrize("suffix", ["-journal", "-wal", "-shm"])
+def test_orphan_sidecars_are_preserved_before_first_database_creation(
+    packet: dict[str, Any], suffix: str,
+) -> None:
+    (packet["target"] / (STORE.DATABASE + suffix)).write_bytes(b"unrecognized SQLite evidence")
+    before = {key: source_bytes(packet[key]) for key in ("source", "target", "export")}
+    with pytest.raises(RESCUE.AgendaError, match="genuinely empty"):
+        rescue(packet)
+    assert {key: source_bytes(packet[key]) for key in before} == before
+
+
+def test_unrecognized_database_hot_journal_is_never_recovered_or_deleted(packet: dict[str, Any]) -> None:
+    target = packet["target"]
+    database = target / STORE.DATABASE
+    database.write_bytes((packet["source"] / STORE.DATABASE).read_bytes())
+    script = r'''
+import os,sqlite3,sys
+db=sqlite3.connect(sys.argv[1],isolation_level=None)
+db.execute("PRAGMA cache_size=1")
+db.execute("BEGIN IMMEDIATE")
+db.execute("UPDATE state SET metadata=?",("uncommitted"*20000,))
+os._exit(0)
+'''
+    flags = 0
+    if sys.platform == "win32":
+        flags = subprocess.CREATE_NO_WINDOW
+    seeded = subprocess.run(
+        [sys.executable, "-B", "-c", script, str(database)],
+        capture_output=True, text=True, timeout=10, creationflags=flags,
+    )
+    assert seeded.returncode == 0, seeded.stderr
+    assert (target / (STORE.DATABASE + "-journal")).is_file()
+    before = {key: source_bytes(packet[key]) for key in ("source", "target", "export")}
+    with pytest.raises(RESCUE.AgendaError):
+        rescue(packet)
+    assert {key: source_bytes(packet[key]) for key in before} == before
+
+
+def test_destination_directory_barrier_precedes_source_writer_fence(
+    packet: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    before = source_bytes(packet["source"])
+    with monkeypatch.context() as patch:
+        def unavailable(*args: Any) -> None:
+            raise OSError("fixture destination directory barrier failed")
+        patch.setattr(EXPORT, "_sync_directory", unavailable)
+        with pytest.raises(RESCUE.AgendaError, match="destination directory barrier"):
+            rescue(packet)
+    assert source_bytes(packet["source"]) == before
+    assert STORE.read(packet["source"])["revision"] == 3
+    with pytest.raises(RESCUE.AgendaError, match="unsupported"):
+        STORE.read(packet["target"])
+    assert rescue(packet)["activated"] is True
+
+
 def test_export_longer_than_a_history_page_moves_every_accepted_operation(
     packet: dict[str, Any],
 ) -> None:
