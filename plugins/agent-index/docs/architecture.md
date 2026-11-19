@@ -918,7 +918,7 @@ The service binds `AGENT_INDEX_HOST` (default `127.0.0.1`) and
 | `GET /similar` | nearest neighbours for an indexed chunk |
 | `GET /clusters` | near-duplicate cluster artifact |
 | `POST /reindex` | enqueue background indexing unless draining/deps missing |
-| `POST /reindex/hints` | strictly validate and durably union version-1 acquisition hints |
+| `POST /reindex/hints` | strictly validate and durably union v1 acquisition hints or parked v2 point claims |
 | `POST /drain`, `/undrain` | zdd cutover drain gates; namespaced calls require the exact instance token |
 | `POST /promote` | instance- and transaction-owned pre-route passive promotion |
 | `POST /shutdown` | ownership-attested service shutdown used by CLI/cutover |
@@ -1076,7 +1076,7 @@ dequeue preserves full-first ordering and FIFO within each tier.
 
 This is a **receiver-first expansion**. `dequeue_next()` retains legacy
 selection; only an explicit `dequeue_next(accept_change_hints=True)` may claim
-parked work. The runner opts in only when the exact engine callable selected in
+parked **v1** work. The runner opts in only when the exact engine callable selected in
 this runtime advertises v1 support. It rechecks before launch; the worker checks
 its own selected callable again before execution. A capability loss returns a
 claimed hinted task to `queued_hints`, without calling the engine or advancing
@@ -1105,11 +1105,11 @@ and worker preserve the envelope; the capable engine retains responsibility
 for source/account admission, acquisition, checkpoints and all index mutations.
 
 `GET /health` adds `indexing_contract` with stable identity
-`agent-index.change-hints`, `intake_versions: [1]`, and separately computed
+`agent-index.change-hints`, `intake_versions: [1, 2]`, and separately computed
 `execution_versions` (`[]` unless the selected callable advertises v1).
 Advertising durable intake is not a claim that hinted execution is available.
 `POST /reindex/hints` accepts only `source`, optional `full: false`, and required
-`change_hints` containing the complete v1 envelope. It refuses unknown fields,
+`change_hints` containing a complete v1 or point-only v2 envelope. It refuses unknown fields,
 versions, duplicate JSON keys, mismatched scopes and oversized bodies before
 queue effects. Ordinary runner/dependency/drain availability checks still apply.
 Accepted responses include the stored task and its complete unioned payload.
@@ -1145,6 +1145,49 @@ there is no source-only polling fallback. The same connector supplies recovery
 identity and acquisition. Hinted failures propagate to a failed retryable task,
 not terminal partial success. Acquired manifests retain existing replay and
 store-before-checkpoint ordering.
+
+#### Point-only v2 intake (execution unsupported)
+
+`indexing.point_hints.PointChangeHints` is a separate immutable v2 envelope.
+Its exact source/family/account plus `PointBinding` form the union boundary.
+The binding retains effective nonsecret `endpoint`, `query_scope` (the exact
+query union), `query_context` (its definition/context), and the explicit
+`point-components` representation/version 1. Adapters own canonicalization
+and later eligibility/coverage validation; intake does not qualify those facts.
+Targets are `WorkItemRevisionTarget(item_id, revision, event_ids=())` or
+`CommentVersionTarget(item_id, comment_id, version, event_ids=())`, with positive
+integer versions and per-target event correlations. Distinct target versions,
+parents and correlations survive union. Broad v1 fields and unknown kinds are
+rejected. The original `ChangeHints` decoder, CLI and client remain v1-only.
+
+V2 intake retains claims as `queued_hints_v2` in the same task rows, with an
+immutable `change_hints_version` discriminator and additive `point_change_hints`
+payload column. The old `change_hints` column remains null for v2 so older
+unfiltered history readers can still decode their v1 payloads. New records and queued unions
+are bounded to 1,024 distinct targets and 1 MiB of serialized hint bytes; the
+HTTP request's existing 1 MiB/five-second read bound also applies. A refused
+union returns HTTP 409 without changing the existing row or notifying a worker.
+No target is dropped to fit a budget.
+
+The existing boolean dequeue opt-in still means **v1 only**. Version-aware
+selection excludes v2 before decoding or claiming; a v2 row cannot starve
+unrelated v1/plain work. Persisted triggers park old retry/release/status writes
+back into the version's own queue state and reject worker registration,
+processing, complete or partial status for v2. These fences survive a v1 runtime
+reopening the database. A legacy direct worker cannot register itself and invoke
+source-only indexing for a point row. An old decoder specifically inspecting v2
+JSON refuses it; old task readers see the unfamiliar status and no v1 payload,
+not reinterpreted targets. Retry/cancellation and a current
+decoder preserve the complete claim across reopen. No exact-build pin is kept.
+
+There is **no v2 execution capability**, even if a selected callable has v1
+support. No runner selects point work, no engine/connector is invoked for it,
+and intake does not enable a producer or source. Ordered component application,
+deletion-version evidence, read isolation and native recovery must be implemented
+and qualified before a future owner expands v2 claiming/execution. Existing
+combined documents, polling checkpoints, default readers and v1 work remain
+unchanged. Rollback preserves v2 rows; use a compatible current decoder for
+point inspection/retry, not a legacy source-only execution fallback.
 
 An in-process connector opts in by advertising `change_hints_versions = (1,)`
 on its actual `discover_hints(hints, last_commit, *, cancel_check=None)` callable.
