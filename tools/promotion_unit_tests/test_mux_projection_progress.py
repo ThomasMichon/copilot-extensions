@@ -261,9 +261,12 @@ def test_active_projection_retains_subject_bound_advisory_content(
     assert owner.get(path) == "DIRTY"
     collect = api.scope.capture_inventory(lambda mux: {"wt-one": (1, "$7:100")})
     writes: list[str] = []
-    api.package.mux_status_link.publish_managed_session_status = lambda **options: (
-        writes.append(options["values"]["@aw_seg"]) or {"context_published": True}
-    )
+
+    def publish(**options: Any) -> dict[str, bool]:
+        writes.append(options["values"]["@aw_seg"])
+        return {"context_published": True}
+
+    api.package.mux_status_link.publish_managed_session_status = publish
 
     def sweep(*args: Any, **options: Any) -> int:
         assert collect(args[0]) is not None

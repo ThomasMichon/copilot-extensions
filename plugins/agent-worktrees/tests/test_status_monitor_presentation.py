@@ -428,9 +428,12 @@ def test_active_projection_keeps_completed_content_advisory_until_refresh(
     monkeypatch.setattr(status_bar_cli, "_render_status_context", lambda *a, **k: "context")
     monkeypatch.setattr(git_ops, "classify_worktree", lambda *a, **k: pytest.fail("projection Git"))
     requests: list[dict[str, Any]] = []
-    monkeypatch.setattr(mux_status_link, "push_status_via_daemon", lambda payload, **k: (
-        requests.append(payload) or {"applied": True}
-    ))
+
+    def publish(payload: dict[str, Any], **kwargs: Any) -> dict[str, bool]:
+        requests.append(payload)
+        return {"applied": True}
+
+    monkeypatch.setattr(mux_status_link, "push_status_via_daemon", publish)
     for phase in ("fresh", "expired", "invalidated", "refreshed"):
         if phase == "expired":
             clock[0] += 61
@@ -674,7 +677,9 @@ def test_bulk_classification_yields_presentation_and_restores_project(
         clock[0] += 31.0
         with progress_scope(progress):
             assert monitor._classify_records_live(
-                records, repo=SimpleNamespace(remote="origin", default_branch="main"),
+                records, repo=cfg.RepoConfig(
+                    anchor=str(tmp_path), worktree_root=str(tmp_path), default_branch="main",
+                ),
             ) == {record.worktree_id: info for record in records}
 
     monkeypatch.setattr(git_ops, "classify_worktree", classify)
