@@ -9,9 +9,9 @@ from agent_worktrees import update_driver_cli as boundary
 
 
 def test_engine_inventory_advertises_its_context_receiver(monkeypatch: pytest.MonkeyPatch) -> None:
-    from agent_worktrees import installation_updates, project_update_controller, reconcile
+    from agent_worktrees import installation_updates, project_update_controller, reconcile, update_runtime
 
-    monkeypatch.setattr(installation_updates.update_runtime, "_registered_plugin_targets", lambda: {})
+    monkeypatch.setattr(update_runtime, "_registered_plugin_targets", lambda: {})
     monkeypatch.setattr(reconcile, "discover_core_payload_dirs", lambda: [])
     monkeypatch.setattr(reconcile, "core_installed_payload_dir", lambda _name: None)
     monkeypatch.setattr(project_update_controller, "delegation_capability", lambda: None)
