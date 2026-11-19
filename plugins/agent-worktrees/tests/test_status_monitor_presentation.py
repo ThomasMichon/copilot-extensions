@@ -375,6 +375,103 @@ def test_scheduled_producer_preserves_content_for_active_mux_rows(
         runtime.shutdown()
 
 
+def test_active_projection_keeps_completed_content_advisory_until_refresh(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_worktrees import status_segment_cache
+    from agent_worktrees.closure_descriptor import DESCRIPTOR_VERSION
+    from agent_worktrees.mux_state_projection import render_projected_segment
+
+    path = str(tmp_path)
+    clock = [100.0]
+    monkeypatch.setattr(status_segment_cache, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    monkeypatch.setattr(git_ops, "_windows_observation", lambda: True)
+    monkeypatch.setattr(cfg, "active_project", lambda: "project")
+    monkeypatch.setattr(cfg, "project_name", lambda: "project")
+    monkeypatch.setattr(cfg, "load_config", lambda *a, **k: SimpleNamespace(
+        default_repo=SimpleNamespace(anchor=path),
+    ))
+    monkeypatch.setattr(monitor, "_find_record_for_path", lambda *a: SimpleNamespace(
+        worktree_id="one", worktree_path=path,
+    ))
+    descriptor = {
+        "version": DESCRIPTOR_VERSION, "label": "ACTIVE", "style": "active",
+        "compact": "ACTIVE", "closure": {"final": False},
+        "action": {"disposition": "blocked"}, "claims": {"held": 0},
+        "follow_ups": {"open": 0},
+    }
+    content = ["dirty"]
+    renders: list[str] = []
+
+    def render(*args: Any, **kwargs: Any) -> str:
+        renders.append(content[0])
+        return render_projected_segment({
+            "state": content[0], "turn_count": 12, "closure": {
+                **descriptor, "label": content[0].upper(),
+                "compact": content[0].upper(), "style": content[0],
+            },
+        }, current=True)
+
+    monkeypatch.setattr(monitor, "_render_status_segment", render)
+    owner = status_segment_cache._StatusSegmentCache(ttl=60)
+    owner.get(path)
+    cache = mux_link.ManagedMuxCache()
+    assert cache.apply_observation({
+        "project": "project", "worktree_id": "one", "worktree_path": path,
+        "mux_session": "wt-one", "session_incarnation": "$7:100",
+        "panes": [], "attached_clients": 1, "live": True, "mapping_revision": 1,
+        "observed_at": datetime.now(timezone.utc).isoformat(),
+    })["applied"]
+    monkeypatch.setattr(monitor, "_monitor_registry_dir", lambda: tmp_path / "registry")
+    set_inventory(monkeypatch, lambda *a: {"wt-one": (1, "$7:100")})
+    monkeypatch.setattr(monitor, "_status_monitor_recheck", lambda *a: None)
+    monkeypatch.setattr(status_bar_cli, "_render_status_context", lambda *a, **k: "context")
+    monkeypatch.setattr(git_ops, "classify_worktree", lambda *a, **k: pytest.fail("projection Git"))
+    requests: list[dict[str, Any]] = []
+    monkeypatch.setattr(mux_status_link, "push_status_via_daemon", lambda payload, **k: (
+        requests.append(payload) or {"applied": True}
+    ))
+    for phase in ("fresh", "expired", "invalidated", "refreshed"):
+        if phase == "expired":
+            clock[0] += 61
+            assert owner.get_cached(path) is None
+        elif phase == "invalidated":
+            owner.invalidate(path)
+            assert owner.get_cached(path) is None
+        elif phase == "refreshed":
+            content[0] = "convo"
+            owner.get(path)
+        assert run_monitor_sweep(
+            monitor._monitor_sweep, "psmux.exe", "monitor", "fixture", set(),
+            managed_mux_cache=cache, segment_cache=owner,
+            state_snapshot=lambda project: {
+                "ok": True, "projection": {"quality": "current"},
+                "availability": {"status": "stale"},
+                "worktrees": [{
+                    "id": "one", "path": path, "state": "active", "closure": descriptor,
+                }],
+            },
+        ) == 1
+        segment = requests[-1]["values"]["@aw_seg"]
+        assert "STATE(?)" not in segment and "ACTIVE" not in segment
+        assert ("(stale)" in segment) is (phase in {"expired", "invalidated"})
+        assert ("CONVO" if phase == "refreshed" else "DIRTY") in segment
+    assert renders == ["dirty", "convo"]
+    clock[0] += 61
+    for rows in ([], [{
+        "id": "one", "path": path, "state": "active",
+        "closure": {**descriptor, "version": DESCRIPTOR_VERSION + 1},
+    }]):
+        assert run_monitor_sweep(
+            monitor._monitor_sweep, "psmux.exe", "monitor", "fixture", set(),
+            managed_mux_cache=cache, segment_cache=owner,
+            state_snapshot=lambda project: {
+                "ok": True, "projection": {"quality": "current"}, "worktrees": rows,
+            },
+        ) == 1
+        assert "STATE(?)" in requests[-1]["values"]["@aw_seg"]
+
+
 @pytest.mark.parametrize("second_present", [True, False])
 @pytest.mark.parametrize("current", [True, False])
 def test_native_projection_batches_inventory_and_computed_state(

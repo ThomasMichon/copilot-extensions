@@ -171,6 +171,46 @@ def test_status_reason_follows_only_the_matching_observation_scope(owner: _Statu
     assert owner.observation_counts() == (0, 1)
 
 
+@pytest.mark.parametrize("condition", [
+    "expired", "invalidated", "busy", "project", "worktree", "path", "cleanup", "retiring",
+])
+def test_advisory_segment_preserves_subject_and_hard_observation_fences(
+    owner: _StatusSegmentCache, monkeypatch: pytest.MonkeyPatch, condition: str,
+) -> None:
+    from agent_worktrees import status_segment_cache
+
+    path = "/repo/wt"
+    monkeypatch.setattr(cfg, "active_project", lambda: "A")
+    monkeypatch.setattr(cfg, "load_config", lambda *a, **k: SimpleNamespace(
+        default_repo=SimpleNamespace(anchor="/repo"),
+    ))
+    monkeypatch.setattr(core, "_find_record_for_path", lambda *a: SimpleNamespace(
+        worktree_id="one", worktree_path=path,
+    ))
+    monkeypatch.setattr(core, "_render_status_segment", lambda *a, **k: "DIRTY")
+    assert owner.get(path) == "DIRTY"
+    clock = time.monotonic() + owner.ttl + 1
+    monkeypatch.setattr(status_segment_cache, "time", SimpleNamespace(monotonic=lambda: clock))
+    if condition == "invalidated":
+        owner.invalidate(path)
+    elif condition == "busy":
+        owner.begin_observation("A", "/repo", path)
+    elif condition == "cleanup":
+        pending(owner, path)
+    elif condition == "retiring":
+        owner.close_observation_admission()
+    assert owner.get_cached(path) is None
+    result = owner.get_advisory(
+        "B" if condition == "project" else "A",
+        "/different/wt" if condition == "path" else path,
+        "two" if condition == "worktree" else "one",
+    )
+    if condition in {"expired", "invalidated", "busy"}:
+        assert result is not None and "DIRTY" in result and "(stale)" in result
+    else:
+        assert result is None
+
+
 def test_pending_keeps_last_good_bytes_ages_and_survives_invalidation(
     owner: _StatusSegmentCache, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -891,7 +931,7 @@ def test_actual_monitor_shutdown_retains_custody_and_negative_control(
         monkeypatch.setattr("agent_worktrees.runtime_identity.PROCESS_GENERATION", "fixture-runtime")
         monkeypatch.setattr("agent_worktrees.status_monitor_health.PROCESS_GENERATION", "fixture-runtime")
         monkeypatch.setattr(status_monitor_cutover, "routing_dir", lambda: recovery_directory)
-    monkeypatch.setattr(shutil, "which", lambda name: None)
+    monkeypatch.setattr(shutil, "which", lambda name, *, path=None: None)
     monkeypatch.setattr(single_instance_lease, "SingleInstance", Lease)
     monkeypatch.setattr(status_monitor_runtime, "_aw_runtime_home", lambda: Path("unused"))
     monkeypatch.setattr(core, "_monitor_lock_path", lambda: Path("unused.lock"), raising=False)

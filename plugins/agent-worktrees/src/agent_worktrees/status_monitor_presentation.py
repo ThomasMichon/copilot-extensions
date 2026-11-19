@@ -13,6 +13,7 @@ from agent_remote_driver.mux_creation import is_psmux
 
 from . import config as cfg, config_cache, mux_status_link, push_timeout
 from . import status_bar_cli, status_monitor_runtime, tracking
+from .closure_descriptor import interpret_descriptor_payload
 from .monitor_projection_cache import ProjectedSegments, SegmentOwner
 from .mux_state_projection import render_projected_segment
 from .observation_progress import inventory_scope
@@ -147,6 +148,15 @@ def run_monitor_sweep(
         cached = segments.get_cached(path) if segments is not None else None
         if isinstance(cached, str):
             return cached
+        if (
+            row is not None and row.get("state") == "active"
+            and interpret_descriptor_payload(row.get("closure"))["supported"]
+        ):
+            advisory = getattr(segments, "get_advisory", None)
+            if callable(advisory):
+                completed = advisory(project, path, row["id"])
+                if isinstance(completed, str):
+                    return completed
         if segments is not None and segments.observation_blocked(project, path):
             return segments.pending_segment_for_path(path)
         if row is not None and row.get("state") == "active":

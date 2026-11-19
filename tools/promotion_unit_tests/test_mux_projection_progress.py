@@ -240,6 +240,72 @@ def test_tmux_uses_read_only_view_of_the_original_owner(api: SimpleNamespace) ->
     ) == len(warm_paths)
 
 
+def test_active_projection_retains_subject_bound_advisory_content(
+    api: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = [100.0]
+    monkeypatch.setattr(api.cache, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    path = "/synthetic/one"
+    api.package.status_bar_cli._find_record_for_path = lambda value: SimpleNamespace(
+        worktree_path=path, worktree_id="one",
+    )
+    content = ["DIRTY"]
+    renders: list[str] = []
+
+    def render(*args: Any, **kwargs: Any) -> str:
+        renders.append(content[0])
+        return content[0]
+
+    api.package.status_bar_cli._render_status_segment = render
+    owner = api.cache._StatusSegmentCache(ttl=60)
+    assert owner.get(path) == "DIRTY"
+    collect = api.scope.capture_inventory(lambda mux: {"wt-one": (1, "$7:100")})
+    writes: list[str] = []
+    api.package.mux_status_link.publish_managed_session_status = lambda **options: (
+        writes.append(options["values"]["@aw_seg"]) or {"context_published": True}
+    )
+
+    def sweep(*args: Any, **options: Any) -> int:
+        assert collect(args[0]) is not None
+        options["catalog_observer"]({"wt-one"})
+        return 1
+
+    for phase in ("fresh", "expired", "invalidated", "refreshed"):
+        if phase == "expired":
+            clock[0] += 61
+            assert owner.get_cached(path) is None
+        elif phase == "invalidated":
+            owner.invalidate(path)
+            assert owner.get_cached(path) is None
+        elif phase == "refreshed":
+            content[0] = "CONVO"
+            owner.get(path)
+        assert api.presentation.run_monitor_sweep(
+            sweep, "psmux.exe", "monitor", "fixture", set(),
+            managed_mux_cache=object(), segment_cache=owner,
+            state_snapshot=lambda project: {
+                "ok": True, "projection": {"quality": "current"},
+                "availability": {"status": "stale"}, "worktrees": [{
+                    "id": "one", "path": path, "state": "active",
+                    "closure": {"supported": True, "style": "active", "compact": "ACTIVE"},
+                }],
+            },
+        ) == 1
+        assert "STATE(?)" not in writes[-1] and "ACTIVE" not in writes[-1]
+        assert ("(stale)" in writes[-1]) is (phase in {"expired", "invalidated"})
+        assert ("CONVO" if phase == "refreshed" else "DIRTY") in writes[-1]
+    assert renders == ["DIRTY", "CONVO"]
+    assert owner.get_advisory("other", path, "one") is None
+    assert owner.get_advisory("project", path, "other") is None
+    assert owner.get_advisory("project", "/synthetic/other", "one") is None
+    ticket = owner.begin_observation("project", "/synthetic", path)
+    assert "(stale)" in owner.get_advisory("project", path, "one")
+    owner.retain_cleanup(ticket, api.package.push_timeout.ObservationCleanupError("held"))
+    assert owner.get_advisory("project", path, "one") is None
+    owner.close_observation_admission()
+    assert owner.get_advisory("project", path, "one") is None
+
+
 def test_content_producer_retains_cleanup_and_propagates_governance(api: SimpleNamespace) -> None:
     attempted: list[str] = []
     retained: list[tuple[str, str | None, Any]] = []

@@ -7495,6 +7495,13 @@ It starts no mux, observer or service. Worktrees'
 `tests/test_status_monitor_presentation.py`, `tests/test_observation_progress.py`
 and `tests/test_worktrees_producer.py` compose the actual collector and producer
 seams; continuous installed publication remains a separate native check.
+The completed-content case also composes the real segment-cache owner with
+fresh, expired, invalidated and refreshed active-row presentation. It retains
+the same content label with an explicit stale marker, without renewing fresh
+evidence or computing Git during projection. Subject changes, retained cleanup
+and retiring owners refuse the advisory copy. The contained Worktrees
+presentation and Windows observation-custody files cover the real descriptor
+parser, missing/unsupported roster rows and the unchanged hard fences.
 Portable private-store creation units select the portable snapshot replacement
 path as well as portable creation. Native Windows replacement and ownership
 remain in their separate qualification lanes, not implicit unit effects.
