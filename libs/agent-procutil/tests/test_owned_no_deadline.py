@@ -42,6 +42,28 @@ def _pin_descendant(pid: int) -> Iterator[Callable[[], None]]:
             yield confirm_windows
         finally:
             process.close()
+    elif sys.platform == "darwin":
+        import select
+
+        with select.kqueue() as queue:
+            change = select.kevent(
+                pid, filter=select.KQ_FILTER_PROC,
+                flags=select.KQ_EV_ADD | select.KQ_EV_ONESHOT,
+                fflags=select.KQ_NOTE_EXIT,
+            )
+            assert not queue.control([change], 1, 0)
+
+            def confirm_darwin() -> None:
+                deadline = time.monotonic() + 1.5
+                while time.monotonic() < deadline:
+                    for event in queue.control(None, 1, .05):
+                        assert not event.flags & select.KQ_EV_ERROR
+                        assert event.fflags & select.KQ_NOTE_EXIT
+                        assert event.ident == pid
+                        return
+                pytest.fail("the identity-bound descendant did not exit")
+
+            yield confirm_darwin
     else:
         descriptor = open_pidfd(pid)
         try:
@@ -56,8 +78,8 @@ def _pin_descendant(pid: int) -> Iterator[Callable[[], None]]:
 
 
 @pytest.mark.skipif(
-    os.name != "nt" and sys.platform != "linux",
-    reason="positive descendant identity checks use Windows handles or Linux pidfds",
+    os.name != "nt" and sys.platform not in {"linux", "darwin"},
+    reason="positive descendant identities require Windows handles, Linux pidfds or Darwin kqueue",
 )
 @pytest.mark.parametrize("exclusive", [False, True])
 @pytest.mark.parametrize("with_input", [False, True])
@@ -72,7 +94,9 @@ def test_root_exit_retires_descendant_before_waiting_for_pipe_eof(
     )
     root = (
         "import pathlib,subprocess,sys,time;"
-        f"subprocess.Popen([sys.executable,'-I','-c',{child!r}]);"
+        f"subprocess.Popen([sys.executable,'-I','-c',{child!r}],"
+        "stdin=sys.stdin,stdout=sys.stdout,stderr=sys.stderr,"
+        "creationflags=(0x08000000 if sys.platform=='win32' else 0));"
         f"release=pathlib.Path({str(release)!r})\n"
         "while not release.exists(): time.sleep(.01)\n"
         "sys.stdout.buffer.write(b'root\\r\\n');sys.stderr.buffer.write(b'root-error\\r\\n');"
@@ -284,3 +308,81 @@ def test_transient_queries_do_not_share_a_serialization_gate(
         "}finally{$first.Dispose();$second.Dispose()}"
     )
     assert _shell_result(native_shell, body) == {"codes": [0, 0], "globalHelper": False}
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows native transient query cancellation")
+def test_cancelling_active_no_deadline_query_confirms_its_original_tree(
+    tmp_path: Path, native_shell: Path,
+) -> None:
+    helper = Path(__file__).resolve().parents[1] / "src" / "agent_procutil" / "daemon_instances.ps1"
+    targets, ready, attempts = (
+        tmp_path / "targets.json", tmp_path / "leaf.ready", tmp_path / "attempts.txt",
+    )
+    leaf = (
+        "import pathlib,time;"
+        f"pathlib.Path({str(ready)!r}).touch();time.sleep(25)"
+    )
+    program = (
+        "import json,os,pathlib,subprocess,sys,time;"
+        f"pathlib.Path({str(attempts)!r}).open('a').write(str(os.getpid())+'\\n');"
+        f"child=subprocess.Popen([sys.executable,'-I','-c',{leaf!r}],"
+        "creationflags=0x08000000);"
+        f"ready=pathlib.Path({str(ready)!r});deadline=time.monotonic()+5\n"
+        "while not ready.exists() and time.monotonic()<deadline: time.sleep(.01)\n"
+        "assert ready.exists();"
+        f"pending=pathlib.Path({str(targets.with_suffix('.pending'))!r});"
+        "pending.write_text(json.dumps([os.getpid(),child.pid]));"
+        f"pending.replace({str(targets)!r});"
+        "time.sleep(25)"
+    )
+    body = (
+        "$ErrorActionPreference='Stop';"
+        "$shared=[hashtable]::Synchronized(@{});$runner=[PowerShell]::Create();"
+        "$pins=New-Object 'Collections.Generic.List[Diagnostics.Process]';try{"
+        "$script={param($helper,$python,$cwd,$program,$shared)"
+        "$ErrorActionPreference='Stop';. $helper;"
+        "$originalStart=(Get-Command Start-DaemonInstanceWorker).ScriptBlock;"
+        "function Start-DaemonInstanceWorker {param($State,[switch]$NoTimeout)"
+        "& $originalStart $State -NoTimeout:$NoTimeout;$shared.State=$State};"
+        "$environment=@{};foreach($entry in [Environment]::GetEnvironmentVariables().GetEnumerator())"
+        "{$environment[[string]$entry.Key]=[string]$entry.Value};"
+        "Invoke-DaemonInstanceRequest -Transient @{command='run-query';parameters=@{"
+        "executable=$python;arguments=@('-I','-B','-c',$program);cwd=$cwd;"
+        "environment=$environment;timeout_ms=$null;limit=4096}}};"
+        f"$null=$runner.AddScript($script).AddArgument({_quoted(helper)})"
+        f".AddArgument({_quoted(sys.executable)}).AddArgument({_quoted(tmp_path)})"
+        f".AddArgument({_quoted(program)}).AddArgument($shared);"
+        "$pending=$runner.BeginInvoke();$clock=[Diagnostics.Stopwatch]::StartNew();"
+        f"while(-not $shared.State -or -not [IO.File]::Exists({_quoted(targets)})){{"
+        "if($pending.IsCompleted -or $clock.Elapsed.TotalSeconds -gt 15){"
+        "throw ('native query did not start: '+$runner.Streams.Error.ToString())};"
+        "Start-Sleep -Milliseconds 10};"
+        f"$targets=Get-Content -Raw -LiteralPath {_quoted(targets)}|ConvertFrom-Json;"
+        "$ids=@($shared.State.process.Id,$shared.State.worker.Id)+@($targets);"
+        "foreach($identity in @($ids|Select-Object -Unique)){"
+        "$pin=[Diagnostics.Process]::GetProcessById([int]$identity);$null=$pin.Handle;"
+        "if($pin.HasExited){throw 'original query identity exited before cancellation'};"
+        "$pins.Add($pin)};"
+        "$clock.Restart();$runner.Stop();"
+        "foreach($pin in $pins){"
+        "$remaining=[Math]::Max(0,3000-$clock.ElapsedMilliseconds);"
+        "if(-not $pin.WaitForExit([int]$remaining)){"
+        "throw 'original transient query identity survived cancellation'}};"
+        "if($clock.Elapsed.TotalSeconds -gt 6){throw 'native cancellation did not settle promptly'};"
+        "if(-not $shared.State.job.IsClosed -or -not $shared.State.broken){"
+        "throw 'original helper custody did not close during cancellation'};"
+        "if($runner.InvocationStateInfo.State -ne 'Stopped'){throw 'query was not cancelled'};"
+        f"if(@(Get-Content -LiteralPath {_quoted(attempts)}).Count -ne 1){{throw 'query was replayed'}};"
+        # These assertions run while this PowerShell host and its outer test Job
+        # are still alive, before runner disposal or the Python owner's cleanup.
+        "@{cancelled=$true;treeExited=$true;jobClosed=$shared.State.job.IsClosed;"
+        "pinned=$pins.Count;attempts=1}|ConvertTo-Json -Compress"
+        "}finally{foreach($pin in $pins){$pin.Dispose()};$runner.Dispose()}"
+    )
+    outcome = _shell_result(native_shell, body)
+    assert isinstance(outcome, dict)
+    assert outcome == {
+        "cancelled": True, "treeExited": True, "jobClosed": True,
+        "pinned": outcome["pinned"], "attempts": 1,
+    }
+    assert outcome["pinned"] >= 3

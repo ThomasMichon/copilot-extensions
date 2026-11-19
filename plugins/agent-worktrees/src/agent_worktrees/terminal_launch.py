@@ -50,8 +50,13 @@ def select_receiver(
         "UV_NO_SYNC": "1", "UV_OFFLINE": "1", "WORKTREE_NO_UPDATE": "1",
         "AGENT_WORKTREES_NO_SELFPROVISION": "1",
     }
+    query_arguments = [*query_command, "--version"]
+    if query_arguments[0].lower().endswith((".cmd", ".bat")):
+        from plugin_resolve.execution import windows_batch_command
+
+        query_arguments = windows_batch_command(query_arguments, query_environment)
     result = run_caller_owned(
-        [*query_command, "--version"], env=query_environment, timeout=timeout,
+        query_arguments, env=query_environment, timeout=timeout,
         max_stdout_bytes=4096, max_stderr_bytes=4096,
     )
     if result.returncode != 0 or result.stderr:

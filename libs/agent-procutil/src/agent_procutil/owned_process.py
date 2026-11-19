@@ -236,57 +236,28 @@ def _retire_posix_group(
             raise
 
 
-def _posix_cleanup_error(
-    process: Any, *, confirm_group: bool = False, inherit_process_group: bool = False,
-    output: Any = None, native_settled: bool = False,
-    on_settled: Callable[[], None] | None = None,
-) -> OwnedCleanupError:
-    """Retain the exact unreaped leader and remaining stream custody for retry."""
-    def retry(deadline: float) -> None:
-        nonlocal native_settled
-
-        def remaining() -> float:
-            seconds = deadline - time.monotonic()
-            if seconds <= 0:
-                raise TimeoutError("owned POSIX cleanup deadline expired")
-            return seconds
-
-        if not native_settled:
-            # Popen retains a completed reap even if interruption prevented this
-            # closure from recording its own stage before the previous unwind.
-            if process.returncode is None:
-                remaining()
-                _retire_posix_group(process, inherit_process_group=inherit_process_group)
-                if confirm_group:
-                    from agent_procutil._caller_owned import _confirm_group
-                    _confirm_group(process, budget=OwnedExecutionBudget(deadline, .01))
-                process.wait(timeout=remaining())
-            native_settled = True
-        if output is not None:
-            output.finish(remaining(), deadline=deadline)
-        for stream in (process.stdin, process.stdout, process.stderr):
-            if stream is not None:
-                remaining()
-                stream.close()
-
-    return OwnedCleanupError(
-        process, cleanup_resources=(("output", output),) if output is not None else (),
-        cleanup_retry=retry, on_settled=on_settled,
-    )
-
-
 def _communicate_unreaped(
     process: Any, *, input_text: str | bytes | None, deadline: float | None,
     argv: list[str], timeout: float | None, capture_limits: tuple[int, int] | None = None,
     binary: bool = False,
     capture_timeout: bool = False,
     on_root_exit: Callable[[], None] | None = None,
+    cleanup_deadline: float | None = None,
 ) -> tuple[str | bytes | None, ...]:
     streams = (process.stdout, process.stderr)
     output = (bytearray(), bytearray())
     data = memoryview(input_text.encode("utf-8") if isinstance(input_text, str) else input_text) if input_text is not None else None
     offset = 0
+    root_exited = False
+    drain_deadline: float | None = None
+
     def remaining() -> float:
+        if root_exited:
+            assert drain_deadline is not None
+            seconds = drain_deadline - time.monotonic()
+            if seconds <= 0:
+                raise TimeoutError("native child output settlement deadline expired")
+            return seconds
         try:
             return _remaining(deadline, argv, timeout)
         except subprocess.TimeoutExpired as error:
@@ -308,20 +279,19 @@ def _communicate_unreaped(
                 selector.register(process.stdin, selectors.EVENT_WRITE, -1)
             else:
                 process.stdin.close()
-        root_exited = False
-        drain_deadline: float | None = None
         while selector.get_map():
             remaining()
-            if not root_exited and _observe_unreaped(process) is not None:
+            if timeout is None and not root_exited and _observe_unreaped(process) is not None:
                 root_exited = True
+                drain_deadline = (
+                    cleanup_deadline if cleanup_deadline is not None else time.monotonic() + 2.0
+                )
                 if on_root_exit is not None:
                     on_root_exit()
-                    drain_deadline = time.monotonic() + 2.0
+                remaining()
                 if process.stdin is not None and not process.stdin.closed:
                     selector.unregister(process.stdin)
                     process.stdin.close()
-            if drain_deadline is not None and time.monotonic() >= drain_deadline:
-                raise RuntimeError("native child pipes did not settle after group retirement")
             # An inherited group belongs to the enclosing supervisor, which must
             # publish its completion before retiring that group. Drain available
             # bytes, but never wait for descendants to close inherited pipe ends.
@@ -594,6 +564,10 @@ def _communicate_windows_bounded(
                 if _pipe_worker_definitely_unstarted(worker, started_workers[worker], error):
                     unstarted.add(worker)
                 raise
+        if timeout is not None:
+            for worker, _completed in workers:
+                while worker.is_alive():
+                    worker.join(min(0.05, _remaining(deadline, argv, timeout)))
         while process.poll() is None:
             remaining = _remaining(deadline, argv, timeout)
             try:
@@ -711,6 +685,8 @@ def _run_owned(
         else:
             require_contained_worker()
     if not windows:
+        from agent_procutil._caller_owned import _posix_cleanup_error, _settle_exited_group
+
         _require_posix_execution_support()
     deadline = time.monotonic() + timeout if timeout is not None else None
     if budget is not None:
@@ -791,25 +767,15 @@ def _run_owned(
                 argv=argv, timeout=cast(float, timeout),
             )
         else:
-            def settle_exited_group() -> None:
-                from agent_procutil._caller_owned import _confirm_group
-
-                try:
-                    _retire_posix_group(process)
-                    if confirm_posix_group or timeout is None:
-                        _confirm_group(process, budget=budget)
-                except BaseException as error:
-                    raise _posix_cleanup_error(
-                        process, confirm_group=confirm_posix_group or timeout is None,
-                        on_settled=on_settled,
-                    ) from error
-
             stdout, stderr = _communicate_unreaped(
                 process, input_text=input_text, deadline=cast(float, deadline),
                 argv=argv, timeout=cast(float, timeout),
                 capture_limits=capture_limits,
                 binary=binary,
-                on_root_exit=settle_exited_group if not inherit_process_group else None,
+                on_root_exit=(
+                    lambda: _settle_exited_group(process, budget=budget, on_settled=on_settled)
+                ) if timeout is None and not inherit_process_group else None,
+                cleanup_deadline=budget.deadline if budget is not None else None,
                 **({"capture_timeout": True} if budget is not None else {}),
             )
     except OwnedCleanupError as error:

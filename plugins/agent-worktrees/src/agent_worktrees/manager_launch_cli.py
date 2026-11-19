@@ -184,8 +184,14 @@ def _probe_worktree_manager_version(
             if timeout is None:
                 from agent_procutil.owned_process import run_caller_owned
 
+                environment = _launch_probe_env()
+                probe_command = list(command)
+                if os.name == "nt" and probe_command[0].lower().endswith((".cmd", ".bat")):
+                    from plugin_resolve.execution import windows_batch_command
+
+                    probe_command = windows_batch_command(probe_command, environment)
                 proc = run_caller_owned(
-                    command, env=_launch_probe_env(), timeout=None,
+                    probe_command, env=environment, timeout=None,
                     max_stdout_bytes=4096, max_stderr_bytes=4096,
                 )
             else:

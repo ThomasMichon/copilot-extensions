@@ -60,6 +60,51 @@ def test_bare_entry_explicitly_selects_owned_deadline_free_probe(
     assert calls == [[*selected.command, "--version"]]
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Native registered Windows batch provider")
+@pytest.mark.parametrize("suffix", [".cmd", ".BAT"])
+def test_registered_batch_provider_admits_health_and_pins_terminal_receiver(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, suffix: str,
+) -> None:
+    directory = tmp_path / "space & tools \u65e5"
+    directory.mkdir()
+    provider = directory / ("worktree-manager" + suffix)
+    pinned = [sys.executable, "-I", "-B", "-X", "utf8", "-m", "worktree_manager"]
+    response = {
+        "package": "worktree_manager", "capability": terminal_launch.CAPABILITY,
+        "runtime": {"command": pinned, "root": str(tmp_path)},
+    }
+    provider.write_text(
+        '@echo off\nif not "%~1"=="fixed-prefix" exit /b 31\n'
+        'if not "%~2"=="--version" exit /b 32\n'
+        "if defined CE_TERMINAL_CAPABILITY_QUERY goto capability\n"
+        "echo worktree-manager 1.2.3\nexit /b 0\n:capability\n"
+        f"echo {json.dumps(response)}\nexit /b 0\n",
+        encoding="utf-8",
+    )
+    registry = tmp_path / "providers"
+    registry.mkdir()
+    command = [str(provider), "fixed-prefix"]
+    (registry / "worktree-manager.json").write_text(json.dumps({
+        "schema_version": 1, "provider": "worktree-manager", "command": command,
+        "minimum_version": "0.1.0-dev21",
+    }), encoding="utf-8")
+    monkeypatch.setenv(launch._CONTROL_PLANE_PROVIDERS_DIR_ENV, str(registry))
+    monkeypatch.setenv(launch._CONTROL_PLANE_PROVIDER_ENV, "worktree-manager")
+    monkeypatch.delenv(terminal_launch.QUERY_ENVIRONMENT, raising=False)
+    health = launch._worktree_manager_health(foreground=True)
+    assert health == launch._ManagerHealth("ready", tuple(command))
+    request = tmp_path / "request.json"
+    request.write_text(json.dumps({"version": 1, "nonce": "a" * 32, "host_pid": os.getpid()}))
+    monkeypatch.setattr(terminal_launch, "_channel", str(request))
+    selected, environment = terminal_launch.select_receiver(
+        [*command, "--resident-picker"], dict(os.environ), timeout=None,
+    )
+    assert selected == [*pinned, "--resident-picker"]
+    assert environment[terminal_launch.ENVIRONMENT] == str(request)
+    assert environment["WORKTREE_MANAGER_ROOT"] == str(tmp_path)
+    assert "COPILOT_VENUE_BATCH_EXECUTABLE" not in environment
+
+
 @pytest.mark.parametrize("stream", ["stdout", "stderr"])
 def test_foreground_real_capture_overflow_is_failure_not_a_version(
     stream: str, capsys: pytest.CaptureFixture[str],

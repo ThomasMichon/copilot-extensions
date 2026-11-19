@@ -9,6 +9,8 @@ import shutil
 import sys
 import time
 import venv
+from contextlib import AbstractContextManager
+from typing import Literal, Protocol, TypedDict, cast, overload
 
 import pytest
 
@@ -19,18 +21,70 @@ pytestmark = [
 HELPER = Path(__file__).resolve().parents[2] / "bin" / "terminal-launch.ps1"
 
 
-def _quote(value):
+class _Process(Protocol):
+    process: object
+    pid: int
+
+
+class _Console(Protocol):
+    process: _Process
+    output: bytearray
+    handles: list[object]
+
+    def exited(self, handle: object, timeout: int = 0) -> bool: ...
+    def pin_descendants(self) -> dict[int, tuple[str, object]]: ...
+    def pin(self, pid: int) -> object: ...
+    def birth(self, handle: object) -> int: ...
+    def wait(self, timeout: int = 15000) -> int: ...
+    def send(self, value: bytes) -> None: ...
+    def resize(self, width: int, height: int) -> None: ...
+    def hangup(self) -> None: ...
+
+
+class _ConsoleFactory(Protocol):
+    def __call__(
+        self, argv: list[str], *, env: dict[str, str], cwd: Path,
+    ) -> AbstractContextManager[_Console]: ...
+
+
+def _console(
+    argv: list[str], *, env: dict[str, str], cwd: Path,
+) -> AbstractContextManager[_Console]:
+    import _terminal_console_fixture
+
+    factory: _ConsoleFactory = getattr(_terminal_console_fixture, "Console")
+    return factory(argv, env=env, cwd=cwd)
+
+
+class _Record(TypedDict, total=False):
+    pid: int
+    outer: int
+    request: str
+    arguments: list[str]
+    redirected: bool
+    channel: str | None
+    cwd: str
+    engine: str
+    line: str
+    width: int
+    height: int
+    supported: bool
+    phase: str
+    milliseconds: float
+
+
+def _quote(value: str | Path) -> str:
     return "'" + str(value).replace("'", "''") + "'"
 
 
-def _query_owner(payload):
+def _query_owner(payload: Path) -> None:
     scripts = payload / "scripts"
     scripts.mkdir(exist_ok=True)
     for name in ("daemon_instances.ps1", "daemon_instance_runtime.pyz"):
         shutil.copy2(HELPER.parents[1] / "scripts" / name, scripts / name)
 
 
-def _aw_front_door(root, entry, fixture):
+def _aw_front_door(root: Path, entry: str, fixture: Path) -> Path:
     source = HELPER.parents[2] / "plugins" / "agent-worktrees"
     payload = root / "payload"
     binary = payload / "bin"
@@ -81,12 +135,27 @@ def _aw_front_door(root, entry, fixture):
     return scripts / "invoke-payload-runtime.ps1"
 
 
-def _wait(path, console):
+@overload
+def _wait(path: Path, console: _Console, *, records: Literal[False] = False) -> _Record: ...
+
+
+@overload
+def _wait(path: Path, console: _Console, *, records: Literal[True]) -> list[_Record]: ...
+
+
+def _wait(
+    path: Path, console: _Console, *, records: bool = False,
+) -> _Record | list[_Record]:
     deadline = time.monotonic() + 15
     last_error = None
     while time.monotonic() < deadline:
         try:
-            return json.loads(path.read_text(encoding="utf-8-sig"))
+            value = json.loads(path.read_text(encoding="utf-8-sig"))
+            if records:
+                assert isinstance(value, list)
+                return cast(list[_Record], value)
+            assert isinstance(value, dict)
+            return cast(_Record, value)
         except (OSError, json.JSONDecodeError, UnicodeDecodeError) as error:
             last_error = error
         assert not console.exited(console.process.process), console.output.decode("utf-8", "replace")
@@ -97,7 +166,7 @@ def _wait(path, console):
     )
 
 
-def _scripts(root, mode, entry):
+def _scripts(root: Path, mode: str, entry: str) -> tuple[list[str], list[str]]:
     fixture = Path(__file__).with_name("_terminal_console_fixture.py").resolve()
     shell = shutil.which("pwsh")
     assert shell, "PowerShell 7 is required for native handoff qualification"
@@ -230,8 +299,10 @@ def _scripts(root, mode, entry):
     ("selected", "manager-cmd"), ("selected", "manager-cmd-resident"),
     ("selected", "aw-selector-race"), ("selected", "aw-resident"),
 ])
-def test_shell_handoff_settles_both_python_jobs_before_real_terminal_attachment(tmp_path, mode, entry):
-    from _terminal_console_fixture import Console
+def test_shell_handoff_settles_both_python_jobs_before_real_terminal_attachment(
+    tmp_path: Path, mode: str, entry: str,
+) -> None:
+    Console = _console
 
     argv, literal = _scripts(tmp_path, mode, entry)
     temporary = tmp_path / "temporary"
@@ -317,8 +388,8 @@ def test_shell_handoff_settles_both_python_jobs_before_real_terminal_attachment(
         assert b"HANDOFF-RENDERED" in console.output
 
 
-def test_manager_new_mux_first_launch_survives_shell_owned_handoff(tmp_path):
-    from _terminal_console_fixture import Console
+def test_manager_new_mux_first_launch_survives_shell_owned_handoff(tmp_path: Path) -> None:
+    Console = _console
 
     argv, _ = _scripts(tmp_path, "first-launch", "helper")
     environment = dict(
@@ -343,8 +414,8 @@ def test_manager_new_mux_first_launch_survives_shell_owned_handoff(tmp_path):
         assert console.wait() == 23
 
 
-def test_real_launcher_refusal_preserves_exit_journal_and_original_diagnostics(tmp_path):
-    from _terminal_console_fixture import Console
+def test_real_launcher_refusal_preserves_exit_journal_and_original_diagnostics(tmp_path: Path) -> None:
+    Console = _console
     from test_launch_admission_ordering import _calls, _fixture
     from worktree_manager.launch_attempts import LaunchAttempts
 
@@ -370,8 +441,8 @@ def test_real_launcher_refusal_preserves_exit_journal_and_original_diagnostics(t
     assert events[-1]["details"]["exit_code"] == 3
 
 
-def test_terminal_host_preserves_empty_literal_preparation_arguments(tmp_path):
-    from _terminal_console_fixture import Console
+def test_terminal_host_preserves_empty_literal_preparation_arguments(tmp_path: Path) -> None:
+    Console = _console
 
     capture = tmp_path / "captured.json"
     code = (
@@ -405,8 +476,8 @@ def test_terminal_host_preserves_empty_literal_preparation_arguments(tmp_path):
 
 
 @pytest.mark.parametrize("response", ["current", "legacy", "malformed", "nonzero", "stale"])
-def test_query_admission_preserves_legacy_without_leaking_an_offer(tmp_path, response):
-    from _terminal_console_fixture import Console
+def test_query_admission_preserves_legacy_without_leaking_an_offer(tmp_path: Path, response: str) -> None:
+    Console = _console
 
     capture = tmp_path / "preparation.json"
     outcome = tmp_path / "outcome.json"
@@ -451,8 +522,8 @@ def test_query_admission_preserves_legacy_without_leaking_an_offer(tmp_path, res
         assert not capture.exists()
 
 
-def test_current_worktrees_does_not_forward_a_channel_to_a_legacy_manager(tmp_path):
-    from _terminal_console_fixture import Console
+def test_current_worktrees_does_not_forward_a_channel_to_a_legacy_manager(tmp_path: Path) -> None:
+    Console = _console
 
     argv, _ = _scripts(tmp_path, "legacy", "helper")
     environment = dict(os.environ, TEMP=str(tmp_path), TMP=str(tmp_path))
@@ -465,7 +536,9 @@ def test_current_worktrees_does_not_forward_a_channel_to_a_legacy_manager(tmp_pa
 
 
 @pytest.mark.parametrize("damage", ["completion", "executable", "executable-without-offer"])
-def test_retired_runtime_after_query_cannot_reselect_or_execute_the_receiver(tmp_path, monkeypatch, damage):
+def test_retired_runtime_after_query_cannot_reselect_or_execute_the_receiver(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, damage: str,
+) -> None:
     from _manager_process_fixture import synthetic_runtime
     from agent_procutil.owned_process import run_caller_owned
 
@@ -495,14 +568,20 @@ def test_retired_runtime_after_query_cannot_reselect_or_execute_the_receiver(tmp
     assert environment["CE_TERMINAL_LAUNCH"] == str(request)
     if damage != "completion":
         from types import SimpleNamespace
-        from agent_worktrees import picker_fast_entry
+        from agent_worktrees import picker_fast_entry, registry_paths
 
         Path(selected[0]).unlink()
         monkeypatch.delenv("WORKTREE_MANAGER_ENGINE_CMD", raising=False)
         monkeypatch.setattr(sys, "stdin", SimpleNamespace(isatty=lambda: True))
-        monkeypatch.setattr(picker_fast_entry.registry_paths, "registry_root", lambda *_: root)
+        monkeypatch.setattr(registry_paths, "registry_root", lambda *_: root)
         monkeypatch.setattr(picker_fast_entry, "_request", lambda *_: {"manager_command": command})
-        monkeypatch.setattr(terminal_launch, "select_receiver", lambda *_: (selected, environment))
+        def admitted(
+            _command: list[str], _environment: dict[str, str], *, timeout: float | None = 10,
+        ) -> tuple[list[str], dict[str, str]]:
+            assert timeout is None
+            return selected, environment
+
+        monkeypatch.setattr(terminal_launch, "select_receiver", admitted)
         if damage == "executable":
             with pytest.raises(RuntimeError, match="no fallback was admitted"):
                 picker_fast_entry.dispatch(["--project", "fixture"])
@@ -521,8 +600,8 @@ def test_retired_runtime_after_query_cannot_reselect_or_execute_the_receiver(tmp
     assert not unexpected.exists()
 
 
-def test_launcher_exception_records_failure_before_restoring_terminal_state(tmp_path):
-    from _terminal_console_fixture import Console
+def test_launcher_exception_records_failure_before_restoring_terminal_state(tmp_path: Path) -> None:
+    Console = _console
     from worktree_manager.launch_attempts import LaunchAttempts
 
     argv, _ = _scripts(tmp_path, "selected", "helper")
@@ -546,8 +625,8 @@ def test_launcher_exception_records_failure_before_restoring_terminal_state(tmp_
     assert b"fixture launch failed" in console.output
 
 
-def test_legacy_forwarder_can_call_a_current_manager_without_inheriting_its_offer(tmp_path):
-    from _terminal_console_fixture import Console
+def test_legacy_forwarder_can_call_a_current_manager_without_inheriting_its_offer(tmp_path: Path) -> None:
+    Console = _console
 
     _scripts(tmp_path, "selected", "manager-standalone")
     shell = shutil.which("pwsh")
@@ -586,8 +665,8 @@ def test_legacy_forwarder_can_call_a_current_manager_without_inheriting_its_offe
     assert list(tmp_path.glob("ce-terminal-*")) == []
 
 
-def test_repeated_foreground_calls_cannot_reuse_a_completed_offer(tmp_path):
-    from _terminal_console_fixture import Console
+def test_repeated_foreground_calls_cannot_reuse_a_completed_offer(tmp_path: Path) -> None:
+    Console = _console
 
     capture = tmp_path / "offers.jsonl"
     code = (
@@ -619,8 +698,10 @@ def test_repeated_foreground_calls_cannot_reuse_a_completed_offer(tmp_path):
     assert list(tmp_path.glob("ce-terminal-*")) == []
 
 
-def test_cold_and_warm_queries_retire_all_observed_transient_children(tmp_path, capsys):
-    from _terminal_console_fixture import Console
+def test_cold_and_warm_queries_retire_all_observed_transient_children(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    Console = _console
 
     outcome = tmp_path / "measurements.json"
     host = tmp_path / "queries.ps1"
@@ -641,7 +722,7 @@ def test_cold_and_warm_queries_retire_all_observed_transient_children(tmp_path, 
     environment.pop("CE_TERMINAL_LAUNCH", None)
     shell = shutil.which("pwsh")
     assert shell
-    observations = {}
+    observations: dict[tuple[int, int], tuple[str, object]] = {}
     with Console([shell, "-NoProfile", "-File", str(host)], env=environment, cwd=tmp_path) as console:
         deadline = time.monotonic() + 30
         while not outcome.exists():
@@ -650,13 +731,13 @@ def test_cold_and_warm_queries_retire_all_observed_transient_children(tmp_path, 
             try:
                 children = console.pin_descendants()
             except OSError as error:
-                if error.winerror not in {87, 1168}:
+                if getattr(error, "winerror", None) not in {87, 1168}:
                     raise
             else:
                 for pid, (name, handle) in children.items():
                     observations[(pid, console.birth(handle))] = (name, handle)
             time.sleep(.005)
-        measurements = _wait(outcome, console)
+        measurements = _wait(outcome, console, records=True)
         assert len(measurements) == 2 and all(item["supported"] for item in measurements)
         assert observations, "the sampler did not observe the real query workers"
         assert all(console.exited(handle, 1000) for _, handle in observations.values())

@@ -867,8 +867,9 @@ without an elapsed execution limit. Per-stream byte limits, caller-death
 custody, cancellation and confirmed cleanup remain enforced. An explicit
 aggregate `budget` still bounds execution and settlement; `None` does not
 override it. This opt-in does not change finite timeouts on existing callers.
-Root exit is observed while pipes drain: a descendant retaining an inherited
-pipe cannot extend execution indefinitely. Windows retires and confirms the
+Only with explicit `timeout=None`, root exit is observed while pipes drain:
+a descendant retaining an inherited pipe cannot extend execution indefinitely.
+Windows retires and confirms the
 owned Job before joining its pipe workers. An exclusive POSIX owner retains
 the unreaped root through group retirement and confirmation, then drains
 available bytes. In the caller-owned POSIX supervisor, root exit drains
@@ -876,6 +877,12 @@ available output without waiting for descendant EOF; publishing the completion
 frame lets the enclosing owner retire and confirm that same group before
 returning. Root output, nonzero exit codes and output-limit failures remain
 distinct from cleanup confirmation.
+Finite requests retain their original EOF-or-execution-deadline behavior,
+including descendant-produced output after root exit. For no-deadline requests
+with an aggregate budget, observing root exit switches draining and settlement
+to that budget's original cleanup deadline; crossing the execution cutoff
+during confirmed retirement does not turn a completed execution into a timeout.
+The cleanup deadline is never renewed or disabled.
 
 ### Aggregate execution and settlement budget
 

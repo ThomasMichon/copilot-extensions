@@ -82,6 +82,29 @@ class _PosixNative(Protocol):
     def set_blocking(self, fd: int, blocking: bool) -> None: ...
 
 
+class _Closeable(Protocol):
+    def close(self) -> None: ...
+
+
+class _CleanupProcess(UnreapedChild, Protocol):
+    @property
+    def stdin(self) -> _Closeable | None: ...
+
+    @property
+    def stdout(self) -> _Closeable | None: ...
+
+    @property
+    def stderr(self) -> _Closeable | None: ...
+
+    def wait(self, *, timeout: float) -> int: ...
+
+
+class _PendingOutput(Protocol):
+    def finish(
+        self, timeout: float, *, deadline: float,
+    ) -> tuple[str | bytes | None, str | bytes | None]: ...
+
+
 _Captured = str | bytes | None
 
 
@@ -194,6 +217,61 @@ def _confirm_group(process: UnreapedChild, *, budget: OwnedExecutionBudget | Non
             time.sleep(0.005)
     except (OSError, RuntimeError, ValueError) as error:
         raise OwnedCleanupError(process) from error
+
+
+def _posix_cleanup_error(
+    process: _CleanupProcess, *, confirm_group: bool = False, inherit_process_group: bool = False,
+    output: _PendingOutput | None = None, native_settled: bool = False,
+    on_settled: Callable[[], None] | None = None,
+) -> OwnedCleanupError:
+    """Retain the exact unreaped leader and remaining stream custody for retry."""
+    def retry(deadline: float) -> None:
+        from agent_procutil.owned_process import _retire_posix_group
+
+        nonlocal native_settled
+
+        def remaining() -> float:
+            seconds = deadline - time.monotonic()
+            if seconds <= 0:
+                raise TimeoutError("owned POSIX cleanup deadline expired")
+            return seconds
+
+        if not native_settled:
+            # Popen retains a completed reap even if interruption prevented this
+            # closure from recording its own stage before the previous unwind.
+            if process.returncode is None:
+                remaining()
+                _retire_posix_group(process, inherit_process_group=inherit_process_group)
+                if confirm_group:
+                    _confirm_group(process, budget=OwnedExecutionBudget(deadline, .01))
+                process.wait(timeout=remaining())
+            native_settled = True
+        if output is not None:
+            output.finish(remaining(), deadline=deadline)
+        for stream in (process.stdin, process.stdout, process.stderr):
+            if stream is not None:
+                remaining()
+                stream.close()
+
+    return OwnedCleanupError(
+        process, cleanup_resources=(("output", output),) if output is not None else (),
+        cleanup_retry=retry, on_settled=on_settled,
+    )
+
+
+def _settle_exited_group(
+    process: _CleanupProcess, *, budget: OwnedExecutionBudget | None,
+    on_settled: Callable[[], None] | None,
+) -> None:
+    from agent_procutil.owned_process import _retire_posix_group
+
+    try:
+        _retire_posix_group(process)
+        _confirm_group(process, budget=budget)
+    except BaseException as error:
+        raise _posix_cleanup_error(
+            process, confirm_group=True, on_settled=on_settled,
+        ) from error
 
 
 def _validate(request: object) -> _Request:
