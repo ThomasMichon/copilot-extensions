@@ -128,12 +128,18 @@ of the `worktree-manager-control-plane` effort.
   script must ship as a sibling of the relocated launcher — omitting it left
   Worktree Manager-launched sessions with a silently unconfigured psmux status
   bar (the failure is swallowed, not a launch error).
-- `apply-mux-keybinds.ps1` / `apply-mux-keybinds.sh` — opt-in, server-global
-  mux tuning (keystroke passthrough + `escape-time`), shipped alongside
-  `session-options.*` for parity with agent-worktrees' own deployment; run by
-  the user or a machine-restore flow, never automatically.
+- `apply-mux-keybinds.ps1` / `apply-mux-keybinds.sh` — deliberately invoked
+  host-wide tuning helpers. Both persist a managed user-config block by default;
+  `-NoPersist` / `--no-persist` selects live application only. The PowerShell
+  helper applies the fragment to every listed PSMux server; the shell helper
+  tunes tmux's shared server, including `escape-time`. Neither helper is
+  automatically invoked by ordinary worktree create/join.
 - `psmux-passthrough.conf` — the keystroke-passthrough fragment
   `session-options.ps1` resolves by the same `$PSScriptRoot`-relative path.
+  Create/join automatically sources it into the named private PSMux server,
+  before Companion bindings. Wheel input uses native mouse handling, not
+  tmux-style mouse-key bindings; [target/application limits](../../plugins/agent-worktrees/docs/mux.md#psmux-wheel-input)
+  are distinct from successful fragment application.
 - `psmux-path.ps1` — Windows psmux binary discovery/compatibility helper,
   also dot-sourced from `launch-session.ps1` by a `$PSScriptRoot`-relative
   path; ships as a sibling for the same reason as `session-options.ps1`.
