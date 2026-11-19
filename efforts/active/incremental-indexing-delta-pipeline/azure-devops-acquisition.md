@@ -59,9 +59,12 @@ extend the existing connector/intake owners, not another service or scheduler.
    requires positive, complete eligibility evidence; a physical deletion
    requires an explicit qualified tombstone. Permission failures and 404s alone
    prove neither. Preserve the existing polling cursor; duplicate and active-
-   round hints use the shared durable queue union/trailing-work owner. Do not
-   advertise this capability until the shared bounded-hint path below is
-   qualified.
+   round hints use the shared durable queue union/trailing-work owner.
+   `ChangeHints` v1 carries identities and opaque revisions/event IDs, not event
+   kind or tombstone authority. Obtain positive provider evidence or evolve the
+   shared contract before supporting deletion semantics; never reinterpret
+   opaque hint values as that evidence. Do not advertise this capability until
+   the shared bounded-hint path below is qualified.
 3. **Resume acquisition through the shared owner.** Use `AcquisitionPage` v1
    and `PendingCrawls` generation/CAS, with the existing 128-unit invocation
    ceiling and 65,536-byte cursor ceiling. Currently `collect_source_changes`
@@ -127,8 +130,8 @@ checkpoint/path lookups and cursor/envelope growth separately; the shared
 payload bytes. Required CI retains small pure contract cases, not this whole
 native matrix.
 
-There is no new external protocol in this proposal. Realization must use the
-existing negotiated delta/hint/page capabilities and follow
+This planning PR changes no external protocol. Realization must use the
+existing negotiated delta/hint/page capabilities where sufficient and follow
 [contract evolution](../../../docs/patterns/service-contract-evolution.md)
 before changing retained state or cross-process forms: provider first,
 conditional caller migration, supported old/new and rollback controls.
