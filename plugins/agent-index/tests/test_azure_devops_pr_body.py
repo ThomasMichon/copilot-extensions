@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import httpx
 import pytest
 
+from agent_index.indexing.crawl import collect_source_changes
+from agent_index.indexing.path_index import PathIndex
+from agent_index.indexing.state import IndexState
 from agent_index.indexing.work_counts import measure_reindex
 from agent_index.sources.azure_devops import AzureDevOpsConnector
 
@@ -185,7 +189,7 @@ def test_pull_counts_retain_parsed_work_on_invalid_body_and_id_only_paths() -> N
             200,
             json={
                 "value": [
-                    {"comments": [{"content": ""}, {"content": None}, {"content": []}, {}, None]},
+                    {"comments": [{"content": ""}, {"content": None}, {}]},
                     {"comments": [{"content": "another"}]},
                 ]
             },
@@ -237,6 +241,73 @@ def test_pull_counts_retain_parsed_work_on_invalid_body_and_id_only_paths() -> N
         }
     finally:
         connector._http.client.close()
+
+
+@pytest.mark.parametrize("repository", ["omitted", None, {}, {"id": None}])
+@pytest.mark.parametrize(
+    "outcome", ["recovered", "unavailable", "unresolved", "wrong-id", "comments-404"],
+)
+def test_missing_review_target_is_recovered_or_refused(
+    tmp_path: Path, repository: object, outcome: str,
+) -> None:
+    listed = {"pullRequestId": 7, "repository": repository}
+    if repository == "omitted":
+        del listed["repository"]
+    requests: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        requests.append(path)
+        if path.endswith("/connectionData"):
+            return httpx.Response(200, json={"authenticatedUser": {"id": "test-account"}})
+        if path.endswith("/pullrequests"):
+            return httpx.Response(200, json={"value": [listed]})
+        if path.endswith("/pullrequests/7"):
+            if outcome == "unavailable":
+                return httpx.Response(404, json={"message": "unavailable"})
+            detail = {
+                "pullRequestId": 8 if outcome == "wrong-id" else 7,
+                "repository": None if outcome == "unresolved" else {"id": "repo-1"},
+                "description": "Complete description",
+            }
+            return httpx.Response(200, json=detail)
+        assert path.endswith("/repositories/repo-1/pullRequests/7/threads")
+        if outcome == "comments-404":
+            return httpx.Response(404, json={"message": "no threads"})
+        return httpx.Response(200, json={"value": [{"comments": [{"content": "Review text"}]}]})
+
+    connector = AzureDevOpsConnector(
+        "ado:acme/widgets", token="fixture-token", min_interval_s=0,
+        transport=httpx.MockTransport(handler), work_item_queries=[],
+        pull_request_queries=[{"status": "all"}],
+    )
+    paths = PathIndex(tmp_path / "paths.db")
+    paths.mark_indexed_batch([("ado:acme/widgets:pulls", "pulls/7.md", "old", 1)])
+    state = IndexState()
+    try:
+        if outcome not in {"recovered", "comments-404"}:
+            error = httpx.HTTPStatusError if outcome == "unavailable" else ValueError
+            with pytest.raises(error):
+                collect_source_changes(
+                    "selected", state=state, path_index=paths, connector=connector,
+                    full=True, source_aware=True,
+                )
+            assert paths.get_paths_by_family("ado") == {"ado:acme/widgets:pulls": {"pulls/7.md"}}
+            assert not state.sources
+        else:
+            batch = collect_source_changes(
+                "selected", state=state, path_index=paths, connector=connector,
+                full=True, source_aware=True,
+            )
+            assert [entry.path for entry in batch.upserts] == ["pulls/7.md"]
+            assert "Complete description" in batch.upserts[0].content
+            assert ("Review text" in batch.upserts[0].content) == (outcome == "recovered")
+    finally:
+        connector._http.client.close()
+    assert sum(path.endswith("/pullrequests/7") for path in requests) == 1
+    assert sum(path.endswith("/threads") for path in requests) == int(
+        outcome in {"recovered", "comments-404"},
+    )
 
 
 def test_cancellation_after_description_read_prevents_comment_request() -> None:

@@ -19,6 +19,8 @@ import httpx
 
 from agent_index.config import install_dir
 from agent_index.sources.azure_devops_responses import collection_values as _values
+from agent_index.sources.azure_devops_responses import pull_comments as _pull_comments
+from agent_index.sources.azure_devops_responses import pull_repository_id as _pull_repository_id
 from agent_index.sources.azure_devops_responses import work_item_ids as _work_item_ids_from_result
 from agent_index.sources.base import FileEntry, nonsecret_target
 from agent_index.sources.good_citizen_http import GoodCitizenSession
@@ -399,7 +401,8 @@ class AzureDevOpsConnector:
         description = pull_request.get("description")
         if description is not None and not isinstance(description, str):
             raise ValueError("Azure DevOps pull-request listing has no valid description")
-        if not description:
+        selected_repository_id = _pull_repository_id(pull_request)
+        if not description and selected_repository_id:
             return pull_request
         # Listing previews have no completeness flag or specified Unicode truncation rule.
         result = self._http.get_json(
@@ -416,18 +419,24 @@ class AzureDevOpsConnector:
             or details["pullRequestId"] != pull_request["pullRequestId"]
         ):
             raise ValueError("Azure DevOps pull-request details have mismatched identity")
-        selected_repo, actual_repo = pull_request.get("repository"), details.get("repository")
+        actual_repository_id = _pull_repository_id(details)
         if (
-            not isinstance(selected_repo, dict) or not isinstance(actual_repo, dict)
-            or not isinstance(selected_repo.get("id"), str) or not selected_repo["id"]
-            or not isinstance(actual_repo.get("id"), str)
-            or selected_repo["id"].casefold() != actual_repo["id"].casefold()
+            not actual_repository_id
+            or (
+                selected_repository_id is not None
+                and selected_repository_id.casefold() != actual_repository_id.casefold()
+            )
         ):
             raise ValueError("Azure DevOps pull-request details have mismatched repository")
         description = details.get("description")
         if description is not None and not isinstance(description, str):
             raise ValueError("Azure DevOps pull-request details have no valid description")
-        return pull_request | {"description": description}
+        return pull_request | {
+            "description": description,
+            "repository": (
+                pull_request["repository"] if selected_repository_id else details["repository"]
+            ),
+        }
 
     def _iter_pull_requests(self) -> Iterable[dict[str, Any]]:
         if not self._pull_request_queries:
@@ -444,9 +453,9 @@ class AzureDevOpsConnector:
                 on_page=lambda page: self._observe_records(page.data, kind="pulls"),
             ):
                 for item in _values(result.data):
-                    if not isinstance(item, dict):
-                        continue
                     pull_request_id = item.get("pullRequestId")
+                    if type(pull_request_id) is not int or pull_request_id <= 0:
+                        raise ValueError("Azure DevOps pull-request listing has invalid identity")
                     if pull_request_id in seen_ids:
                         continue
                     seen_ids.add(pull_request_id)
@@ -520,11 +529,10 @@ class AzureDevOpsConnector:
         return self._authenticated_user_id
 
     def _pull_request_comments(self, pull_request: dict[str, Any]) -> list[dict[str, Any]]:
-        repository = pull_request.get("repository") or {}
-        repository_id = repository.get("id")
+        repository_id = _pull_repository_id(pull_request)
         pull_request_id = pull_request.get("pullRequestId")
         if not repository_id or pull_request_id is None:
-            return []
+            raise ValueError("Azure DevOps pull request has no review target")
         try:
             result = self._http.get_json(
                 self._project_path(
@@ -544,14 +552,7 @@ class AzureDevOpsConnector:
                 return []
             raise
         self._observe_records(result.data, kind="pull_comments")
-        comments: list[dict[str, Any]] = []
-        for thread in _values(result.data):
-            if not isinstance(thread, dict):
-                continue
-            for comment in thread.get("comments", []):
-                if isinstance(comment, dict):
-                    comments.append(comment)
-        return comments
+        return _pull_comments(result.data)
 
     def _work_item_entry(
         self,

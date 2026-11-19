@@ -205,7 +205,8 @@ therefore does not infer completeness from preview length. After query eligibili
 and duplicate filtering, it point-reads every selected nonempty description
 through the configured project endpoint,
 requires the same PR/repository identity and a string/null/omitted description, and
-replaces only the selected description. Empty descriptions need no extra read.
+replaces the selected description. Empty descriptions need no extra read when
+the listing supplies a usable repository target.
 An unavailable or invalid detail response refuses acquisition rather than
 indexing a preview; the original query metadata and comment path remain intact.
 Nontext listing/detail descriptions refuse acquisition. Null or omitted
@@ -215,6 +216,17 @@ Cancellation is checked again after the
 detail read, before requesting comments. Point-description reads are unconditional:
 the shared HTTP session caches validators, not the response bodies needed here.
 This adds no history enumeration, cursor capability or reconciliation authority.
+
+Selected PRs require positive integer identities before deduplication, including
+identity-only path inventories. Repository fields can be omitted/null under
+`GitPullRequest` serialization defaults; when the listing has no usable target,
+document acquisition uses the same project PR point-read to recover it. Missing
+or mismatched detail identities, unresolved targets and malformed repository
+shapes refuse acquisition rather than certify empty reviews. Thread comments
+accept omitted/null/empty collections and omitted/null text as provider defaults;
+non-array collections, non-object rows and nontext content refuse the document.
+The initial threads-404 compatibility remains. Parsed observations are recorded
+before these validations and do not certify source completeness.
 
 Work-item comments follow the comments API's JSON-body continuation tokens
 on the same selected work-item path, without following a supplied `nextPage`
