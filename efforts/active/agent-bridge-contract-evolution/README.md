@@ -2,7 +2,7 @@
 
 - **Slug:** `agent-bridge-contract-evolution`
 - **Repo:** copilot-extensions
-- **Branch(es):** serial per-phase PR worktrees to `main`; one shared-contract
+- **Branch(es):** serial per-phase PR worktrees to `dev`; one shared-contract
   writer at a time
 - **Created:** 2026-08-31
 - **Status:** Draft
@@ -555,6 +555,74 @@ bounded Bridge change. All incumbent Plan and Validation items remain intact.
   Bridge durable/pinning/cutover/retirement foundation. Do not invent an
   incompatible-release incident or universal all-host/native matrix.
 
+### Source #11113 - HTTP-52 evidence decoupling
+
+Retain #11113's snapshot/registry/source-capture coupling request as unfinished
+work under the incumbent Bridge contract/evidence owners and shared-contract
+coordination above. This subsection appoints no implementer, transfers no
+claim/resource and changes neither Draft status nor incumbent acceptance.
+The report attributes broad fixture/registry churn to whole-source-tree closure,
+primary-byte-hash pointers, incidental capture identifiers, compact registry
+encoding and commit-bound CI recapture. Preserve the #10935 conflict/regeneration
+case, #8381 and #2230/#5050/#5054 squash/reachability incidents, and analogous
+promotion-manifest churn as historical reports, not current product verification.
+
+Preserve the original sequencing rule: start implementation only after #10935
+merges; this records the predecessor without asserting that it remains unmet.
+Reviewed direct receiving and current readback precede any separate tracking
+retirement. Neither implementation of this redesign nor completion of the wider
+foundation is added as a prerequisite to redundant-tracking retirement.
+The six acceptance conditions remain mandatory; supporting design directions
+and their literal alternatives remain source proposals for the incumbent
+owners, not a requirement to implement every alternative.
+
+- [ ] **P11113-R1 - Bounded affected-source refresh:** An HTTP-52 affected-source
+  edit that leaves wire behavior unchanged updates at most a handful of files,
+  not about 140 fixtures plus the whole registry. Retain the proposed
+  implementation-only path and stable path/evidence-family/generation identity
+  for shared-primary pointers rather than volatile primary byte hashes.
+  Shared capture-metadata changes must not rewrite otherwise unchanged pointers.
+
+- [ ] **P11113-R2 - Unrelated-source independence:** An unrelated agent-worktrees
+  or agent-codespaces module edit requires no HTTP-52 recapture. Retain the
+  proposed working/git-tree-derived closure hashes and execution-path-scoped
+  membership rather than recursively freezing unrelated source trees.
+  A relevant closure change triggers re-probe and observation comparison;
+  hash mismatch alone does not force rebaselining, and the golden changes
+  only when its observations change.
+
+- [ ] **P11113-R3 - Merge-friendly registry:** Independent PRs refreshing
+  different sources do not textually conflict OR conflict only in a generated
+  artifact regenerated deterministically by one documented command. Preserve
+  the alternatives: canonical pretty/sorted encoding with one entry per line
+  OR per-entry/per-generation fixture, provenance and source-path files OR a
+  generated-and-verified fixture-hash index with a merge driver or documented
+  resolve-by-regenerating step. Selecting one does not require all three.
+
+- [ ] **P11113-R4 - Rebase independence:** A rebase alone requires no new CI
+  capture round trip. Retain the proposed separation of capture-time commit
+  identity from unchanged asserted observations and truthful capture/source
+  provenance; changed observations cannot be relabelled as unchanged.
+
+- [ ] **P11113-R5 - Preserve meaningful integrity:**
+  `tools/check-agent-bridge-contracts.py` still detects changed observations,
+  tampered fixtures and missing or extra probes, and keeps historical
+  generations immutable. Retain exact-hash integrity pinning for immutable
+  historical generations, content-addressed provenance chunks and source blobs,
+  and the captured input vector. Decoupling does not weaken meaningful
+  expectations, integrity or probe completeness.
+
+- [ ] **P11113-R6 - Freeze contracts, not incidental identifiers:** No snapshot
+  embeds capture commit or plugin version unless that value is itself asserted
+  contract. Retain frozen observations, checked probes, scope, input identity,
+  runtime roles and required execution sources, with rolling closure/capture/
+  version metadata in a separate generated manifest OR normalization of volatile
+  fields for comparison. Retain the proposed CONTRIBUTING snapshot rule:
+  normalize/derive incidental hashes, versions, commits, timestamps, paths and
+  ordering; pin exact bytes where integrity is the contract; keep generated
+  indexes merge-friendly. Apply the same rule to the analogous promotion-unit
+  manifest coupling without adding unrelated manifest redesign.
+
 ## Validation Plan
 
 - [ ] Every registered contract has exact old/new fixtures and release
@@ -875,6 +943,52 @@ bounded Bridge change. All incumbent Plan and Validation items remain intact.
   boundary remains its own open work. This global crosswalk creates no
   all-boundary deployment/release gate, new ACK or all-native/whole-parent
   prerequisite, and releases no source or resource claim.
+
+### Global validation of Source #11113
+
+These six pairs retain the original finite source/checker acceptance, literal
+choices and incumbent ownership. They add no native/installed/rollout mandate,
+implementation assignment, source-open veto or wider-foundation completion
+gate. Preserve existing review, complete receiving-ROOT/inherited-criterion/
+seven-internal-owner-group readback and source-specific disposition conditions;
+unchecked work remains planned.
+
+- [ ] **V11113-R1:** For a behavior-preserving HTTP-52 affected-source edit,
+  demonstrate the handful-of-files bound rather than whole-registry/about-140
+  fixture churn. Verify the selected implementation-only/stable-identity design
+  and unchanged unrelated pointers despite shared capture-metadata changes,
+  without discarding meaningful observations or provenance.
+
+- [ ] **V11113-R2:** Demonstrate unrelated Worktrees/Codespaces edits require no
+  HTTP-52 recapture. Verify the selected derived, execution-path-scoped closure
+  design and relevant-member re-probe/observation comparison; hash-only changes
+  must not force a golden rewrite, while changed observations remain detectable.
+
+- [ ] **V11113-R3:** Exercise independent different-source refreshes. They merge
+  without textual conflict OR the sole generated conflict is resolved by the
+  documented deterministic command. Verify the selected canonical-pretty OR
+  split-entry/generation OR derived-index alternative, including its selected
+  merge-driver/documented-regeneration path; do not require all alternatives.
+
+- [ ] **V11113-R4:** Demonstrate a rebase with unchanged asserted behavior does
+  not require another CI capture round trip. Preserve attributable capture and
+  source provenance and detection of genuinely changed observations; do not
+  substitute a commit-identity refresh for semantic evidence.
+
+- [ ] **V11113-R5:** Retain checks rejecting changed observations, fixture
+  tampering and missing/extra probes. Verify historical generations stay
+  immutable and exact integrity pins remain for historical content, provenance
+  chunks, source blobs and the captured input vector. Confirm churn reduction
+  does not weaken meaningful expectations or integrity failures.
+
+- [ ] **V11113-R6:** Verify capture commit/plugin version is absent from
+  snapshots unless itself asserted contract. Exercise the selected frozen
+  structural golden plus rolling manifest OR normalized-comparison approach,
+  retaining required execution sources and the other asserted structural fields.
+  Verify the retained CONTRIBUTING rule covers volatile values and merge-friendly
+  indexes and its application to analogous promotion-manifest coupling.
+  Preserve exact integrity-contract pins and the original #10935 sequencing
+  condition without asserting it remains unsatisfied.
 
 ## Proposal
 

@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-19 - Non-live cause reconciliation and current identity accounting](journal/2026/11.19-non-live-cause-reconciliation-and-identity-accounting.md)
+
 - [2026-11-19 - Current qualification and retained ownership](journal/2026/11.19-current-qualification-and-retained-ownership.md)
 
 - [2026-11-19 - Native readiness and retained Vault boundaries](journal/2026/11.19-native-readiness-and-vault-boundaries.md)
