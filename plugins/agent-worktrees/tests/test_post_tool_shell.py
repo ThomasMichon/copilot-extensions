@@ -705,7 +705,9 @@ def _trace_prepared_sender(fixture: PreparedReadEvent) -> None:
 @pytest.mark.effect("filesystem")
 @pytest.mark.effect("network")
 @pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
-def test_post_tool_routing_clock_preserves_real_owner_delivery(tmp_path: Path, shell: str) -> None:
+def test_registered_prepared_cell_post_tool_routing_clock_preserves_real_owner_delivery(
+    tmp_path: Path, shell: str,
+) -> None:
     from agent_procutil import no_window_kwargs
     from agent_worktrees.hook_ipc import HookIpcServer
 
