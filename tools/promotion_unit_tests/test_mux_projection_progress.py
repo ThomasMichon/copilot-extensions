@@ -73,6 +73,7 @@ def api(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     scope = load("observation_progress")
     load("monitor_projection_cache")
     content = load("status_monitor_content")
+    load("segment_render_observation")
     cache = load("status_segment_cache")
     formatter = load("mux_state_projection")
     projects = load("status_monitor_roster_demand")
@@ -254,7 +255,14 @@ def test_active_projection_retains_subject_bound_advisory_content(
 
     def render(*args: Any, **kwargs: Any) -> str:
         renders.append(content[0])
-        return content[0]
+        record = api.package.status_bar_cli._find_record_for_path(path)
+        observation = api.package.segment_render_observation
+        rendered = observation.record_render(observation.render_subject(
+            "project", record.worktree_path, getattr(record, "worktree_id", None),
+            getattr(record, "creation_nonce", ""),
+        ), content[0])
+        assert isinstance(rendered, str)
+        return rendered
 
     api.package.status_bar_cli._render_status_segment = render
     owner = api.cache._StatusSegmentCache(ttl=60)
@@ -346,6 +354,54 @@ def test_active_projection_retains_subject_bound_advisory_content(
     assert owner.get_advisory("project", path, "one") is None
     owner.close_observation_admission()
     assert owner.get_advisory("project", path, "one") is None
+
+
+@pytest.mark.parametrize("evidence", ["missing", "value", "path", "project", "multiple"])
+def test_segment_advisory_requires_one_matching_renderer_result(
+    api: SimpleNamespace, evidence: str,
+) -> None:
+    observation = api.package.segment_render_observation
+    path = "/synthetic/one"
+    api.package.status_bar_cli._find_record_for_path = lambda value: SimpleNamespace(
+        worktree_path=path, worktree_id="old", creation_nonce="old",
+    )
+
+    def render(*args: Any, **kwargs: Any) -> str:
+        if evidence != "missing":
+            subject = observation.render_subject(
+                "other" if evidence == "project" else "project",
+                "/synthetic/other" if evidence == "path" else path, "new", "new",
+            )
+            observation.record_render(subject, "different" if evidence == "value" else "DIRTY")
+            if evidence == "multiple":
+                observation.record_render(subject, "DIRTY")
+        return "DIRTY"
+
+    api.package.status_bar_cli._render_status_segment = render
+    owner = api.cache._StatusSegmentCache()
+    assert owner.get(path) == "DIRTY"
+    assert owner.get_cached(path) == "DIRTY"
+    owner.invalidate(path)
+    assert owner.get_advisory("project", path, "old", "old") is None
+    assert owner.get_advisory("project", path, "new", "new") is None
+
+
+def test_render_capture_restores_outer_subject_after_failure(api: SimpleNamespace) -> None:
+    observation = api.package.segment_render_observation
+    subject = observation.render_subject("project", "/synthetic/one", "one", "")
+    with observation.capture_render() as outer:
+        with pytest.raises(RuntimeError, match="failed"):
+            with observation.capture_render() as inner:
+                observation.record_render(None, "unknown")
+                raise RuntimeError("failed")
+        assert inner.completed is None
+        assert observation.record_render(subject, "DIRTY") == "DIRTY"
+        assert outer.completed.subject == subject
+    assert observation.record_render(subject, "unscoped") == "unscoped"
+    assert outer.completed.value == "DIRTY"
+    for fields in (("", "/path", "one", ""), ("project", None, "one", ""),
+                   ("project", "/path", None, ""), ("project", "/path", "one", None)):
+        assert observation.render_subject(*fields) is None
 
 
 def test_content_producer_retains_cleanup_and_propagates_governance(api: SimpleNamespace) -> None:

@@ -277,6 +277,10 @@ retained string, including any historical counts. This presentation-only copy
 is bound to the project, normalized checkout path, worktree ID and creation
 nonce. Recreating the same ID at the same path with a different nonce refuses
 the predecessor's copy. The roster path must match the managed checkout path.
+Identity is captured from the actual rendered record together with its returned
+segment, not from an earlier alias lookup. Missing, mismatched or multiple
+renderer observations cannot populate this copy; ordinary fresh output is
+unchanged.
 An otherwise usable renderer record without a worktree ID cannot retain it.
 The copy survives ordinary expiry, invalidation and an in-flight observation,
 but never supplies

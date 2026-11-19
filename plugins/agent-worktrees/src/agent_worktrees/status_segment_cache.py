@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from collections.abc import Callable, Iterator
 from typing import Any, Protocol, TypeVar
 
-from . import config as cfg, git_ops, push_timeout
+from . import config as cfg, git_ops, push_timeout, segment_render_observation
 
 _T = TypeVar("_T")
 
@@ -410,12 +410,13 @@ class _StatusSegmentCache:
                     anchor = cfg.load_config(include_control_plane_related_pr=False).default_repo.anchor
                 except Exception:
                     pass
-            value = self.run_observation(
-                project, anchor, target,
-                lambda: render(
-                    target, fetch=False, plain=False, no_title=False, persist_title=True,
-                ),
-            )
+            with segment_render_observation.capture_render() as capture:
+                value = self.run_observation(
+                    project, anchor, target,
+                    lambda: render(
+                        target, fetch=False, plain=False, no_title=False, persist_title=True,
+                    ),
+                )
         except push_timeout.ObservationCleanupError as error:
             self.retain_unclaimed_cleanup(project, target, error)
             return self.pending_segment_for_path(target, project=project)
@@ -427,14 +428,15 @@ class _StatusSegmentCache:
             self._aliases[input_key] = key
             self._entries[key] = (time.monotonic(), value)
             self._entry_projects[key] = project
-            worktree_id = getattr(record, "worktree_id", None)
-            creation_nonce = getattr(record, "creation_nonce", "")
+            observed = capture.completed
             if (
-                isinstance(worktree_id, str) and worktree_id and subject_project and value
-                and isinstance(creation_nonce, str)
+                observed is not None and value and observed.value == value
+                and observed.subject.project == subject_project
+                and observed.subject.path == key
             ):
                 self._completed[key] = _CompletedSegment(
-                    subject_project, worktree_id, creation_nonce, value,
+                    observed.subject.project, observed.subject.worktree_id,
+                    observed.subject.creation_nonce, value,
                 )
             else:
                 self._completed.pop(key, None)

@@ -378,7 +378,7 @@ def test_scheduled_producer_preserves_content_for_active_mux_rows(
 def test_active_projection_keeps_completed_content_advisory_until_refresh(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from agent_worktrees import status_segment_cache
+    from agent_worktrees import segment_render_observation, status_segment_cache
     from agent_worktrees.closure_descriptor import DESCRIPTOR_VERSION
     from agent_worktrees.mux_state_projection import render_projected_segment
 
@@ -406,12 +406,17 @@ def test_active_projection_keeps_completed_content_advisory_until_refresh(
 
     def render(*args: Any, **kwargs: Any) -> str:
         renders.append(content[0])
-        return render_projected_segment({
+        value = render_projected_segment({
             "state": content[0], "turn_count": 12, "closure": {
                 **descriptor, "label": content[0].upper(),
                 "compact": content[0].upper(), "style": content[0],
             },
         }, current=True)
+        return segment_render_observation.record_render(
+            segment_render_observation.render_subject(
+                "project", path, "one", creation_nonce[0],
+            ), value,
+        )
 
     monkeypatch.setattr(monitor, "_render_status_segment", render)
     owner = status_segment_cache._StatusSegmentCache(ttl=60)
@@ -504,6 +509,67 @@ def test_active_projection_keeps_completed_content_advisory_until_refresh(
     ) == 1
     segment = requests[-1]["values"]["@aw_seg"]
     assert "STATE(?)" in segment and "CONVO" not in segment
+
+
+@pytest.mark.parametrize("replacement", ["worktree", "creation"])
+def test_segment_cache_binds_advisory_to_the_record_actually_rendered(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, replacement: str,
+) -> None:
+    from dataclasses import replace
+    from agent_worktrees import closure_descriptor, finalized_checkout, prune, sessions
+    from agent_worktrees import status_segment_cache, tracking_session_registry
+
+    path = str(tmp_path)
+    first = UnloadedRecord(
+        worktree_id="one", branch="worktree/one", worktree_path=path, repo="project",
+        machine="fixture", platform="windows", started_at="", last_resumed_at="",
+        resume_count=0, title="first", status="active", completed_at=None,
+        creation_nonce="first",
+    )
+    second = replace(
+        first, worktree_id="two" if replacement == "worktree" else "one",
+        creation_nonce="second", title="second",
+    )
+    records = iter((first, second))
+    lookups: list[str] = []
+
+    def lookup(target: str) -> tracking.WorktreeRecord:
+        lookups.append(target)
+        return next(records)
+
+    monkeypatch.setattr(monitor, "_find_record_for_path", lookup)
+    monkeypatch.delattr(monitor, "_render_status_segment", raising=False)
+    monkeypatch.setattr(git_ops, "_windows_observation", lambda: False)
+    monkeypatch.setattr(cfg, "active_project", lambda: "project")
+    monkeypatch.setattr(cfg, "load_config", lambda *a, **k: SimpleNamespace(
+        default_repo=SimpleNamespace(remote="origin", default_branch="main", anchor=path),
+    ))
+    monkeypatch.setattr(status_bar_cli, "_detect_upstream_branch", lambda *a, **k: "main")
+    monkeypatch.setattr(git_ops, "classify_worktree", lambda *a, **k:
+        git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.DIRTY),
+    )
+    monkeypatch.setattr(status_bar_cli, "_apply_tracking_override", lambda record, info: info)
+    monkeypatch.setattr(sessions, "scan_sessions_fast", lambda *a:
+        SimpleNamespace(turn_count={}),
+    )
+    monkeypatch.setattr(status_bar_cli, "_sync_status_tag", lambda *a: "")
+    monkeypatch.setattr(prune, "cleanup_disposition", lambda *a, **k: None)
+    monkeypatch.setattr(tracking_session_registry, "is_repo_fetch_fresh", lambda *a: False)
+    monkeypatch.setattr(prune, "cross_machine_claim_count", lambda *a: 0)
+    monkeypatch.setattr(finalized_checkout, "matches", lambda *a: False)
+    monkeypatch.setattr(closure_descriptor, "assemble_closure_descriptor", lambda *a, **k:
+        SimpleNamespace(display=None, style="dirty", display_compact="DIRTY"),
+    )
+    monkeypatch.setattr(status_bar_cli, "_persist_segment_title", lambda *a: None)
+    owner = status_segment_cache._StatusSegmentCache()
+    value = owner.get(path)
+    assert "second" in value and "DIRTY" in value
+    assert len(lookups) == 2
+    owner.invalidate(path)
+    assert owner.get_advisory("project", path, "one", "first") is None
+    assert owner.get_advisory(
+        "project", path, second.worktree_id, "second",
+    ) == value + " #[fg=colour244](stale)#[default]"
 
 
 @pytest.mark.parametrize("second_present", [True, False])

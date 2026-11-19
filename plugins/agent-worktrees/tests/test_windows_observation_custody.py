@@ -177,7 +177,7 @@ def test_status_reason_follows_only_the_matching_observation_scope(owner: _Statu
 def test_advisory_segment_preserves_subject_and_hard_observation_fences(
     owner: _StatusSegmentCache, monkeypatch: pytest.MonkeyPatch, condition: str,
 ) -> None:
-    from agent_worktrees import status_segment_cache
+    from agent_worktrees import segment_render_observation, status_segment_cache
 
     path = "/repo/wt"
     monkeypatch.setattr(cfg, "active_project", lambda: "A")
@@ -187,7 +187,11 @@ def test_advisory_segment_preserves_subject_and_hard_observation_fences(
     monkeypatch.setattr(core, "_find_record_for_path", lambda *a: SimpleNamespace(
         worktree_id="one", worktree_path=path, creation_nonce="first",
     ))
-    monkeypatch.setattr(core, "_render_status_segment", lambda *a, **k: "DIRTY")
+    monkeypatch.setattr(core, "_render_status_segment", lambda *a, **k:
+        segment_render_observation.record_render(
+            segment_render_observation.render_subject("A", path, "one", "first"), "DIRTY",
+        ),
+    )
     assert owner.get(path) == "DIRTY"
     clock = time.monotonic() + owner.ttl + 1
     monkeypatch.setattr(status_segment_cache, "time", SimpleNamespace(monotonic=lambda: clock))
