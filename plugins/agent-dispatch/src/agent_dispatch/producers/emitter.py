@@ -18,16 +18,10 @@ import threading
 import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, TypedDict, TypeVar
+from typing import Any, TypedDict
 
 from agent_procutil import no_window_kwargs
-
-if TYPE_CHECKING:
-    _F = TypeVar("_F", bound=Callable[..., Any])
-
-    def daemon_entrypoint(service: str, *, source: str, purpose: Literal["production"]) -> Callable[[_F], _F]: ...
-else:
-    from agent_procutil.daemon_instances import daemon_entrypoint
+from agent_procutil.daemon_instances import admit_daemon_instance
 
 from ..client import DispatchClient
 from .. import emission_trace
@@ -737,7 +731,6 @@ def _parse_tick_process_output(completed: Any) -> dict[str, Any]:
     }
 
 
-@daemon_entrypoint("agent-dispatch-emitter", source=__file__, purpose="production")
 def serve(
     spec_path: str | Path,
     *,
@@ -747,6 +740,17 @@ def serve(
     on_tick: Callable[[dict[str, Any]], None] | None = None,
     sleep: Callable[[float], None] = time.sleep,
     runner: Callable[..., Any] = subprocess.run,
+) -> None:
+    """Keep admission for the full lifetime of the supervised command emitter."""
+    with admit_daemon_instance("agent-dispatch-emitter", source=__file__, purpose="production"):
+        _serve(spec_path, holder=holder, registration_id=registration_id, cli_argv=cli_argv,
+               on_tick=on_tick, sleep=sleep, runner=runner)
+
+
+def _serve(
+    spec_path: str | Path, *, holder: str, registration_id: str | None,
+    cli_argv: list[str] | None, on_tick: Callable[[dict[str, Any]], None] | None,
+    sleep: Callable[[float], None], runner: Callable[..., Any],
 ) -> None:
     """Reload and tick a command emitter on its declared cadence.
 
