@@ -90,6 +90,9 @@ def test_recording_failure_and_typed_retry_keep_real_admission_eligible(
     with closing(sqlite3.connect(records.path)) as db:
         db.execute("DROP TRIGGER refused")
     with queue._connect() as conn:
+        plan = conn.execute("EXPLAIN QUERY PLAN SELECT acceptance FROM task_steer "
+                            "WHERE task_id=? AND wake_operation_id=?", (task_id, wake.id)).fetchall()
+        assert any("idx_task_steer_wake" in row[3] for row in plan)
         for i in range(101):
             conn.execute("INSERT INTO task_events(task_id,ts,note,task_relationship) VALUES(?,?,?,?)",
                          (task_id, i, "historical relationship", "{}"))
