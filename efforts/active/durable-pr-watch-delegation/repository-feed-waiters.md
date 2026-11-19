@@ -264,9 +264,10 @@ provider expansion; wake-before-ACK and coordinator/drain proof remain later.
   existing owners. Preserve exact configured identity and refuse unsupported
   service/native combinations before task suspension (#13325). Historical
   reader adoption and registration/delivery are not closed by this source leaf.
-- [ ] Expand and qualify the provider's original-request inspection and
+- [x] Expand and qualify the provider's original-request inspection and
   deadline-bound acceptance before native registration. Preserve old forms,
-  strict storage refusal, bounded receipt retention and late/unknown custody.
+  strict storage refusal, bounded receipt retention and late/unknown custody
+  (#13330). Installed reader adoption and native consumer delivery remain open.
 - [ ] Exercise actual cache/client/native-queue composition: original request
   recovery, materially new activity, unchanged views, unknown baseline,
   stale/partial coverage, own echo, author actions, forms and generation races.
