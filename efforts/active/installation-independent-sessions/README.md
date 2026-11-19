@@ -41,6 +41,14 @@ survival; neither substitutes for the other.
 
 ## Coordination
 
+The finite #13209 terminal-attachment lane retains the existing terminal,
+Picker, selected-payload and launch-depth custodians, including the recorded
+#5579 overlap boundary. Tracking does not appoint an executor, reopen or
+release a claim, or authorize native/installed operations. Normal reviewed
+direct receiving delivery and current source/receiver/custody readback precede
+a separate tracking judgment. This finite leaf does not inherit completion
+of the whole installation-survival programme as a retirement prerequisite.
+
 - **Topology:** serial per-slice PRs; each slice leaves the default branch usable.
 - **Host (owns PRs):** Installation-survival driver.
 - **Delegates:** Linux baseline worker owns one disposable Linux baseline and
@@ -329,6 +337,41 @@ retains the operator's wording.
     Linux/Windows installed-monitor and mixed-version controls (#10266).
     This qualifies that source component, not the broader authoritative
     replacement target or selected-host acceptance.
+
+### Finite Windows terminal-attachment fallback from #13209
+
+Credit #13210's selected-payload terminal-host resolution, interactive
+diagnostic and copied-binstub regression. These do not resolve the remaining
+no-channel Python waiter.
+
+- [ ] **P13209-1:** Retain the Windows user-bin incident: Picker's runtime
+  Python ancestors remain over Manager/mux attachment, so old-slot retirement
+  can close the tab although pane sessions survive. Preserve current selected-
+  payload resolution rather than relying solely on sibling plugin.json or
+  the legacy payload-dir pointer.
+- [ ] **P13209-2:** On interactive Windows Picker/Manager attachment without
+  a terminal-launch channel, route through the existing in-host
+  ce-terminal-launch-v1 handoff
+  OR fail closed with a one-line diagnostic. Successful selection fully exits
+  Picker Python and leaves attachment owned by the tab's shell, with no
+  python.exe ancestor of the mux attach client. WMI/Win32_Process.Create
+  detached attachment is not an alternative; preserve resident-bootstrap
+  behavior. Do not impose a terminal-host prerequisite on non-attachment
+  CLI, query or recovery operations.
+
+#### Local Validation
+
+- [ ] **V13209-1:** Preserve the actual copied-user-binstub regression:
+  outside the payload directory, with neither sibling plugin.json nor
+  payload-dir, resolve and load the current selected payload's
+  bin/terminal-launch.ps1.
+- [ ] **V13209-2:** Cover reachable handoff and unavailable-channel behavior
+  through their actual callers: successful attachment has the shell-owned,
+  no-Python-ancestor outcome; unavailable handoff fails diagnostically rather
+  than leaving a Python waiter. Preserve existing resident-bootstrap,
+  arguments, terminal interaction, non-attachment CLI/query/recovery and exit
+  behavior. Record source/component evidence separately from any independently
+  authorized native evidence.
 
 ### Phase 4 - Native and clean-room acceptance
 
@@ -648,6 +691,13 @@ Current bounded #9470/#9479 literal-forwarding and blanket-renderer-removal cred
 
 All detailed controls below are **agent-recommended** ways to prove the
 operator's installation-survival contract.
+
+- [ ] **G13209:** Resolve P13209-1/P13209-2 and V13209-1/V13209-2 at their
+  finite Windows caller/attachment boundary, retaining #13210's partial
+  credit, terminal-handoff OR diagnostic fail-closed choice, actual copied-
+  binstub regression and unchanged bootstrap/terminal semantics. This is
+  independent of unrelated installation-survival, release and selected-host
+  acceptance; those incumbent obligations remain unchanged.
 
 - [ ] Unit tests cover boundary dispatch, installation identity, exact launch
   incarnation, duplicate/stale end handling, missing/unsupported handlers and
@@ -997,6 +1047,17 @@ and does not delay final Copilot exit indefinitely merely to deliver a lifecycle
 notice; the existing bounded/quiet absent-handler contract remains intact.
 
 ## Journal
+
+### 2026-11-19 UTC - Proposed finite Windows attachment receiving
+
+Propose direct P13209/V13209/G13209 receiving for the remaining no-channel
+terminal-handoff OR diagnostic fail-closed contract. Credit #13210's selected-
+payload discovery, diagnostic and copied-binstub regression without claiming
+the Python waiter or whole issue resolved. All five new acceptance rows remain
+unchecked; all incumbent states, launch ownership, parent acceptance and
+resource custody remain unchanged. Normal reviewed receiving delivery and
+current readback precede a separate source judgment. This entry records a
+proposal, not accepted receiving, implementation, native proof or disposition.
 
 ### 2026-11-08 - Logger/Codespaces scheduling source merged
 
