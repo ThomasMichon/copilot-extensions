@@ -92,7 +92,7 @@ refuse it rather than interpreting partial acquisition as a complete manifest.
 Finish pending work before rollback or switching to hints, full reconciliation
 or a connector without paged support. An explicit caller-authorized
 `indexing.paged_crawl.discard_acquisition` repair may instead abandon only an
-**unapplied v2 or v4** acquisition. It requires the original actual connector,
+**unapplied v2, v4 or v5** acquisition. It requires the original actual connector,
 configuration scope, path database and exact observed payload; the owning
 journal compares those under its existing SQLite transaction before removing
 the row. Concurrent progress or promotion to a complete v1 manifest refuses
@@ -1109,7 +1109,7 @@ using postponed concrete annotations rather than newer `typing` exports.
 Deploy receivers before producers, and enable hinted execution only with a
 qualified capable engine. The shared engine now advertises v1 execution and
 preflights one exact configured source, the actual connector's
-`discover_hints` callable capability, and its explicit
+selected hinted-discovery callable capability, and its explicit
 `hint_scope == (canonical_family, account_id)` before opening stores or embedding
 clients. Aliases, synthesized sources and unsupported connectors are refused;
 there is no source-only polling fallback. The same connector supplies recovery
@@ -1124,6 +1124,34 @@ exactly, including `None`: targeted events do not prove coverage of intervening
 poll changes. An unchanged or changed polling cursor is not inferred from event
 IDs. Existing unadvertised workers still park hinted tasks after rollback.
 External CLI providers do not yet support hinted acquisition.
+
+For bounded in-process work, a connector can instead expose
+`discover_hints_page(hints, last_commit, cursor, *, cancel_check=None)`.
+The actual callable must advertise both `change_hints_versions = (1,)` and
+`acquisition_page_versions = (1,)`. It returns `AcquisitionPage` units, preserving
+`last_commit` on **every** page. Units must bound nested item/comment work too;
+an unbounded document acquisition wrapped in a page is not this contract.
+Only a terminal cursor completes the claimed hints, never polling coverage.
+
+The collector selects negotiated hinted pages before the legacy single-delta
+callable. With no negotiated page capability, existing nonpaged hinted callers
+retain their original contract; once paged work is pending, losing that
+capability refuses rather than downgrading. The same `pending_crawls` owner uses
+an incomplete v5 envelope containing the immutable full hint union (including
+events, ref ranges and metadata revisions), refresh-retention policy, base
+checkpoint, opaque cursor and generation. Recovery scope still binds the
+effective connector/account. A changed binding refuses before requesting
+another unit. The existing 128-unit invocation and 65,536-byte cursor limits,
+CAS, family exclusion, cancellation and explicit-discard rules apply. Older
+readers reject incomplete v5 state; finish or explicitly discard it before
+rollback. Ordinary v2 pages, full v4 snapshots and nonpaged hints are unchanged.
+
+Terminal acquisition promotes to the existing ready v1/v3 manifest, preserving
+store-before-checkpoint replay. For a connector already requiring poll refresh,
+candidate generations are retained atomically with that terminal promotion in
+the current refresh owner. Partial hinted pages certify no refresh coverage,
+and completion does not clear candidates or advance the polling cursor.
+This shared seam does not enable any additional built-in connector.
 
 Git implements ref-range hints with immutable full hexadecimal commit identities.
 It requires the exact configured source and an explicit nonsecret `hint_account`;

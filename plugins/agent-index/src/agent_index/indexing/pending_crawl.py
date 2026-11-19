@@ -9,7 +9,7 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager, closing, nullcontext
 from dataclasses import asdict, replace
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol, cast
 
 from agent_index.indexing.manifest import CrawlManifest, CrawlStats, PollRefresh
 from agent_index.indexing.poll_refresh import PollRefreshJournal, validate_refresh
@@ -37,7 +37,10 @@ def recovery_scope(config_scope: str, connector: SourceConnector) -> str:
     if identity is None:
         if any(
             callable(getattr(connector, name, None))
-            for name in ("discover_delta", "discover_hints", "discover_delta_page", "discover_snapshot_page")
+            for name in (
+                "discover_delta", "discover_hints", "discover_hints_page",
+                "discover_delta_page", "discover_snapshot_page",
+            )
         ):
             raise ValueError("Delta connector must declare its effective recovery_identity")
         identity = (connector.source_name,)
@@ -149,12 +152,17 @@ class PendingCrawls(PollRefreshJournal):
             return None
         if row["scope"] != scope:
             raise ValueError("Pending crawl belongs to a different source/account configuration")
-        return row["payload"]
+        return cast(str, row["payload"])
 
     def compare_and_save(
         self, source: str, *, scope: str, payload: str, expected: str | None, family: str,
     ) -> None:
         """Publish acquisition progress under the same family exclusion and journal key."""
+        data = json.loads(payload)
+        completed = (
+            self.decode_manifest(data["manifest"], source)
+            if isinstance(data, dict) and data.get("version") == 3 else None
+        )
         with closing(self._paths._connect()) as conn, conn:
             conn.execute("BEGIN IMMEDIATE")
             self._assert_family_available(conn, source, family)
@@ -174,13 +182,15 @@ class PendingCrawls(PollRefreshJournal):
                 conn.execute(
                     "UPDATE pending_crawls SET payload = ? WHERE source = ?", (payload, source),
                 )
+            if completed is not None:
+                self.retain_refresh(conn, completed, scope)
 
     def load(self, source: str, scope: str) -> tuple[CrawlManifest, bool] | None:
         payload = self.read_payload(source, scope)
         if payload is None:
             return None
         data = json.loads(payload)
-        if isinstance(data, dict) and data.get("version") in (2, 4):
+        if isinstance(data, dict) and data.get("version") in (2, 4, 5):
             from agent_index.indexing.paged_crawl import decode_acquisition
             from agent_index.indexing.snapshot_crawl import decode_snapshot
 
@@ -282,7 +292,7 @@ class PendingCrawls(PollRefreshJournal):
             self.retain_refresh(conn, manifest, scope)
 
     @staticmethod
-    def manifest_data(manifest: CrawlManifest) -> dict:
+    def manifest_data(manifest: CrawlManifest) -> dict[str, Any]:
         data = asdict(manifest)
         if manifest.poll_refresh is None:
             data.pop("poll_refresh")
