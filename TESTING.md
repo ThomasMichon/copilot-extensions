@@ -2094,10 +2094,14 @@ The normal cohort fixture records each canonical wheel-build duration and
 names bootstrap/engine/Manager setup phases. These observations preserve the
 actual builder calls, return values, refusals, lifecycle sequence and all
 existing deadlines; they do not enable artifact reuse or skip a setup stage.
-The engine receiver runs under fixture-only cumulative profiling, printing its
-30 highest-cost call sites to the existing stderr owner. Its original script
+The engine receiver runs with fixture-only wall timing around its actual
+construction, child, freezing and identity functions. The import observer
+preserves each callable's arguments, result and refusal and restores its loader
+on exit; nested durations are inclusive, not additive. Its original script
 arguments, Source, command-owner lifecycle lease and 90-second deadline remain
-unchanged. Profiling adds observation overhead; it is not a performance fix.
+unchanged. Whole-receiver call profiling materially perturbed an earlier run;
+these coarse observations replace it rather than qualify that failed run or
+claim a performance fix.
 The fixture explicitly selects its Manager root as well as its private homes;
 a real generated-launcher control retains an inherited runner root override and
 verifies that the fixture still reaches its own selected slot.

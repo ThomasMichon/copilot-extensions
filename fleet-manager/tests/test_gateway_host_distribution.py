@@ -431,12 +431,21 @@ def test_engine_cost_diagnostic_preserves_script_arguments_output_and_refusal(
 ) -> None:
     from repository_ssh_cohort_fixture import engine_cost_diagnostic
 
+    (tmp_path / "installer_engine.py").write_text(
+        "def _construct(value,*,code):\n"
+        " assert value=='actual-input'\n"
+        " if code: raise SystemExit(code)\n"
+        " return value\n"
+        "_child=freeze_inputs=_construct\n",
+        encoding="utf-8",
+    )
     script = tmp_path / "install_source.py"
     script.write_text(
         "import json,sys\n"
         "print(json.dumps({'argv':sys.argv,'path':sys.path[0],'name':__name__}),flush=True)\n"
         "print('actual receiver stderr',file=sys.stderr,flush=True)\n"
-        f"raise SystemExit({exit_code})\n",
+        "from installer_engine import _construct\n"
+        f"assert _construct('actual-input',code={exit_code})=='actual-input'\n",
         encoding="utf-8",
     )
     arguments = ["--install-source", "source", "--install-application", "--root", "runtime"]
@@ -447,8 +456,42 @@ def test_engine_cost_diagnostic_preserves_script_arguments_output_and_refusal(
     assert json.loads(result.stdout) == {
         "argv": [str(script), *arguments], "path": str(tmp_path.resolve()), "name": "__main__",
     }
-    assert result.stderr.startswith("actual receiver stderr\nEngine receiver cumulative cost:\n")
-    assert "install_source.py" in result.stderr and "cumulative" in result.stderr
+    assert result.stderr.startswith("actual receiver stderr\nEngine receiver cost installer_engine.py:_construct: ")
+    assert len(result.stderr.splitlines()) == 2
+
+
+def test_engine_cost_diagnostic_observes_actual_fingerprint_and_source_refusal(tmp_path: Path) -> None:
+    from repository_ssh_cohort_fixture import engine_cost_diagnostic
+
+    payload = tmp_path / "payload"
+    payload.mkdir()
+    (payload / "input.py").write_bytes(b"VALUE = 7\n")
+    script = tmp_path / "receiver.py"
+    script.write_text(
+        "import sys;from pathlib import Path\n"
+        "sys.path.insert(0,sys.argv[1])\n"
+        "import versioned_runtime as runtime\n"
+        "import versioned_runtime_source as source\n"
+        "payload=Path(sys.argv[2]);item=payload/'input.py'\n"
+        "assert source.assembly_hash(payload)==runtime.fingerprint_source([item])\n"
+        "assert source.read_source_identity(payload,'1.0.0') is None\n"
+        "item.unlink()\n"
+        "try: source.assembly_hash(payload)\n"
+        "except source.SourceIdentityError as error:\n"
+        " assert 'payload is empty' in str(error)\n"
+        "else: raise AssertionError('actual empty Source was not refused')\n"
+        "print('actual-fingerprint-and-refusal')\n",
+        encoding="utf-8",
+    )
+    result = run(engine_cost_diagnostic([
+        sys.executable, "-I", "-B", str(script),
+        str(PROJECT.parent / "libs" / "versioned-runtime"), str(payload),
+    ]), cwd=tmp_path, timeout=10)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == "actual-fingerprint-and-refusal\n"
+    assert result.stderr.count("Engine receiver cost versioned_runtime_source.py:assembly_hash: ") == 2
+    assert result.stderr.count("Engine receiver cost versioned_runtime.py:fingerprint_source: ") == 2
+    assert "Engine receiver cost versioned_runtime_source.py:read_source_identity: " in result.stderr
 
 
 def test_manager_activation_diagnostic_bounds_the_actual_startup_log(tmp_path: Path) -> None:
@@ -614,7 +657,7 @@ def test_original_engine_owner_runs_its_declared_lifecycle_in_private_home(
     ], cwd=project, env=environment, timeout=60)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "owned-fixture" in result.stdout
-    assert "Engine receiver cumulative cost:" in result.stderr
+    assert "Engine receiver cost" not in result.stderr
     manifest = json.loads((home / ".agent-worktrees" / "deploy-manifest.json").read_text())
     assert manifest["commandLifecycle"]["state"] == "complete"
     assert Path(manifest["commandBinding"]["payloadRoot"]) == owner
