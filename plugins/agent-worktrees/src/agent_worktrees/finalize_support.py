@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 from . import output, tracking
@@ -9,7 +10,8 @@ from .config import Config
 
 
 def rollback_finalizing_freeze(
-    yaml_path, prior_status: str | None, worktree_id: str, config: Config | None = None,
+    yaml_path: Path, prior_status: tracking.WorktreeStatus | None,
+    worktree_id: str, config: Config | None = None,
 ) -> None:
     """Restore only a still-frozen, owned record; never undo a terminal save."""
     if prior_status is None or not yaml_path.exists():
@@ -63,7 +65,7 @@ def rollback_finalizing_freeze(
 
 
 def authority_fenced_write(
-    yaml_path: Path, config: Config, mutate,
+    yaml_path: Path, config: Config, mutate: Callable[[tracking.WorktreeRecord], object],
 ) -> tracking.WorktreeRecord | None:
     """Reload fresh, re-verify authority, then mutate under one sidecar lock.
 
@@ -88,6 +90,8 @@ def dry_run_finalize_preview(
     worktree_path: str,
     branch: str,
     upstream: str,
+    *,
+    retain_checkout: bool = False,
 ) -> None:
     """Show what finalize would do without side effects."""
     repo = config.default_repo
@@ -96,12 +100,15 @@ def dry_run_finalize_preview(
     print(f"Finalization plan for worktree {worktree_id}:")
     output.dry_run(f"Would fetch from {repo.remote}")
     output.dry_run(f"Would validate that {branch} content is on {upstream}")
-    output.dry_run(
-        f"Would remove worktree directory and branch ONLY if idle "
-        f"(no live session / not inside it): {worktree_path}"
-    )
-    output.dry_run("Would merge worktree permissions back to anchor")
-    output.dry_run("Would remove worktree path from trustedFolders")
+    if retain_checkout:
+        output.dry_run(f"Would retain checkout and branch explicitly: {worktree_path}")
+    else:
+        output.dry_run(
+            f"Would remove worktree directory and branch ONLY if idle "
+            f"(no live session / not inside it): {worktree_path}"
+        )
+        output.dry_run("Would merge worktree permissions back to anchor")
+        output.dry_run("Would remove worktree path from trustedFolders")
     output.dry_run("Would update worktree YAML status: finalized")
     print()
     output.ok("Dry run complete -- no changes made")

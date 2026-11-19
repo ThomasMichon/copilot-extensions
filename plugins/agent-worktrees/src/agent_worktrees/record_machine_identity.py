@@ -18,6 +18,8 @@ class IdentityRecord(Protocol):
 class RecordMachineIdentityView(IdentityRecord):
     """Compatibility projections of transient reporter naming facts."""
 
+    _loaded_record_subject: tuple[object, ...] | None = None
+
     @property
     def execution_machine(self) -> str:
         return execution_machine(self)

@@ -145,8 +145,22 @@ Batch reports and orphan/managed dry runs name the hold instead of claiming the
 checkout would be removed. A validated finalized display remains distinct from
 blocked deletion eligibility; its descriptor round trip does not turn the hold
 into an unsafe `FINAL` action or an unsupported-looking result.
-The guard probes only this documented fallback with `lstat`; it opens no database,
-follows no agenda link and performs no recursive search for arbitrary custom homes.
+List/status projections use the cheap known-history `lstat` hint and their existing
+cached/advisory closure facts. They open no agenda database and start no ignored-data
+Git observation; an eligible-looking row does not establish fresh data absence.
+Physical disposal independently checks ignored paths and the sparse-aware index
+through bounded, repository-isolated Git observations. They share a five-second
+execution budget, 64 KiB ignored-output and 32 MiB index-output limits, with 8 KiB
+stderr per observation. An uninspected sparse index retains the checkout rather
+than expanding it or fetching objects.
+
+Ignored content is not disposable from its name or Git-ignore status: its producer
+must preserve or explicitly reclaim it first. Nonempty tracked submodule paths are
+conservatively retained, including ignored evidence invisible to the parent Git
+status. The submodule owner must preserve or dispose of local data and use normal
+Git deinitialization before retrying root cleanup. Missing or empty submodule paths
+do not block removal. Failed, linked, oversized or otherwise incomplete inspection
+retains the checkout. No new launch-time or presentation work is added.
 Boundary rechecks cover late state before fallback/retry removal, but do not claim
 a filesystem transaction against an independently running external writer.
 
@@ -169,8 +183,8 @@ This slice provides no automatic relocation, descriptor rebinding, writer switch
 source deletion or restore command. Only the data owner may reconcile a supported
 rescue and explicitly retire its original source under the applicable permission
 and retention gates. Arbitrary custom checkout-local homes remain the adopter's
-explicit preservation responsibility; their absence from this bounded convention
-check is not a safety guarantee.
+explicit preservation responsibility; the ignored-data hold is not a complete
+domain inventory or proof of a supported writer cutover.
 
 The [reviewed lifetime and archival design](../../../efforts/active/mux-companion-manual-cutover-diagnostics/worktree-state-lifetime.md)
 retains the independent efforts, Manager, logger, rescue and operational

@@ -104,7 +104,8 @@ Report per-resource partial outcomes without releasing unresolved custody.
 
 ## Plan
 
-- [ ] R0 Review and merge this subplan before runtime implementation.
+- [x] R0 Review and merge this subplan before runtime implementation.
+      #13280 merged after exact-head approval and required checks.
 - [ ] R1 Deliver explicit retained finalization and runtime support declaration.
 - [ ] R2 Deliver retained relationship discovery without changing obligations.
 - [ ] R3 Deliver selected test-cache/source-lifetime disposition.
@@ -159,3 +160,118 @@ CLI reference, retained discovery contract and test-runner reference.
 The existing issue coordinates the bounded retained-resource follow-up. This
 document states the source sequence and tests; no runtime behavior or live
 cleanup is claimed by this plan.
+
+### 2026-11-18 - Source plan accepted
+
+#13280 merged after current-head Copilot approval, no open review findings and
+passing required checks. A superseded direct source-attribution result was
+reconciled through the documented PR-scoped workflow before managed merge.
+Implementation starts with retained finalization and known-child discovery;
+cache/source-lifetime disposition and full qualification remain open.
+
+### 2026-11-18 - Retained finalization and discovery candidate
+
+The R1/R2 candidate adds explicit checkout retention, a selected-runtime support
+declaration, and bounded read-only traversal through settled child edges.
+The existing active-obligation view and default finalization behavior remain
+unchanged. Whole-file strict typing passes for both Linux and Windows targets.
+The focused Linux packet passes all 80 cases. Fatal-error lint, documentation
+consistency, version consistency and the install-contract check pass.
+
+A broader 12-file compatibility packet reports 417 passes and 31 failures.
+The unchanged source baseline has the identical 31 failing test selectors;
+#13300 tracks that separate receiving-fixture qualification gap. Neither run
+is a passing broader packet. Native Windows execution and the complete
+multi-repository cleanup flow remain unqualified. R1/R2 delivery is not yet
+merged, and the cache/source-lifetime and parent completion gates remain open.
+
+Documentation impact: the CLI reference and closeout/reclamation guide now
+name the explicit selection, runtime support check and retained discovery
+boundary. No install or configuration default changes. Inventory is an explicit
+bounded local read; it adds no launch-time work or background scan.
+
+The exact R1/R2 candidate also passed all 80 focused cases on disposable native
+Windows in [the hosted qualification run](https://github.com/ThomasMichon/copilot-extensions/actions/runs/44402600631).
+This qualifies that packet, not the complete cross-repository cleanup flow.
+
+### 2026-11-18 - Test-environment retirement candidate
+
+The R3 candidate adds a selected source/target/native-platform preview and apply
+owner. It reuses the runner's environment-identity lease and preserves the
+leased directory. A terminal marker blocks preparation and `--reinstall`, so
+an admitted waiter cannot recreate source-dependent imports after retirement.
+Partial or interrupted work keeps that fence and requires a fresh preview.
+Mixed-version review tightened the boundary: both preparers explicitly select
+`--retirement-ready` to allocate and use the new cache namespace. The existing
+`venv_root` helper retains its legacy path, including when an older caller
+imports the current helper. A selected-source capability declaration is required.
+Legacy caches are not migrated or retired by this tool; their owners retain
+their process-drain and disposition obligations.
+Success applies only to the selected environment; sibling caches and other
+source consumers remain independent gates.
+
+The contained Linux cache packet passes 63 cases with one Windows-only skip.
+It exercises the actual CLI, a separate busy lease holder, interrupted owner
+recovery, partial failure, preview staleness and actual source-dependent imports
+after process exit. Fatal-error lint and whole-file strict typing pass for
+both target platforms. Native Windows qualification of R3 is still pending.
+The [source-lifetime reference](../../../docs/retained-test-environments.md)
+documents the terminal selection and the separate source-cleanup decision.
+
+The exact R3 candidate passed all 64 selected cases on disposable native
+Windows in [run 44405932083](https://github.com/ThomasMichon/copilot-extensions/actions/runs/44405932083).
+A subsequent control also binds the source directory identity: replacing the
+checkout invalidates an earlier retirement preview.
+
+### 2026-11-18 - Independent cleanup and ignored-data protection
+
+The R4 consumer constructs a real Root -> child -> grandchild chain across
+three repositories, plus an independent sibling. All nodes finalize with
+retained checkouts. Settled relationships remain discoverable. A separate
+preview changes no bytes, and normal cleanup removes eligible nodes while
+retaining one grandchild's ignored evidence.
+
+Physical disposal now retains unclassified ignored content until its producer
+preserves or explicitly reclaims it. This intentionally tightens the old unsafe
+removal path; logical finalization and ordinary empty/clean checkout behavior
+remain separate. Inspection uses the existing caller-owned process primitive,
+five-second execution and hard stdout/stderr limits, repository-isolated Git
+configuration, and no new service or launch-time work. The native process-use
+check remains real in the cross-repository consumer.
+
+The current Linux lifecycle packet passes 90 cases. The existing late-agenda
+selection passes 17 cases, including data created during removal/registration
+inspection. The legacy hold is not a writer migration: existing complete-export
+support alone does not provide relocation or a safe new writer. Full agenda
+rescue/cutover and final exact-head native qualification remain open gates.
+The source-replacement cache control also passes in the updated Linux packet:
+64 passes and the same one Windows-only skip. Whole-file strict typing passes
+all 18 touched Python files for both target platforms.
+
+### 2026-11-18 - Review corrections
+
+Review of #13314 found four real gaps. Fresh disposal now inspects tracked
+gitlinks and conservatively retains nonempty submodule paths. Advisory
+classification uses a separate cheap history hint, so classified list and both
+status renderers start no ignored-data observation. CWD retained discovery uses
+existing records only, without invoking adoption. Marker publication uses unique
+temporary files with exception cleanup; fresh previews recover valid retiring
+state with orphan temporary files, including the older fixed temporary name.
+
+Focused controls cover actual submodule evidence, owner-led disposition and
+deinitialization, both tracked/untracked CWD cases with byte-preserved ledgers,
+real rendering work counts, and interruption inside final marker publication.
+The lifecycle/status/classification selection passes 256 cases with four legacy
+fixture failures. All four failed selectors also fail against the committed
+pre-review `prune.py`; #13300 tracks that receiver/pair-fixture gap, not a CI
+exception. The cache and actor-free selection passes 77 cases with one
+Windows-only skip.
+
+The original required unit job refused changed source hashes before test
+execution. Its corrected local packet passed all 5,499 admitted cases with
+coverage in 132.381 seconds under the unchanged 300-second budget. The review
+corrections add two more actor-free controls and require a refreshed complete
+packet, current-head CI and review before merge. Earlier native Windows
+qualification includes 140 published-head CLI/recovery cases in
+[run 44417101889](https://github.com/ThomasMichon/copilot-extensions/actions/runs/44417101889);
+updated native qualification is still separate from those prior results.
