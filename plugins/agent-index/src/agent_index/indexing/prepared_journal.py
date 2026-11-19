@@ -92,6 +92,18 @@ class PreparedJournal:
                 raise PendingCrawlConflict("Prepared cache belongs to a different account scope")
             self.generation = bound["generation"]
 
+    @classmethod
+    def for_point_application(
+        cls, paths: PathIndex, source: str, scope: str, payload: str, *,
+        manifest: CrawlManifest, point_claim: PendingPointClaim,
+    ) -> PreparedJournal:
+        """Bind a complete retained point candidate without replacing its pending parent."""
+        from agent_index.indexing.prepared_points import PreparedPoints
+
+        journal = cls(paths, source, scope, payload, point_claim=point_claim)
+        PreparedPoints(journal).bind_application(manifest)
+        return journal
+
     def _require_parent(self, conn: sqlite3.Connection) -> None:
         row = conn.execute(
             "SELECT scope, generation FROM prepared_crawl_parents WHERE source = ?", (self.source,),

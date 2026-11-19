@@ -19,6 +19,7 @@ from agent_index.sources.base import FileEntry
 from agent_index.sources.delta import DeletedFile
 
 _KIND = "named-point-acquisition/v1"
+_APPLICATION_KIND = "named-point-application/v1"
 
 
 def _json(value: Any) -> str:
@@ -204,3 +205,14 @@ class PreparedPoints:
         )
         PendingCrawls._validate(result)
         return result
+
+    def bind_application(self, manifest: CrawlManifest) -> None:
+        """Retain the exact complete candidate, not applied-version or queue coverage."""
+        candidate = self.compose()
+        for entry in manifest.upserts:
+            _json(entry.metadata)
+        expected = _json(PendingCrawls.manifest_data(candidate)).encode()
+        supplied = _json(PendingCrawls.manifest_data(manifest)).encode()
+        if supplied != expected:
+            raise PendingCrawlConflict("Point application manifest does not match every acquired target")
+        self.journal.put_immutable(_APPLICATION_KIND, "manifest", expected)

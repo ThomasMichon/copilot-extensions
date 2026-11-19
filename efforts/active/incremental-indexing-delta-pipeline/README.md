@@ -150,7 +150,12 @@ After the reviewed proposal, the operator admitted execution:
   parent/incarnation checks; ordinary readers and premature retirement refuse it.
   A disconnected named-point reader uses exact revision/comment-version APIs and
   rechecks query/account context without acquiring the combined discussion;
-  its observations are not durable whole-claim acquisition/application coverage.
+  explicit pending-parent retention can resume each exact target and compose a
+  whole-claim candidate only after every named version/correlation is retained.
+  An explicit prepared-journal binding requalifies and retains that exact complete
+  application candidate without replacing the pending parent. Application
+  constructors do not consume it yet, and it establishes no durable
+  application/current-claim completion coverage.
   A [retained component carrier](../../../plugins/agent-index/docs/architecture.md#component-recovery-carrier-application-unsupported)
   preserves ordering inputs behind pre-application refusal, including changed
   replacement and premature-completion refusal. Pure content/version comparison
