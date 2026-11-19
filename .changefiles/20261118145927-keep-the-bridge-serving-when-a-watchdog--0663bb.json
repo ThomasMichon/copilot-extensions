@@ -1,0 +1,9 @@
+{
+  "comment": "Keep the Bridge serving when a watchdog replacement cannot be scheduled",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
