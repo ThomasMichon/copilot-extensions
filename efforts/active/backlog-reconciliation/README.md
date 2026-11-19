@@ -377,14 +377,21 @@ the non-public approval conversation.
 The [accepted liveness, reaper and publisher record](journal/2026/11.19-keeper-continuation-and-liveness-receipts.md)
 records #13402's actual reviewed delivery, full current readback and the
 three separately audited #13203/#13207/#13208 redundant-tracking retirements.
-All fifteen receiving rows remain unchecked; the latest complete census is
+All fifteen receiving rows remain unchecked; the 08:12:54 UTC census was
 911 whole open, 182 above fixed 729. #13204 remains OPEN as an explicitly
 unadopted allocation alternative; no vision or Request is rewritten.
-The same record proposes explicit #6236 keeper continuation in existing
-Fleet Coordination. Its actual reviewed merge, still-OPEN reflection, fresh
-complete permitted readback and separate judgment remain future conditions;
-the withdrawn judgment is not replayed. Existing technical, keeper,
-reservation, execution and resource boundaries remain.
+The same record now retains #13416's actual explicit keeper-continuation
+merge, new while-OPEN reflection, fresh complete permitted readback and
+the separately audited NEW #6236 redundant-tracking judgment. The earlier
+withdrawn judgment remains withdrawn; no payload or correction was replayed.
+Existing technical, keeper, reservation, execution and resource boundaries
+remain. The complete 09:29:22 UTC census is 912 whole open, 183 above fixed
+729; the original cohort is now 410 open and the effort remains Active.
+The [current guarded inflow audit](journal/2026/11.19-qualified-inflow-source-completions.md)
+separates actual source delivery from incidental PR references and records
+five independently audited completed requests, two explicit installer
+retentions and a complete 10:33:08 UTC census: 909 whole open, 180 above
+fixed 729. Runtime adoption and the broader graph/roadmap remain unfinished.
 
 The [complete terminal, offline-job and fixture receiving proposal](journal/2026/11.18-terminal-and-offline-receiving.md)
 directly preserves #13209/#13278/#13300/#13334 in existing domain Plan/local

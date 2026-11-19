@@ -148,7 +148,10 @@ After the reviewed proposal, the operator admitted execution:
   A [retained component carrier](../../../plugins/agent-index/docs/architecture.md#component-recovery-carrier-application-unsupported)
   preserves ordering inputs behind pre-application refusal, including changed
   replacement and premature-completion refusal. Pure content/version comparison
-  does not qualify durable application or deletion evidence. Representation,
+  does not qualify durable application or deletion evidence.
+  [Raw file-point observations](../../../plugins/agent-index/docs/file-projection.md)
+  provide a separately budgeted native snapshot prerequisite, not applied-version
+  or deletion proof. Representation,
   v2 execution, ordered application and read isolation remain unimplemented.
 - [ ] Persist acquisition progress so retry/restart does not restart a
   corpus-wide listing.

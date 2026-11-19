@@ -57,6 +57,11 @@ also owns explicit whole-table-budgeted scalar consolidation when ordinary
 ingestion reaches its segment ceiling. It does not migrate legacy stores or
 run corpus-sized maintenance automatically.
 
+An additional opt-in [raw file-point observation](file-projection.md) binds the
+configured domain/model mapping, caps same-path candidates before source
+filtering and retains complete raw content/vector rows under the same exclusion.
+It prepares no index and certifies neither ordered application nor deletion.
+
 An in-process connector may opt into `DeltaSourceConnector.discover_delta()`,
 returning a version-1 `SourceDelta` with changed `FileEntry` values, explicit
 `DeletedFile` tombstones, its target checkpoint and complete-acquisition status.
