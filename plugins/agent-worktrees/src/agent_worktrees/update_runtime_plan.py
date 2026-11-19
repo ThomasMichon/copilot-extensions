@@ -15,18 +15,52 @@ import shutil
 import socket
 import subprocess
 import sys
-from collections.abc import Collection, Mapping
+from collections.abc import Callable, Collection, Mapping
 from pathlib import Path
 from types import MappingProxyType
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from . import reconcile
+from .update_gate import MACHINE_GATED_SKIP, MachineDetectionError
 from .update_runtime_application import plan_step as _application_step
 
 if TYPE_CHECKING:
     from .update_runtime import _RegisteredPluginTarget
     from .update_runtime_source import PreparedRuntimeSource
     from .update_runtime_target import SourceRuntimeTarget
+
+# The Index role resolver nests a Worktrees `state-root --configuration` owner
+# read bounded at 20 seconds; the outer bound must leave room for that read
+# plus interpreter startup, or a loaded host fails the whole update preflight.
+INDEX_ROLE_RESOLVER_TIMEOUT_S = 60
+
+
+def _seam(owner: str, name: str) -> Any:
+    """Resolve a planning seam at call time so patches on its owner apply."""
+    # Import only the owner: contract checkers load this module under a
+    # synthetic package that provides update_runtime but not update_cli.
+    if owner == "update_cli":
+        from . import update_cli
+
+        return vars(update_cli)[name]
+    from . import update_runtime
+
+    return vars(update_runtime)[name]
+
+
+def _machine_gate_blocks(name: str, scope: str, context: Path | None) -> bool:
+    return bool(_seam("update_runtime", "_machine_gate_blocks")(name, scope, context))
+
+
+def _installer_timeout(
+    owner: str, name: str, environment: Mapping[str, str], plugin_dir: Path,
+) -> int:
+    deadline: int = _seam(owner, "_installer_timeout")(name, environment, plugin_dir)
+    return deadline
+
+
+def _installer_deadline_status(owner: str, error: Exception) -> str:
+    return str(_seam(owner, "installer_deadline_status")(error))
 
 
 @dataclasses.dataclass(frozen=True)
@@ -84,7 +118,7 @@ def _index_repository(
             [sys.executable, "-I", "-B", str(resolver), "--repo", str(candidate),
              "--machine", machine],
             cwd=payload, env=dict(environment), capture_output=True, text=True,
-            timeout=10, **no_window_kwargs(),
+            timeout=INDEX_ROLE_RESOLVER_TIMEOUT_S, **no_window_kwargs(),
         )
         role = result.stdout.strip()
         if result.returncode or role not in {"host", "client", "unconfigured"}:
@@ -106,7 +140,6 @@ def _select_inputs(
         environment = dict(environment)
         source_target = None
         if source is not None:
-            from . import update_runtime as runtime
             from .update_runtime_source import PIN_ENV
             from .update_runtime_target import TARGET_ENV, plan_target
 
@@ -121,11 +154,11 @@ def _select_inputs(
                 if project is not None and not environment.get("AGENT_INDEX_REPO"):
                     environment["AGENT_INDEX_REPO"] = str(project.resolve())
             try:
-                if runtime._machine_gate_blocks(step.name, scope, project):
+                if _machine_gate_blocks(step.name, scope, project):
                     return dataclasses.replace(
-                        step, status=runtime.MACHINE_GATED_SKIP, eligible=False,
+                        step, status=MACHINE_GATED_SKIP, eligible=False,
                     )
-            except runtime.MachineDetectionError as error:
+            except MachineDetectionError as error:
                 return dataclasses.replace(step, status=f"machine detection failed: {error}")
             if step.name != "agent-index":
                 source.validate(step.name, step.payload, environment)
@@ -234,7 +267,6 @@ def plan_registered(
     repository_contexts: tuple[Path, ...] = (),
     check_footprint: bool = True,
 ) -> RuntimeUpdateStep:
-    from . import update_runtime as runtime
 
     pdir = reconcile.core_installed_payload_dir(name)
     step = RuntimeUpdateStep(name, "runtime_reconcile", pdir or Path())
@@ -246,18 +278,18 @@ def plan_registered(
     step = dataclasses.replace(step, eligible=True)
     multi_index = name == "agent-index" and len(repository_contexts) > 1
     try:
-        if not multi_index and runtime._machine_gate_blocks(name, scope, gate_context):
-            return dataclasses.replace(step, status=runtime.MACHINE_GATED_SKIP, eligible=False)
-    except runtime.MachineDetectionError as error:
+        if not multi_index and _machine_gate_blocks(name, scope, gate_context):
+            return dataclasses.replace(step, status=MACHINE_GATED_SKIP, eligible=False)
+    except MachineDetectionError as error:
         return dataclasses.replace(step, status=f"machine detection failed: {error}")
     step = _select_inputs(step, source, gate_context, repository_contexts=repository_contexts)
     if step.status:
         return step
     if multi_index:
         try:
-            if runtime._machine_gate_blocks(name, scope, step.project_root):
-                return dataclasses.replace(step, status=runtime.MACHINE_GATED_SKIP, eligible=False)
-        except runtime.MachineDetectionError as error:
+            if _machine_gate_blocks(name, scope, step.project_root):
+                return dataclasses.replace(step, status=MACHINE_GATED_SKIP, eligible=False)
+        except MachineDetectionError as error:
             return dataclasses.replace(step, status=f"machine detection failed: {error}")
     pdir, environment, pver = step.artifact, step.environment, step.target_version
     try:
@@ -286,7 +318,7 @@ def plan_registered(
     else:
         prefix = _shell_prefix(
             pdir, platform_name, allow_init=True,
-            **({"prepared": True} if source and source.install_source is not None else {}),
+            prepared=source is not None and source.install_source is not None,
         )
         if isinstance(prefix, str):
             return dataclasses.replace(step, status=prefix)
@@ -299,9 +331,9 @@ def plan_registered(
         if source is not None:
             argv += source.installer_arguments(platform_name)
     try:
-        deadline = runtime._installer_timeout(name, environment, pdir)
+        deadline = _installer_timeout("update_runtime", name, environment, pdir)
     except (OSError, ValueError) as error:
-        return dataclasses.replace(step, status=runtime.installer_deadline_status(error))
+        return dataclasses.replace(step, status=_installer_deadline_status("update_runtime", error))
     return dataclasses.replace(step, argv=tuple(argv), deadline_s=deadline)
 
 
@@ -339,7 +371,6 @@ def plan_module(
     repository_contexts: tuple[Path, ...] = (),
     check_footprint: bool = True,
 ) -> RuntimeUpdateStep:
-    from . import update_runtime as runtime
 
     step = RuntimeUpdateStep(name, "module_update", pdir)
     if not pdir.is_dir():
@@ -352,18 +383,18 @@ def plan_module(
     step = dataclasses.replace(step, eligible=True)
     multi_index = name == "agent-index" and len(repository_contexts) > 1
     try:
-        if not multi_index and runtime._machine_gate_blocks(name, scope, gate_context):
-            return dataclasses.replace(step, status=runtime.MACHINE_GATED_SKIP, eligible=False)
-    except runtime.MachineDetectionError as error:
+        if not multi_index and _machine_gate_blocks(name, scope, gate_context):
+            return dataclasses.replace(step, status=MACHINE_GATED_SKIP, eligible=False)
+    except MachineDetectionError as error:
         return dataclasses.replace(step, status=f"machine detection failed: {error}")
     step = _select_inputs(step, source, gate_context, repository_contexts=repository_contexts)
     if step.status:
         return step
     if multi_index:
         try:
-            if runtime._machine_gate_blocks(name, scope, step.project_root):
-                return dataclasses.replace(step, status=runtime.MACHINE_GATED_SKIP, eligible=False)
-        except runtime.MachineDetectionError as error:
+            if _machine_gate_blocks(name, scope, step.project_root):
+                return dataclasses.replace(step, status=MACHINE_GATED_SKIP, eligible=False)
+        except MachineDetectionError as error:
             return dataclasses.replace(step, status=f"machine detection failed: {error}")
     pdir, environment, pver = step.artifact, step.environment, step.target_version
     try:
@@ -379,7 +410,7 @@ def plan_module(
     # replace that contract with the registered-runtime init/cell-provision path.
     prefix = _shell_prefix(
         pdir, platform_name,
-        **({"prepared": True} if source and source.install_source is not None else {}),
+        prepared=source is not None and source.install_source is not None,
     )
     if isinstance(prefix, str):
         return dataclasses.replace(step, status=prefix)
@@ -390,12 +421,12 @@ def plan_module(
     if reconcile._zero_downtime_update(pdir):
         if platform_name == "windows":
             update_args.append("-ZeroDowntime")
-        elif runtime.posix_zero_downtime_flag_supported(pdir):
+        elif bool(_seam("update_runtime", "posix_zero_downtime_flag_supported")(pdir)):
             update_args.append("--zero-downtime")
     try:
-        deadline = runtime._installer_timeout(name, environment, pdir)
+        deadline = _installer_timeout("update_runtime", name, environment, pdir)
     except (OSError, ValueError) as error:
-        return dataclasses.replace(step, status=runtime.installer_deadline_status(error))
+        return dataclasses.replace(step, status=_installer_deadline_status("update_runtime", error))
     return dataclasses.replace(
         step, argv=tuple([*shell_prefix, *update_args]),
         fallback_argv=() if name == "agent-bridge" or (
@@ -450,9 +481,10 @@ def plan_modules(
             step = plan_module(
                 name, pdir, platform_name, force=force or name in force_runtimes,
                 gate_context=target.context if target else None,
-                **({"repository_contexts": target.repository_contexts}
-                   if target and name == "agent-index" else {}),
-                **({"source": sources.get(name)} if sources is not None else {}),
+                repository_contexts=(
+                    target.repository_contexts if target and name == "agent-index" else ()
+                ),
+                source=sources.get(name) if sources is not None else None,
             )
         steps.append(step)
     return tuple(steps)
@@ -468,28 +500,28 @@ def plan_portfolio(
     """Collect the engine, module and remaining active registered runtime owners."""
     engine = plan_engine(
         plugin_dir, platform_name, force=force or "agent-worktrees" in force_runtimes,
-        **({"source": sources.get("agent-worktrees")} if sources is not None else {}),
+        source=sources.get("agent-worktrees") if sources is not None else None,
     ) if not selected_plugins or "agent-worktrees" in selected_plugins else None
     if isolated_engine and engine is not None and not engine.blocked:
         from .installation_updates import isolated_engine_step
 
+        isolate: Callable[[RuntimeUpdateStep], RuntimeUpdateStep] = isolated_engine_step
         try:
-            engine = isolated_engine_step(engine)
+            engine = isolate(engine)
         except (OSError, ValueError) as error:
             engine = dataclasses.replace(engine, status=f"isolated engine update blocked: {error}")
     modules = () if set(selected_plugins) == {"agent-worktrees"} else plan_modules(
         plugin_dir, platform_name, skip_modules, force=force,
         targets=targets, force_runtimes=force_runtimes,
-        **({"sources": sources} if sources is not None else {}),
-        **({"selected_plugins": selected_plugins} if selected_plugins else {}),
+        sources=sources, selected_plugins=selected_plugins,
     )
     excluded = {step.name for step in modules} | {"agent-worktrees"} | set(skip_modules or ())
     registered = tuple(
         plan_registered(
             name, platform_name, force=force or name in force_runtimes,
             gate_context=target.context,
-            **({"repository_contexts": target.repository_contexts} if name == "agent-index" else {}),
-            **({"source": sources.get(name)} if sources is not None else {}),
+            repository_contexts=target.repository_contexts if name == "agent-index" else (),
+            source=sources.get(name) if sources is not None else None,
         )
         for name, target in sorted(targets.items())
         if target.required and name not in excluded
@@ -504,7 +536,6 @@ def plan_engine(
     check_footprint: bool = True,
     action: str = "update",
 ) -> RuntimeUpdateStep:
-    from . import update_cli
 
     step = RuntimeUpdateStep("agent-worktrees", "engine_runtime", plugin_dir, eligible=True)
     step = _select_inputs(step, source, project_root)
@@ -529,7 +560,7 @@ def plan_engine(
         return _application_step(step, force=force or action == "repair")
     prefix = _shell_prefix(
         plugin_dir, platform_name,
-        **({"prepared": True} if source and source.install_source is not None else {}),
+        prepared=source is not None and source.install_source is not None,
     )
     if isinstance(prefix, str):
         return dataclasses.replace(step, status=prefix)
@@ -539,7 +570,9 @@ def plan_engine(
     if source is not None:
         argv += source.installer_arguments(platform_name)
     try:
-        deadline = max(600, update_cli._installer_timeout("agent-worktrees", environment, plugin_dir))
+        deadline = max(
+            600, _installer_timeout("update_cli", "agent-worktrees", environment, plugin_dir),
+        )
     except (OSError, ValueError) as error:
-        return dataclasses.replace(step, status=update_cli.installer_deadline_status(error))
+        return dataclasses.replace(step, status=_installer_deadline_status("update_cli", error))
     return dataclasses.replace(step, argv=tuple(argv), deadline_s=deadline)

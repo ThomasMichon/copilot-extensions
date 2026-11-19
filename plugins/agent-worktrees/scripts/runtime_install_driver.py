@@ -74,6 +74,16 @@ def selected_version(root: Path, runtime: ModuleType) -> str | None:
     return version if runtime.slot_python(root, version) == python else None
 
 
+def selector_snapshot(root: Path) -> dict[str, bytes | None]:
+    result: dict[str, bytes | None] = {}
+    for name in ("current-version", "last-known-good"):
+        try:
+            result[name] = (root / name).read_bytes()
+        except FileNotFoundError:
+            result[name] = None
+    return result
+
+
 def installed_identity(slot: Path, runtime: ModuleType, refusal: type[Exception]) -> dict[str, Any]:
     python = runtime.slot_python(slot.parent.parent, slot.name)
     if python is None:
@@ -101,7 +111,7 @@ def selected_repair(
 ) -> str:
     """Choose the selected repair; the constructor still admits its exact inputs."""
     import re
-    import installer_engine as engine
+    import versioned_runtime as runtime
 
     if not previous or re.fullmatch(
         re.escape(version) + r"(?:[.+]repair\.[0-9a-f]{32})?", previous,
@@ -112,8 +122,8 @@ def selected_repair(
         manifest.get("runtime_source") == (source_identity.document() if source_identity is not None else None)
         and manifest.get("runtime_version") == previous
         and isinstance(manifest.get("venv"), str)
-        and Path(manifest["venv"]) == engine.runtime.version_dir(root, previous)
-        and engine.runtime.is_complete(root, previous)
+        and Path(manifest["venv"]) == runtime.version_dir(root, previous)
+        and runtime.is_complete(root, previous)
     ):
         return previous
     return version
@@ -205,6 +215,41 @@ def child_environment() -> dict[str, str]:
     return {**os.environ, **inherited}
 
 
+def refusal_result(version: str, error: Exception, *, committed: bool) -> dict[str, Any]:
+    return {
+        "runtime_version": version,
+        "installation_refused": {
+            "version": 1, "settled": True, "publication_committed": committed, "error": str(error),
+        },
+    }
+
+
+def result_exit_code(result: dict[str, Any]) -> int:
+    refusal = result.get("installation_refused")
+    if "installation_refused" not in result:
+        return 0
+    if (
+        not isinstance(refusal, dict)
+        or set(refusal) != {"version", "settled", "publication_committed", "error"}
+        or type(refusal["version"]) is not int or refusal["version"] != 1
+        or refusal["settled"] is not True
+        or type(refusal["publication_committed"]) is not bool
+        or not isinstance(refusal["error"], str) or not refusal["error"]
+        or not isinstance(result.get("runtime_version"), str) or not result["runtime_version"]
+    ):
+        raise ValueError("Invalid settled installation refusal")
+    return 1
+
+
+def read_result(path: Path, code: int, argv: list[str]) -> dict[str, Any]:
+    if code not in (0, 1) or not path.is_file():
+        raise subprocess.CalledProcessError(code or 1, argv)
+    result = json.loads(path.read_text(encoding="utf-8"))
+    if result_exit_code(result) != code:
+        raise subprocess.CalledProcessError(code or 1, argv)
+    return cast(dict[str, Any], result)
+
+
 def adopt_broker(root: Path, slot: Path) -> None:
     """Adopt before publication or callbacks, with the complete slot retained."""
     if os.name != "nt" or os.environ.get("COPILOT_EXTENSIONS_TEST_CONTAINED") == "1":
@@ -253,8 +298,9 @@ def _settle(wait: Callable[[], T]) -> T:
 
 def _source_digest(payload: Path) -> str:
     import installer_engine as engine
+    import versioned_runtime as runtime
 
-    return engine.runtime.fingerprint_source(engine._source_files(engine._package_roots(payload)))
+    return runtime.fingerprint_source(engine._source_files(engine._package_roots(payload)))
 
 
 def _admission_digest(args: argparse.Namespace) -> str:
@@ -377,6 +423,7 @@ def _selected_snapshot_current(args: argparse.Namespace) -> bool:
         return False
     if absent:
         return False
+    assert selected is not None
     try:
         if (
             not stat.S_ISREG(info.st_mode)
@@ -384,9 +431,9 @@ def _selected_snapshot_current(args: argparse.Namespace) -> bool:
         ):
             return False
         current = Path(pointer.read_text(encoding="utf-8-sig").strip())
-        if not current.is_absolute() or not cast(Path, selected).is_absolute():
+        if not current.is_absolute() or not selected.is_absolute():
             return False
-        return current.resolve(strict=True) == cast(Path, selected).resolve(strict=True) == cast(Path, args.payload).resolve(strict=True)
+        return current.resolve(strict=True) == selected.resolve(strict=True) == cast(Path, args.payload).resolve(strict=True)
     except (OSError, RuntimeError, ValueError):
         return False
 
@@ -439,9 +486,12 @@ def _execute(args: argparse.Namespace) -> int:
         try:
             owner.assert_owned()
         except ParticipantError as error:
-            getattr(error, "add_note")(
-                f"Native Worktrees installer child exited {code}; transaction custody is unconfirmed",
-            )
+            note = f"Native Worktrees installer child exited {code}; transaction custody is unconfirmed"
+            add_note = getattr(error, "add_note", None)
+            if callable(add_note):
+                add_note(note)
+            else:
+                print(note, file=sys.stderr, flush=True)
             raise
         if code:
             print(f"Native Worktrees installer failed (exit {code})", file=sys.stderr, flush=True)

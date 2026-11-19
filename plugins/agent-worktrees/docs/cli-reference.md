@@ -665,7 +665,7 @@ continue to work unchanged.
 | `mark-complete` | Manual recovery -- set tracking status flag only (hidden from help) |
 | `get finalize-recovery` | Selected executable's additive finalization-recovery contract. Explicit [retired-parent recovery](retired-owner-finalization.md) preserves ordinary mutation refusal and independent finalization/removal gates. |
 | `get finalize-retention` | Selected executable's `agent-worktrees.finalize-retention` version 1 contract. `finalize --retain-checkout` keeps the checkout and branch after all normal completion checks; physical cleanup remains separate. Older runtimes without support must not be retried with removing finalization. |
-| `claims retained [worktree-id]` | Bounded read-only known descendant view, including settled child edges across local projects. `--json` returns `agent-worktrees.retained-worktrees` version 1: nodes, edges, explicit unresolved observations and `removal_authorized: false`. Defaults: `--max-depth 8`, `--max-nodes 256`, at most 4096 claims observed. Limits, cycles, unavailable/remote or other-environment records remain incomplete, not evidence of no retained allocations. No provider queries, mutations or arbitrary-directory scans. Each owner's normal cleanup must revalidate a separately authorized target. |
+| `claims retained [worktree-id]` | Bounded read-only known descendant view, including settled child edges across local projects. Without an ID, CWD must already resolve to a tracked record; an untracked linked checkout is not adopted. `--json` returns `agent-worktrees.retained-worktrees` version 1: nodes, edges, explicit unresolved observations and `removal_authorized: false`. Defaults: `--max-depth 8`, `--max-nodes 256`, at most 4096 claims observed. Limits, cycles, unavailable/remote or other-environment records remain incomplete, not evidence of no retained allocations. No remote provider queries, mutations or arbitrary-directory scans. Each owner's normal cleanup must revalidate a separately authorized target. |
 | `claims` | The worktree's **resource-obligation ledger** (accountability for what it allocated; effort `resource-obligation-settlement`). `claims [id]` shows the ledger; `claims owner <kind> <ref> [--json] [--all-states]` searches every registered project on this machine for the worktree(s) holding that outbound claim (held claims only by default); `claims add <kind> <ref> [--owner-ref <m/p/w>]` journals an outbound claim; `claims annotate <ref> --note <text>` attaches/updates a note on an already-existing claim (e.g. one an underlying tool auto-created) without release + re-add; `claims settle <ref> [--released]` marks it at-rest/released; `claims add derived <path> --creator <tool>` creates a derived output directory with a `.derived-claim.json` marker (worktree id + nonce) and opens a `derived` claim on it, refusing any path that already exists without a matching marker; `claims settle <path> --reclaim [--dry-run]` deletes exactly that one derived directory -- only when its marker/nonce match the ledger, it is inside this worktree's checkout, holds no Git-tracked files, contains no symlink/junction/reparse point and no live process uses it -- and then settles the claim (any failed check refuses and leaves the claim open; finalize and `claims sweep` never delete derived directories); `claims release <ref> [--remove]` retires one (for a derived claim the directory is kept); `claims handoff offer ...` offers exact held claims to another worktree, and `claims handoff accept <bundle-id>` atomically transfers them -- same-machine in-process, cross-machine by SSHing to the source machine's own project binstub for the source-side settle while the accepting machine commits the consumer-side ledger locally, fenced by the shared claim-handoff lease; `claims sweep [--apply]` runs the never-wedge reclaim (flip a provably-gone+safe `active` claim → `abandoned`; dry-run default); `claims reconcile-at-rest [<worktree-id> ...] [--apply]` is the dedicated legacy/GC close-out reconciliation command (`worktree-finality-and-obligations` design.md): releases lingering **at-rest-only** claims on existing records that predate/bypassed finalize's own automatic release-under-freeze, never an `active` one; no selector means every tracked record; dry-run by default; `claims orphans` lists the durable orphanage (obligations re-homed by a `finalize --abandon`); `claims cleanup [<ref-or-source-worktree> ...] [--apply]` is the acting consumer that reclaims matching orphaned resources (delete the CodeSpace, finalize the cross-repo worktree, release a PR only when its reference matches the configured provider and authority and the live provider confirms it merged) and drops settled entries. No selector means the entire orphanage. Same-machine, best-effort, dry-run by default; `claims transitive [worktree_id]` lists every unsettled obligation anywhere in a worktree's whole subtree (itself + every worktree it created, transitively) -- a diagnostic convenience, never a substitute for the per-hop finalize gate; `claims history <ref>` prints the durable, ordered claim/release/settle/reassigned event history recorded for a claimed resource -- **today `pr`-kind only**, fed from the explicit claim-lifecycle write paths, `worktree run`'s own PR-claim persistence (both its live pending-ref settle site and its tested helper), an explicit claim-handoff bundle accept's transfer, plus a context-handoff cutover's implicit agent-bridge-style session reassignment (not yet an agent-dispatch task redrive -- an empty result is NOT proof nothing happened), locally plus, with `--remote`, merged with any mirrored remote events (`refs/agent-worktrees/claim-history/v1`, same shared store as the lease refs) -- an unreadable remote store warns on stderr rather than silently showing local-only history as complete |
 | `follow-ups` | The worktree's **itemized follow-up ledger** (worktree-finality-and-obligations effort; replaces the boolean-only `follow_up` flag). `follow-ups [id]` lists items + the effective open count; `follow-ups add <summary> [--ref <kind>:<value>]...` journals a new open item (`--ref` is repeatable; kinds: `resource-claim`\|`dispatch-task`\|`issue`\|`pull-request`\|`file`\|`effort`\|`other`) and reopens a `finalized` owner; `follow-ups resolve <id> [--result-ref <ref>]` marks one done; `follow-ups dismiss <id> --reason <text>` marks one explicitly not requiring action. The reserved id `legacy` explicitly settles the old boolean flag: resolve requires `--result-ref`; dismiss requires `--reason`. See [legacy settlement](#legacy-follow-up-settlement) below. An open (or `pending-transfer`) item counts as an open obligation the same way `status --follow-up` did, and blocks `cleanup`/`gc` the same way a held claim does. Transfer (`offer`/`accept`/`decline`) is not yet implemented |
 | `cleanup` | List and remove orphaned or finalized worktrees. Open/unconfirmed PRs and held outbound obligations block removal and archival, including `--force` and missing checkouts; see [cleanup safety details](../skills/worktree/references/cleanup-details.md). |
@@ -1111,7 +1111,7 @@ stamps per branch are kept. Recover a bad rewrite with
 `git for-each-ref refs/agent-worktrees/backup/<branch>/` and a normal branch
 reset to the retained commit. A backup write failure refuses the rewrite.
 
-### Explicit operator recovery
+### Owning-worktree PR history recovery
 
 Prefer normal `push-changes` or `git sync` from the source-owning worktree's CWD.
 Do not request operator approval merely because publication acknowledgement or
@@ -1122,24 +1122,28 @@ the existing `push-changes --rewrite-pr` ownership checks; the host's explicit
 command confirms that intent without a separate operator recovery ceremony.
 When that context or ordinary
 ownership/lineage proof is unavailable, select the
-recovery worktree explicitly with its project configuration and request a preview:
+recovery worktree explicitly with its project configuration and run recovery:
 
 ```text
 agent-worktrees push-changes <recovery-worktree-id> --config <project-config> --break-glass-reason "<reason>" --json
 ```
 
-This first call refuses with exit 2 and an exact PR/provider/repository/head-ref,
-destination fingerprint, full source commit and expected remote commit preview.
-The saved head remains separate from the current head agreed by the provider
-and remote ref; disagreement or an unreadable/deleted ref refuses even a preview.
-The preview also binds the original publication authority, proposed action and
-any validated recovery evidence. It changes no Git refs, tracking data, audit
-files or remote head. The reason and preview
-fingerprint are not operator authentication or permission. Obtain real operator
-sign-off for this specific PR and operation before repeating the same call with
-`--confirm-break-glass <preview-fingerprint>`. Never add confirmation automatically
-after a guard refusal. Changed source, reason, destination, saved publication,
-expected head, action or evidence requires a fresh preview and sign-off.
+Recovery of the author's own existing numbered PR from its owning worktree is
+line-of-business work and needs no operator approval. The command computes an
+exact PR/provider/repository/head-ref, destination fingerprint, full source
+commit and expected remote commit preview and binds it automatically. The saved
+head remains separate from the current head agreed by the provider and remote
+ref; disagreement or an unreadable/deleted ref refuses before any effect. The
+preview also binds the original publication authority, proposed action and any
+validated recovery evidence, and is revalidated immediately before taking
+effect. Add `--dry-run` to print the bound operation (PR, source commit, saved
+head, expected head, evidence) and its preview fingerprint without changing Git
+refs, tracking data, audit files or the remote head; with `--json` the same
+structured preview is returned as `recovery_preview`.
+A caller may pin that preview with `--confirm-break-glass <preview-fingerprint>`;
+if the source, reason, destination, saved publication, expected head, action or
+evidence changed since, the pinned call refuses with exit 2 and the new preview.
+Re-preview and retry rather than reusing the stale fingerprint.
 
 If an existing completed backed-sync checkpoint proves that its exact result
 is already the agreed published head, the preview prefers `settle-publication`:
@@ -1149,12 +1153,12 @@ new base; settlement records that base and its corresponding publication patch I
 Equal source/remote commits
 or matching patches alone do not establish this proof. Otherwise `rewrite`
 publishes the pinned committed source as-is with the **previewed live head** as
-its exact CAS lease, not a silently refreshed saved lease. Both actions require
-confirmation and revalidate the plan immediately before taking effect.
+its exact CAS lease, not a silently refreshed saved lease. Both actions bind the
+preview and revalidate the plan immediately before taking effect.
 Malformed, unreadable or dangling historical checkpoints explicitly mark
 settlement evidence `unusable` and disable settlement, not the rewrite preview.
 Invalid ref arguments and failed optional Git probes receive the same treatment.
-The imperfect evidence snapshot is confirmation-bound and preserved unchanged;
+The imperfect evidence snapshot is preview-bound and preserved unchanged;
 it is neither repaired nor accepted as authority.
 Outside the routine backed reconciliation above, ordinary `push-changes` and
 `--rewrite-pr` retain their saved-lease refusal.
@@ -1171,8 +1175,9 @@ repositories, non-default ports and plaintext destinations remain distinct;
 this source observation does not change the saved publication destination fence.
 
 The selected worktree's Git metadata contains private
-`agent-worktrees-pr-break-glass-<id>.json` audits with the reason, confirmed
-operation, original saved publication evidence, retained refs and observed
+`agent-worktrees-pr-break-glass-<id>.json` audits with the reason, bound
+operation, authorization basis, confirmation binding (`auto-bound` or
+`explicit`), original saved publication evidence, retained refs and observed
 invoker/session context. Unknown attribution
 stays unknown; this is not authenticated identity. Private rationale and invoker
 details are not posted to the provider. Audit `succeeded` records successful

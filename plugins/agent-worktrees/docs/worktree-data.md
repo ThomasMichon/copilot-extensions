@@ -145,12 +145,22 @@ Batch reports and orphan/managed dry runs name the hold instead of claiming the
 checkout would be removed. A validated finalized display remains distinct from
 blocked deletion eligibility; its descriptor round trip does not turn the hold
 into an unsafe `FINAL` action or an unsupported-looking result.
-The history guard probes this documented fallback with `lstat`; it opens no database
-and follows no agenda link. Disposal also inspects ignored paths through one bounded,
-repository-isolated Git observation. Ignored content is not classified as disposable
-from its name or Git-ignore status: its producer must preserve or explicitly reclaim
-it first. Failed or incomplete inspection retains the checkout. This read runs only
-on the existing explicit disposal path, not at launch or session start.
+List/status projections use the cheap known-history `lstat` hint and their existing
+cached/advisory closure facts. They open no agenda database and start no ignored-data
+Git observation; an eligible-looking row does not establish fresh data absence.
+Physical disposal independently checks ignored paths and the sparse-aware index
+through bounded, repository-isolated Git observations. They share a five-second
+execution budget, 64 KiB ignored-output and 32 MiB index-output limits, with 8 KiB
+stderr per observation. An uninspected sparse index retains the checkout rather
+than expanding it or fetching objects.
+
+Ignored content is not disposable from its name or Git-ignore status: its producer
+must preserve or explicitly reclaim it first. Nonempty tracked submodule paths are
+conservatively retained, including ignored evidence invisible to the parent Git
+status. The submodule owner must preserve or dispose of local data and use normal
+Git deinitialization before retrying root cleanup. Missing or empty submodule paths
+do not block removal. Failed, linked, oversized or otherwise incomplete inspection
+retains the checkout. No new launch-time or presentation work is added.
 Boundary rechecks cover late state before fallback/retry removal, but do not claim
 a filesystem transaction against an independently running external writer.
 

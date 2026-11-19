@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify inert reviewer feed consumers through an explicitly selected native Dispatch HTTP client.",
+  "changes": [
+    {
+      "plugin": "services/pr",
+      "type": "patch"
+    }
+  ]
+}

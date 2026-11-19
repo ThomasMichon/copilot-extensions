@@ -12,6 +12,19 @@ the public substrate. Scenarios that name specific repos or internal venues live
 with the **harness that consumes them**, mounted into the box at run time (see
 *§6 Ownership & homing*).
 
+The inert `offline_job.py` planner describes a separate credential-free
+cached-input boundary. Its opt-in `offline_job_run.run_job` caller uses
+`offline_job_host` for existing native cgroup admission and bounded CLI I/O,
+and `offline_job_inspect` for physical-target/configuration/stop checks.
+Control records and the empty client configuration stay outside payload binds;
+physical identity is recorded after creation and before start. No global
+HOME/PATH change, image build/pull, privileged helper, resource adoption or
+automatic deletion is part of this owner.
+Host-driver and container declarations are counted together, not each granted
+the full budget. The caller still owns its finite outer lifetime, capacity,
+input provenance, independent cleanup and native kernel/scenario qualification.
+Neither a passing unit control nor a configured container is that proof.
+
 ## 1. The matrix — tiers × families
 
 The clean room is not one flow but a **matrix**: two *validation tiers* (how we

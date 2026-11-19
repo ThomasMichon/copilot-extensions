@@ -23,16 +23,14 @@ def _core() -> ModuleType:
     return core
 
 
-def _cli_error(message: str, use_json: bool, code: int = 1) -> int:
-    if use_json:
-        return output._json_error(message, code)
-    output.err(message)
-    return code
-
-
 def cmd_publication_labels(args: argparse.Namespace) -> int:
     from .pr_publication_labels_cli import cmd_publication_labels as repair
     return repair(args)
+
+
+def _refuse(message: str, code: int) -> int:
+    output.err(message)
+    return code
 
 
 def _warn_publication_labels(result: dict[str, Any]) -> None:
@@ -119,13 +117,13 @@ def add_parsers(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> Non
                    help="Intentionally publish rewritten owned PR history using its recorded exact head lease")
     p.add_argument(
         "--break-glass-reason", default=None, metavar="REASON",
-        help="Preview operator recovery of an existing PR despite incomplete historical ownership. "
-        "Requires per-PR sign-off; preserves exact-head leases, hooks and merge gates.",
+        help="Recover the owning worktree's existing PR despite incomplete historical ownership. "
+        "Line-of-business for the author; binds the current preview and preserves exact-head "
+        "leases, hooks and merge gates. Combine with --dry-run to preview.",
     )
     p.add_argument(
         "--confirm-break-glass", default=None, metavar="PREVIEW_FINGERPRINT",
-        help="Confirm the exact previewed source/remote operation only after real operator sign-off. "
-        "Never add this automatically after a refusal.",
+        help="Optionally pin a previously previewed operation; refuses if the preview changed.",
     )
     p.add_argument("worktree_id", nargs="?", default=None)
     p.add_argument("--title", default=None, help="Set worktree title")
@@ -425,7 +423,7 @@ def cmd_finalize(args: argparse.Namespace) -> int:
         if getattr(args, "explain_landing", False):
             if getattr(args, "recover_retired_owner", None) is not None:
                 message = "Retired-owner recovery cannot be combined with --explain-landing"
-                return _cli_error(message, use_json, 2)
+                return output._json_error(message, 2) if use_json else _refuse(message, 2)
             return _explain_landing(worktree_id, config, use_json)
         abandon = getattr(args, "abandon", False)
         handoff_to = (getattr(args, "handoff_to", None) or "").strip()
@@ -451,7 +449,7 @@ def cmd_finalize(args: argparse.Namespace) -> int:
         recovery_owner = getattr(args, "recover_retired_owner", None)
         if recovery_owner is not None and (abandon or getattr(args, "force_open_pr", False)):
             message = "Retired-owner recovery cannot be combined with finalization overrides"
-            return _cli_error(message, use_json, 2)
+            return output._json_error(message, 2) if use_json else _refuse(message, 2)
         try:
             with retired_owner_finalization.scope(worktree_id, config, recovery_owner):
                 success = fin.validate_and_finalize(
@@ -467,7 +465,7 @@ def cmd_finalize(args: argparse.Namespace) -> int:
             if recovery_owner is None:
                 raise
             message = f"Retired-owner finalization refused: {exc}"
-            return _cli_error(message, use_json)
+            return output._json_error(message) if use_json else _refuse(message, 1)
 
         if use_json:
             yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
@@ -509,7 +507,7 @@ def cmd_push_changes(args: argparse.Namespace) -> int:
             )
         ):
             message = "Recovery confirmation requires a reason and cannot be combined with title/squash options."
-            return _cli_error(message, use_json, 2)
+            return output._json_error(message) if use_json else _refuse(message, 2)
         try:
             config = cfg.load_config(Path(args.config) if args.config else None)
         except Exception as e:
@@ -535,7 +533,7 @@ def cmd_push_changes(args: argparse.Namespace) -> int:
             try:
                 tracking.normalize_asserted_title(args.title)
             except ValueError as error:
-                return _cli_error(str(error), use_json)
+                return output._json_error(str(error)) if use_json else _refuse(str(error), 1)
             yaml_path = (cfg.tracking_dir(config.repo_name) if getattr(args, "rewrite_pr", False) else cfg.tracking_dir()) / f"{worktree_id}.yaml"
             if not yaml_path.exists():
                 output.err(f"Tracking file not found for {worktree_id}")
@@ -553,6 +551,7 @@ def cmd_push_changes(args: argparse.Namespace) -> int:
                 return 1
             return 0
 
+        pr_break_glass.last_preview.set(None)
         try:
             success = fin.push_changes(
                 worktree_id,
@@ -574,7 +573,7 @@ def cmd_push_changes(args: argparse.Namespace) -> int:
                 print(json.dumps(exc.preview, sort_keys=True, indent=2))
             return 2
         except ValueError as exc:
-            return _cli_error(str(exc), use_json)
+            return output._json_error(str(exc)) if use_json else _refuse(str(exc), 1)
 
         reminder = context_cli._pr_reminder_for(
             config,
@@ -598,6 +597,10 @@ def cmd_push_changes(args: argparse.Namespace) -> int:
             from .pr_publication_labels import last_result
             if success and last_result.get() is not None:
                 out["publication_labels"] = last_result.get()
+            if success and args.dry_run and recovery_reason is not None:
+                preview = pr_break_glass.last_preview.get()
+                if preview is not None:
+                    out["recovery_preview"] = preview
             if reminder is not None:
                 out["reminder"] = reminder.as_dict()
             output._json_output(out)
@@ -639,7 +642,7 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
 
             _claimant_id, claimant_error = _pr_cli.require_claimant_worktree("create-pr")
             if claimant_error:
-                return _cli_error(claimant_error, use_json, 2)
+                return output._json_error(claimant_error) if use_json else _refuse(claimant_error, 2)
 
         worktree_id = worktree_identity._infer_worktree_id(args.worktree_id, config)
         if not worktree_id:
@@ -663,7 +666,7 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
                 body = Path(body_file).read_bytes().decode("utf-8")
             except (OSError, UnicodeError) as e:
                 msg = f"Could not read --body-file '{body_file}': {e}"
-                return _cli_error(msg, use_json)
+                return output._json_error(msg) if use_json else _refuse(msg, 1)
 
         resolution = None
         if target_repo_arg:
@@ -679,7 +682,7 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
             getattr(args, "source_workspace", None) or getattr(args, "expected_head", None)
         ):
             msg = "Delegated source inputs require --repo and foreign --from-branch."
-            return _cli_error(msg, use_json, 2)
+            return output._json_error(msg) if use_json else _refuse(msg, 2)
         if from_branch and not is_foreign_from_branch:
             msg = (
                 "create-pr: --from-branch requires --repo naming a "
@@ -688,10 +691,10 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
                 "local-checkout path. Pass --repo <owner/name> alongside "
                 "it, or drop --from-branch to use the normal local path."
             )
-            return _cli_error(msg, use_json, 2)
+            return output._json_error(msg) if use_json else _refuse(msg, 2)
 
         if is_foreign_from_branch:
-            assert target_repo_arg is not None and from_branch is not None
+            assert target_repo_arg and from_branch
             if getattr(args, "dry_run", False) or getattr(args, "no_open", False):
                 msg = (
                     "create-pr: --from-branch opens a real PR immediately "
@@ -699,7 +702,7 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
                     "skip) -- --dry-run and --no-open are not meaningful "
                     "with it."
                 )
-                return _cli_error(msg, use_json, 2)
+                return output._json_error(msg) if use_json else _refuse(msg, 2)
             title = (args.title or "").strip()
             if not title:
                 msg = (
@@ -707,7 +710,7 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
                     "to derive a title from (unlike the local path) -- "
                     "pass a non-blank --title explicitly."
                 )
-                return _cli_error(msg, use_json, 2)
+                return output._json_error(msg) if use_json else _refuse(msg, 2)
 
             from . import pr_foreign_create
 
@@ -768,7 +771,7 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
                 "built for exactly this (no local checkout required). "
                 "Do not fall back to gh/az repos/git directly."
             )
-            return _cli_error(msg, use_json, 2)
+            return output._json_error(msg) if use_json else _refuse(msg, 2)
 
         try:
             result = pr_ops.create_pr(
@@ -791,7 +794,7 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
             )
         except (codename_tracking.CodenameAttributionPolicyError, TimeoutError, ValueError) as e:
             msg = str(e)
-            return _cli_error(msg, use_json)
+            return output._json_error(msg) if use_json else _refuse(msg, 1)
 
         reminder_flow = None
         if result.get("viewer_permission"):
@@ -894,7 +897,7 @@ def cmd_attribution_audit(args: argparse.Namespace) -> int:
     try:
         config = cfg.load_config(Path(args.config) if args.config else None)
     except Exception as e:
-        return _cli_error(str(e), use_json)
+        return output._json_error(str(e)) if use_json else _refuse(str(e), 1)
     findings = pr_ops.audit_attribution_risk(config)
     if use_json:
         output._json_output({"success": True, "findings": findings})

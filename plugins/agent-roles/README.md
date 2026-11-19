@@ -114,6 +114,13 @@ Its loop discipline measures success as zero eligible PRs awaiting reviewer
 action, starts rounds only on new input, never reposts an identical verdict on
 an unchanged head, backs off unchanged watches, hands PRs back explicitly and
 tells and releases a superseded reviewer.
+Optional [declared Maintainer mode](skills/review-pull-requests/references/maintainer-mode.md)
+adds complete peer-inclusive census, authoritative role/CODEOWNER coverage,
+advisory peer posture and coordinator-owned authorized landing for authors
+without merge permission. It separates retained source assessment from current
+native review authority after pushes or clean rebases; static lanes never gain
+merge or fix ownership. Adoption stays repository-owned, not a global permission
+mapping or a new runtime configuration framework.
 Failure walkthroughs distinguish stalled intake from provider errors and healthy
 empty results, preserve partial-review credit and accepted-result revisions, and
 settle only the role's owned flows on sunset. These remain guidance contracts,

@@ -34,6 +34,14 @@ Do not assign singleton slots. The [callback-context amendment](subscriber-callb
 preserves the verbatim direction and the required historical-reader transition
 protection; take the revised design through normal review and CI before
 enabling context-bearing state writes.
+The operator further directed:
+
+> an older engine must recognize that it is older and NOT restart. Also make the shared state file support state-per-version for anything that risks overwrite, so versions cannot clobber each other.
+
+Continue the version-aware design through normal review. This is source/design
+scope only, not installation, service-stop or rollout authority; the
+[amendment](subscriber-callback-context.md#version-aware-restart-and-per-version-state-amendment)
+retains the complete direction and realization/validation obligations.
 
 The requested read-only extension is a reviewer-perspective status/current-PR/
 priority-next-action feed backed by PR activity, subscribable through SSE or
@@ -298,8 +306,10 @@ fleet controller or credential issuer.
 The callback-state direction is preserved verbatim in
 [subscriber-callback-context.md#operator-direction](subscriber-callback-context.md#operator-direction).
 It selects a versioned per-subscription command/cwd map, not a restriction to
-governed owners or a singleton-slot allocation. Operational authority and the
-parent's other acceptance gates remain unchanged.
+governed owners or a singleton-slot allocation. The subsequent
+[restart/per-version amendment](subscriber-callback-context.md#version-aware-restart-and-per-version-state-amendment)
+adds older-engine no-restart and shared per-version overwrite protection.
+Operational authority and the parent's other acceptance gates remain unchanged.
 
 The selected first milestone's verbatim public-safe Request and separately
 labelled recommendations are in [repository-cache-events-m1.md#request](repository-cache-events-m1.md#request).
@@ -770,10 +780,14 @@ _Agent-recommended implementation requirements._
 
 [The subscriber-context contract](subscriber-callback-context.md), reviewed in
 #13228, specifies concrete wire, saved-state and rollback boundaries for
-P5947-3/4. The subsequent operator-selected map/version amendment is proposed
-for review there after an unsafe historical inline reader was reproduced.
-Runtime expansion is local WIP, not published or activated; passing current
-tests does not resolve transition protection or consumer acceptance.
+P5947-3/4. The subsequent operator-selected map/version amendment cleared
+review in #13277 after an unsafe historical inline reader was reproduced.
+The first version-aware read/final-write refusal baseline landed in #13295
+while retaining legacy-list writes. Historical executor transition protection,
+map/cwd support and consumer acceptance remain open; source publication does
+not establish installed adoption. The subsequent operator direction adds
+older-engine restart refusal and per-version state protection; its revised
+design must clear review before realization.
 
 #6019 already delivered outage-independent expiry and the acknowledged-delivery
 foundation. Preserve that positive credit; the unchecked rows below retain
@@ -1785,6 +1799,15 @@ callback an implicit credential store.
 
 ## Journal
 
+- [2026-11-18 - Version-aware watch-state refusal baseline](journal/2026/11.18%20Watch%20state%20contract%20baseline.md)
+- **2026-11-18 - Versioned per-subscription map design reviewed.** #13277
+  captures the operator-selected command/cwd map and explicit contract-version
+  refusal without singleton-slot assignment. Current-head Copilot approval,
+  required CI and managed merge passed. Next: expand version-aware state
+  refusal and existing owner/activation protection before enabling map writes
+  or caller defaults. The unsafe inline-reader family remains a transition
+  gate; no runtime, installation or consumer acceptance is credited.
+  P/V/G5947-3/4 and the broader parent remain open.
 - [2026-11-18 - Released Gitea shadow and combined M1 qualification](journal/2026/11.18%20Gitea%20shadow%20qualification.md)
 - **2026-11-18 - Subscriber callback context contract reviewed.** #13228
   specifies actual-owner cwd negotiation, separate best-effort/ACK semantics,

@@ -10,7 +10,7 @@ import socket
 import pytest
 from machine_transport import detect_platform, resolve_local_execution_context
 
-from agent_worktrees import cleanup_gc_cli, config as cfg, finalize, sessions, tracking
+from agent_worktrees import claims_cli, cleanup_gc_cli, config as cfg, finalize, sessions, tracking, worktree_identity
 from agent_worktrees.__main__ import build_parser
 from agent_worktrees.retained_worktrees import inventory
 from agent_worktrees.tracking_claims import ResourceClaim, format_claim_ref
@@ -137,3 +137,35 @@ def test_retained_chain_and_blocked_descendant_do_not_hide_an_eligible_sibling(
     assert Path(graph.records["grandchild"].worktree_path).is_dir()
     for name in ("parent", "child", "sibling"):
         assert not Path(graph.records[name].worktree_path).exists()
+
+
+@pytest.mark.parametrize("tracked", [True, False])
+def test_cwd_discovery_reads_existing_records_without_adopting(
+    graph: Graph, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str], tracked: bool,
+) -> None:
+    config = graph.select("parent")
+    checkout = Path(graph.records["parent"].worktree_path)
+    if not tracked:
+        checkout = Path(config.default_repo.worktree_root) / "external"
+        _git("worktree", "add", "-b", "worktree/external", str(checkout),
+             cwd=Path(config.default_repo.anchor))
+    monkeypatch.chdir(checkout)
+    records = cfg.project_dir(config.repo_name)
+    before = {path.relative_to(records): path.read_bytes() for path in records.rglob("*") if path.is_file()}
+
+    def unexpected(*args: object, **kwargs: object) -> None:
+        pytest.fail("read-only retained discovery must not infer through an adopting resolver")
+
+    monkeypatch.setattr(worktree_identity, "_infer_worktree_id", unexpected)
+    monkeypatch.setattr(worktree_identity, "_adopt_linked_worktree", unexpected)
+    args = build_parser().parse_args(["claims", "retained", "--json"])
+    result = claims_cli.cmd_claims(args)
+    rendered = json.loads(capfd.readouterr().out)
+
+    assert result == (0 if tracked else 2)
+    if tracked:
+        assert rendered["root"].endswith("/control/parent")
+    else:
+        assert "existing tracked worktree" in rendered["error"]
+        assert not (cfg.tracking_dir() / "external.yaml").exists()
+    assert {path.relative_to(records): path.read_bytes() for path in records.rglob("*") if path.is_file()} == before

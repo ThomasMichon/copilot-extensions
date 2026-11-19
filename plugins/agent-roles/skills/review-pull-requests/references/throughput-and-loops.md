@@ -57,6 +57,13 @@ checks. Review only an overlapping delta; otherwise retain the verdict where
 the target's actual policy permits retained review authority. Do not re-review
 every open PR after each merge.
 
+For adopted [Maintainer mode](maintainer-mode.md), a proven clean rebase can
+retain source assessment without a full rerun. Separately refresh native review
+validity and fulfill actual newer-head gates or explicit re-review requests.
+This may require a first official review on that head, not duplicate findings.
+Mechanical movement alone neither resets caps nor permits an identical own
+vote on an unchanged current head without qualifying input.
+
 ## Cap repetition and time per PR
 
 Set a **per-PR round cap** for consecutive rounds without new author input.
