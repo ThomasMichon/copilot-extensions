@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-19 - Cache source acceptance and actual delivery boundaries](journal/2026/11.19-cache-source-acceptance-and-delivery-boundaries.md)
+
 - [2026-11-19 - Qualified inflow source completion and retained acceptance](journal/2026/11.19-qualified-inflow-source-completions.md)
 
 - [2026-11-19 - Keeper continuation proposal and accepted finite receiving](journal/2026/11.19-keeper-continuation-and-liveness-receipts.md)
