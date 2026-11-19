@@ -1,0 +1,9 @@
+{
+  "comment": "Retain typed point identities through component recovery and native ordering evidence",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}
