@@ -168,7 +168,7 @@ passed in 17.11 and 5.44 seconds. These earlier timings do not qualify the
 subsequent child-start and path-length controls.
 
 The explicit native path-length control is
-`test_owned_producer.py::test_native_windows_overlong_path_refuses_without_losing_custody`.
+`test_owned_producer.py::test_native_overlong_path_refuses_without_losing_custody`.
 It checks native refusal of an overlong component in the selected root,
 refusal before child execution and no allocation, with a nearby valid
 component as a positive control. Its separate child case writes and observes
@@ -176,8 +176,10 @@ a valid long component, encounters the native overlong-component refusal,
 and verifies bounded retained diagnostics with settled custody. Windows APIs
 can report errors 123/206; Python's file API can instead expose `EINVAL`
 without a Windows error attribute.
-Both cases first probe the fixture's long-path prerequisite. An unavailable
-venue is reported as a skip, not a component-length acceptance result.
+On Windows, both cases first probe the fixture's long-path prerequisite. An
+unavailable venue is reported as a skip, not a component-length acceptance
+result. The same consumer controls run on POSIX and require native
+`ENAMETOOLONG` at both root admission and child execution.
 This tests component-length refusal, not every possible Windows total-path
 limit or filesystem policy. The 12 existing producer cases, now including
 positive child-start checks, passed on Windows x64. The first path-control
@@ -190,6 +192,18 @@ The final cleanup-safe observer and prerequisite-aware file passed all
 Windows-only skips in 22.42 seconds. Strict checking passes the final six-file
 cohort for both declared targets. No runtime or required unit-source admission
 changed.
+
+The producer-level partial-removal control is
+`test_owned_producer.py::test_partial_native_removal_reports_retained_settled_custody`.
+It starts and consumes a real child, then injects refusal only at the exact
+allocation's final directory removal. The real cleanup owner removes the
+consumed payload, retains its breadcrumb and reports partial removal. The
+test checks the retained ledger disposition, settled process custody and
+provider readback instead of calling retained bytes a complete removal.
+The expanded file passes all 16 cases on Windows x64 in 55.63 seconds and
+Linux in 25.75 seconds. A subsequent direct-`os` import correction passes the
+affected partial-removal case on both platforms, in 4.85 and 1.25 seconds,
+and the final six-file strict matrix passes both declared targets.
 
 The parser rejects long-option abbreviations. Three actor-free regressions
 and actual Windows CLI calls cover `--own`, `--ki` and `--time`, each refused

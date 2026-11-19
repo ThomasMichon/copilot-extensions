@@ -2,6 +2,7 @@
 
 import errno
 import json
+import os
 from contextlib import nullcontext
 from copy import deepcopy
 from pathlib import Path
@@ -9,7 +10,7 @@ import secrets
 import shutil
 import sys
 from types import ModuleType, TracebackType
-from typing import Literal
+from typing import Any, Literal
 import zipfile
 
 import pytest
@@ -349,10 +350,9 @@ def test_target_disposition_preserves_an_unrelated_sibling_allocation(
         assert not sibling_path.exists()
 
 
-@pytest.mark.skipif(sys.platform != "win32", reason="native Windows component-length boundary")
 @pytest.mark.timeout(60)
 @pytest.mark.parametrize("stage", ["root", "child"])
-def test_native_windows_overlong_path_refuses_without_losing_custody(
+def test_native_overlong_path_refuses_without_losing_custody(
     producer_owner: ProducerOwner, monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str], stage: str,
 ) -> None:
@@ -370,8 +370,11 @@ def test_native_windows_overlong_path_refuses_without_losing_custody(
         with pytest.raises(OSError) as failure:
             overlong.mkdir()
         native_error = getattr(failure.value, "winerror", None)
-        assert native_error in {123, 206}
-        assert failure.value.errno in {errno.EINVAL, errno.ENAMETOOLONG}
+        if sys.platform == "win32":
+            assert native_error in {123, 206}
+            assert failure.value.errno in {errno.EINVAL, errno.ENAMETOOLONG}
+        else:
+            assert failure.value.errno == errno.ENAMETOOLONG
         monkeypatch.setenv("AGENT_SCRATCH_ROOT", str(overlong))
 
         def unexpected(*args: object, **kwargs: object) -> int:
@@ -381,7 +384,7 @@ def test_native_windows_overlong_path_refuses_without_losing_custody(
         assert runner.main([
             "--owner", owner, "--kind", "spike", "--", sys.executable, "-c", "pass",
         ]) == 125
-        assert str(native_error) in capsys.readouterr().err
+        assert str(native_error or failure.value.errno) in capsys.readouterr().err
         assert tracking.load_record(ledger).resources == []
         assert overlong.name not in {entry.name for entry in selected.parent.iterdir()}
         return
@@ -389,14 +392,17 @@ def test_native_windows_overlong_path_refuses_without_losing_custody(
     valid_component = "v" * 240
     _require_child_payload(runner, monkeypatch, valid_component, b"child started")
     program = """
-import errno
+import errno, sys
 from pathlib import Path
 Path("v" * 240).write_bytes(b"child started")
 try:
     Path("x" * 256).write_bytes(b"must refuse")
 except OSError as error:
-    assert error.errno in {errno.EINVAL, errno.ENAMETOOLONG}, error
-    assert getattr(error, "winerror", None) in {None, 123, 206}, error
+    if sys.platform == "win32":
+        assert error.errno in {errno.EINVAL, errno.ENAMETOOLONG}, error
+        assert getattr(error, "winerror", None) in {None, 123, 206}, error
+    else:
+        assert error.errno == errno.ENAMETOOLONG, error
     raise SystemExit(7)
 raise AssertionError("the native overlong component unexpectedly succeeded")
 """
@@ -414,3 +420,43 @@ raise AssertionError("the native overlong component unexpectedly succeeded")
     }
     diagnostic = json.loads((allocation / "runner-diagnostic.txt").read_bytes())
     assert diagnostic["results_tail"] == [{"group": 0, "exit_code": 7}]
+
+
+@pytest.mark.timeout(60)
+def test_partial_native_removal_reports_retained_settled_custody(
+    producer_owner: ProducerOwner, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    runner, owner, selected, _, ledger = producer_owner
+    _require_child_payload(runner, monkeypatch, "consumed.bin", b"consumed output")
+    allocations: list[Path] = []
+    allocate = artifact_scratch.allocate
+    rmdir = os.rmdir
+
+    def observe_allocation(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        allocation = allocate(*args, **kwargs)
+        allocations.append(Path(allocation["path"]))
+        return allocation
+
+    def refuse_final_directory(target: str | Path, *args: Any, **kwargs: Any) -> None:
+        if allocations and Path(target).name == allocations[0].name:
+            raise PermissionError("fixture-owned final directory refusal")
+        rmdir(target, *args, **kwargs)
+
+    monkeypatch.setattr(artifact_scratch, "allocate", observe_allocation)
+    monkeypatch.setattr(os, "rmdir", refuse_final_directory)
+    assert runner.main([
+        "--owner", owner, "--kind", "spike", "--timeout", "20",
+        "--", sys.executable, "-c",
+        "from pathlib import Path; Path('consumed.bin').write_bytes(b'consumed output')",
+    ]) == 0
+    assert "[KEEP] Partial scratch removal" in capsys.readouterr().err
+    claim, = tracking.load_record(ledger).resources
+    producer = claim.producer
+    assert isinstance(producer, dict)
+    assert producer["phase"] == "retained" and not claim.is_unsettled
+    allocation, = allocations
+    assert allocation == selected / artifact_scratch._name(producer["recovery"])
+    assert {entry.name for entry in allocation.iterdir()} == {"scratch-owner.json"}
+    proof = artifact_scratch.status(ledger, owner, claim.ref, forbidden=())
+    assert proof["available"] and proof["producer_verification"]["work_settled"]
