@@ -1,5 +1,5 @@
 {
-  "comment": "Add explicit retained terminal-reader adoption under the existing service writer lease without startup migration or cache/effect changes.",
+  "comment": "Add explicit terminal-reader bootstrap for eligible retained workspace owners, preserving original readers by refusing populated or incompatible state.",
   "changes": [
     {
       "plugin": "services/pr",

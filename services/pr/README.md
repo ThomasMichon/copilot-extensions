@@ -484,19 +484,25 @@ refuses without stripping extensions or rewriting the volume.
 
 An explicitly stopped standalone workspace owner can instead run
 `agent-pull-requests-service adopt-terminal --config /run/config/pr-service.json`
-against its existing valid conversation volume and cache. This separate command
+against an eligible existing conversation volume and empty workspace cache.
+This bootstrap path refuses cached generations/current pointers, active or
+compact review operations, and populated terminal-extension state: preserving
+their files alone would not preserve the original usable reader/recovery paths.
+Keep those volumes with their original owner pending a separately qualified
+transition. Selected workspace scopes must also map each account/repository to
+one full scope, and active watch registrations must retain finite original
+delivery deadlines; the command never invents deadlines.
+This separate command
 requires the terminal-reader selection and the same available service writer
 lease; a running or unconfirmed drain refuses without stopping the service.
-It preserves the original service/namespace binding, replay/delivery positions,
-cache objects and recovery identities, and performs no acquisition, compaction
+It preserves the original service/namespace binding, eligible replay/delivery
+positions and cache scaffold, and performs no acquisition, compaction
 or cache retirement. It neither provisions missing state nor repairs it.
-Volumes with active review-operation records refuse unchanged, including
-unknown attempts: preserving their JSON would not preserve their recovery
-interface after switching to a terminal-only reader. Keep their original
-reader/owner until a separately qualified recovery-compatible transition exists.
-Native callback state, unsafe linked lease files, corrupt or dangling cache
-objects/pointers and cache-capacity violations also refuse before adoption.
-Cache validation checks the original operation deadline between entries.
+Native callback state, unsafe linked lease files and incompatible cache
+descriptors also refuse before adoption. Cache eligibility uses bounded
+first-entry checks, not a scan or repeated decoding of retained generations.
+The exact monotonic operation deadline remains enforced; integer storage
+expiry is rounded up so a short budget is not lost at a wall-clock boundary.
 The host-local lease does not fence another host or unsupported direct volume
 users; their exclusion remains with the deployment owner.
 The command returns zero after adoption and one with a sanitized unavailable

@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any, cast
 import pytest
 from single_instance_lease import SingleInstance
 
-from agent_pull_requests.generation_cache import CacheFull, CacheInvalid, _plain
+from agent_pull_requests.generation_cache import CacheInvalid
 from agent_pull_requests.review_workspace import build_generation
 from agent_pull_requests.terminal_recovery import TerminalRecoveryStore
 from agent_pull_requests.watch_contract import PRSnapshot
@@ -69,16 +69,14 @@ def generation(title: str | None = None) -> dict[str, Any]:
     return cast(dict[str, Any], build_generation(evidence)["generation"])
 
 
-def test_actual_cli_preserves_populated_cache_and_pending_replay(
+def test_actual_cli_preserves_empty_cache_and_pending_replay(
     configuration: Configuration,
 ) -> None:
     path, _, selected = retained(configuration)
     assert selected.workspaces is not None
     baseline = load_config(configuration[0])
     store = baseline.store()
-    selected_generation = generation()
     cache = selected.workspaces.cache(store)
-    cache.publish(selected_generation, expected_current=None)
     expires_at = int(time.time()) + 60
     scope = selected.bindings[0].scope
     receipt = store.execute(scope, "register", {
@@ -103,7 +101,7 @@ def test_actual_cli_preserves_populated_cache_and_pending_replay(
         assert after[field] == before[field]
     assert reopened.store().execute(scope, "pending", {}, expires_at=expires_at) == pending
     assert cache_bytes(reopened) == objects
-    assert cache.lookup(selected_generation["scope"])["generation"] == selected_generation
+    assert not list(cache.generations.iterdir()) and not list(cache.targets.iterdir())
     assert all(after[field + "_version"] == 1 for field in (
         "terminal_retention", "terminal_recovery", "terminal_cache_retirement",
     ))
@@ -369,35 +367,41 @@ def test_native_state_coexistence_refuses_before_adoption(configuration: Configu
     assert (config.store().path.read_bytes(), native.read_bytes()) == before
 
 
-@pytest.mark.parametrize("failure", ["generation", "dangling", "pointer-scope", "bytes", "count"])
-def test_committed_cache_corruption_and_capacity_refuse_before_adoption(
-    configuration: Configuration, failure: str,
+@pytest.mark.parametrize("contents", ["generation", "pointer"])
+def test_populated_cache_refuses_without_excluding_original_workspace_reads(
+    configuration: Configuration, contents: str,
 ) -> None:
-    _, _, config = retained(configuration)
-    assert config.workspaces is not None
-    cache = config.workspaces.cache(config.store())
+    path, value, _ = retained(configuration)
     selected = generation()
+    value["workspaces"]["terminal_reads"] = False
+    value["workspaces"]["bindings"][0]["scope"] = {
+        name: selected_value for name, selected_value in selected["scope"].items() if name != "number"
+    }
+    path.write_text(json.dumps(value))
+    baseline = load_config(path)
+    assert baseline.workspaces is not None
+    cache = baseline.workspaces.cache(baseline.store())
     cache.publish(selected, expected_current=None)
-    if failure == "generation":
-        (cache.generations / (selected["id"] + ".json")).write_text("{}")
-    elif failure == "dangling":
-        pointer = next(cache.targets.iterdir())
-        document = json.loads(pointer.read_bytes())
-        document["generation_id"] = "f" * 64
-        pointer.write_text(json.dumps(document))
-    elif failure == "pointer-scope":
-        next(cache.targets.iterdir()).rename(cache.targets / ("f" * 64 + ".json"))
-    elif failure == "bytes":
-        (cache.generations / ("f" * 64 + ".json")).write_bytes(b" " * (cache.max_bytes + 1))
-    else:
-        for index in range(cache.max_generations):
-            extra = generation(f"retained generation {index}")
-            (cache.generations / (extra["id"] + ".json")).write_text(json.dumps(extra))
+    operations = baseline.workspaces.operations(baseline.store(), lambda: None, 60)[
+        ("caller-a", "repository-a")
+    ]
+    payload = {"number": selected["scope"]["number"]}
+    original = operations.execute(
+        "lookup", payload, expires_at=int(time.time()) + 60, checkpoint=lambda: None,
+    )
+    if contents == "pointer":
+        (cache.generations / (selected["id"] + ".json")).unlink()
+    value["workspaces"]["terminal_reads"] = True
+    path.write_text(json.dumps(value))
+    config = load_config(path)
     before = config.store().path.read_bytes(), cache_bytes(config)
-    expected = CacheFull if failure in ("bytes", "count") else (CacheInvalid, ValueError)
-    with pytest.raises(expected):
+    with pytest.raises(CacheInvalid, match="populated cache"):
         terminal_transition.adopt(config)
     assert (config.store().path.read_bytes(), cache_bytes(config)) == before
+    if contents == "generation":
+        assert operations.execute(
+            "lookup", payload, expires_at=int(time.time()) + 60, checkpoint=lambda: None,
+        ) == original
 
 
 def test_deadline_expires_during_cache_scan_without_visiting_later_entries(
@@ -405,19 +409,19 @@ def test_deadline_expires_during_cache_scan_without_visiting_later_entries(
 ) -> None:
     _, _, config = retained(configuration)
     assert config.workspaces is not None
-    config.workspaces.cache(config.store()).publish(generation(), expected_current=None)
+    cache = config.workspaces.cache(config.store())
     before = config.store().path.read_bytes(), cache_bytes(config)
     clock = [0.0]
     visited: list[Path] = []
-    original = _plain
+    original = os.scandir
 
-    def plain(path: Path) -> None:
-        original(path)
-        if path.suffix == ".json":
+    def scan(path: Path) -> Any:
+        if path == cache.generations:
             visited.append(path)
             clock[0] = config.operation_seconds + 1.0
+        return original(path)
 
-    monkeypatch.setattr(terminal_transition, "_plain", plain)
+    monkeypatch.setattr(terminal_transition, "os", SimpleNamespace(getpid=os.getpid, scandir=scan))
     monkeypatch.setattr(terminal_transition, "time", SimpleNamespace(
         monotonic=lambda: clock[0], time=time.time,
     ))

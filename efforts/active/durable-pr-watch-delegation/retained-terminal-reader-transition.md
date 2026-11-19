@@ -23,7 +23,7 @@ It adds no migration daemon, second state ledger or remote operation.
 
 Add a local `adopt-terminal --config <absolute-config>` command to the
 standalone service CLI. It requires the already supported explicit terminal
-workspace selection and a populated, valid, service-bound conversation store.
+workspace selection and an existing valid, service-bound conversation store.
 It is not a substitute for fresh provisioning and does not create missing
 replay/cache state, adopt a different namespace/service identity, change a
 credential or reinterpret an unsupported layout.
@@ -43,15 +43,18 @@ prepared intents, acquired mappings, selections or any other adopted extension.
 Unsupported combinations refuse before the first change. Existing terminal
 mapping selection may compose only its already supported prerequisites.
 
-The first finite implementation admits only volumes whose active review
-operation journal is empty. Source review showed that retaining an unknown
-attempt's bytes would not preserve its original recovery interface after
-terminal-reader selection. Refuse such volumes unchanged and retain their
-original reader; a recovery-compatible positive transition remains T3 work,
-not an implicit new recovery route or permission to settle accepted work.
-Validate plain lease files before PID writes and reject native callback state.
-Validate committed cache contents, pointer references and configured capacity
-with lifecycle checkpoints between entries, not a filename-only inventory.
+The first finite implementation is a bootstrap-only retained-volume transition.
+Source review showed that retaining generation or unknown-attempt bytes would
+not preserve their original usable reader/recovery interfaces after selection.
+Require empty generation/pointer directories, empty active/compact operation
+journals and empty terminal-extension state. Refuse other volumes unchanged
+and retain their original reader; positive populated/recovery-compatible
+transition remains T3 work, not permission to settle or discard accepted work.
+Also require one full workspace scope per account/repository and finite
+original deadlines on active watch registrations. Validate plain lease files
+before PID writes and reject native callback state. Use bounded cache
+eligibility checks and the original monotonic budget, without scanning or
+repeatedly decoding retained generations.
 
 Use the original command's finite operation deadline and PID/held-lease
 checkpoint at every existing adoption boundary. Select the same terminal
@@ -97,9 +100,10 @@ probe followed by a legacy provisioning fallback.
   provisioning, serving, remote workspace contracts or physical retirement.
 - [ ] Qualify a populated baseline volume, preserving original replay/cache and
   unknown-effect identities through transition and fresh-reader restart.
-  The finite eligible-volume path qualifies populated cache/pending replay;
-  active-operation volumes refuse unchanged with original inspection preserved.
-  Positive active-operation recovery compatibility remains with full T3.
+  The finite bootstrap path qualifies an existing empty workspace cache and
+  finite pending replay. Populated cache/active or compact operation volumes
+  refuse unchanged, with original inspection preserved. Positive populated
+  generation and recovery compatibility remain with full T3.
 - [x] Cover actual competing service/transition lease ownership, failed drain,
   operation expiry, unsupported core/layout/binding/capacity, partial adoption,
   uncertain replacement and explicit retry. Refusal before adoption must
