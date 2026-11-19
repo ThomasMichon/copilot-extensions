@@ -26,6 +26,181 @@ if [ "$#" -eq 1 ] && [ "${1-}" = --describe-source-inputs ]; then
     exit 0
 fi
 
+if [ "$#" -eq 1 ] && [ "${1-}" = --describe-toolchain-config ]; then
+    printf '%s\n' '{"schema":"copilot-extensions.toolchain-config","version":1,"capabilities":["native-file","python-index","python-install-mirror","uv-install-mirror","npm-registry"]}'
+    exit 0
+fi
+
+toolchain_config="${COPILOT_EXTENSIONS_TOOLCHAIN_CONFIG:-}"
+if [ "${1-}" = --toolchain-config ]; then
+    [ "$#" -ge 2 ] || { printf '%s\n' '--toolchain-config requires an absolute file.' >&2; exit 2; }
+    if [ -n "$toolchain_config" ] && [ "$toolchain_config" != "$2" ]; then
+        printf '%s\n' 'Explicit toolchain configuration conflicts with the environment selection.' >&2
+        exit 2
+    fi
+    toolchain_config="$2"
+    shift 2
+fi
+for argument in "$@"; do
+    if [ "$argument" = --toolchain-config ]; then
+        printf '%s\n' '--toolchain-config must occur once, before other arguments.' >&2; exit 2
+    fi
+done
+if [ -z "$toolchain_config" ]; then
+    for candidate in "$(pwd -P)/.copilot-extensions/toolchain.conf" \
+        "${WORKTREE_MANAGER_ROOT:-$HOME/.worktree-manager}/toolchain.conf"; do
+        if [ -e "$candidate" ]; then toolchain_config="$candidate"; break; fi
+    done
+fi
+if [ -n "$toolchain_config" ]; then
+    case "$toolchain_config" in /*) ;; *) printf '%s\n' 'Toolchain configuration must be absolute.' >&2; exit 2 ;; esac
+    if [ ! -f "$toolchain_config" ] || [ -L "$toolchain_config" ] ||
+        [ "$(wc -c < "$toolchain_config")" -gt 16384 ]; then
+        printf '%s\n' 'Toolchain configuration must be a small ordinary file.' >&2
+        exit 2
+    fi
+    toolchain_values="$(LC_ALL=C awk '
+        { if ($0 ~ /[^ -~\t\r]/) exit 1; sub(/\r$/, "") }
+        /^[[:space:]]*(#.*)?$/ { next }
+        {
+            equal = index($0, "=")
+            key = substr($0, 1, equal - 1); value = substr($0, equal + 1)
+            if (!equal || seen[key]++ || key !~ /^(schema|python_index_url|python_install_mirror|uv_install_mirror|npm_registry)$/) exit 1
+            if (key == "schema") { if (value != "1") exit 1 }
+            else {
+                if (length(value) > 2048 || value !~ /^https:\/\/[A-Za-z0-9.-]+(:[0-9]+)?(\/[A-Za-z0-9._~:\/+-]*)?$/) exit 1
+                count++
+            }
+            print key "=" value
+        }
+        END { if (!seen["schema"] || !count) exit 1 }
+    ' "$toolchain_config")" || { printf '%s\n' 'Malformed or unsupported toolchain configuration.' >&2; exit 2; }
+    tc_index="" tc_python="" tc_uv="" tc_npm=""
+    while IFS='=' read -r key value; do
+        case "$key" in
+            python_index_url) tc_index="$value" ;;
+            python_install_mirror) tc_python="$value" ;;
+            uv_install_mirror) tc_uv="$value" ;;
+            npm_registry) tc_npm="$value" ;;
+        esac
+    done <<< "$toolchain_values"
+    for mapping in "UV_DEFAULT_INDEX=$tc_index" "UV_INDEX_URL=$tc_index" "PIP_INDEX_URL=$tc_index" \
+        "UV_PYTHON_INSTALL_MIRROR=$tc_python" "UV_INSTALLER_GITHUB_BASE_URL=$tc_uv" \
+        "npm_config_registry=$tc_npm" "NPM_CONFIG_REGISTRY=$tc_npm"; do
+        name="${mapping%%=*}" expected="${mapping#*=}"
+        [ -n "$expected" ] || continue
+        current="${!name:-}"
+        if [ -n "$current" ] && [ "${current%/}" != "${expected%/}" ]; then
+            printf '%s conflicts with toolchain configuration.\n' "$name" >&2
+            exit 2
+        fi
+    done
+    if [ -n "$tc_index" ]; then
+        if [ "${PIP_CONFIG_FILE:-}" = /dev/null ]; then
+            printf '%s\n' 'PIP_CONFIG_FILE disables native configuration.' >&2; exit 2
+        fi
+        for name in UV_INDEX UV_EXTRA_INDEX_URL UV_FIND_LINKS UV_CONFIG_FILE UV_INSECURE_HOST \
+            UV_NO_INDEX UV_NO_CONFIG PIP_EXTRA_INDEX_URL PIP_FIND_LINKS PIP_TRUSTED_HOST PIP_NO_INDEX; do
+            if [ -n "${!name:-}" ]; then
+                printf '%s requires explicit source reconciliation.\n' "$name" >&2
+                exit 2
+            fi
+        done
+    fi
+    if [ -n "$tc_uv" ]; then
+        for name in UV_DOWNLOAD_URL INSTALLER_DOWNLOAD_URL UV_INSTALLER_GHE_BASE_URL; do
+            if [ -n "${!name:-}" ]; then
+                printf '%s requires explicit source reconciliation.\n' "$name" >&2
+                exit 2
+            fi
+        done
+    fi
+    if [ -n "$tc_npm" ]; then
+        for suffix in USERCONFIG GLOBALCONFIG; do
+            upper="NPM_CONFIG_$suffix"
+            case "$suffix" in USERCONFIG) lower=npm_config_userconfig ;; *) lower=npm_config_globalconfig ;; esac
+            if [ -n "${!upper:-}" ] && [ -n "${!lower:-}" ] && [ "${!upper}" != "${!lower}" ]; then
+                printf '%s\n' 'npm configuration-file selections conflict.' >&2; exit 2
+            fi
+        done
+    fi
+    tc_paths=("") tc_kinds=(none)
+    if [ -n "$tc_index" ]; then
+        tc_paths+=(/etc/pip.conf "$HOME/.pip/pip.conf" "${XDG_CONFIG_HOME:-$HOME/.config}/pip/pip.conf")
+        tc_kinds+=(pip pip pip)
+        IFS=: read -r -a tc_dirs <<< "${XDG_CONFIG_DIRS:-/etc/xdg}"
+        for directory in "${tc_dirs[@]}"; do tc_paths+=("$directory/pip/pip.conf"); tc_kinds+=(pip); done
+        if [ -n "${VIRTUAL_ENV:-}" ]; then tc_paths+=("$VIRTUAL_ENV/pip.conf"); tc_kinds+=(pip); fi
+        if [ -n "${PIP_CONFIG_FILE:-}" ]; then
+            [ -f "$PIP_CONFIG_FILE" ] || [ "$PIP_CONFIG_FILE" = /dev/null ] || {
+                printf '%s\n' 'Explicit pip configuration is unavailable.' >&2; exit 2;
+            }
+            if [ "$PIP_CONFIG_FILE" != /dev/null ]; then tc_paths+=("$PIP_CONFIG_FILE"); tc_kinds+=(pip); fi
+        fi
+    fi
+    if [ -n "$tc_index$tc_python" ]; then
+        tc_paths+=("${XDG_CONFIG_HOME:-$HOME/.config}/uv/uv.toml"); tc_kinds+=(uv)
+    fi
+    if [ -n "$tc_npm" ]; then
+        tc_paths+=("${NPM_CONFIG_USERCONFIG:-${npm_config_userconfig:-$HOME/.npmrc}}"); tc_kinds+=(npm)
+        if [ -n "${NPM_CONFIG_GLOBALCONFIG:-${npm_config_globalconfig:-}}" ]; then
+            tc_paths+=("${NPM_CONFIG_GLOBALCONFIG:-$npm_config_globalconfig}"); tc_kinds+=(npm)
+        fi
+    fi
+    for ((i=0; i<${#tc_paths[@]}; i++)); do
+        path="${tc_paths[$i]}"
+        [ -n "$path" ] || continue
+        [ -e "$path" ] || continue
+        if [ ! -f "$path" ] || [ -L "$path" ] || [ "$(wc -c < "$path")" -gt 1048576 ]; then
+            printf '%s\n' 'Native tool configuration is not a bounded ordinary file.' >&2; exit 2
+        fi
+        LC_ALL=C awk -v kind="${tc_kinds[$i]}" -v idx="$tc_index" -v mirror="$tc_python" -v registry="$tc_npm" '
+            function same(a,b) { sub(/\/$/, "", a); sub(/\/$/, "", b); return a == b }
+            function value(line) {
+                sub(/^[^=]*=[[:space:]]*/, "", line); sub(/[[:space:]]*$/, "", line)
+                return line
+            }
+            /^[[:space:]]*([#;].*)?$/ { next }
+            {
+                line=$0; sub(/\r$/, "", line)
+                if (kind == "pip") {
+                    if (tolower(line) ~ /^[[:space:]]*(extra[-_]index[-_]url|find[-_]links|trusted[-_]host|no[-_]index)[[:space:]]*=/) exit 1
+                    if (tolower(line) ~ /^[[:space:]]*index[-_]url[[:space:]]*=/ && !same(value(line), idx)) exit 1
+                } else if (kind == "uv") {
+                    if (line ~ /^[[:space:]]*(extra-index-url|find-links|index)[[:space:]]*=/) exit 1
+                    if (line ~ /^[[:space:]]*\[\[index\]\][[:space:]]*(#.*)?$/) indexes++
+                    if (line ~ /^[[:space:]]*default[[:space:]]*=[[:space:]]*true[[:space:]]*(#.*)?$/) defaults++
+                    if (line ~ /^[[:space:]]*(url|index-url|python-install-mirror)[[:space:]]*=/) {
+                        field=line; sub(/[[:space:]]*=.*/, "", field); sub(/^[[:space:]]*/, "", field)
+                        v=value(line); quote=substr(v,1,1)
+                        if (quote != "\"" && quote != sprintf("%c",39)) exit 1
+                        v=substr(v,2); end=index(v,quote); if (!end) exit 1
+                        tail=substr(v,end+1); if (tail !~ /^[[:space:]]*(#.*)?$/) exit 1
+                        v=substr(v,1,end-1); expected=(field == "python-install-mirror" ? mirror : idx)
+                        if (expected != "" && !same(v,expected)) exit 1
+                    } else if (line ~ /^[[:space:]]*["\047]?(url|index|python-install-mirror)["\047]?[[:space:]]*[=.]/) exit 1
+                } else {
+                    if (line ~ /^[[:space:]]*[^=]+:registry[[:space:]]*=/) exit 1
+                    if (tolower(line) ~ /^[[:space:]]*registry[[:space:]]*=/ && !same(value(line),registry)) exit 1
+                }
+            }
+            END { if (kind == "uv" && idx != "" && (indexes > 1 || indexes != defaults)) exit 1 }
+        ' "$path" || { printf '%s\n' 'Native source configuration requires reconciliation.' >&2; exit 2; }
+    done
+    [ -z "$tc_index" ] || export UV_DEFAULT_INDEX="$tc_index" PIP_INDEX_URL="$tc_index"
+    [ -z "$tc_python" ] || export UV_PYTHON_INSTALL_MIRROR="$tc_python"
+    [ -z "$tc_uv" ] || export UV_INSTALLER_GITHUB_BASE_URL="$tc_uv"
+    [ -z "$tc_npm" ] || export npm_config_registry="$tc_npm"
+    for name in PIP_CONFIG_FILE NPM_CONFIG_USERCONFIG npm_config_userconfig NPM_CONFIG_GLOBALCONFIG npm_config_globalconfig; do
+        current="${!name:-}"
+        case "$current" in
+            ""|/*) ;;
+            *) export "$name=$(pwd -P)/$current" ;;
+        esac
+    done
+    export COPILOT_EXTENSIONS_TOOLCHAIN_CONFIG="$toolchain_config"
+fi
+
 source_anchor="${WORKTREE_MANAGER_SOURCE_ANCHOR:-$(pwd -P)}"
 case "$source_anchor" in
     /*) ;;
@@ -303,6 +478,10 @@ if [ "$recovery_only" -eq 0 ]; then
         exit 2
     fi
     installer_args+=(--bootstrap-uv "$UV")
+fi
+if [ -n "$toolchain_config" ] && ! grep -qx '# copilot-extensions:toolchain-config=1' scripts/runtime_install.py; then
+    _bootstrap_progress 'Selected Manager source does not support toolchain configuration; installation was not started.' failed
+    exit 2
 fi
 if ! PYTHON="$("$UV" python find --no-project --system --managed-python --no-python-downloads 3.11 2>/dev/null)"; then
     "$UV" python install --no-bin --no-registry 3.11

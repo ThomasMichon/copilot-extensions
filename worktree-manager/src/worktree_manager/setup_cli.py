@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import configparser
+
 from .core_install import core_status, install_command, install_core
 from .prereqs import detect_baseline, missing
 from .provision import apply as provision_apply
@@ -16,6 +18,14 @@ def cmd_setup(rest: list[str], *, banner: str, register: bool = False) -> int:
     except SystemExit as error:
         return int(error.code)
     do_apply = args.apply
+    from .self_install import default_root
+    from .toolchain_config import configure_selected
+
+    try:
+        configure_selected(root=default_root(), apply=do_apply)
+    except (OSError, ValueError, UnicodeError, configparser.Error) as error:
+        print(f"  ! toolchain configuration refused: {type(error).__name__}")
+        return 2
     gaps = missing(detect_baseline())
     actions = provision_plan(gaps)
     core = core_status()

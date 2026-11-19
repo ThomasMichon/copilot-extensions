@@ -1,5 +1,6 @@
 """Standalone Manager adapter over the canonical Python installer engine."""
 # copilot-extensions:bootstrap-uv=1
+# copilot-extensions:toolchain-config=1
 
 from __future__ import annotations
 
@@ -959,6 +960,9 @@ def main(argv: list[str] | None = None) -> int:
     if refusal is not None:
         print(refusal, file=sys.stderr)
         return 3
+    from worktree_manager.toolchain_config import configure_selected
+
+    configure_selected(root=args.root.resolve(), apply=True)
     if os.name == "nt" or command[:1] == ["update"]:
         with _installation_custody() as custody, _bootstrap_python_environment():
             if custody is None:

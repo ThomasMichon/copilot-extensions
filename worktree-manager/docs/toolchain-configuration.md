@@ -1,0 +1,114 @@
+# Adopter toolchain configuration
+
+The standard native `bootstrap.ps1` and `bootstrap.sh` accept an optional
+data-only configuration before discovering or acquiring uv or Python. An adopter
+can distribute this file independently of its repository, including before
+private Git access. No adopter initialization script is needed.
+
+## Input and selection
+
+The file is plain ASCII text (no BOM), at most 16384 bytes, with LF or CRLF
+line endings. It contains one unquoted `key=value` per line,
+with no whitespace around `=`. Empty lines and lines beginning with `#`
+(optionally indented) are ignored. Duplicate keys, unknown keys and unsupported
+schema revisions are errors. Values are literal data, never shell expressions,
+environment interpolation or executable configuration.
+
+```text
+schema=1
+python_index_url=https://packages.example.invalid/simple/
+npm_registry=https://packages.example.invalid/npm/
+```
+
+`schema=1` and at least one source are required. Supported source fields:
+
+| Field | Native consumer | Persistence |
+|---|---|---|
+| `python_index_url` | `UV_DEFAULT_INDEX` and `PIP_INDEX_URL` | User `uv.toml` default index and pip `[global] index-url` |
+| `python_install_mirror` | `UV_PYTHON_INSTALL_MIRROR` for managed CPython acquisition | User `uv.toml` `python-install-mirror` |
+| `uv_install_mirror` | `UV_INSTALLER_GITHUB_BASE_URL` for the official uv installer | Retained input, reapplied by bootstrap/setup; no global environment edit |
+| `npm_registry` | `npm_config_registry` for npm package consumption | User `.npmrc` `registry`, respecting an explicit native user-config path |
+
+URLs must be HTTPS, at most 2048 characters, with an ASCII hostname, optional
+numeric port and a path containing only letters, digits and `._~:/+-`.
+User information, query strings, fragments, percent escapes and embedded
+credentials are not supported. Authentication stays with each native tool's
+credential owner. No certificate, trust-host or TLS policy is changed.
+
+Selection order:
+
+1. Leading `--toolchain-config ABSOLUTE_FILE` on the native bootstrap.
+2. `COPILOT_EXTENSIONS_TOOLCHAIN_CONFIG`, an absolute local file.
+3. `.copilot-extensions/toolchain.conf` in the invocation directory, if present.
+4. `toolchain.conf` in the selected `WORKTREE_MANAGER_ROOT`, if retained.
+
+An explicit argument conflicting with the environment selection is refused.
+There is no parent-directory walk, repository clone, remote config fetch or
+execution of adopter code. With no selected file, existing public bootstrap
+behavior is unchanged. Normal `worktree-manager setup` uses the environment,
+current-directory or retained selection too; its dry run only preflights it.
+
+For example, after downloading the standard bootstrap using the normal trusted
+source flow:
+
+```powershell
+& .\bootstrap.ps1 --toolchain-config C:\trusted\toolchain.conf setup --apply
+```
+
+```bash
+bash ./bootstrap.sh --toolchain-config /trusted/toolchain.conf setup --apply
+```
+
+## Ordering, native configuration and conflicts
+
+The native seed parses the file and preflights affected environment and native
+source settings before prerequisite commands. The selected environment reaches
+the official uv installer, managed Python acquisition and standard setup's child
+processes. Once the standard Python installer entry runs, it fully parses the
+affected native configuration before writing any file or installing packages.
+It preserves unrelated native options and comments, adds missing defaults,
+and retains the input under the Manager root for subsequent bootstrap/setup.
+Repeated application is idempotent.
+
+An existing explicit index, registry or mirror must agree with the corresponding
+selected source (a trailing slash is immaterial); it is not silently replaced.
+Pip checks include global, legacy/user, active virtual-environment and explicit
+configuration, including command-specific sections. A matching legacy uv
+`index-url` or a single matching default `[[index]]` is preserved.
+Additional/opaque selectors such as extra indexes, find-links, scoped npm
+registries, explicit `UV_CONFIG_FILE`, or conflicting uv installer download
+overrides require reconciliation and are not cleared. Errors start no package
+installation. File writes use per-file atomic replacement; this is not a
+multi-file transaction or rollback of a later failed installation.
+An explicit pip configuration that disables discovery (`NUL` or `/dev/null`)
+is also refused. Relative native pip/npm config paths are anchored before
+bootstrap changes directories.
+
+This is a small defaults provider, not an organization policy engine. It does
+not classify an alternate endpoint as approved, discover credentials, replace a
+native source profile, or change artifact qualification and dependency
+seasoning. Organizations supply their own values; generic defaults remain
+organization-neutral.
+
+## Channel and compatibility limits
+
+A Python **package index does not control Python, uv or Node binary downloads**.
+The mirror fields above are separate opt-in channels supported by uv's native
+owners. The bootstrap still obtains the official uv installer script through
+its existing URL. Node acquisition remains with the existing selected
+prerequisite/application owner; this contract does not add a Node binary mirror
+or claim that an npm registry controls Node installation.
+
+`--describe-toolchain-config` on the selected native bootstrap describes
+`copilot-extensions.toolchain-config` version 1 and its supported fields.
+Callers must establish this support before sending the new leading option.
+The bootstrap additionally requires the fetched standard Python installer's
+`toolchain-config=1` capability marker when configuration is selected; an older
+source is refused rather than silently dropping persistence. No-config callers
+retain their old syntax and do not require this capability.
+
+Release provider support before migrating adopters. A source merge is not a
+release or an installed rollout. When rolling back to an older provider that
+does not support this contract, do not silently omit mandatory configuration or
+retry an effectful unsupported invocation with a different syntax. Select a
+compatible release through the existing source owner instead.
