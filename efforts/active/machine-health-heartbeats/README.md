@@ -64,10 +64,13 @@ single successful hourly run or restart is not that finish line.
 
 ### Now
 
-The installed local Windows collection/report slice is verified. Receiver
-selection and broader carrier, preference, domain and platform gates remain
-open. Preserve current operator holds and the local-only result; do not infer
-new receiving, binding, credential or rollout authority.
+The installed local Windows collection/report slice has recorded verification.
+The Linux retained finite-action foundation is merged. Native enrollment and
+pair recovery source is under validation; real-user-manager qualification
+remains open. Receiver
+selection and broader carrier, preference and domain gates remain open.
+Preserve current operator holds and the local-only result; do not infer new
+receiving, binding, credential or rollout authority.
 
 ### Return
 
@@ -338,6 +341,37 @@ semantics; Manager renders cached reports; Worktrees contributes observations.
 The [owner comparison](architecture.md#owner-decision) explains this choice.
 
 ## Journal
+
+### 2026-11-18 - Linux enrollment and pair-recovery source controls
+- Extended the existing enrollment/reference transaction with explicit
+  Linux version-2 state, derived local UID and an installation-owned user
+  service/timer adapter. Windows version-1 state and task semantics remain
+  isolated; no consent is inferred from a different platform.
+- Portable controls exercise preview, normal CLI, unchanged active actions,
+  immutable selection, compatible replacement/rollback, interrupted pair
+  publication, deliberate withdrawal and unknown manager/cgroup settlement.
+  The existing 41 actor-free composition controls pass without adding native
+  actors or expanding that packet's node admission.
+- Updated the consumer and resource guides to name support and limitations.
+  Real user-manager/installed execution, accelerated native cycles, clean-room
+  first adoption and target rollout remain unqualified. This source milestone
+  closes no parent platform or carrier acceptance item and changes no
+  receiving, credential or deployment authority.
+
+### 2026-11-18 - Linux retained finite-action foundation
+- #13298 merged as `79aaaef34fe837ad3f81d4671416dc1998616d9e` after exact-head
+  Copilot approval with no active findings and green required CI. The source
+  adds immutable pair rendering, finite Linux execution and bounded installed
+  capability reading; native enrollment still refuses.
+- Focused controls cover executable-path escaping, canonical interpreter
+  selection, actual immutable metadata hardlinks, file replacement, support
+  loss and owned budgets. Strict changed-file checks pass for both platform
+  targets; these are not native systemd or installed Linux qualification.
+- The open Linux Plan and platform Validation items remain open. Continue with
+  platform-isolated enrollment state and the native pair adapter under the
+  reviewed amendment, then prove the real installed/user-manager flow before
+  any separately authorized adoption. No receiving, service or rollout change
+  was performed.
 
 ### 2026-11-17 - Completion charter made explicit
 - #12948 merged after current-head Copilot approval with no findings and green

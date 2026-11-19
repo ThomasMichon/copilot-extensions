@@ -375,7 +375,7 @@ not require operator attendance or block publication, CI or enrollment on its
 absence. Automated GUI/console-state, result and complete-tree cleanup controls
 remain independent requirements; unobserved is not a visual pass.
 
-### Linux retained finite-action foundation
+### Linux retained finite action
 
 The internal installed-definition renderer can now describe an immutable Linux
 service/timer pair bound to one runtime generation and local UID. Unlike
@@ -392,14 +392,63 @@ rejecting indirect paths, oversized declarations and file replacement during
 the read. Mutable health-store readers retain their separate exclusive-file
 requirements.
 
-This is a portable execution foundation, **not Linux enrollment support**.
-The normal `health job` lifecycle still rejects Linux. No unit publication,
-manager reload, account selection, lingering change or native systemd
-qualification is provided by this renderer. Native pair custody, interrupted
-publication/recovery, retained replacement and real-user-manager validation
-remain tracked in the
+The installed lifecycle below uses this execution closure. Portable source
+controls are not native systemd qualification. Actual installed launch,
+two-cycle timing and lifecycle qualification remain open in the
 [reviewed Linux amendment](../../../efforts/active/machine-health-heartbeats/local-collection.md#installed-linux-job-enrollment).
-Do not hand-register rendered units to bypass those gates.
+
+## Installed Linux enrollment
+
+```text
+agent-machines health job configure --store-dir <absolute-v2-store> --enabled
+agent-machines health job configure --store-dir <absolute-v2-store> --enabled --apply --expect <preview-token>
+```
+
+These are explicit local operations from an already installed immutable
+runtime. Linux derives the executing UID; it refuses `--user-id`, alternate
+effective users and Windows SID/XML consent. Linux state uses version 2 with
+`platform: linux`; Windows version-1 state remains Windows-only. Neither lane
+migrates or adopts the other's state.
+
+The existing preview, policy confirmation, pending recovery and retained-runtime
+reference owner also controls Linux. A missing local adoption is inert.
+Convergence qualifies the exact retained collection support, publishes one
+installation-named service/timer pair disabled, reloads the existing user
+manager and verifies the loaded files before enabling and starting the timer.
+A matching loaded pair is unchanged, including an active collection action.
+The hourly UTC timer coalesces late starts; it does not replay every missed hour.
+The finite oneshot stays in its invocation cgroup, with a 55-second start
+deadline and five-second stop reserve.
+
+The native scope is the current user's systemd configuration directory
+(`XDG_CONFIG_HOME/systemd/user`, or `~/.config/systemd/user`) and existing local
+user bus. The scope must occur in the manager's unambiguous unit search path.
+Foreign files, file links, shadow units, aliases and loaded or unloaded
+drop-ins refuse rather than being overwritten. Unavailable managers and
+unsupported scope/readback refuse; there is no user-manager provisioning,
+lingering change, elevation or `sudo` fallback.
+
+Two files plus manager state are not an atomic publication. Pending intent
+retains incumbent/candidate recovery custody across interrupted writes, reloads,
+enables and removals. Unknown effects remain recovery-required. Withdrawal
+stops the owned timer, removes only its verified enable link, verifies the
+timer is disabled, then stops the owned action through the manager. A populated
+or unobservable retained cgroup is not settled; reference release requires
+confirmed exit (cgroup-v2 readback when a group remains). Removal preserves
+health history, policy and unrelated units. Compatible rollback is reported
+separately from candidate readiness; disable recovery never reenables an action.
+
+`status`, `converge`, `disable` and `remove` use the same explicit commands as
+Windows below. Results separate configured/enabled state, active invocation,
+absolute last/next execution and result. Missing timing or completion evidence
+is null. Native success is not carrier receipt, receiving readiness or proof
+that an hourly collection completed.
+
+`test_health_linux_enrollment.py` and `test_health_systemd_native.py` exercise
+portable state, normal CLI, adapter and interrupted-pair controls with synthetic
+native responses. They do **not** qualify a real user manager, installed
+checkout-independent execution, accelerated native cycles or a live host.
+Those require the separate native packet and target adoption authority.
 
 ## Installed Windows enrollment
 
@@ -417,7 +466,7 @@ intent. `--apply --expect` adopts that preview locally; omitting `--enabled`
 adopts a disabled task. The confirmation binds existing local configuration and
 native task state too. A changed store, policy, account or before-state needs
 a new preview. No executable, interpreter, task XML or synchronized policy is
-accepted. Nothing enrolls by default; Linux enrollment is unsupported.
+accepted. Nothing enrolls by default; Linux uses the isolated lifecycle above.
 
 When confirmation first has to recover an older pending operation, the result
 compares the settled desired state with the newly confirmed configuration.

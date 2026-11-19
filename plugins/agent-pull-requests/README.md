@@ -548,19 +548,54 @@ for resident-daemon rollout requirements.
 
 ## Governed watch-state groundwork (internal)
 
-The subscription store currently reads and writes only the legacy JSON list.
-An explicit `agent-pull-requests.watch-subscriptions` schema/version envelope
-is recognized as an unsupported state contract, not an empty subscription set.
-Unknown schemas, malformed versions and other non-list state also refuse.
-Every subscription write rechecks the existing file under the atomic-replace
-lock immediately before replacement. An already-running contract-aware owner
-therefore leaves incompatible or corrupt state unchanged; the existing
-`state_write_failed` diagnostic and definite-failure registry rollback apply.
-Missing state still means an empty initial collection. Rendezvous metadata
-uses its separate existing format and is not subject to this subscription check.
+Missing subscription state still means an empty initial collection, and an
+ordinary legacy JSON list stays a list. The receiver also understands an
+already-present `agent-pull-requests.watch-subscriptions` version-2 envelope
+with `activeStateVersion: 1`, a positive integer `engineGeneration`, and
+`stateByVersion["1"].subscriptions` containing the legacy list. It does not
+create this envelope or support an active version-2 subscription map.
+Unselected version partitions and selected-partition extensions remain opaque
+and preserved; they are not additional live registries or rollback permission.
+The owner's shared read boundary strictly validates the complete versioned
+collection before cold start, self-boot, governed ensure, restart or resumption.
+Validation builds an effect-free candidate registry, never a partial live one.
 
-This is a provider expansion baseline, not map/callback-cwd support or a
-cross-process writer lease. Existing writer/lifecycle ownership remains required.
+`engineGeneration` is an ordered executor-admission epoch, independent of
+package versions. The current executing storage implementation declares epoch
+1 in its own code; a newer payload stamp, environment variable or installed
+selection cannot raise it. A higher recorded epoch refuses cold serve,
+self-boot and restart before launch or predecessor shutdown. Governed ensure
+checks before its transaction and again under custody; final adoption and
+activation/resume recheck through the actual executor. The epoch is not a
+comparison of arbitrary release dates or a claim that pre-awareness binaries
+enforce it. This expansion does not publish or advance an admitted epoch.
+Current restart requests carry `restart_engine_generation` on the existing
+shutdown operation. Under its persistence custody, the incumbent refuses an
+older/invalid requester and rechecks its state before setting shutdown flags.
+This closes an epoch change between the caller's first read and shutdown.
+Ordinary stop remains unchanged. A pre-awareness peer ignoring this additive
+field is only legacy behavior, not versioned-restart enforcement; historical
+transition qualification remains required.
+
+Unknown schemas, unsupported active versions, malformed/duplicate keys and
+incomparable generations refuse without changing state. Opaque JSON numbers
+must round-trip without numeric loss; precision loss, overflow or underflow
+refuses during decoding rather than rounding another version's state or
+escaping definite-write-failure recovery. Subscription writes
+hold the existing process-local atomic lock across read/modify/write, update
+only the selected legacy partition, and re-read the exact current bytes
+immediately before replacement. A changed document refuses rather than
+overwriting another partition or silently downgrading to a list. The existing
+`state_write_failed`, definite-failure rollback and uncertain-commit semantics
+remain. Rendezvous metadata retains its independent existing format.
+Versioned writes require the owner's strict registry validator: existing state,
+the replacement candidate and the final current state are all validated under
+the atomic boundary. A malformed selected registration is not permission to
+overwrite it or stop a healthy incumbent. Legacy-list decoding retains its
+original restore semantics.
+
+This is a receiver expansion baseline, not a migration tool, map/callback-cwd
+support or a cross-process writer lease. Existing writer/lifecycle ownership remains required.
 It does not retrofit historical executables that overwrite unknown state.
 Their startup/rollback and already-running-writer transition protection remain
 prerequisites before versioned map writes or caller-context defaults are enabled.

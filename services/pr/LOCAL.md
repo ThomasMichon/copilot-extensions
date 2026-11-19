@@ -233,6 +233,33 @@ for this repository profile, not silently added to filtered or watch profiles.
 No CLI selector, Dispatch dependency, consumer factory or operational enrollment
 is introduced. Linux remains the supported private local transport.
 
+### Asynchronous bound requests
+
+An embedding with an existing event loop can explicitly construct
+`async_local_client.AsyncBoundRepositoryClient` with the same path, target,
+identity and consumer arguments. Its `await client.negotiate()` and
+`await client.request(operation, payload)` use native asyncio Unix streams,
+not blocking calls or executor threads. They reuse the same expected-selection
+validator and expected-consumer envelope. The synchronous client is unchanged.
+
+Each call permits one in-flight operation and bounds negotiation plus the
+requested exchange by `operation_seconds` (positive and at most 30 seconds).
+An optional absolute monotonic `client.deadline` further shortens that budget;
+an elapsed deadline refuses before IPC. Request intent is detached before the
+first await, so changing a caller's dictionary cannot replace an emitted request.
+The current operations use shallow scalar request fields. Before copying, the
+client admits at most eight fields with bounded keys, strings and numeric
+values; nested collections and oversized inputs refuse before encoding or IPC.
+Headers, request bodies and response bodies retain the local byte budgets.
+The client rejects ambiguous framing rather than adding another HTTP profile.
+
+Cancellation closes and joins the owned connection, with up to one additional
+second for close cleanup. It does not roll back an operation the service may
+already have accepted. Preserve the original request/registration/deadline and
+reconcile its result through the existing owner; there is no internal retry,
+replacement request, ACK, task preparation or process fallback. This finite
+request client does not implement SSE or enroll a Dispatch consumer.
+
 Source limits are eight admitted requests/connections, 8 KiB headers, 32 KiB
 request bodies, 1 MiB selected responses, query/event pages of 1..16 and
 subscription TTL 1..86,400 seconds.

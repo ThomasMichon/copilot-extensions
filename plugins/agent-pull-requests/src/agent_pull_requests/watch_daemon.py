@@ -33,8 +33,10 @@ from .watch_notification import (
 from .watch_registry import FiredEvent, WatchKey, WatchRegistry
 from .watch_storage import (
     StateCommitUncertain,
+    VersionedSubscriptions,
     _atomic_write_json as _atomic_write_json, lock_path, read_lock_data, read_subscriptions_state,
-    state_dir, subscriptions_path, write_lock_data, write_subscriptions_state,
+    state_dir, subscriptions_path, write_lock_data,
+    write_subscriptions_state as _write_subscriptions_state,
 )
 
 _DEFAULT_POLL_INTERVAL_S = 30.0
@@ -46,6 +48,21 @@ _POLLER_IDLE_EXIT_S = 5.0
 #: and reporting it as unresponsive (the caller decides what to do next --
 #: this module never force-kills on the caller's behalf).
 _SHUTDOWN_REQUEST_DEADLINE_S = CALLBACK_TIMEOUT + 5.0
+
+
+def validate_versioned_entries(entries: list[dict[str, Any]]) -> None:
+    if isinstance(entries, VersionedSubscriptions):
+        WatchRegistry().restore_state(entries, strict=True)
+
+
+def read_watch_state(root: Path | None = None) -> list[dict[str, Any]]:
+    entries = read_subscriptions_state() if root is None else read_subscriptions_state(root)
+    validate_versioned_entries(entries)
+    return entries
+
+
+def write_subscriptions_state(entries: list[dict[str, Any]], root: Path | None = None) -> None:
+    _write_subscriptions_state(entries, root, validate=validate_versioned_entries)
 
 
 def rendezvous_fields(server: CoalescingServer) -> dict[str, Any]:
@@ -150,16 +167,13 @@ class WatchDaemon:
         entries = self._read_state()
         if not entries:
             return
-        self._registry.restore_state(entries)
+        self._registry.restore_state(entries, strict=isinstance(entries, VersionedSubscriptions))
         self._deliveries.resume()
         for key in self._registry.active_keys():
             self._ensure_poller(key)
 
     def _read_state(self) -> list[dict[str, Any]]:
-        return (
-            read_subscriptions_state() if self._state_root is None
-            else read_subscriptions_state(self._state_root)
-        )
+        return read_watch_state(self._state_root)
 
     def _persist(self, entries: list[dict[str, Any]] | None = None) -> None:
         """Serialize every persist call against every other -- multiple
@@ -264,10 +278,22 @@ class WatchDaemon:
                 "delivery_error": self._deliveries.start_error,
             }
         if kind == "shutdown":
-            with self._admission:
-                self._accepting_mutations = False
-                self._lifecycle_shutdown_event.set()
-                self._shutdown_event.set()
+            with self._persist_lock:
+                if "restart_engine_generation" in payload:
+                    from .watch_storage import WATCH_ENGINE_GENERATION
+
+                    requester = payload["restart_engine_generation"]
+                    if type(requester) is not int or requester < WATCH_ENGINE_GENERATION:
+                        return {"error": "watch restart requires a compatible executor generation"}
+                    if self._persist_enabled:
+                        try:
+                            self._read_state()
+                        except (OSError, ValueError):
+                            return {"error": "watch restart state admission refused"}
+                with self._admission:
+                    self._accepting_mutations = False
+                    self._lifecycle_shutdown_event.set()
+                    self._shutdown_event.set()
             return {"shutting_down": True}
         return {"error": f"unknown kind {kind!r}"}
 
@@ -487,6 +513,9 @@ class WatchDaemon:
                 raise RuntimeError("PR watch state has not been adopted")
             if self._lifecycle_shutdown_event.is_set():
                 raise RuntimeError("PR watch owner is shutting down")
+            if self._persist_enabled:
+                self._read_state()
+                self._check_lifecycle_deadline(deadline)
             with self._admission:
                 self._accepting_mutations = False
             if self._shutdown_event.is_set():

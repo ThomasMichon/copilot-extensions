@@ -171,6 +171,14 @@ expectation to the existing operation's admission boundary. It does not prepare
 a native task, add a Dispatch import/dependency or activate a feed consumer.
 The native adapter, historical-reader transition and recovery exits stay open.
 
+The [asynchronous bound request client](../../../services/pr/LOCAL.md#asynchronous-bound-requests)
+adds finite native asyncio Unix exchanges for a future shared-loop embedding.
+It preserves the same expected-selection and consumer assertion, the original
+caller-owned payload and monotonic deadline, cancellation and uncertain-effect
+custody without an executor thread. It neither prepares a native waiter nor
+selects the coordinator factory. Native admission, historical-reader transition,
+effect-before-ACK recovery and operational enrollment remain separate exits.
+
 ## Serial plan and validation
 
 - [x] Review this owner/contract refinement before new protocol or storage code
