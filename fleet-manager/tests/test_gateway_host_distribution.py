@@ -355,10 +355,27 @@ def test_source_application_command_keeps_direct_source_without_main_composition
         snapshot, component, tmp_path / "runtime", Path(sys.executable),
     )
     assert arguments[arguments.index("--install-source") + 1] == str(snapshot)
-    assert arguments[arguments.index("--component") + 1] == component
-    assert arguments[arguments.index("--health-module") + 1] == module
-    assert arguments[arguments.index("--expected-runtime-version") + 1] == generation
-    assert arguments[arguments.index("--expected-payload-hash") + 1] == "d" * 64
+    if component == "worktree-manager":
+        monkeypatch.syspath_prepend(str(PROJECT.parent / "worktree-manager" / "src"))
+        from worktree_manager import self_install
+
+        adapter = self_install._runtime_installer()
+        assert Path(arguments[3]).name == "runtime_install.py"
+
+        class NativeSourceAccepted(RuntimeError):
+            pass
+
+        def reached_native(_payload: Path) -> NoReturn:
+            raise NativeSourceAccepted
+
+        monkeypatch.setattr(adapter, "_execution_driver", reached_native)
+        with pytest.raises(NativeSourceAccepted):
+            adapter.main(arguments[4:])
+    else:
+        assert arguments[arguments.index("--component") + 1] == component
+        assert arguments[arguments.index("--health-module") + 1] == module
+        assert arguments[arguments.index("--expected-runtime-version") + 1] == generation
+        assert arguments[arguments.index("--expected-payload-hash") + 1] == "d" * 64
     assert json.loads(pin) == selection
     assert manifest.read_bytes() == original
     (payload / "pyproject.toml").write_text(

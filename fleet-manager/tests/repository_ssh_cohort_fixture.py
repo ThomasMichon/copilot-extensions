@@ -66,6 +66,11 @@ def source_application_command(
     application = install_source._member(snapshot, selected.project["application"])
     declaration = install_source._read(application / "application.json")
     construction = declaration["construction"]
+    if component == "worktree-manager":
+        return [
+            sys.executable, "-I", "-B", str(selected.payload / "scripts" / "runtime_install.py"),
+            "--root", str(root), "--install-source", str(snapshot), "--", "--help",
+        ], json.dumps(construction["identity"], sort_keys=True)
     arguments = [
         sys.executable, "-I", "-B", str(selected.payload / "scripts" / "install_source.py"),
         "--install-source", str(snapshot), "--component", component,

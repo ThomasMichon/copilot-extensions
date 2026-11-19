@@ -2067,11 +2067,14 @@ Copilot home declares the copied owner's actual marketplace, and its control
 requires ownership publication, not merely a successful child command.
 Prepared application Source is never substituted as its own command owner.
 The copied owner omits development test trees, not runtime scripts or their
-declared materialized dependencies. Manager fixture support installs its already
-prepared Source application through the same existing application receiver,
-rather than reconstructing it through the separate source-payload adapter.
+declared materialized dependencies. Manager support must use its existing
+`runtime_install.py --install-source` lifecycle: the generic application receiver
+explicitly refuses Manager. Its receiver-level control exercises actual native
+Source admission before construction. A timed-out Manager support call reports
+only bounded Source phase/progress lines; its 60-second limit is unchanged.
 The real installed Manager front door and all native setup assertions remain
-the acceptance boundary; this fixture does not qualify Manager self-installation.
+the acceptance boundary; this fixture does not establish complete Manager
+self-installation qualification.
 Preparation-only jobs retain the source controls locally; normal lifecycle jobs
 do not repeat that independently gated work inside their unchanged time budget.
 Direct Git Sources without Main composition use the existing
