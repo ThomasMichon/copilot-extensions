@@ -103,6 +103,15 @@ class RepositoryFeedPreparer:
         admission = FeedWaiterAdmission.observe(
             task, lane=self._lane, dedup_key=dedup_key_for(recipe),
         )
+        existing = self.queue.find_delegated_preparation(task_id, selected["preparation_id"])
+        if existing is not None:
+            retained = FeedWaiterAdmission.from_record(existing.get("feed_admission"))
+            if (
+                retained.lane != admission.lane or retained.dedup_key != admission.dedup_key
+                or retained.task_id != task_id
+            ):
+                raise TaskError("repository-feed preparation association changed")
+            admission = retained
         remaining = selected["feed"]["deadline_at"] - time.time()
         if remaining <= 0:
             raise TaskError("original repository-feed deadline elapsed")
