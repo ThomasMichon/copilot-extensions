@@ -30,6 +30,7 @@ else:
 from types import ModuleType
 from typing import TYPE_CHECKING, Any, BinaryIO, TypedDict, cast
 import subprocess
+import versioned_runtime as runtime
 
 from installer_dependency_policy import (
     RetainedUVInstall,
@@ -61,8 +62,7 @@ _ProgressOptions = TypedDict("_ProgressOptions", {"on_progress": Callable[[], No
 def _construction_hash(files: tuple[Path, ...], extras: tuple[str, ...],
     local_packages: tuple[str, ...] | None = None,
     *, on_progress: Callable[[], None] | None = None,
-    file_hashes: dict[Path, str] | None = None) -> str:
-    import versioned_runtime as runtime
+    file_hashes: dict[Path, str] | None = None    ) -> str:
 
     progress: _ProgressOptions = {"on_progress": on_progress} if on_progress is not None else {}
     source_hash = runtime.fingerprint_source(
