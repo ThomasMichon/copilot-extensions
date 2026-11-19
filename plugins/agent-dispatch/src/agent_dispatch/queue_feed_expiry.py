@@ -34,14 +34,18 @@ class FeedWaiterExpiryMixin:
         ts = self._now(now)
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            row = conn.execute("SELECT * FROM run_waiters WHERE id=?", (waiter["id"],)).fetchone()
+            row = conn.execute(
+                "SELECT * FROM run_waiters WHERE task_id=? AND generation=?",
+                (waiter["task_id"], waiter["generation"]),
+            ).fetchone()
             if row is None:
                 raise TaskError("original repository-feed waiter unavailable")
             current = self._run_waiter_from_row(row)
             observed = waiter.get("delegation")
             retained = current.get("delegation")
             if (
-                not isinstance(observed, dict) or not isinstance(retained, dict)
+                "id" in waiter and current["id"] != waiter["id"]
+                or not isinstance(observed, dict) or not isinstance(retained, dict)
                 or "feed" not in retained
                 or {key: value for key, value in observed.items() if key != "registration_id"}
                 != {key: value for key, value in retained.items() if key != "registration_id"}

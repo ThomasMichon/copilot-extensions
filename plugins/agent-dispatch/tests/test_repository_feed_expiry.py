@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import threading
@@ -12,8 +13,27 @@ import pytest
 from agent_dispatch.queue_records import TaskError
 from tests._helpers import RepoDefaultingQueue as TaskQueue
 from tests.test_repository_feed_attempts import prepared
+from tests.test_repository_feed_preparation import prepare, setup
 
 pytestmark = pytest.mark.contract("agent_dispatch.repository_feed.expiry")
+
+
+def test_initial_preparation_result_expires_without_a_reload(tmp_path: Path) -> None:
+    queue, task_id, spec, _client, preparer = setup(tmp_path)
+    initial = asyncio.run(prepare(preparer, task_id, spec))
+    assert "id" not in initial
+    deadline = spec["feed"]["deadline_at"]
+    with pytest.raises(TaskError, match="identity differs"):
+        queue.expire_repository_feed_waiter({**initial, "id": -1}, now=deadline)
+    result = queue.expire_repository_feed_waiter(initial, now=deadline)
+    assert result is not None and result["state"] == "retired"
+    reopened = TaskQueue(tmp_path / "tasks.db")
+    repeated = reopened.expire_repository_feed_waiter(initial, now=deadline + 1)
+    assert repeated is not None and repeated["wake_id"] == result["wake_id"]
+    wake, = reopened.list_run_waiter_wakes(task_id)
+    assert wake.id == result["wake_id"] and wake.status == "pending"
+    task = reopened.get(task_id)
+    assert task is not None and task.status == "suspended"
 
 
 @pytest.mark.parametrize("armed", [False, True])
