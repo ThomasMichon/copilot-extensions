@@ -116,10 +116,27 @@ unknown/duplicate fields, nonfinite numbers and non-JSON metadata.
 
 The composed manifest is only a **candidate**: it does not replace the exact
 manifest already bound to the pending parent. It preserves that parent's poll
-marker without certifying a polling interval. No application, task
-acknowledgement, pending retirement, cursor advance, executor admission or
-capability advertisement follows from retention or composition. Application
-and completion still need their own owner-qualified transition and per-target
+marker without certifying a polling interval.
+
+`PreparedJournal.for_point_application()` explicitly binds a complete candidate
+for preparation. It first qualifies the exact pending payload, account scope
+and whole claim through the ordinary journal owner, then recomposes every
+retained target. The supplied manifest must match that candidate exactly,
+including metadata types, component versions and the unchanged poll marker.
+`PreparedPoints.bind_application()` retains that canonical manifest in one
+immutable, separately versioned prepared row under the same cache incarnation.
+An identical retry, including after a lost return, reuses the binding; missing
+targets, changed inputs or conflicting retained binding bytes refuse. The
+pending payload, target rows and parent incarnation remain unchanged. The
+default journal constructor still requires its supplied manifest to match the
+original pending manifest, even after this explicit binding.
+
+Binding does not invoke preparation or native application. The existing
+`PreparedApplication` and `PreparedComponentApplication` constructors do not
+consume this explicit point binding yet. No application, task acknowledgement,
+pending retirement, cursor advance, executor admission or capability
+advertisement follows from retention, composition or binding. Application and
+completion still need their own owner-qualified transition and per-target
 applied/higher-covered proof. Ordinary recovery is not that transition.
 `tests/test_prepared_points.py` covers restart, exact-target completeness,
 conflicts and stale parents; `tests/test_azure_devops_points.py` connects the
