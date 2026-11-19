@@ -9,6 +9,7 @@ import stat
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+import uuid
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -38,6 +39,41 @@ FLEET_TEST_CONSUMERS = frozenset({
     "agent-index", "agent-pull-requests", "agent-dispatch", "agent-ssh", "agent-worktrees",
     "agent-vault",
 })
+PREPARATION_GENERATION = ".preparation-generation"
+
+
+def preparation_generation(path: Path) -> str | None:
+    """Read the bounded mutation generation while the environment lease is held."""
+    marker = native_test_path(ordinary_cache_root(path) / PREPARATION_GENERATION)
+    try:
+        info = marker.lstat()
+    except FileNotFoundError:
+        return None
+    if not stat.S_ISREG(info.st_mode) or getattr(info, "st_reparse_tag", False) or info.st_size != 32:
+        raise ValueError("Invalid test-environment preparation generation")
+    with marker.open("rb") as stream:
+        value = stream.read(33)
+    if re.fullmatch(rb"[0-9a-f]{32}", value) is None:
+        raise ValueError("Invalid test-environment preparation generation")
+    return value.decode("ascii")
+
+
+def advance_preparation_generation(path: Path) -> None:
+    """Invalidate previews before an active, already-leased environment is mutated."""
+    root = ordinary_cache_root(path)
+    preparation_generation(root)
+    temporary = native_test_path(root / (PREPARATION_GENERATION + ".new-" + uuid.uuid4().hex))
+    try:
+        with temporary.open("xb") as stream:
+            stream.write(uuid.uuid4().hex.encode("ascii"))
+            stream.flush()
+            os.fsync(stream.fileno())
+        temporary.replace(native_test_path(root / PREPARATION_GENERATION))
+    finally:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def has_dev_extra(project: Path) -> bool:
@@ -289,10 +325,14 @@ def dependency_fingerprint(
     return digest.hexdigest()
 
 
-def clear_cache_contents(path: Path) -> None:
-    """Clear an already-leased ordinary environment without replacing its root."""
+def clear_cache_contents(
+    path: Path, *, preserve: frozenset[str] = frozenset({PREPARATION_GENERATION}),
+) -> None:
+    """Clear a leased environment, preserving its mutation generation by default."""
     root = native_test_path(ordinary_cache_root(path))
     for child in root.iterdir():
+        if child.name in preserve:
+            continue
         if child.is_symlink():
             child.unlink()
         elif (

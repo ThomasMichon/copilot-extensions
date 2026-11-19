@@ -5,6 +5,9 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from types import ModuleType
+from collections.abc import Callable
+from typing import Any, TypeVar, cast
 
 from . import (
     activity,
@@ -20,26 +23,28 @@ from . import (
     output,
     producer_views_cli,
     tracking,
+    tracking_claims,
     worktree_identity,
 )
 from . import config as cfg, execution_spaces, state_root as state_root_mod
 from .resident_recovery import dispatch_claim as _dispatch_claim
+F = TypeVar("F", bound=Callable[..., object])
 
 
-def _core():
+def _core() -> ModuleType:
     from . import __main__ as core
 
     return core
 
 
-def _core_helper(name: str, local):
+def _core_helper(name: str, local: F) -> F:
     candidate = vars(_core()).get(name)
     if callable(candidate) and candidate is not local:
-        return candidate
+        return cast(F, candidate)
     return local
 
 
-def add_parsers(sub) -> None:
+def add_parsers(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     p = sub.add_parser(
         "claims",
         help="Show a worktree's full claim ledger (outbound resources + its "
@@ -62,6 +67,7 @@ def add_parsers(sub) -> None:
         "'find pr --repo <owner/name> [--state ...] [--live]' to search all registered "
         "projects for PR claims; 'transitive [worktree_id]' to list unsettled obligations "
         "throughout a worktree's subtree (diagnostic only, not a per-hop finalize gate); "
+        "'retained [worktree_id]' for bounded known descendants including settled child edges; "
         "'history <ref>' for ordered claim/release/settle events (today: pr-kind only); "
         "'ownership' for a strict read-only disposable ownership snapshot across registered projects",
     )
@@ -132,6 +138,8 @@ def add_parsers(sub) -> None:
     )
     p.add_argument("--actor", default="", dest="claim_actor", help=argparse.SUPPRESS)
     p.add_argument("--all-states", action="store_true", help="with owner: include released claims")
+    p.add_argument("--max-depth", type=int, default=8, help="with retained: maximum child depth (1-32)")
+    p.add_argument("--max-nodes", type=int, default=256, help="with retained: maximum records (1-1024)")
     p.add_argument(
         "--repo",
         default=None,
@@ -161,14 +169,10 @@ def add_parsers(sub) -> None:
     p.add_argument("--json", action="store_true", help="JSON output mode (stdout is JSON only)")
 
 
-def _dispatch_assigned_tasks(machine: str, worktree_id: str, cwd: str) -> dict:
+def _dispatch_assigned_tasks(machine: str, worktree_id: str, cwd: str) -> dict[str, Any]:
     """Best-effort inbound tasks a worktree claims, via agent-dispatch.
 
-    Distinct from agent-worktrees' OWN claims ledger (outbound resource
-    claims) -- this reads agent-dispatch's separate assigned/owned TASK
-    concept, hence the name (renamed from ``_inbound_claims``, which
-    conflated the two, as part of the claim-provider-pattern effort).
-
+    Reads assigned agent-dispatch tasks, not this worktree's outbound ledger.
     Resolves agent-dispatch's own payload-local binstub via the
     ``dispatch-task:`` claim-provider registry entry -- never an ambient
     ``PATH`` lookup -- closing the tier-3 -> tier-9 upward call this effort
@@ -285,6 +289,9 @@ def cmd_claims(args: argparse.Namespace) -> int:
         return claims_find_cli.cmd_claims_find(args, target[1:])
     if target and target[0] == "transitive":
         return _claims_transitive(args, target[1] if len(target) > 1 else None)
+    if target and target[0] == "retained":
+        from .retained_worktrees import cmd_retained
+        return cmd_retained(args, target[1:])
     if target and target[0] == "history":
         return _claims_history(args, target[1] if len(target) > 1 else None)
     worktree_id = target[0] if target else None
@@ -323,7 +330,7 @@ def _claim_handoff_actor(config: cfg.Config, explicit_worktree: str | None) -> s
         config,
         explicit_worktree,
         infer_worktree_id=worktree_identity._infer_worktree_id,
-        format_claim_ref=tracking.format_claim_ref,
+        format_claim_ref=tracking_claims.format_claim_ref,
     )
 
 
@@ -343,8 +350,8 @@ def _coordination_readiness_for_owner_ref(
     config: cfg.Config,
 ) -> state_root_mod.CoordinationReadiness:
     """Resolve readiness in the project that owns a produced resource."""
-    parsed_owner = tracking.parse_claim_ref(owner_ref)
-    if parsed_owner is None or not parsed_owner.is_qualified:
+    parsed_owner = tracking_claims.parse_claim_ref(owner_ref)
+    if parsed_owner is None or not parsed_owner.is_qualified or not parsed_owner.machine or not parsed_owner.project:
         raise ValueError(
             f"--owner-ref must be a qualified machine/project/worktree_id ref (got {owner_ref!r})"
         )
@@ -380,7 +387,7 @@ def _claims_handoff(args: argparse.Namespace, target: list[str]) -> int:
         target,
         require_coordination_readiness=_require_coordination_readiness,
         infer_worktree_id=worktree_identity._infer_worktree_id,
-        format_claim_ref=tracking.format_claim_ref,
+        format_claim_ref=tracking_claims.format_claim_ref,
         json_error=output._json_error,
         json_output=output._json_output,
     )
@@ -409,6 +416,7 @@ def _claims_add(args: argparse.Namespace, kind: str, ref: str) -> int:
     if kind == "derived": return derived_claims_cli.claims_add_derived(args, ref)
     config = cfg.load_config()
     owner_ref = getattr(args, "claim_owner_ref", None)
+    wt_id: str | None
     if owner_ref:
         rec_path, wt_id, err = _resolve_owner_ref_record_path(owner_ref, config)
         if err:
@@ -585,6 +593,7 @@ def _claims_release(args: argparse.Namespace, ref: str) -> int:
 
 
 def _claims_settle(args: argparse.Namespace, ref: str) -> int:
+    wt_id: str | None
     """Settle one outbound resource claim's disposition by ref."""
     config = cfg.load_config()
     owner_ref = getattr(args, "claim_owner_ref", None)
@@ -673,7 +682,7 @@ def _claims_sweep(args: argparse.Namespace) -> int:
         rec_path = tdir / f"{rec.worktree_id}.yaml"
         verdicts: dict[str, tuple[bool | None, bool | None]] = {}
         for claim in rec.resources:
-            if not claim.is_unsettled or tracking.claim_handoff_reservation(rec, claim):
+            if not claim.is_unsettled or tracking_claims.claim_handoff_reservation(rec, claim):
                 continue
             try:
                 gone = gone_of(claim)
@@ -685,10 +694,10 @@ def _claims_sweep(args: argparse.Namespace) -> int:
                 safe = None
             verdicts[claim.ref] = (gone, safe)
 
-        def _gone(claim):
+        def _gone(claim: tracking_claims.ResourceClaim) -> bool | None:
             return verdicts.get(claim.ref, (None, None))[0]
 
-        def _safe(claim):
+        def _safe(claim: tracking_claims.ResourceClaim) -> bool | None:
             return verdicts.get(claim.ref, (None, None))[1]
 
         if apply:
@@ -701,7 +710,7 @@ def _claims_sweep(args: argparse.Namespace) -> int:
                         return output._json_error(str(exc))
                     output.err(str(exc))
                     return 1
-                flipped = tracking.sweep_abandoned_obligations(
+                flipped = tracking_claims.sweep_abandoned_obligations(
                     rec,
                     gone_of=_gone,
                     safe_of=_safe,
@@ -728,7 +737,7 @@ def _claims_sweep(args: argparse.Namespace) -> int:
                         )
         else:
             before = {c.ref: c.state for c in rec.resources}
-            flipped = tracking.sweep_abandoned_obligations(
+            flipped = tracking_claims.sweep_abandoned_obligations(
                 rec,
                 gone_of=_gone,
                 safe_of=_safe,
@@ -783,7 +792,7 @@ def _claims_reconcile_at_rest(args: argparse.Namespace) -> int:
         if apply:
             with tracking._RecordLock(rec_path, require_sidecar=True):
                 rec = tracking.load_record(rec_path)
-                flipped = tracking.release_at_rest_resources(rec, save=False)
+                flipped = tracking_claims.release_at_rest_resources(rec, save=False)
                 if flipped:
                     tracking.save_record(rec, rec_path)
                     # Same immediate-append, same-record-lock,
@@ -796,7 +805,7 @@ def _claims_reconcile_at_rest(args: argparse.Namespace) -> int:
                         )
         else:
             before = {c.ref: c.state for c in rec.resources}
-            flipped = tracking.release_at_rest_resources(rec, save=False)
+            flipped = tracking_claims.release_at_rest_resources(rec, save=False)
             for c in rec.resources:
                 if c.ref in before:
                     c.state = before[c.ref]
@@ -881,7 +890,7 @@ def _claims_cleanup(args: argparse.Namespace) -> int:
 
 def _claims_orphans(args: argparse.Namespace) -> int:
     """List the durable orphanage -- obligations re-homed by an ``--abandon`` finalize."""
-    orphans = tracking.load_orphaned_obligations()
+    orphans = tracking_claims.load_orphaned_obligations()
     if args.json:
         output._json_output({"orphaned": orphans, "count": len(orphans)})
         return 0
@@ -928,7 +937,7 @@ def _claims_show(args: argparse.Namespace, worktree_id: str | None) -> int:
     ]
     inbound = _core_helper("_dispatch_assigned_tasks", _dispatch_assigned_tasks)(
         rec.execution_machine or config.machine,
-        wt_id,
+        rec.worktree_id,
         rec.worktree_path,
     )
 

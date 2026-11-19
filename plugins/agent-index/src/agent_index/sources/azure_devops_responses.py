@@ -49,3 +49,35 @@ def collection_values(data: Any, *, context: str = "collection response") -> lis
     if not isinstance(values, list) or any(not isinstance(item, dict) for item in values):
         raise ValueError(f"Azure DevOps {context} has invalid records")
     return values
+
+
+def pull_repository_id(pull_request: dict[str, Any]) -> str | None:
+    """Read an optional repository target without accepting an invalid shape."""
+    repository = pull_request.get("repository")
+    if repository is None:
+        return None
+    if not isinstance(repository, dict):
+        raise ValueError("Azure DevOps pull request has an invalid repository")
+    repository_id = repository.get("id")
+    if repository_id is None or repository_id == "":
+        return None
+    if not isinstance(repository_id, str) or not repository_id.strip():
+        raise ValueError("Azure DevOps pull request has an invalid repository identity")
+    return repository_id
+
+
+def pull_comments(data: Any) -> list[dict[str, Any]]:
+    """Flatten recognized thread comments, retaining nullable provider defaults."""
+    comments: list[dict[str, Any]] = []
+    for thread in collection_values(data, context="pull-request threads"):
+        rows = thread.get("comments")
+        if rows is None:
+            continue
+        if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+            raise ValueError("Azure DevOps pull-request thread has invalid comments")
+        if any(
+            row.get("content") is not None and not isinstance(row["content"], str) for row in rows
+        ):
+            raise ValueError("Azure DevOps pull-request comment has invalid content")
+        comments.extend(rows)
+    return comments

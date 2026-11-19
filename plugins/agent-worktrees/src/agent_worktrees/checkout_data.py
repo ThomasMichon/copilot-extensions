@@ -1,12 +1,20 @@
-"""Preserve the documented checkout-local agenda fallback during disposal."""
+"""Preserve checkout-local history and unclassified ignored data during disposal."""
 
 from __future__ import annotations
 
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
+import stat
+import subprocess
+import time
+
+from agent_procutil.owned_process import run_caller_owned
+from plugin_resolve.git import resolve_git
+
+from .git_repository_environment import repository_identity_env
 
 
-def preservation_reason(checkout: str | Path) -> str | None:
-    """Presence or uncertain inspection requires owner-led rescue, not deletion."""
+def preservation_hint(checkout: str | Path) -> str | None:
+    """Cheap known-history hint for advisory list/status projections."""
     try:
         (Path(checkout) / ".effort-agenda").lstat()
     except FileNotFoundError:
@@ -20,3 +28,115 @@ def preservation_reason(checkout: str | Path) -> str | None:
         "checkout-local .effort-agenda requires preservation; retain the checkout "
         "until its agenda owner verifies rescue and explicitly retires the source"
     )
+
+
+def _git_observation(
+    root: Path, git: str, arguments: list[str], environment: dict[str, str],
+    deadline: float, maximum: int,
+) -> str:
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError("checkout data inspection exhausted its budget")
+    result = run_caller_owned(
+        [git, "--literal-pathspecs", *arguments], cwd=root, env=environment,
+        timeout=remaining, max_stdout_bytes=maximum, max_stderr_bytes=8192,
+    )
+    text = result.stdout
+    if result.returncode != 0 or not isinstance(text, str) or len(text) > maximum:
+        raise ValueError("incomplete checkout data observation")
+    return text
+
+
+def _submodule_reason(root: Path, name: str) -> str | None:
+    relative = PurePosixPath(name)
+    if (
+        not relative.parts or relative.is_absolute() or PureWindowsPath(name).drive
+        or "\\" in name or any(ord(char) < 32 for char in name)
+        or any(part in {"..", ".git"} for part in relative.parts)
+    ):
+        return "tracked submodule path cannot be safely inspected; retain the checkout"
+    current = root
+    try:
+        for part in relative.parts:
+            current /= part
+            info = current.lstat()
+            if not stat.S_ISDIR(info.st_mode) or getattr(info, "st_reparse_tag", False):
+                return "tracked submodule data is linked or non-directory; retain the checkout"
+        if next(current.iterdir(), None) is not None:
+            return (
+                "initialized or nonempty submodule requires owner-led data preservation "
+                "and deinitialization before checkout removal"
+            )
+    except FileNotFoundError:
+        return None
+    except OSError:
+        return "cannot inspect tracked submodule data; retain the checkout"
+    return None
+
+
+def preservation_reason(checkout: str | Path) -> str | None:
+    """Fresh, bounded disposal guard; never invoke it from presentation."""
+    root = Path(checkout)
+    if reason := preservation_hint(root):
+        return reason
+    try:
+        info = root.lstat()
+    except FileNotFoundError:
+        return None
+    except OSError:
+        return "cannot inspect checkout data; retain the checkout until its owner reconciles preservation"
+    if not stat.S_ISDIR(info.st_mode) or getattr(info, "st_reparse_tag", False):
+        return "checkout data is linked or non-directory; retain it for its owner"
+    try:
+        if next(root.iterdir(), None) is None:
+            return None
+    except OSError:
+        return "cannot inspect checkout contents; retain them for their producer"
+    try:
+        metadata = (root / ".git").lstat()
+    except OSError:
+        return "nonempty checkout has no inspectable Git root; retain its data"
+    if not (stat.S_ISDIR(metadata.st_mode) or stat.S_ISREG(metadata.st_mode)) or getattr(metadata, "st_reparse_tag", False):
+        return "checkout Git root is linked or non-ordinary; retain its data"
+    try:
+        git = resolve_git()
+        environment = repository_identity_env()
+        environment["GIT_OPTIONAL_LOCKS"] = "0"
+        environment["GIT_NO_LAZY_FETCH"] = "1"
+        deadline = time.monotonic() + 5
+        ignored = _git_observation(
+            root, git, ["ls-files", "--sparse", "--others", "--ignored", "--exclude-standard",
+                        "--directory", "--no-empty-directory", "-z"],
+            environment, deadline, 65536,
+        )
+        if ignored:
+            return (
+                "checkout contains ignored data without completed producer disposition; "
+                "retain it until its artifact owner preserves or explicitly reclaims that data"
+            )
+        index = _git_observation(
+            root, git, ["ls-files", "--sparse", "--format=%(objectmode)%x09%(path)", "-z"],
+            environment, deadline, 32 * 1024 * 1024,
+        )
+        if index and not index.endswith("\0"):
+            raise ValueError("incomplete checkout index observation")
+        submodules = 0
+        for entry in index.split("\0"):
+            if not entry:
+                continue
+            if time.monotonic() >= deadline:
+                raise TimeoutError("checkout index inspection exhausted its budget")
+            mode, separator, name = entry.partition("\t")
+            if not separator or mode not in {"100644", "100755", "120000", "160000", "040000"}:
+                raise ValueError("unrecognized checkout index entry")
+            if mode == "040000":
+                return "sparse index contains uninspected data; retain the checkout"
+            if mode == "160000":
+                submodules += 1
+                if submodules > 256:
+                    return "tracked submodule inspection exceeds its bound; retain the checkout"
+                if reason := _submodule_reason(root, name):
+                    return reason
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+        return "cannot classify ignored checkout data; retain it for its producer"
+    return None
