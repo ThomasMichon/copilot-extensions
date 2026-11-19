@@ -12,15 +12,14 @@ from .queue_common import PROGRESS_SUMMARY_MAX, RunWaiterWakeOperation, Task, _c
 from .queue_records import Status, TaskError
 from .queue_execution_wakes import wake_custody_clear_sql
 from .queue_run_waiter_transition_cleanup import CLAIM_RELEASE_SENDER
-from .queue_delegated_waiters import DelegatedWaiterBindingMixin
+from .queue_run_waiter_arming import QueueRunWaiterArmingMixin
 from .queue_run_waiter_records import run_waiter_from_row, select_waiter_row
 from .queue_feed_preparation import (
     FeedWaiterAdmission, require_feed_preparation, require_feed_waiter_reconciliation,
 )
-from .queue_feed_attempts import require_feed_arm
 
 
-class QueueRunWaitersMixin(DelegatedWaiterBindingMixin):
+class QueueRunWaitersMixin(QueueRunWaiterArmingMixin):
     """Detached-run waiter and event-note helpers for :class:`TaskQueue`."""
 
     if TYPE_CHECKING:
@@ -178,60 +177,6 @@ class QueueRunWaitersMixin(DelegatedWaiterBindingMixin):
             "feed_admission": _feed_admission.record() if _feed_admission is not None else None,
             **({"kind": kind, "delegation": delegation} if kind == "delegated" else {}),
         }
-
-    def arm_run_waiter(
-        self,
-        task_id: str,
-        *,
-        generation: int,
-        pid: int | None = None,
-        host: str | None = None,
-        start_token: str | None = None,
-        kind: str = "process",
-        delegation: dict[str, Any] | None = None,
-        now: float | None = None,
-    ) -> dict[str, Any] | None:
-        ts = self._now(now)
-        with self._connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            row = self._select_waiter_row(conn, task_id, states=("preparing",), generation=generation)
-            if row is None:
-                conn.execute("COMMIT")
-                return None
-            waiter = self._run_waiter_from_row(row)
-            self._validate_waiter_arm(waiter, kind=kind, delegation=delegation, pid=pid,
-                                      host=host, start_token=start_token)
-            task = self._fetch(conn, task_id)
-            if not self._run_waiter_matches_task(waiter, task):
-                conn.execute("COMMIT")
-                return None
-            require_feed_arm(conn, task, waiter, delegation, now=self._now(now))
-            conn.execute(
-                "UPDATE run_waiters SET state = 'active', pid = ?, host = ?, start_token = ?,"
-                " updated_at = ? WHERE id = ? AND state = 'preparing'",
-                (int(pid or 0), host if kind == "process" else waiter["host"],
-                 start_token, ts, row["id"]),
-            )
-            if delegation is not None:
-                conn.execute("UPDATE run_waiters SET delegation_json = ? WHERE id = ?",
-                             (json.dumps(delegation), row["id"]))
-            if task is not None:
-                self._audit(
-                    conn,
-                    task_id,
-                    ts=ts,
-                    from_status=task.status,
-                    to_status=task.status,
-                    worker=task.owner,
-                    note=f"run waiter armed (generation {generation})",
-                )
-            armed = conn.execute("SELECT * FROM run_waiters WHERE id = ?", (row["id"],)).fetchone()
-            if waiter["delegation"] is not None and "feed" in waiter["delegation"]:
-                require_feed_arm(
-                    conn, self._fetch(conn, task_id), waiter, delegation, now=self._now(now),
-                )
-            conn.execute("COMMIT")
-        return self._run_waiter_from_row(armed)
 
     def register_run_waiter(
         self,
