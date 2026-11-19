@@ -163,6 +163,86 @@ def test_point_vector_interruption_keeps_existing_dirty_recovery_boundary(
     assert snapshot(config.data_dir) == before
 
 
+@pytest.mark.parametrize("foreign_writer_connection", [False, True])
+def test_point_vectors_refuse_mismatched_store_and_active_writer_connections(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, foreign_writer_connection: bool,
+) -> None:
+    monkeypatch.setenv("AGENT_INDEX_STORE_LAYOUT", LAYOUT)
+    profile = ModelProfile("small", "fixture", dim=2)
+    scope = claim().scope
+    config = IndexConfig(data_dir=tmp_path / "first", model_profiles={"small": profile})
+    first = initialize_source_store(config, point_scope=scope)
+    second_config = replace(config, data_dir=tmp_path / "second")
+    second = initialize_source_store(second_config, point_scope=scope)
+    domain = first._source_domain
+    assert domain is not None
+    owner = VectorTable(
+        (first if foreign_writer_connection else second).content_store.db,
+        table_name=profile.table_name, dim=2, source_domain=domain,
+        content_table=config.content_table,
+    )
+    active = (second if foreign_writer_connection else first).content_store.db
+    item = Chunk("text", "one.md", "text", "markdown", 1, 1, scope[1])
+    with domain._write(active, point_scope=scope):
+        before_first, before_second = snapshot(config.data_dir), snapshot(second_config.data_dir)
+        for chunks, vectors in (
+            ([item], np.ones((1, 2), dtype=np.float32)),
+            ([], np.zeros((0, 2), dtype=np.float32)),
+        ):
+            with pytest.raises(SourceLayoutError, match="connection differs"):
+                owner.upsert(chunks, vectors, bounded_input=True, point_scope=scope)
+            assert snapshot(config.data_dir) == before_first
+            assert snapshot(second_config.data_dir) == before_second
+
+
+@pytest.mark.parametrize("binding", [
+    "collision", "missing-vector", "missing-content", "wrong-vector-schema", "wrong-content-schema",
+])
+def test_point_vectors_refuse_unprepared_or_colliding_table_bindings_before_effects(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, binding: str,
+) -> None:
+    monkeypatch.setenv("AGENT_INDEX_STORE_LAYOUT", LAYOUT)
+    profile = ModelProfile("small", "fixture", dim=2)
+    sibling = ModelProfile("sibling", "fixture", dim=2, table_name="vectors_sibling")
+    config = IndexConfig(
+        data_dir=tmp_path / "point", model_profiles={"small": profile, "sibling": sibling},
+    )
+    scope = claim().scope
+    store = initialize_source_store(config, point_scope=scope)
+    domain = store._source_domain
+    assert domain is not None
+    item = Chunk("retain canonical", "one.md", "text", "markdown", 1, 1, scope[1])
+    with domain._write(store.content_store.db, point_scope=scope):
+        domain.effect("fixture-canonical-seed")
+        store.content_store._get_or_create_table().add([{**content_record(item), "indexed_at": 0.0}])
+    prepare_ingestion_indices(store, max_rows=1, point_scope=scope)
+    if binding in ("collision", "missing-vector"):
+        store.register_model(ModelProfile(
+            "late", "fixture", dim=2,
+            table_name=config.content_table if binding == "collision" else "unprepared_vectors",
+        ))
+        owner = store.get_vector_table("late")
+    else:
+        owner = VectorTable(
+            store.content_store.db, table_name=profile.table_name,
+            dim=3 if binding == "wrong-vector-schema" else 2, source_domain=domain,
+            content_table=(
+                "unprepared_content" if binding == "missing-content"
+                else sibling.table_name if binding == "wrong-content-schema"
+                else config.content_table
+            ),
+        )
+    with domain._write(store.content_store.db, point_scope=scope):
+        before = snapshot(config.data_dir)
+        for chunks, vectors in (
+            ([item], np.ones((1, owner.dim), dtype=np.float32)),
+            ([], np.zeros((0, owner.dim), dtype=np.float32)),
+        ):
+            with pytest.raises(SourceLayoutError, match="(?:distinct prepared|schema is incompatible)"):
+                owner.upsert(chunks, vectors, bounded_input=True, point_scope=scope)
+            assert snapshot(config.data_dir) == before
+
+
 def test_cold_point_binding_reopens_without_enabling_default_stores(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

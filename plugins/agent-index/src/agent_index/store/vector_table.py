@@ -13,6 +13,7 @@ import time
 from contextlib import nullcontext
 from dataclasses import dataclass
 from importlib import import_module
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
@@ -109,6 +110,7 @@ class VectorTable:
             with domain.read(self._db, point_scope=point_scope):
                 if any(chunk.source != point_scope[1] for chunk in chunks):
                     raise SourceLayoutError("Vector input is outside its selected family")
+                self._require_point_binding()
         if not (bounded_provenance or bounded_input):
             return self._upsert(chunks, vectors)
         from .scalar_index import ScalarIndexPreparationRequired as ChunkIdIndexPreparationRequired
@@ -147,6 +149,23 @@ class VectorTable:
             else:
                 return self._write_vectors(chunks, vectors, canonical=canonical)
         raise refusal
+
+    def _require_point_binding(self) -> None:
+        from .content_store import _CONTENT_SCHEMA
+
+        domain = self._source_domain
+        assert domain is not None
+        for db in (self._db, getattr(domain._local, "db", None)):
+            uri = getattr(db, "uri", None)
+            if not isinstance(uri, (str, Path)) or Path(uri).resolve() != domain.path.resolve():
+                raise SourceLayoutError("Point vector connection differs from its owning source writer")
+        names = {self._table_name, self._content_table}
+        if (len(names) != 2 or not names <= set(self._db.list_tables().tables)
+                or not names <= domain.receipt()["versions"].keys()):
+            raise SourceLayoutError("Point vectors require distinct prepared content and vector tables")
+        if (not self._db.open_table(self._content_table).schema.equals(_CONTENT_SCHEMA)
+                or not self._db.open_table(self._table_name).schema.equals(self._schema)):
+            raise SourceLayoutError("Point vector content or model schema is incompatible")
 
     @source_write
     def _upsert(self, chunks: list[Chunk], vectors: np.ndarray[Any, Any]) -> int:

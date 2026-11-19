@@ -88,7 +88,9 @@ matching source writer. They reject another family or scope, including empty
 batches, and compare every canonical embedding-input field through the prepared
 chunk-ID index before reusing the existing vector mutation path. They never
 acquire outer point-writer ownership, prepare indices or mutate canonical
-content. An interrupted vector effect retains the existing dirty recovery
+content. Both the vector and active-writer connections must resolve to the
+selected domain; content/vector tables must already be prepared, have distinct
+names and match their expected schemas. An interrupted vector effect retains the existing dirty recovery
 boundary. Default vector writes and reads remain refused; selected reads still
 require their explicit prepared-index path.
 
