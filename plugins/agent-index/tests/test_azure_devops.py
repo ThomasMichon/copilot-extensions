@@ -706,9 +706,9 @@ def test_ado_parsed_work_item_counts_precede_body_refusal_and_query_deduplicatio
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("/wiql"):
             return _json_response(200, {
-                "workItems": [{"id": 1}, {"id": 1}, None],
+                "workItems": [{"id": 1}, {"id": 1}],
                 "workItemRelations": [
-                    {"target": {"id": 2}}, {"target": None}, None,
+                    {"target": {"id": 2}}, {"target": None},
                 ],
             })
         if request.url.path.endswith("/workitemsbatch"):
@@ -802,7 +802,15 @@ def test_ado_parsed_empty_pull_pages_differ_from_unrecognized_envelopes(
 
     @measure_reindex
     def run() -> dict[str, object]:
-        if comments:
+        if payload == {}:
+            with pytest.raises(ValueError, match="Azure DevOps"):
+                if comments:
+                    connector._pull_request_comments({
+                        "pullRequestId": 1, "repository": {"id": "repo-1"},
+                    })
+                else:
+                    list(connector._iter_pull_requests())
+        elif comments:
             assert connector._pull_request_comments({
                 "pullRequestId": 1, "repository": {"id": "repo-1"},
             }) == []
@@ -831,7 +839,11 @@ def test_ado_parsed_empty_query_pages_differ_from_unrecognized_envelopes(
 
     @measure_reindex
     def run() -> dict[str, object]:
-        assert connector._work_item_ids() == []
+        if payload == {}:
+            with pytest.raises(ValueError, match="Azure DevOps"):
+                connector._work_item_ids()
+        else:
+            assert connector._work_item_ids() == []
         return {}
 
     counts = run()["work_counts"]
