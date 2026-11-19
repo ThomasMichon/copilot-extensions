@@ -411,6 +411,10 @@ Service IO remains outside SQLite. Recording a recovered registration receipt
 does not require an unchanged task: an uncertain remote effect still belongs
 to its original native row. Arming that receipt rechecks the same custody,
 wake and deadline guards and requires its retained attempt/registration.
+It rechecks admission immediately before the existing transaction commits;
+crossing the original deadline during the tentative transition rolls it back.
+Nonfinite clocks cannot admit a feed attempt or arm. The task is re-read under
+that same write lock rather than trusting its earlier checked snapshot.
 A changed task can therefore retain a cancellation/reconciliation obligation
 without becoming active or waking. These library guards do not implement
 subscription transmission, cancellation, expiry completion or ACK.

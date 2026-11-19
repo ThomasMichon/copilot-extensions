@@ -226,6 +226,10 @@ class QueueRunWaitersMixin(DelegatedWaiterBindingMixin):
                     note=f"run waiter armed (generation {generation})",
                 )
             armed = conn.execute("SELECT * FROM run_waiters WHERE id = ?", (row["id"],)).fetchone()
+            if waiter["delegation"] is not None and "feed" in waiter["delegation"]:
+                require_feed_arm(
+                    conn, self._fetch(conn, task_id), waiter, delegation, now=self._now(now),
+                )
             conn.execute("COMMIT")
         return self._run_waiter_from_row(armed)
 
