@@ -1083,6 +1083,41 @@ def test_fleet_spawn_threads_project_before_embody(monkeypatch):
     assert remote_cmd.index("--project") < remote_cmd.index("embody")
 
 
+def _probe_out(cmd):
+    """The SSH fallback first probes ``command -v agent-bridge`` on the host."""
+    return "/usr/bin/agent-bridge\n" if cmd[-1].startswith("command -v") else ""
+
+
+def test_fleet_headless_ssh_fallback_refuses_non_posix_host(monkeypatch):
+    """A Windows OpenSSH host passes fleet liveness for the carrier path, but
+    its shell would split the POSIX fallback command line: ``command -v`` exits
+    0 with no output under PowerShell, so the fallback refuses before create."""
+    from agent_dispatch import bridge_remote
+
+    class _UnavailableClient:
+        def create_session(self, *args, **kwargs):
+            raise bridge_remote.RemoteBridgeUnavailable("no local carrier")
+
+    monkeypatch.setattr(
+        embody.bridge_remote, "LocalBridgeRemoteClient", _UnavailableClient
+    )
+    monkeypatch.setattr(embody.shutil, "which", lambda _n: "/usr/bin/ssh")
+    calls = []
+    monkeypatch.setattr(
+        embody, "run_ssh_command",
+        lambda cmd, **kw: (calls.append(cmd)
+                           or subprocess.CompletedProcess(cmd, 0, "", "")),
+    )
+
+    with pytest.raises(embody.EmbodyUnavailable):
+        embody.spawn_fleet_headless_worker(
+            "win-host", "t1", origin="coord", owner="fleet-t1-abc",
+            worker_id="fleet-t1-abc",
+        )
+    assert len(calls) == 1
+    assert calls[0][-1] == "command -v agent-bridge"
+
+
 def test_fleet_headless_ssh_fallback_passes_caller(monkeypatch):
     """copilot-extensions#2202: the SSH fallback (no local carrier capability)
     must still stamp --caller, mirroring the primary LocalBridgeRemoteClient
@@ -1103,7 +1138,7 @@ def test_fleet_headless_ssh_fallback_passes_caller(monkeypatch):
     monkeypatch.setattr(
         embody, "run_ssh_command",
         lambda cmd, **kw: (captured.__setitem__("cmd", cmd)
-                           or subprocess.CompletedProcess(cmd, 0, "", "")),
+                           or subprocess.CompletedProcess(cmd, 0, _probe_out(cmd), "")),
     )
 
     embody.spawn_fleet_headless_worker(
@@ -1139,7 +1174,7 @@ def test_fleet_headless_falls_back_to_ssh_on_far_side_426(monkeypatch):
     monkeypatch.setattr(
         embody, "run_ssh_command",
         lambda cmd, **kw: (captured.__setitem__("cmd", cmd)
-                           or subprocess.CompletedProcess(cmd, 0, "", "")),
+                           or subprocess.CompletedProcess(cmd, 0, _probe_out(cmd), "")),
     )
 
     result = embody.spawn_fleet_headless_worker(

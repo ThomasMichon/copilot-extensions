@@ -43,6 +43,7 @@ def _fake_spawn(record: list | None = None, *, ok: bool = True, rc: int = 0):
         origin,
         owner,
         worker_id,
+        machine=None,
         driver,
         project=None,
         repo=None,
@@ -52,7 +53,8 @@ def _fake_spawn(record: list | None = None, *, ok: bool = True, rc: int = 0):
         if record is not None:
             record.append(
                 {"host": host, "task_id": task_id, "origin": origin, "owner": owner,
-                 "project": project, "repo": repo, "all_repos": all_repos}
+                 "machine": machine, "project": project, "repo": repo,
+                 "all_repos": all_repos}
             )
         stdout = '{"worktree_id": "wt-x", "session_id": "sess-x"}' if ok else ""
         return subprocess.CompletedProcess(
@@ -78,6 +80,7 @@ def _fake_headless_spawn(record: list | None = None, *, ok: bool = True, rc: int
         origin,
         owner,
         worker_id,
+        machine=None,
         agent,
         charter=None,
         repo=None,
@@ -86,7 +89,8 @@ def _fake_headless_spawn(record: list | None = None, *, ok: bool = True, rc: int
         if record is not None:
             record.append(
                 {"host": host, "task_id": task_id, "origin": origin, "owner": owner,
-                 "agent": agent, "repo": repo, "all_repos": all_repos}
+                 "machine": machine, "agent": agent, "repo": repo,
+                 "all_repos": all_repos}
             )
         return subprocess.CompletedProcess(
             args=["ssh"], returncode=rc, stdout="", stderr="" if ok else "boom"
@@ -159,22 +163,64 @@ def test_all_asleep_pool_selects_nothing():
     assert f.can_spawn({"id": "t1"}) is False
 
 
-def test_target_machine_affinity_tried_first():
+def test_target_machine_pin_runs_only_on_that_host():
     seen = []
 
     def live(h):
         seen.append(h)
-        return True  # first probed is chosen
+        return True
 
     f = fleet.FleetSpawner(["a", "b", "c"], origin="orig", liveness=live)
     assert f.select({"id": "t1", "target_machine": "c"}) == "c"
-    assert seen[0] == "c"  # the pinned host was probed first
+    assert seen == ["c"]  # no other pool host is probed for a pinned task
 
 
-def test_target_machine_outside_pool_ignored():
+def test_asleep_pinned_host_defers_without_fallback():
+    seen = []
+
+    def live(h):
+        seen.append(h)
+        return h != "c"
+
+    f = fleet.FleetSpawner(["a", "b", "c"], origin="orig", liveness=live)
+    # another host could not claim a task pinned to 'c', so wait for 'c'
+    assert f.select({"id": "t1", "target_machine": "c"}) is None
+    assert f.can_spawn({"id": "t1", "target_machine": "c"}) is False
+    assert seen == ["c"]
+
+
+def test_target_machine_pin_matches_pool_host_case_insensitively():
+    f = fleet.FleetSpawner(["host-a", "Host-B"], origin="orig", liveness=lambda h: True)
+    assert f.select({"id": "t1", "target_machine": "host-b"}) == "Host-B"
+
+
+def test_target_machine_outside_pool_has_no_candidate():
     f = fleet.FleetSpawner(["a", "b"], origin="orig", liveness=lambda h: True)
-    # 'z' is not in the pool -> normal config order, first host wins
-    assert f.select({"id": "t1", "target_machine": "z"}) == "a"
+    # 'z' is not in the pool -> no fleet host could claim the pinned task
+    assert f.select({"id": "t1", "target_machine": "z"}) is None
+    ok, handle = f({"id": "t1", "target_machine": "z"})
+    assert ok is False
+    assert handle.get("deferred") is True
+
+
+def test_machine_excludes_skip_that_host():
+    f = fleet.FleetSpawner(["host-a", "host-b"], origin="orig", liveness=lambda h: True)
+    # e.g. after `yield --exclude-self machine --machine host-a`
+    assert f.select({"id": "t1", "excludes": ["machine:host-a"]}) == "host-b"
+    # the queue row stores selectors as JSON text
+    assert f.select({"id": "t2", "excludes": '["machine:host-a"]'}) == "host-b"
+
+
+def test_machine_requires_limit_candidates():
+    f = fleet.FleetSpawner(["host-a", "host-b"], origin="orig", liveness=lambda h: True)
+    assert f.select({"id": "t1", "requires": ["machine:host-b", "os:linux"]}) == "host-b"
+    assert f.select({"id": "t2", "requires": ["machine:host-z"]}) is None
+
+
+def test_excluded_pinned_host_has_no_candidate():
+    f = fleet.FleetSpawner(["host-a", "host-b"], origin="orig", liveness=lambda h: True)
+    task = {"id": "t1", "target_machine": "host-a", "excludes": ["machine:host-a"]}
+    assert f.select(task) is None
 
 
 def test_liveness_result_is_cached_within_ttl():
@@ -234,6 +280,8 @@ def test_call_success_builds_handle_with_host_and_owner():
     # the same synthetic owner was handed to the remote body
     assert rec[0]["owner"] == handle["owner"]
     assert rec[0]["host"] == "b"
+    # the body is told which host it runs on, for --machine on claim/yield
+    assert rec[0]["machine"] == "b"
     assert rec[0]["origin"] == "orig"
     # the task's lane was resolved to a project name for the CWD-neutral body
     assert rec[0]["project"] == "widgets"
@@ -332,6 +380,26 @@ def test_fleet_seed_carries_explicit_all_repos_claim_mode():
     ) in seed
 
 
+def test_fleet_seed_carries_executing_machine_on_claim_and_yield():
+    seed = embody.fleet_autopilot_worker_prompt(
+        "t42", origin="brain", owner="fleet-t42-abc123",
+        worker_id="fleet-t42-abc123", machine="host-b",
+    )
+    assert (
+        "ssh brain agent-dispatch claim --task t42 --worker fleet-t42-abc123 "
+        "--evaluation --machine host-b`"
+    ) in seed
+    assert (
+        "ssh brain agent-dispatch yield t42 fleet-t42-abc123 --exclude-self "
+        "machine --machine host-b --note"
+    ) in seed
+
+    unpinned = embody.fleet_autopilot_worker_prompt(
+        "t42", origin="brain", owner="fleet-t42-abc123", worker_id="fleet-t42-abc123"
+    )
+    assert "--machine" not in unpinned
+
+
 def test_fleet_seed_duplicate_check_sweep_shares_the_claim_lane_scope():
     # dev-cycle regression: the duplicate-check `list` sweep must respect the
     # same repo scoping as the claim step, not silently sweep every lane on
@@ -420,6 +488,61 @@ def test_host_can_bridge_probes_agent_bridge(monkeypatch):
     assert captured["kwargs"]["timeout"] == 8.0
 
 
+def _probe_runner(results):
+    """A fake ``run_ssh_command`` returning queued ``(rc, stdout)`` per probe."""
+    calls = []
+
+    def fake_run(cmd, **kw):
+        calls.append((cmd[-1], kw.get("timeout")))
+        rc, stdout = results[len(calls) - 1]
+        return subprocess.CompletedProcess(cmd, rc, stdout=stdout, stderr="")
+
+    return fake_run, calls
+
+
+def test_probe_rejects_empty_output_from_powershell_get_command(monkeypatch):
+    """PowerShell turns ``command -v x`` into ``Get-Command``: exit 0, no output
+    for a missing binary. That must not count as the binary being present."""
+    fake_run, calls = _probe_runner([(0, ""), (1, "")])
+    monkeypatch.setattr(fleet.shutil, "which", lambda _n: "/usr/bin/ssh")
+    monkeypatch.setattr(fleet, "run_ssh_command", fake_run)
+    assert fleet.host_can_embody("win-host") is False
+    assert [c for c, _ in calls] == ["command -v agent-worktrees"]
+
+
+def test_host_can_bridge_falls_back_to_where_exe_on_windows(monkeypatch):
+    fake_run, calls = _probe_runner(
+        [(1, "'command' is not recognized"), (0, "C:\\bin\\agent-bridge.cmd\r\n")]
+    )
+    monkeypatch.setattr(fleet.shutil, "which", lambda _n: "/usr/bin/ssh")
+    monkeypatch.setattr(fleet, "run_ssh_command", fake_run)
+    assert fleet.host_can_bridge("win-host") is True
+    assert [c for c, _ in calls] == [
+        "command -v agent-bridge", "where.exe agent-bridge",
+    ]
+    # the fallback shares the original budget rather than doubling it
+    assert calls[0][1] == 8.0
+    assert 0 < calls[1][1] <= 8.0
+
+
+def test_host_can_bridge_skips_fallback_on_ssh_failure(monkeypatch):
+    fake_run, calls = _probe_runner([(255, "")])
+    monkeypatch.setattr(fleet.shutil, "which", lambda _n: "/usr/bin/ssh")
+    monkeypatch.setattr(fleet, "run_ssh_command", fake_run)
+    assert fleet.host_can_bridge("asleep-host") is False
+    assert len(calls) == 1
+
+
+def test_host_can_embody_has_no_windows_fallback(monkeypatch):
+    """A CLI-embodied body runs a POSIX remote command, so only POSIX hosts
+    qualify; ``where.exe`` is never tried."""
+    fake_run, calls = _probe_runner([(1, ""), (0, "C:\\x.cmd")])
+    monkeypatch.setattr(fleet.shutil, "which", lambda _n: "/usr/bin/ssh")
+    monkeypatch.setattr(fleet, "run_ssh_command", fake_run)
+    assert fleet.host_can_embody("win-host") is False
+    assert len(calls) == 1
+
+
 def test_spawn_fleet_headless_worker_builds_ssh_agent_bridge_argv(monkeypatch):
     captured = {}
 
@@ -427,7 +550,8 @@ def test_spawn_fleet_headless_worker_builds_ssh_agent_bridge_argv(monkeypatch):
         import subprocess
 
         captured["cmd"] = cmd
-        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        out = "/usr/bin/agent-bridge\n" if cmd[-1].startswith("command -v") else ""
+        return subprocess.CompletedProcess(cmd, 0, stdout=out, stderr="")
 
     def unavailable_client():
         raise embody.bridge_remote.RemoteBridgeUnavailable()
@@ -698,6 +822,7 @@ def test_headless_call_encodes_fleet_body_recovery_handle():
         origin,
         owner,
         worker_id,
+        machine=None,
         agent,
         charter=None,
         repo=None,
@@ -730,6 +855,7 @@ def test_headless_call_without_session_id_falls_back_to_owner():
         origin,
         owner,
         worker_id,
+        machine=None,
         agent,
         charter=None,
         repo=None,
@@ -773,6 +899,7 @@ def test_headless_call_routes_agent_and_records_no_worktree():
     # the configured agent-bridge agent was handed to the headless body
     assert rec[0]["agent"] == "review-worker"
     assert rec[0]["owner"] == handle["owner"]
+    assert rec[0]["machine"] == "a"
 
 
 def test_headless_call_reports_remote_failure():

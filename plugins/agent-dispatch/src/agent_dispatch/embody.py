@@ -534,6 +534,7 @@ def spawn_fleet_embodied_worker(
     origin: str,
     owner: str,
     worker_id: str,
+    machine: str | None = None,
     driver: str = DEFAULT_DRIVER,
     project: str | None = None,
     repo: str | None = None,
@@ -569,6 +570,7 @@ def spawn_fleet_embodied_worker(
         worker_id=worker_id,
         repo=repo,
         all_repos=all_repos,
+        machine=machine,
         **({"route": route} if route else {}),
     )
     remote_argv = ["agent-worktrees"]
@@ -605,6 +607,7 @@ def spawn_fleet_headless_worker(
     origin: str,
     owner: str,
     worker_id: str,
+    machine: str | None = None,
     agent: str = DEFAULT_HEADLESS_AGENT,
     charter: str | None = None,
     repo: str | None = None,
@@ -632,8 +635,11 @@ def spawn_fleet_headless_worker(
     bridge daemon, which owns it independently of the command transport.
 
     If carrier capability is absent, missing local ``ssh`` raises
-    :class:`EmbodyUnavailable`; a fallback host lacking ``agent-bridge`` surfaces
-    as a non-zero exit (the caller fails the reservation).
+    :class:`EmbodyUnavailable`. The SSH fallback is a POSIX remote command, so
+    it first probes ``command -v agent-bridge``; a host without a POSIX shell
+    that resolves ``agent-bridge`` (for example a Windows OpenSSH host) raises
+    :class:`EmbodyUnavailable` instead of receiving a command its shell would
+    split. A non-zero create exit still fails the reservation.
     """
     host = bridge_remote.normalize_host(host)
     seed = fleet_autopilot_worker_prompt(
@@ -643,6 +649,7 @@ def spawn_fleet_headless_worker(
         worker_id=worker_id,
         repo=repo,
         all_repos=all_repos,
+        machine=machine,
         **({"route": route} if route else {}),
     )
     try:
@@ -680,6 +687,24 @@ def spawn_fleet_headless_worker(
     exe = shutil.which("ssh")
     if exe is None:
         raise EmbodyUnavailable("ssh CLI not found on PATH (needed for fleet dispatch)")
+    ssh_host = host.strip().lower()
+    # The fallback below is a POSIX-quoted remote command line. Fleet liveness
+    # also admits Windows OpenSSH hosts (for the carrier path), whose cmd.exe or
+    # PowerShell login shell would split that line, so confirm a POSIX shell
+    # that resolves agent-bridge before sending it.
+    try:
+        probe = run_ssh_command(
+            [exe, "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", ssh_host,
+             "command -v agent-bridge"],
+            timeout=8.0,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise EmbodyUnavailable(f"pool host {ssh_host!r} is unreachable over ssh") from exc
+    if probe.returncode != 0 or not (probe.stdout or "").strip():
+        raise EmbodyUnavailable(
+            f"pool host {ssh_host!r} has no POSIX shell with agent-bridge; without "
+            "the local Agent Bridge carrier a headless body cannot start there"
+        )
     # `--json` (a global flag, before the subcommand) makes `create --no-wait`
     # emit the created session_id as JSON, so the caller can record a recovery
     # handle (the pool host's agent-bridge session id) for liveness-gated

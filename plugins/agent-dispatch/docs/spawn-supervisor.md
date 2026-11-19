@@ -1295,15 +1295,31 @@ Three properties define it:
   lifecycle (`claim`/`start`/`progress`/`complete`) **back to the origin over the
   existing bidirectional SSH mesh** — `ssh <origin> agent-dispatch <verb> …`,
   under a supervisor-assigned **synthetic owner** (the body's own worktree can't
-  identify it to the origin). This introduces **no new network bind** on the
+  identify it to the origin). Because `ssh <origin>` would resolve the origin's
+  machine identity, the body passes `--machine <pool-host>` on `claim` and
+  `yield`, so pins, `machine:` selectors and `--exclude-self machine` apply to
+  the host that runs the work. This introduces **no new network bind** on the
   origin: its control API never leaves loopback. The body runs **detached** on the
   pool host, so an SSH blip after launch never kills a running job.
 - **Liveness-gated selection.** A pool host is a candidate only when it is
   reachable over SSH **and** has `agent-worktrees` (a single cheap
   `command -v agent-worktrees` probe, cached briefly) — or, in **headless-fleet**
-  mode, `agent-bridge` (the binary a headless body embodies through). The first
-  live candidate by policy (config order; a task's `target_machine`, if in the
-  pool, is tried first) is chosen.
+  mode, `agent-bridge` (the binary a headless body embodies through). A probe
+  counts only when it exits 0 **and** prints the resolved path (PowerShell's
+  `Get-Command` exits 0 with no output for a missing binary). The headless probe
+  also tries `where.exe agent-bridge` within the same timeout, so a Windows
+  OpenSSH host qualifies; the CLI-embody probe stays POSIX-only because its
+  remote command is a POSIX shell line. An unpinned task takes the first live
+  pool host in config order. A task pinned to a `target_machine` runs **only**
+  on that pool host (matched case-insensitively, like the claim): an asleep
+  pinned host defers the task, and a pin outside the pool has no fleet
+  candidate, because a body on any other host could not claim it. Selection
+  also skips a host named by a `machine:` entry in the task's `excludes` and,
+  when `requires` names `machine:` entries, any host they do not name (exact
+  token match, as in the claim). A headless body on a Windows OpenSSH host needs
+  the local Agent Bridge carrier: the SSH fallback sends a POSIX command line, so
+  it first probes `command -v agent-bridge` and refuses a host without a POSIX
+  shell instead of sending a command that shell would split.
 - **Defer, don't fail, when the pool is asleep.** `FleetSpawner.can_spawn` is wired
   as the supervisor's **`capacity_gate`** — an optional pre-reservation check
   (default no-op → the local path is unchanged). When no host is live, the task is

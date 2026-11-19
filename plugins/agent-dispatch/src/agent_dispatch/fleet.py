@@ -17,7 +17,9 @@ The design (Model C) keeps the strong guarantee where it belongs:
 - **Liveness-gated selection.** A pool host is a candidate only when it is
   reachable over SSH **and** has ``agent-worktrees`` (or ``agent-bridge`` in
   headless-fleet mode) -- so it can actually embody. The first live candidate by
-  policy (config order) is chosen.
+  policy (config order) is chosen. A task pinned to a ``target_machine`` runs
+  only on that pool host: an asleep pinned host defers the task, and a pin
+  outside the pool is never served by this fleet (its body could not claim it).
 - **Defer, don't fail, when the pool is asleep.** :meth:`FleetSpawner.can_spawn`
   is the supervisor's **capacity gate**: when no host is live, the task is skipped
   for this cycle **without a reservation**, so an all-asleep pool never burns
@@ -30,6 +32,7 @@ aliases + task ids.
 
 from __future__ import annotations
 
+import json
 import logging
 import shutil
 import subprocess
@@ -40,6 +43,7 @@ from collections.abc import Callable, Sequence
 from . import embody
 from .embody_prompts import validate_fleet_route
 from .procutil import run_ssh_command
+from .queue_common import machine_matches
 
 log = logging.getLogger("agent-dispatch.fleet")
 
@@ -76,29 +80,68 @@ def host_can_bridge(host: str, *, timeout: float = 8.0) -> bool:
     ``agent-worktrees``, so this checks for that binary instead. Same fail-closed
     semantics as :func:`host_can_embody`: any failure returns False so an asleep
     or unprovisioned host is not a candidate.
+
+    A headless body is created through the Bridge carrier rather than a POSIX
+    remote command line, so this probe also accepts a Windows OpenSSH host whose
+    login shell is ``cmd.exe`` or PowerShell (see :func:`_host_has_command`).
     """
-    return _host_has_command(host, "agent-bridge", timeout=timeout)
+    return _host_has_command(host, "agent-bridge", timeout=timeout, windows=True)
 
 
-def _host_has_command(host: str, command: str, *, timeout: float = 8.0) -> bool:
-    """SSH to ``host`` (SSH alias) and check ``command -v <command>``.
+def _host_has_command(
+    host: str, command: str, *, timeout: float = 8.0, windows: bool = False
+) -> bool:
+    """SSH to ``host`` (SSH alias) and check that ``command`` resolves there.
 
     The shared reachability + capability probe behind :func:`host_can_embody` and
     :func:`host_can_bridge`. ``BatchMode`` so a missing key fails fast; any
     failure (ssh absent, unreachable, timeout, or missing binary) returns False.
+
+    The POSIX probe is ``command -v <command>``; it counts only when it exits 0
+    **and** prints the resolved command. PowerShell expands an unknown
+    ``command`` to ``Get-Command``, which exits 0 with no output for a missing
+    binary, so the output check stops that false positive. With ``windows``, a
+    host that fails the POSIX probe (other than an SSH-level failure, exit 255)
+    gets one ``where.exe <command>`` probe within the same ``timeout`` budget;
+    ``where.exe`` behaves the same under ``cmd.exe`` and PowerShell.
     """
     exe = shutil.which("ssh")
     if exe is None:
         return False
-    cmd = [
-        exe, "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
-        _ssh_alias(host), f"command -v {command}",
-    ]
-    try:
-        result = run_ssh_command(cmd, timeout=timeout)
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return result.returncode == 0
+    probes = [f"command -v {command}"]
+    if windows:
+        probes.append(f"where.exe {command}")
+    deadline = time.monotonic() + timeout
+    budget = timeout
+    for probe in probes:
+        cmd = [
+            exe, "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
+            _ssh_alias(host), probe,
+        ]
+        try:
+            result = run_ssh_command(cmd, timeout=budget)
+        except (OSError, subprocess.SubprocessError):
+            return False
+        if result.returncode == 0 and (result.stdout or "").strip():
+            return True
+        if result.returncode == 255:
+            return False
+        budget = deadline - time.monotonic()
+        if budget <= 0:
+            return False
+    return False
+
+
+def _selector_tokens(value: object) -> set[str]:
+    """Selector tokens from a task's ``excludes``/``requires`` (list or JSON text)."""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value or "[]")
+        except ValueError:
+            return set()
+    if not isinstance(value, (list, tuple, set)):
+        return set()
+    return {t for t in value if isinstance(t, str)}
 
 
 class FleetSpawner:
@@ -198,15 +241,31 @@ class FleetSpawner:
     def _candidates(self, task: dict) -> list[str]:
         """Ordered candidate hosts for ``task``.
 
-        A task pinned to a ``target_machine`` that is in the pool is tried
-        **first** (honor an explicit affinity), then the rest of the pool in
-        config order. A ``target_machine`` outside the pool is ignored here -- the
-        pool is the authority on where fleet bodies may run.
+        An unpinned task may run on any pool host, in config order. A task
+        pinned to a ``target_machine`` may run **only** on that host: the claim
+        enforces the pin, so a body on any other host could not claim the task.
+        The pin matches a pool host case-insensitively, like the claim does. A
+        pin outside the pool has no candidate here.
+
+        The claim also checks ``machine:`` selectors against the body's
+        ``--machine``, so a host named in ``excludes`` (for example after a
+        ``yield --exclude-self machine``) or not named by a ``machine:`` entry in
+        ``requires`` is skipped. These tokens match exactly, as in the claim.
         """
         target = (task.get("target_machine") or "").strip()
-        if target and target in self.pool:
-            return [target] + [h for h in self.pool if h != target]
-        return list(self.pool)
+        excludes = _selector_tokens(task.get("excludes"))
+        machine_requires = {
+            t for t in _selector_tokens(task.get("requires")) if t.startswith("machine:")
+        }
+
+        def admits(host: str) -> bool:
+            token = f"machine:{host}"
+            return token not in excludes and machine_requires <= {token}
+
+        if not target:
+            return [h for h in self.pool if admits(h)]
+        pinned = [h for h in self.pool if machine_matches(target, h)][:1]
+        return [h for h in pinned if admits(h)]
 
     def select(self, task: dict) -> str | None:
         """Pick the first live candidate host for ``task``; cache and return it,
@@ -259,6 +318,7 @@ class FleetSpawner:
                     origin=self.origin,
                     owner=owner,
                     worker_id=owner,
+                    machine=host,
                     agent=self.agent,
                     charter=self.charter,
                     repo=None if self.all_repos else task.get("repo"),
@@ -272,6 +332,7 @@ class FleetSpawner:
                     origin=self.origin,
                     owner=owner,
                     worker_id=owner,
+                    machine=host,
                     driver=self.driver,
                     project=embody.project_for_task(task),
                     repo=None if self.all_repos else task.get("repo"),
