@@ -43,8 +43,17 @@ A different scope, protocol or nonempty unmarked directory refuses without
 rebinding or adopting its data. Receipt publication cannot downgrade or
 replace a different binding.
 
-This is receipt preparation only, not a component-store initializer or a
-configuration/wire selector. Existing `ContentStore`, `MultiModelStore`,
+`initialize_source_store(config, point_scope=hints.scope)` additionally
+bootstraps the configured empty content/model schemas through the existing
+writer and dirty/effect/clean protocol. It requires distinct configured tables
+and matching model IDs. Reopening retains the same receipt and tables; missing
+configured tables in an already prepared domain or changed vector schemas
+refuse rather than being added or converted. An interrupted bootstrap remains
+dirty and requires its existing recovery owner; initialization does not replay
+it. This is an in-process cold schema seam, not a component ledger/index
+bootstrap, point application or a configuration/wire selector.
+
+Existing default `ContentStore`, `MultiModelStore`,
 `ClusterStore`, search and presentation paths remain legacy-only and reject
 protocol 2 before opening their native stores. Default and explicitly selected
 domain handles do not share cached selection; existing nested/lazy guards
@@ -62,9 +71,12 @@ and child arguments, so maintenance cannot retarget after a caller-directory
 change while its read guard stays on the original connection.
 
 Even an exactly selected point-domain handle refuses the current legacy-shaped
-`read`, `operation`, `write` and reconciliation paths. Component result types,
-applied-version qualification, qualified point application and every v2
-executor/producer remain unimplemented or disabled. The binding is not
+`read`, `operation`, `write` and reconciliation paths, including inside the
+private schema writer. Explicit scoped reads support the
+[named-component result](component-ledger.md#selected-named-component-reads)
+through applied-version qualification. Point-domain ledger/index bootstrap,
+qualified point application and every v2 executor/producer remain unsupported.
+The binding is not
 acquisition, application, completion or deployment authority. There is no live
 directory allocation, migration, new service, HTTP parameter, CLI flag or MCP
 form in this foundation.

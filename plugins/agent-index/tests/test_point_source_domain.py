@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 
 from agent_index.chunking.base import Chunk
-from agent_index.index_config import IndexConfig
+from agent_index.index_config import IndexConfig, ModelProfile
 from agent_index.indexing.point_hints import PointBinding, PointChangeHints, WorkItemRevisionTarget
 from agent_index.store.cluster_store import ClusterStore
 from agent_index.store.clustering import Cluster, ClusterMember
@@ -87,6 +87,86 @@ def test_cold_point_binding_reopens_without_enabling_default_stores(
     with pytest.raises(SourceLayoutError):
         ContentStore(config.lance_dir)
     assert snapshot(config.data_dir) == before
+
+
+def test_cold_point_schema_bootstrap_keeps_ordinary_access_disabled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AGENT_INDEX_STORE_LAYOUT", LAYOUT)
+    profile = ModelProfile("small", "fixture-inference-only", dim=2)
+    config = IndexConfig(data_dir=tmp_path / "point", model_profiles={"small": profile})
+    store = initialize_source_store(config, point_scope=claim().scope)
+    domain = store._source_domain
+    assert domain is not None
+    receipt = domain.receipt()
+    assert receipt["protocol"] == 2 and receipt["state"] == "clean"
+    assert set(receipt["versions"]) == {config.content_table, profile.table_name}
+    with domain.operation(store.content_store.db, point_scope=claim().scope):
+        assert all(
+            store.content_store.db.open_table(name).count_rows() == 0
+            for name in receipt["versions"]
+        )
+        for operation in (
+            store.stats, lambda: store.upsert_content([]),
+            lambda: store.get_vector_table("small").upsert([], np.zeros((0, 2), dtype=np.float32)),
+        ):
+            with pytest.raises(SourceLayoutError, match="not admitted"):
+                operation()
+        with pytest.raises(SourceLayoutError, match="not admitted"), domain.write(store.content_store.db):
+            pytest.fail("schema bootstrap must not admit ordinary writers")
+    before = snapshot(config.data_dir)
+    reopened = initialize_source_store(config, point_scope=claim().scope)
+    assert reopened._source_domain is domain
+    assert domain.receipt() == receipt
+    for changed in (
+        replace(config, content_table="different"),
+        replace(config, model_profiles={"small": replace(profile, table_name="different")}),
+        replace(config, model_profiles={"small": replace(profile, dim=3)}),
+    ):
+        with pytest.raises(SourceLayoutError, match="bootstrap"):
+            initialize_source_store(changed, point_scope=claim().scope)
+        assert snapshot(config.data_dir) == before
+    for selected_scope in (None, replace(claim(), account_id="other").scope):
+        with pytest.raises(SourceLayoutError):
+            initialize_source_store(config, point_scope=selected_scope)
+        assert snapshot(config.data_dir) == before
+
+
+def test_point_schema_bootstrap_never_rebinds_legacy_or_replays_interruption(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AGENT_INDEX_STORE_LAYOUT", LAYOUT)
+    profile = ModelProfile("small", "fixture-inference-only", dim=2)
+    config = IndexConfig(data_dir=tmp_path / "point", model_profiles={"small": profile})
+    for profiles in (
+        {"wrong-key": profile},
+        {"small": replace(profile, table_name=config.content_table)},
+        {"small": profile, "other": ModelProfile("other", "fixture", table_name=profile.table_name, dim=2)},
+    ):
+        with pytest.raises(SourceLayoutError, match="distinct configured"):
+            initialize_source_store(replace(config, model_profiles=profiles), point_scope=claim().scope)
+        assert not config.data_dir.exists()
+    legacy = initialize_source_store(config)
+    legacy.upsert("small", [
+        Chunk("retain legacy", "legacy.md", "text", "markdown", 1, 1, "sample:legacy"),
+    ], np.array([[1, 0]], dtype=np.float32))
+    before = snapshot(config.data_dir)
+    with pytest.raises(SourceLayoutError, match="incompatible"):
+        initialize_source_store(config, point_scope=claim().scope)
+    assert snapshot(config.data_dir) == before
+    interrupted = replace(config, data_dir=tmp_path / "interrupted")
+
+    def fail(_self: VectorTable) -> Any:
+        raise RuntimeError("fixture schema interruption")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(VectorTable, "_get_or_create_table", fail)
+        with pytest.raises(RuntimeError, match="fixture schema interruption"):
+            initialize_source_store(interrupted, point_scope=claim().scope)
+    before = snapshot(interrupted.data_dir)
+    with pytest.raises(SourceLayoutError, match="explicit recovery"):
+        initialize_source_store(interrupted, point_scope=claim().scope)
+    assert snapshot(interrupted.data_dir) == before
 
 
 def test_relative_cluster_connection_cannot_retarget_to_marked_destination(
