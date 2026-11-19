@@ -120,7 +120,7 @@ class PreparedJournal:
                 kind = self._require_batch_plan(conn, writing=True)
                 if self._batch_plan is not None:
                     for key, payload in values:
-                        self._put_immutable(conn, kind, key, payload)
+                        self._put_batch_reference(conn, kind, key, payload)
                     return
             conn.executemany(
                 "INSERT OR REPLACE INTO prepared_crawl_rows VALUES (?, ?, ?, ?, ?)",
@@ -129,24 +129,39 @@ class PreparedJournal:
             )
 
     def get(self, kind: str, keys: list[str]) -> dict[str, bytes]:
-        result = {}
+        bound_batch = kind == "batch" and self._batch_plan is not None
         with closing(self.paths._connect()) as conn, conn:
             conn.execute("BEGIN")
             self._require_parent(conn)
             if kind == "batch":
                 kind = self._require_batch_plan(conn)
-            for start in range(0, len(keys), 200):
-                selected = keys[start:start + 200]
-                placeholders = ",".join("?" for _ in selected)
-                for row in conn.execute(
-                    "SELECT key, payload, digest FROM prepared_crawl_rows "
-                    f"WHERE source = ? AND kind = ? AND key IN ({placeholders})",
-                    [self.source, kind, *selected],
-                ):
-                    payload = row["payload"]
-                    if not isinstance(payload, bytes) or hashlib.sha256(payload).hexdigest() != row["digest"]:
-                        raise ValueError("Corrupt prepared crawl data")
-                    result[row["key"]] = payload
+            result = self._read(conn, kind, keys)
+            if not bound_batch:
+                return result
+            references = {key: value.decode("ascii") for key, value in result.items()}
+            blobs = self._read(conn, "batch-payload/v1", list(set(references.values())))
+            resolved = {}
+            for key, digest in references.items():
+                payload = blobs.get(digest)
+                if payload is None or hashlib.sha256(payload).hexdigest() != digest:
+                    raise ValueError("Missing or corrupt prepared batch payload")
+                resolved[key] = payload
+            return resolved
+
+    def _read(self, conn: sqlite3.Connection, kind: str, keys: list[str]) -> dict[str, bytes]:
+        result = {}
+        for start in range(0, len(keys), 200):
+            selected = keys[start:start + 200]
+            placeholders = ",".join("?" for _ in selected)
+            for row in conn.execute(
+                "SELECT key, payload, digest FROM prepared_crawl_rows "
+                f"WHERE source = ? AND kind = ? AND key IN ({placeholders})",
+                [self.source, kind, *selected],
+            ):
+                payload = row["payload"]
+                if not isinstance(payload, bytes) or hashlib.sha256(payload).hexdigest() != row["digest"]:
+                    raise ValueError("Corrupt prepared crawl data")
+                result[row["key"]] = payload
         return result
 
     def put_immutable(self, kind: str, key: str, payload: bytes) -> None:
@@ -156,7 +171,17 @@ class PreparedJournal:
             self._require_parent(conn)
             if kind == "batch":
                 kind = self._require_batch_plan(conn, writing=True)
+                if self._batch_plan is not None:
+                    self._put_batch_reference(conn, kind, key, payload)
+                    return
             self._put_immutable(conn, kind, key, payload)
+
+    def _put_batch_reference(
+        self, conn: sqlite3.Connection, kind: str, key: str, payload: bytes,
+    ) -> None:
+        digest = hashlib.sha256(payload).hexdigest()
+        self._put_immutable(conn, "batch-payload/v1", digest, payload)
+        self._put_immutable(conn, kind, key, digest.encode("ascii"))
 
     def _put_immutable(
         self, conn: sqlite3.Connection, kind: str, key: str, payload: bytes,
@@ -193,7 +218,7 @@ class PreparedJournal:
             plan, hashlib.sha256(plan).hexdigest(),
         ):
             raise PendingCrawlConflict("Prepared batch plan is missing or corrupt")
-        return "batch/v2:" + plan.decode("ascii")
+        return "batch-ref/v1:" + plan.decode("ascii")
 
     def reset_batches(
         self, *, bind_plan: bool = False, guard: AbstractContextManager[None] | None = None,

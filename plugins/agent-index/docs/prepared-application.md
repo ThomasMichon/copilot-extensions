@@ -40,10 +40,14 @@ binding. Neither table has a cursor, source lease, completion marker or repair
 authority.
 
 Each `PreparedApplication` also binds a fresh, one-shot batch plan in the existing
-prepared rows. Its `batch-plan/v2` marker and plan-specific batch namespace are
+prepared rows. Its `batch-plan/v2` marker and plan-specific `batch-ref/v1` namespace are
 separate from legacy `batch` rows, so even an already-running old journal cannot
 delete or overwrite them. Different preparations retain independent plans;
 rebinding an already-bound handle and changing a retained batch both refuse.
+Plans retain only compact references to shared, content-addressed
+`batch-payload/v1` bytes in the same journal. Identical retries do not duplicate
+full chunk/metadata payloads. Each read qualifies both the reference and the
+referenced payload's digest under one parent-checked SQLite snapshot.
 Batch reads/writes and the
 pre-publication checkpoint check verify that plan binding in the same SQLite
 transaction as cache access. Exact vector pairs remain shared under the unchanged

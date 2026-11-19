@@ -380,6 +380,43 @@ def test_point_preparations_keep_independent_immutable_batch_plans(application: 
     assert first.vectors("first", first_chunks).shape == (1, 2)
 
 
+def test_retries_share_immutable_batch_payloads_without_revoking_any_plan(application: Fixture) -> None:
+    f = application
+    prepared = [f.prepare() for _ in range(7)]
+    batches = list(prepared[0].batches())
+    assert batches
+    with closing(f.paths._connect()) as conn:
+        blobs = conn.execute(
+            "SELECT key, payload FROM prepared_crawl_rows WHERE kind = 'batch-payload/v1'",
+        ).fetchall()
+        references = conn.execute(
+            "SELECT payload FROM prepared_crawl_rows WHERE kind LIKE 'batch-ref/v1:%'",
+        ).fetchall()
+    assert len(blobs) == len(batches)
+    assert len(references) == len(batches) * len(prepared)
+    assert {row["payload"].decode("ascii") for row in references} == {row["key"] for row in blobs}
+    for plan in prepared:
+        assert list(plan.batches()) == batches
+        plan.require_current_checkpoints()
+    assert len(f.calls) == 2
+
+
+@pytest.mark.parametrize("damage", ["missing", "changed"])
+def test_bound_batch_reads_qualify_shared_payload_bytes(application: Fixture, damage: str) -> None:
+    f = application
+    prepared = f.prepare()
+    with closing(f.paths._connect()) as conn, conn:
+        if damage == "missing":
+            conn.execute("DELETE FROM prepared_crawl_rows WHERE kind = 'batch-payload/v1'")
+        else:
+            conn.execute(
+                "UPDATE prepared_crawl_rows SET payload = ? WHERE kind = 'batch-payload/v1'",
+                (b"changed bytes",),
+            )
+    with pytest.raises(ValueError, match="[Cc]orrupt prepared"):
+        list(prepared.batches())
+
+
 def test_point_recomposition_does_not_exclude_native_readers(
     application: Fixture, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
