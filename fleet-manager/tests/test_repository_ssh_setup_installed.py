@@ -141,7 +141,9 @@ def test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop(
     )
 
     clean = native_setup_environment(os.environ, home, root)
+    owner_started = time.monotonic()
     command_owner = original_engine_owner(home)
+    progress(f"normal original engine owner prepared: {time.monotonic() - owner_started:.2f}s")
     monkeypatch.syspath_prepend(str(PROJECT.parent / "plugins" / "agent-worktrees" / "src"))
     from agent_worktrees.update_runtime_source import PIN_ENV
 
@@ -149,6 +151,8 @@ def test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop(
     assert initialized.returncode == 0, initialized.stderr
 
     def install_engine(component: str) -> None:
+        started = time.monotonic()
+        progress("normal engine application start: " + component)
         uv = shutil.which("uv")
         assert uv is not None
         arguments, identity = source_application_command(
@@ -190,6 +194,7 @@ def test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop(
             not Path(path).resolve().is_relative_to(PROJECT.parent.resolve())
             for path in facts["paths"] if path
         )
+        progress(f"normal engine application {component} ready: {time.monotonic() - started:.2f}s")
 
     install_engine("engine-base")
     manager_snapshot = cohort["worktree-manager"]
@@ -198,6 +203,8 @@ def test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop(
     manager_command, _manager_identity = source_application_command(
         manager_snapshot, "worktree-manager", home / ".worktree-manager", Path(uv),
     )
+    manager_started = time.monotonic()
+    progress("normal Manager application start")
     try:
         installed = run(manager_stack_diagnostic(manager_command), cwd=home, env=clean, timeout=60)
     except subprocess.TimeoutExpired as error:
@@ -213,6 +220,7 @@ def test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop(
     if installed.returncode:
         progress(manager_activation_diagnostic(home / ".worktree-manager"))
     assert installed.returncode == 0, installed.stdout + installed.stderr
+    progress(f"normal Manager application ready: {time.monotonic() - manager_started:.2f}s")
     launcher = home / ".local" / "bin" / (
         "worktree-manager.ps1" if os.name == "nt" else "worktree-manager"
     )
@@ -277,15 +285,16 @@ def test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop(
             "authority": "authority-a", "installation": "installation-a", "ssh": value,
         }
 
-    async def manager() -> subprocess.CompletedProcess[str]:
+    async def manager(phase: str) -> subprocess.CompletedProcess[str]:
         started = time.monotonic()
+        progress("normal Manager/engine setup start: " + phase)
         result = await asyncio.to_thread(
             run, [*front_door, "setup", "--apply", "--repository", url,
                   "--repository-target", str(harness),
                   "--trust-repository-setup", "--context", "harness-a"],
             cwd=home, env=clean, timeout=90,
         )
-        progress(f"normal Manager/engine setup: {time.monotonic() - started:.2f}s")
+        progress(f"normal Manager/engine setup {phase}: {time.monotonic() - started:.2f}s")
         return result
 
     async def control(action: str) -> Document:
@@ -346,14 +355,14 @@ def test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop(
             rig.tasks.append(asyncio.create_task(connector.run(stopped)))
             await asyncio.wait_for(connector.connected.wait(), 3)
             assert not state.exists() and not root.exists()
-            missing = await manager()
+            missing = await manager("missing-sdk")
             assert missing.returncode != 0, missing.stdout + missing.stderr
             assert not state.exists() and not root.exists()
             with sqlite3.connect(enrollment.ledger.path) as connection:
                 assert connection.execute("SELECT count(*) FROM machine_enrollments").fetchone() == (0,)
                 assert connection.execute("SELECT count(*) FROM operations").fetchone() == (0,)
             await asyncio.to_thread(install_engine, "agent-worktrees")
-            first = await manager()
+            first = await manager("first-touch")
             if first.returncode and (root / "current-version").exists():
                 log = root / host.STATE / "host.log"
                 if log.is_file():
@@ -385,24 +394,24 @@ def test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop(
             retained = state / "machine.json"
             original = retained.read_bytes(), retained.stat().st_mtime_ns
             selected = (root / "current-version").read_bytes()
-            assert (await manager()).returncode == 0
+            assert (await manager("repeat")).returncode == 0
             assert (await control("status"))["pid"] == initial["pid"]
             valid = request.read_bytes()
             wrong = json.loads(valid)
             wrong["ssh"]["authentication"]["principal"] = "other-principal"
             request.write_bytes(canonical(wrong))
-            assert (await manager()).returncode != 0
+            assert (await manager("wrong-scope")).returncode != 0
             assert (root / "current-version").read_bytes() == selected
             request.write_bytes(valid)
             assert (await control("status"))["pid"] == initial["pid"]
             request.write_bytes(canonical(selected_request(updated)))
-            changed = await manager()
+            changed = await manager("update")
             assert changed.returncode == 0, changed.stdout + changed.stderr
             incoming = await control("status")
             assert incoming["ready"] and incoming["selected"] and incoming["pid"] != initial["pid"]
             assert (retained.read_bytes(), retained.stat().st_mtime_ns) == original
             assert (await control("stop"))["native_exit_confirmed"]
-            restarted = await manager()
+            restarted = await manager("restart")
             assert restarted.returncode == 0, restarted.stdout + restarted.stderr
             resumed = await control("status")
             assert resumed["ready"] and resumed["selected"] and resumed["pid"] != incoming["pid"]

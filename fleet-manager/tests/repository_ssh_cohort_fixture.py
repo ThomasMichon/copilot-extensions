@@ -13,6 +13,7 @@ import re
 import shutil
 import sys
 import time
+from types import ModuleType
 from typing import Any, Protocol, TypeVar, TypedDict, cast
 
 import pytest
@@ -132,6 +133,27 @@ def manager_activation_diagnostic(root: Path) -> str:
     except OSError as error:
         return "Manager passive startup log unavailable: " + type(error).__name__
     return "Manager passive startup log:\n" + content.decode("utf-8", errors="replace")
+
+
+def source_build_diagnostic(
+    loader: Callable[[Path, str], ModuleType], progress: Progress,
+) -> Callable[[Path, str], ModuleType]:
+    def load(path: Path, name: str) -> ModuleType:
+        module = loader(path, name)
+        if name == "_local_install_artifact_builder":
+            build = cast(Callable[..., Path], getattr(module, "build_wheel"))
+
+            def timed(source: Path, *args: Any, **kwargs: Any) -> Path:
+                started = time.monotonic()
+                try:
+                    return build(source, *args, **kwargs)
+                finally:
+                    progress(f"normal Source wheel {source.name}: {time.monotonic() - started:.2f}s")
+
+            setattr(module, "build_wheel", timed)
+        return module
+
+    return load
 
 
 class ProfileBuilder(Protocol):
@@ -354,7 +376,9 @@ def prepare_cohort(
         )
 
     select_feed("simple")
-    sources.build_projects(snapshot, record, projects=projects)
+    with monkeypatch.context() as diagnostic:
+        diagnostic.setattr(sources, "_load_module", source_build_diagnostic(sources._load_module, progress))
+        sources.build_projects(snapshot, record, projects=projects)
     progress(f"normal Source cohort built: {time.monotonic() - started:.2f}s")
     outputs = _prepare_profiles(snapshot, tmp_path, profiles, uv, progress, started)
     select_feed("updated/simple")

@@ -437,6 +437,36 @@ def test_manager_activation_diagnostic_bounds_the_actual_startup_log(tmp_path: P
     assert len(diagnostic.removeprefix("Manager passive startup log:\n")) == 16_384
 
 
+@pytest.mark.parametrize("fails", [False, True])
+def test_source_build_diagnostic_preserves_the_actual_builder_result(
+    tmp_path: Path, fails: bool,
+) -> None:
+    from types import ModuleType
+    from repository_ssh_cohort_fixture import source_build_diagnostic
+
+    module = ModuleType("fixture_builder")
+    calls: list[tuple[Path, Path, str]] = []
+    messages: list[str] = []
+    wheel = tmp_path / "actual.whl"
+
+    def build(source: Path, output: Path, *, uv: str) -> Path:
+        calls.append((source, output, uv))
+        if fails:
+            raise RuntimeError("actual builder refusal")
+        return wheel
+
+    setattr(module, "build_wheel", build)
+    loader = source_build_diagnostic(lambda _path, _name: module, messages.append)
+    assert loader(tmp_path / "builder.py", "_local_install_artifact_builder") is module
+    if fails:
+        with pytest.raises(RuntimeError, match="actual builder refusal"):
+            getattr(module, "build_wheel")(tmp_path / "source", tmp_path / "output", uv="actual-uv")
+    else:
+        assert getattr(module, "build_wheel")(tmp_path / "source", tmp_path / "output", uv="actual-uv") == wheel
+    assert calls == [(tmp_path / "source", tmp_path / "output", "actual-uv")]
+    assert len(messages) == 1 and messages[0].startswith("normal Source wheel source: ")
+
+
 @pytest.mark.parametrize("failure", ["transient", "ordinary", "expired"])
 def test_source_denial_retries_only_bounded_windows_sharing_failures(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str,

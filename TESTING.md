@@ -2090,6 +2090,10 @@ paths remain refusals.
 Source-independent repeat still requires renaming the actual Source snapshot.
 Only Windows access/sharing errors 5, 32 and 33 retry for at most two seconds
 inside the original runner deadline; exhaustion or other errors still fail.
+The normal cohort fixture records each canonical wheel-build duration and
+names bootstrap/engine/Manager setup phases. These observations preserve the
+actual builder calls, return values, refusals, lifecycle sequence and all
+existing deadlines; they do not enable artifact reuse or skip a setup stage.
 The fixture explicitly selects its Manager root as well as its private homes;
 a real generated-launcher control retains an inherited runner root override and
 verifies that the fixture still reaches its own selected slot.
