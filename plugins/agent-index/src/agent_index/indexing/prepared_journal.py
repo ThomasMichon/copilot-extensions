@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
-from contextlib import closing
+from contextlib import AbstractContextManager, closing, nullcontext
 from dataclasses import fields
 from typing import TYPE_CHECKING, Any
 
@@ -195,26 +195,29 @@ class PreparedJournal:
             raise PendingCrawlConflict("Prepared batch plan is missing or corrupt")
         return "batch/v2:" + plan.decode("ascii")
 
-    def reset_batches(self, *, bind_plan: bool = False) -> None:
+    def reset_batches(
+        self, *, bind_plan: bool = False, guard: AbstractContextManager[None] | None = None,
+    ) -> None:
         """Reset legacy batches or bind a fresh handle to its own immutable plan."""
         if self._batch_plan is not None:
             raise PendingCrawlConflict("Prepared batch plan is already bound")
         plan = uuid.uuid4().hex.encode("ascii") if bind_plan else None
         with closing(self.paths._connect()) as conn, conn:
             conn.execute("BEGIN IMMEDIATE")
-            self._require_parent(conn)
-            if not bind_plan:
-                self._require_batch_plan(conn, writing=True)
-                conn.execute(
-                    "DELETE FROM prepared_crawl_rows WHERE source = ? AND kind = 'batch'",
-                    (self.source,),
-                )
-            if plan is not None:
-                conn.execute(
-                    "INSERT INTO prepared_crawl_rows VALUES (?, ?, ?, ?, ?)",
-                    (self.source, "batch-plan/v2", plan.decode("ascii"), plan,
-                     hashlib.sha256(plan).hexdigest()),
-                )
+            with guard if guard is not None else nullcontext():
+                self._require_parent(conn)
+                if not bind_plan:
+                    self._require_batch_plan(conn, writing=True)
+                    conn.execute(
+                        "DELETE FROM prepared_crawl_rows WHERE source = ? AND kind = 'batch'",
+                        (self.source,),
+                    )
+                if plan is not None:
+                    conn.execute(
+                        "INSERT INTO prepared_crawl_rows VALUES (?, ?, ?, ?, ?)",
+                        (self.source, "batch-plan/v2", plan.decode("ascii"), plan,
+                         hashlib.sha256(plan).hexdigest()),
+                    )
         self._batch_plan = plan
 
     def put_batch(self, index: int, batch: FileBatch) -> None:

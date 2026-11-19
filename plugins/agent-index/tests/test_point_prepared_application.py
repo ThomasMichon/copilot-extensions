@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import sqlite3
-from contextlib import closing
+from contextlib import AbstractContextManager, closing, contextmanager
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Callable, cast
+from threading import Event
+from typing import Any, Callable, Iterator, cast
 
 import numpy as np
 import pytest
@@ -483,8 +484,9 @@ def test_unbound_point_cache_cannot_mutate_an_application_plan(
 
 
 @pytest.mark.parametrize("point", [False, True])
+@pytest.mark.parametrize("contended", [False, True])
 def test_source_aware_plan_reset_excludes_native_writers(
-    application: Fixture, monkeypatch: pytest.MonkeyPatch, point: bool,
+    application: Fixture, monkeypatch: pytest.MonkeyPatch, point: bool, contended: bool,
 ) -> None:
     f = application
     options: dict[str, Any] = {"clients": {}}
@@ -512,16 +514,71 @@ def test_source_aware_plan_reset_excludes_native_writers(
                 pytest.fail("Native writer entered during plan replacement")
         blocked.append(True)
 
-    def reset_under_exclusion(self: PreparedJournal, *, bind_plan: bool = False) -> None:
-        assert getattr(domain._local, "reading", False)
-        with ThreadPoolExecutor(max_workers=1) as pool:
-            pool.submit(try_writer).result(timeout=5)
-        reset(self, bind_plan=bind_plan)
+    def reset_under_exclusion(
+        self: PreparedJournal, *, bind_plan: bool = False,
+        guard: AbstractContextManager[None] | None = None,
+    ) -> None:
+        assert not getattr(domain._local, "reading", False)
+        assert guard is not None
+
+        @contextmanager
+        def guarded() -> Iterator[None]:
+            with guard:
+                assert getattr(domain._local, "reading", False)
+                with ThreadPoolExecutor(max_workers=1) as pool:
+                    pool.submit(try_writer).result(timeout=5)
+                yield
+
+        if not contended:
+            reset(self, bind_plan=bind_plan, guard=guarded())
+            return
+        connect = self.paths._connect
+        waiting = Event()
+
+        def observed_connect() -> sqlite3.Connection:
+            conn = connect()
+            conn.set_trace_callback(lambda sql: waiting.set() if sql == "BEGIN IMMEDIATE" else None)
+            return conn
+
+        with closing(connect()) as blocker, ThreadPoolExecutor(max_workers=1) as pool:
+            blocker.execute("BEGIN IMMEDIATE")
+            monkeypatch.setattr(self.paths, "_connect", observed_connect)
+            future = pool.submit(reset, self, bind_plan=bind_plan, guard=guarded())
+            try:
+                assert waiting.wait(timeout=5)
+                # SQLite contention must not exclude an unrelated native read.
+                with domain.read(store.content_store.db, point_scope=scope):
+                    assert domain.receipt() == receipt
+            finally:
+                blocker.rollback()
+            future.result(timeout=5)
+        monkeypatch.setattr(self.paths, "_connect", connect)
 
     monkeypatch.setattr(PreparedJournal, "reset_batches", reset_under_exclusion)
     f.prepare(**options).require_current_checkpoints()
     assert blocked == [True]
     assert domain.receipt() == receipt
+
+
+@pytest.mark.parametrize("ownership", ["writer", "operation", "reader"])
+def test_reentrant_preparation_refuses_before_changing_prepared_rows(
+    application: Fixture, ownership: str,
+) -> None:
+    f = application
+    domain = f.store._source_domain
+    assert domain is not None
+    before = f.cache()
+    scope = f.points.claim.hints.scope
+    context: AbstractContextManager[None] = domain.read(f.store.content_store.db, point_scope=scope)
+    if ownership == "writer":
+        context = domain._write(f.store.content_store.db, point_scope=scope)
+    elif ownership == "operation":
+        context = domain.operation(f.store.content_store.db, point_scope=scope)
+    with context:
+        with pytest.raises(SourceLayoutError, match="no active native operation"):
+            f.prepare(clients={})
+    assert f.cache() == before
+    assert f.calls == []
 
 
 @pytest.mark.parametrize("interference", ["legacy-writer", "direct-reset"])

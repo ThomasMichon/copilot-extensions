@@ -157,10 +157,17 @@ resetting batches or calling an embedding client. Selection narrows chunking,
 not the complete candidate or claim. Missing observations, changed claims,
 scope/family mismatches, candidate changes and dirty domains refuse before
 changing existing preparation. Recomposition holds no native-domain exclusion;
-short native checks precede it. For every source-aware preparation, native
-exclusion covers the final clean check and the fresh batch-plan binding transaction.
-Plans are never replaced, even through direct journal calls.
-It does not cover target recomposition, chunking or embedding.
+short native checks precede it. Whole-claim recomposition uses one existing
+journal read snapshot with batches of at most 200 keys and constant-time target
+membership; it does not open a connection per target.
+For every source-aware preparation, the journal acquires its SQLite writer
+transaction before entering native exclusion for the final clean check and
+fresh plan insertion. SQLite contention therefore holds no native fence.
+Plans are never replaced, even through direct journal calls. Preparation inside
+an already-owned native writer, reader or operation refuses before journal
+binding, so callbacks cannot hold native exclusion across recomposition or
+embedding. Native exclusion does not cover ordinary target recomposition,
+chunking or embedding.
 
 Point preparation uses the same subordinate journal, batch plan, checkpoint
 snapshot and exact vector cache. Its existing coverage/vector readers receive

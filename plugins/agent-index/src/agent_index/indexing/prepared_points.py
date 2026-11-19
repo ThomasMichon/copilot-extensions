@@ -128,11 +128,12 @@ class PreparedPoints:
         if journal.point_claim != claim:
             raise PendingCrawlConflict("Point acquisition requires its whole bound claim")
         self.journal, self.claim, self.manifest = journal, claim, manifest
+        self._targets = frozenset(claim.hints.targets)
 
     def _key(self, target: PointTarget) -> str:
         if (
             type(target) not in (WorkItemRevisionTarget, CommentVersionTarget)
-            or target not in self.claim.hints.targets
+            or target not in self._targets
         ):
             raise ValueError("Point acquisition target does not belong to the whole claim")
         return _json(target.to_dict())
@@ -155,7 +156,10 @@ class PreparedPoints:
         stored = self.journal.get(_KIND, [key])
         if key not in stored:
             return None
-        result = PointAcquisition.from_bytes(stored[key])
+        return self._decode(target, stored[key])
+
+    def _decode(self, target: PointTarget, payload: bytes) -> PointAcquisition:
+        result = PointAcquisition.from_bytes(payload)
         if (
             result.target != target
             or result.component.source != self.claim.hints.canonical_family
@@ -174,10 +178,13 @@ class PreparedPoints:
         component_to_logical: dict[tuple[str, str], tuple[str, ...]] = {}
         versions: dict[tuple[str, str, int], str] = {}
         selected: dict[tuple[str, str], PointAcquisition] = {}
-        for target in self.claim.hints.targets:
-            observed = self.read(target)
-            if observed is None:
+        targets = self.claim.hints.targets
+        keys = [self._key(target) for target in targets]
+        stored = self.journal.get(_KIND, keys)
+        for target, key in zip(targets, keys, strict=True):
+            if key not in stored:
                 raise ValueError("Whole point acquisition is incomplete")
+            observed = self._decode(target, stored[key])
             component = observed.component
             logical = (target.kind, target.item_id) + (
                 (target.comment_id,) if isinstance(target, CommentVersionTarget) else ()

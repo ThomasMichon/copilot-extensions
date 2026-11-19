@@ -50,17 +50,21 @@ def _observed(target: PointTarget, *, deleted: bool = False) -> PointAcquisition
 
 
 @pytest.fixture
-def retained(tmp_path: Path) -> tuple[PreparedPoints, TaskStore]:
+def retained(tmp_path: Path, request: pytest.FixtureRequest) -> tuple[PreparedPoints, TaskStore]:
+    count = getattr(request, "param", None)
+    targets = _TARGETS if count is None else tuple(
+        WorkItemRevisionTarget(str(index), 1, (f"event-{index}",)) for index in range(count)
+    )
     hints = PointChangeHints(
         source="selected", canonical_family=_FAMILY, account_id="account-a",
         binding=PointBinding("https://example.test", "project", "eligible-query/v1"),
-        targets=_TARGETS,
+        targets=targets,
     )
     tasks = TaskStore(tmp_path / "tasks.db")
     task = tasks.enqueue(hints.source, change_hints=hints)
     claim = PendingPointClaim.from_task(tasks.pin_point_claim(task.id, expected_hints=hints))
     paths = PathIndex(tmp_path / "paths.db")
-    first = _observed(_TARGETS[0])
+    first = _observed(targets[0])
     assert first.entry is not None
     manifest = CrawlManifest(
         source=hints.source, accounting_family=_FAMILY, commit="unchanged-poll",
@@ -73,6 +77,34 @@ def retained(tmp_path: Path) -> tuple[PreparedPoints, TaskStore]:
     return PreparedPoints(PreparedJournal(
         paths, manifest.source, "account/endpoint/query", payload, point_claim=claim,
     )), tasks
+
+
+@pytest.mark.parametrize("retained", [1024], indirect=True)
+def test_whole_claim_composition_uses_one_snapshot_and_batched_point_reads(
+    retained: tuple[PreparedPoints, TaskStore], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    points, _tasks = retained
+    targets = points.claim.hints.targets
+    for target in targets:
+        points.retain(_observed(target), claim=points.claim)
+    connect = points.journal.paths._connect
+    counts = {"connections": 0, "batch_reads": 0}
+
+    def trace(sql: str) -> None:
+        if sql.startswith("SELECT key, payload, digest"):
+            counts["batch_reads"] += 1
+
+    def observed_connect() -> Any:
+        counts["connections"] += 1
+        conn = connect()
+        conn.set_trace_callback(trace)
+        return conn
+
+    monkeypatch.setattr(points.journal.paths, "_connect", observed_connect)
+    candidate = points.compose()
+    assert len(candidate.upserts) == 1024
+    assert counts == {"connections": 1, "batch_reads": 6}
+    assert {entry.path for entry in candidate.upserts} == {f"{t.item_id}/body.md" for t in targets}
 
 
 def _reopen(points: PreparedPoints) -> PreparedPoints:

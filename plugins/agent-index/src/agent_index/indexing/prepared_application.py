@@ -98,6 +98,11 @@ class PreparedApplication:
             raise PendingCrawlConflict("Prepared application requires its pending crawl")
         self.point_scope = point_claim.hints.scope if point_claim is not None else None
         domain = store._source_domain
+        if domain is not None and (
+            domain.writing is True or getattr(domain._local, "operation", False) is True
+            or getattr(domain._local, "reading", False) is True
+        ):
+            raise SourceLayoutError("Preparation requires no active native operation")
         if point_claim is None:
             self.journal = PreparedJournal(
                 paths, manifest.source, scope, payload, manifest=manifest, full=full,
@@ -117,10 +122,11 @@ class PreparedApplication:
         self.identities = [(entry.source, entry.path) for entry in files]
         self.checkpoints = paths.get_entries(self.identities)
         self.batch_count = 0
-        with domain.read(
-            store.content_store.db, point_scope=self.point_scope,
-        ) if domain is not None else nullcontext():
-            self.journal.reset_batches(bind_plan=True)
+        self.journal.reset_batches(
+            bind_plan=True, guard=domain.read(
+                store.content_store.db, point_scope=self.point_scope,
+            ) if domain is not None else None,
+        )
         coverage = EmbeddingCoverage(paths)
         for batch in file_batches(
             files, path_index=paths, model_profiles=profiles,
