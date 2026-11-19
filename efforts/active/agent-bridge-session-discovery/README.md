@@ -82,6 +82,12 @@ owners. #60 live/wedged state, mutation and purge custody remain separate.
 Draft and #2530's pending wire decision are not a bar to this planned
 extension; it creates no owner assignment, generic ACK or peer probe.
 
+The bounded [nullable catalog capability](catalog-worktree-capability.md)
+source proposal is reserved by `patient-knob` on #13489. Only that finite
+capability/name facet is selected for review and subsequent execution.
+Parent Draft status, both discovery axes, static reload S4036-P3/P4 and
+the existing state/provider/compatibility custodians remain unchanged.
+
 ## Context
 
 Filed as [copilot-extensions#2530](https://github.com/ThomasMichon/copilot-extensions/issues/2530)
@@ -399,6 +405,9 @@ and current project-scoped behavior. It is not existing delivery or a new
 registry; provider-manifest/namespace/catalog/roster-cache refresh is a
 different dataset from configured static settings.
 
+- [ ] **C13489:** Deliver the [finite nullable capability/name Plan](catalog-worktree-capability.md#finite-plan)
+  C1-C4 after review, retaining declaration authority and every independent
+  static-reload/discovery/admission boundary.
 - [ ] **S4036-P1:** Derive and publish `supports_worktrees` for supported
   ordinary, namespace, cache and detail rows with versioned unsupported/
   unknown behavior. Project, `worktree_root`, `spawnable` or `target_type`
@@ -423,6 +432,9 @@ different dataset from configured static settings.
 
 ## Validation Plan
 
+- [ ] **V13489:** Qualify every [finite capability validation](catalog-worktree-capability.md#validation-plan)
+  V1-V5 at its actual evidence tier. This does not satisfy the whole
+  S4036-G/static-reload or discovery matrix.
 - [ ] **S4036-G:** Resolve every S4036 Plan/local Validation and Coordination
   clause while preserving original #2530/#2440/#4044 discovery, flags,
   currentness and partial/unreachable/unsupported/unauthorized/empty
