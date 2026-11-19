@@ -78,6 +78,18 @@ function Invoke-ResidentPostTool {
         if ($payload -is [Collections.IDictionary]) { $payload['sessionId'] = $session }
         else { $payload | Add-Member -NotePropertyName 'sessionId' -NotePropertyValue $session }
     }
+    $hasCwd = if ($payload -is [Collections.IDictionary]) {
+        $payload.ContainsKey('cwd')
+    } else { $null -ne $payload.PSObject.Properties['cwd'] }
+    if (-not $hasCwd) {
+        $hasWorkingDirectory = if ($payload -is [Collections.IDictionary]) {
+            $payload.ContainsKey('workingDirectory')
+        } else { $null -ne $payload.PSObject.Properties['workingDirectory'] }
+        $cwd = if ($hasWorkingDirectory) { $payload.workingDirectory }
+        else { [Environment]::GetEnvironmentVariable('COPILOT_PROJECT_DIR') }
+        if ($payload -is [Collections.IDictionary]) { $payload['cwd'] = $cwd }
+        else { $payload | Add-Member -NotePropertyName 'cwd' -NotePropertyValue $cwd }
+    }
     if ($Kind -ceq 'postToolUse') {
         # Accounting and target invalidation consume the invocation, never its output.
         foreach ($key in @('toolResult', 'tool_result')) {

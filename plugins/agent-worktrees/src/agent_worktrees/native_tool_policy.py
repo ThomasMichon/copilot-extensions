@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import time
 from collections.abc import Callable
@@ -33,6 +34,33 @@ def unavailable(boundary: str) -> dict[str, Any]:
         "Next: inspect the selected resident and existing repairing-worktrees guidance. "
         "Retry only after this boundary changes; do not repeat the tool solely for this warning."
     )}
+
+
+def _bounded_result(result: dict[str, Any]) -> dict[str, Any]:
+    # Reserve envelope space inside the transport's unchanged 64 KiB frame.
+    limit = 60 * 1024
+    if len(json.dumps(result)) <= limit:
+        return result
+    result = dict(result)
+    notice = "\n[agent-worktrees pre-tool] Text truncated to fit native response."
+    for field in ("additionalContext", "permissionDecisionReason"):
+        text = result.get(field)
+        if not isinstance(text, str):
+            continue
+        result[field] = notice
+        if len(json.dumps(result)) > limit:
+            continue
+        low, high = 0, len(text)
+        while low < high:
+            middle = (low + high + 1) // 2
+            result[field] = text[:middle] + notice
+            if len(json.dumps(result)) <= limit:
+                low = middle
+            else:
+                high = middle - 1
+        result[field] = text[:low] + notice
+        break
+    return result
 
 
 def dispatch_pre(
@@ -97,7 +125,7 @@ def decide_pre(
     for event in events:
         tool = event.get("toolName") or event.get("tool_name")
         if not isinstance(tool, str) or not tool:
-            return merge(combined, recover("native tool name is invalid"))
+            return _bounded_result(merge(combined, recover("native tool name is invalid")))
         for name in (
             "statelessness_guard.py", "cross_repo_guard.py",
             "anchor_write_guard.py", "pr_supersede_guard.py",
@@ -128,5 +156,5 @@ def decide_pre(
             if decision:
                 combined = merge(combined, decision)
                 if combined.get("permissionDecision") == "deny":
-                    return combined
-    return combined
+                    return _bounded_result(combined)
+    return _bounded_result(combined)

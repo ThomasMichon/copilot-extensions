@@ -228,6 +228,53 @@ def test_incomplete_native_input_is_explicitly_unavailable(payload: dict[str, An
     assert "not authorization" in result["additionalContext"]
 
 
+@pytest.mark.parametrize("case", ["late-deny", "warnings-only", "long-reason"])
+def test_large_valid_native_output_keeps_decision_inside_response_frame(case: str) -> None:
+    def sibling(name: str) -> ModuleType:
+        if name in {"tool_call_forms.py", "hook_pre_policy.py"}:
+            return load(name)
+        module = ModuleType(name)
+
+        def decide(payload: dict[str, Any], **kwargs: Any) -> dict[str, str] | None:
+            if name == "statelessness_guard.py" and case != "long-reason":
+                return {"additionalContext": "notice \U0001f680" * 128}
+            if name == "anchor_write_guard.py" and payload["toolName"] == "edit":
+                return {
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": (
+                        "protected " + "\U0001f680" * 12000
+                        if case == "long-reason" else "protected"
+                    ),
+                }
+            return None
+
+        module.decide = decide  # type: ignore[attr-defined]
+        return module
+
+    calls = [{"name": "view"} for _ in range(127)] + [
+        {"name": "view" if case == "warnings-only" else "edit"},
+    ]
+    result = decide_pre(
+        event(toolCalls=calls), load_sibling=sibling,
+        merge=load("hook_client.py")._merge_pre_decisions, deadline=time.time() + 0.5,
+    )
+    frame = {
+        "version": 1, "hook_generation": "fixture",
+        "hook_capabilities": ["native-tool-policy-v1"], "result": result,
+    }
+    assert len(json.dumps(frame).encode("utf-8")) + 1 <= 65536
+    if case == "warnings-only":
+        assert "permissionDecision" not in result
+    else:
+        assert result["permissionDecision"] == "deny"
+        if case == "late-deny":
+            assert result["permissionDecisionReason"] == "protected"
+        else:
+            assert result["permissionDecisionReason"].startswith("protected ")
+    field = "permissionDecisionReason" if case == "long-reason" else "additionalContext"
+    assert "truncat" in result[field]
+
+
 @pytest.mark.parametrize("command", [
     "Get-Content -LiteralPath 'source.py'", "Get-Date", "",
 ], ids=["content-read", "clock-read", "empty"])

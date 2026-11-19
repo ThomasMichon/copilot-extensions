@@ -2935,6 +2935,7 @@ def test_real_powershell_roundtrip_and_validation_without_cli_children(tmp_path:
     def decide(kind: str, payload: dict[str, Any], deadline: float | None) -> dict[str, Any]:
         assert payload.pop("_agentWorktrees")["nativePolicy"] == 1
         assert payload.pop("sessionId") == "post-fixture"
+        assert payload.pop("cwd") == str(tmp_path)
         seen.append((kind, payload))
         if payload.get("toolName") == "empty":
             return {}
@@ -2984,6 +2985,7 @@ def test_real_powershell_roundtrip_and_validation_without_cli_children(tmp_path:
         env["USERPROFILE"] = str(tmp_path)
         env["AGENT_HOME"] = str(tmp_path)
         env["COPILOT_AGENT_SESSION_ID"] = "post-fixture"
+        env["COPILOT_PROJECT_DIR"] = str(tmp_path)
         env.pop("COPILOT_EXTENSIONS_CONTEXT", None)
         result = subprocess.run(
             [shell, "-NoProfile", "-NonInteractive", "-File", str(harness)],
@@ -3090,6 +3092,7 @@ def test_real_shell_json_values_and_legacy_metadata_compatibility(tmp_path: Path
     def decide(kind: str, payload: dict[str, Any], deadline: float | None) -> dict[str, Any]:
         assert payload.pop("_agentWorktrees")["nativePolicy"] == 1
         assert payload.pop("sessionId") == "post-fixture"
+        assert payload.pop("cwd") == str(tmp_path)
         seen.append((kind, payload))
         return payload
 
@@ -3107,6 +3110,7 @@ def test_real_shell_json_values_and_legacy_metadata_compatibility(tmp_path: Path
         env["USERPROFILE"] = str(tmp_path)
         env["AGENT_HOME"] = str(tmp_path)
         env["COPILOT_AGENT_SESSION_ID"] = "post-fixture"
+        env["COPILOT_PROJECT_DIR"] = str(tmp_path)
         env.pop("COPILOT_EXTENSIONS_CONTEXT", None)
         reference_harness = tmp_path / "legacy-json.ps1"
         expected_requests = []

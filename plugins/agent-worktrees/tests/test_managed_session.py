@@ -3543,6 +3543,58 @@ def test_native_entry_resolves_caller_session_before_resident_admission(
     assert not (tmp_path / ".copilot" / "session-state" / "resident-session").exists()
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows hook directory identity")
+@pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
+@pytest.mark.parametrize("case", ["implicit", "explicit", "working-directory", "null", "missing"])
+def test_native_entry_resolves_caller_directory_before_resident_admission(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    native_resident: ResidentFactory, shell: str, case: str,
+) -> None:
+    executable = shutil.which(shell)
+    if not executable:
+        pytest.skip(f"{shell} is unavailable")
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    anchor, registry = fixture_project(tmp_path)
+    unmanaged = fixture_checkout(tmp_path / "unmanaged")
+    monkeypatch.setenv(
+        "COPILOT_PROJECT_DIR", str(anchor if case == "missing" else unmanaged),
+    )
+    env = environment(tmp_path, anchor)
+    payload: dict[str, Any] = {
+        "sessionId": "caller-session", "toolName": "edit",
+        "toolArgs": {"path": "source.py"},
+    }
+    if case in {"explicit", "working-directory"}:
+        env["COPILOT_PROJECT_DIR"] = str(unmanaged)
+        payload["cwd" if case == "explicit" else "workingDirectory"] = str(anchor)
+    elif case == "null":
+        payload["cwd"] = None
+    elif case == "missing":
+        env.pop("COPILOT_PROJECT_DIR", None)
+    observed = native_resident(
+        tmp_path, registry, env, real_policy=True, require_admission=True,
+    )
+    hooks = json.loads((SCRIPTS.parent / "hooks.json").read_text())
+    command = (
+        "function Get-Command { throw 'native hook requested executable lookup' }; "
+        + hooks["hooks"]["preToolUse"][0]["powershell"]
+    )
+    result = subprocess.run(
+        [executable, "-NoProfile", "-NonInteractive", "-Command", command],
+        input=json.dumps(payload), text=True, capture_output=True, timeout=10,
+        cwd=anchor, env=env, **no_window_kwargs(),
+    )
+    assert result.returncode == 0 and not result.stderr, result.stdout + result.stderr
+    decision = json.loads(result.stdout or "{}")
+    if case in {"implicit", "explicit", "working-directory"}:
+        assert decision["permissionDecision"] == "deny", decision
+        assert observed[0]["cwd"] == str(anchor)
+        if case == "working-directory":
+            assert observed[0]["workingDirectory"] == str(anchor)
+    else:
+        assert decision == {} and not observed
+
+
 def test_extension_is_inert_until_adoption_and_stops_after_revocation(tmp_path: Path) -> None:
     node = shutil.which("node")
     if not node:
