@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import importlib.util
+from importlib.machinery import ModuleSpec
+from collections.abc import Callable, Iterator
 import io
 import json
 import os
@@ -11,15 +13,58 @@ import sys
 import threading
 import time
 from pathlib import Path
+from types import ModuleType
+from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 import pytest
+
+from machine_transport import detect_platform
+from agent_worktrees.record_io import load_record_uncached
+from agent_worktrees.status_segment_cache import _StatusSegmentCache
+from agent_worktrees.tracking_session_registry import register_session
+
+if TYPE_CHECKING:
+    from agent_worktrees.worktrees_runtime import WorktreesRuntime
+
+
+class PreparedReadEvent(TypedDict):
+    env: dict[str, str]
+    harness: Path
+    payload: dict[str, Any]
+    facts: Path
+    row: dict[str, Any]
+    record_heads: dict[str, dict[str, Any]]
+    runtime: WorktreesRuntime
+    session: Path
+    registry: Path
+    home: Path
+    tracking_path: Path
+    sidecar: Path
+    context: Path | None
+    selected: Any
+    payload_root: Path
+
+
+class _RecordingCache(_StatusSegmentCache):
+    def __init__(self, observed: list[str], *, allow_all: bool = True) -> None:
+        super().__init__()
+        self.observed = observed
+        self.allow_all = allow_all
+
+    def invalidate(self, path: str | None) -> None:
+        assert path is not None
+        self.observed.append(path)
+
+    def invalidate_all(self) -> None:
+        assert self.allow_all, "known paths must retain target scope"
+        self.observed.append("all")
 
 PLUGIN = Path(__file__).resolve().parents[1]
 SCRIPT = PLUGIN / "scripts" / "post-tool-hook.ps1"
 
 
 @pytest.fixture
-def admitted_protocol_script(tmp_path):
+def admitted_protocol_script(tmp_path: Path) -> Path:
     scripts = tmp_path / "protocol-scripts"
     scripts.mkdir()
     for name in ("post-tool-hook.ps1", "hook_client.py"):
@@ -31,7 +76,7 @@ def admitted_protocol_script(tmp_path):
 
 
 @pytest.mark.guard
-def test_post_hook_uses_same_shell_and_installs_the_client():
+def test_post_hook_uses_same_shell_and_installs_the_client() -> None:
     hooks = json.loads((PLUGIN / "hooks.json").read_text(encoding="utf-8"))
     command = hooks["hooks"]["postToolUse"][0]["powershell"]
     assert ". $s; Invoke-PostToolHook -Raw $raw" in command
@@ -50,7 +95,7 @@ def test_post_hook_uses_same_shell_and_installs_the_client():
 
 
 @pytest.mark.guard
-def test_local_advisory_fallback_does_not_retry_daemon(monkeypatch):
+def test_local_advisory_fallback_does_not_retry_daemon(monkeypatch: pytest.MonkeyPatch) -> None:
     spec = importlib.util.spec_from_file_location(
         "post_tool_python_client", PLUGIN / "scripts" / "hook_client.py"
     )
@@ -60,10 +105,12 @@ def test_local_advisory_fallback_does_not_retry_daemon(monkeypatch):
     spec.loader.exec_module(module)
     monkeypatch.setattr(module, "_managed_session_admitted", lambda payload: True)
     calls = []
-    monkeypatch.setattr(
-        module, "_fallback_post",
-        lambda payload, home: calls.append(payload) or {"additionalContext": "local"},
-    )
+
+    def fallback(payload: dict[str, Any], home: Path) -> dict[str, str]:
+        calls.append(payload)
+        return {"additionalContext": "local"}
+
+    monkeypatch.setattr(module, "_fallback_post", fallback)
     monkeypatch.setattr(
         module, "_request",
         lambda *args: pytest.fail("local advisory fallback must not resend"),
@@ -77,19 +124,21 @@ def test_local_advisory_fallback_does_not_retry_daemon(monkeypatch):
 
 
 @pytest.fixture
-def post_client(monkeypatch):
+def post_client(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> ModuleType:
     spec = importlib.util.spec_from_file_location(
         "post_tool_fallback_client", PLUGIN / "scripts" / "hook_client.py"
     )
+    assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     monkeypatch.setenv("AGENT_WORKTREES_NUDGE", "on")
     monkeypatch.setenv("AGENT_WORKTREES_NUDGE_CALLS", "2")
     monkeypatch.setenv("AGENT_WORKTREES_NUDGE_MINUTES", "999")
+    monkeypatch.setenv("AGENT_HOME", str(tmp_path))
     return module
 
 
-def _post_record(home, name):
+def _post_record(home: Path, name: str) -> tuple[Path, Path]:
     records = home / ".project" / "worktrees"
     records.mkdir(parents=True, exist_ok=True)
     root = home / name
@@ -103,8 +152,8 @@ def _post_record(home, name):
 
 
 def test_post_fallback_shares_lookup_but_not_across_callbacks(
-    post_client, monkeypatch, tmp_path,
-):
+    post_client: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     root, record = _post_record(tmp_path, "worktree-a")
     payload = {"cwd": str(root), "toolName": "view"}
     scans = []
@@ -112,12 +161,12 @@ def test_post_fallback_shares_lookup_but_not_across_callbacks(
     original_glob = Path.glob
     original_spec = importlib.util.spec_from_file_location
 
-    def glob(path, pattern):
+    def glob(path: Path, pattern: str) -> Iterator[Path]:
         if path == tmp_path:
             scans.append(pattern)
         return original_glob(path, pattern)
 
-    def spec(name, location, *args, **kwargs):
+    def spec(name: str, location: str | Path, *args: Any, **kwargs: Any) -> ModuleSpec | None:
         if Path(location).name == "nudge_status.py":
             loads.append(location)
         return original_spec(name, location, *args, **kwargs)
@@ -139,8 +188,8 @@ def test_post_fallback_shares_lookup_but_not_across_callbacks(
 
 @pytest.mark.parametrize("distinct_cwd", [False, True])
 def test_post_fallback_empty_result_is_fresh_and_cwd_scoped(
-    post_client, monkeypatch, tmp_path, distinct_cwd,
-):
+    post_client: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, distinct_cwd: bool,
+) -> None:
     status_root = tmp_path / "worktree-a"
     binding_root = tmp_path / "worktree-b" if distinct_cwd else status_root
     payload = {"cwd": str(status_root), "workingDirectory": str(binding_root)}
@@ -148,7 +197,7 @@ def test_post_fallback_empty_result_is_fresh_and_cwd_scoped(
     lookup = status._find_tracking_yaml
     calls = []
 
-    def find(cwd, home):
+    def find(cwd: str, home: Path) -> Any:
         calls.append(cwd)
         return lookup(cwd, home)
 
@@ -163,15 +212,15 @@ def test_post_fallback_empty_result_is_fresh_and_cwd_scoped(
 
 
 def test_post_fallback_preserves_late_notice_and_independent_failure(
-    post_client, monkeypatch, tmp_path,
-):
+    post_client: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     root, _record = _post_record(tmp_path, "worktree-a")
     payload = {"cwd": str(root)}
     status = post_client._load_sibling("nudge_status.py")
     lookup = status._find_tracking_yaml
     calls = []
 
-    def find(cwd, home):
+    def find(cwd: str, home: Path) -> Any:
         calls.append(cwd)
         if len(calls) == 1:
             raise OSError("transient lookup failure")
@@ -188,13 +237,13 @@ def test_post_fallback_preserves_late_notice_and_independent_failure(
 
 
 def test_post_fallback_retries_failure_swallowed_by_tracking_resolver(
-    post_client, monkeypatch, tmp_path,
-):
+    post_client: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     root, _record = _post_record(tmp_path, "worktree-a")
     resolve = Path.resolve
     attempts = []
 
-    def transient(path, *args, **kwargs):
+    def transient(path: Path, *args: Any, **kwargs: Any) -> Path:
         if path == root:
             attempts.append(path)
             if len(attempts) == 1:
@@ -210,8 +259,8 @@ def test_post_fallback_retries_failure_swallowed_by_tracking_resolver(
 
 @pytest.mark.parametrize("status_missing", [False, True])
 def test_post_fallback_default_cwd_and_missing_status_helper(
-    post_client, monkeypatch, tmp_path, status_missing,
-):
+    post_client: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, status_missing: bool,
+) -> None:
     root, _record = _post_record(tmp_path, "worktree-a")
     monkeypatch.chdir(root)
     if status_missing:
@@ -230,7 +279,7 @@ def test_post_fallback_default_cwd_and_missing_status_helper(
 @pytest.mark.portfolio_tier("T2")
 @pytest.mark.effect("process")
 @pytest.mark.effect("filesystem")
-def test_real_python_post_fallback_preserves_accounting_and_binding(tmp_path):
+def test_real_python_post_fallback_preserves_accounting_and_binding(tmp_path: Path) -> None:
     from agent_procutil import no_window_kwargs
 
     root, record = _post_record(tmp_path, "worktree-a")
@@ -255,8 +304,8 @@ def test_real_python_post_fallback_preserves_accounting_and_binding(tmp_path):
     env.pop("COPILOT_EXTENSIONS_CONTEXT", None)
     payload = json.dumps({"sessionId": "post-fixture", "cwd": str(root), "toolName": "view"})
 
-    def invoke():
-        result = subprocess.run(
+    def invoke() -> str:
+        result: subprocess.CompletedProcess[str] = subprocess.run(
             [sys.executable, str(PLUGIN / "scripts" / "hook_client.py"),
              "postToolUse", "--local-fallback"],
             input=payload, text=True, capture_output=True, env=env, timeout=10,
@@ -284,10 +333,16 @@ def test_real_python_post_fallback_preserves_accounting_and_binding(tmp_path):
     "mutation", "late-watch", "oversized-mutation", "oversized-late-watch",
     "batch-unknown", "batch-malformed", "batch-empty", "batch-too-many", "batch-call-cwd",
 ])
-def test_registered_post_hook_reuses_original_prepared_membership(tmp_path, monkeypatch, shell, event_case):
+def test_registered_post_hook_reuses_original_prepared_membership(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shell: str, event_case: str) -> None:
     from agent_procutil import no_window_kwargs
     from agent_worktrees.hook_ipc import HookIpcServer
-    from test_managed_session import environment, fixture_project, load
+    from test_managed_session import (
+        environment as shared_environment, fixture_project as shared_project, load as shared_load,
+    )
+
+    environment = cast(Callable[[Path, Path], dict[str, str]], shared_environment)
+    fixture_project = cast(Callable[[Path], tuple[Path, Path]], shared_project)
+    load = cast(Callable[[str], ModuleType], shared_load)
 
     executable = shutil.which(shell)
     if not executable:
@@ -297,12 +352,12 @@ def test_registered_post_hook_reuses_original_prepared_membership(tmp_path, monk
     anchor, registry = fixture_project(tmp_path)
     session = tmp_path / ".copilot" / "session-state" / "prepared"
     session.mkdir(parents=True)
-    payload = {
+    payload: dict[str, Any] = {
         "sessionId": "prepared", "cwd": str(anchor),
         "toolName": "edit" if event_case.endswith("mutation") else "view",
     }
     if event_case.startswith("batch-"):
-        calls = [{"name": "edit", "args": {"path": "one"}}]
+        calls: list[dict[str, Any] | None] = [{"name": "edit", "args": {"path": "one"}}]
         if event_case == "batch-unknown":
             calls.append({"name": "unknown", "args": {"command": "git status"}})
         elif event_case == "batch-malformed":
@@ -343,7 +398,7 @@ def test_registered_post_hook_reuses_original_prepared_membership(tmp_path, monk
     )
     seen = []
 
-    def decide(kind, event, deadline):
+    def decide(kind: str, event: dict[str, Any], deadline: float | None) -> dict[str, Any]:
         seen.append((kind, event))
         return {"additionalContext": "prepared resident"}
 
@@ -380,14 +435,22 @@ def test_registered_post_hook_reuses_original_prepared_membership(tmp_path, monk
 
 
 @pytest.fixture
-def prepared_read_event(tmp_path, monkeypatch, monkeypatch_config, request):
+def prepared_read_event(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, monkeypatch_config: object, request: pytest.FixtureRequest) -> Iterator[PreparedReadEvent]:
     from agent_worktrees import (
         __main__ as main, config as cfg, config_authority, handoff_diagnostics, sessions, tracking,
     )
     from agent_worktrees.hook_facts_publication import HookFactsPublisher
     from agent_worktrees.worktrees_runtime import WorktreesRuntime
-    from test_managed_session import environment, fixture_linked_worktree, fixture_project, load
+    from test_managed_session import (
+        environment as shared_environment, fixture_linked_worktree as shared_linked,
+        fixture_project as shared_project, load as shared_load,
+    )
     from test_session_worktree_binding import _save_record
+
+    environment = cast(Callable[[Path, Path], dict[str, str]], shared_environment)
+    fixture_project = cast(Callable[[Path], tuple[Path, Path]], shared_project)
+    fixture_linked_worktree = cast(Callable[[Path, Path], tuple[Path, Path]], shared_linked)
+    load = cast(Callable[[str], ModuleType], shared_load)
 
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     anchor, registry = fixture_project(tmp_path)
@@ -437,7 +500,7 @@ def prepared_read_event(tmp_path, monkeypatch, monkeypatch_config, request):
         anchor=str(anchor), worktree_root=str(workspace.parent),
     )
 
-    def receiving_config(name, **kwargs):
+    def receiving_config(name: str, **kwargs: Any) -> cfg.Config:
         return receiving if name == "example" else previous_config(name, **kwargs)
 
     monkeypatch.setattr(cfg, "load_project_config", receiving_config)
@@ -454,19 +517,22 @@ def prepared_read_event(tmp_path, monkeypatch, monkeypatch_config, request):
     monkeypatch.setattr(sessions, "_session_state_dir", lambda: session_root)
     _save_record(records, "worktree", str(workspace))
     path = records / "worktree.yaml"
-    record = tracking._load_record_uncached(path)
+    record = load_record_uncached(path)
     record.repo = "example"
-    record.platform = cfg.detect_platform()
+    record.platform = detect_platform()
     record.creation_nonce = "read-incarnation"
     record.status_note_at = "2026-11-05T20:00:00.123+05:30"
     tracking.save_record(record, path)
-    tracking.register_session("worktree", "prepared")
-    record = tracking._load_record_uncached(path)
+    register_session("worktree", "prepared")
+    record = load_record_uncached(path)
     binding = handoff_diagnostics.stamp_session_state_worktree_binding(
         "prepared", "worktree", worktree_dir="not-a-locator", worktree_record=record,
     )
-    assert binding["hookFacts"]["projectRoot"] == str(project)
-    assert binding["hookFacts"]["workspace"] == str(workspace)
+    assert binding is not None
+    locator = binding["hookFacts"]
+    assert isinstance(locator, dict)
+    assert locator["projectRoot"] == str(project)
+    assert locator["workspace"] == str(workspace)
     row = main._worktree_to_dict(record, current_only=True)
     assert "record_head_session" not in row
     record_heads = {
@@ -550,7 +616,7 @@ def prepared_read_event(tmp_path, monkeypatch, monkeypatch_config, request):
         )
     env.pop("AGENT_WORKTREES_NUDGE", None)
     try:
-        fixture = dict(
+        fixture: PreparedReadEvent = dict(
             env=env, harness=harness, payload=payload, facts=fact_path,
             row=row, record_heads=record_heads, runtime=runtime, session=session, registry=registry,
             home=tmp_path, tracking_path=path,
@@ -560,6 +626,135 @@ def prepared_read_event(tmp_path, monkeypatch, monkeypatch_config, request):
         yield fixture
     finally:
         runtime.shutdown()
+
+
+def _instrument_prepared_sender(source: str, *, routing_clock: bool=False) -> str:
+    start = source.index("function Send-PostToolReadDemand")
+    end = source.index("function Get-PostToolRuntimeRoot", start)
+    sender = source[start:end]
+    if routing_clock:
+        # Isolate routing from host latency; cold-process controls retain the real clock.
+        clock = "$clock = [Diagnostics.Stopwatch]::StartNew()"
+        assert sender.count(clock) == 1
+        sender = sender.replace(clock, "$clock = [pscustomobject]@{ ElapsedMilliseconds = 0 }")
+    allocation = "$client = [Net.Sockets.TcpClient]::new([Net.Sockets.AddressFamily]::InterNetwork)"
+    connect = "$connect = $client.ConnectAsync([Net.IPAddress]::Loopback, $port)"
+    connect_wait = "if ($remaining -le 0 -or -not $connect.Wait($remaining)) { return }"
+    write = "$write = $client.GetStream().WriteAsync($bytes, 0, $bytes.Length)"
+    for original, replacement in (
+        ("$client = $null", "$script:senderDiagnostic = @{ phase = 'entered' }; $client = $null"),
+        (
+            allocation,
+            "$script:senderDiagnostic.phase = 'allocating'\n" + allocation + "\n"
+            "$script:senderDiagnostic.phase = 'allocated'\n"
+            "$script:senderDiagnostic.allocation_ms = $clock.ElapsedMilliseconds",
+        ),
+        (
+            connect,
+            "$script:senderDiagnostic.phase = 'connecting'\n" + connect,
+        ),
+        (
+            connect_wait,
+            connect_wait + "\n"
+            "$script:senderDiagnostic.phase = 'connected'\n"
+            "$script:senderDiagnostic.connected_ms = $clock.ElapsedMilliseconds",
+        ),
+        (
+            write,
+            "$script:senderDiagnostic.phase = 'writing'\n" + write,
+        ),
+        (
+            "$null = $write.Wait($remaining)",
+            "$script:senderDiagnostic.write_complete = "
+            "$write.Wait($remaining)\n"
+            "$script:senderDiagnostic.phase = 'write-returned'",
+        ),
+        (
+            "} catch {} finally {",
+            "} catch {\n"
+            " $script:senderDiagnostic.error_type = $_.Exception.GetType().FullName\n"
+            " $script:senderDiagnostic.error_hresult = $_.Exception.HResult\n"
+            "} finally {\n"
+            " if ($null -ne $clock) { $script:senderDiagnostic.elapsed_ms = $clock.ElapsedMilliseconds }",
+        ),
+    ):
+        assert sender.count(original) == 1, original
+        sender = sender.replace(original, replacement)
+    return source[:start] + sender + source[end:]
+
+
+def _trace_prepared_sender(fixture: PreparedReadEvent) -> None:
+    path = fixture["payload_root"] / "scripts" / "hook-facts.ps1"
+    path.write_text(
+        _instrument_prepared_sender(path.read_text(encoding="utf-8"), routing_clock=True),
+        encoding="utf-8",
+    )
+    harness = fixture["harness"]
+    source = harness.read_text(encoding="utf-8")
+    terminal = "InvariantCulture)); exit 0"
+    assert source.count(terminal) == 1
+    harness.write_text(source.replace(terminal, (
+        "InvariantCulture));\n"
+        "[Console]::Error.WriteLine('sender_diagnostics=' + "
+        "(ConvertTo-Json -Compress -InputObject $script:senderDiagnostic)); exit 0"
+    )), encoding="utf-8")
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+@pytest.mark.effect("network")
+@pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
+def test_post_tool_routing_clock_preserves_real_owner_delivery(tmp_path: Path, shell: str) -> None:
+    from agent_procutil import no_window_kwargs
+    from agent_worktrees.hook_ipc import HookIpcServer
+
+    executable = shutil.which(shell)
+    if not executable:
+        pytest.skip(f"{shell} is unavailable")
+    notices = []
+    received = threading.Event()
+
+    class Server(HookIpcServer):
+        def _on_read_demand(self, request: dict[str, Any]) -> None:
+            super()._on_read_demand(request)
+            notices.append(request)
+            received.set()
+
+    server = Server(
+        lambda *args: pytest.fail("read demand must not request synchronous policy"),
+        read_demand_admitted=lambda: True,
+    )
+    server.start()
+    try:
+        discovery = server.rendezvous()
+        source = _instrument_prepared_sender(
+            (PLUGIN / "scripts" / "hook-facts.ps1").read_text(encoding="utf-8"),
+            routing_clock=True,
+        )
+        managed = str(PLUGIN / "scripts" / "managed-session.ps1").replace("'", "''")
+        script = tmp_path / "routing-clock.ps1"
+        script.write_text(
+            f". '{managed}'\n" + source + "\nSend-PostToolReadDemand -Discovery @{\n"
+            "hook_capabilities = @('read-hook-demand-v1'); hook_transport = 'tcp'\n"
+            + "\n".join(
+                f"{key} = '{discovery[key]}'"
+                for key in ("hook_generation", "hook_endpoint", "hook_token")
+            )
+            + "\n}\nConvertTo-Json -Compress -InputObject $script:senderDiagnostic\n",
+            encoding="utf-8",
+        )
+        result = subprocess.run(
+            [executable, "-NoProfile", "-NonInteractive", "-File", str(script)],
+            text=True, capture_output=True, timeout=10, **no_window_kwargs(),
+        )
+        assert result.returncode == 0, result.stderr
+        assert received.wait(2), result.stdout
+        assert len(notices) == 1 and notices[0]["kind"] == "readHookDemand"
+        assert server.has_recent_hook_demand()
+        assert json.loads(result.stdout)["write_complete"] is True
+    finally:
+        server.close()
 
 
 @pytest.mark.portfolio_tier("T2")
@@ -578,9 +773,8 @@ def prepared_read_event(tmp_path, monkeypatch, monkeypatch_config, request):
     "live-nudge-off", "late-guidance",
 ])
 def test_registered_prepared_cell_post_tool_uses_selected_original_owners(
-    prepared_read_event, monkeypatch, shell, case,
-):
-    from types import SimpleNamespace
+    prepared_read_event: PreparedReadEvent, monkeypatch: pytest.MonkeyPatch, shell: str, case: str,
+) -> None:
 
     from agent_procutil import no_window_kwargs
     from agent_worktrees import __main__ as main, local_cache_worker
@@ -610,28 +804,31 @@ def test_registered_prepared_cell_post_tool_uses_selected_original_owners(
             + harness,
             encoding="utf-8",
         )
-    invalidated, notices, synchronous = [], [], []
+    _trace_prepared_sender(fixture)
+    invalidated: list[str] = []
+    notices, synchronous, connections = [], [], []
     received, release = threading.Event(), threading.Event()
-    policy = main._ResidentHookPolicy(main._load_hook_client_module())
+    policy = main._ResidentHookPolicy(cast(Callable[[], ModuleType], main._load_hook_client_module)())
     target = str(fixture["home"] / "changed")
-    cache = SimpleNamespace(
-        invalidate=lambda path: invalidated.append(path),
-        invalidate_all=lambda: invalidated.append("all"),
-    )
+    cache = _RecordingCache(invalidated)
 
     class Server(HookIpcServer):
-        def _on_read_demand(self, request):
+        def _on_request_accepted(self) -> None:
+            super()._on_request_accepted()
+            connections.append(time.monotonic())
+
+        def _on_read_demand(self, request: dict[str, Any]) -> None:
             super()._on_read_demand(request)
             notices.append(request)
             received.set()
 
-        def _on_native_mutation(self, request):
+        def _on_native_mutation(self, request: dict[str, Any]) -> None:
             super()._on_native_mutation(request)
             notices.append(request)
             received.set()
 
     class NoReply(socketserver.BaseRequestHandler):
-        def handle(self):
+        def handle(self) -> None:
             self.request.settimeout(2)
             raw = b""
             while not raw.endswith(b"\n") and len(raw) < 65536:
@@ -643,8 +840,12 @@ def test_registered_prepared_cell_post_tool_uses_selected_original_owners(
             received.set()
             assert release.wait(10)
 
+    def synchronous_request(*args: Any) -> dict[str, Any]:
+        synchronous.append(args)
+        return {}
+
     server = Server(
-        lambda *args: synchronous.append(args) or {},
+        synchronous_request,
         read_demand_admitted=lambda: True,
         native_mutation_decide=lambda kind, payload, deadline: main._resident_hook_decision(
             kind, payload, deadline=deadline, policy=policy, segment_cache=cache,
@@ -683,6 +884,7 @@ def test_registered_prepared_cell_post_tool_uses_selected_original_owners(
             fixture["facts"].unlink()
         elif case in {"changed-receipt", "changed-payload"}:
             changed = fixture["context"] if case == "changed-receipt" else fixture["payload_root"] / "plugin.json"
+            assert changed is not None
             before = changed.stat()
             changed.write_bytes(changed.read_bytes().replace(b"{", b"[", 1))
             os.utime(changed, ns=(before.st_atime_ns, before.st_mtime_ns))
@@ -754,7 +956,10 @@ def test_registered_prepared_cell_post_tool_uses_selected_original_owners(
             received.wait(2)
             assert not server.has_recent_hook_demand()
         else:
-            assert received.wait(2), "selected original IPC owner received no notification"
+            assert received.wait(2), (
+                "selected original IPC owner received no notification",
+                {"sender": result.stderr, "accepted_connections": len(connections)},
+            )
             assert len(notices) == 1
             expected_kind = {
                 "native": "nativeToolMutation", "batch": "nativeToolBatchMutation",
@@ -784,6 +989,7 @@ def test_registered_prepared_cell_post_tool_uses_selected_original_owners(
         if stalled is not None:
             stalled.shutdown()
             stalled.server_close()
+            assert stalled_thread is not None
             stalled_thread.join(timeout=2)
             assert not stalled_thread.is_alive()
         server.close()
@@ -795,7 +1001,7 @@ def test_registered_prepared_cell_post_tool_uses_selected_original_owners(
 @pytest.mark.skipif(os.name != "nt", reason="Native post-tool relative source compatibility")
 @pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
 @pytest.mark.parametrize("path_kind", ["relative", "drive-relative", "root-relative"])
-def test_registered_post_tool_preserves_relative_source_location(prepared_read_event, shell, path_kind):
+def test_registered_post_tool_preserves_relative_source_location(prepared_read_event: PreparedReadEvent, shell: str, path_kind: str) -> None:
     from agent_procutil import no_window_kwargs
 
     executable = shutil.which(shell)
@@ -833,7 +1039,7 @@ def test_registered_post_tool_preserves_relative_source_location(prepared_read_e
 @pytest.mark.skipif(os.name != "nt", reason="Native post-tool missing/non-file entry compatibility")
 @pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
 @pytest.mark.parametrize("case", ["missing", "directory"])
-def test_registered_post_tool_entry_fallback_preserves_original_boundary(tmp_path, shell, case):
+def test_registered_post_tool_entry_fallback_preserves_original_boundary(tmp_path: Path, shell: str, case: str) -> None:
     from agent_procutil import no_window_kwargs
 
     executable = shutil.which(shell)
@@ -888,7 +1094,7 @@ def test_registered_post_tool_entry_fallback_preserves_original_boundary(tmp_pat
 @pytest.mark.effect("filesystem")
 @pytest.mark.skipif(os.name != "nt", reason="Native post-tool fallback cwd compatibility")
 @pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
-def test_post_tool_fallback_repairs_cwd_before_original_admission(tmp_path, shell):
+def test_post_tool_fallback_repairs_cwd_before_original_admission(tmp_path: Path, shell: str) -> None:
     from agent_procutil import no_window_kwargs
 
     executable = shutil.which(shell)
@@ -924,7 +1130,7 @@ def test_post_tool_fallback_repairs_cwd_before_original_admission(tmp_path, shel
 @pytest.mark.skipif(os.name != "nt", reason="Native prepared runtime-root compatibility")
 @pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
 @pytest.mark.parametrize("case", ["canonical", "dot", "missing", "missing-dot", "linked-dot", "layout"])
-def test_prepared_runtime_root_preserves_literal_context_guards(tmp_path, shell, case):
+def test_prepared_runtime_root_preserves_literal_context_guards(tmp_path: Path, shell: str, case: str) -> None:
     from agent_procutil import no_window_kwargs
 
     executable = shutil.which(shell)
@@ -987,10 +1193,15 @@ ConvertTo-Json -Compress -InputObject @{ old = $old; prepared = $prepared }
 @pytest.mark.portfolio_tier("T2")
 @pytest.mark.effect("process")
 @pytest.mark.effect("filesystem")
-@pytest.mark.skipif(os.name != "nt", reason="Native Windows sender deadline arithmetic")
 @pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
-@pytest.mark.parametrize("allocation_ms", [60, 110])
-def test_post_tool_send_debits_allocation_and_connect_from_one_budget(tmp_path, shell, allocation_ms):
+@pytest.mark.parametrize(
+    "allocation_ms,connect_setup_ms,stream_setup_ms,write_setup_ms",
+    [(60, 0, 0, 0), (110, 0, 0, 0), (60, 10, 5, 5),
+     (60, 40, 0, 0), (60, 0, 25, 0), (60, 0, 0, 25)],
+)
+def test_post_tool_send_debits_allocation_and_connect_from_one_budget(
+    tmp_path: Path, shell: str, allocation_ms: int, connect_setup_ms: int, stream_setup_ms: int, write_setup_ms: int,
+) -> None:
     from agent_procutil import no_window_kwargs
 
     executable = shutil.which(shell)
@@ -998,7 +1209,7 @@ def test_post_tool_send_debits_allocation_and_connect_from_one_budget(tmp_path, 
         if os.environ.get("AGENT_WORKTREES_REQUIRE_NATIVE_MEMBERSHIP") == "1":
             pytest.fail(f"Required native membership shell {shell} is unavailable")
         pytest.skip(f"{shell} is unavailable")
-    source = (PLUGIN / "scripts" / "hook-facts.ps1").read_text(encoding="utf-8")
+    source = _instrument_prepared_sender((PLUGIN / "scripts" / "hook-facts.ps1").read_text(encoding="utf-8"))
     start = source.index("function Send-PostToolReadDemand")
     end = source.index("function Get-PostToolRuntimeRoot", start)
     sender = source[start:end]
@@ -1024,7 +1235,7 @@ $script:connectTask = [pscustomobject]@{}
 $script:connectTask | Add-Member ScriptMethod Wait {
     param($remaining)
     $script:connectWaits.Add($remaining)
-    $script:clock.ElapsedMilliseconds = 75
+    $script:clock.ElapsedMilliseconds += 15
     return $true
 }
 $script:writeTask = [pscustomobject]@{}
@@ -1036,15 +1247,20 @@ $script:writeTask | Add-Member ScriptMethod Wait {
 $script:stream = [pscustomobject]@{}
 $script:stream | Add-Member ScriptMethod WriteAsync {
     param($bytes, $offset, $count)
+    $script:clock.ElapsedMilliseconds += [int]$env:WRITE_SETUP_MS
     $script:wire = [Text.Encoding]::UTF8.GetString($bytes, $offset, $count)
     return $script:writeTask
 }
 $script:client = [pscustomobject]@{}
 $script:client | Add-Member ScriptMethod ConnectAsync {
     param($address, $port)
+    $script:clock.ElapsedMilliseconds += [int]$env:CONNECT_SETUP_MS
     return $script:connectTask
 }
-$script:client | Add-Member ScriptMethod GetStream { return $script:stream }
+$script:client | Add-Member ScriptMethod GetStream {
+    $script:clock.ElapsedMilliseconds += [int]$env:STREAM_SETUP_MS
+    return $script:stream
+}
 $script:client | Add-Member ScriptMethod Dispose { $script:disposed++ }
 Send-PostToolReadDemand -Discovery @{
     hook_capabilities = @('read-hook-demand-v1'); hook_transport = 'tcp'
@@ -1053,24 +1269,40 @@ Send-PostToolReadDemand -Discovery @{
 }
 ConvertTo-Json -Compress -InputObject @{
     connect = @($script:connectWaits); write = @($script:writeWaits)
-    wire = $script:wire; disposed = $script:disposed
+    wire = $script:wire; disposed = $script:disposed; diagnostic = $script:senderDiagnostic
 }
 """, encoding="utf-8")
     result = subprocess.run(
         [executable, "-NoProfile", "-NonInteractive", "-File", str(script)],
         text=True, capture_output=True, timeout=10,
-        env={**os.environ, "ALLOCATION_MS": str(allocation_ms)}, **no_window_kwargs(),
+        env={
+            **os.environ, "ALLOCATION_MS": str(allocation_ms),
+            "CONNECT_SETUP_MS": str(connect_setup_ms), "STREAM_SETUP_MS": str(stream_setup_ms),
+            "WRITE_SETUP_MS": str(write_setup_ms),
+        }, **no_window_kwargs(),
     )
     assert result.returncode == 0, result.stderr
     value = json.loads(result.stdout)
     assert value["disposed"] == 1
-    if allocation_ms == 60:
-        assert value["connect"] == [40]
-        assert value["write"] == [25]
+    connect_started = allocation_ms < 100
+    connect_ready_ms = allocation_ms + connect_setup_ms
+    connect_waited = connect_started and connect_ready_ms < 100
+    connected_ms = connect_ready_ms + (15 if connect_waited else 0)
+    write_started = connect_waited and connected_ms < 100
+    write_ready_ms = connected_ms + (stream_setup_ms + write_setup_ms if write_started else 0)
+    write_waited = write_started and write_ready_ms < 100
+    assert value["connect"] == ([100 - connect_ready_ms] if connect_waited else [])
+    assert value["write"] == ([100 - write_ready_ms] if write_waited else [])
+    if write_started:
         assert json.loads(value["wire"])["kind"] == "readHookDemand"
     else:
-        assert value["connect"] == value["write"] == []
         assert value["wire"] is None
+    assert value["diagnostic"]["allocation_ms"] == allocation_ms
+    assert value["diagnostic"]["elapsed_ms"] == write_ready_ms
+    if connect_waited:
+        assert value["diagnostic"]["connected_ms"] == connected_ms
+    if write_waited:
+        assert value["diagnostic"]["write_complete"] is True
 
 
 @pytest.mark.portfolio_tier("T2")
@@ -1082,8 +1314,8 @@ ConvertTo-Json -Compress -InputObject @{
 @pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
 @pytest.mark.parametrize("sample_group", range(4))
 def test_registered_prepared_cell_post_tool_cold_process_tail(
-    prepared_read_event, shell, sample_group, capsys,
-):
+    prepared_read_event: PreparedReadEvent, shell: str, sample_group: int, capsys: pytest.CaptureFixture[str],
+) -> None:
     from agent_procutil import no_window_kwargs
     from agent_worktrees.hook_ipc import HookIpcServer
 
@@ -1098,7 +1330,7 @@ def test_registered_prepared_cell_post_tool_cold_process_tail(
     received = threading.Event()
 
     class Server(HookIpcServer):
-        def _on_read_demand(self, request):
+        def _on_read_demand(self, request: dict[str, Any]) -> None:
             super()._on_read_demand(request)
             notices.append(request)
             received.set()
@@ -1150,7 +1382,7 @@ def test_registered_prepared_cell_post_tool_cold_process_tail(
 @pytest.mark.parametrize("prepared_read_event", ["cell"], indirect=True)
 @pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
 @pytest.mark.parametrize("sample_group", range(2))
-def test_prepared_post_entry_baseline_comparison(prepared_read_event, shell, sample_group, capsys):
+def test_prepared_post_entry_baseline_comparison(prepared_read_event: PreparedReadEvent, shell: str, sample_group: int, capsys: pytest.CaptureFixture[str]) -> None:
     from agent_procutil import no_window_kwargs
     from agent_worktrees.hook_ipc import HookIpcServer
 
@@ -1169,8 +1401,8 @@ def test_prepared_post_entry_baseline_comparison(prepared_read_event, shell, sam
     harness = fixture["harness"].read_text(encoding="utf-8")
     assert harness.count(command.removesuffix("exit 0")) == 1
 
-    def baseline_file(relative):
-        result = subprocess.run(
+    def baseline_file(relative: str) -> bytes:
+        result: subprocess.CompletedProcess[bytes] = subprocess.run(
             [git, "-C", str(repository), "show", f"{revision}:{relative}"],
             capture_output=True, timeout=10, **no_window_kwargs(),
         )
@@ -1191,7 +1423,7 @@ def test_prepared_post_entry_baseline_comparison(prepared_read_event, shell, sam
     received = threading.Event()
 
     class Server(HookIpcServer):
-        def _on_read_demand(self, request):
+        def _on_read_demand(self, request: dict[str, Any]) -> None:
             super()._on_read_demand(request)
             notices.append(request)
             received.set()
@@ -1251,7 +1483,7 @@ def test_prepared_post_entry_baseline_comparison(prepared_read_event, shell, sam
 @pytest.mark.parametrize(("shell", "old_engine"), [
     ("pwsh", False), ("pwsh", True), ("powershell.exe", False),
 ])
-def test_prepared_json_engine_retains_shell_semantics(tmp_path, shell, old_engine):
+def test_prepared_json_engine_retains_shell_semantics(tmp_path: Path, shell: str, old_engine: bool) -> None:
     depth_count = 2 if shell == "pwsh" else 1
     from agent_procutil import no_window_kwargs
 
@@ -1349,7 +1581,7 @@ if ($script:preparedJsonFallbackCalls -ne $script:expectedFallbackCalls) {
 @pytest.mark.parametrize("prepared_read_event", ["cell"], indirect=True)
 @pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
 @pytest.mark.parametrize("mode", ["startup", "registered", "stages"])
-def test_prepared_post_entry_stage_profile(prepared_read_event, shell, mode, capsys):
+def test_prepared_post_entry_stage_profile(prepared_read_event: PreparedReadEvent, shell: str, mode: str, capsys: pytest.CaptureFixture[str]) -> None:
     from agent_procutil import no_window_kwargs
     from agent_worktrees.hook_ipc import HookIpcServer
 
@@ -1360,7 +1592,7 @@ def test_prepared_post_entry_stage_profile(prepared_read_event, shell, mode, cap
     scripts = fixture["payload_root"] / "scripts"
     fixture["env"]["AGENT_WORKTREES_NUDGE_CALLS"] = "1000"
 
-    def instrument(text, name, first_statement):
+    def instrument(text: str, name: str, first_statement: str) -> str:
         start = text.index(f"function {name} {{")
         end = text.find("\nfunction ", start + 1)
         end = len(text) if end < 0 else end
@@ -1389,7 +1621,7 @@ def test_prepared_post_entry_stage_profile(prepared_read_event, shell, mode, cap
             + suffix + section[closing:] + text[end:]
         )
 
-    def instrument_load(text, statement, name):
+    def instrument_load(text: str, statement: str, name: str) -> str:
         assert text.count(statement) == 1
         return text.replace(
             statement,
@@ -1484,7 +1716,7 @@ try {
     received = threading.Event()
 
     class Server(HookIpcServer):
-        def _on_read_demand(self, request):
+        def _on_read_demand(self, request: dict[str, Any]) -> None:
             super()._on_read_demand(request)
             notices.append(request)
             received.set()
@@ -1544,7 +1776,7 @@ try {
     "current", "old-provider", "wrong-generation", "closed", "revoked",
     "missing-discovery", "missing-row", "unadmitted", "no-reply",
 ])
-def test_registered_read_demand_is_send_only(prepared_read_event, shell, case):
+def test_registered_read_demand_is_send_only(prepared_read_event: PreparedReadEvent, shell: str, case: str) -> None:
     from agent_procutil import no_window_kwargs
     from agent_worktrees.hook_ipc import HookIpcServer
 
@@ -1556,13 +1788,13 @@ def test_registered_read_demand_is_send_only(prepared_read_event, shell, case):
     received, release = threading.Event(), threading.Event()
 
     class Server(HookIpcServer):
-        def _on_read_demand(self, request):
+        def _on_read_demand(self, request: dict[str, Any]) -> None:
             notices.append(request)
             super()._on_read_demand(request)
             received.set()
 
     class NoReply(socketserver.BaseRequestHandler):
-        def handle(self):
+        def handle(self) -> None:
             self.request.settimeout(2)
             raw = b""
             while not raw.endswith(b"\n") and len(raw) < 2048:
@@ -1574,7 +1806,11 @@ def test_registered_read_demand_is_send_only(prepared_read_event, shell, case):
             received.set()
             assert release.wait(10), "test did not release its non-replying peer"
 
-    server = Server(lambda *args: calls.append(args) or {}, read_demand_admitted=lambda: case != "revoked")
+    def synchronous_request(*args: Any) -> dict[str, Any]:
+        calls.append(args)
+        return {}
+
+    server = Server(synchronous_request, read_demand_admitted=lambda: case != "revoked")
     server.start()
     stalled = None
     stalled_thread = None
@@ -1626,6 +1862,7 @@ def test_registered_read_demand_is_send_only(prepared_read_event, shell, case):
         if stalled is not None:
             stalled.shutdown()
             stalled.server_close()
+            assert stalled_thread is not None
             stalled_thread.join(timeout=2)
             assert not stalled_thread.is_alive()
         server.close()
@@ -1660,8 +1897,7 @@ def test_registered_read_demand_is_send_only(prepared_read_event, shell, case):
     "mixed-old-provider", "mixed-wrong-generation", "mixed-closed",
     "mixed-missing-discovery", "mixed-oversized", "mixed-no-reply",
 ])
-def test_registered_native_mutation_is_send_only(prepared_read_event, shell, case):
-    from types import SimpleNamespace
+def test_registered_native_mutation_is_send_only(prepared_read_event: PreparedReadEvent, shell: str, case: str) -> None:
 
     from agent_procutil import no_window_kwargs
     from agent_worktrees import __main__ as main
@@ -1676,18 +1912,15 @@ def test_registered_native_mutation_is_send_only(prepared_read_event, shell, cas
     shell_event = case.startswith("shell-")
     case = case.removeprefix("mixed-") if mixed else case.removeprefix("batch-") if batch else case.removeprefix("shell-")
     paths = [str(fixture["home"] / name) for name in ("one", "two")]
-    policy = main._ResidentHookPolicy(main._load_hook_client_module())
-    invalidated = []
-    cache = SimpleNamespace(
-        invalidate=lambda path: invalidated.append(path),
-        invalidate_all=lambda: invalidated.append("all") if shell_event or mixed else pytest.fail("known paths must retain target scope"),
-    )
+    policy = main._ResidentHookPolicy(cast(Callable[[], ModuleType], main._load_hook_client_module)())
+    invalidated: list[str] = []
+    cache = _RecordingCache(invalidated, allow_all=shell_event or mixed)
     received, release = threading.Event(), threading.Event()
     notices = []
     callback_errors = []
 
     class Server(HookIpcServer):
-        def _on_native_mutation(self, request):
+        def _on_native_mutation(self, request: dict[str, Any]) -> None:
             notices.append(request)
             try:
                 super()._on_native_mutation(request)
@@ -1698,7 +1931,7 @@ def test_registered_native_mutation_is_send_only(prepared_read_event, shell, cas
                 received.set()
 
     class NoReply(socketserver.BaseRequestHandler):
-        def handle(self):
+        def handle(self) -> None:
             self.request.settimeout(2)
             raw = b""
             while not raw.endswith(b"\n") and len(raw) < 65536:
@@ -1743,14 +1976,16 @@ def test_registered_native_mutation_is_send_only(prepared_read_event, shell, cas
         path.write_text(json.dumps(discovery), encoding="utf-8")
         if case == "missing-discovery":
             path.unlink()
-        args = {"edits": [{"path": item} for item in paths]}
+        args: dict[str, Any] = {"edits": [{"path": item} for item in paths]}
         tool = "multi_edit"
         if case == "patch":
             tool = "apply_patch"
             args = {"input": f"*** Update File: {paths[0]}\n*** Move to: {paths[1]}\n"}
         elif case == "oversized":
             args["content"] = "x" * 65536
-        payload = {**fixture["payload"], "toolName": tool, "toolArgs": args, "toolResult": "not transmitted"}
+        payload: dict[str, Any] = {
+            **fixture["payload"], "toolName": tool, "toolArgs": args, "toolResult": "not transmitted",
+        }
         if batch:
             payload.pop("toolName")
             payload.pop("toolArgs")
@@ -1766,11 +2001,14 @@ def test_registered_native_mutation_is_send_only(prepared_read_event, shell, cas
             elif case == "shell-metadata":
                 payload["toolName"] = "powershell"
             if mixed:
+                shell_arguments: str | dict[str, Any] = (
+                    {"command": ["unknown"]} if case == "unknown-args" else
+                    '{"command":"git -c core.quotepath=false pull --ff-only"}' if case == "write" else
+                    {"command": "git --no-pager status --short"}
+                )
                 payload["toolCalls"].append({
                     "name": "powershell",
-                    "args": {"command": ["unknown"]} if case == "unknown-args" else
-                        '{"command":"git -c core.quotepath=false pull --ff-only"}' if case == "write" else
-                        {"command": "git --no-pager status --short"},
+                    "args": shell_arguments,
                 })
         elif case == "structured":
             payload["workingDirectory"] = payload["cwd"]
@@ -1891,6 +2129,7 @@ def test_registered_native_mutation_is_send_only(prepared_read_event, shell, cas
         if stalled is not None:
             stalled.shutdown()
             stalled.server_close()
+            assert stalled_thread is not None
             stalled_thread.join(timeout=2)
             assert not stalled_thread.is_alive()
         server.close()
@@ -1904,7 +2143,7 @@ def test_registered_native_mutation_is_send_only(prepared_read_event, shell, cas
 @pytest.mark.parametrize("case", [
     "changed-partial", "failed", "later-publication", "missing-row", "missing-locator", "root-prefix",
 ])
-def test_registered_late_guidance_needs_no_python_or_resident(prepared_read_event, monkeypatch, shell, case):
+def test_registered_late_guidance_needs_no_python_or_resident(prepared_read_event: PreparedReadEvent, monkeypatch: pytest.MonkeyPatch, shell: str, case: str) -> None:
     from agent_procutil import no_window_kwargs
     from agent_worktrees import local_cache_worker
 
@@ -1949,7 +2188,7 @@ def test_registered_late_guidance_needs_no_python_or_resident(prepared_read_even
             "example", [fixture["row"]], observed_at=2, record_heads=heads,
         )
 
-    def invoke():
+    def invoke() -> dict[str, Any]:
         response = subprocess.run(
             [executable, "-NoProfile", "-NonInteractive", "-File", str(fixture["harness"])],
             input=json.dumps(fixture["payload"]), text=True, capture_output=True, timeout=10,
@@ -1981,8 +2220,8 @@ def test_registered_late_guidance_needs_no_python_or_resident(prepared_read_even
 @pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
 @pytest.mark.parametrize("case", ["live", "absent", "invalid-owner", "old-result", "oversized-request"])
 def test_registered_late_guidance_retains_pending_and_unknown_watch(
-    prepared_read_event, monkeypatch, shell, case,
-):
+    prepared_read_event: PreparedReadEvent, monkeypatch: pytest.MonkeyPatch, shell: str, case: str,
+) -> None:
     from agent_procutil import no_window_kwargs
     from agent_worktrees import local_cache_worker
 
@@ -2041,8 +2280,8 @@ def test_registered_late_guidance_retains_pending_and_unknown_watch(
 @pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
 @pytest.mark.parametrize("status", ["ready", "partial", "skipped", "timeout"])
 def test_shell_late_guidance_unchanged_matches_original_consumer(
-    prepared_read_event, monkeypatch, shell, status,
-):
+    prepared_read_event: PreparedReadEvent, monkeypatch: pytest.MonkeyPatch, shell: str, status: str,
+) -> None:
     from agent_procutil import no_window_kwargs
     from agent_worktrees import local_cache_worker
     from test_nudge_status import nudge
@@ -2085,8 +2324,8 @@ def test_shell_late_guidance_unchanged_matches_original_consumer(
 @pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
 @pytest.mark.parametrize("second_owner", ["shell", "python"])
 def test_registered_late_guidance_has_one_competing_consumer(
-    prepared_read_event, monkeypatch, shell, second_owner,
-):
+    prepared_read_event: PreparedReadEvent, monkeypatch: pytest.MonkeyPatch, shell: str, second_owner: str,
+) -> None:
     from agent_procutil import no_window_kwargs
     from agent_worktrees import local_cache_worker
 
@@ -2196,6 +2435,7 @@ print(json.dumps({"additionalContext": notice} if notice else {}))
                 time.sleep(0.005)
             if suffix:
                 for process in processes:
+                    assert process.stdin is not None
                     process.stdin.write(json.dumps(fixture["payload"]))
                     process.stdin.close()
                     process.stdin = None
@@ -2220,7 +2460,7 @@ print(json.dumps({"additionalContext": notice} if notice else {}))
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows rename must not overwrite a newer watch")
 @pytest.mark.parametrize("newer_during_restore", [False, True])
-def test_python_late_watch_claim_preserves_replacement(tmp_path, monkeypatch, newer_during_restore):
+def test_python_late_watch_claim_preserves_replacement(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, newer_during_restore: bool) -> None:
     from test_nudge_status import nudge
 
     path = tmp_path / "local-guidance-watch.json"
@@ -2230,7 +2470,7 @@ def test_python_late_watch_claim_preserves_replacement(tmp_path, monkeypatch, ne
     path.write_bytes(original)
     rename = Path.rename
 
-    def replace_before_claim(source, target):
+    def replace_before_claim(source: Path, target: Path) -> Path:
         if source == path:
             path.write_bytes(replacement)
         elif target == path and newer_during_restore:
@@ -2249,7 +2489,7 @@ def test_python_late_watch_claim_preserves_replacement(tmp_path, monkeypatch, ne
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows watch replacement")
 @pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
 @pytest.mark.parametrize("newer_during_restore", [False, True])
-def test_shell_late_watch_claim_preserves_replacement(tmp_path, shell, newer_during_restore):
+def test_shell_late_watch_claim_preserves_replacement(tmp_path: Path, shell: str, newer_during_restore: bool) -> None:
     from agent_procutil import no_window_kwargs
 
     executable = shutil.which(shell)
@@ -2293,7 +2533,7 @@ $consumed = Remove-PostToolLateWatch $env:TEST_WATCH '{"version":1,"started_at":
 @pytest.mark.skipif(os.name != "nt", reason="Native overlapping stale watch transactions")
 @pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
 @pytest.mark.parametrize("second_owner", ["shell", "python"])
-def test_overlapping_stale_claims_preserve_latest_publication(tmp_path, shell, second_owner):
+def test_overlapping_stale_claims_preserve_latest_publication(tmp_path: Path, shell: str, second_owner: str) -> None:
     from agent_procutil import no_window_kwargs
 
     executable = shutil.which(shell)
@@ -2347,7 +2587,7 @@ print(json.dumps({"consumed": nudge._consume_late_watch(
 """, encoding="utf-8")
     processes = []
 
-    def start(role, snapshot):
+    def start(role: str, snapshot: str) -> subprocess.Popen[str]:
         command = [executable, "-NoProfile", "-NonInteractive", "-File", str(shell_driver)]
         if role == "second" and second_owner == "python":
             command = [sys.executable, str(python_driver), str(PLUGIN / "scripts" / "nudge_status.py")]
@@ -2362,13 +2602,13 @@ print(json.dumps({"consumed": nudge._consume_late_watch(
         processes.append(process)
         return process
 
-    def wait_for(predicate):
+    def wait_for(predicate: Callable[[], bool]) -> None:
         end = time.monotonic() + 6
         while not predicate():
             assert time.monotonic() < end, "stale claim control did not reach its boundary"
             time.sleep(0.005)
 
-    def finish(process):
+    def finish(process: subprocess.Popen[str]) -> None:
         stdout, stderr = process.communicate(timeout=10)
         assert process.returncode == 0, stderr
         assert not stderr
@@ -2404,7 +2644,7 @@ print(json.dumps({"consumed": nudge._consume_late_watch(
     "wrong-workspace", "missing-discovery", "legacy-facts", "malformed-facts",
     "agenda-expected", "agenda-off", "agenda-present", "agenda-disabled",
 ])
-def test_registered_read_event_needs_no_python_or_resident(prepared_read_event, shell, case):
+def test_registered_read_event_needs_no_python_or_resident(prepared_read_event: PreparedReadEvent, shell: str, case: str) -> None:
     from agent_procutil import no_window_kwargs
 
     executable = shutil.which(shell)
@@ -2415,7 +2655,7 @@ def test_registered_read_event_needs_no_python_or_resident(prepared_read_event, 
     session, registry = fixture["session"], fixture["registry"]
     sidecar = fixture["sidecar"]
 
-    def invoke(tool="view"):
+    def invoke(tool: str="view") -> dict[str, Any]:
         event = {**payload, "toolName": tool}
         started = time.monotonic()
         result = subprocess.run(
@@ -2444,10 +2684,10 @@ def test_registered_read_event_needs_no_python_or_resident(prepared_read_event, 
         assert "2 tool call(s)" in text
         assert invoke() == {}
         assert json.loads(sidecar.read_text())["count"] == 1
-        record = tracking._load_record_uncached(fixture["tracking_path"])
+        record = load_record_uncached(fixture["tracking_path"])
         record.status_note_at = "2026-11-05T20:01:00.123+05:30"
         tracking.save_record(record, fixture["tracking_path"])
-        saved = tracking._load_record_uncached(fixture["tracking_path"])
+        saved = load_record_uncached(fixture["tracking_path"])
         row = {**fixture["row"], "status_note_at": saved.status_note_at}
         fixture["runtime"].publish(
             "example", [row], observed_at=2, record_heads=fixture["record_heads"],
@@ -2571,8 +2811,8 @@ def test_registered_read_event_needs_no_python_or_resident(prepared_read_event, 
 @pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
 @pytest.mark.parametrize("second_owner", ["shell", "python"])
 def test_overlapping_read_and_edit_share_counter_transaction(
-    prepared_read_event, shell, second_owner,
-):
+    prepared_read_event: PreparedReadEvent, shell: str, second_owner: str,
+) -> None:
     from agent_procutil import no_window_kwargs
 
     executable = shutil.which(shell)
@@ -2582,7 +2822,8 @@ def test_overlapping_read_and_edit_share_counter_transaction(
     home = fixture["home"]
     first_ready, second_ready, release = [home / name for name in ("first-ready", "second-ready", "release")]
     support = fixture["harness"].parent / "payload" / "scripts" / "hook-facts.ps1"
-    quote = lambda path: str(path).replace("'", "''")
+    def quote(path: Path) -> str:
+        return str(path).replace("'", "''")
     with support.open("a", encoding="utf-8") as stream:
         stream.write(
             "\n$script:CounterRead = ${function:Read-PostToolBoundedJson}\n"
@@ -2603,18 +2844,19 @@ def test_overlapping_read_and_edit_share_counter_transaction(
     env = {**fixture["env"], "AGENT_WORKTREES_NUDGE_CALLS": "999"}
     children = []
 
-    def start(command, role):
+    def start(command: list[str], role: str) -> subprocess.Popen[str]:
         child = subprocess.Popen(
             command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, env={**env, "COUNTER_TEST_ROLE": role}, **no_window_kwargs(),
         )
         children.append(child)
+        assert child.stdin is not None
         child.stdin.write(json.dumps(fixture["payload"]))
         child.stdin.close()
         child.stdin = None
         return child
 
-    def wait_for(path):
+    def wait_for(path: Path) -> None:
         until = time.monotonic() + 5
         while not path.exists():
             assert time.monotonic() < until, f"barrier not reached: {path.name}"
@@ -2642,7 +2884,7 @@ def test_overlapping_read_and_edit_share_counter_transaction(
         assert not stdout
         assert not fixture["sidecar"].exists()
         release.write_text("continue")
-        def finish(child):
+        def finish(child: subprocess.Popen[str]) -> None:
             stdout, stderr = child.communicate(timeout=10)
             assert child.returncode == 0, (stdout, stderr)
             assert not stdout
@@ -2666,7 +2908,7 @@ def test_overlapping_read_and_edit_share_counter_transaction(
     os.environ.get("AGENT_WORKTREES_SHELL_HOOK_INTEGRATION") != "1",
     reason="explicit native shell/daemon integration",
 )
-def test_real_powershell_roundtrip_and_validation_without_cli_children(tmp_path, admitted_protocol_script):
+def test_real_powershell_roundtrip_and_validation_without_cli_children(tmp_path: Path, admitted_protocol_script: Path) -> None:
     from agent_procutil import no_window_kwargs
     from agent_worktrees.hook_ipc import HookIpcServer
 
@@ -2675,7 +2917,7 @@ def test_real_powershell_roundtrip_and_validation_without_cli_children(tmp_path,
     if shell is None:
         pytest.skip("PowerShell unavailable in explicit integration venue")
     seen = []
-    def decide(kind, payload, deadline):
+    def decide(kind: str, payload: dict[str, Any], deadline: float | None) -> dict[str, Any]:
         seen.append((kind, payload))
         if payload.get("toolName") == "empty":
             return {}
@@ -2811,7 +3053,7 @@ def test_real_powershell_roundtrip_and_validation_without_cli_children(tmp_path,
     os.environ.get("AGENT_WORKTREES_SHELL_HOOK_INTEGRATION") != "1",
     reason="explicit native shell/daemon integration",
 )
-def test_real_shell_json_values_and_legacy_metadata_compatibility(tmp_path, admitted_protocol_script):
+def test_real_shell_json_values_and_legacy_metadata_compatibility(tmp_path: Path, admitted_protocol_script: Path) -> None:
     from agent_procutil import no_window_kwargs
     from agent_worktrees.hook_ipc import HookIpcServer
 
@@ -2838,7 +3080,7 @@ def test_real_shell_json_values_and_legacy_metadata_compatibility(tmp_path, admi
     ]
     seen = []
 
-    def decide(kind, payload, deadline):
+    def decide(kind: str, payload: dict[str, Any], deadline: float | None) -> dict[str, Any]:
         seen.append((kind, payload))
         return payload
 
@@ -2907,7 +3149,7 @@ def test_real_shell_json_values_and_legacy_metadata_compatibility(tmp_path, admi
     os.environ.get("AGENT_WORKTREES_SHELL_HOOK_INTEGRATION") != "1",
     reason="explicit native shell/daemon integration",
 )
-def test_real_shell_rejects_invalid_or_unbounded_responses(tmp_path, admitted_protocol_script):
+def test_real_shell_rejects_invalid_or_unbounded_responses(tmp_path: Path, admitted_protocol_script: Path) -> None:
     from agent_procutil import no_window_kwargs
 
     shell = shutil.which(os.environ.get("AGENT_WORKTREES_TEST_SHELL", "pwsh"))
@@ -2918,7 +3160,7 @@ def test_real_shell_rejects_invalid_or_unbounded_responses(tmp_path, admitted_pr
     requests = []
 
     class Handler(socketserver.StreamRequestHandler):
-        def handle(self):
+        def handle(self) -> None:
             request = json.loads(self.rfile.readline())
             mode = request["payload"]["mode"]
             requests.append(mode)
@@ -2991,7 +3233,7 @@ def test_real_shell_rejects_invalid_or_unbounded_responses(tmp_path, admitted_pr
 @pytest.mark.portfolio_tier("T2")
 @pytest.mark.effect("process")
 @pytest.mark.effect("filesystem")
-def test_prepared_agenda_helpers_mirror_python_policy_lane_and_window(tmp_path):
+def test_prepared_agenda_helpers_mirror_python_policy_lane_and_window(tmp_path: Path) -> None:
     from agent_procutil import no_window_kwargs
     from test_nudge_status import nudge
 
