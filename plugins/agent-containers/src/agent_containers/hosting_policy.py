@@ -12,6 +12,7 @@ from agent_procutil import no_window_flags
 from repository_policy import AgentHostingError, validate_hosting_result
 
 if TYPE_CHECKING:
+    from .resolver import LiveExecTarget
     from .session_host_context import TrustedContext
 
 _OWNER_POLICY_JSON = (
@@ -31,9 +32,12 @@ _OWNER_POLICY_JSON = (
 )
 
 class ExecutionCheckout(Protocol):
-    container_id: str
-    user: str
-    workspace_folder: str
+    @property
+    def container_id(self) -> str: ...
+    @property
+    def user(self) -> str: ...
+    @property
+    def workspace_folder(self) -> str: ...
 
 
 def guest_check_command(workspace: str, *, operation: str = "launch") -> str:
@@ -48,6 +52,41 @@ def guest_check_command(workspace: str, *, operation: str = "launch") -> str:
         "{ POLICY_STATUS=$?; printf '%s\\n' \"$POLICY_RESULT\" >&2; exit \"$POLICY_STATUS\"; }; "
         f"printf '%s\\n' \"$POLICY_RESULT\" | python3 -c {shlex.quote(_OWNER_POLICY_JSON)})"
     )
+
+
+def exec_launch(command: str, workspace: str, *, portable: bool) -> str:
+    """The guest-guarded launch, or after a portable admission its workspace change only."""
+    if not portable:
+        return guarded_launch(command, workspace)
+    if not isinstance(workspace, str) or not workspace.startswith("/") or "\0" in workspace:
+        raise RuntimeError("Repository hosting admission requires an absolute guest checkout")
+    # A function, like guarded_launch, so a failed cd stops even a compound command.
+    return (
+        "repository_policy_launch() {\n"
+        f"  cd -- {shlex.quote(workspace)} || return $?\n"
+        f'  {command} "$@"\n'
+        "}\nrepository_policy_launch"
+    )
+
+
+def require_exec_hosting(target: LiveExecTarget) -> bool:
+    """Admit an ``exec`` launch; true when the portable receiver admitted it.
+
+    agent-bridge offers its receiving context only to driver-exec members,
+    which have no Session Host to run the portable receiver; every other
+    member keeps the guest agent-worktrees check.
+    """
+    import os
+
+    from .config import RESTRICTED_PROFILE
+    from .resolver import AGENT_CONTAINERS_EXEC_POLICY_CONTEXT_ENV
+
+    context = os.environ.get(AGENT_CONTAINERS_EXEC_POLICY_CONTEXT_ENV)
+    if context and getattr(target.fleet, "driver", None) and target.actual_profile != RESTRICTED_PROFILE:
+        require_portable_hosting(target, context)
+        return True
+    require_container_hosting(target)
+    return False
 
 
 def guarded_launch(command: str, workspace: str) -> str:
@@ -102,6 +141,23 @@ def require_container_checkout(container_id: str, user: str, workspace: str) -> 
     ))
 
 
+def require_portable_hosting(target: ExecutionCheckout, policy_context: str) -> None:
+    """Run the Bridge-bound portable receiver; the guest needs no agent-worktrees."""
+    from repository_policy.receiving import build_receiving_policy_check
+
+    from .config import _installation_owner
+
+    _installation_owner()
+    command, payload = build_receiving_policy_check(
+        target.workspace_folder, policy_context, text_transport=True,
+    )
+    result = _run(target, command, input_text=payload.decode("ascii"))
+    try:
+        validate_hosting_result(json.loads(result.stdout))
+    except (AgentHostingError, TypeError, ValueError) as exc:
+        raise RuntimeError("Portable receiving policy returned invalid admission") from exc
+
+
 def session_host_launch_inputs(
     context: TrustedContext, expected_instance: str | None,
     *, policy_context: str | None = None,
@@ -112,22 +168,10 @@ def session_host_launch_inputs(
             getattr(context, "target", context.instance_id), context.user, context.workspace,
         )
     else:
-        from repository_policy.receiving import build_receiving_policy_check
-
-        from .config import _installation_owner
-
-        _installation_owner()
-        command, payload = build_receiving_policy_check(
-            context.workspace, policy_context, text_transport=True,
-        )
-        result = _run(SimpleNamespace(
+        require_portable_hosting(SimpleNamespace(
             container_id=getattr(context, "target", context.instance_id),
             user=context.user, workspace_folder=context.workspace,
-        ), command, input_text=payload.decode("ascii"))
-        try:
-            validate_hosting_result(json.loads(result.stdout))
-        except (AgentHostingError, TypeError, ValueError) as exc:
-            raise RuntimeError("Portable receiving policy returned invalid admission") from exc
+        ), policy_context)
     command = context.config.acp_command_for(context.fleet)
     launcher = "{{target_preference_launcher}}"
     count = command.count(launcher)
@@ -141,19 +185,28 @@ def session_host_launch_inputs(
 def _run(
     target: ExecutionCheckout, command: str, *, input_text: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    from .runtime_drivers import run_routed
+    if TYPE_CHECKING:
+        from .routed_exec import run_routed
+    else:
+        # The routed seam is resolved (and patched) through runtime_drivers.
+        from .runtime_drivers import run_routed
 
     argv = [
         "docker", "exec", *(["-i"] if input_text is not None else []),
         "-u", target.user, target.container_id, "bash", "-lc", command,
     ]
     try:
-        result = run_routed(
-            argv, timeout=90, **({"input_text": input_text} if input_text is not None else {}),
-        ) or subprocess.run(
-            argv, capture_output=True, text=True, timeout=90, check=False,
-            creationflags=no_window_flags(),
-            **({"input": input_text} if input_text is not None else {}),
+        result = (
+            run_routed(argv, timeout=90) if input_text is None
+            else run_routed(argv, timeout=90, input_text=input_text)
+        ) or (
+            subprocess.run(
+                argv, capture_output=True, text=True, timeout=90, check=False,
+                creationflags=no_window_flags(),
+            ) if input_text is None else subprocess.run(
+                argv, capture_output=True, text=True, timeout=90, check=False,
+                creationflags=no_window_flags(), input=input_text,
+            )
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise RuntimeError(f"Required guest repository hosting check is unavailable: {exc}") from exc

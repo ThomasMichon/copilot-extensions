@@ -27,7 +27,7 @@ def _require_workspace(workspace: str) -> None:
 
 
 def _policy_check(
-    workspace: str, operation: str, metadata: dict, *, text_transport: bool = False,
+    workspace: str, operation: str, metadata: dict[str, Any], *, text_transport: bool = False,
 ) -> tuple[str, bytes | None]:
     _require_workspace(workspace)
     declaration = metadata.get("portable_receiving_policy")
@@ -61,7 +61,7 @@ def _answer(rc: int, output: str, error: str, *, portable: bool = True) -> dict[
             + (error.strip() or output.strip() or f"exit {rc}")
         )
     try:
-        result = json.loads(output)
+        result: dict[str, Any] = json.loads(output)
     except (TypeError, ValueError) as exc:
         raise AgentHostingError("Guest repository hosting returned invalid policy JSON") from exc
     validate_policy_result(result)
@@ -159,7 +159,9 @@ async def _container_policy(target: SpawnTarget, operation: str) -> dict[str, An
     from .session_host.container_transport import _run_provider
 
     venue = target.venue or {}
-    metadata = target.container or {}
+    # A driver-exec member has no Session Host container block; its venue
+    # declares the portable receiving policy and provider command instead.
+    metadata = target.container or (venue if venue.get("transport") == "driver-exec" else {})
     name = metadata.get("name") or str(venue.get("target_id") or "").removeprefix("container:")
     expected = venue.get("instance_id") or metadata.get("instance_id")
     identity = expected or name
@@ -201,10 +203,10 @@ async def _container_policy(target: SpawnTarget, operation: str) -> dict[str, An
     )
     user = target.user
     if not user or not workspace:
-        command = _provider_command(metadata)
-        if command is None or not isinstance(name, str) or not name:
+        resolver = _provider_command(metadata)
+        if resolver is None or not isinstance(name, str) or not name:
             raise AgentHostingError("Container receiver lacks an attributed context resolver")
-        rc, output, error = await _run_provider([*command, "namespace-resolve", name], timeout=30)
+        rc, output, error = await _run_provider([*resolver, "namespace-resolve", name], timeout=30)
         try:
             spec = json.loads(output)
             refreshed_venue = spec.get("venue") if isinstance(spec, dict) else None
@@ -238,9 +240,10 @@ async def _container_policy(target: SpawnTarget, operation: str) -> dict[str, An
     command, payload = await asyncio.to_thread(
         _policy_check, workspace, operation, metadata, text_transport=bool(venue.get("driver")),
     )
-    rc, output, error = await _run_provider(
-        [*runtime, "exec", *(["-i"] if payload is not None else []),
-         "-u", user, instance, "bash", "-lc", command],
-        timeout=90, **({"input_bytes": payload} if payload is not None else {}),
-    )
+    argv = [*runtime, "exec", *(["-i"] if payload is not None else []),
+            "-u", user, instance, "bash", "-lc", command]
+    if payload is None:
+        rc, output, error = await _run_provider(argv, timeout=90)
+    else:
+        rc, output, error = await _run_provider(argv, timeout=90, input_bytes=payload)
     return _answer(rc, output.decode(), error.decode(), portable=payload is not None)
