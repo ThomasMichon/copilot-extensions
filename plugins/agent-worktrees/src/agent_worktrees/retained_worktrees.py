@@ -75,24 +75,24 @@ def inventory(
             receiving = projects[repo]
             path = cfg.project_dir(repo) / "worktrees" / f"{wid}.yaml"
             record = tracking.load_record(path)
-        except (OSError, ValueError, KeyError, TypeError, OverflowError, yaml.YAMLError) as exc:
+            if (
+                record.worktree_id != wid or record.repo != repo
+                or record.platform != config.platform
+                or receiving.platform != config.platform
+                or getattr(getattr(record, "_reporting_context", None), "unavailable", False)
+                or not record_namespace_matches(record, receiving)
+            ):
+                unknown(ref, "record identity or execution environment mismatch")
+                return
+            if host != record.execution_machine:
+                owner = parse_claim_ref(ref)
+                if owner is None or resolve_legacy_wsl_owner_ref(owner, receiving) != path:
+                    unknown(ref, "remote owner; inspect through that resource owner")
+                    return
+            presence = _presence(record.worktree_path)
+        except (OSError, ValueError, KeyError, TypeError, OverflowError, RuntimeError, yaml.YAMLError) as exc:
             unknown(ref, f"record unavailable: {type(exc).__name__}")
             return
-        if (
-            record.worktree_id != wid or record.repo != repo
-            or record.platform != config.platform
-            or receiving.platform != config.platform
-            or getattr(getattr(record, "_reporting_context", None), "unavailable", False)
-            or not record_namespace_matches(record, receiving)
-        ):
-            unknown(ref, "record identity or execution environment mismatch")
-            return
-        if host != record.execution_machine:
-            owner = parse_claim_ref(ref)
-            if owner is None or resolve_legacy_wsl_owner_ref(owner, receiving) != path:
-                unknown(ref, "remote owner; inspect through that resource owner")
-                return
-        presence = _presence(record.worktree_path)
         nodes.append({
             "ref": ref, "project": repo, "worktree_id": wid,
             "platform": record.platform, "status": record.status,

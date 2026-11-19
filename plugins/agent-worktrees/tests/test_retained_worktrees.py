@@ -160,6 +160,31 @@ def test_bounds_preserve_an_explicit_unresolved_edge(graph: Graph, limits: dict[
     assert any(item["reason"] == "traversal limit" for item in result["unresolved"])
 
 
+@pytest.mark.parametrize("worktree_path", [{"invalid": 1}, ["invalid"], None])
+def test_malformed_descendant_path_does_not_hide_an_independent_sibling(
+    graph: Graph, worktree_path: object,
+) -> None:
+    config, save = graph
+    save("root", "parent", [
+        ("host/source/broken", "released"), ("host/library/sibling", "at-rest"),
+    ])
+    save("source", "broken")
+    save("library", "sibling", status="finalized")
+    path = cfg.project_dir("source") / "worktrees" / "broken.yaml"
+    value = yaml.safe_load(path.read_text(encoding="utf-8"))
+    value["worktree_path"] = worktree_path
+    path.write_text(yaml.safe_dump(value), encoding="utf-8")
+    before = path.read_bytes()
+
+    result = inventory("parent", config)
+
+    assert not result["complete"]
+    assert [node["worktree_id"] for node in result["nodes"]] == ["parent", "sibling"]
+    assert len(result["unresolved"]) == 1
+    assert result["unresolved"][0]["ref"] == "host/source/broken"
+    assert path.read_bytes() == before
+
+
 def test_cycle_and_unsafe_child_do_not_escape_or_recurse_forever(graph: Graph) -> None:
     config, save = graph
     save("root", "parent", [
