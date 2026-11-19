@@ -17,7 +17,9 @@ import pytest
 from agent_index.chunking.base import Chunk
 from agent_index.engine.client import EngineClient
 from agent_index.index_config import IndexConfig, ModelProfile
-from agent_index.indexing.component_application import PreparedComponentApplication
+from agent_index.indexing.component_application import (
+    PreparedComponentApplication, qualify_applied_component,
+)
 from agent_index.indexing.component_manifest import ComponentVersion
 from agent_index.indexing.component_publication import reconcile_component_publication
 from agent_index.indexing.manifest import CrawlManifest
@@ -554,7 +556,7 @@ prepared.publish()
     assert f.prepare(manifest).publish() == (0, 1)
 
 
-@pytest.mark.parametrize("missing", ["coverage", "checkpoint"])
+@pytest.mark.parametrize("missing", ["coverage", "checkpoint", "checkpoint-count"])
 def test_missing_coverage_or_path_evidence_cannot_be_blessed_by_cached_vectors(
     application: Fixture, missing: str,
 ) -> None:
@@ -564,6 +566,10 @@ def test_missing_coverage_or_path_evidence_cannot_be_blessed_by_cached_vectors(
     if missing == "coverage":
         with closing(f.paths._connect()) as conn, conn:
             conn.execute("DELETE FROM embedding_coverage")
+    elif missing == "checkpoint-count":
+        checkpoint = f.paths.get_entry(FAMILY, PATH)
+        assert checkpoint is not None
+        f.paths.mark_indexed(FAMILY, PATH, content_hash=checkpoint[0], chunk_count=7)
     else:
         f.paths.invalidate_batch([(FAMILY, PATH)])
     f.reopen()
@@ -571,6 +577,72 @@ def test_missing_coverage_or_path_evidence_cannot_be_blessed_by_cached_vectors(
     with pytest.raises(SourceLayoutError, match="coverage is incomplete|checkpoint is incomplete"):
         f.prepare(manifest)
     assert f.domain.receipt() == before
+
+
+@pytest.mark.parametrize("deleted", [False, True])
+def test_applied_snapshot_reopens_without_changing_parent_poll_or_native_state(
+    application: Fixture, deleted: bool,
+) -> None:
+    f = application
+    f.prepare(f.retain(3, deleted=deleted)).publish()
+    f.reopen()
+    ledger = ComponentLedger(f.config, f.store)
+    evidence = ledger.get(FAMILY, PATH)
+    assert evidence is not None
+    before = f.domain.receipt(), f.paths.get_checkpoint_rows([(FAMILY, PATH)])
+    parent = PendingCrawls(f.paths).read_payload("selected", SCOPE)
+    poll = f.config.state_file.read_bytes()
+    f.calls.clear()
+    snapshot = qualify_applied_component(ledger, f.paths, evidence, scope=SCOPE, max_rows=8)
+    assert snapshot.evidence == evidence and snapshot.coverage == "named-target-only"
+    assert snapshot.evidence.content.component.version == 3
+    assert snapshot.evidence.content.deleted == deleted
+    assert [chunk.content for chunk in snapshot.chunks] == ([] if deleted else ["Selected fields."])
+    assert (f.domain.receipt(), f.paths.get_checkpoint_rows([(FAMILY, PATH)])) == before
+    assert PendingCrawls(f.paths).read_payload("selected", SCOPE) == parent
+    assert f.config.state_file.read_bytes() == poll and f.calls == []
+
+
+@pytest.mark.parametrize(
+    "drift", ["scope", "ordering", "native", "coverage", "checkpoint-count", "path-owner"],
+)
+def test_applied_snapshot_refuses_unqualified_evidence_without_repair(
+    application: Fixture, drift: str,
+) -> None:
+    f = application
+    f.prepare(f.retain(3)).publish()
+    ledger = ComponentLedger(f.config, f.store)
+    evidence = ledger.get(FAMILY, PATH)
+    assert evidence is not None
+    paths = f.paths
+    if drift == "ordering":
+        evidence = replace(
+            evidence, content=replace(
+                evidence.content, component=replace(evidence.content.component, version=4),
+            ),
+        )
+    elif drift == "native":
+        f.store.delete_by_file(FAMILY, PATH)
+        prepare_ingestion_indices(f.store, max_rows=0)
+    elif drift == "coverage":
+        with closing(f.paths._connect()) as conn, conn:
+            conn.execute("DELETE FROM embedding_coverage")
+    elif drift == "checkpoint-count":
+        f.paths.mark_indexed(
+            FAMILY, PATH, content_hash=evidence.content.fingerprint, chunk_count=7,
+        )
+    elif drift == "path-owner":
+        paths = PathIndex(f.config.data_dir / "wrong.db")
+    before = f.domain.receipt(), f.paths.get_checkpoint_rows([(FAMILY, PATH)])
+    parent = PendingCrawls(f.paths).read_payload("selected", SCOPE)
+    poll = f.config.state_file.read_bytes()
+    with pytest.raises((SourceLayoutError, ValueError)):
+        qualify_applied_component(
+            ledger, paths, evidence, scope="other" if drift == "scope" else SCOPE, max_rows=8,
+        )
+    assert (f.domain.receipt(), f.paths.get_checkpoint_rows([(FAMILY, PATH)])) == before
+    assert PendingCrawls(f.paths).read_payload("selected", SCOPE) == parent
+    assert f.config.state_file.read_bytes() == poll
 
 
 def test_retained_id_union_budget_refuses_replacement_before_writer(application: Fixture) -> None:
