@@ -37,7 +37,11 @@ fleets:
 Absent `driver` keeps today's Docker behavior unchanged. `driver: docker` is
 rejected (omit the key instead).
 
-Allowed with `driver`: `size`, `name_prefix`, `workspace_folder`, `exec_user`,
+`max_size` works the same for a driver fleet: when `borrow` finds no free
+member and the fleet is below `max_size`, agent-containers asks the driver to
+`provision` exactly one more `<prefix>-<n>` member and leases it.
+
+Allowed with `driver`: `size`, `max_size`, `name_prefix`, `workspace_folder`, `exec_user`,
 `acp_command`, `environment` (forwarded to `provision`), `forward_gh_token`,
 `relay_enabled`, `copilot_cli_account`, `copilot_auth_mode`.
 

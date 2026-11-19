@@ -120,6 +120,7 @@ No alternate fleet schema or implicit resource enrollment is introduced.
 | `repo` | String; empty |
 | `devcontainer_path`, `devcontainer_config`, `image` | String/null; null; config relative to devcontainer path under native resolution |
 | `size`, `name_prefix` | Integer 1 / string-null (fleet name) |
+| `max_size` | Integer/null; null (no growth). Must be an integer `>= size`; refused with `lifecycle_owner: external`. When set, a fleet-scoped `borrow` that finds no free member provisions one more member through the `up` path, up to this bound; see [On-demand growth](#on-demand-growth) |
 | `workspace_folder`, `exec_user`, `acp_command` | String/null; inherit global values |
 | `security_profile` | `trusted` (default) or `restricted`; unknown profile refused |
 | `lifecycle_owner` | Native owner enum; `agent-containers`; external ownership never transfers on read |
@@ -136,6 +137,26 @@ No alternate fleet schema or implicit resource enrollment is introduced.
 | `systemd_capable` | Strict boolean false; only trusted image-backed fleets |
 | `driver` | Lowercase driver name (`[a-z0-9][a-z0-9._-]{0,63}`)/null; null = built-in Docker; `docker` refused; trusted, internally lifecycle-owned fleets only; see [runtime drivers](runtime-drivers.md) |
 | `driver_options` | JSON-serializable mapping; empty; requires `driver`; forwarded verbatim to every driver call, never secret; merges recursively across tiers like any mapping |
+
+### On-demand growth
+
+`size` is the warm floor `up` maintains; `max_size` is the bound `borrow` may
+grow to. When every member is leased (or the fleet has none), a borrow scoped
+with `--fleet` (or an unscoped borrow when exactly one fleet is configured)
+provisions one member named with the next free `<name_prefix>-<n>` index
+through the fleet's normal Docker, devcontainer or driver provisioning, then
+leases it. A fleet-scoped growth lock under the state directory spans the
+capacity check, provisioning and the lease, so concurrent borrows never exceed
+`max_size`; the lease lock itself is not held while a member builds. At the
+bound, or when provisioning fails, `borrow` returns the usual refusal with the
+reason appended and writes no lease. `borrow --container` never grows, and
+`borrow --no-grow` opts out per call. Grown members are ordinary warm members
+that survive `release`; `down`, `start` and `rm` handle them like any other, and
+nothing trims the fleet back to `size` automatically. `max_size` composes like
+any scalar fleet key, so an operator layer can add it to a plugin-shipped fleet
+(validation runs on the composed fleet). `fleet --json` reports
+`fleet_size`/`fleet_max_size` per member; plain `fleet` prints a per-fleet
+sizing line.
 
 Host source paths retain their declaring-source ownership; remote paths and
 commands are not host paths. `devcontainer_config` remains relative to

@@ -743,6 +743,30 @@ def test_lease_borrow_and_fleet_listing_cover_driver_members(
     }
 
 
+def test_borrow_grows_a_driver_fleet_through_the_driver(
+    fake: SimpleNamespace, no_docker: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_containers import lease
+
+    for attr, name in (("LEASE_FILE", "leases.json"), ("_LOCK_FILE", "leases.lock"),
+                       ("_LEASE_DETAILS_FILE", "lease-details.json"),
+                       ("_DEPLOY_HOLDS_FILE", "deploy-holds.json"),
+                       ("_SESSION_ADMISSIONS_FILE", "session-admissions.json")):
+        monkeypatch.setattr(lease, attr, tmp_path / name)
+    monkeypatch.setattr(lease, "STATE_DIR", tmp_path / "state")
+    config = _write_config(tmp_path, monkeypatch, size=1, max_size=2)
+    fleet.reconcile_up(config, "example")
+
+    assert lease.borrow(config, "first", fleet="example").container == "example-1"
+    assert lease.borrow(config, "second", fleet="example").container == "example-2"
+    with pytest.raises(RuntimeError, match=r"max_size \(2\)"):
+        lease.borrow(config, "third", fleet="example")
+
+    calls = cast(list[dict[str, Any]], fake.state()["calls"])
+    provisioned = [c["request"]["member"]["name"] for c in calls if c["verb"] == "provision"]
+    assert provisioned == ["example-1", "example-2"]
+
+
 def test_external_driver_rejects_foreign_member_reports(fake: SimpleNamespace) -> None:
     driver = ExternalDriver(find_driver("example-driver"), "example", driver_fleet())
     for bad in (

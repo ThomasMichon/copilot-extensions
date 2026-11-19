@@ -50,7 +50,9 @@ Define the fleet in `containers.yaml`, then:
 <catalog argv[0]> fleet                   # list members + lease status
 ```
 
-Containers are kept warm (stopped, not destroyed). `down` stops them, `start`
+Containers are kept warm (stopped, not destroyed). Set an optional
+`max_size` (`>= size`) to let `borrow --fleet <fleet>` grow the fleet one member
+at a time when every member is leased (see *Borrow / release*). `down` stops them, `start`
 restarts them, `rm` removes them, and `rescue-capture` non-destructively copies
 idle restricted-fleet session evidence for publication without stopping members.
 
@@ -192,6 +194,16 @@ contains them; machine-readable output reports names only.
 Leases are **advisory** and persist across processes until `release` or TTL
 (default 24h). `borrow` will not hand out a container already leased to another
 effort; re-borrowing for the same effort is idempotent.
+With `max_size` set, a full fleet grows instead of refusing: `borrow` (scoped
+by `--fleet`, or with only one fleet configured) provisions one more
+`<name_prefix>-<n>` member through the same path `up` uses (Docker,
+devcontainer or external driver), leases it and prints its name. Concurrent
+borrows never overshoot `max_size`; at the bound, or if provisioning fails, the
+usual refusal returns (with the reason) and no lease is written. Expect the
+first growth borrow to take as long as creating a member. `--no-grow` opts out;
+`--container` never grows. Grown members stay warm after `release`, are handled
+by `down`/`rm` like any member and are not trimmed automatically. `fleet`
+shows each fleet's `size`/`max_size`.
 Use `<catalog argv[0]> leases` to inspect active leases. Release by either effort
 name or container name; a missing target returns non-zero so callers can notice
 cleanup drift.
