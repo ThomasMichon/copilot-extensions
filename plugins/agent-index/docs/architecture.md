@@ -174,6 +174,11 @@ remains unchanged. The legacy engine receives no complete project cursor from
 `current_commit()`, so its ordinary acquisition still takes the legacy full
 path, not the work-item timestamp optimization. Even that optimization reduces
 body transfer, not the number of query-selected identities and timestamps.
+Every full-body work-item batch requests `errorPolicy=fail` and must return
+exactly one integer-ID record with a fields object per requested identity.
+Missing, duplicate, unexpected or malformed rows refuse the entire acquisition
+before that batch's comments are read. Parsed records remain counted even on
+refusal; a partial body inventory cannot become full-crawl deletion evidence.
 Azure DevOps does not yet implement the
 shared paged acquisition journal, durable query progress, immutable full
 snapshots or authoritative tombstones. This legacy optimization does not

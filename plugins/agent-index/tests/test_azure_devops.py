@@ -481,7 +481,7 @@ def test_ado_incremental_filters_metadata_before_hydrating_bodies(
                     }}
                     for number in reversed(batch)
                 ]})
-            assert payload == {"ids": batch, "$expand": "all"}
+            assert payload == {"ids": batch, "$expand": "all", "errorPolicy": "fail"}
             body_ids.extend(batch)
             return _json_response(200, {"value": [
                 _work_item_payload(number, changed="2026-01-03T00:00:00Z")
@@ -702,7 +702,7 @@ def test_ado_work_item_comments_preserve_legacy_and_initial_not_found(status: in
     )
 
 
-def test_ado_parsed_work_item_counts_precede_filtering_and_query_deduplication() -> None:
+def test_ado_parsed_work_item_counts_precede_body_refusal_and_query_deduplication() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("/wiql"):
             return _json_response(200, {
@@ -737,13 +737,13 @@ def test_ado_parsed_work_item_counts_precede_filtering_and_query_deduplication()
 
     @measure_reindex
     def run() -> dict[str, object]:
-        return {"entries": connector.discover_changed("2026-01-03T00:01:00Z")}
+        with pytest.raises(ValueError, match="work-item body batch"):
+            connector.discover_changed("2026-01-03T00:01:00Z")
+        return {}
 
     result = run()
-    entries, counts = result["entries"], result["work_counts"]
-    assert isinstance(entries, list)
+    counts = result["work_counts"]
     assert isinstance(counts, dict)
-    assert [entry.path for entry in entries] == ["workitems/2.md"]
     assert counts["acquisition_by_source"] == {
         "ado:acme/widgets:workitems": {
             "identity_records": 3, "item_body_records": 3, "comment_body_records": 0,
