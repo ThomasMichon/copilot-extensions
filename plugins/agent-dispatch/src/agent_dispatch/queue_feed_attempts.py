@@ -1,8 +1,9 @@
-"""Original-basis admission before a repository subscription can be transmitted."""
+"""Original-basis admission for feed attempts, arming and deadline recovery."""
 
 from __future__ import annotations
 
 import sqlite3
+import math
 from typing import Any
 
 from .queue_common import Task
@@ -14,14 +15,13 @@ from .queue_records import TaskError
 ATTEMPT_PROTOCOL = "agent-dispatch.repository-feed-attempt/v1"
 
 
-def require_feed_custody(
+def require_feed_live_custody(
     conn: sqlite3.Connection, task: Task | None, waiter: dict[str, Any],
-    *, now: float,
 ) -> None:
     """Recheck the original basis under the native waiter owner's write lock."""
     basis = FeedWaiterAdmission.from_record(waiter.get("feed_admission"))
-    if waiter["state"] != "preparing" or waiter["replay_settled"]:
-        raise TaskError("repository-feed registration requires its original preparing waiter")
+    if waiter["state"] not in ("preparing", "active") or waiter["replay_settled"]:
+        raise TaskError("repository-feed operation requires its original live waiter")
     require_feed_preparation(conn, task, basis, worker_id=waiter["owner"])
     require_feed_waiter_reconciliation(task, waiter)
     latest = conn.execute(
@@ -42,8 +42,26 @@ def require_feed_custody(
         (task.id, task.wake_operation_id, task.owner, task.owner_session_id, task.generation),
     ).fetchone():
         raise TaskError("repository-feed attempt cannot override a current owner wake")
+
+
+def require_feed_custody(
+    conn: sqlite3.Connection, task: Task | None, waiter: dict[str, Any],
+    *, now: float,
+) -> None:
+    if waiter["state"] != "preparing":
+        raise TaskError("repository-feed registration requires its original preparing waiter")
+    require_feed_live_custody(conn, task, waiter)
     if now >= waiter["delegation"]["feed"]["deadline_at"]:
         raise TaskError("original repository-feed deadline elapsed")
+
+
+def require_feed_expiry(
+    conn: sqlite3.Connection, task: Task | None, waiter: dict[str, Any],
+    *, now: float,
+) -> None:
+    require_feed_live_custody(conn, task, waiter)
+    if not math.isfinite(now) or now < waiter["delegation"]["feed"]["deadline_at"]:
+        raise TaskError("original repository-feed deadline has not elapsed")
 
 
 def require_feed_attempt(

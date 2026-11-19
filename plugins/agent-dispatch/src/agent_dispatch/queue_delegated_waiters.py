@@ -16,11 +16,12 @@ from .queue_feed_preparation import (
     PREPARATION_PROTOCOL, REGISTRATION_PROTOCOL, FeedWaiterAdmission,
     require_feed_creation_deadline,
 )
+from .queue_feed_expiry import FeedWaiterExpiryMixin
 from .queue_run_waiter_transition_cleanup import CLAIM_RELEASE_SENDER
 from .repository_feed_waiter_contract import validate_feed_delegation
 
 
-class DelegatedWaiterBindingMixin(ReplayWaiterProgressMixin):
+class DelegatedWaiterBindingMixin(ReplayWaiterProgressMixin, FeedWaiterExpiryMixin):
     if TYPE_CHECKING:
         prepare_run_waiter: Callable[..., dict[str, Any]]
         _now: Callable[[float | None], float]
