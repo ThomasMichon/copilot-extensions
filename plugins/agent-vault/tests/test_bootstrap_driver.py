@@ -33,6 +33,40 @@ def native_bootstrap(plugin, project, native_directory):
     ]
 
 
+def test_provider_only_selection_bypasses_unchanged_base_fast_exit(tmp_path):
+    home, project = tmp_path / "home", tmp_path / "project"
+    home.mkdir()
+    project.mkdir()
+    plugin = _make_fake_plugin(tmp_path, "agent-vault")
+    installation = _make_fake_install(home, "agent-vault")
+    (installation / ".venv").mkdir()
+    (installation / "deploy-manifest.json").write_text(
+        '{"source":{"version":"1.0.1"}}', encoding="utf-8",
+    )
+    (installation / "runtime-provider-roots.json").write_text(
+        '{"schema":"copilot-extensions.runtime-provider-roots","version":1,"roots":["example-provider"]}',
+        encoding="utf-8",
+    )
+    (plugin / "scripts" / "runtime_profile.py").write_text(
+        "import pathlib,sys\n"
+        "assert sys.argv[-3:] == ['current','--package-version','1.0.1']\n"
+        "pathlib.Path(sys.argv[2], 'provider-inspected').write_text('yes')\n"
+        "raise SystemExit(1)\n",
+        encoding="utf-8",
+    )
+    env = _clean_env({
+        "HOME": str(home), "USERPROFILE": str(home),
+        "BOOTSTRAP_KILLSWITCH_STATE_FILE": str(home / "killswitch.json"),
+    })
+    result = subprocess.run(
+        native_bootstrap(plugin, project, home), env=env, cwd=project,
+        stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=15, **no_window_kwargs(),
+    )
+    assert result.returncode == 0 and json.loads(result.stdout) == {}, result.stderr
+    assert (installation / "provider-inspected").read_text() == "yes"
+    assert (project / "handoff").read_text(encoding="utf-8-sig").splitlines()[4] == "provision"
+
+
 @pytest.mark.skipif(os.name != "nt", reason="native PowerShell interpreter floor")
 @pytest.mark.parametrize("kind,minimum", [("wheel", 11), ("source", 10)])
 def test_native_profile_readiness_selects_the_required_python_floor(tmp_path, kind, minimum):
@@ -299,9 +333,9 @@ def test_native_bootstrap_preserves_or_reconciles_selected_ssh_profile(tmp_path,
     project.mkdir()
     plugin = _make_fake_plugin(tmp_path, "agent-vault")
     scripts = Path(__file__).resolve().parents[1] / "scripts"
-    for name in ("runtime_profile.py", "runtime_source_target.py", "versioned_runtime_source.py",
-                 "versioned_runtime_native.ps1"):
-        shutil.copyfile(scripts / name, plugin / "scripts" / name)
+    for path in [scripts / "runtime_profile.py", scripts / "runtime_source_target.py",
+                 *scripts.glob("versioned_runtime*.py")]:
+        shutil.copyfile(path, plugin / "scripts" / path.name)
     (plugin / "pyproject.toml").write_text('[project]\nname="agent-vault"\nversion="1.0.1"\n')
     installation = _make_fake_install(home, "agent-vault")
     version = "1.0.1+base" if condition == "base-runtime" else "1.0.1+ssh"

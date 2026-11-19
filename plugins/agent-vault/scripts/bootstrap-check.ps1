@@ -56,6 +56,13 @@ try {
         if (-not $versionLine) { throw 'The owning payload version is unavailable.' }
         $current = $versionLine.Line -replace '.*=\s*"([^"]+)".*', '$1'
         $profilePresent = $false
+        $providersPresent = $false
+        try {
+            [void][IO.File]::GetAttributes((Join-Path $InstallDir 'runtime-provider-roots.json'))
+            $providersPresent = $true
+        } catch [IO.FileNotFoundException] {
+        } catch [IO.DirectoryNotFoundException] {
+        }
         try {
             [void][IO.File]::GetAttributes((Join-Path $InstallDir 'runtime-profile.json'))
             $profilePresent = $true
@@ -72,9 +79,9 @@ try {
         $sourceSelected = $sourcePresent -or (Test-Path Env:COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN)
         $wheelSelected = $deployment.runtime_version -cmatch '\.profile\.[0-9a-f]{16}'
         $expectedRuntime = $current
-        if ($profilePresent -or $sourceSelected -or $wheelSelected) {
+        if ($profilePresent -or $providersPresent -or $sourceSelected -or $wheelSelected) {
             . (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
-            $minimumMinor = if ($profilePresent -or $wheelSelected) { 11 } else { 10 }
+            $minimumMinor = if ($profilePresent -or $providersPresent -or $wheelSelected) { 11 } else { 10 }
             $profilePython = Resolve-NativeBootstrapPython -MinimumMinor $minimumMinor
             if (-not $profilePython) { throw 'Vault source/profile inspection requires a bootstrap Python interpreter.' }
             [void](Invoke-Hidden -FilePath $profilePython -ArgList @(
@@ -93,7 +100,7 @@ try {
                 (Test-Path -LiteralPath (Join-Path $InstallDir "versions/$selected/bin/python"))
             )) { $provisioned = $true }
         }
-        if (-not $profilePresent -and -not $sourceSelected -and $provisioned -and
+        if (-not $profilePresent -and -not $providersPresent -and -not $sourceSelected -and $provisioned -and
             $deployed -ceq $current -and (-not $deployment.runtime_profile -or
             $deployment.runtime_profile -ceq 'base') -and -not $deployment.runtime_source -and
             (-not $deployment.runtime_version -or $deployment.runtime_version -ceq $current)) {

@@ -227,6 +227,7 @@ def main(argv: list[str] | None = None) -> int:
     wheels.add_argument("--persist", action="store_true")
     commands.add_parser("fingerprint", allow_abbrev=False)
     commands.add_parser("fields", allow_abbrev=False)
+    commands.add_parser("require-inputs", allow_abbrev=False)
     check = commands.add_parser("current", allow_abbrev=False)
     check.add_argument("--package-version", required=True)
     session = commands.add_parser("construction-session", allow_abbrev=False)
@@ -237,6 +238,11 @@ def main(argv: list[str] | None = None) -> int:
     providers_command.add_argument("--persist", action="store_true")
     args = parser.parse_args(argv)
     payload = SCRIPTS.parent
+    if args.command == "require-inputs":
+        import installer_provider_roots as providers
+
+        providers.require_inputs(args.root, closed_wheels=False)
+        return 0
     if args.command == "providers":
         import installer_provider_roots as providers
 

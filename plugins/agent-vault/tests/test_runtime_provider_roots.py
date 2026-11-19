@@ -185,3 +185,17 @@ def test_inactive_roots_and_unselected_extras_do_not_satisfy_provider_desire(
     assert providers.from_profile(profile, core="agent-vault") == []
     with pytest.raises(ValueError, match="changes selected"):
         providers.check_construction(tmp_path, {"binding": profile}, core="agent-vault")
+
+
+def test_repeated_profile_roots_union_only_inspected_extras(providers: ModuleType) -> None:
+    profile: dict[str, Any] = {
+        "roots": [
+            "agent-vault", "example-provider[a]==1", "Example_Provider[b]==1",
+            'example-provider[inactive]; python_version < "3.0"',
+        ],
+        "wheels": [{"name": "example-provider", "selected_extras": ["a", "b"]}],
+    }
+    assert providers.from_profile(profile, core="agent-vault") == ["example-provider[a,b]"]
+    profile["roots"] = ["example-provider==1; os_name=='nt'", "example-provider==1; os_name!='nt'"]
+    profile["wheels"][0]["selected_extras"] = []
+    assert providers.from_profile(profile, core="agent-vault") == ["example-provider"]

@@ -54,6 +54,7 @@ from installer_source_build import (
     SourceWheelInputs, _selected_extras as _selected_extras,
     _source_deadline, _source_phase, retained_input_graph, retained_source_wheels,
     revalidate_input_content, check_dev_owner,
+    _construction_hash as _construction_hash,
     _wheel_construction_hash as _wheel_construction_hash)
 from installer_engine_health import (
     HealthRepairRequired as HealthRepairRequired,
@@ -94,27 +95,6 @@ class ReadyCandidate:
 
 class ContentRepairRequired(RuntimeError):
     """Published bytes differ; a caller must select a distinct generation."""
-
-
-def _construction_hash(files: tuple[Path, ...], extras: tuple[str, ...],
-    local_packages: tuple[str, ...] | None = None,
-    *, on_progress: Callable[[], None] | None = None,
-    file_hashes: dict[Path, str] | None = None) -> str:
-    progress: _ProgressOptions = {"on_progress": on_progress} if on_progress is not None else {}
-    source_hash = runtime.fingerprint_source(
-        files, file_hashes=file_hashes,
-        **progress,
-    )
-    if not extras and local_packages is None:
-        return source_hash
-    profile: dict[str, object] = {"source_hash": source_hash, "extras": extras}
-    if local_packages is not None:
-        profile["local_packages"] = local_packages
-    # Keep source-only identities compatible; non-base admission also binds selection.
-    return hashlib.sha256(json.dumps({
-        "schema": "installer-engine.dependency-profile", "version": 1,
-        **profile,
-    }, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
 def _package_roots(plugin: Path) -> tuple[Path, ...]:

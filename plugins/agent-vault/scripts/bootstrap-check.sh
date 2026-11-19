@@ -86,11 +86,13 @@ print("source" if data.get("runtime_source") is not None else "ordinary")
   }
   special_selection=0
   if [[ -e "$InstallDir/runtime-profile.json" || -L "$InstallDir/runtime-profile.json" ||
+      -e "$InstallDir/runtime-provider-roots.json" || -L "$InstallDir/runtime-provider-roots.json" ||
       -e "$PluginDir/runtime-source.json" || -L "$PluginDir/runtime-source.json" ||
       -n "${COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN+x}" ]]; then
     special_selection=1
     minimum_minor=10
-    if [[ -e "$InstallDir/runtime-profile.json" || -L "$InstallDir/runtime-profile.json" ]]; then
+    if [[ -e "$InstallDir/runtime-profile.json" || -L "$InstallDir/runtime-profile.json" ||
+        -e "$InstallDir/runtime-provider-roots.json" || -L "$InstallDir/runtime-provider-roots.json" ]]; then
       minimum_minor=11
     fi
     profile_python=""

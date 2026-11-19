@@ -56,7 +56,10 @@ def normalize(roots: object, *, core: str | None = None) -> list[str]:
 
 def from_profile(profile: dict[str, object], *, core: str) -> list[str]:
     """Derive provider selection from applicable, inspected distributions."""
-    roots = normalize(profile.get("roots"), core=core)
+    declared = profile.get("roots")
+    if not isinstance(declared, list) or len(declared) > 256:
+        raise ValueError("Runtime provider roots require a bounded list")
+    roots = [root for value in declared for root in normalize([value], core=core)]
     wheels = profile.get("wheels")
     if not isinstance(wheels, list):
         raise ValueError("Provider selection requires the inspected wheel closure")
@@ -65,7 +68,7 @@ def from_profile(profile: dict[str, object], *, core: str) -> list[str]:
         if not isinstance(row, dict) or not isinstance(row.get("name"), str):
             raise ValueError("Provider selection requires inspected distribution names")
         installed[_name(row["name"])] = row.get("selected_extras", [])
-    result = []
+    selected: dict[str, set[str]] = {}
     for root in roots:
         match = _ROOT.fullmatch(root)
         assert match is not None
@@ -77,8 +80,11 @@ def from_profile(profile: dict[str, object], *, core: str) -> list[str]:
         requested = set((match[2] or "").split(",")) - {""}
         if not requested <= {_name(extra) for extra in extras}:
             continue
-        result.append(root)
-    return result
+        selected.setdefault(match[1], set()).update(requested)
+    return [
+        name + ("[" + ",".join(sorted(extras)) + "]" if extras else "")
+        for name, extras in sorted(selected.items())
+    ]
 
 
 def read(root: Path) -> list[str] | None:

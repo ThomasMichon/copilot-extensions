@@ -3,20 +3,25 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 import os
 from pathlib import Path
 import shutil
+import subprocess
 import sys
 
 import pytest
+from agent_procutil import no_window_kwargs
 
 from .test_runtime_profile import (
     _backend,
     _closed_wheels,
     _external_wheel,
     _isolated_install_env,
+    _no_service_provision_command,
     _run,
     _stage_payload,
+    native_profile_inputs,
 )
 
 PROVIDER = '''
@@ -111,6 +116,39 @@ with install_source.wheel_inputs(profile, wheels) as inputs:
 assert (root / installer_provider_roots.FILE).read_bytes() == desire
 print(json.dumps({"constructed": True, "reused": True, "activated": False}))
 '''
+
+
+@pytest.mark.timeout(120)
+def test_base_profile_update_refuses_unqualified_provider_inputs(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    with contextmanager(native_profile_inputs)(
+        tmp_path_factory, crypto=False,
+    ) as (payload, home, env, pwsh):
+        installer = payload / "scripts" / "install.ps1"
+        _run(_no_service_provision_command(home, installer, pwsh), env, home)
+        root = home / ".agent-vault"
+        assert not (root / "runtime-profile.json").exists()
+        retained = {
+            name: (root / name).read_bytes() for name in ("current-version", "deploy-manifest.json")
+        }
+        versions = sorted(path.name for path in (root / "versions").iterdir())
+        selection = root / "runtime-provider-roots.json"
+        selection.write_text(json.dumps({
+            "schema": "copilot-extensions.runtime-provider-roots", "version": 1,
+            "roots": ["example-vault-provider"],
+        }), encoding="utf-8")
+        before = selection.read_bytes()
+        result = subprocess.run(
+            _no_service_provision_command(home, installer, pwsh, action="update"),
+            env=env, cwd=home, stdin=subprocess.DEVNULL, capture_output=True, text=True,
+            timeout=60, **no_window_kwargs(),
+        )
+        assert result.returncode != 0
+        assert "complete native wheel profile" in result.stdout + result.stderr
+        assert selection.read_bytes() == before
+        assert {name: (root / name).read_bytes() for name in retained} == retained
+        assert sorted(path.name for path in (root / "versions").iterdir()) == versions
 
 
 @pytest.mark.timeout(120)
