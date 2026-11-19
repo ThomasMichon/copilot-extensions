@@ -37,6 +37,12 @@ function Close-DaemonInstanceWorker {
     catch { $errors.Add('Original helper Job closure is unconfirmed: ' + $_.Exception.Message) }
     try { if ($null -ne $State.input) { $State.input.BaseStream.Dispose() } }
     catch { $errors.Add('Original helper input closure is unconfirmed: ' + $_.Exception.Message) }
+    if (-not $State.offerPermitted -and $null -eq $State.job -and $null -ne $State.process) {
+        try {
+            # Start retained this exact creation handle before qualification.
+            if (-not $State.process.HasExited) { $State.process.Kill() }
+        } catch { $errors.Add('Original pre-offer helper retirement is unconfirmed: ' + $_.Exception.Message) }
+    }
     $settled = $true
     $clock = [Diagnostics.Stopwatch]::StartNew()
     foreach ($process in @($State.worker, $State.process)) {
@@ -72,7 +78,11 @@ function Close-DaemonInstanceWorker {
             if ($State.diagnostics.Result) { $errors.Add($State.diagnostics.Result.Trim()) }
         } else { $errors.Add('Original helper diagnostic capture failed.') }
     }
-    if ($errors.Count -gt 0) { throw ($errors -join "`n") }
+    if ($errors.Count -gt 0) {
+        $failure = [InvalidOperationException]::new(($errors -join "`n"))
+        $failure.Data['DaemonInstanceState'] = $State
+        throw $failure
+    }
 }
 
 function Start-DaemonInstanceWorker {
@@ -146,11 +156,17 @@ sys.exit(main(packet))
     $compatible = $false
     for ($index = 0; $index -lt $pythons.Count; $index++) {
         $start.FileName = $pythons[$index]
-        try { $State.process = [Diagnostics.Process]::Start($start) }
+        $State.process = New-Object Diagnostics.Process
+        $State.process.StartInfo = $start
+        try { $started = $State.process.Start() }
         catch [ComponentModel.Win32Exception] {
+            $State.process.Dispose()
+            $State.process = $null
             if ($bootstrapPython) { throw }
             continue
         }
+        if (-not $started) { throw 'Original helper process creation is unconfirmed; selection was not retried.' }
+        [void]$State.process.Handle
         $State.input = $State.process.StandardInput
         $State.input.NewLine = "`n"
         $State.input.AutoFlush = $true
@@ -271,7 +287,13 @@ function Invoke-DaemonInstanceRequest {
                 $failure = $_
                 $cleanupAttempted = $true
                 try { Close-DaemonInstanceWorker $state }
-                catch { throw ($failure.Exception.Message + "`n" + $_.Exception.Message) }
+                catch {
+                    $combined = [InvalidOperationException]::new(
+                        ($failure.Exception.Message + "`n" + $_.Exception.Message), $_.Exception
+                    )
+                    $combined.Data['DaemonInstanceState'] = $state
+                    throw $combined
+                }
                 throw $failure
             }
         }
@@ -321,7 +343,13 @@ function Invoke-DaemonInstanceRequest {
             $failure = $_
             $cleanupAttempted = $true
             try { Close-DaemonInstanceWorker $state }
-            catch { throw ($failure.Exception.Message + "`n" + $_.Exception.Message) }
+            catch {
+                $combined = [InvalidOperationException]::new(
+                    ($failure.Exception.Message + "`n" + $_.Exception.Message), $_.Exception
+                )
+                $combined.Data['DaemonInstanceState'] = $state
+                throw $combined
+            }
             throw $failure
         }
         if (-not $response.ok) {

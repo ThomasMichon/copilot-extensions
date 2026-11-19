@@ -62,8 +62,11 @@ def test_bare_entry_explicitly_selects_owned_deadline_free_probe(
 
 @pytest.mark.skipif(os.name != "nt", reason="Native registered Windows batch provider")
 @pytest.mark.parametrize("suffix", [".cmd", ".BAT"])
+@pytest.mark.parametrize("prefix", [
+    "fixed-prefix", "prefix with spaces", r"C:\Program Files\selected\entry.txt", "single'quote-value",
+])
 def test_registered_batch_provider_admits_health_and_pins_terminal_receiver(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, suffix: str,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, suffix: str, prefix: str,
 ) -> None:
     directory = tmp_path / "space & tools \u65e5"
     directory.mkdir()
@@ -74,7 +77,7 @@ def test_registered_batch_provider_admits_health_and_pins_terminal_receiver(
         "runtime": {"command": pinned, "root": str(tmp_path)},
     }
     provider.write_text(
-        '@echo off\nif not "%~1"=="fixed-prefix" exit /b 31\n'
+        f'@echo off\nif not "%~1"=="{prefix}" exit /b 31\n'
         'if not "%~2"=="--version" exit /b 32\n'
         "if defined CE_TERMINAL_CAPABILITY_QUERY goto capability\n"
         "echo worktree-manager 1.2.3\nexit /b 0\n:capability\n"
@@ -83,7 +86,7 @@ def test_registered_batch_provider_admits_health_and_pins_terminal_receiver(
     )
     registry = tmp_path / "providers"
     registry.mkdir()
-    command = [str(provider), "fixed-prefix"]
+    command = [str(provider), prefix]
     (registry / "worktree-manager.json").write_text(json.dumps({
         "schema_version": 1, "provider": "worktree-manager", "command": command,
         "minimum_version": "0.1.0-dev21",
@@ -91,8 +94,9 @@ def test_registered_batch_provider_admits_health_and_pins_terminal_receiver(
     monkeypatch.setenv(launch._CONTROL_PLANE_PROVIDERS_DIR_ENV, str(registry))
     monkeypatch.setenv(launch._CONTROL_PLANE_PROVIDER_ENV, "worktree-manager")
     monkeypatch.delenv(terminal_launch.QUERY_ENVIRONMENT, raising=False)
-    health = launch._worktree_manager_health(foreground=True)
-    assert health == launch._ManagerHealth("ready", tuple(command))
+    for foreground in (False, True):
+        health = launch._worktree_manager_health(foreground=foreground)
+        assert health == launch._ManagerHealth("ready", tuple(command))
     request = tmp_path / "request.json"
     request.write_text(json.dumps({"version": 1, "nonce": "a" * 32, "host_pid": os.getpid()}))
     monkeypatch.setattr(terminal_launch, "_channel", str(request))
@@ -103,6 +107,79 @@ def test_registered_batch_provider_admits_health_and_pins_terminal_receiver(
     assert environment[terminal_launch.ENVIRONMENT] == str(request)
     assert environment["WORKTREE_MANAGER_ROOT"] == str(tmp_path)
     assert "COPILOT_VENUE_BATCH_EXECUTABLE" not in environment
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native registered Windows batch provider")
+@pytest.mark.parametrize("prefix", [
+    "flag&ver", "flag|ver", "flag<input", "flag>output", "flag^value", "(flag)",
+    "%COMSPEC%", "!COMSPEC!", 'flag"value', "flag\rvalue", "flag\nvalue",
+    "flag\0value", "flag\tvalue", "flag\x7fvalue", "C:\\path space\\",
+    "flag;value", "flag,value", "flag=value",
+])
+def test_unsafe_registered_batch_prefix_is_rejected_before_health_or_terminal_launch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    prefix: str,
+) -> None:
+    provider = tmp_path / "selected.cmd"
+    started = tmp_path / "started"
+    provider.write_text(
+        '@echo off\necho started>"%~dp0started"\necho worktree-manager 1.2.3\n',
+        encoding="utf-8",
+    )
+    registry = tmp_path / "providers"
+    registry.mkdir()
+    command = [str(provider), prefix]
+    (registry / "worktree-manager.json").write_text(json.dumps({
+        "schema_version": 1, "provider": "worktree-manager", "command": command,
+        "minimum_version": "0.1.0-dev21",
+    }), encoding="utf-8")
+    monkeypatch.setenv(launch._CONTROL_PLANE_PROVIDERS_DIR_ENV, str(registry))
+    monkeypatch.setenv(launch._CONTROL_PLANE_PROVIDER_ENV, "worktree-manager")
+    def unexpected_launch(*_args: object, **_options: object) -> NoReturn:
+        pytest.fail("unsafe batch prefix reached a subprocess launch boundary")
+
+    monkeypatch.setattr(owned_process, "run_caller_owned", unexpected_launch)
+    monkeypatch.setattr(launch.subprocess, "run", unexpected_launch)
+    for foreground in (False, True):
+        health = launch._worktree_manager_health(foreground=foreground)
+        assert health.state == "failed" and health.command is None
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "cannot be passed literally" in captured.err
+    assert "No launch was admitted" in captured.err
+    request = tmp_path / "request.json"
+    request.write_text(json.dumps({"version": 1, "nonce": "a" * 32, "host_pid": os.getpid()}))
+    monkeypatch.setattr(terminal_launch, "_channel", str(request))
+    environment = {"FIXTURE_KEPT": "original"}
+    with pytest.raises(terminal_launch._UnsafeBatchArguments, match="cannot be passed literally"):
+        terminal_launch.select_receiver(
+            [*command, "--resident-picker"], environment, timeout=None,
+        )
+    assert environment == {"FIXTURE_KEPT": "original"}
+    assert not started.exists()
+
+
+def test_nonbatch_probe_prefix_remains_literal_argv(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prefix = 'flag&value|%PATH%!name^<>"quoted" C:\\path space\\'
+    command = [sys.executable, prefix]
+    calls: list[list[str]] = []
+
+    def query(arguments: list[str], **options: object) -> subprocess.CompletedProcess[str]:
+        calls.append(arguments)
+        assert options["timeout"] is None
+        return subprocess.CompletedProcess(arguments, 0, "worktree-manager 1.2.3", "")
+
+    monkeypatch.setattr(owned_process, "run_caller_owned", query)
+    version, process = launch._probe_worktree_manager_version([*command, "--version"], timeout=None)
+    assert version is not None and process is not None
+    request = tmp_path / "request.json"
+    request.write_text(json.dumps({"version": 1, "nonce": "a" * 32, "host_pid": os.getpid()}))
+    monkeypatch.setattr(terminal_launch, "_channel", str(request))
+    monkeypatch.setattr(terminal_launch, "os", SimpleNamespace(name="nt"))
+    assert terminal_launch.select_receiver(command, {}, timeout=None) == (command, {})
+    assert calls == [[*command, "--version"], [*command, "--version"]]
 
 
 @pytest.mark.parametrize("stream", ["stdout", "stderr"])

@@ -181,23 +181,21 @@ def _probe_worktree_manager_version(
     timeout_detail: str | bytes = ""
     for _attempt in range(probe_attempts):
         try:
+            environment = _launch_probe_env()
+            probe_command = list(command)
+            if os.name == "nt" and probe_command[0].lower().endswith((".cmd", ".bat")):
+                probe_command = _terminal_launch._batch_probe_command(probe_command, environment)
             if timeout is None:
                 from agent_procutil.owned_process import run_caller_owned
 
-                environment = _launch_probe_env()
-                probe_command = list(command)
-                if os.name == "nt" and probe_command[0].lower().endswith((".cmd", ".bat")):
-                    from plugin_resolve.execution import windows_batch_command
-
-                    probe_command = windows_batch_command(probe_command, environment)
                 proc = run_caller_owned(
                     probe_command, env=environment, timeout=None,
                     max_stdout_bytes=4096, max_stderr_bytes=4096,
                 )
             else:
                 proc = subprocess.run(
-                    command, capture_output=True, text=True, timeout=timeout,
-                    env=_launch_probe_env(),
+                    probe_command, capture_output=True, text=True, timeout=timeout,
+                    env=environment,
                 )
         except OwnedCleanupError:
             raise
@@ -213,7 +211,7 @@ def _probe_worktree_manager_version(
                 )
                 return None, None
             continue
-        except (OSError, subprocess.SubprocessError) as error:
+        except (OSError, subprocess.SubprocessError, _terminal_launch._UnsafeBatchArguments) as error:
             _report_manager_probe_failure(
                 "Control-plane --version probe could not start or complete.", str(error),
             )

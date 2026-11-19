@@ -14,6 +14,29 @@ QUERY_ENVIRONMENT = "CE_TERMINAL_CAPABILITY_QUERY"
 _channel = os.environ.pop(ENVIRONMENT, None)
 
 
+class _UnsafeBatchArguments(ValueError):
+    pass
+
+
+def _batch_probe_command(arguments: list[str], environment: dict[str, str]) -> list[str]:
+    from plugin_resolve.execution import windows_batch_command
+
+    # Native argv quoting is not cmd syntax escaping or batch-parameter
+    # quoting (which also splits comma/semicolon/equals). Spaced trailing
+    # backslashes are doubled by native quoting, which cmd does not undo.
+    if any(
+        any(character in '&|<>^()%!",;=' or ord(character) < 32 or ord(character) == 127
+            for character in argument)
+        or (" " in argument and argument.endswith("\\"))
+        for argument in arguments[1:]
+    ):
+        raise _UnsafeBatchArguments(
+            "Selected Manager batch prefix cannot be passed literally; "
+            "use a non-batch provider command. No launch was admitted."
+        )
+    return windows_batch_command(arguments, environment)
+
+
 def available() -> bool:
     return bool(_channel)
 
@@ -52,9 +75,7 @@ def select_receiver(
     }
     query_arguments = [*query_command, "--version"]
     if query_arguments[0].lower().endswith((".cmd", ".bat")):
-        from plugin_resolve.execution import windows_batch_command
-
-        query_arguments = windows_batch_command(query_arguments, query_environment)
+        query_arguments = _batch_probe_command(query_arguments, query_environment)
     result = run_caller_owned(
         query_arguments, env=query_environment, timeout=timeout,
         max_stdout_bytes=4096, max_stderr_bytes=4096,

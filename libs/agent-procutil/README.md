@@ -568,6 +568,12 @@ An unsupported interpreter still has a finite refusal grace: without an
 execution deadline, its exit and diagnostic EOF share three seconds.
 Unconfirmed diagnostic capture refuses selection rather than waiting forever
 or trying another interpreter.
+Before qualification, the shell retains the original `Process` instance and
+pins its creation handle. Pre-offer cancellation terminates and observes that
+original process rather than depending on stdin EOF or rediscovering a PID.
+Unconfirmed cleanup retains the original state in the exception's
+`Data['DaemonInstanceState']`; this is live cleanup custody, not a serializable
+diagnostic or permission to replay selection.
 The caller still owns applicability and capability interpretation. This
 operation does not authorize installation or target effects.
 
