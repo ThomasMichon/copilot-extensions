@@ -258,9 +258,15 @@ def plan_native_configuration(
                 header = parser.SECTCRE.match(line.strip())
                 if header is not None and header.group("header") == "global":
                     newline = "\r\n" if "\r\n" in pip_content else "\n"
+                    indentation = ""
+                    for following in lines[i + 1:]:
+                        stripped = following.lstrip()
+                        if stripped.strip() and not stripped.startswith(("#", ";")):
+                            indentation = following[:len(following) - len(stripped)]
+                            break
                     if not lines[i].endswith(("\r", "\n")):
                         lines[i] += newline
-                    lines.insert(i + 1, f"index-url = {index}{newline}")
+                    lines.insert(i + 1, f"{indentation}index-url = {index}{newline}")
                     break
             else:
                 lines += [f"\n[global]\nindex-url = {index}\n"]

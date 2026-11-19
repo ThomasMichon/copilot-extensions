@@ -68,7 +68,8 @@ processes. Once the standard Python installer entry runs, it fully parses the
 affected native configuration before writing any file or installing packages.
 It preserves unrelated native options and comments, adds missing defaults,
 and retains the input under the Manager root for subsequent bootstrap/setup.
-Repeated application is idempotent.
+Pip option indentation is retained so existing options are not turned into
+continuations of the added index. Repeated application is idempotent.
 
 An existing explicit index, registry or mirror must agree with the corresponding
 selected source (a trailing slash is immaterial); it is not silently replaced.
@@ -97,6 +98,9 @@ failed installation.
 An explicit pip configuration that disables discovery (`NUL` or `/dev/null`)
 is also refused. Relative native pip/npm config paths are anchored before
 bootstrap changes directories.
+PowerShell resolves those paths through its current filesystem provider
+location, not an independently inherited .NET process directory; preflight
+reads the same resolved file.
 Checks stay channel-specific: selecting only a managed-Python mirror preserves
 independent package-index settings. Explicit uv discovery overrides are still
 refused for either Python channel, since they can bypass the persisted file.

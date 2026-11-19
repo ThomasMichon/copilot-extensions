@@ -210,7 +210,7 @@ if ($ToolchainConfig) {
         }
         $indexCount = 0
         $defaultCount = 0
-        foreach ($line in [IO.File]::ReadAllLines($path)) {
+        foreach ($line in [IO.File]::ReadAllLines($item.FullName)) {
             if ($line -match '^\s*(#|;|$)') { continue }
             if ($kind -eq 'pip') {
                 if ($line -match '^\s*(?:extra[-_]index[-_]url|find[-_]links|trusted[-_]host|no[-_]index)\s*[:=]') {
@@ -259,7 +259,9 @@ if ($ToolchainConfig) {
     $ToolchainConfig = $file.FullName
     foreach ($name in @('PIP_CONFIG_FILE', 'NPM_CONFIG_USERCONFIG', 'NPM_CONFIG_GLOBALCONFIG')) {
         $value = [Environment]::GetEnvironmentVariable($name)
-        if ($value) { $ToolchainEnvironment[$name] = [IO.Path]::GetFullPath($value) }
+        if ($value) {
+            $ToolchainEnvironment[$name] = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($value)
+        }
     }
     foreach ($name in $ToolchainEnvironment.Keys) {
         [Environment]::SetEnvironmentVariable($name, $ToolchainEnvironment[$name], 'Process')

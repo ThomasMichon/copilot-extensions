@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
+import configparser
 import os
 from pathlib import Path
 import shutil
@@ -112,6 +113,74 @@ def test_toolchain_config_preserves_options_and_reconciles_idempotently(
     assert os.environ[tc.CONFIGURATION_ENV] == str(root / "toolchain.conf")
     tc.apply_configuration(root / "toolchain.conf", home=tmp_path, root=root)
     assert {path: path.read_bytes() for path in before} == before
+
+
+@pytest.mark.parametrize("indent", ["    ", "\t"])
+def test_toolchain_config_preserves_indented_pip_options(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, indent: str,
+) -> None:
+    pip, _, _ = _native_fixture(monkeypatch, tmp_path)
+    pip.parent.mkdir()
+    pip.write_text(f"[global]\n{indent}timeout = 73\n{indent}retries = 3\n", encoding="ascii")
+    config = tmp_path / "toolchain.conf"
+    config.write_text(f"schema=1\npython_index_url={INDEX}\n", encoding="ascii")
+    tc.apply_configuration(config, home=tmp_path)
+    parser = configparser.RawConfigParser()
+    parser.read(pip, encoding="utf-8")
+    assert parser.get("global", "index-url") == INDEX
+    assert parser.getint("global", "timeout") == 73
+    assert parser.getint("global", "retries") == 3
+
+
+@pytest.mark.parametrize("shell_name", ["pwsh", "powershell"])
+@pytest.mark.parametrize("conflict", [False, True])
+def test_toolchain_config_powershell_relative_paths_follow_provider_location(
+    tmp_path: Path, shell_name: str, conflict: bool,
+) -> None:
+    shell = shutil.which(shell_name)
+    if shell is None:
+        pytest.skip("native PowerShell unavailable")
+    home, other = tmp_path / "selected", tmp_path / "other"
+    home.mkdir()
+    other.mkdir()
+    foreign = "https://other.example.invalid/simple/"
+    for directory, index in ((home, foreign if conflict else INDEX), (other, INDEX if conflict else foreign)):
+        (directory / "selected.ini").write_text(f"[global]\nindex-url={index}\n", encoding="ascii")
+    config = tmp_path / "toolchain.conf"
+    config.write_text(f"schema=1\npython_index_url={INDEX}\n", encoding="ascii")
+    bootstrap = Path(__file__).resolve().parents[1] / "bootstrap.ps1"
+    def quote(path: Path) -> str:
+        return str(path).replace("'", "''")
+
+    program = (
+        f"[Environment]::CurrentDirectory='{quote(other)}'; Set-Location -LiteralPath '{quote(home)}'; "
+        "function Get-Command { param($Name); if ($Name -like 'uv*') { "
+        "[Console]::Out.WriteLine('FIRST_CONSUMER|' + $env:PIP_CONFIG_FILE); throw 'STOP'; }; "
+        "throw 'UNEXPECTED_COMMAND' }; "
+        f"& '{quote(bootstrap)}' --toolchain-config '{quote(config)}' --version"
+    )
+    env = {
+        key: value for key, value in os.environ.items()
+        if not key.upper().startswith(("UV_", "PIP_", "NPM_CONFIG_", "COPILOT_EXTENSIONS_TOOLCHAIN_"))
+    }
+    env.update(
+        HOME=str(home), USERPROFILE=str(home), APPDATA=str(home / "appdata"),
+        PROGRAMDATA=str(home / "programdata"), XDG_CONFIG_HOME=str(home / ".config"),
+        XDG_CONFIG_DIRS=str(home / "system"), WORKTREE_MANAGER_ROOT=str(home / "manager"),
+        PIP_CONFIG_FILE="selected.ini",
+    )
+    result = subprocess.run(
+        [shell, "-NoProfile", "-NonInteractive", "-Command", program],
+        cwd=other, env=env, capture_output=True, text=True, timeout=20,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert result.returncode != 0
+    output = result.stdout + result.stderr
+    if conflict:
+        assert "FIRST_CONSUMER" not in output
+    else:
+        assert "FIRST_CONSUMER|" + str(home / "selected.ini") in output
+    assert not (home / "manager").exists()
 
 
 @pytest.mark.parametrize("kind", ["pip", "uv", "npm"])
