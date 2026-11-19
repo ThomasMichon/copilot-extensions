@@ -51,8 +51,8 @@ def require_feed_custody(
     if waiter["state"] != "preparing":
         raise TaskError("repository-feed registration requires its original preparing waiter")
     require_feed_live_custody(conn, task, waiter)
-    if now >= waiter["delegation"]["feed"]["deadline_at"]:
-        raise TaskError("original repository-feed deadline elapsed")
+    if not math.isfinite(now) or now >= waiter["delegation"]["feed"]["deadline_at"]:
+        raise TaskError("original repository-feed deadline elapsed or clock invalid")
 
 
 def require_feed_expiry(

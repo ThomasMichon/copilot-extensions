@@ -52,6 +52,10 @@ They are **not** certified bounded merely because their returned row count is
 small. No ordinary-round migration, legacy writer adoption, model backfill,
 retention policy or automatic consolidation is supplied by this API.
 
+For complete raw file and registered-model observations, use the additive
+[raw file-point helper](file-projection.md). It requires these prepared indices
+and an explicit same-path candidate/retained-ID budget; it changes no defaults.
+
 ## Ingestion preparation and explicit consolidation
 
 [Ordinary source publication](prepared-application.md) creates missing point/file

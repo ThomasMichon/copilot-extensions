@@ -98,6 +98,17 @@ prerequisite credit and actual ownership/claim boundaries. This proposal grants
 no implementation, technical completion, credential operation, native execution,
 deployment, reassignment or source/resource release.
 
+**Keeper continuation accepted; separate tracking judgment recorded.**
+#13416 actually merged the explicit continuation, followed by new reflection
+7004474617 while #6236 remained OPEN and fresh complete permitted source,
+inherited-receipt, receiving-contract, eligibility and custody readback.
+Only after those phases did new explanation 7005071056 support #6236's
+separate `NOT_PLANNED` redundant-tracking retirement. The withdrawn earlier
+judgment and correction remain history, not reinstated evidence.
+Every unfinished technical row, checked prerequisite credit, assignment,
+actual owner and resource duty remains unchanged; the active effort and
+direct retained contracts still own the complete unfinished programme.
+
 ## Context
 
 The completed finite [Gateway Role Tunnels](../../2026/10/19%20gateway-role-tunnels/README.md)

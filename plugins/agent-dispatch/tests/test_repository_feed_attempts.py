@@ -7,6 +7,7 @@ from collections.abc import Callable
 import copy
 import json
 from pathlib import Path
+import sqlite3
 from typing import Any, cast
 
 import pytest
@@ -199,6 +200,64 @@ def test_admitted_receipt_arms_without_another_request_or_wake(tmp_path: Path) -
     )
     assert armed is not None and armed["state"] == "active"
     assert armed["feed_admission"] == waiter["feed_admission"]
+    assert not queue.list_run_waiter_wakes(task_id)
+
+
+@pytest.mark.parametrize("change", ["deadline", "operator-form"])
+def test_feed_arm_rechecks_admission_before_commit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str,
+) -> None:
+    queue, task_id, spec, waiter = prepared(tmp_path)
+    queue.replay_waiter_progress(waiter, attempt=True)
+    queue.replay_waiter_progress(waiter, registration_id="receipt")
+    task_before = queue.get(task_id)
+    waiter_before = queue.find_delegated_preparation(task_id, spec["preparation_id"])
+    clock = spec["feed"]["issued_at"]
+    monkeypatch.setattr("time.time", lambda: clock)
+    original_audit = queue._audit
+
+    def before_commit(conn: sqlite3.Connection, *args: Any, **kwargs: Any) -> None:
+        nonlocal clock
+        original_audit(conn, *args, **kwargs)
+        if change == "deadline":
+            clock = spec["feed"]["deadline_at"]
+        else:
+            conn.execute("UPDATE tasks SET awaiting_steer=1 WHERE id=?", (task_id,))
+
+    monkeypatch.setattr(queue, "_audit", before_commit)
+    with pytest.raises(TaskError):
+        queue.arm_run_waiter(
+            task_id, generation=waiter["generation"], kind="delegated",
+            delegation={**spec, "registration_id": "receipt"},
+        )
+    reopened = TaskQueue(tmp_path / "tasks.db")
+    assert reopened.get(task_id) == task_before
+    assert reopened.find_delegated_preparation(
+        task_id, spec["preparation_id"],
+    ) == waiter_before
+    assert not reopened.list_run_waiter_wakes(task_id)
+
+
+@pytest.mark.parametrize("clock", [float("nan"), float("inf"), float("-inf")])
+@pytest.mark.parametrize("stage", ["attempt", "arm"])
+def test_invalid_clock_cannot_attempt_or_arm_feed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clock: float, stage: str,
+) -> None:
+    queue, task_id, spec, waiter = prepared(tmp_path)
+    if stage == "arm":
+        queue.replay_waiter_progress(waiter, attempt=True)
+        queue.replay_waiter_progress(waiter, registration_id="receipt")
+    before = queue.find_delegated_preparation(task_id, spec["preparation_id"])
+    monkeypatch.setattr("time.time", lambda: clock)
+    with pytest.raises(TaskError, match="clock invalid"):
+        if stage == "attempt":
+            queue.replay_waiter_progress(waiter, attempt=True)
+        else:
+            queue.arm_run_waiter(
+                task_id, generation=waiter["generation"], kind="delegated",
+                delegation={**spec, "registration_id": "receipt"},
+            )
+    assert queue.find_delegated_preparation(task_id, spec["preparation_id"]) == before
     assert not queue.list_run_waiter_wakes(task_id)
 
 
