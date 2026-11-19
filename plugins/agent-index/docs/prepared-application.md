@@ -26,6 +26,8 @@ a subordinate table in the existing path-index SQLite database. Construction
 decodes the completed acquisition through the shared pending-journal codec.
 Application callers also supply their manifest and full-rebuild mode; both must
 match that decoded acquisition, including component versions when present.
+Canonical manifest serialization preserves numeric metadata types rather than
+equating booleans, integers and floating-point values; object key order is immaterial.
 The journal then compares the parent row's exact source, account scope and
 payload under SQLite writer exclusion, **before** creating any prepared tables,
 triggers or rows. That same transaction binds a compact cache incarnation in

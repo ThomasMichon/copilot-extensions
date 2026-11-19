@@ -35,8 +35,11 @@ class PreparedJournal:
         acquired = PendingCrawls.decode_pending(payload, source)
         if acquired is None:
             raise ValueError("Prepared application requires a completed pending crawl")
-        if manifest is not None and acquired != (manifest, full):
-            raise PendingCrawlConflict("Prepared manifest does not match its acquired pending crawl")
+        if manifest is not None:
+            supplied = json.dumps(PendingCrawls.manifest_data(manifest), sort_keys=True, allow_nan=False)
+            retained = json.dumps(PendingCrawls.manifest_data(acquired[0]), sort_keys=True, allow_nan=False)
+            if (supplied, full) != (retained, acquired[1]):
+                raise PendingCrawlConflict("Prepared manifest does not match its acquired pending crawl")
         self.paths, self.source, self.scope, self.payload = paths, source, scope, payload
         with closing(paths._connect()) as conn, conn:
             conn.execute("BEGIN IMMEDIATE")

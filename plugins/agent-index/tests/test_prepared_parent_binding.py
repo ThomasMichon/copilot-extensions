@@ -13,6 +13,7 @@ import pytest
 
 from agent_index.index_config import IndexConfig
 from agent_index.indexing.component_manifest import ComponentVersion
+from agent_index.indexing.fingerprints import file_fingerprint
 from agent_index.indexing.manifest import CrawlManifest
 from agent_index.indexing.path_index import PathIndex
 from agent_index.indexing.pending_crawl import PendingCrawlConflict, PendingCrawls
@@ -27,7 +28,10 @@ def acquired_parent(tmp_path: Path) -> tuple[PathIndex, PendingCrawls, CrawlMani
     pending = PendingCrawls(paths)
     manifest = CrawlManifest(
         source="sample:repo", accounting_family="sample:repo", commit="pinned",
-        upserts=[FileEntry("one.md", "Useful text.", "markdown", "sample:repo")],
+        upserts=[FileEntry(
+            "one.md", "Useful text.", "markdown", "sample:repo",
+            metadata={"a": 1, "z": [True, 1.0]},
+        )],
         component_versions=[ComponentVersion("sample:repo", "one.md", 7, "body/v1")],
     )
     pending.save(manifest, scope="account", full=False)
@@ -102,8 +106,11 @@ def test_exact_component_parent_reuses_incarnation_but_cannot_complete_acquisiti
         paths, manifest.source, "account", payload, manifest=manifest, full=False,
     )
     first.put("vector", [("pair", b"fixture")])
+    reordered = replace(manifest, upserts=[
+        replace(manifest.upserts[0], metadata={"z": [True, 1.0], "a": 1}),
+    ])
     reopened = PreparedJournal(
-        paths, manifest.source, "account", payload, manifest=manifest, full=False,
+        paths, manifest.source, "account", payload, manifest=reordered, full=False,
     )
     assert reopened.generation == first.generation
     assert reopened.get("vector", ["pair"]) == {"pair": b"fixture"}
@@ -168,7 +175,9 @@ def test_cache_creation_holds_parent_writer_exclusion(
     assert blocked == [True]
 
 
-@pytest.mark.parametrize("mismatch", ["content", "mode", "stripped-components"])
+@pytest.mark.parametrize(
+    "mismatch", ["content", "mode", "stripped-components", "bool-int", "int-float"],
+)
 def test_wrong_acquired_application_cannot_reset_cache_or_touch_store(
     tmp_path: Path, mismatch: str, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -180,6 +189,10 @@ def test_wrong_acquired_application_cannot_reset_cache_or_touch_store(
     )
     if mismatch == "stripped-components":
         manifest.component_versions = [ComponentVersion("sample:repo", "one.md", 7, "body/v1")]
+    if mismatch in ("bool-int", "int-float"):
+        manifest.upserts = [replace(
+            manifest.upserts[0], metadata={"flag": True if mismatch == "bool-int" else 1},
+        )]
     pending.save(manifest, scope="account", full=False)
     payload = pending.read_payload(manifest.source, "account")
     assert payload is not None
@@ -191,6 +204,12 @@ def test_wrong_acquired_application_cannot_reset_cache_or_touch_store(
     supplied = replace(manifest, component_versions=None)
     if mismatch == "content":
         supplied.upserts = [replace(manifest.upserts[0], content="Different input.")]
+    elif mismatch in ("bool-int", "int-float"):
+        supplied.upserts = [replace(
+            manifest.upserts[0], metadata={"flag": 1 if mismatch == "bool-int" else 1.0},
+        )]
+        assert manifest == supplied
+        assert file_fingerprint(manifest.upserts[0], None) != file_fingerprint(supplied.upserts[0], None)
     untouched = Mock()
     monkeypatch.setattr(paths, "get_entries", untouched)
     with pytest.raises(PendingCrawlConflict, match="does not match"):
