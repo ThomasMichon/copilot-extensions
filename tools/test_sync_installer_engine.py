@@ -1194,7 +1194,10 @@ def _promotion_installer_source(
     contract = sync_installer_engine.ier
     _copy_real_installer_engine(root)
     canonical = root / "libs" / "installer-engine"
-    for name in contract.PYTHON_FILES:
+    native_extras = {
+        name for names in contract.STANDALONE_NATIVE_EXTRA_FILES.values() for name in names
+    }
+    for name in (*contract.PYTHON_FILES, *sorted(native_extras)):
         (canonical / name).write_bytes((REPO / "libs" / "installer-engine" / name).read_bytes())
     consumers = {root / "plugins" / name for name in (*contract.ADOPTERS, *contract.PYTHON_ADOPTERS)}
     consumers.update(root / name for name in (
