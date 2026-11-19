@@ -146,7 +146,9 @@ After the reviewed proposal, the operator admitted execution:
   separates named target coverage from combined-document replacement (#13386);
   typed intake now retains parked v2 claims with v1-only dequeue isolation.
   A [retained component carrier](../../../plugins/agent-index/docs/architecture.md#component-recovery-carrier-application-unsupported)
-  preserves ordering inputs behind pre-application refusal. Representation,
+  preserves ordering inputs behind pre-application refusal, including changed
+  replacement and premature-completion refusal. Pure content/version comparison
+  does not qualify durable application or deletion evidence. Representation,
   v2 execution, ordered application and read isolation remain unimplemented.
 - [ ] Persist acquisition progress so retry/restart does not restart a
   corpus-wide listing.
@@ -273,6 +275,7 @@ source-owner coordination rather than one large rewrite.
 
 Append-only entries are preserved in dated files, newest first.
 
+- [2026-11-19 component application prerequisites](journal/2026/11.19%20component-application.md)
 - [2026-11-18 Azure DevOps response and selected-record coverage](journal/2026/11.18%20ado-response-coverage.md)
 - [2026-11-18 Azure DevOps body-batch completeness](journal/2026/11.18%20ado-body-batches.md)
 - [2026-11-18 Azure DevOps PR update-contract refusal](journal/2026/11.18%20ado-pr-update-contract.md)

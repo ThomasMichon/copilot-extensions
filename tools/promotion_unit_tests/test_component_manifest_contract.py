@@ -70,3 +70,22 @@ def test_unqualified_component_application_refuses_without_reinterpreting_legacy
     legacy = SimpleNamespace(component_versions=None)
     api.require_unordered_application(legacy)
     api.validate_components(legacy)
+
+
+def test_component_ordering_retains_deletions_and_refuses_equal_version_conflicts(api: ModuleType) -> None:
+    version = api.ComponentVersion("sample:components", "items/1/comment.md", 7, "comment/v1")
+    current = api.ComponentContent(version, "a" * 64, False)
+    assert current.covered_by(current)
+    assert not replace(current, component=replace(version, version=8)).covered_by(current)
+    tombstone = replace(current, component=replace(version, version=9), deleted=True)
+    assert current.covered_by(tombstone)
+    assert not replace(current, component=replace(version, version=10)).covered_by(tombstone)
+    for conflicting in (
+        replace(current, fingerprint="b" * 64), replace(current, deleted=True),
+        replace(current, component=replace(version, semantics="comment/v2")),
+    ):
+        with pytest.raises(ValueError, match="Equal component versions"):
+            conflicting.covered_by(current)
+    for field in ("source", "path"):
+        with pytest.raises(ValueError, match="identity"):
+            replace(current, component=replace(version, **{field: "different"})).covered_by(current)
