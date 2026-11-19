@@ -1205,6 +1205,18 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The [native-readiness and Vault boundary audit](journal/2026/11.19-native-readiness-and-vault-boundaries.md)
+records #13456's reviewed delivery and parent return, the whole finite #13020
+source completion through #13027, and distinct #12900/#12920 adoption/context
+contracts. It also retains #12946's current TLS-capture boundary and the complete
+#11175/#11875 native-failure distinctions; recovery does not erase failed results.
+The ten-request unit separately verifies #2830's finite watchdog acceptance and
+explicit OPEN incident, retaining #1303/#3336's actual source-provenance stops.
+The unchanged #5716 observation is not re-investigated. Actual
+installed acceptance and source/resource owners remain separate. The complete
+15:18:54 UTC census is 899 whole open, 170 above fixed 729; all incumbent
+Plan/Validation states and broader completion gates remain.
+
 The [managed-metadata and finite-source unit](journal/2026/11.19-managed-metadata-and-finite-source-completions.md)
 records six acknowledged, audited `COMPLETED` source requests and four retained
 contracts without closing their broader native, installation or resource programs.
