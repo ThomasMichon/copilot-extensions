@@ -91,3 +91,24 @@ def test_owner_refusal_never_reaches_a_command(
         "--owner", "machine/project/worktree", "--kind", "report",
         "--", sys.executable, "-c", "pass",
     ]) == 125
+
+
+@pytest.mark.parametrize(
+    "option,complete", [("--own", "--owner"), ("--ki", "--kind"), ("--time", "--timeout")],
+    ids=["owner-prefix", "kind-prefix", "timeout-prefix"],
+)
+def test_abbreviated_options_refuse_before_allocation(
+    producer: ModuleType, monkeypatch: pytest.MonkeyPatch, option: str, complete: str,
+) -> None:
+    def forbidden(*args: object, **kwargs: object) -> None:
+        pytest.fail("an undeclared option reached allocation")
+
+    monkeypatch.setattr(producer, "OwnedProducerSandbox", forbidden)
+    args = [
+        "--owner", "machine/project/worktree", "--kind", "spike", "--timeout", "5",
+        "--", sys.executable, "-c", "pass",
+    ]
+    args[args.index(complete)] = option
+    with pytest.raises(SystemExit) as error:
+        producer.main(args)
+    assert error.value.code == 2

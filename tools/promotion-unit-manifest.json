@@ -5563,7 +5563,10 @@
         "tools/promotion_unit_tests/test_owned_producer_contract.py::test_literal_command_settles_only_after_join[command-failure]",
         "tools/promotion_unit_tests/test_owned_producer_contract.py::test_literal_command_settles_only_after_join[signal]",
         "tools/promotion_unit_tests/test_owned_producer_contract.py::test_literal_command_settles_only_after_join[cleanup-overrun]",
-        "tools/promotion_unit_tests/test_owned_producer_contract.py::test_owner_refusal_never_reaches_a_command"
+        "tools/promotion_unit_tests/test_owned_producer_contract.py::test_owner_refusal_never_reaches_a_command",
+        "tools/promotion_unit_tests/test_owned_producer_contract.py::test_abbreviated_options_refuse_before_allocation[owner-prefix]",
+        "tools/promotion_unit_tests/test_owned_producer_contract.py::test_abbreviated_options_refuse_before_allocation[kind-prefix]",
+        "tools/promotion_unit_tests/test_owned_producer_contract.py::test_abbreviated_options_refuse_before_allocation[timeout-prefix]"
     ],
     "coverage_targets": [
         "plugins/agent-index/src/agent_index/indexing/component_manifest.py",
@@ -6854,8 +6857,8 @@
         "plugins/efforts/skills/driving-effort-agendas/scripts/agenda_v2_records.py": "0eb64fe209149583b7ee2487ade6be3a261d8a2d07d9509912ac61a11dd6aa0d",
         "plugins/efforts/skills/driving-effort-agendas/scripts/agenda_v2_schema.py": "f79bf3814f205ddd11b1b903b0e6a0ab644c8416dd0113eddfa173ef71405048",
         "tools/promotion_unit_tests/test_agenda_rescue.py": "12a13246161d3bdc9da202585c353d3470d7f97fad564d38045517534d7327e1",
-        "tools/promotion_unit_tests/test_owned_producer_contract.py": "cae3436f8fa1ce6dee263670fd2bc0cf8b019009e46bf66872ef102a6847d3b7",
-        "tools/owned_producer.py": "ee933183a77b425b708da1e1a26915fe4ebb89e98ad1ddbfca3568a4bffd7112",
+        "tools/promotion_unit_tests/test_owned_producer_contract.py": "9dfc76a34d8f31b2c8442966c243a407fa16c9691a181faff145cefde924e879",
+        "tools/owned_producer.py": "7abad6cfc6877e62d4f045342e4cb4ffb4331ab4ee99ff21fb3f93e8fcdb0672",
         "tools/plugin_test_owned_scratch.py": "832af0f793f3675acb4ed506b2ac683f707c554f5ad4a993554ba60526d110cf"
     }
 }

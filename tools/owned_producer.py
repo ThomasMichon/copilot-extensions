@@ -44,6 +44,7 @@ def parse_arguments(argv: Sequence[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=__doc__,
         epilog="Consume disposable results during the command. External outputs keep their own owner.",
+        allow_abbrev=False,
     )
     parser.add_argument("--owner", required=True, metavar="MACHINE/PROJECT/WORKTREE")
     parser.add_argument(
