@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import configparser
+from contextlib import ExitStack
 import os
 from pathlib import Path
 import re
@@ -241,7 +242,7 @@ def plan_native_configuration(
             content = _text(path)
             parser = configparser.RawConfigParser()
             parser.read_string(content)
-            for section in parser.sections():
+            for section in (parser.default_section, *parser.sections()):
                 for name, value in parser.items(section):
                     name = name.replace("_", "-")
                     if name in {"extra-index-url", "find-links", "trusted-host", "no-index"}:
@@ -289,37 +290,57 @@ def plan_native_configuration(
 
 def apply_configuration(path: Path, *, home: Path | None = None, root: Path | None = None) -> None:
     """Apply selected defaults before the standard installer starts package work."""
+    from .config_write_lock import config_write_lock
+
     values = read_configuration(path)
     current = _routing_environment(os.environ)
     selected_home = home or Path(current.get("USERPROFILE") or Path.home())
     updated = environment(values, current)
-    changes = plan_native_configuration(values, selected_home, current, windows=os.name == "nt")
-    if root is not None:
-        retained = root / "toolchain.conf"
-        content = "schema=1\n" + "".join(f"{key}={value}\n" for key, value in values.items())
+    _paths, uv, pip = _native_paths(selected_home, current, os.name == "nt")
+    targets: set[Path] = set()
+    if "python_index_url" in values:
+        targets.add(pip)
+    if any(field in values for field in ("python_index_url", "python_install_mirror")):
+        targets.add(uv)
+    if "npm_registry" in values:
+        targets.add(Path(current.get("NPM_CONFIG_USERCONFIG") or current.get("npm_config_userconfig")
+                         or selected_home / ".npmrc"))
+    retained = root / "toolchain.conf" if root is not None else None
+    content = "schema=1\n" + "".join(f"{key}={value}\n" for key, value in values.items())
+    if retained is not None:
         if retained.resolve() != path.resolve():
-            changes[retained] = content
+            targets.add(retained)
         updated[CONFIGURATION_ENV] = str(retained.absolute())
-    for target, content in changes.items():
-        target.parent.mkdir(parents=True, exist_ok=True)
-        temporary: str | None = None
-        try:
-            with tempfile.NamedTemporaryFile(
-                mode="w", encoding="utf-8", newline="", dir=target.parent, delete=False,
-            ) as stream:
-                temporary = stream.name
-                stream.write(content)
-            if target.exists():
-                os.chmod(temporary, target.stat().st_mode)
-            os.replace(temporary, target)
-            temporary = None
-        finally:
-            if temporary is not None:
-                os.unlink(temporary)
+    with ExitStack() as locks:
+        for target in sorted({target.absolute() for target in targets}, key=str):
+            locks.enter_context(config_write_lock(target))
+        changes = plan_native_configuration(values, selected_home, current, windows=os.name == "nt")
+        if retained is not None and retained.resolve() != path.resolve():
+            changes[retained] = content
+        for target, content in changes.items():
+            _write_configuration(target, content)
     if current.get("COPILOT_EXTENSIONS_TOOLCHAIN_REQUEST") == "1" and os.name != "nt":
         for name in ("npm_config_registry", "npm_config_userconfig", "npm_config_globalconfig"):
             os.environ.pop(name, None)
     os.environ.update(updated)
+
+
+def _write_configuration(target: Path, content: str) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", newline="", dir=target.parent, delete=False,
+        ) as stream:
+            temporary = stream.name
+            stream.write(content)
+        if target.exists():
+            os.chmod(temporary, target.stat().st_mode)
+        os.replace(temporary, target)
+        temporary = None
+    finally:
+        if temporary is not None:
+            os.unlink(temporary)
 
 
 def configure_selected(*, root: Path, apply: bool) -> None:

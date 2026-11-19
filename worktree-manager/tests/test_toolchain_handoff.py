@@ -129,6 +129,122 @@ def test_toolchain_handoff_refuses_missing_or_invalid_support_before_effect(
 
 
 @pytest.mark.parametrize("conflict", [False, True])
+def test_queued_manager_update_applies_toolchain_before_first_effect(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, conflict: bool,
+) -> None:
+    home, root = tmp_path / "home", tmp_path / "manager"
+    home.mkdir()
+    for key in (*update_driver_cli._SUPPORTED_CONTEXT_KEYS,
+                *update_driver_cli._NPM_CONTEXT_ALIASES.values()):
+        monkeypatch.delenv(key, raising=False)
+    config = home / "selected.conf"
+    index = "https://caller.example.invalid/simple/"
+    config.write_text(f"schema=1\npython_index_url={index}\n", encoding="ascii")
+    for key, value in {
+        "HOME": str(home), "USERPROFILE": str(home), "WORKTREE_MANAGER_ROOT": str(root),
+        "APPDATA": str(home / "appdata"), "PROGRAMDATA": str(home / "programdata"),
+        "XDG_CONFIG_HOME": str(home / "config"), "XDG_CONFIG_DIRS": str(home / "system"),
+        "COPILOT_EXTENSIONS_TOOLCHAIN_CONFIG": str(config),
+    }.items():
+        monkeypatch.setenv(key, value)
+    if conflict:
+        monkeypatch.setenv("PIP_INDEX_URL", "https://other.example.invalid/simple/")
+    context = update_driver_cli.installation_request_context()
+    report = tmp_path / "result.json"
+    program = """
+import json,os,sys
+from pathlib import Path
+from types import SimpleNamespace
+sys.path[:0]=json.loads(sys.argv[1])
+from worktree_manager import __main__ as manager, project_update_controller, update_driver_cli
+update_driver_cli._current_authority=lambda *a,**k: SimpleNamespace(configured=False)
+update_driver_cli._source_key=lambda: "fixture-source"
+def effect(*args,**kwargs):
+    root=Path(os.environ["WORKTREE_MANAGER_ROOT"])
+    assert (root/"toolchain.conf").is_file(), "configuration not applied before update"
+    assert os.environ["PIP_INDEX_URL"]=="https://caller.example.invalid/simple/"
+    Path(sys.argv[2]).write_text(json.dumps({"applied":True}),encoding="utf-8")
+    return 7
+project_update_controller.handoff=effect
+manager._cmd_update=effect
+raise SystemExit(update_driver_cli.cmd_update_request([]))
+"""
+    queue = home / ".copilot-extensions" / "update-driver"
+    request = update_driver.enqueue(
+        update_driver.RequestSpec(
+            "manager", (), cwd=str(tmp_path), source="fixture-source",
+            context=tuple(context.items()),
+        ),
+        runner=update_driver.TrustedRunner(
+            (sys.executable, "-I", "-B", "-c", program, json.dumps(sys.path), str(report)),
+            str(tmp_path), context_keys=update_driver_cli._runner_context_keys(context),
+        ), root=queue,
+    )
+    assert update_driver.drain(root=queue) == 0
+    result = update_driver.status(request.id, root=queue)
+    assert not isinstance(result, tuple)
+    assert result.state == "completed", result.log_path.read_text(encoding="utf-8")
+    assert result.exit_code == (1 if conflict else 7), result.log_path.read_text(encoding="utf-8")
+    assert report.exists() is not conflict
+    if conflict:
+        assert "PIP_INDEX_URL conflicts" in result.log_path.read_text(encoding="utf-8")
+        assert not (root / "toolchain.conf").exists()
+
+
+def test_configured_target_is_enqueued_before_handoff(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    from worktree_manager import project_update_controller
+
+    for key in update_driver_cli._SUPPORTED_CONTEXT_KEYS:
+        monkeypatch.delenv(key, raising=False)
+    config = tmp_path / "selected.conf"
+    config.write_text("schema=1\npython_index_url=https://caller.example.invalid/simple/\n", encoding="ascii")
+    monkeypatch.setenv("COPILOT_EXTENSIONS_TOOLCHAIN_CONFIG", str(config))
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(tmp_path / "manager"))
+    monkeypatch.setattr(update_driver_cli, "request_source_anchor", lambda: str(tmp_path))
+    monkeypatch.setattr(update_driver_cli, "_source_key", lambda: "fixture-source")
+    monkeypatch.setattr(update_driver_cli, "_current_authority",
+                        lambda *_a, **_k: SimpleNamespace(configured=False))
+    requests: list[update_driver.RequestSpec] = []
+
+    def enqueue(spec: update_driver.RequestSpec, **_kwargs: Any) -> Any:
+        requests.append(spec)
+        raise update_driver.StateError("fixture stops before execution")
+
+    def premature_handoff(*_args: Any, **_kwargs: Any) -> int:
+        pytest.fail("configured target bypassed its Manager participant")
+
+    monkeypatch.setattr(update_driver, "enqueue", enqueue)
+    monkeypatch.setattr(project_update_controller, "handoff", premature_handoff)
+    monkeypatch.setattr(engine_client, "run_engine_passthrough", premature_handoff)
+    assert update_driver_cli.cmd_update_request(["--target", "agent-index"]) == 1
+    assert len(requests) == 1 and requests[0].backend == "manager"
+    assert requests[0].argv == ("--target", "agent-index")
+    assert "fixture stops before execution" in capsys.readouterr().err
+    assert not (tmp_path / "manager" / "toolchain.conf").exists()
+
+
+def test_configured_manager_target_remains_visible_in_durable_history(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from worktree_manager import installation_updates
+
+    log = tmp_path / "request.log"
+    log.write_bytes(b"configured target\n")
+    request = SimpleNamespace(
+        spec=SimpleNamespace(backend="manager", source="fixture-source", argv=("--target", "agent-index")),
+        id="fixture-request", state="completed", error=None, exit_code=0, log_path=log,
+    )
+    monkeypatch.setattr(update_driver, "status", lambda: (request,))
+    monkeypatch.setattr(update_driver_cli, "_source_key", lambda: "fixture-source")
+    operation = installation_updates._operations()["agent-index"]
+    assert operation["state"] == "succeeded"
+    assert operation["request_id"] == request.id
+    assert operation["progress"] == "configured target\n"
+
+
+@pytest.mark.parametrize("conflict", [False, True])
 def test_self_install_participant_applies_toolchain_before_candidate(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, conflict: bool,
 ) -> None:

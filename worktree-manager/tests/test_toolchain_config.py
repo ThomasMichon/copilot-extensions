@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from contextlib import contextmanager
 import os
 from pathlib import Path
 import shutil
@@ -113,7 +114,40 @@ def test_toolchain_config_preserves_options_and_reconciles_idempotently(
     assert {path: path.read_bytes() for path in before} == before
 
 
-@pytest.mark.parametrize("conflict", ["site", "command", "npm", "uv"])
+@pytest.mark.parametrize("kind", ["pip", "uv", "npm"])
+def test_toolchain_config_preserves_writer_completed_before_lock_acquisition(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str,
+) -> None:
+    from worktree_manager import config_write_lock as writer
+
+    pip, uv, _ = _native_fixture(monkeypatch, tmp_path)
+    target, content = {
+        "pip": (pip, "[global]\ntimeout = 73\n"),
+        "uv": (uv, "http-timeout = 73\n"),
+        "npm": (tmp_path / ".npmrc", "fetch-retries=3\n"),
+    }[kind]
+    original_lock = writer.config_write_lock
+    acquired: list[Path] = []
+
+    @contextmanager
+    def competing_writer(path: Path, *, timeout: float = 5.0) -> Iterator[None]:
+        if path == target:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+        with original_lock(path, timeout=timeout):
+            acquired.append(path)
+            yield
+
+    monkeypatch.setattr(writer, "config_write_lock", competing_writer)
+    config = tmp_path / "toolchain.conf"
+    config.write_text(f"schema=1\npython_index_url={INDEX}\nnpm_registry={REGISTRY}\n", encoding="ascii")
+    tc.apply_configuration(config, home=tmp_path)
+    assert target in acquired
+    assert content.splitlines()[-1] in target.read_text(encoding="utf-8")
+    assert (REGISTRY if kind == "npm" else INDEX) in target.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("conflict", ["site", "command", "defaults", "npm", "uv"])
 def test_toolchain_config_conflicts_do_not_partially_write(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, conflict: str,
 ) -> None:
@@ -128,8 +162,9 @@ def test_toolchain_config_conflicts_do_not_partially_write(
     config = tmp_path / "toolchain.conf"
     config.write_text(f"schema=1\npython_index_url={INDEX}\nnpm_registry={REGISTRY}\n", encoding="ascii")
     root = tmp_path / "manager"
-    if conflict in {"site", "command"}:
-        target.write_text("[install]\nindex-url = https://other.example.invalid/simple/\n", encoding="utf-8")
+    if conflict in {"site", "command", "defaults"}:
+        section = "DEFAULT" if conflict == "defaults" else "install"
+        target.write_text(f"[{section}]\nindex-url = https://other.example.invalid/simple/\n", encoding="utf-8")
     elif conflict == "npm":
         npm.write_text("registry=https://other.example.invalid/\n", encoding="utf-8")
     else:

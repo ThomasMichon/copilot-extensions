@@ -514,6 +514,14 @@ def cmd_update_request(rest: list[str]) -> int:
                         raise driver.StateError("update authority changed before execution")
                     if requested == "project" and not selected.configured:
                         raise driver.StateError("selected project update authority is unavailable")
+                    if os.environ.get(_TOOLCHAIN_REQUEST_KEY) == "1":
+                        if request.spec.backend == "manager" and request.spec.source != _source_key():
+                            raise driver.StateError("Manager source changed after submission; submit a new request")
+                        custody.assert_owned()
+                        from .source_config import default_root
+                        from .toolchain_config import configure_selected
+
+                        configure_selected(root=default_root().expanduser().resolve(), apply=True)
                     if selected.configured and selected.mode == "standalone":
                         if "--no-project-controller" not in forwarded:
                             forwarded = [*forwarded, "--no-project-controller"]
@@ -547,11 +555,13 @@ def cmd_update_request(rest: list[str]) -> int:
         if selected.configured and selected.mode == "standalone":
             if "--no-project-controller" not in forwarded:
                 forwarded = [*forwarded, "--no-project-controller"]
-        with _request_environment(context):
-            controlled = handoff(forwarded, observer=observer, authority=selected)
-        if controlled is not None:
-            return controlled
-        if options.target is not None and options.target != "worktree-manager":
+        configured = context.get(_TOOLCHAIN_REQUEST_KEY) == "1"
+        if not configured:
+            with _request_environment(context):
+                controlled = handoff(forwarded, observer=observer, authority=selected)
+            if controlled is not None:
+                return controlled
+        if not configured and options.target is not None and options.target != "worktree-manager":
             from . import engine_client
             from .runtime_source_config import require_marketplace
 

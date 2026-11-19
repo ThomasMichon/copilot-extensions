@@ -74,8 +74,9 @@ An existing explicit index, registry or mirror must agree with the corresponding
 selected source (a trailing slash is immaterial); it is not silently replaced.
 Pip checks include effective global, legacy/user, active virtual-environment and
 explicit configuration, including command-specific sections and either INI
-option delimiter. An existing `PIP_CONFIG_FILE` suppresses the normal user files;
-setup persists into that selected file instead, preserving its options. Darwin
+option delimiter, plus inherited INI defaults. An existing `PIP_CONFIG_FILE`
+suppresses the normal user files; setup persists into that selected file
+instead, preserving its options. Darwin
 uses pip's native Application Support locations, with its normal user fallback.
 A matching legacy uv `index-url` or a single matching default `[[index]]` is
 preserved. Uv checks include `[pip]` selectors and the effective system file
@@ -87,8 +88,12 @@ forms rather than guessing; use ordinary `[pip]` tables for that path.
 Additional/opaque selectors such as extra indexes, find-links, scoped npm
 registries, explicit `UV_CONFIG_FILE`, or conflicting uv installer download
 overrides require reconciliation and are not cleared. Errors start no package
-installation. File writes use per-file atomic replacement; this is not a
-multi-file transaction or rollback of a later failed installation.
+installation. Native and retained configuration writers take the existing
+bounded per-file locks before reading and merging, then publish by atomic
+replacement. Cooperating writers therefore preserve unrelated settings written
+before lock acquisition; arbitrary external editors do not participate in this
+locking protocol. This is not a multi-file transaction or rollback of a later
+failed installation.
 An explicit pip configuration that disables discovery (`NUL` or `/dev/null`)
 is also refused. Relative native pip/npm config paths are anchored before
 bootstrap changes directories.
@@ -128,6 +133,10 @@ refuses the engine update before execution and directs setup/recovery; ordinary
 no-config updates do not require the new declaration. Windows `self-install
 --apply` participants also apply the selected configuration under installation
 custody before constructing a candidate.
+Ordinary configured Manager updates apply it under the same queue custody
+before project-controller handoff or any update phase, even when Manager is
+already current. Configured component-targeted updates enter that Manager
+participant too; no-config requests retain their existing direct routing.
 
 ## Channel and compatibility limits
 
