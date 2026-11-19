@@ -473,6 +473,21 @@ def test_active_projection_keeps_completed_content_advisory_until_refresh(
             },
         ) == 1
         assert "STATE(?)" in requests[-1]["values"]["@aw_seg"]
+    for fresh in (False, True):
+        if fresh:
+            owner.get(path)
+        assert run_monitor_sweep(
+            monitor._monitor_sweep, "psmux.exe", "monitor", "fixture", set(),
+            managed_mux_cache=cache, segment_cache=owner,
+            state_snapshot=lambda project: {
+                "ok": True, "projection": {"quality": "current"}, "worktrees": [{
+                    "id": "one", "path": str(tmp_path / "moved"),
+                    "state": "active", "closure": descriptor,
+                }],
+            },
+        ) == 1
+        segment = requests[-1]["values"]["@aw_seg"]
+        assert "STATE(?)" in segment and "CONVO" not in segment
 
 
 @pytest.mark.parametrize("second_present", [True, False])

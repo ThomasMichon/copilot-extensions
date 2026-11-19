@@ -275,6 +275,9 @@ the fresh content entry, the same cache owner can retain its last completed
 segment with an explicit `(stale)` marker. The marker applies to the whole
 retained string, including any historical counts. This presentation-only copy
 is bound to the project, normalized checkout path and worktree ID. It survives
+only while the roster path still matches the managed session's checkout path.
+An otherwise usable renderer record without a worktree ID cannot retain it.
+The copy survives
 ordinary expiry, invalidation and an in-flight observation, but never supplies
 fresh-cache, hook or action evidence. Missing or unsupported roster subjects,
 retained cleanup and a retiring owner cannot use it.

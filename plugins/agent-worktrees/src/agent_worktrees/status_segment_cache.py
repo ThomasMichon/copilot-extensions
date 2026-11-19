@@ -423,9 +423,10 @@ class _StatusSegmentCache:
             self._aliases[input_key] = key
             self._entries[key] = (time.monotonic(), value)
             self._entry_projects[key] = project
-            if record is not None and subject_project and value:
+            worktree_id = getattr(record, "worktree_id", None)
+            if isinstance(worktree_id, str) and worktree_id and subject_project and value:
                 self._completed[key] = _CompletedSegment(
-                    subject_project, record.worktree_id, value,
+                    subject_project, worktree_id, value,
                 )
             else:
                 self._completed.pop(key, None)

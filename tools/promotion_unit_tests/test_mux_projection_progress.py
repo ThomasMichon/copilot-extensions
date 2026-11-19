@@ -301,6 +301,28 @@ def test_active_projection_retains_subject_bound_advisory_content(
     assert owner.get_advisory("other", path, "one") is None
     assert owner.get_advisory("project", path, "other") is None
     assert owner.get_advisory("project", "/synthetic/other", "one") is None
+    assert api.presentation.run_monitor_sweep(
+        sweep, "psmux.exe", "monitor", "fixture", set(),
+        managed_mux_cache=object(), segment_cache=owner,
+        state_snapshot=lambda project: {
+            "ok": True, "projection": {"quality": "current"}, "worktrees": [{
+                "id": "one", "path": "/synthetic/moved", "state": "active",
+                "closure": {"supported": True, "style": "active", "compact": "ACTIVE"},
+            }],
+        },
+    ) == 1
+    assert "STATE(?)" in writes[-1] and "CONVO" not in writes[-1]
+    api.package.status_bar_cli._find_record_for_path = lambda value: SimpleNamespace(
+        worktree_path=path,
+    )
+    owner.invalidate(path)
+    assert owner.get(path) == "CONVO"
+    assert owner.get_advisory("project", path, "one") is None
+    api.package.status_bar_cli._find_record_for_path = lambda value: SimpleNamespace(
+        worktree_path=path, worktree_id="one",
+    )
+    owner.invalidate(path)
+    assert owner.get(path) == "CONVO"
     ticket = owner.begin_observation("project", "/synthetic", path)
     assert "(stale)" in owner.get_advisory("project", path, "one")
     owner.retain_cleanup(ticket, api.package.push_timeout.ObservationCleanupError("held"))
