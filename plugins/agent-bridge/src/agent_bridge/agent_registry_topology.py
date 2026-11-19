@@ -16,6 +16,7 @@ from .agent_registry_common import (
     AgentConfig,
     AgentRegistryLoadError,
     _PROJECTS_YAML_DEFAULT,
+    parse_worktree_capability,
 )
 from .topology import MachineConfig, SshEnvironment
 
@@ -67,6 +68,7 @@ def parse_agent_registry(data: dict[str, Any]) -> dict[str, AgentConfig]:
             setup_script=config.get("setup_script"),
             requires_admin=bool(config.get("requires_admin")),
             mcp_servers=[dict(spec) for spec in raw_mcp_servers],
+            supports_worktrees=parse_worktree_capability(config.get("supports_worktrees")),
         )
     return registry
 
@@ -360,7 +362,7 @@ def _load_related_entries(repo_root: Path) -> list[tuple[str, list[str], str]]:
     return out
 
 
-def load_local_repos() -> list[dict]:
+def load_local_repos() -> list[dict[str, Any]]:
     """Live-query the local per-machine repo registry (normalized)."""
     from . import agent_registry as compat
 
@@ -399,7 +401,7 @@ def load_local_repos() -> list[dict]:
 
 
 def infer_control_plane_project(
-    repos: list[dict], machines_yaml_path: str | Path,
+    repos: list[dict[str, Any]], machines_yaml_path: str | Path,
 ) -> str | None:
     """Infer the control-plane project from the live per-machine repo registry."""
     try:
@@ -437,7 +439,7 @@ def infer_control_plane_project(
     return best_name
 
 
-def _local_repository_allows_discovery(entry: dict, platform: str) -> bool:
+def _local_repository_allows_discovery(entry: dict[str, Any], platform: str) -> bool:
     paths = entry.get("paths")
     raw = paths.get(platform) if isinstance(paths, dict) else None
     if not isinstance(raw, str) or not raw:
@@ -463,7 +465,7 @@ def derive_topology_agents(
     related: list[tuple[str, list[str], str]],
     local_machine: MachineConfig | None,
     local_platform: str = "",
-    repos: list[dict] | None = None,
+    repos: list[dict[str, Any]] | None = None,
     elevated_projects: set[str] | None = None,
     *,
     default_copilot_args: list[str] | None = None,
@@ -473,6 +475,8 @@ def derive_topology_agents(
     from . import agent_registry as compat
 
     out: dict[str, AgentConfig] = {}
+    machine: MachineConfig | None
+    env: SshEnvironment | None
 
     def _machine_metadata(machine: MachineConfig) -> str:
         parts = [machine.description] if machine.description else []
@@ -608,9 +612,9 @@ def _effective_spawn_defaults(
     composed = effective_spawn_defaults(profile, repo_cfg)
     if composed is not None:
         return composed
-    profile_set = getattr(profile, "model_fields_set", set())
+    profile_set: set[str] = getattr(profile, "model_fields_set", set())
 
-    def _pick(field: str, repo_value: object) -> object:
+    def _pick(field: str, repo_value: Any) -> Any:
         if field in profile_set:
             return getattr(profile, field)
         return repo_value if repo_cfg is not None else getattr(profile, field)

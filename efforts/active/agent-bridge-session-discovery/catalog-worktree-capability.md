@@ -109,3 +109,32 @@ slice does not claim a Manager UI integration or begin filtering targets.
 Accept only C1-C4/V1-V5 after real source qualification and merge. Do not
 mark S4036-G or the discovery effort Done: same-consumer static reload and
 the other original requirements remain outside this finite slice.
+
+## Journal
+
+### 2026-11-19 - Reviewed plan and finite source qualification
+
+The plan merged in #13490 before production edits. Seventeen initial
+consumer cases fail on absent metadata, ignored invalid declarations and
+the prior namespace row shape. The final contained packet passes 308 cases,
+including 21 focused HTTP/cache/declaration/legacy-rollback controls.
+Remote ACP's existing refusal executes before its false metadata assertion.
+An added cache test explicitly expires its fixture observation; force-refresh
+alone intentionally does not rescan a fresh healthy namespace.
+
+All seven touched Python files pass whole-file strict checking for Linux
+and Windows. Necessary annotations preserve actual optional/dynamic roles
+without changing admission; the coroutine helper's cast expresses its
+declared result through Python's untyped `StopIteration.value`.
+The existing actor-free namespace packet gains ten decoder/declaration
+controls and retains its prior 14 cases. Exact source bindings are refreshed.
+Disposable Windows run44608558606 qualifies all24 cases at immutable
+`5839798627dfc4953a516bcf4af790777532eed4`, with zero failures/skips and both
+source/selection and contained-tool phases passed. No Python bytes change
+in this journal follow-up.
+
+The local full unit runner refuses before execution because an untouched
+PowerShell file has CRLF working-copy bytes while its Git blob exactly
+matches the retained LF hash. No unrelated source or admission hash is
+changed. Required full unit CI, final-head review, source merge and finite
+acceptance remain pending. No runtime, provider or installed rollout is claimed.

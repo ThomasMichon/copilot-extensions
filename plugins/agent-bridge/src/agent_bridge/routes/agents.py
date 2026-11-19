@@ -3,16 +3,27 @@
 from __future__ import annotations
 
 import asyncio
+from typing import TYPE_CHECKING, Any
 from fastapi import APIRouter, HTTPException, Request
+
+from ..agent_registry_common import parse_worktree_capability
+
+if TYPE_CHECKING:
+    from ..agent_registry_resolver import AgentResolver
 
 router = APIRouter(tags=["agents"])
 
 
-async def _list_uncached(resolver, project: str | None) -> list[dict]:
+async def _list_uncached(
+    resolver: AgentResolver, project: str | None,
+) -> list[dict[str, Any]]:
     list_async = getattr(resolver, "list_agents_async", None)
     if not callable(list_async):
         return []
-    return await list_async() if project is None else await list_async(project=project)
+    rows: list[dict[str, Any]] = (
+        await list_async() if project is None else await list_async(project=project)
+    )
+    return rows
 
 
 @router.get("/api/v1/agents")
@@ -21,7 +32,7 @@ async def list_agents(
     force_refresh: bool = False,
     require_complete: bool = False,
     project: str | None = None,
-):
+) -> dict[str, Any]:
     """List registered agent profiles.
 
     ``force_refresh`` and ``require_complete`` are new, protocol-gated
@@ -56,8 +67,7 @@ async def list_agents(
         }
 
     cache = getattr(request.app.state, "agent_roster_cache", None)
-    cache_usable = cache is not None and getattr(cache, "resolver", None) is resolver
-    if not cache_usable:
+    if cache is None or getattr(cache, "resolver", None) is not resolver:
         if require_complete:
             # This daemon generation DOES advertise the capability (the
             # client only sends `require_complete` after confirming that via
@@ -108,14 +118,14 @@ async def get_agent(
     request: Request,
     include_unaddressable: bool = False,
     project: str | None = None,
-):
+) -> dict[str, Any]:
     """Get agent profile detail."""
     resolver = getattr(request.app.state, "resolver", None)
     if not resolver:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_name}' not found")
     catalog = getattr(resolver, "remote_acp_catalog", None)
     if catalog is not None and agent_name.startswith("remote-acp:"):
-        row = await asyncio.to_thread(catalog.detail, agent_name, project)
+        row: dict[str, Any] | None = await asyncio.to_thread(catalog.detail, agent_name, project)
         if row is None:
             raise HTTPException(status_code=404, detail="Remote ACP target not found")
         return row
@@ -160,11 +170,14 @@ async def get_agent(
         "env": config.env or {},
         "project": config.project,
         "auto_discovered": config.auto_discovered,
+        "supports_worktrees": parse_worktree_capability(
+            getattr(config, "supports_worktrees", None),
+        ),
     }
 
 
 @router.get("/api/v1/machines")
-async def list_machines(request: Request):
+async def list_machines(request: Request) -> dict[str, Any]:
     """List machines from loaded topology."""
     resolver = getattr(request.app.state, "resolver", None)
     if not resolver:
@@ -202,7 +215,7 @@ async def list_machines(request: Request):
 
 
 @router.get("/api/v1/machines/{machine_key}")
-async def get_machine(machine_key: str, request: Request):
+async def get_machine(machine_key: str, request: Request) -> dict[str, Any]:
     """Get machine detail with SSH environments."""
     resolver = getattr(request.app.state, "resolver", None)
     if not resolver:
