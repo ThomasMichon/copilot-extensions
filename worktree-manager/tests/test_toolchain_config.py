@@ -573,6 +573,141 @@ def test_toolchain_config_standard_setup_applies_before_prerequisite_owner(
     assert setup_cli.cmd_setup(["--apply"], banner="fixture") == 0
 
 
+@pytest.mark.parametrize("apply", [False, True])
+@pytest.mark.parametrize("selected", [False, True])
+def test_toolchain_config_only_uses_real_owner_without_provisioning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, apply: bool, selected: bool,
+) -> None:
+    from worktree_manager import repository_bootstrap, setup_cli
+
+    pip, uv, _ = _native_fixture(monkeypatch, tmp_path)
+    root = tmp_path / "manager"
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(root))
+    monkeypatch.chdir(tmp_path)
+    if selected:
+        configuration = tmp_path / "selected.conf"
+        configuration.write_text(f"schema=1\npython_index_url={INDEX}\n", encoding="ascii")
+        monkeypatch.setenv(tc.CONFIGURATION_ENV, str(configuration))
+
+    def forbidden(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("configuration-only setup reached an installation/repository owner")
+
+    for name in ("detect_baseline", "core_status", "provision_plan", "provision_apply",
+                 "install_command", "install_core"):
+        monkeypatch.setattr(setup_cli, name, forbidden)
+    monkeypatch.setattr(repository_bootstrap, "run", forbidden)
+    arguments = ["--toolchain-only", *(["--apply"] if apply else [])]
+    assert setup_cli.cmd_setup(arguments, banner="fixture") == 0
+    if apply and selected:
+        assert INDEX in pip.read_text(encoding="utf-8")
+        assert INDEX in uv.read_text(encoding="utf-8")
+        assert tc.read_configuration(root / "toolchain.conf") == {"python_index_url": INDEX}
+        before = {path: path.read_bytes() for path in (pip, uv, root / "toolchain.conf")}
+        assert setup_cli.cmd_setup(arguments, banner="fixture") == 0
+        assert {path: path.read_bytes() for path in before} == before
+    else:
+        assert not pip.exists()
+        assert not uv.exists()
+        assert not root.exists()
+
+
+@pytest.mark.parametrize(("register", "arguments"), [
+    (True, ["https://example.invalid/repository"]),
+    (False, ["--repository", "https://example.invalid/repository"]),
+    (False, ["--repository-target", str(Path.cwd().anchor)]),
+    (False, ["--repository-commit", "a" * 40]),
+    (False, ["--trust-repository-setup"]),
+    (False, ["--context", "example"]),
+    (False, ["--toolchain-onl"]),
+])
+def test_toolchain_config_only_conflicting_intent_refuses_before_configuration(
+    monkeypatch: pytest.MonkeyPatch, register: bool, arguments: list[str],
+) -> None:
+    from worktree_manager import setup_cli
+
+    def forbidden(**_kwargs: object) -> None:
+        pytest.fail("invalid intent reached configuration")
+
+    monkeypatch.setattr(tc, "configure_selected", forbidden)
+    assert setup_cli.cmd_setup(
+        ["--toolchain-only", "--apply", *arguments], banner="fixture", register=register,
+    ) == 2
+
+
+def test_toolchain_config_only_help_is_safe_with_invalid_selection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    from worktree_manager import setup_cli
+
+    configuration = tmp_path / "invalid.conf"
+    configuration.write_text("invalid data", encoding="ascii")
+    monkeypatch.setenv(tc.CONFIGURATION_ENV, str(configuration))
+
+    def forbidden(**_kwargs: object) -> None:
+        pytest.fail("help reached configuration")
+
+    monkeypatch.setattr(tc, "configure_selected", forbidden)
+    assert setup_cli.cmd_setup(["--help"], banner="fixture") == 0
+    assert "toolchain-config-only=1" in capsys.readouterr().out.splitlines()
+    assert configuration.read_text(encoding="ascii") == "invalid data"
+
+
+def test_toolchain_config_only_actual_cli_does_not_need_bootstrap_or_core(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    root = home / "manager"
+    root.mkdir()
+    sentinel = root / "knowledge-binding.json"
+    sentinel.write_text('{"retained":true}\n', encoding="ascii")
+    selected = tmp_path / "selected.conf"
+    selected.write_text(f"schema=1\nnpm_registry={REGISTRY}\n", encoding="ascii")
+    env = {
+        key: value for key, value in os.environ.items()
+        if not key.upper().startswith((
+            "UV_", "PIP_", "NPM_CONFIG_", "COPILOT_EXTENSIONS_TOOLCHAIN_",
+            "AGENT_WORKTREES_ENGINE_", "WORKTREE_MANAGER_ENGINE_",
+        ))
+    }
+    env.update(
+        HOME=str(home), USERPROFILE=str(home), APPDATA=str(home / "appdata"),
+        PROGRAMDATA=str(home / "programdata"), XDG_CONFIG_HOME=str(home / ".config"),
+        XDG_CONFIG_DIRS=str(home / "system"), WORKTREE_MANAGER_ROOT=str(root),
+        COPILOT_EXTENSIONS_TOOLCHAIN_CONFIG=str(selected), PATH="",
+    )
+
+    def invoke(*arguments: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, "-m", "worktree_manager", "setup", *arguments],
+            cwd=tmp_path, env=env, capture_output=True, text=True, timeout=30,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+
+    before = {path: path.read_bytes() for path in home.rglob("*") if path.is_file()}
+    result = invoke("--toolchain-only")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert {path: path.read_bytes() for path in home.rglob("*") if path.is_file()} == before
+    result = invoke("--toolchain-only", "--apply")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (home / ".npmrc").read_text(encoding="utf-8").strip() == f"registry={REGISTRY}"
+    assert tc.read_configuration(root / "toolchain.conf") == tc.read_configuration(selected)
+    assert sentinel.read_bytes() == before[sentinel]
+    first_apply = {path: path.read_bytes() for path in home.rglob("*") if path.is_file()}
+    result = invoke("--toolchain-only", "--apply")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert {path: path.read_bytes() for path in home.rglob("*") if path.is_file()} == first_apply
+    (home / ".npmrc").write_text("registry=https://other.example.invalid/npm/\n", encoding="ascii")
+    conflicting = {path: path.read_bytes() for path in home.rglob("*") if path.is_file()}
+    result = invoke("--toolchain-only", "--apply")
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert {path: path.read_bytes() for path in home.rglob("*") if path.is_file()} == conflicting
+    selected.write_text("invalid data", encoding="ascii")
+    result = invoke("--help")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "toolchain-config-only=1" in result.stdout.splitlines()
+
+
 @pytest.mark.parametrize("failure", ["conflict", "parse"])
 def test_toolchain_config_setup_reports_safe_cause_before_prerequisites(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], failure: str,

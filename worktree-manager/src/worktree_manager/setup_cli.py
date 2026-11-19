@@ -28,6 +28,10 @@ def cmd_setup(rest: list[str], *, banner: str, register: bool = False) -> int:
         reason = f": {error}" if type(error) is ValueError else ""
         print(f"  ! toolchain configuration refused: {type(error).__name__}{reason}")
         return 2
+    if args.toolchain_only:
+        mode = "applied" if do_apply else "preflight complete (plan only)"
+        print(f"  toolchain configuration: {mode}; no prerequisite/core/repository setup requested.")
+        return 0
     gaps = missing(detect_baseline())
     actions = provision_plan(gaps)
     core = core_status()

@@ -61,6 +61,38 @@ source flow:
 bash ./bootstrap.sh --toolchain-config /trusted/toolchain.conf setup --apply
 ```
 
+## Installed configuration-only application
+
+An already-installed compatible Manager can validate the same selected data
+without its original bootstrap or acquisition payload:
+
+```text
+worktree-manager setup --toolchain-only
+worktree-manager setup --toolchain-only --apply
+```
+
+Selection still follows the environment, current directory and retained file
+order above. The first command only preflights; `--apply` uses the same native
+configuration writer. With no selection, both are successful no-ops.
+Neither command discovers/provisions prerequisites, installs/repairs core,
+sets up a repository, or changes aliases/knowledge binding. Configuration
+success does not report application or engine readiness. Combining this mode
+with repository options or `register` is a syntax error before configuration.
+Ordinary setup is unchanged.
+
+Version 1 of `copilot-extensions.toolchain-config-only` is advertised as the
+standalone line `toolchain-config-only=1` in the exact selected Manager's
+`setup --help` output. This existing discovery invocation returns before
+reading configuration or provisioning, even with malformed selected data.
+Callers must inspect that receiver with launcher self-provisioning disabled
+before emitting the new option. A bootstrap declaration, a package version or
+another Manager's help is not receiver support. Older ordinary setup help
+does not advertise it; direct new syntax on an older receiver remains a
+strict parser error, not a compatible configuration-only operation.
+Select compatible setup/recovery rather than dropping required configuration
+or retrying speculative effects. Existing callers retain their old syntax;
+no old form is deprecated by this additive mode.
+
 ## Ordering, native configuration and conflicts
 
 The native seed parses the file and preflights affected environment and native
