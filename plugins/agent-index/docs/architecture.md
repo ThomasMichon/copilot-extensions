@@ -1219,8 +1219,8 @@ metadata in legacy envelopes. Component carriers cannot certify polling refresh
 or full reconciliation. Reopen, exact-parent CAS and explicit scope checks retain
 the evidence without translating it into legacy work.
 
-Recovery and direct prepared/application entrypoints refuse these manifests
-before publication, embedding or store mutation. The pending owner also refuses
+Ordinary recovery and direct prepared/application entrypoints refuse these
+manifests before publication, embedding or store mutation. The pending owner also refuses
 v8-to-legacy or changed-v8 replacement and premature completion in the same
 SQLite transaction that would change the parent; refusal retains the original
 payload. An identical v8 retry is accepted without rewriting the retained row.
@@ -1230,14 +1230,17 @@ It compares matching source/path identities, considers lower versions covered,
 and requires equal-version fingerprints, deletion state and rendering semantics
 to match. A newer version is not covered. The caller must supply a qualified
 canonical fingerprint and retained applied record. The opt-in
-[native ledger](component-ledger.md) retains ordering/raw-point observations,
-but qualification and runtime application do not yet supply that applied record.
+[native ledger](component-ledger.md) retains ordering/raw-point observations.
+Its explicit [native application](component-ledger.md#explicit-native-application)
+qualifies pending-parent, raw-point, fingerprint, routed-model and path evidence,
+then applies selected points under the existing writer without polling or claim
+completion.
 
-There is no ordered application capability, applied-version/deletion ledger or
-producer yet. Monotonic application, equal-version content checks, crash/backup
-reconciliation and explicit read isolation remain required before recovery
-refusal or the v2 queue fences can be expanded. Legacy callers and stored rows
-are unchanged.
+There is no advertised component execution capability or producer. Automatic
+partial-effect/backup reconciliation, whole-claim completion and explicit read
+isolation remain required before recovery refusal or the v2 queue fences can be
+expanded. The explicit native application retains pending work and refuses
+dirty/uncertain state; it does not change legacy callers or default readers.
 
 An in-process connector opts in by advertising `change_hints_versions = (1,)`
 on its actual `discover_hints(hints, last_commit, *, cancel_check=None)` callable.

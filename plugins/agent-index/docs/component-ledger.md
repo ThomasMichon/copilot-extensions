@@ -68,6 +68,63 @@ revalidate inside it, and compose content/vector publication, claims,
 checkpoints, crash recovery and component read isolation. This helper cannot
 retroactively prove those steps or make default readers component-isolated.
 
+### Explicit native application
+
+`indexing.component_application.PreparedComponentApplication` composes those
+owners for an explicitly selected in-process component family. It accepts a
+completed component manifest, opaque recovery scope, configured store/path/model
+owners and positive `max_rows` point budget. The native ledger must already be
+bootstrapped and all point indices prepared; application never adopts a populated
+store, rebuilds an index or repairs an uncertain writer.
+
+The application fingerprints each acquired replacement with the shared file,
+chunker and model-policy fingerprint. Its versioned policy identity binds the
+configured chunker, content table and model/profile/routing mapping. It refuses
+prior observations from a different scope/policy or rendering contract, native
+state without qualified application evidence, conflicting equal versions, and
+missing/mismatched path checkpoints. Lower or equal covered versions additionally
+require an unchanged complete raw point, valid canonical chunk identities, exact
+routed model membership and current embedding receipts qualified against actual
+vectors. A cached embedding or ledger observation alone is insufficient.
+
+Selected replacements reuse the existing prepared journal and its exact parent
+binding. Component selection only narrows the cached file plan, never the acquired
+parent or immutable component set. Selected files are chunked even when a path
+fingerprint matches; vector preparation can still reuse qualified pairs.
+Chunking/embedding occur outside source-domain exclusion. Covered points prepare
+no vectors. Preparation failure leaves native rows and path checkpoints unchanged.
+
+`publish()` rechecks the policy, configured owners, pending cache incarnation,
+selected path checkpoints, exact prior ledger records, raw native points and
+covered vector receipts under the existing domain operation. Native point/retained
+ID caps and index segment capacity refuse before writer entry. The existing
+writer then encloses content/vector writes, stale-ID cleanup, bounded index
+upkeep, final canonical/routed-vector qualification, native ordering evidence
+and finally path checkpoints. Deletions retain ordering and known vector IDs but
+remove only the named component's rows and checkpoint. Cancellation before writer
+entry is clean; interruption inside it retains the existing dirty latch.
+
+`publish()` returns applied/covered point counts. It **does not** save a polling
+cursor, retire the pending manifest or acknowledge a queued claim. An already
+committed native application can reopen and qualify as covered while that exact
+parent remains retained. A dirty/incoherent native state refuses reopening;
+prepared vectors never clear uncertainty. Automatic partial-effect reconciliation,
+mixed checkpoint/native restore qualification, whole-claim completion and explicit
+reader isolation remain unfinished under
+[#13386](https://github.com/ThomasMichon/copilot-extensions/issues/13386).
+The ordinary engine, recovery and pending-completion entrypoints still refuse
+components. No v2 execution declaration, connector, producer, service/CLI form,
+source activation or default read behavior is enabled.
+
+The point cap includes same-path native candidates and the union of current,
+retained and newly prepared chunk IDs. It does not bound acquired payload bytes,
+whole-file chunking/embedding memory, aggregate component count or metadata I/O.
+History/segment exhaustion requires separately budgeted maintenance, not automatic
+consolidation. `tests/test_component_application.py` exercises native ordering,
+replacement/deletion, routed coverage, unrelated-row preservation, preparation
+replay, publication races and interruption refusals in its explicitly selected
+native lane; it is not an unconditional required unit matrix.
+
 A coherent, quiescent synthetic copy of the complete native directory preserves
 the evidence at another path without an inode/path identity requirement.
 Missing-ledger and dirty copies refuse in native controls. This is not a new

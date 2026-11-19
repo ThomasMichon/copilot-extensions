@@ -40,8 +40,13 @@ binding. Neither table has a cursor, source lease, completion marker or repair
 authority.
 
 The journal can bind a completed component envelope for subordinate cache work.
-This does not enable ordered component application or completion: the existing
-engine, prepared-application and pending-completion boundaries still refuse it.
+The explicit [native component application](component-ledger.md#explicit-native-application)
+can supply `component_selection`, a frozen subset of acquired upsert identities.
+This narrows only preparation; the journal still binds the entire exact manifest.
+Selected component files are always chunked, with ordinary qualified vector
+reuse, rather than trusting a file checkpoint as applied-version proof.
+Default prepared application, the ordinary engine/recovery paths and pending
+completion still refuse ordered components.
 
 Vectors are keyed by model/table, canonical chunk ID and raw embedding-input
 identity, including the model revision and preprocessing policy. Stored float32
