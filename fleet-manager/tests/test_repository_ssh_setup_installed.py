@@ -136,7 +136,8 @@ def test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop(
         json.dumps([url, "harness-a"], separators=(",", ":")).encode(),
     ).hexdigest())
     from repository_ssh_cohort_fixture import (
-        native_setup_environment, original_engine_owner, source_application_command,
+        manager_stack_diagnostic, native_setup_environment, original_engine_owner,
+        source_application_command,
     )
 
     clean = native_setup_environment(os.environ, home, root)
@@ -198,12 +199,15 @@ def test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop(
         manager_snapshot, "worktree-manager", home / ".worktree-manager", Path(uv),
     )
     try:
-        installed = run(manager_command, cwd=home, env=clean, timeout=60)
+        installed = run(manager_stack_diagnostic(manager_command), cwd=home, env=clean, timeout=60)
     except subprocess.TimeoutExpired as error:
         diagnostic = error.stderr or b""
         text = diagnostic.decode("utf-8", errors="replace") if isinstance(diagnostic, bytes) else diagnostic
         phases = [line for line in text.splitlines() if line.startswith("Source wheel")]
         progress("Manager fixture timeout phases:\n" + "\n".join(phases[-24:]))
+        stack = text.partition("Timeout (")[2]
+        if stack:
+            progress("Manager fixture stack:\nTimeout (" + stack)
         raise
     assert installed.returncode == 0, installed.stdout + installed.stderr
     launcher = home / ".local" / "bin" / (

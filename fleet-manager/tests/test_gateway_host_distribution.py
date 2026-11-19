@@ -386,6 +386,30 @@ def test_source_application_command_keeps_direct_source_without_main_composition
         source_application_command(snapshot, component, tmp_path / "runtime", Path(sys.executable))
 
 
+def test_manager_stack_diagnostic_preserves_script_entry_and_emits_stack(tmp_path: Path) -> None:
+    from repository_ssh_cohort_fixture import manager_stack_diagnostic
+
+    script = tmp_path / "runtime_install.py"
+    script.write_text(
+        "import faulthandler,json,sys,time\n"
+        "print(json.dumps({'argv':sys.argv,'path':sys.path[0],'name':__name__,"
+        "'diagnostic':faulthandler.is_enabled()}),flush=True)\n"
+        "time.sleep(0.25)\n",
+        encoding="utf-8",
+    )
+    arguments = ["--root", str(tmp_path / "runtime"), "--install-source", "source", "--", "--help"]
+    command = [sys.executable, "-I", "-B", str(script), *arguments]
+    result = run(manager_stack_diagnostic(command, dump_after=0.05), cwd=tmp_path, timeout=5)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout) == {
+        "argv": [str(script), *arguments], "path": str(tmp_path.resolve()),
+        "name": "__main__", "diagnostic": True,
+    }
+    assert "Timeout (" in result.stderr
+    assert str(script) in result.stderr
+    assert "run_path" in result.stderr
+
+
 def test_native_manager_launcher_uses_fixture_root_despite_runner_override(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

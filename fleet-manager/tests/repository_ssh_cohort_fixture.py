@@ -105,6 +105,21 @@ def source_application_command(
     return arguments, json.dumps(construction["identity"], sort_keys=True)
 
 
+def manager_stack_diagnostic(command: list[str], *, dump_after: float = 40) -> list[str]:
+    assert command[:3] == [sys.executable, "-I", "-B"]
+    assert 0 < dump_after < 60
+    script = (
+        "import faulthandler,runpy,sys;"
+        "from pathlib import Path;"
+        "delay=float(sys.argv.pop(1));sys.argv.pop(0);"
+        "sys.path.insert(0,str(Path(sys.argv[0]).resolve().parent));"
+        "faulthandler.enable();"
+        "faulthandler.dump_traceback_later(delay);"
+        "runpy.run_path(sys.argv[0],run_name='__main__')"
+    )
+    return [*command[:3], "-c", script, str(dump_after), *command[3:]]
+
+
 class ProfileBuilder(Protocol):
     def prepare_registry_lock(
         self, snapshot: Path, output: Path, *, uv: str, deadline: float,

@@ -2070,8 +2070,12 @@ The copied owner omits development test trees, not runtime scripts or their
 declared materialized dependencies. Manager support must use its existing
 `runtime_install.py --install-source` lifecycle: the generic application receiver
 explicitly refuses Manager. Its receiver-level control exercises actual native
-Source admission before construction. A timed-out Manager support call reports
-only bounded Source phase/progress lines; its 60-second limit is unchanged.
+Source admission before construction. A fixture-only Python wrapper enables a
+single stack dump after 40 seconds while preserving the installer script,
+arguments and script import root. A timed-out Manager support call reports that
+stack plus bounded Source phase/progress lines; its 60-second limit is unchanged.
+The wrapper's real subprocess control verifies argument forwarding and stack
+delivery without constructing or modifying a prepared Source.
 The fixture explicitly selects its Manager root as well as its private homes;
 a real generated-launcher control retains an inherited runner root override and
 verifies that the fixture still reaches its own selected slot.
