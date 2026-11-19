@@ -359,7 +359,10 @@ effective under that write lock. The original deadline is rechecked after lock
 acquisition, not renewed after negotiation. Only then can that transaction
 suspend and retain the original waiter. Repeating an unchanged preparation
 reconciles its original generation; changed or retired custody is not replaced
-by a fresh request.
+by a fresh request. A suspended task permits reconciliation of that same live,
+owner-matching waiter only, not a new preparation. In particular, an event-note
+wake that supersedes the waiter during negotiation must retain its generation
+and pending wake; preparation cannot invalidate it by creating another waiter.
 
 There is at most one preparation in flight per adapter and two finite service
 operations per call. The original monotonic deadline bounds the SDK operations;

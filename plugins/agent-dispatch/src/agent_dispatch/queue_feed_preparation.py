@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import sqlite3
+from typing import Any
 
 from .queue_common import Task
 from .queue_dedup import find_live_dedup_task
@@ -66,3 +67,19 @@ def require_feed_preparation(
         raise TaskError("repository-feed task association changed during preparation")
     require_execution_admission(conn, task.id)
     require_relationship(conn, task.id)
+
+
+def require_feed_waiter_reconciliation(
+    task: Task | None, waiter: dict[str, Any] | None,
+) -> None:
+    """A suspended owner may observe its live waiter, never replace its wake."""
+    if task is not None and task.status == Status.STARTED and waiter is None:
+        return
+    if (
+        task is None or task.status != Status.SUSPENDED or waiter is None
+        or waiter["state"] not in ("preparing", "active")
+        or waiter["owner"] != task.owner
+        or waiter["owner_session_id"] != task.owner_session_id
+        or waiter["task_generation"] != task.generation
+    ):
+        raise TaskError("suspended repository-feed task requires the same live waiter")

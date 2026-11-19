@@ -14,7 +14,9 @@ from .queue_execution_wakes import wake_custody_clear_sql
 from .queue_run_waiter_transition_cleanup import CLAIM_RELEASE_SENDER
 from .queue_delegated_waiters import DelegatedWaiterBindingMixin
 from .queue_run_waiter_records import run_waiter_from_row, select_waiter_row
-from .queue_feed_preparation import FeedWaiterAdmission, require_feed_preparation
+from .queue_feed_preparation import (
+    FeedWaiterAdmission, require_feed_preparation, require_feed_waiter_reconciliation,
+)
 
 
 class QueueRunWaitersMixin(DelegatedWaiterBindingMixin):
@@ -67,6 +69,8 @@ class QueueRunWaitersMixin(DelegatedWaiterBindingMixin):
                     raise TaskError("original repository-feed deadline elapsed")
             if delegation is not None:
                 existing = self._find_delegated_preparation(conn, task_id, delegation["preparation_id"])
+                if _feed_admission is not None:
+                    require_feed_waiter_reconciliation(self._fetch(conn, task_id), existing)
                 if existing:
                     expected = {k: v for k, v in existing["delegation"].items() if k != "registration_id"}
                     if (expected != delegation or existing["command"] != command

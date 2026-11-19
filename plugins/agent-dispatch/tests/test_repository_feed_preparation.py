@@ -116,6 +116,57 @@ def test_native_prepare_reopen_and_retry_keep_original_intent_without_registrati
     assert associated is not None and associated.id == task_id
 
 
+def test_suspended_task_cannot_replace_its_live_waiter(tmp_path: Path) -> None:
+    queue, task_id, spec, client, preparer = setup(tmp_path)
+    original = asyncio.run(prepare(preparer, task_id, spec))
+    before = queue.get(task_id)
+    replacement = copy.deepcopy(spec)
+    replacement["preparation_id"] = "replacement"
+    replacement["feed"]["request_id"] = "replacement"
+    with pytest.raises(TaskError, match="same live waiter"):
+        asyncio.run(prepare(preparer, task_id, replacement))
+    assert queue.get(task_id) == before
+    retained = queue.find_delegated_preparation(task_id, spec["preparation_id"])
+    assert retained is not None and retained["generation"] == original["generation"]
+    assert retained["state"] == "preparing" and not retained["replay_attempted"]
+    assert queue.find_delegated_preparation(task_id, "replacement") is None
+    assert not queue.list_run_waiter_wakes(task_id)
+    assert client.calls == ["capabilities", "next-actions"] * 2
+
+
+@pytest.mark.parametrize("replacement", [False, True])
+def test_event_note_racing_negotiation_preserves_its_current_pending_wake(
+    tmp_path: Path, replacement: bool,
+) -> None:
+    queue, task_id, spec, client, preparer = setup(tmp_path)
+    original = asyncio.run(prepare(preparer, task_id, spec))
+    before = queue.get(task_id)
+    assert before is not None
+    if replacement:
+        spec["preparation_id"] = "replacement"
+        spec["feed"]["request_id"] = "replacement"
+    def event_note() -> None:
+        queue.append_event_note(
+            task_id, sender="operator", note="new accepted instruction", wake_agent=True,
+        )
+
+    client.during = event_note
+    with pytest.raises(TaskError, match="same live waiter"):
+        asyncio.run(prepare(preparer, task_id, spec))
+    current = queue.get(task_id)
+    assert current is not None and current.steering_revision == before.steering_revision
+    wake, = queue.list_run_waiter_wakes(task_id)
+    assert wake.sender == "agent-dispatch-event-note" and wake.status == "pending"
+    assert wake.waiter_generation == original["generation"]
+    with queue._connect() as conn:
+        assert queue._run_waiter_wake_is_current(conn, current, wake)
+        assert conn.execute(
+            "SELECT MAX(generation) FROM run_waiters WHERE task_id=?", (task_id,),
+        ).fetchone()[0] == original["generation"]
+    if replacement:
+        assert queue.find_delegated_preparation(task_id, "replacement") is None
+
+
 @pytest.mark.parametrize("change", [
     {"hold_reason": "operator hold"}, {"awaiting_steer": 1},
     {"owner_session_id": "successor"}, {"generation": 2}, {"owner": "other"},
