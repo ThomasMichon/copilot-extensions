@@ -126,10 +126,19 @@ if [ -n "$toolchain_config" ]; then
     fi
     tc_paths=("") tc_kinds=(none)
     if [ -n "$tc_index" ]; then
-        tc_paths+=(/etc/pip.conf "$HOME/.pip/pip.conf" "${XDG_CONFIG_HOME:-$HOME/.config}/pip/pip.conf")
-        tc_kinds+=(pip pip pip)
-        IFS=: read -r -a tc_dirs <<< "${XDG_CONFIG_DIRS:-/etc/xdg}"
-        for directory in "${tc_dirs[@]}"; do tc_paths+=("$directory/pip/pip.conf"); tc_kinds+=(pip); done
+        if [ "$(uname -s)" = Darwin ]; then
+            tc_paths+=("/Library/Application Support/pip/pip.conf"); tc_kinds+=(pip)
+            pip_directory="$HOME/Library/Application Support/pip"
+            [ -d "$pip_directory" ] || pip_directory="$HOME/.config/pip"
+        else
+            tc_paths+=(/etc/pip.conf); tc_kinds+=(pip)
+            pip_directory="${XDG_CONFIG_HOME:-$HOME/.config}/pip"
+            IFS=: read -r -a tc_dirs <<< "${XDG_CONFIG_DIRS:-/etc/xdg}"
+            for directory in "${tc_dirs[@]}"; do tc_paths+=("$directory/pip/pip.conf"); tc_kinds+=(pip); done
+        fi
+        if [ -z "${PIP_CONFIG_FILE:-}" ]; then
+            tc_paths+=("$HOME/.pip/pip.conf" "$pip_directory/pip.conf"); tc_kinds+=(pip pip)
+        fi
         if [ -n "${VIRTUAL_ENV:-}" ]; then tc_paths+=("$VIRTUAL_ENV/pip.conf"); tc_kinds+=(pip); fi
         if [ -n "${PIP_CONFIG_FILE:-}" ]; then
             [ -f "$PIP_CONFIG_FILE" ] || [ "$PIP_CONFIG_FILE" = /dev/null ] || {
@@ -140,6 +149,14 @@ if [ -n "$toolchain_config" ]; then
     fi
     if [ -n "$tc_index$tc_python" ]; then
         tc_paths+=("${XDG_CONFIG_HOME:-$HOME/.config}/uv/uv.toml"); tc_kinds+=(uv)
+        IFS=: read -r -a tc_system_dirs <<< "${XDG_CONFIG_DIRS:-}"
+        tc_system_dirs+=(/etc)
+        for directory in "${tc_system_dirs[@]}"; do
+            if [ -n "$directory" ] && [ -e "$directory/uv/uv.toml" ]; then
+                tc_paths+=("$directory/uv/uv.toml"); tc_kinds+=(uv)
+                break
+            fi
+        done
     fi
     if [ -n "$tc_npm" ]; then
         tc_paths+=("${NPM_CONFIG_USERCONFIG:-${npm_config_userconfig:-$HOME/.npmrc}}"); tc_kinds+=(npm)
@@ -157,28 +174,31 @@ if [ -n "$toolchain_config" ]; then
         LC_ALL=C awk -v kind="${tc_kinds[$i]}" -v idx="$tc_index" -v mirror="$tc_python" -v registry="$tc_npm" '
             function same(a,b) { sub(/\/$/, "", a); sub(/\/$/, "", b); return a == b }
             function value(line) {
-                sub(/^[^=]*=[[:space:]]*/, "", line); sub(/[[:space:]]*$/, "", line)
+                if (kind == "pip") sub(/^[^=:]*[:=][[:space:]]*/, "", line)
+                else sub(/^[^=]*=[[:space:]]*/, "", line)
+                sub(/[[:space:]]*$/, "", line)
                 return line
             }
             /^[[:space:]]*([#;].*)?$/ { next }
             {
                 line=$0; sub(/\r$/, "", line)
                 if (kind == "pip") {
-                    if (tolower(line) ~ /^[[:space:]]*(extra[-_]index[-_]url|find[-_]links|trusted[-_]host|no[-_]index)[[:space:]]*=/) exit 1
-                    if (tolower(line) ~ /^[[:space:]]*index[-_]url[[:space:]]*=/ && !same(value(line), idx)) exit 1
+                    if (tolower(line) ~ /^[[:space:]]*(extra[-_]index[-_]url|find[-_]links|trusted[-_]host|no[-_]index)[[:space:]]*[:=]/) exit 1
+                    if (tolower(line) ~ /^[[:space:]]*index[-_]url[[:space:]]*[:=]/ && !same(value(line), idx)) exit 1
                 } else if (kind == "uv") {
-                    if (line ~ /^[[:space:]]*(extra-index-url|find-links|index)[[:space:]]*=/) exit 1
-                    if (line ~ /^[[:space:]]*\[\[index\]\][[:space:]]*(#.*)?$/) indexes++
-                    if (line ~ /^[[:space:]]*default[[:space:]]*=[[:space:]]*true[[:space:]]*(#.*)?$/) defaults++
-                    if (line ~ /^[[:space:]]*(url|index-url|python-install-mirror)[[:space:]]*=/) {
+                    if (line ~ /^[[:space:]]*["\047]?(extra-index-url|find-links|no-index|no-default-index|allow-insecure-host|index)["\047]?[[:space:]]*=/) exit 1
+                    if (line ~ /^[[:space:]]*\[\[[[:space:]]*["\047]?index["\047]?[[:space:]]*\]\][[:space:]]*(#.*)?$/) indexes++
+                    if (line ~ /^[[:space:]]*["\047]?default["\047]?[[:space:]]*=[[:space:]]*true[[:space:]]*(#.*)?$/) defaults++
+                    if (line ~ /^[[:space:]]*["\047]?(url|index-url|python-install-mirror)["\047]?[[:space:]]*=/) {
                         field=line; sub(/[[:space:]]*=.*/, "", field); sub(/^[[:space:]]*/, "", field)
+                        gsub(/^["\047]|["\047]$/, "", field)
                         v=value(line); quote=substr(v,1,1)
                         if (quote != "\"" && quote != sprintf("%c",39)) exit 1
                         v=substr(v,2); end=index(v,quote); if (!end) exit 1
                         tail=substr(v,end+1); if (tail !~ /^[[:space:]]*(#.*)?$/) exit 1
                         v=substr(v,1,end-1); expected=(field == "python-install-mirror" ? mirror : idx)
                         if (expected != "" && !same(v,expected)) exit 1
-                    } else if (line ~ /^[[:space:]]*["\047]?(url|index|python-install-mirror)["\047]?[[:space:]]*[=.]/) exit 1
+                    } else if (line ~ /^[[:space:]]*["\047]?(url|index|index-url|python-install-mirror)["\047]?[[:space:]]*[=.]/) exit 1
                 } else {
                     if (line ~ /^[[:space:]]*[^=]+:registry[[:space:]]*=/) exit 1
                     if (tolower(line) ~ /^[[:space:]]*registry[[:space:]]*=/ && !same(value(line),registry)) exit 1

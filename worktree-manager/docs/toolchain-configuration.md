@@ -24,7 +24,7 @@ npm_registry=https://packages.example.invalid/npm/
 
 | Field | Native consumer | Persistence |
 |---|---|---|
-| `python_index_url` | `UV_DEFAULT_INDEX` and `PIP_INDEX_URL` | User `uv.toml` default index and pip `[global] index-url` |
+| `python_index_url` | `UV_DEFAULT_INDEX` and `PIP_INDEX_URL` | Effective uv default index and pip `[global] index-url` in the user or explicitly selected file |
 | `python_install_mirror` | `UV_PYTHON_INSTALL_MIRROR` for managed CPython acquisition | User `uv.toml` `python-install-mirror` |
 | `uv_install_mirror` | `UV_INSTALLER_GITHUB_BASE_URL` for the official uv installer | Retained input, reapplied by bootstrap/setup; no global environment edit |
 | `npm_registry` | `npm_config_registry` for npm package consumption | User `.npmrc` `registry`, respecting an explicit native user-config path |
@@ -72,9 +72,16 @@ Repeated application is idempotent.
 
 An existing explicit index, registry or mirror must agree with the corresponding
 selected source (a trailing slash is immaterial); it is not silently replaced.
-Pip checks include global, legacy/user, active virtual-environment and explicit
-configuration, including command-specific sections. A matching legacy uv
-`index-url` or a single matching default `[[index]]` is preserved.
+Pip checks include effective global, legacy/user, active virtual-environment and
+explicit configuration, including command-specific sections and either INI
+option delimiter. An existing `PIP_CONFIG_FILE` suppresses the normal user files;
+setup persists into that selected file instead, preserving its options. Darwin
+uses pip's native Application Support locations, with its normal user fallback.
+A matching legacy uv `index-url` or a single matching default `[[index]]` is
+preserved. Uv checks include `[pip]` selectors and the effective system file
+(the first discovered XDG system file, otherwise the platform system file).
+System configuration is never modified, and an existing matching system default
+does not cause setup to append a second default index.
 Additional/opaque selectors such as extra indexes, find-links, scoped npm
 registries, explicit `UV_CONFIG_FILE`, or conflicting uv installer download
 overrides require reconciliation and are not cleared. Errors start no package

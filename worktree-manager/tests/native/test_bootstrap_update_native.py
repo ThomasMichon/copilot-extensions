@@ -304,7 +304,7 @@ def bootstrap_source(tmp_path_factory: pytest.TempPathFactory) -> Path:
         "engine_client", "engine_progress", "engine_sessions", "agent_plugin_runtime", "picker_review", "engine_posix_process",
         "engine_environment", "worktree_rows_contract", "worktree_observation_contract",
         "worktree_reporting_contract",
-        "update_orchestration", "update_events", "project_update_controller",
+        "update_orchestration", "update_events", "project_update_controller", "toolchain_config",
     ):
         shutil.copy2(SOURCE / "worktree-manager" / "src" / "worktree_manager" / f"{name}.py", package)
     for name in ("bootstrap.ps1", "bootstrap.sh"):

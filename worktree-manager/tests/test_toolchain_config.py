@@ -67,6 +67,7 @@ def _native_fixture(monkeypatch: pytest.MonkeyPatch, home: Path) -> tuple[Path, 
     uv = home / "uv" / "uv.toml"
     site = home / "venv" / "pip.ini"
     monkeypatch.setattr(tc, "_native_paths", lambda *_: ([pip, site], uv, pip))
+    monkeypatch.setattr(tc, "_system_uv_path", lambda *_a, **_k: None)
     for name in tc.FIELDS:
         for variable in tc.FIELDS[name]:
             monkeypatch.delenv(variable, raising=False)
@@ -86,7 +87,7 @@ def test_toolchain_config_preserves_options_and_reconciles_idempotently(
 ) -> None:
     pip, uv, _ = _native_fixture(monkeypatch, tmp_path)
     pip.parent.mkdir()
-    pip.write_text("# pip options\n[global]\ntimeout = 73\n", encoding="utf-8")
+    pip.write_text("# pip options\n[global] # user settings\ntimeout = 73\n", encoding="utf-8")
     uv.parent.mkdir()
     uv.write_text("# uv options\nhttp-timeout = 73\n", encoding="utf-8")
     npm = tmp_path / ".npmrc"
@@ -98,11 +99,12 @@ def test_toolchain_config_preserves_options_and_reconciles_idempotently(
     root = tmp_path / "manager"
     tc.apply_configuration(config, home=tmp_path, root=root)
     before = {path: path.read_bytes() for path in (pip, uv, npm)}
-    assert "# pip options\n[global]\nindex-url = " in pip.read_text(encoding="utf-8")
+    assert "# pip options\n[global] # user settings\nindex-url = " in pip.read_text(encoding="utf-8")
     assert b"timeout = 73" in before[pip]
     assert "# uv options\nhttp-timeout = 73" in uv.read_text(encoding="utf-8")
     assert "# npm options\nfetch-retries=3" in npm.read_text(encoding="utf-8")
     assert tc.read_configuration(root / "toolchain.conf") == tc.read_configuration(config)
+    assert os.environ[tc.CONFIGURATION_ENV] == str(root / "toolchain.conf")
     tc.apply_configuration(root / "toolchain.conf", home=tmp_path, root=root)
     assert {path: path.read_bytes() for path in before} == before
 
@@ -140,7 +142,7 @@ def test_toolchain_config_conflicts_do_not_partially_write(
 
 
 @pytest.mark.parametrize("kind", ["ps1", "sh"])
-@pytest.mark.parametrize("invalid", ["", "unknown", "pip", "uv", "npm", "environment"])
+@pytest.mark.parametrize("invalid", ["", "unknown", "pip", "pip-colon", "uv", "uv-pip", "uv-system", "npm", "environment"])
 def test_toolchain_config_native_entry_precedes_first_prerequisite(
     tmp_path: Path, kind: str, invalid: str,
 ) -> None:
@@ -170,18 +172,29 @@ def test_toolchain_config_native_entry_precedes_first_prerequisite(
     )
     if invalid == "environment":
         env["PIP_INDEX_URL"] = "https://other.example.invalid/simple/"
-    elif invalid in {"pip", "uv", "npm"}:
+    elif invalid in {"pip", "pip-colon", "uv", "uv-pip", "uv-system", "npm"}:
+        family = "pip" if invalid.startswith("pip") else "uv" if invalid.startswith("uv") else "npm"
         target = {
             "pip": home / "appdata" / "pip" / "pip.ini" if os.name == "nt" else home / ".config" / "pip" / "pip.conf",
             "uv": home / "appdata" / "uv" / "uv.toml" if os.name == "nt" else home / ".config" / "uv" / "uv.toml",
             "npm": home / ".npmrc",
-        }[invalid]
+        }[family]
+        if invalid == "uv-system":
+            target = (
+                home / "programdata" / "uv" / "uv.toml" if os.name == "nt"
+                else home / "global-config" / "uv" / "uv.toml"
+            )
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text({
+        content = {
             "pip": "[install]\nindex-url=https://other.example.invalid/simple/\n",
             "uv": '[[index]]\nurl = "https://other.example.invalid/simple/"\ndefault = true\n',
             "npm": "registry=https://other.example.invalid/npm/\n",
-        }[invalid], encoding="utf-8")
+        }[family]
+        if invalid == "pip-colon":
+            content = "[install]\nindex-url: https://other.example.invalid/simple/\n"
+        elif invalid == "uv-pip":
+            content = '[pip]\n"extra-index-url" = ["https://other.example.invalid/simple/"]\n'
+        target.write_text(content, encoding="utf-8")
     if kind == "ps1":
         escaped = str(bootstrap).replace("'", "''")
         selected = str(config).replace("'", "''")
@@ -226,7 +239,7 @@ def test_toolchain_config_native_entry_precedes_first_prerequisite(
     assert not (home / "manager").exists()
 
 
-@pytest.mark.parametrize("tool", ["pip", "uv", "uv-python", "npm"])
+@pytest.mark.parametrize("tool", ["pip", "pip-explicit", "uv", "uv-python", "npm"])
 def test_toolchain_config_real_native_tool_reads_persisted_defaults(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tool: str,
 ) -> None:
@@ -245,6 +258,16 @@ def test_toolchain_config_real_native_tool_reads_persisted_defaults(
         f"schema=1\npython_index_url={INDEX}\nnpm_registry={REGISTRY}\n"
         f"python_install_mirror={PYTHON_MIRROR}\n", encoding="ascii",
     )
+    user_pip = (
+        tmp_path / "appdata" / "pip" / "pip.ini" if os.name == "nt"
+        else tmp_path / ".config" / "pip" / "pip.conf"
+    )
+    if tool == "pip-explicit":
+        explicit = tmp_path / "selected-pip.ini"
+        explicit.write_text("[global]\ntimeout = 73\n", encoding="utf-8")
+        user_pip.parent.mkdir(parents=True)
+        user_pip.write_text("[global]\nindex-url=https://ignored.example.invalid/simple/\n", encoding="utf-8")
+        monkeypatch.setenv("PIP_CONFIG_FILE", str(explicit))
     tc.apply_configuration(config, home=tmp_path)
     # A new terminal has no bootstrap-injected index/registry variables.
     env = dict(os.environ)
@@ -255,14 +278,16 @@ def test_toolchain_config_real_native_tool_reads_persisted_defaults(
     env["npm_config_update_notifier"] = "false"
     base_python = sys._base_executable
     expected = INDEX
-    if tool == "pip":
+    if tool.startswith("pip"):
         command = [base_python, "-m", "pip", "config", "list"]
         # Windows pip resolves known folders through the OS, not redirected
         # APPDATA. Select the fixture file so this check never reads user state.
-        env["PIP_CONFIG_FILE"] = str(
-            tmp_path / "appdata" / "pip" / "pip.ini" if os.name == "nt"
-            else tmp_path / ".config" / "pip" / "pip.conf"
-        )
+        if tool == "pip":
+            env["PIP_CONFIG_FILE"] = str(user_pip)
+        else:
+            assert tc._native_paths(tmp_path, env, os.name == "nt")[2] == explicit
+            assert "ignored.example.invalid" in user_pip.read_text(encoding="utf-8")
+            assert "timeout = 73" in explicit.read_text(encoding="utf-8")
     else:
         executable = shutil.which("uv" if tool == "uv-python" else tool)
         if executable is None:
@@ -285,7 +310,7 @@ def test_toolchain_config_real_native_tool_reads_persisted_defaults(
         command, env=env, cwd=tmp_path, capture_output=True, text=True, timeout=30,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
-    if tool == "pip" and "No module named pip" in result.stderr:
+    if tool.startswith("pip") and "No module named pip" in result.stderr:
         pytest.skip("base interpreter has no pip")
     if tool.startswith("uv"):
         assert result.returncode != 0, result.stdout + result.stderr
@@ -381,3 +406,49 @@ def test_toolchain_config_standard_setup_applies_before_prerequisite_owner(
         lambda **_: SimpleNamespace(ran=False, reason="already-installed"),
     )
     assert setup_cli.cmd_setup(["--apply"], banner="fixture") == 0
+
+
+def test_toolchain_config_darwin_pip_paths_follow_native_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(tc, "sys", SimpleNamespace(platform="darwin"))
+    paths, _, target = tc._native_paths(tmp_path, {}, False)
+    assert target == tmp_path / ".config" / "pip" / "pip.conf"
+    assert Path("/Library/Application Support/pip/pip.conf") in paths
+    native = tmp_path / "Library" / "Application Support" / "pip"
+    native.mkdir(parents=True)
+    assert tc._native_paths(tmp_path, {}, False)[2] == native / "pip.conf"
+
+
+@pytest.mark.parametrize("selector", ["user-pip", "system-pip", "system-index", "system-mirror", "system-matching"])
+def test_toolchain_config_checks_merged_uv_sources_before_writes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, selector: str,
+) -> None:
+    pip, uv, _ = _native_fixture(monkeypatch, tmp_path)
+    system = tmp_path / "system-uv.toml"
+    monkeypatch.setattr(tc, "_system_uv_path", lambda *_a, **_k: system)
+    content = '[pip]\nextra-index-url = ["https://other.example.invalid/simple/"]\n'
+    if selector == "system-index":
+        content = '[[index]]\nurl = "https://other.example.invalid/simple/"\ndefault = true\n'
+    elif selector == "system-mirror":
+        content = 'python-install-mirror = "https://other.example.invalid/python/"\n'
+    elif selector == "system-matching":
+        content = f'[[index]]\nurl = "{INDEX}"\ndefault = true\n'
+    system.write_text("" if selector == "user-pip" else content, encoding="utf-8")
+    if selector == "user-pip":
+        uv.parent.mkdir()
+        uv.write_text(content, encoding="utf-8")
+    config = tmp_path / "toolchain.conf"
+    config.write_text(f"schema=1\npython_index_url={INDEX}\npython_install_mirror={PYTHON_MIRROR}\n", encoding="ascii")
+    before = {path: path.read_bytes() if path.exists() else None for path in (pip, uv, system)}
+    if selector == "system-matching":
+        tc.apply_configuration(config, home=tmp_path)
+        assert "[[index]]" not in uv.read_text(encoding="utf-8")
+        assert INDEX in pip.read_text(encoding="utf-8")
+        assert system.read_bytes() == before[system]
+    else:
+        with pytest.raises(ValueError):
+            tc.apply_configuration(config, home=tmp_path)
+        assert {path: path.read_bytes() if path.exists() else None for path in before} == before

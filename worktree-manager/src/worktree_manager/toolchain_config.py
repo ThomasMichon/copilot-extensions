@@ -5,6 +5,7 @@ import configparser
 import os
 from pathlib import Path
 import re
+import sys
 import tempfile
 import tomllib
 from collections.abc import Mapping
@@ -101,24 +102,76 @@ def environment(values: Mapping[str, str], current: Mapping[str, str]) -> dict[s
 def _native_paths(home: Path, env: Mapping[str, str], windows: bool) -> tuple[list[Path], Path, Path]:
     if windows:
         appdata = Path(env.get("APPDATA") or home / "AppData" / "Roaming")
-        pip = [Path(env.get("PROGRAMDATA") or "C:\\ProgramData") / "pip" / "pip.ini",
-               home / "pip" / "pip.ini", appdata / "pip" / "pip.ini"]
+        pip = [Path(env.get("PROGRAMDATA") or "C:\\ProgramData") / "pip" / "pip.ini"]
+        target = appdata / "pip" / "pip.ini"
+        user = [home / "pip" / "pip.ini", target]
         uv = appdata / "uv" / "uv.toml"
     else:
         config = Path(env.get("XDG_CONFIG_HOME") or home / ".config")
-        pip = [Path(p) / "pip" / "pip.conf" for p in env.get("XDG_CONFIG_DIRS", "/etc/xdg").split(":")]
-        pip += [Path("/etc/pip.conf"), home / ".pip" / "pip.conf", config / "pip" / "pip.conf"]
+        if sys.platform == "darwin":
+            native = home / "Library" / "Application Support" / "pip"
+            target = (native if native.is_dir() else home / ".config" / "pip") / "pip.conf"
+            pip = [Path("/Library/Application Support/pip/pip.conf")]
+        else:
+            target = config / "pip" / "pip.conf"
+            pip = [Path(p) / "pip" / "pip.conf" for p in (env.get("XDG_CONFIG_DIRS") or "/etc/xdg").split(":") if p]
+            pip.append(Path("/etc/pip.conf"))
+        user = [home / ".pip" / "pip.conf", target]
         uv = config / "uv" / "uv.toml"
+    if not env.get("PIP_CONFIG_FILE"):
+        pip += user
     if env.get("VIRTUAL_ENV"):
         pip.append(Path(env["VIRTUAL_ENV"]) / ("pip.ini" if windows else "pip.conf"))
     if env.get("PIP_CONFIG_FILE"):
         explicit = Path(env["PIP_CONFIG_FILE"])
         pip.append(explicit)
-    target = (
-        Path(env.get("APPDATA") or home / "AppData" / "Roaming") / "pip" / "pip.ini"
-        if windows else Path(env.get("XDG_CONFIG_HOME") or home / ".config") / "pip" / "pip.conf"
-    )
+        target = explicit
     return pip, uv, target
+
+
+def _system_uv_path(env: Mapping[str, str], *, windows: bool) -> Path | None:
+    if windows:
+        candidates = [Path(env.get("PROGRAMDATA") or "C:\\ProgramData") / "uv" / "uv.toml"]
+    else:
+        candidates = [
+            Path(directory) / "uv" / "uv.toml"
+            for directory in env.get("XDG_CONFIG_DIRS", "").split(":") if directory
+        ] + [Path("/etc/uv/uv.toml")]
+    return next((path for path in candidates if path.exists()), None)
+
+
+def _check_uv_sources(config: dict[str, object], values: Mapping[str, str]) -> bool:
+    mirror = values.get("python_install_mirror")
+    if mirror and "python-install-mirror" in config and (
+        not isinstance(config["python-install-mirror"], str)
+        or not _same(config["python-install-mirror"], mirror)
+    ):
+        raise ValueError("Existing managed Python mirror conflicts with toolchain configuration")
+    index = values.get("python_index_url")
+    if not index:
+        return False
+    pip = config.get("pip", {})
+    if not isinstance(pip, dict):
+        raise ValueError("Unsupported uv pip configuration")
+    for table in (config, pip):
+        for name in ("extra-index-url", "find-links", "no-index", "no-default-index", "allow-insecure-host"):
+            if name in table:
+                raise ValueError("Additional uv source selectors require reconciliation")
+        if "index-url" in table and (
+            not isinstance(table["index-url"], str) or not _same(table["index-url"], index)
+        ):
+            raise ValueError("Existing uv index conflicts with toolchain configuration")
+    if "index" in pip:
+        raise ValueError("Unsupported uv pip index configuration")
+    indexes = config.get("index")
+    legacy = config.get("index-url")
+    if indexes is not None and (
+        legacy is not None or not isinstance(indexes, list) or len(indexes) != 1
+        or not isinstance(indexes[0], dict) or indexes[0].get("default") is not True
+        or not isinstance(indexes[0].get("url"), str) or not _same(indexes[0]["url"], index)
+    ):
+        raise ValueError("Existing uv indexes conflict with toolchain configuration")
+    return indexes is not None or legacy is not None
 
 
 def _text(path: Path) -> str:
@@ -141,13 +194,16 @@ def plan_native_configuration(
         name in values for name in ("python_index_url", "python_install_mirror")
     ) else ""
     uv_config = tomllib.loads(uv_content)
+    uv_configs = [uv_config]
+    if any(name in values for name in ("python_index_url", "python_install_mirror")):
+        system = _system_uv_path(env, windows=windows)
+        if system is not None and system != uv_path:
+            uv_configs.append(tomllib.loads(_text(system)))
+    has_index = [_check_uv_sources(config, values) for config in uv_configs]
+    if sum(has_index) > 1:
+        raise ValueError("Multiple uv default index selections require reconciliation")
     if mirror := values.get("python_install_mirror"):
-        if "python-install-mirror" in uv_config:
-            if not isinstance(uv_config["python-install-mirror"], str) or not _same(
-                uv_config["python-install-mirror"], mirror,
-            ):
-                raise ValueError("Existing managed Python mirror conflicts with toolchain configuration")
-        else:
+        if not any("python-install-mirror" in config for config in uv_configs):
             uv_content = f'python-install-mirror = "{mirror}"\n' + uv_content
             changes[uv_path] = uv_content
     if index := values.get("python_index_url"):
@@ -171,7 +227,8 @@ def plan_native_configuration(
         if not parser.has_option("global", "index-url") and not parser.has_option("global", "index_url"):
             lines = pip_content.splitlines(keepends=True)
             for i, line in enumerate(lines):
-                if line.strip().lower() == "[global]":
+                header = parser.SECTCRE.match(line.strip())
+                if header is not None and header.group("header") == "global":
                     newline = "\r\n" if "\r\n" in pip_content else "\n"
                     if not lines[i].endswith(("\r", "\n")):
                         lines[i] += newline
@@ -180,23 +237,7 @@ def plan_native_configuration(
             else:
                 lines += [f"\n[global]\nindex-url = {index}\n"]
             changes[pip_target] = "".join(lines)
-        for name in ("extra-index-url", "find-links"):
-            if name in uv_config:
-                raise ValueError("Legacy or additional uv sources require reconciliation")
-        legacy_index = uv_config.get("index-url")
-        if legacy_index is not None and (
-            not isinstance(legacy_index, str) or not _same(legacy_index, index)
-        ):
-            raise ValueError("Existing uv index conflicts with toolchain configuration")
-        indexes = uv_config.get("index")
-        if indexes is not None:
-            if (
-                legacy_index is not None or not isinstance(indexes, list) or len(indexes) != 1
-                or not isinstance(indexes[0], dict) or indexes[0].get("default") is not True
-                or not isinstance(indexes[0].get("url"), str) or not _same(indexes[0]["url"], index)
-            ):
-                raise ValueError("Existing uv indexes conflict with toolchain configuration")
-        elif legacy_index is None:
+        if not any(has_index):
             changes[uv_path] = uv_content + f'\n\n[[index]]\nurl = "{index}"\ndefault = true\n'
     if registry := values.get("npm_registry"):
         user = Path(env.get("NPM_CONFIG_USERCONFIG") or env.get("npm_config_userconfig") or home / ".npmrc")
@@ -230,6 +271,7 @@ def apply_configuration(path: Path, *, home: Path | None = None, root: Path | No
         content = "schema=1\n" + "".join(f"{key}={value}\n" for key, value in values.items())
         if retained.resolve() != path.resolve():
             changes[retained] = content
+        updated[CONFIGURATION_ENV] = str(retained.absolute())
     for target, content in changes.items():
         target.parent.mkdir(parents=True, exist_ok=True)
         temporary: str | None = None

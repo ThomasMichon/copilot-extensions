@@ -122,6 +122,7 @@ if ($ToolchainConfig) {
         }
     }
     $toolchainWindows = [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT
+    $toolchainDarwin = [bool](Get-Variable -Name IsMacOS -ValueOnly -ErrorAction SilentlyContinue)
     $appdata = if ($toolchainWindows) {
         if ($env:APPDATA) { $env:APPDATA } else { Join-Path $env:USERPROFILE 'AppData\Roaming' }
     } else {
@@ -130,13 +131,27 @@ if ($ToolchainConfig) {
     $nativeConfigs = @()
     if ($ToolchainValues.ContainsKey('python_index_url')) {
         if ($toolchainWindows) {
-            foreach ($base in @($env:PROGRAMDATA, $env:USERPROFILE, $appdata)) {
+            $bases = @($env:PROGRAMDATA)
+            if (-not $env:PIP_CONFIG_FILE) { $bases += @($env:USERPROFILE, $appdata) }
+            foreach ($base in $bases) {
                 if ($base) { $nativeConfigs += ,@((Join-Path $base 'pip\pip.ini'), 'pip') }
+            }
+        } elseif ($toolchainDarwin) {
+            $nativeConfigs += ,@('/Library/Application Support/pip/pip.conf', 'pip')
+            if (-not $env:PIP_CONFIG_FILE) {
+                $pipDirectory = Join-Path $env:HOME 'Library/Application Support/pip'
+                if (-not (Test-Path -LiteralPath $pipDirectory -PathType Container)) {
+                    $pipDirectory = Join-Path $env:HOME '.config/pip'
+                }
+                $nativeConfigs += ,@((Join-Path $env:HOME '.pip/pip.conf'), 'pip')
+                $nativeConfigs += ,@((Join-Path $pipDirectory 'pip.conf'), 'pip')
             }
         } else {
             $nativeConfigs += ,@('/etc/pip.conf', 'pip')
-            $nativeConfigs += ,@((Join-Path $env:HOME '.pip/pip.conf'), 'pip')
-            $nativeConfigs += ,@((Join-Path $appdata 'pip/pip.conf'), 'pip')
+            if (-not $env:PIP_CONFIG_FILE) {
+                $nativeConfigs += ,@((Join-Path $env:HOME '.pip/pip.conf'), 'pip')
+                $nativeConfigs += ,@((Join-Path $appdata 'pip/pip.conf'), 'pip')
+            }
             $xdgDirs = if ($env:XDG_CONFIG_DIRS) { $env:XDG_CONFIG_DIRS } else { '/etc/xdg' }
             foreach ($base in ($xdgDirs -split ':')) {
                 $nativeConfigs += ,@((Join-Path $base 'pip/pip.conf'), 'pip')
@@ -155,6 +170,22 @@ if ($ToolchainConfig) {
     }
     if ($ToolchainValues.ContainsKey('python_index_url') -or $ToolchainValues.ContainsKey('python_install_mirror')) {
         $nativeConfigs += ,@((Join-Path $appdata 'uv\uv.toml'), 'uv')
+        $systemCandidates = if ($toolchainWindows) {
+            if ($env:PROGRAMDATA) { Join-Path $env:PROGRAMDATA 'uv\uv.toml' }
+        } else {
+            if ($env:XDG_CONFIG_DIRS) {
+                foreach ($base in ($env:XDG_CONFIG_DIRS -split ':')) {
+                    if ($base) { Join-Path $base 'uv/uv.toml' }
+                }
+            }
+            '/etc/uv/uv.toml'
+        }
+        foreach ($candidate in $systemCandidates) {
+            if (Test-Path -LiteralPath $candidate) {
+                $nativeConfigs += ,@($candidate, 'uv')
+                break
+            }
+        }
     }
     if ($ToolchainValues.ContainsKey('npm_registry')) {
         $npmUser = if ($env:NPM_CONFIG_USERCONFIG) { $env:NPM_CONFIG_USERCONFIG } else {
@@ -176,26 +207,26 @@ if ($ToolchainConfig) {
         foreach ($line in [IO.File]::ReadAllLines($path)) {
             if ($line -match '^\s*(#|;|$)') { continue }
             if ($kind -eq 'pip') {
-                if ($line -match '^\s*(?:extra[-_]index[-_]url|find[-_]links|trusted[-_]host|no[-_]index)\s*=') {
+                if ($line -match '^\s*(?:extra[-_]index[-_]url|find[-_]links|trusted[-_]host|no[-_]index)\s*[:=]') {
                     throw 'Additional pip source selectors require reconciliation.'
                 }
-                if ($line -match '^\s*index[-_]url\s*=\s*(.*?)\s*$' -and
+                if ($line -match '^\s*index[-_]url\s*[:=]\s*(.*?)\s*$' -and
                     $Matches[1].TrimEnd('/') -cne $ToolchainValues['python_index_url'].TrimEnd('/')) {
                     throw 'Existing pip index conflicts with toolchain configuration.'
                 }
             } elseif ($kind -eq 'uv') {
-                if ($line -match '^\s*(?:extra-index-url|find-links|index)\s*=') {
+                if ($line -match '^\s*["'']?(?:extra-index-url|find-links|no-index|no-default-index|allow-insecure-host|index)["'']?\s*=') {
                     throw 'Legacy or additional uv sources require reconciliation.'
                 }
-                if ($line -match '^\s*\[\[index\]\]\s*(?:#.*)?$') { $indexCount++ }
-                if ($line -match '^\s*default\s*=\s*true\s*(?:#.*)?$') { $defaultCount++ }
-                if ($line -match '^\s*(url|index-url|python-install-mirror)\s*=\s*["'']([^"'']+)["'']\s*(?:#.*)?$') {
+                if ($line -match '^\s*\[\[\s*["'']?index["'']?\s*\]\]\s*(?:#.*)?$') { $indexCount++ }
+                if ($line -match '^\s*["'']?default["'']?\s*=\s*true\s*(?:#.*)?$') { $defaultCount++ }
+                if ($line -match '^\s*["'']?(url|index-url|python-install-mirror)["'']?\s*=\s*["'']([^"'']+)["'']\s*(?:#.*)?$') {
                     $field = if ($Matches[1] -eq 'python-install-mirror') { 'python_install_mirror' } else { 'python_index_url' }
                     if ($ToolchainValues.ContainsKey($field) -and
                         $Matches[2].TrimEnd('/') -cne $ToolchainValues[$field].TrimEnd('/')) {
                         throw 'Existing uv source conflicts with toolchain configuration.'
                     }
-                } elseif ($line -match '^\s*["'']?(url|index|python-install-mirror)["'']?\s*[=.]') {
+                } elseif ($line -match '^\s*["'']?(url|index|index-url|python-install-mirror)["'']?\s*[=.]') {
                     throw 'Unsupported uv source syntax requires reconciliation.'
                 }
             } else {
