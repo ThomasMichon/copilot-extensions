@@ -18,6 +18,7 @@ from urllib.parse import quote
 import httpx
 
 from agent_index.config import install_dir
+from agent_index.sources.azure_devops_eligibility import WorkItemEligibility, qualify_work_item
 from agent_index.sources.azure_devops_responses import collection_values as _values
 from agent_index.sources.azure_devops_responses import pull_comments as _pull_comments
 from agent_index.sources.azure_devops_responses import pull_repository_id as _pull_repository_id
@@ -172,6 +173,19 @@ class AzureDevOpsConnector:
     def current_commit(self) -> str | None:
         """Legacy full acquisition does not provide a complete project cursor."""
         return None
+
+    def work_item_eligibility(
+        self, item_id: int, *, cancel_check: Callable[[], None] | None = None,
+    ) -> WorkItemEligibility | None:
+        """Read bounded query membership, without deletion authority or progress changes."""
+        return qualify_work_item(
+            self._http, item_id=item_id, queries=self._work_item_queries,
+            project_path=self._project_path, org_path=self._org_path,
+            source=self._workitems_source,
+            scope=(nonsecret_target(str(self._http.client.base_url).rstrip("/")),
+                   self.org, self.project),
+            cancel_check=cancel_check,
+        )
 
     @property
     def _workitems_source(self) -> str:
