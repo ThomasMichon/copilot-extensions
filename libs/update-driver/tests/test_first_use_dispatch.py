@@ -90,6 +90,33 @@ pytestmark = pytest.mark.skipif(
 REPOSITORY = Path(__file__).resolve().parents[3]
 
 
+@pytest.mark.parametrize(("fixture_name", "plugin"), [
+    ("owning_bridge", "agent-bridge"), ("owning_dispatch", "agent-dispatch"),
+])
+def test_installed_fixture_provenance_uses_its_private_copilot_home(
+    area: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest,
+    fixture_name: str, plugin: str,
+) -> None:
+    foreign = area / "foreign-copilot"
+    foreign.mkdir()
+    monkeypatch.setenv("COPILOT_HOME", str(foreign))
+    payload, installation, project = cast(OwningPayload, request.getfixturevalue(fixture_name))
+    copilot = installation.parent / ".copilot"
+    assert Path(os.environ["COPILOT_HOME"]) == copilot
+    settings = copilot / "settings.json"
+    before = settings.read_bytes()
+    source = primitive(payload).resolve_payload_source(
+        payload_root=payload, plugin_id=plugin, project_root=project,
+    )
+    assert source["source"]["canonical"] == "github:example/fixture-market"
+    assert source["pluginId"] == plugin and Path(source["payloadRoot"]) == payload
+    assert source["locator"]["kind"] == "installed"
+    assert Path(source["locator"]["copilotHome"]) == copilot
+    assert source["locator"]["marketplaceKey"] == "fixture-market"
+    assert settings.read_bytes() == before and not installation.exists()
+    assert list(foreign.iterdir()) == []
+
+
 @pytest.mark.parametrize("action", ["stamp", "provision"])
 @pytest.mark.parametrize("submitted_wsl", [None, "0", "1"])
 def test_dispatch_fixed_action_keeps_native_options_context_custody_and_result(

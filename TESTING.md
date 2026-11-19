@@ -5640,7 +5640,10 @@ jobs. Python/native refusal packets include actual-installer missing-prerequisit
 controls; recipe controls include the copied foundation's actual lifecycle
 archive. A real pytest collection/keyword-selection guard checks that each of
 these seven cases is selected exactly once per platform, preserving every
-previous packet selection. Bounded independent packets cover Python/native
+previous packet selection. Source fixtures bind `COPILOT_HOME` to the same private
+profile containing their installed payload and marketplace declaration, retaining
+normal provenance validation even when the runner supplies another Copilot home.
+Bounded independent packets cover Python/native
 no-write refusals, exact `stamp`/`provision` action custody, source replacement,
 deferred real stamping, and actual cold construction after the original caller's
 Job/group is closed. The original ordinary receipt must complete before any

@@ -126,6 +126,7 @@ def owning_context(area: Path, monkeypatch: pytest.MonkeyPatch) -> OwningPayload
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("HOME", str(profile))
     monkeypatch.setenv("USERPROFILE", str(profile))
+    monkeypatch.setenv("COPILOT_HOME", str(profile / ".copilot"))
     monkeypatch.setenv("PSModuleAnalysisCachePath", str(profile / "module-analysis.cache"))
     return payload, profile / ".agent-vault", project
 
