@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 import sys
@@ -21,6 +22,8 @@ from agent_index.indexing.component_application import (
     PreparedComponentApplication, qualify_applied_component,
 )
 from agent_index.indexing.component_manifest import ComponentIdentity, ComponentVersion
+from agent_index.indexing.component_read import ComponentRead, read_component
+from agent_index.indexing.point_hints import PointBinding, PointChangeHints, WorkItemRevisionTarget
 from agent_index.indexing.component_publication import reconcile_component_publication
 from agent_index.indexing.manifest import CrawlManifest
 from agent_index.indexing.path_index import PathIndex
@@ -32,7 +35,7 @@ from agent_index.store.ingestion_index import prepare_ingestion_indices
 from agent_index.store.multi_model_store import MultiModelStore
 from agent_index.store.scalar_index import ScalarIndexPreparationRequired
 from agent_index.store.source_layout import (
-    LAYOUT, SourceDomain, SourceLayoutError, initialize_source_store, validate_source_store,
+    LAYOUT, MARKER, SourceDomain, SourceLayoutError, initialize_source_store, validate_source_store,
 )
 from agent_index.sources.base import FileEntry
 from agent_index.sources.delta import DeletedFile
@@ -679,6 +682,137 @@ def test_applied_snapshot_refuses_unqualified_evidence_without_repair(
     assert (f.domain.receipt(), f.paths.get_checkpoint_rows([(FAMILY, PATH)])) == before
     assert PendingCrawls(f.paths).read_payload("selected", SCOPE) == parent
     assert f.config.state_file.read_bytes() == poll
+
+
+def select_point_fixture(f: Fixture) -> PointChangeHints:
+    """Author synthetic retained state only; no production writer or migration is enabled."""
+    hints = PointChangeHints(
+        source="selected", canonical_family=FAMILY, account_id="fixture",
+        binding=PointBinding("https://example.test/project", "query", "context"),
+        targets=(WorkItemRevisionTarget("opaque-item", 3),),
+    )
+    receipt = f.domain.receipt()
+    receipt.update(protocol=2, point_scope={
+        "source": hints.source, "canonical_family": hints.canonical_family,
+        "account_id": hints.account_id, "binding": hints.binding.to_dict(),
+    })
+    (f.config.lance_dir / MARKER).write_text(json.dumps(receipt))
+    f.store = MultiModelStore(
+        f.config.lance_dir, content_table=f.config.content_table, point_scope=hints.scope,
+    )
+    for profile in f.config.model_profiles.values():
+        f.store.register_model(profile)
+    return hints
+
+
+@pytest.mark.parametrize("deleted", [False, True])
+@pytest.mark.parametrize("identity", [
+    ComponentIdentity("work_item_revision", "opaque-item"),
+    ComponentIdentity("comment_version", "other-parent", "opaque-comment"),
+])
+def test_selected_component_read_retains_identity_and_default_refusal(
+    application: Fixture, deleted: bool, identity: ComponentIdentity,
+) -> None:
+    f = application
+    f.prepare(f.retain(3, deleted=deleted, identity=identity)).publish()
+    hints = select_point_fixture(f)
+    ledger = ComponentLedger(f.config, f.store)
+    before = {str(p): p.read_bytes() for p in f.config.data_dir.rglob("*") if p.is_file()}
+    f.calls.clear()
+    result = read_component(
+        ledger, f.paths, PATH, point_scope=hints.scope, application_scope=SCOPE, max_rows=8,
+    )
+    assert type(result) is ComponentRead
+    assert result.point_scope == hints.scope and result.identity == identity
+    assert (result.source, result.path, result.applied_version, result.semantics) == (
+        FAMILY, PATH, 3, "fields-v1",
+    )
+    assert result.coverage == "named-target-only" and result.deleted == deleted
+    assert [c.content for c in result.chunks] == ([] if deleted else ["Selected fields."])
+    with f.domain.operation(f.store.content_store.db, point_scope=hints.scope):
+        for read in (
+            f.store.stats, f.store.content_store.stats,
+            lambda: f.store.get_document(FAMILY, PATH),
+            lambda: f.store.content_store.fts_search("Selected"),
+            lambda: ledger.get(FAMILY, PATH),
+            lambda: f.store.get_vector_table("first").get_vectors([]),
+            lambda: f.store.upsert_content([]),
+        ):
+            with pytest.raises(SourceLayoutError, match="not admitted"):
+                read()
+    for constructor in (MultiModelStore,):
+        with pytest.raises(SourceLayoutError):
+            constructor(f.config.lance_dir)
+    assert f.calls == []
+    assert {str(p): p.read_bytes() for p in f.config.data_dir.rglob("*") if p.is_file()} == before
+
+
+@pytest.mark.parametrize(
+    "drift", ["scope", "family", "binding", "untyped", "missing", "coverage",
+              "checkpoint", "missing-path-db", "empty-path-db", "empty-deleted-path-db",
+              "corrupt-path-db", "policy", "native", "receipt", "budget"],
+)
+def test_selected_component_read_refuses_unqualified_points_without_repair(
+    application: Fixture, drift: str,
+) -> None:
+    f = application
+    identity = None if drift == "untyped" else ComponentIdentity("work_item_revision", "opaque")
+    f.prepare(f.retain(3, identity=identity, deleted=drift == "empty-deleted-path-db")).publish()
+    if drift == "coverage":
+        with closing(f.paths._connect()) as conn, conn:
+            conn.execute("DELETE FROM embedding_coverage")
+    elif drift == "checkpoint":
+        f.paths.invalidate_batch([(FAMILY, PATH)])
+    elif drift == "native":
+        f.store.delete_by_file(FAMILY, PATH)
+        prepare_ingestion_indices(f.store, max_rows=0)
+    hints = select_point_fixture(f)
+    selected = hints.scope
+    if drift == "family":
+        selected = replace(hints, canonical_family="other").scope
+    elif drift == "binding":
+        selected = replace(hints, binding=replace(hints.binding, query_context="other")).scope
+    elif drift == "policy":
+        f.config.model_profiles["first"] = replace(
+            f.config.model_profiles["first"], revision="other",
+        )
+    elif drift == "receipt":
+        marker = f.config.lance_dir / MARKER
+        receipt = json.loads(marker.read_text())
+        receipt["point_scope"]["account_id"] = "other"
+        marker.write_text(json.dumps(receipt))
+    elif drift == "missing-path-db":
+        Path(f.paths._db_path).unlink()
+    elif drift in ("empty-path-db", "empty-deleted-path-db", "corrupt-path-db"):
+        Path(f.paths._db_path).write_bytes(b"not SQLite" if drift == "corrupt-path-db" else b"")
+    before = {str(p): p.read_bytes() for p in f.config.data_dir.rglob("*") if p.is_file()}
+    with pytest.raises((SourceLayoutError, ValueError)):
+        read_component(
+            ComponentLedger(f.config, f.store), f.paths,
+            "unknown" if drift == "missing" else PATH, point_scope=selected,
+            application_scope="other" if drift == "scope" else SCOPE,
+            max_rows=0 if drift == "budget" else 8,
+        )
+    assert {str(p): p.read_bytes() for p in f.config.data_dir.rglob("*") if p.is_file()} == before
+
+
+def test_selected_read_never_ignores_or_changes_uncheckpointed_path_evidence(
+    application: Fixture,
+) -> None:
+    f = application
+    f.prepare(f.retain(3, identity=ComponentIdentity("work_item_revision", "opaque"))).publish()
+    hints = select_point_fixture(f)
+    with closing(f.paths._connect()) as conn:
+        conn.execute("UPDATE indexed_files SET indexed_at = indexed_at + 1")
+        conn.commit()
+        assert Path(f.paths._db_path + "-wal").stat().st_size > 0
+        before = {str(p): p.read_bytes() for p in f.config.data_dir.rglob("*") if p.is_file()}
+        with pytest.raises(SourceLayoutError, match="path evidence"):
+            read_component(
+                ComponentLedger(f.config, f.store), f.paths, PATH,
+                point_scope=hints.scope, application_scope=SCOPE, max_rows=8,
+            )
+        assert {str(p): p.read_bytes() for p in f.config.data_dir.rglob("*") if p.is_file()} == before
 
 
 def test_retained_id_union_budget_refuses_replacement_before_writer(application: Fixture) -> None:

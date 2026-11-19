@@ -48,6 +48,7 @@ from agent_index.store.result_filters import (
     _facet_values as _facet_values,
 )
 from agent_index.store.source_layout import (
+    PointScope,
     source_fts_read as _source_fts_read,
     source_read as _source_read,
     source_write as _source_write,
@@ -72,9 +73,9 @@ class _SourceGuard(Protocol):
 
 
 # The shared guards forward the wrapped callable's arguments and return unchanged.
-source_read: _SourceGuard = _source_read
-source_fts_read: _SourceGuard = _source_fts_read
-source_write: _SourceGuard = _source_write
+source_read = cast(_SourceGuard, _source_read)
+source_fts_read = cast(_SourceGuard, _source_fts_read)
+source_write = cast(_SourceGuard, _source_write)
 
 # Vector results are post-filtered by source/repo, so when such a filter is
 # set we widen the candidate pool to avoid a small repo's matches never
@@ -105,8 +106,14 @@ class MultiModelStore(_ItemRepresentationMixin):
         content_store_type: type[ContentStore] = ContentStore,
         repo_matcher: Callable[[str, str], bool] = repo_matches,
         exact_match_bonus: float = _EXACT_MATCH_BONUS,
+        point_scope: PointScope | None = None,
     ) -> None:
-        self._content = content_store_type(db_path, table_name=content_table)
+        self._content = (
+            content_store_type(db_path, table_name=content_table)
+            if point_scope is None else content_store_type(
+                db_path, table_name=content_table, point_scope=point_scope,
+            )
+        )
         self._repo_matcher = repo_matcher
         self._exact_match_bonus = exact_match_bonus
         self._source_domain = self._content._source_domain
@@ -165,7 +172,7 @@ class MultiModelStore(_ItemRepresentationMixin):
     @source_write
     def upsert_content(self, chunks: list[Chunk], *, skip_identical: bool = False) -> int:
         """Store chunk content in the global content table."""
-        return cast(int, self._content.upsert(chunks, skip_identical=skip_identical))
+        return self._content.upsert(chunks, skip_identical=skip_identical)
 
     def upsert_vectors(
         self,
@@ -231,17 +238,17 @@ class MultiModelStore(_ItemRepresentationMixin):
     @source_read
     def distinct_sources(self) -> set[str]:
         """Return the set of distinct ``source`` values present in the store."""
-        return cast(set[str], self._content.distinct_sources())
+        return self._content.distinct_sources()
 
     @source_read
     def source_counts(self) -> dict[str, int]:
         """Return ``{source: chunk_count}`` actually stored (truthful status)."""
-        return cast(dict[str, int], self._content.source_counts())
+        return self._content.source_counts()
 
     @source_read
     def get_document(self, source: str, file_path: str) -> ChunkRecord | None:
         """Reconstruct a file's full indexed text (delegates to ContentStore)."""
-        return cast(ChunkRecord | None, self._content.get_document(source, file_path))
+        return self._content.get_document(source, file_path)
 
     @source_read
     def distinct_items(self) -> list[tuple[str, str]]:
@@ -250,7 +257,7 @@ class MultiModelStore(_ItemRepresentationMixin):
         The unit the similarity-cluster pass groups by — one issue, one quip,
         one doc, one source file.  Delegates to ContentStore.
         """
-        return cast(list[tuple[str, str]], self._content.distinct_items())
+        return self._content.distinct_items()
 
 
 
@@ -262,9 +269,9 @@ class MultiModelStore(_ItemRepresentationMixin):
         and all VectorTables - no orphaned vectors.
         """
         if self._source_domain is not None:
-            return cast(list[str], self._content.delete_by_file(source, file_path))
+            return self._content.delete_by_file(source, file_path)
         # Retain canonical IDs until every vector deletion succeeds, for retry.
-        chunk_ids = cast(list[str], self._content.get_chunk_ids_by_file(source, file_path))
+        chunk_ids = self._content.get_chunk_ids_by_file(source, file_path)
         for vt in self._vector_tables.values():
             if chunk_ids:
                 vt.delete_by_chunk_ids(chunk_ids)
@@ -292,7 +299,7 @@ class MultiModelStore(_ItemRepresentationMixin):
         ``indexed_at`` timestamp, old chunks are cleaned up here.
         """
         if self._source_domain is not None:
-            return cast(int, self._content.delete_stale_by_file(source, file_path, before=before))
+            return self._content.delete_stale_by_file(source, file_path, before=before)
         # Get stale chunk_ids from content store
         stale_ids = self._content.get_stale_chunk_ids_by_file(
             source, file_path, before=before,
@@ -309,8 +316,8 @@ class MultiModelStore(_ItemRepresentationMixin):
     def delete_stale(self, source: str, *, before: float) -> int:
         """Remove stale chunks from content store and all vector tables."""
         if self._source_domain is not None:
-            return cast(int, self._content.delete_stale(source, before=before))
-        removed = cast(int, self._content.delete_stale(source, before=before))
+            return self._content.delete_stale(source, before=before)
+        removed = self._content.delete_stale(source, before=before)
         for vt in self._vector_tables.values():
             vt.delete_stale(before=before)
         return removed
@@ -351,7 +358,7 @@ class MultiModelStore(_ItemRepresentationMixin):
     # -- FTS -----------------------------------------------------------------
 
     def ensure_fts_index(self) -> bool:
-        return cast(bool, self._content.ensure_fts_index())
+        return self._content.ensure_fts_index()
 
     def mark_fts_dirty(self) -> None:
         self._content.mark_fts_dirty()
@@ -530,7 +537,7 @@ class MultiModelStore(_ItemRepresentationMixin):
 
         # FTS search via global content store
         _fts_excluded = set(_FACET_KEYS)
-        fts_filter_kwargs = {
+        fts_filter_kwargs: dict[str, Any] = {
             k: v for k, v in filter_kwargs.items() if k not in _fts_excluded
         }
         fts_hits = self._content.fts_search(
@@ -723,7 +730,7 @@ class MultiModelStore(_ItemRepresentationMixin):
     @source_read
     def stats(self) -> dict[str, Any]:
         """Combined statistics across content and vector tables."""
-        content_stats = cast(dict[str, Any], self._content.stats())
+        content_stats = self._content.stats()
         vector_stats = {}
         for model_id, vt in self._vector_tables.items():
             vector_stats[model_id] = {

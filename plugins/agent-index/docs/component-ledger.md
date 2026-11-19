@@ -42,7 +42,7 @@ physical mutations carrying the same logical identity within one source.
 
 Legacy component records omit this optional field in their canonical encoding.
 Reopening or composing existing observations does not enrich them or alter an
-immutable application binding. They remain untyped, not qualified for a future
+immutable application binding. They remain untyped, not qualified for an
 identity-bearing read result. Typed/untyped rebinding and changed kind, parent
 or comment identity refuse at every version, before application embedding or
 native writes. There is no automatic migration or adoption path. Older strict
@@ -167,12 +167,47 @@ before accepting prior versions and again before publication. Missing or
 conflicting evidence refuses without repairing state or treating absence as
 an unobserved deletion.
 
+Coverage and checkpoint qualification use non-creating, immutable read-only
+SQLite connections under that existing source-domain exclusion. They neither
+initialize empty files nor change journal mode or create WAL/SHM sidecars.
+Nonempty WAL or rollback journals refuse qualification rather than being
+silently ignored; their existing writer/recovery owner must settle them first.
+Qualification never checkpoints, deletes journals or repairs missing, empty
+or corrupt path evidence. Ordinary application/reuse connection defaults are
+unchanged.
+
 This helper supports the existing explicit native application prerequisites.
-It does not open a protocol-2 point domain, provide a component search/document/
-cluster presentation route, or infer item/comment identity from path strings.
-Selected point-domain reads and every v2 execution/producer boundary remain
-disabled until their own complete identity, coverage and compatibility contract
-is implemented and qualified.
+Its optional exact `point_scope` propagates through the existing ledger, raw
+projection, chunk-ID and vector-coverage owners. Omitting that selection still
+refuses a protocol-2 domain, even within an explicitly selected operation.
+
+### Selected named-component reads
+
+Open `MultiModelStore(config.lance_dir, content_table=config.content_table,
+point_scope=hints.scope)` and register the configured model profiles. This
+only opens already prepared handles; it neither creates missing tables nor
+admits ordinary store reads or writes. Build the existing `ComponentLedger`
+from those owners, then call `indexing.component_read.read_component(ledger,
+paths, path, point_scope=hints.scope, application_scope=..., max_rows=...)`.
+
+The domain must match the complete selected representation/account/query scope,
+and the point must belong to its canonical family. Qualification uses the
+[applied snapshot](#applied-native-snapshots) under the same exclusion. Missing
+ordering, typed identity, native/index, checkpoint, policy or routed coverage
+evidence refuses without repair. Paths and metadata never supply missing item
+or comment identity. Unknown paths refuse rather than claiming enumeration.
+
+The distinct `ComponentRead` returns exact point scope, canonical typed identity,
+source/path, applied provider version, rendering semantics, deletion state,
+qualified chunks and `named-target-only` coverage. A proven ordered deletion
+has no chunks but retains those identity and coverage semantics. The result is
+an in-process observation, not a durable certificate or a complete discussion.
+
+All legacy-shaped reads, including nested/lazy reads on the selected handles,
+continue to refuse. Search, clusters, HTTP, MCP, CLI and consumer presentation
+routes remain unsupported for point domains. Protocol-2 writer/bootstrap,
+v2 execution/producer and current-claim completion remain disabled; there is
+no migration or conversion of existing protocol-1 state.
 
 ### Sealed native publication suffix
 
