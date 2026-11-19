@@ -485,6 +485,23 @@ unchanged.
 
 - **Fleet** — a named pool of long-lived dev containers built from one
   devcontainer spec. Kept warm (stopped, not destroyed) between uses.
+- **On-demand growth** — `size` is the warm floor `up` maintains. An optional
+  `max_size` (an integer `>= size`) lets `borrow` grow the fleet: when no
+  member is free and the fleet has fewer than `max_size` members, `borrow`
+  provisions exactly one more `<name_prefix>-<n>` member through the same
+  Docker, devcontainer or external-driver path `up` uses, leases it and prints
+  its name. A fleet-scoped growth lock spans the capacity check, provisioning
+  and the lease, so racing borrows never overshoot `max_size`; the lease lock
+  is not held while provisioning. Until the grower leases it, the member being
+  built (including a devcontainer's temporary pre-rename name) is hidden from
+  other borrows and refused session admission; a member left by a failed
+  provisioning is removed (or quarantined if removal fails). A provisioning failure writes no lease and
+  returns the usual "all leased" refusal with the error appended. Growth
+  applies to `--fleet`-scoped borrows (or the only configured fleet) and
+  never to `--container`; `borrow --no-grow` opts out per call. Grown members
+  are ordinary warm members: they stay after `release`, and `down`/`start`/`rm`
+  treat them like any other. Trimming back to `size` is not automatic. Without
+  `max_size`, behavior is unchanged.
 - **Lease / borrow** — an *effort* (a logical unit of work) borrows a
   container for the duration of its work, then releases it. Leases persist
   across CLI invocations and agent dispatches; they expire on explicit
@@ -613,8 +630,9 @@ agent-containers rm <fleet> [--force] [--force-abandon] [--json]
 agent-containers rescue-capture <fleet> [--json]
                                       # capture running restricted members' session
                                       # evidence non-destructively (no stop/remove)
-agent-containers borrow <effort> [--fleet <fleet>] [--container <name>]
-                                      # lease a free/specific container -> prints name
+agent-containers borrow <effort> [--fleet <fleet>] [--container <name>] [--no-grow]
+                                      # lease a free/specific container -> prints name;
+                                      # grows a max_size fleet by one when full
 agent-containers release <target>    # release by container or effort name
 agent-containers leases              # show active leases
 agent-containers lifecycle-clear [name]

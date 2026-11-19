@@ -11,6 +11,19 @@ a missing table, orphan table, unknown binding, incompatible schema, changed
 table identity/version or unprepared index refuses access. Existing populated
 stores require a separately designed adoption/recovery path, not this bootstrap.
 
+For a protocol-2 point domain, pass its exact `point_scope=hints.scope` explicitly
+to both `initialize_component_ledger(config, store, point_scope=...)` and
+`prepare_ingestion_indices(store, max_rows=..., point_scope=...)`. They reuse the
+existing domain operation, private preparation writer and scalar-index owner.
+The ledger still requires empty configured data tables; index preparation retains
+its physical-tail and segment budgets, without implicit consolidation. Reopening
+verifies existing ledger identity/version/index evidence and does not recount
+configured data or reset missing history. An interrupted native preparation
+retains the existing dirty/uncertain latch; retry cannot replay or repair it.
+Omitted, mismatched and legacy-domain point selections refuse, including nested
+calls inside an explicitly selected operation. Preparation neither admits
+`ledger.put`/consolidation nor ordinary data mutation or point application.
+
 The table lives in `config.lance_dir`, alongside the source-layout receipt and
 data included by the existing native-directory backup. Arrow schema metadata
 retains a random table identity across native writes, index preparation and
@@ -205,8 +218,11 @@ an in-process observation, not a durable certificate or a complete discussion.
 
 All legacy-shaped reads, including nested/lazy reads on the selected handles,
 continue to refuse. Search, clusters, HTTP, MCP, CLI and consumer presentation
-routes remain unsupported for point domains. Protocol-2 writer/bootstrap,
-v2 execution/producer and current-claim completion remain disabled; there is
+routes remain unsupported for point domains. The separate
+[cold schema bootstrap](source-aware-store.md#point-domain-binding-foundation)
+creates only configured content/model tables, not this ledger or its indices.
+Protocol-2 ledger/index bootstrap and application, v2 execution/producer and
+current-claim completion remain disabled; there is
 no migration or conversion of existing protocol-1 state.
 
 ### Sealed native publication suffix

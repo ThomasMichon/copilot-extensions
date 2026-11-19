@@ -1,0 +1,9 @@
+{
+  "comment": "Infer the application footprint preparation mode for an unambiguous Main or Dev commit.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

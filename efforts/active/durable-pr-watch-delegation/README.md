@@ -43,6 +43,15 @@ scope only, not installation, service-stop or rollout authority; the
 [amendment](subscriber-callback-context.md#version-aware-restart-and-per-version-state-amendment)
 retains the complete direction and realization/validation obligations.
 
+For historical POSIX roots, the operator accepted the proposed one-time
+migration boot boundary as a source-design requirement: seal the historical
+lock path, retain legacy state as the sole authority, and wait for the next
+actual host boot before importing its final snapshot or activating isolated
+per-version state. Windows may avoid that wait only after its no-delete-sharing
+guard is qualified. The [physical-transition decision](subscriber-callback-context.md#physical-transition-feasibility-and-accepted-migration-choice)
+preserves the complete question/answer and remaining review/validation gates.
+This accepts no reboot, installation, service stop, migration or rollout.
+
 The requested read-only extension is a reviewer-perspective status/current-PR/
 priority-next-action feed backed by PR activity, subscribable through SSE or
 WebSockets. The [reviewer-action feed contract](reviewer-action-feeds.md),
@@ -790,9 +799,20 @@ older-engine restart refusal and per-version state protection; its revised
 design cleared review in #13310. Implementation and transition qualification,
 not another design-approval request, follow that accepted direction. The
 [present-only receiver groundwork](journal/2026/11.18%20Per-version%20receiver%20groundwork.md)
-adds epoch-aware admission and opaque-partition preservation; physical
+landed in #13320 with epoch-aware admission, strict registry validation and
+opaque-partition preservation. Physical
 historical-writer isolation and recoverable migration remain prerequisites to
 publishing versioned state or enabling context registrations.
+The [physical transition design](subscriber-state-transition.md), reviewed in
+#13493, adds the operator-accepted POSIX boot boundary and Windows
+sealing/recovery requirements. Runtime realization follows that accepted
+design. Its native open-handle experiment is not complete transition or
+historical-install proof.
+The next receiver slice observes fixed transition paths and the phase header
+through shared storage, preserving absent-transition legacy behavior and
+refusing every present or orphaned transition before legacy reads/writes.
+Guarded recovery and authority selection remain unimplemented; no phase,
+map/cwd capability or new state publisher is activated.
 
 #6019 already delivered outage-independent expiry and the acknowledged-delivery
 foundation. Preserve that positive credit; the unchecked rows below retain
@@ -1804,6 +1824,7 @@ callback an implicit credential store.
 
 ## Journal
 
+- [2026-11-19 - Historical physical transition design](journal/2026/11.19%20Historical%20physical%20transition%20design.md)
 - [2026-11-18 - Present-only per-version receiver groundwork](journal/2026/11.18%20Per-version%20receiver%20groundwork.md)
 - [2026-11-18 - Version-aware watch-state refusal baseline](journal/2026/11.18%20Watch%20state%20contract%20baseline.md)
 - **2026-11-18 - Versioned per-subscription map design reviewed.** #13277

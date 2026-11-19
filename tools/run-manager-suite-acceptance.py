@@ -6,6 +6,7 @@ import argparse
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
+import importlib
 import json
 import os
 from pathlib import Path
@@ -16,6 +17,8 @@ import sys
 import time
 from typing import TypedDict
 
+# This owner bootstraps the repository's process library on a fresh machine.
+importlib.import_module("plugin_test_containment")
 from agent_procutil import contained_test_mode, no_window_kwargs
 from agent_procutil.owned_process import run_installation_owned
 

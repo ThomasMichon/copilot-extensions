@@ -9,8 +9,10 @@ transition protection and map/cwd consumer acceptance remain open. The
 older-engine restart/per-version state amendment is reviewed in #13310.
 **Current direction:** Continue the version-aware design with older-engine
 restart refusal and per-version overwrite isolation under that reviewed
-contract; the preserved provider prototype is not delivered and map writes
-are not enabled.
+contract. The receiver-only expansion landed in #13320; physical historical
+isolation and recoverable migration design is reviewed in #13493, while its
+runtime implementation and qualification remain open. The preserved provider
+prototype is not delivered and map writes are not enabled.
 **Scope:** P5947-3/4, V5947-3/4 and G5947-3/4. This does not complete those
 items, expiry acceptance, M1, or the parent effort.
 **Vision reconciliation:** Closes the existing
@@ -382,6 +384,96 @@ context to make rollback pass. Test every schema family in the
 actual supported upgrade/rollback window; if a supported reader does not
 refuse safely, add a reviewed expansion/transition guard before enabling
 context writes. Do not redefine that reader as unsupported to avoid the test.
+
+### Physical transition feasibility and accepted migration choice
+
+The receiver-only release does not change the historical executable's
+`SingleInstance.acquire`: it opens
+`agent-pull-requests-watch.lock` with `O_RDWR | O_CREAT`, then takes the
+nonblocking OS lock. A guard in a newer payload cannot intercept its direct
+Python-module self-boot. The existing installation transaction does not
+govern that historical path either. These are execution boundaries, not a
+missing JSON version comparison in the new receiver.
+
+A contained Windows experiment with the actual `24b79724ac` lease pauses
+after its file open but before its original OS-lock operation. Renaming that
+open file refuses with Windows sharing violation 32. After the child is
+allowed to acquire and normally release its lease, moving the file and
+putting a directory at the historical lock address causes a fresh historical
+open to refuse with `PermissionError`. The child exits zero; no daemon is
+constructed, subscription file migrated, provider read or callback launched.
+This tests only the historical lease and controlled scheduling, not complete
+released installations, a crash-safe migration or a cross-platform guard.
+
+A physical directory seal is therefore a candidate admission boundary,
+not delivered protection. A compatible owner could keep the one shared
+per-version authority and its writer lease inside that directory, separate
+from the historical whole-file write address. It must not infer that merely
+renaming a lock file revokes descriptors already opened against it.
+On POSIX, an open descriptor can retain the original inode after rename;
+the historical nonblocking lock can succeed on that inode after its holder
+exits. That POSIX race is source/OS-semantics analysis, not a passed native
+Linux experiment.
+
+**Operator-accepted source-design choice, implementation not delivered:** qualify
+the Windows no-delete-sharing seal with interrupted and competing-start
+cases. For POSIX historical-root migration, stage the seal while retaining
+the legacy state as the sole authority, and require a subsequent actual
+kernel boot boundary before importing the final legacy snapshot or
+activating isolated versioned state. That boundary eliminates pre-seal
+processes and descriptors. Do not automatically reboot, treat a service
+restart, sign-out, elapsed time or process scan as a boot, or make ordinary
+installation readiness/current selection wait for it. No such boot or
+Windows migration is authorized or executed here.
+
+Before that boundary, a delayed historical descriptor may still acquire the
+legacy inode: no versioned authority may be activated and no staged snapshot
+may be mistaken for the final state. Registrations and pending delivery
+changes still belong to the legacy authority. The implementation must retain
+the original inode/lease custody and recover this phase without splitting
+writers; simply sealing the pathname and dropping that custody is not a
+complete transition.
+The physical seal itself must preserve historical admission without a
+missing-name gap: on POSIX, atomically exchange a staged directory and the
+original leased file. Moving the file and only then creating the directory
+can split delayed and cold callers across different lock inodes before any
+recovery runs. That sequence is explicitly prohibited and has a dedicated
+two-caller/controller-exit qualification obligation in the concrete proposal.
+
+After physical admission is qualified, the existing owner must validate the
+final complete legacy snapshot, durably publish the per-version authority,
+and record the exact activation phase before effects. Original registration,
+pending/queued/retry/event identities remain unchanged. A crash at every
+file/journal boundary must leave exactly one recoverable authority, never
+two live copies or an instruction to erase state. An existing or raced
+legacy lock, unknown descriptor custody, missing boot evidence or malformed
+journal is an unresolved transition, not permission to replace a live owner.
+
+The operator accepted this one-time POSIX historical-migration boot boundary
+as a **source design**, not a choice to retire historical support, enable map
+writes or perform operations. Normal review of this concrete transition
+amendment cleared in #13493; runtime realization follows. A boot-independent transition would
+need a different enforceable historical execution boundary; the current lease
+and new-version metadata alone do not provide one.
+
+The bounded decision exchange is retained verbatim:
+
+> The existing lease cannot fully fence an unmodified historical POSIX engine: a descriptor opened before a path change can acquire the old lock later. I recommend a one-time migration design that seals the old lock path, keeps legacy state authoritative, and activates isolated per-version state only after the next actual host boot has eliminated those descriptors. Windows may avoid that wait using its verified open-handle sharing behavior, subject to further qualification. Accept this source-design requirement? This does NOT authorize any reboot, installation, service stop, migration or rollout.
+
+The form field was
+`accept_posix_boot_boundary`, titled "Accept the one-time POSIX
+historical-migration boot boundary in the proposed source design". Its
+description was:
+
+> Yes: take this design through normal review. No: retain the selected map/version goal and investigate a boot-independent historical execution guard instead. Neither answer authorizes live operations.
+
+The operator's submitted answer was `true`. The field's default was also
+`true`; the default alone is not the acceptance evidence. The actual submitted
+answer accepts only the question's source-design requirement and limits.
+The [concrete physical transition proposal](subscriber-state-transition.md)
+defines staged authority, retained-inode custody, boot evidence, interrupted
+recovery and serial implementation/qualification under the existing owner.
+It cleared normal review in #13493, not runtime or installed qualification.
 
 ### Execution and missing directories
 

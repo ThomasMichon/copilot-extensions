@@ -1,15 +1,7 @@
 """``TaskQueue`` mixin: task-row storage, payload/result I/O, and creation.
 
-Extracted from :mod:`agent_dispatch.queue` as the storage-facing core that the
-other queue mixins already build on: canonical repo/token normalization,
-attachment/event persistence, payload/result reads, and the task-creation path
-all revolve around durable task-row storage rather than task-state transitions.
-
-This mixin is composed into :class:`agent_dispatch.queue.TaskQueue` via
-multiple inheritance; it relies on queue-owned connection state
-(``self._connect()``, ``self.payloads``, ``self.lease_seconds``) and on helper
-methods supplied by the other composed mixins (notably the producer-fence
-helpers). It is not usable standalone.
+Composed into :class:`agent_dispatch.queue.TaskQueue`; its connection, payload,
+admission and producer-fence dependencies are described by ``StorageOwner``.
 """
 
 from __future__ import annotations
@@ -22,6 +14,12 @@ import sqlite3
 import time
 import uuid
 from collections.abc import Iterable, Mapping, Sequence
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from .queue_storage_types import ProducerFence, StorageOwner
+else:
+    StorageOwner = object
 
 from .identity import canonical_reviewer_target, canonicalize_remote
 from .payload import is_blob_ref
@@ -46,8 +44,11 @@ from .queue_dedup import find_live_dedup_task
 log = logging.getLogger("agent-dispatch.queue")
 
 
-class QueueStorageMixin:
+class QueueStorageMixin(StorageOwner):
     """Storage, payload/result I/O, and create methods for :class:`TaskQueue`."""
+
+    def _new_task_id(self) -> str:
+        return uuid.uuid4().hex
 
     @staticmethod
     def _now(now: float | None) -> float:
@@ -405,7 +406,7 @@ class QueueStorageMixin:
         not_before = float(not_before)
         normalized_requires = self._canonical_selector_tokens(requires or ())
         normalized_excludes = self._canonical_selector_tokens(excludes or ())
-        fence = self._normalize_producer_fence(
+        fence = cast("ProducerFence | None", self._normalize_producer_fence(
             producer_scope,
             producer_id,
             producer_generation,
@@ -413,7 +414,7 @@ class QueueStorageMixin:
             producer_request_id,
             repo=canonical_repo,
             source=source,
-        )
+        ))
         fence_record = None
         if fence is not None:
             fence_record = {
@@ -500,7 +501,7 @@ class QueueStorageMixin:
                         self._producer_request_hash(legacy_fields_no_verification)
                     )
         ts = self._now(now)
-        task_id = uuid.uuid4().hex
+        task_id = self._new_task_id()
         spill_content = (
             payload_inline if self._payload_needs_spill(payload_ref, payload_inline) else None
         )

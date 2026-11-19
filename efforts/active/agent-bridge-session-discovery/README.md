@@ -83,8 +83,11 @@ Draft and #2530's pending wire decision are not a bar to this planned
 extension; it creates no owner assignment, generic ACK or peer probe.
 
 The bounded [nullable catalog capability](catalog-worktree-capability.md)
-source proposal is reserved by `patient-knob` on #13489. Only that finite
-capability/name facet is selected for review and subsequent execution.
+source facet is delivered by `patient-knob` in #13503 under #13489 and
+reviewed plan #13490. Only its finite C1-C4/V1-V5 source acceptance is
+completed; the original discussion-only reservation is settled.
+This accepts S4036-P1/P2/LV1 at the source tier. S4036-P3/P4/LV2/G and
+the other discovery/native/installed contracts remain open.
 Parent Draft status, both discovery axes, static reload S4036-P3/P4 and
 the existing state/provider/compatibility custodians remain unchanged.
 
@@ -405,14 +408,14 @@ and current project-scoped behavior. It is not existing delivery or a new
 registry; provider-manifest/namespace/catalog/roster-cache refresh is a
 different dataset from configured static settings.
 
-- [ ] **C13489:** Deliver the [finite nullable capability/name Plan](catalog-worktree-capability.md#finite-plan)
+- [x] **C13489:** Deliver the [finite nullable capability/name Plan](catalog-worktree-capability.md#finite-plan)
   C1-C4 after review, retaining declaration authority and every independent
   static-reload/discovery/admission boundary.
-- [ ] **S4036-P1:** Derive and publish `supports_worktrees` for supported
+- [x] **S4036-P1:** Derive and publish `supports_worktrees` for supported
   ordinary, namespace, cache and detail rows with versioned unsupported/
   unknown behavior. Project, `worktree_root`, `spawnable` or `target_type`
   alone must not stand in for the capability.
-- [ ] **S4036-P2:** Preserve distinct project-qualified display names across
+- [x] **S4036-P2:** Preserve distinct project-qualified display names across
   local/remote discovery, aliases and overrides without rewriting identity.
 - [ ] **S4036-P3:** Through a change-driven watch OR explicit reload
   signal/API, expose configured acp-agents, repo spawn/config, defaults and
@@ -422,7 +425,7 @@ different dataset from configured static settings.
 - [ ] **S4036-P4:** Report malformed, unavailable, ambiguous and failed
   reloads truthfully; provider-only refresh cannot count as static reload.
   Keep liveness/currentness and #60 state/mutation/purge controls separate.
-- [ ] **S4036-LV1:** Exercise actual row derivation through ordinary,
+- [x] **S4036-LV1:** Exercise actual row derivation through ordinary,
   namespace, cache and detail consumers, including supported/unknown/
   unsupported capability and local/remote names, aliases and overrides.
 - [ ] **S4036-LV2:** Prove same-consumer static add/change/remove, defaults,
@@ -432,7 +435,7 @@ different dataset from configured static settings.
 
 ## Validation Plan
 
-- [ ] **V13489:** Qualify every [finite capability validation](catalog-worktree-capability.md#validation-plan)
+- [x] **V13489:** Qualify every [finite capability validation](catalog-worktree-capability.md#validation-plan)
   V1-V5 at its actual evidence tier. This does not satisfy the whole
   S4036-G/static-reload or discovery matrix.
 - [ ] **S4036-G:** Resolve every S4036 Plan/local Validation and Coordination

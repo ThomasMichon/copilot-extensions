@@ -16,6 +16,128 @@ from agent_pull_requests.watch_daemon import WatchDaemon, validate_versioned_ent
 pytestmark = pytest.mark.contract("agent_pull_requests.watch.state_contract")
 
 
+def transition_marker(phase: Any = "prepared", **changes: Any) -> str:
+    return json.dumps({
+        "schema": "agent-pull-requests.watch-state-transition",
+        "version": 1, "phase": phase, **changes,
+    })
+
+
+def test_transition_absence_keeps_legacy_paths_without_creating_state(tmp_path: Path) -> None:
+    root = tmp_path / "not-created"
+    assert watch_storage.read_transition_phase(root) == "absent"
+    assert watch_storage.read_subscriptions_state(root) == []
+    assert not root.exists()
+    root.mkdir()
+    (root / "agent-pull-requests-watch.lock").write_text("legacy", encoding="utf-8")
+    watch_storage.write_subscriptions_state([{"retained": "legacy"}], root)
+    assert watch_storage.read_subscriptions_state(root) == [{"retained": "legacy"}]
+    assert sorted(path.name for path in root.iterdir()) == [
+        "agent-pull-requests-watch.lock", "watch-subscriptions.json",
+    ]
+
+
+@pytest.mark.parametrize("phase", ["prepared", "sealed-legacy", "import-ready", "active"])
+def test_transition_phase_never_authorizes_legacy_fallback(tmp_path: Path, phase: str) -> None:
+    legacy = watch_storage.subscriptions_path(tmp_path)
+    legacy.write_text('[{"retained":"legacy"}]', encoding="utf-8")
+    marker = tmp_path / "watch-state-transition.json"
+    marker.write_text(transition_marker(phase), encoding="utf-8")
+    candidate = tmp_path / "watch-state"
+    candidate.mkdir()
+    (candidate / "subscriptions.json").write_text(partitioned_state(), encoding="utf-8")
+    before = {path: path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()}
+    assert watch_storage.read_transition_phase(tmp_path) == phase
+    with pytest.raises(ValueError, match="watch state transition"):
+        watch_storage.read_subscriptions_state(tmp_path)
+    with pytest.raises(watch_storage.StateWriteRefused, match="watch state transition"):
+        watch_storage.write_subscriptions_state([], tmp_path)
+    assert {path: path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()} == before
+
+
+@pytest.mark.parametrize("name", [
+    "agent-pull-requests-watch.lock", "watch-state-transition.legacy.lock",
+    "watch-state-transition.barrier", "watch-state", "watch-state-transition.json",
+])
+def test_orphan_transition_evidence_is_not_absence(tmp_path: Path, name: str) -> None:
+    (tmp_path / name).mkdir()
+    with pytest.raises(ValueError, match="watch state transition"):
+        watch_storage.read_subscriptions_state(tmp_path)
+    with pytest.raises(watch_storage.StateWriteRefused, match="watch state transition"):
+        watch_storage.write_subscriptions_state([], tmp_path)
+    assert list(tmp_path.iterdir()) == [tmp_path / name]
+
+
+@pytest.mark.parametrize("raw", [
+    "{}", "[]", "{invalid",
+    transition_marker("unknown"), transition_marker(version=True),
+    transition_marker(schema="foreign"), transition_marker(phase=None),
+    '{"schema":"agent-pull-requests.watch-state-transition","version":1,'
+    '"phase":"prepared","phase":"active"}',
+])
+def test_invalid_transition_marker_preserves_all_bytes(tmp_path: Path, raw: str) -> None:
+    marker = tmp_path / "watch-state-transition.json"
+    marker.write_text(raw, encoding="utf-8")
+    with pytest.raises(ValueError, match="watch state transition"):
+        watch_storage.read_subscriptions_state(tmp_path)
+    assert marker.read_text(encoding="utf-8") == raw
+    assert list(tmp_path.iterdir()) == [marker]
+
+
+def test_transition_arriving_at_final_write_refuses_legacy_replacement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = watch_storage.subscriptions_path(tmp_path)
+    path.write_text('[{"retained":"legacy"}]', encoding="utf-8")
+    original = path.read_bytes()
+    fsync = os.fsync
+    marker = tmp_path / "watch-state-transition.json"
+
+    def prepare_before_commit(fd: int) -> None:
+        fsync(fd)
+        marker.write_text(transition_marker(), encoding="utf-8")
+
+    monkeypatch.setattr(os, "fsync", prepare_before_commit)
+    with pytest.raises(watch_storage.StateWriteRefused, match="watch state transition"):
+        watch_storage.write_subscriptions_state([], tmp_path)
+    assert path.read_bytes() == original
+    assert sorted(item.name for item in tmp_path.iterdir()) == [marker.name, path.name]
+
+
+def test_transition_refuses_governed_entry_before_transaction(tmp_path: Path) -> None:
+    from types import SimpleNamespace
+    from agent_pull_requests import watch_entry
+
+    def forbidden(*_args: Any, **_kwargs: Any) -> NoReturn:
+        pytest.fail("transition marker must not initiate custody changes")
+
+    installation = SimpleNamespace(state_root=tmp_path, transaction=forbidden)
+    invocation: Any = SimpleNamespace(
+        require_current=lambda: None, fresh_installation=lambda: installation,
+    )
+    (tmp_path / "watch-state-transition.json").write_text(transition_marker(), encoding="utf-8")
+    with pytest.raises(ValueError, match="watch state transition"):
+        watch_entry.ensure(invocation)
+
+
+def test_transition_refuses_delayed_activation_without_effects(tmp_path: Path) -> None:
+    def forbidden(*_args: Any) -> NoReturn:
+        pytest.fail("unqualified transition must not observe or deliver")
+
+    daemon = WatchDaemon(fetch=forbidden, notify=forbidden, state_root=tmp_path, active=False)
+    try:
+        daemon.reload_state()
+        (tmp_path / "watch-state-transition.json").write_text(
+            transition_marker("active"), encoding="utf-8",
+        )
+        with pytest.raises(ValueError, match="watch state transition"):
+            daemon.resume_effects()
+        assert daemon.quiescent and not daemon.effects_enabled
+        assert not daemon._pollers and daemon._deliveries.scheduler is None
+    finally:
+        daemon.close()
+
+
 def future_state(**changes: Any) -> str:
     return json.dumps({
         "schema": "agent-pull-requests.watch-subscriptions",
@@ -305,15 +427,21 @@ def test_newer_requester_can_stop_an_older_incumbent_without_changing_legacy_sto
 
 
 @pytest.mark.parametrize("command", ["serve", "restart"])
-def test_actual_cli_process_refuses_newer_generation_without_state_or_route_writes(
-    tmp_path: Path, command: str,
+@pytest.mark.parametrize("transition", [False, True], ids=["newer-engine", "transition"])
+def test_actual_cli_process_refuses_incompatible_state_without_state_or_route_writes(
+    tmp_path: Path, command: str, transition: bool,
 ) -> None:
     import subprocess
     import sys
     from agent_procutil import no_window_kwargs
 
-    path = watch_storage.subscriptions_path(tmp_path)
-    original = partitioned_state(engineGeneration=2).encode()
+    path = (
+        tmp_path / "watch-state-transition.json"
+        if transition else watch_storage.subscriptions_path(tmp_path)
+    )
+    original = (
+        transition_marker("active") if transition else partitioned_state(engineGeneration=2)
+    ).encode()
     path.write_bytes(original)
     result = subprocess.run(
         [sys.executable, "-m", "agent_pull_requests", command],
@@ -321,7 +449,11 @@ def test_actual_cli_process_refuses_newer_generation_without_state_or_route_writ
         capture_output=True, text=True, timeout=10, **no_window_kwargs(),
     )
     assert result.returncode != 0
-    assert "persisted watch subscriptions require a newer engine generation" in result.stderr
+    expected = (
+        "watch state transition requires guarded recovery"
+        if transition else "persisted watch subscriptions require a newer engine generation"
+    )
+    assert expected in result.stderr
     assert path.read_bytes() == original
     assert list(tmp_path.iterdir()) == [path]
 

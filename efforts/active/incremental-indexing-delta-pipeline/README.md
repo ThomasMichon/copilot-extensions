@@ -178,8 +178,10 @@ After the reviewed proposal, the operator admitted execution:
   reader refusal are implemented, with an explicit
   [named-component read](../../../plugins/agent-index/docs/component-ledger.md#selected-named-component-reads)
   through the existing qualification owners. Default query/HTTP/MCP/CLI
-  frontdoors have bounded native refusal qualification; the remaining direct
-  read-route and consumer composition inventory stays open. Point-domain
+  frontdoors and direct native content/vector/cluster/package-export readers
+  have bounded refusal qualification; broader consumer composition remains
+  open. Exact-scope cold content/model schema and component-ledger bootstrap,
+  plus explicitly budgeted point-index preparation, are available; point-domain
   application, v2 execution, automatic partial-effect/restore reconciliation
   and whole-claim completion remain unimplemented.
 - [ ] Persist acquisition progress so retry/restart does not restart a

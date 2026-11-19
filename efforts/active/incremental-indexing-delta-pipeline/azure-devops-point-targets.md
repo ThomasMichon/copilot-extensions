@@ -110,6 +110,14 @@ service, a directory allocation on a live installation or a volume migration.
 Cold initialization must refuse nonempty/unmarked state and incompatible
 existing bindings without altering them.
 
+The explicit in-process
+[cold schema bootstrap](../../../plugins/agent-index/docs/source-aware-store.md#point-domain-binding-foundation)
+can now prepare the configured empty content/model tables for that exact scope.
+The existing [ledger/index preparation owners](../../../plugins/agent-index/docs/component-ledger.md)
+also accept that same explicit selection while retaining cold-ledger refusal,
+index budgets and dirty/uncertain recovery. Neither preparation seam admits
+ordinary data writers or implements selected point application.
+
 #### Default refusal and explicit reads
 
 Keep every existing reader's default selection on the legacy representation.

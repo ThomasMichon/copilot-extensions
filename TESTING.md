@@ -7613,6 +7613,41 @@ replacement/rollback, failed replacement with restored dependencies, successor
 execution and lease-settled withdrawal. Those native results are not production
 hourly publication, carrier delivery or another platform's qualification.
 
+The separately opt-in Machines `tests/native/test_health_linux_installed.py`
+packet prepares a closed Linux slot, removes its fixture build inputs, exercises
+the normal installed CLI's disabled enrollment/collection/removal, then tests
+two accelerated calendar cycles and replacement/rollback through the enrollment
+owner with a fixture-only cadence adapter. Installed code is unmodified. Select
+it through `tools/run-plugin-tests.py agent-machines --test-file
+tests/native/test_health_linux_installed.py --allow-explicit-tiers --allow-host-state
+--test-timeout 240 --timeout 600 --plugin-timeout 600` only with separate
+fixture-unit approval. Host-state opt-in preserves the explicitly selected native
+config and persistent evidence paths instead of remapping them into disposable
+runner storage; it does not authorize unrelated host access.
+Set `AGENT_MACHINES_NATIVE_SYSTEMD=1`,
+`AGENT_MACHINES_NATIVE_SYSTEMD_CONFIG_HOME` to the current user's existing config
+home, and `AGENT_MACHINES_NATIVE_SYSTEMD_ROOT` to a precreated private persistent
+fixture/evidence directory. The actual user manager must already be running;
+production readback must confirm the selected config home in its unit search
+path. The fixture never provisions a manager, changes lingering, uses sudo or
+modifies an existing installation or unrelated unit.
+
+Each recurring fixture uses two absolute UTC trigger instants and a bounded
+interpreter `ExecCondition` lease, so a late persistent trigger cannot collect
+after expiry. Actions retain the production oneshot/cgroup/time limits.
+Exact unit names, installation identity and expiry are recorded before effects;
+cleanup removes/readbacks only that pair and checks runtime-reference release.
+Per-case timestamped evidence directories remain outside disposable runner
+storage for recovery after interruption; review their `fixture-owner.json` and
+`cleanup.json` before the caller removes an exact fixture directory. An
+interrupted/failed cleanup remains owned recovery, not automatic deletion.
+`tests/test_health_linux_fixture.py` supplies portable calendar and bounded
+pending-job controls, plus explicit T2 retained-helper and real-interpreter
+expiry checks. Passing those controls, or skipping
+the native cases on another platform, is not Linux installed qualification.
+Process-death recovery, late-start/overlap and deadline/storage failure
+qualification remain separate acceptance items.
+
 The actor-free `test_health_composition.py` packet executes the existing domain
 age projection, normal report/parser and SVG composition. Substituted storage
 and service owners retain stale/unknown evidence, independent unavailable

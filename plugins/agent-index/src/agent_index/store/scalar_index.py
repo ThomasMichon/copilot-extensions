@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any, Protocol, cast
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
 
-    from .source_layout import SourceDomain
+    from .source_layout import PointScope, SourceDomain
 
 log = logging.getLogger(__name__)
 MAX_SEGMENTS = 32
@@ -111,23 +111,23 @@ def require_budget(
 
 def prepare_index(
     owner: ScalarIndexOwner, *, column: str, max_rows: int,
-    max_segments: int = MAX_SEGMENTS,
+    max_segments: int = MAX_SEGMENTS, point_scope: PointScope | None = None,
 ) -> ScalarIndexState:
-    """Prepare a column B-tree without implicit consolidation or data compaction."""
+    """Prepare a budgeted B-tree; a point domain requires its exact explicit scope."""
     if type(max_rows) is not int or max_rows < 0:
         raise ValueError("Scalar preparation budget must be a nonnegative integer")
     domain = owner._source_domain
     if domain is None:
         raise ScalarIndexPreparationRequired("Bounded preparation requires a participating source store")
     get_table = cast("Callable[[], ScalarTable]", owner._get_or_create_table)
-    with domain.read(owner._db):
+    with domain.read(owner._db, point_scope=point_scope):
         table = get_table()
         state, _ = inspect_index(table, column=column)
         require_budget(state, max_rows, max_segments=max_segments)
         if state.prepared and state.physical_unindexed_rows == 0:
             return state
     refusal: ScalarIndexPreparationRequired
-    with domain.write(owner._db):
+    with domain._write(owner._db, point_scope=point_scope):
         try:
             table = get_table()
             state, dataset = inspect_index(table, column=column)
