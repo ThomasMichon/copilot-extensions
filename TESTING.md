@@ -1152,10 +1152,16 @@ and non-replying peers. Warm interpreter/client and synchronous requests are
 trapped; incompatible membership explicitly retains its original admission
 lookup. Original 30-second item, 10-second child and 300-second group limits
 remain unchanged. The Windows production sender shares a 100-ms allocation/
-connect/write ceiling, subtracting elapsed time from both waits. Controlled-clock
+connect/write ceiling, subtracting elapsed time after async connection setup,
+stream acquisition and async write setup before either wait. Controlled-clock
 and transport-adapter tests execute the real sender/encoder to prove the
 remaining connection/write allowances and refusal after budget exhaustion;
 these are deadline arithmetic controls, not native delivery/performance samples.
+The selected-owner functional routing matrix holds only the copied sender's
+elapsed clock at zero while retaining real shell entry, sockets, original
+receiver, payload and invalidation assertions. Its phase/error diagnostics
+describe controlled routing, not production latency. This separation does not
+change the production budget or substitute for the real-clock controls below.
 The uninstrumented cold-process tail cases run three separate shell processes
 per group across four fresh fixtures per shell, retain every real receiver/
 accounting assertion, and report entry and complete-process durations.
