@@ -77,8 +77,10 @@ Even an exactly selected point-domain handle refuses the current legacy-shaped
 `read`, `operation`, `write` and reconciliation paths, including inside the
 private schema writer. Explicit scoped reads support the
 [named-component result](component-ledger.md#selected-named-component-reads)
-through applied-version qualification. Point-domain ledger/index bootstrap,
-qualified point application and every v2 executor/producer remain unsupported.
+through applied-version qualification. Explicit
+[ledger/index preparation](component-ledger.md) now forwards that same exact
+selection through its existing owners and budgets, without admitting ordinary
+data writers. Qualified point application and every v2 executor/producer remain unsupported.
 The binding is not
 acquisition, application, completion or deployment authority. There is no live
 directory allocation, migration, new service, HTTP parameter, CLI flag or MCP
