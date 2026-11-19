@@ -28,6 +28,8 @@ import subprocess
 import sys
 from dataclasses import asdict
 from pathlib import Path
+from types import ModuleType
+from typing import TYPE_CHECKING, Any
 
 from agent_procutil import no_window_flags as _creation_flags
 
@@ -42,6 +44,7 @@ from .config import (
     load_config,
 )
 from .resolver import (
+    AGENT_CONTAINERS_EXEC_POLICY_CONTEXT_ENV,
     _append_copilot_args,
     add_related_plugins,
     build_restricted_acp_spawn_command,
@@ -60,11 +63,14 @@ from .ssh_transport import (
     write_remote_env,
 )
 
+if TYPE_CHECKING:
+    from .session_host_context import TrustedContext
+
 log = logging.getLogger("agent-containers")
 _BUSY_EXIT = 75
 
 
-def _runtime_drivers():
+def _runtime_drivers() -> ModuleType:
     from . import runtime_drivers
 
     return runtime_drivers
@@ -299,7 +305,8 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         if getattr(args, "func", None) is not None:
-            return args.func(args)
+            result: int = args.func(args)
+            return result
         if args.command == "fleet":
             return _cmd_fleet(args)
         if args.command == "up":
@@ -439,7 +446,9 @@ def _cmd_installer_readiness() -> int:
     return emit(evaluate(config, containers, failures))
 
 
-def _trusted_session_host_context(name: str, expected_instance: str | None = None):
+def _trusted_session_host_context(
+    name: str, expected_instance: str | None = None,
+) -> TrustedContext:
     """Resolve a trusted fleet member without launching its Session Host."""
     from .session_host_context import resolve_context
 
@@ -643,7 +652,8 @@ def _cmd_namespace_ensure_ready(args: argparse.Namespace) -> int:
 
 def _cmd_namespace_recreate(args: argparse.Namespace) -> int:
     """Recreate one exact trusted container and emit redacted identity data."""
-    from .fleet import RecreateMemberError, recreate_member
+    from .fleet import recreate_member
+    from .fleet_results import RecreateMemberError
 
     try:
         result = recreate_member(
@@ -686,13 +696,13 @@ def _cmd_fleet(args: argparse.Namespace) -> int:
     if getattr(args, "json", False):
         # Bare JSON array, one object per container, so the picker's Containers
         # pivot (and any other machine-readable consumer) can render the fleet.
-        out = []
+        out: list[dict[str, Any]] = []
         for c in containers:
             lease = get_lease(c.name)
             hold_status = deploy_hold_status(c.name)
             fleet = config.fleets.get(c.fleet or "")
             posture_errors = []
-            actual_profile = c.security_profile
+            actual_profile: str | None = c.security_profile
             actual_network = None
             inspected = None
             if (fleet and fleet.restricted) or actual_profile == RESTRICTED_PROFILE:
@@ -991,7 +1001,17 @@ def _cmd_exec(args: argparse.Namespace) -> int:
         return launch_task(args, _exec_stdio)
     extra = resolve_extra_copilot_args(getattr(args, "copilot_args", None))
     target = resolve_live_exec_target(args.name, config=load_config())
-    hosting_policy.require_container_hosting(target)
+    policy_context = os.environ.get(AGENT_CONTAINERS_EXEC_POLICY_CONTEXT_ENV)
+    # Only driver members are offered the portable receiver by agent-bridge
+    # (their direct exec has no Session Host to run it); every other member
+    # keeps the guest agent-worktrees check.
+    portable = bool(policy_context) and bool(getattr(target.fleet, "driver", None)) and (
+        target.actual_profile != RESTRICTED_PROFILE
+    )
+    if portable and policy_context:
+        hosting_policy.require_portable_hosting(target, policy_context)
+    else:
+        hosting_policy.require_container_hosting(target)
 
     if target.actual_profile == RESTRICTED_PROFILE:
         from .lease import ProviderAdmissionError, session_admission
@@ -1032,6 +1052,7 @@ def _cmd_exec(args: argparse.Namespace) -> int:
             target.user,
             _append_copilot_args(target.acp_command, extra),
             handle=target.container_id,
+            portable_policy=portable,
         )
     finally:
         target_lock.release()
@@ -1047,8 +1068,14 @@ def _launch_container_agent(
     *,
     container_id: str | None = None,
     handle: str | None = None,
+    portable_policy: bool = False,
 ) -> int:
-    """Launch through the trust-profiled transport while holding its lock."""
+    """Launch through the trust-profiled transport while holding its lock.
+
+    ``portable_policy`` means the portable receiver already admitted this
+    launch, so (as for the portable Session Host) a direct driver exec gets
+    no guest-side agent-worktrees launch guard.
+    """
     if actual_profile == RESTRICTED_PROFILE:
         acp_command = hosting_policy.guarded_launch(acp_command, fleet.workspace_folder or config.workspace_folder)
         spawn_cmd = build_restricted_acp_spawn_command(
@@ -1143,15 +1170,17 @@ def _launch_container_agent(
     try:
         ssh_config = prepare_ssh_config(member, user) if plan.ssh else None
         copilot_auth_env = process_auth.prepare_launch(config, fleet, member, user)
-        acp_command = hosting_policy.guarded_launch(
-            process_auth.wrap_command(acp_command, copilot_auth_env), fleet.workspace_folder or config.workspace_folder,
-        )
+        acp_command = process_auth.wrap_command(acp_command, copilot_auth_env)
+        if not portable_policy or plan.ssh:
+            acp_command = hosting_policy.guarded_launch(
+                acp_command, fleet.workspace_folder or config.workspace_folder,
+            )
         remote_command = build_remote_command(acp_command, remote_env)
         spawn_cmd = build_ssh_command(
             ssh_config,
             remote_command,
             reverse_forwards=reverse_forwards,
-        ) if plan.ssh else _runtime_drivers().stream_routed(
+        ) if ssh_config is not None else _runtime_drivers().stream_routed(
             ["docker", "exec", "-i", "-u", user, member, "sh", "-c", remote_command],
         )
         if not plan.ssh and spawn_cmd[:1] == ["docker"]:  # never fall back to Docker

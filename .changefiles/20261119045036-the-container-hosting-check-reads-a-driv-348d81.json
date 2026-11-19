@@ -1,9 +1,0 @@
-{
-  "comment": "The container hosting check reads a driver-exec venue's portable receiving-policy declaration and runs the portable guest check over runtime-proxy.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

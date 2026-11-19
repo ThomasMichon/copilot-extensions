@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 from collections.abc import Callable, Iterator, Sequence
-from typing import TypedDict, cast
+from typing import Any, TypedDict, cast
 
 import pytest
 import yaml
@@ -645,6 +645,57 @@ def test_exec_launches_acp_through_driver_stream(
     # The driver owns the relay: agent-containers injects none of its wiring.
     assert not any(name.startswith("LC_GIT_CREDENTIAL_RELAY") for name in seen["staged"])
     assert not any(name.startswith("LC_GIT_CREDENTIAL_RELAY") for name in seen["env"])
+
+
+@posix_only
+@pytest.mark.parametrize("allowed", [True, False])
+def test_exec_admits_driver_member_through_portable_policy_without_guest_worktrees(
+    fake: SimpleNamespace, no_docker: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    allowed: bool,
+) -> None:
+    from agent_containers.resolver import AGENT_CONTAINERS_EXEC_POLICY_CONTEXT_ENV
+
+    monkeypatch.setenv("FAKE_DRIVER_CAPS", json.dumps({"owns_relay": True}))
+    workspace = tmp_path / "workspace"
+    policy = workspace / ".copilot-extensions" / "agent-worktrees" / "config.yaml"
+    policy.parent.mkdir(parents=True)
+    policy.write_text(f"expose_agent: {str(allowed).lower()}\n")
+    config = _write_config(tmp_path, monkeypatch, relay_enabled=True, workspace_folder=str(workspace))
+    fleet.reconcile_up(config, "example")
+    monkeypatch.setenv(AGENT_CONTAINERS_EXEC_POLICY_CONTEXT_ENV, json.dumps({
+        "schema": "agent-bridge.receiving-policy", "version": 1, "marketplaceId": "example",
+    }))
+    seen: LaunchCapture = {}
+    monkeypatch.setattr(cli, "host_gh_token", lambda: "gh-token")
+    monkeypatch.setattr(cli, "prepare_ssh_config", lambda *a: pytest.fail("no SSH"))
+    monkeypatch.setattr(cli, "write_remote_env", lambda name, user, values: "/launch/1.env")
+    monkeypatch.setattr(cli, "cleanup_remote_env", lambda *a: None)
+    monkeypatch.setattr(cli, "container_environment", lambda *a: {"PATH": "/usr/bin"})
+
+    def execute(argv: list[str], env: dict[str, str]) -> int:
+        seen["argv"] = argv
+        return 0
+
+    monkeypatch.setattr(cli, "_exec_stdio", execute)
+    args = argparse.Namespace(name="example-1", stdio=True, force=False, copilot_args=None)
+
+    if allowed:
+        assert cli._cmd_exec(args) == 0
+    else:
+        with pytest.raises(RuntimeError, match="expose_agent"):
+            cli._cmd_exec(args)
+
+    calls = cast(list[dict[str, Any]], fake.state()["calls"])
+    checks = [call["request"] for call in calls if call["verb"] == "exec"]
+    # The real hosting check ran once in the member, via the portable receiver.
+    assert len(checks) == 1 and "python3 -I -S" in checks[0]["argv"][-1]
+    assert not any("agent-worktrees" in json.dumps(call["request"]) for call in calls)
+    if allowed:
+        launch = json.loads(seen["argv"][seen["argv"].index("--request") + 1])
+        assert "copilot --acp" in launch["argv"][2]
+        assert "agent-policy" not in launch["argv"][2]
+    else:
+        assert "argv" not in seen
 
 
 def test_copilot_verb_requires_ssh_capability(

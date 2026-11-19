@@ -1,9 +1,0 @@
-{
-  "comment": "Driver-exec members' venue declares the portable receiving policy and provider command, so agent-bridge's hosting check no longer needs agent-worktrees inside the member.",
-  "changes": [
-    {
-      "plugin": "agent-containers",
-      "type": "patch"
-    }
-  ]
-}

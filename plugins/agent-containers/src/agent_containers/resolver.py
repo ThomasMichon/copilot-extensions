@@ -416,6 +416,11 @@ def build_restricted_spawn_command(
 
 
 AGENT_CONTAINERS_EXEC_COPILOT_ARGS_ENV = "AGENT_CONTAINERS_EXEC_COPILOT_ARGS"
+# Set by agent-bridge for driver-exec venues that declare the portable
+# receiving policy: the Bridge-bound receiving context for the exec wrapper's
+# own portable hosting check (an env var, like the copilot args above, so it
+# survives ``.cmd`` shim reparsing on Windows).
+AGENT_CONTAINERS_EXEC_POLICY_CONTEXT_ENV = "AGENT_CONTAINERS_EXEC_REPOSITORY_POLICY_CONTEXT"
 
 
 def build_restricted_inference_spawn_command(

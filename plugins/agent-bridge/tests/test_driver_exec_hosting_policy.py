@@ -82,3 +82,31 @@ async def test_undeclared_driver_venue_keeps_legacy_guest_check(
         await query_provider_policy(_target(), operation="launch")
     argv, kwargs = calls[-1]
     assert "agent-policy check" in argv[-1] and "input_bytes" not in kwargs
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("declared", [True, False])
+async def test_spawn_hands_exec_wrapper_its_bound_receiving_context(
+    monkeypatch: pytest.MonkeyPatch, declared: bool,
+) -> None:
+    from agent_bridge import hosting_policy, transport
+
+    seen: dict[str, str] = {}
+
+    async def admitted(target: SpawnTarget, **kwargs: Any) -> None:
+        return None
+
+    async def spawn(*argv: str, env: dict[str, str], **kwargs: Any) -> object:
+        seen.update(env)
+        raise OSError("stop before a real child")
+
+    monkeypatch.setattr(hosting_policy, "require_target_hosting", admitted)
+    monkeypatch.setattr("asyncio.create_subprocess_exec", spawn)
+    monkeypatch.setattr("agent_bridge.portable_policy.selected_context", lambda: "bound-context")
+    monkeypatch.setenv(transport._CONTAINERS_POLICY_CONTEXT_ENV, "inherited")
+    target = _target(**({"portable_receiving_policy": {"version": 1}} if declared else {}))
+
+    with pytest.raises(OSError, match="stop before"):
+        await transport.spawn_raw(target)
+
+    assert seen.get(transport._CONTAINERS_POLICY_CONTEXT_ENV) == ("bound-context" if declared else None)
