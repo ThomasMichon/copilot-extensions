@@ -557,7 +557,8 @@ private `run-query` operation. It borrows the existing transport and strict
 child-Job/capture owner, not a daemon or new supervisor. A dedicated helper
 state closes before the response returns and never replaces the shell's
 existing instance guard. Requests supply literal argv, cwd and an explicit
-environment, a target deadline of at most 30 seconds, and per-stream capture
+environment, a target deadline of at most 30 seconds (or explicit `null` for
+caller-cancellable launch admission without an execution deadline), and per-stream capture
 limits of at most 65536 bytes. Actual child-tree settlement is required;
 timeout, output overflow and unknown cleanup cannot become successful output.
 The caller still owns applicability and capability interpretation. This
@@ -857,6 +858,12 @@ Unconfirmed cleanup retains exact process/output resources on
 add caller-death supervision: a dead caller is not settlement evidence.
 Descendants must remain in the inherited POSIX group; deliberate group/session
 escape is outside this contract, not a claimed whole-tree guarantee.
+
+`run_caller_owned(..., timeout=None, ...)` also supports foreground admission
+without an elapsed execution limit. Per-stream byte limits, caller-death
+custody, cancellation and confirmed cleanup remain enforced. An explicit
+aggregate `budget` still bounds execution and settlement; `None` does not
+override it. This opt-in does not change finite timeouts on existing callers.
 
 ### Aggregate execution and settlement budget
 

@@ -68,7 +68,7 @@ def test_foreground_channel_only_reaches_a_supported_selected_receiver(monkeypat
         assert argv == [*command, "--version"]
         assert "CE_TERMINAL_LAUNCH" not in options["env"]
         assert options["env"]["UV_NO_SYNC"] == "1"
-        assert options["timeout"] == 10
+        assert options["timeout"] is None
         assert options["max_stdout_bytes"] == options["max_stderr_bytes"] == 4096
         return SimpleNamespace(returncode=int(response == "failed"), stderr="", stdout=outputs[response])
 

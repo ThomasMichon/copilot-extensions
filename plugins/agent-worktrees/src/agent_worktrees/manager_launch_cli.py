@@ -170,57 +170,28 @@ def _report_manager_probe_failure(summary: str, detail: str | bytes = "") -> Non
 
 def _probe_worktree_manager_version(
     command: list[str],
-    *,
-    attempts: int = 2,
-    timeout: float = 20.0,
 ) -> tuple[tuple[int, int, int, int] | None, subprocess.CompletedProcess[str] | None]:
-    """Run a fast ``--version`` probe and parse a comparable version tuple.
-
-    Retries on a bare timeout only -- never on a genuine spawn failure (a
-    missing/non-executable binstub, which another attempt cannot fix). A cold
-    ``uv run`` resync (e.g. right after a self-update, or under heavy
-    concurrent load from other worktree/session activity on the same
-    machine) has been observed to take several seconds on its own, well
-    within an installed Manager's legitimate startup budget -- treating one
-    slow probe as conclusively "unusable" was too quick to call a real,
-    working install uninstalled/broken (the loud reinstall-from-scratch
-    guidance) when it was really just transient load.
-    """
-    probe_attempts = max(1, attempts)
-    timeout_detail: str | bytes = ""
-    for _attempt in range(probe_attempts):
-        try:
-            proc = subprocess.run(
-                command,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                env=_launch_probe_env(),
-            )
-        except subprocess.TimeoutExpired as error:
-            timeout_detail = (
-                _safe_probe_diagnostic(error.stderr or "")
-                or _safe_probe_diagnostic(error.stdout or "")
-                or timeout_detail
-            )
-            continue
-        except (OSError, subprocess.SubprocessError) as error:
-            _report_manager_probe_failure(
-                "Control-plane --version probe could not start.", str(error),
-            )
-            return None, None
-        if proc.returncode != 0:
-            return None, proc
-        version = _parse_comparable_version(proc.stdout or "")
-        if version is None:
-            return None, proc
-        return version, proc
-    _report_manager_probe_failure(
-        f"Control-plane --version probe timed out after {probe_attempts} attempts "
-        f"({timeout:g}s each).",
-        timeout_detail,
-    )
-    return None, None
+    """Observe the selected command without turning CPU contention into failure."""
+    try:
+        proc = subprocess.run(
+            command, capture_output=True, text=True, env=_launch_probe_env(),
+        )
+    except subprocess.TimeoutExpired as error:
+        _report_manager_probe_failure(
+            "Control-plane --version command reported a timeout.",
+            _safe_probe_diagnostic(error.stderr or "")
+            or _safe_probe_diagnostic(error.stdout or "")
+            or str(error),
+        )
+        return None, None
+    except (OSError, subprocess.SubprocessError) as error:
+        _report_manager_probe_failure(
+            "Control-plane --version probe could not start.", str(error),
+        )
+        return None, None
+    if proc.returncode != 0:
+        return None, proc
+    return _parse_comparable_version(proc.stdout or ""), proc
 
 
 @dataclass(frozen=True)
@@ -241,7 +212,7 @@ def _worktree_manager_health() -> _ManagerHealth:
         "_probe_worktree_manager_version", _probe_worktree_manager_version
     )([*manifest.command, "--version"])
     if proc is None:
-        reason = "its --version health check could not complete (could not start or timed out)"
+        reason = "its --version health check could not complete"
     elif proc.returncode != 0:
         reason = f"its --version health check failed (exit {proc.returncode})"
     elif version is None:

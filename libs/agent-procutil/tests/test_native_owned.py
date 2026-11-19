@@ -18,7 +18,7 @@ pytestmark = pytest.mark.skipif(os.name != "nt", reason="Windows native prerequi
 HELPER = Path(__file__).resolve().parents[1] / "src" / "agent_procutil" / "native_owned.ps1"
 
 
-@pytest.mark.parametrize("mode", ["success", "overflow", "timeout"])
+@pytest.mark.parametrize("mode", ["success", "overflow", "timeout", "no-deadline"])
 def test_transient_native_query_bounds_capture_and_retires_its_helper(tmp_path, native_shell, mode):
     marker = tmp_path / "query.pid"
     release = tmp_path / "query.release"
@@ -28,10 +28,12 @@ def test_transient_native_query_bounds_capture_and_retires_its_helper(tmp_path, 
         f"while not pathlib.Path({str(release)!r}).exists(): time.sleep(.01)\n"
         + {
             "success": "print('finite response');sys.exit(7)",
+            "no-deadline": "time.sleep(10.1);print('finite response');sys.exit(7)",
             "overflow": "sys.stdout.write('x'*100000);sys.stdout.flush();time.sleep(30)",
             "timeout": "time.sleep(30)",
         }[mode]
     )
+    timeout_ms = "$null" if mode == "no-deadline" else "5000"
     body = (
         f"$ErrorActionPreference='Stop'; . {quoted(HELPER.with_name('daemon_instances.ps1'))}; "
         "$environment=@{}; foreach($entry in [Environment]::GetEnvironmentVariables().GetEnumerator())"
@@ -40,7 +42,7 @@ def test_transient_native_query_bounds_capture_and_retires_its_helper(tmp_path, 
         "try { "
         "$result=Invoke-DaemonInstanceRequest -Transient @{command='run-query';parameters=@{"
         f"executable={quoted(sys.executable)};arguments=@('-I','-B','-c',{quoted(program)});"
-        f"cwd={quoted(tmp_path)};environment=$environment;timeout_ms=5000;limit=4096}}}}; "
+        f"cwd={quoted(tmp_path)};environment=$environment;timeout_ms={timeout_ms};limit=4096}}}}; "
         "@{result=$result;error=$null;elapsed=$clock.ElapsedMilliseconds;"
         "globalHelper=($null -ne [AppDomain]::CurrentDomain.GetData('copilot-daemon-instance-shell-v1'))}"
         " | ConvertTo-Json -Compress "
@@ -87,9 +89,11 @@ def test_transient_native_query_bounds_capture_and_retires_its_helper(tmp_path, 
     assert not outcome["globalHelper"], outcome
     assert outcome["elapsed"] < 30000
     assert marker.exists(), outcome
-    if mode == "success":
+    if mode in {"success", "no-deadline"}:
         assert outcome["result"] == {"returncode": 7, "stdout": "finite response\n", "stderr": ""}
         assert outcome["error"] is None
+        if mode == "no-deadline":
+            assert outcome["elapsed"] >= 10000
     else:
         assert outcome["result"] is None and outcome["error"], outcome
 

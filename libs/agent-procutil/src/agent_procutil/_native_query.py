@@ -21,8 +21,8 @@ def run(value: object) -> dict:
         ):
             raise ValueError("native query arguments must be NUL-free strings")
         timeout, limit = value["timeout_ms"], value["limit"]
-        if type(timeout) is not int or not 0 < timeout <= 30000:
-            raise ValueError("native query requires a deadline of at most 30 seconds")
+        if timeout is not None and (type(timeout) is not int or not 0 < timeout <= 30000):
+            raise ValueError("native query requires no deadline or at most 30 seconds")
         if type(limit) is not int or not 0 < limit <= 65536:
             raise ValueError("native query requires a capture limit of at most 65536 bytes")
         environment = value["environment"]
@@ -44,7 +44,8 @@ def run(value: object) -> dict:
     try:
         result = _run_owned(
             [executable, *arguments], cwd=cwd, env=environment,
-            timeout=timeout / 1000, capture_limits=(limit, limit),
+            timeout=timeout / 1000 if timeout is not None else None,
+            capture_limits=(limit, limit),
             on_settled=on_settled,
         )
     except BaseException as error:

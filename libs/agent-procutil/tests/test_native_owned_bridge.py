@@ -13,18 +13,20 @@ from agent_procutil.owned_process import OwnedCleanupError
 from agent_procutil import _native_query as query
 
 
+@pytest.mark.parametrize("timeout_ms", [2000, None])
 def test_native_query_requires_actual_settlement_and_bounded_original_arguments(
-    native_request, monkeypatch,
+    native_request, monkeypatch, timeout_ms,
 ):
     native_request.pop("log")
     native_request["limit"] = 4096
+    native_request["timeout_ms"] = timeout_ms
 
     def run(argv, **options):
         assert argv == [native_request["executable"], *native_request["arguments"]]
         assert options["capture_limits"] == (4096, 4096)
         assert options["cwd"] == native_request["cwd"]
         assert options["env"] == native_request["environment"]
-        assert options["timeout"] == 2
+        assert options["timeout"] == (2 if timeout_ms is not None else None)
         options["on_settled"]()
         return SimpleNamespace(returncode=7, stdout="exact output", stderr="exact error")
 

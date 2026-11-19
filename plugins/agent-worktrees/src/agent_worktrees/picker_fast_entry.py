@@ -99,12 +99,6 @@ def dispatch(argv: list[str]) -> int | None:
     environment.pop("UV_INTERNAL__PYTHONHOME", None)
     from .terminal_launch import available
 
-    if result.get("manager_session") and not available():
-        from .picker_session_entry import open_session
-
-        code = open_session(result, engine_command, environment)
-        if code is not None:
-            return code
     from agent_procutil import spawn_sync_in_kill_on_close_job
 
     from .terminal_launch import select_receiver

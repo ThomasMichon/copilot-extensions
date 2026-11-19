@@ -619,6 +619,37 @@ def test_repeated_foreground_calls_cannot_reuse_a_completed_offer(tmp_path):
     assert list(tmp_path.glob("ce-terminal-*")) == []
 
 
+def test_slow_terminal_capability_query_has_no_launch_deadline(tmp_path):
+    from _terminal_console_fixture import Console
+
+    program = (
+        "import time;time.sleep(10.25);"
+        "from worktree_manager import terminal_launch;"
+        "assert terminal_launch.answer_query()"
+    )
+    host = tmp_path / "slow-query.ps1"
+    host.write_text(
+        "$ErrorActionPreference='Stop'\n"
+        f". {_quote(HELPER)}\n"
+        f"$supported=Get-WorktreeTerminalCapability {_quote(sys.executable)} "
+        f"@('-I','-B','-c',{_quote(program)},'--version') worktree_manager\n"
+        "if(-not $supported){throw 'Delayed runtime was not admitted'}\n"
+        "'slow-query-ready'\n",
+        encoding="utf-8",
+    )
+    environment = dict(os.environ)
+    environment.pop("CE_TERMINAL_LAUNCH", None)
+    shell = shutil.which("pwsh")
+    assert shell
+    with Console([shell, "-NoProfile", "-File", str(host)], env=environment, cwd=tmp_path) as console:
+        deadline = time.monotonic() + 60
+        while not console.exited(console.process.process):
+            assert time.monotonic() < deadline
+            time.sleep(.05)
+        assert console.wait() == 0, console.output.decode("utf-8", "replace")
+        assert b"slow-query-ready" in console.output
+
+
 def test_cold_and_warm_queries_retire_all_observed_transient_children(tmp_path, capsys):
     from _terminal_console_fixture import Console
 

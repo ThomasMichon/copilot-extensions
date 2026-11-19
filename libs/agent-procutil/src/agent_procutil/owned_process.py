@@ -177,7 +177,9 @@ def require_contained_worker() -> None:
             raise RuntimeError("contained worker requires its outer owner's session/group root")
 
 
-def _remaining(deadline: float, argv: list[str], timeout: float | None) -> float:
+def _remaining(deadline: float | None, argv: list[str], timeout: float | None) -> float:
+    if deadline is None:
+        return math.inf
     remaining = deadline - time.monotonic()
     if remaining <= 0:
         raise subprocess.TimeoutExpired(argv, cast(float, timeout))
@@ -274,8 +276,8 @@ def _posix_cleanup_error(
 
 
 def _communicate_unreaped(
-    process: Any, *, input_text: str | bytes | None, deadline: float,
-    argv: list[str], timeout: float, capture_limits: tuple[int, int] | None = None,
+    process: Any, *, input_text: str | bytes | None, deadline: float | None,
+    argv: list[str], timeout: float | None, capture_limits: tuple[int, int] | None = None,
     binary: bool = False,
     capture_timeout: bool = False,
 ) -> tuple[str | bytes | None, ...]:
@@ -306,7 +308,7 @@ def _communicate_unreaped(
             else:
                 process.stdin.close()
         while selector.get_map():
-            for key, _mask in selector.select(remaining()):
+            for key, _mask in selector.select(remaining() if deadline is not None else .05):
                 if key.data == -1:
                     try:
                         offset += os.write(key.fd, cast(memoryview, data)[offset:offset + 65536])
@@ -405,8 +407,8 @@ def _communicate_windows(
 
 
 def _communicate_windows_bounded(
-    process: Any, job: Any, *, input_text: str | bytes | None, deadline: float,
-    argv: list[str], timeout: float, capture_limits: tuple[int, int],
+    process: Any, job: Any, *, input_text: str | bytes | None, deadline: float | None,
+    argv: list[str], timeout: float | None, capture_limits: tuple[int, int],
     binary: bool = False,
     budget: OwnedExecutionBudget | None = None,
     _settlement: _CleanupSettlement | None = None,
@@ -579,7 +581,7 @@ def _communicate_windows_bounded(
                 process.wait(timeout=min(0.05, remaining))
             except subprocess.TimeoutExpired:
                 continue
-        if time.monotonic() >= deadline:
+        if deadline is not None and time.monotonic() >= deadline:
             raise subprocess.TimeoutExpired(argv, timeout)
     except BaseException as error:
         note(error)
@@ -658,7 +660,7 @@ def _run_owned(
     output_fds: Mapping[str, int] | None = None,
 ) -> subprocess.CompletedProcess[Any]:
     streaming = inactivity_timeout is not None or output_fds is not None
-    if timeout is None and not streaming or timeout is not None and (
+    if timeout is None and not streaming and capture_limits is None or timeout is not None and (
         type(timeout) not in (int, float) or not math.isfinite(timeout) or timeout <= 0
     ):
         raise ValueError("native child timeout must be finite and positive")
@@ -670,7 +672,7 @@ def _run_owned(
         or not math.isfinite(inactivity_timeout) or inactivity_timeout <= 0
     ):
         raise ValueError("native child inactivity timeout must be finite and positive")
-    if timeout is None and inactivity_timeout is None:
+    if streaming and timeout is None and inactivity_timeout is None:
         raise ValueError("streaming execution requires an absolute or inactivity deadline")
     if type(inherit_process_group) is not bool:
         raise ValueError("inherit_process_group must be a boolean")
@@ -944,7 +946,7 @@ def require_caller_owned_support() -> None:
 
 
 def run_caller_owned(
-    argv: list[str], *, timeout: float, max_stdout_bytes: int, max_stderr_bytes: int,
+    argv: list[str], *, timeout: float | None, max_stdout_bytes: int, max_stderr_bytes: int,
     input_text: str | None = None, capture: bool = True,
     input_bytes: bytes | None = None,
     on_settled: Callable[[], None] | None = None,
@@ -954,7 +956,7 @@ def run_caller_owned(
     budget: OwnedExecutionBudget | None = None,
     borrow_parent_scope: bool = False,
 ) -> subprocess.CompletedProcess[Any]:
-    """Execute with caller lifetime/stream budgets; optional binary stdin is byte-exact."""
+    """Execute with caller lifetime/stream bounds and an optional execution deadline."""
     from agent_procutil._caller_owned import run
 
     options: dict[str, Any] = {

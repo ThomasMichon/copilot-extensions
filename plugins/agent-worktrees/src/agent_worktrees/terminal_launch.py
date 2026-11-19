@@ -51,7 +51,7 @@ def select_receiver(
         "AGENT_WORKTREES_NO_SELFPROVISION": "1",
     }
     result = run_caller_owned(
-        [*query_command, "--version"], env=query_environment, timeout=10,
+        [*query_command, "--version"], env=query_environment, timeout=None,
         max_stdout_bytes=4096, max_stderr_bytes=4096,
     )
     if result.returncode != 0 or result.stderr:

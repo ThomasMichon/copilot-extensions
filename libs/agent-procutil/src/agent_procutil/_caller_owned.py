@@ -161,8 +161,10 @@ def _validate(request: object) -> dict:
     if any("\0" in arg for arg in argv):
         raise ValueError("native child argv must not contain NUL characters")
     timeout = request["timeout"]
-    if type(timeout) not in (int, float) or not math.isfinite(timeout) or timeout <= 0:
-        raise ValueError("native child timeout must be finite and positive")
+    if timeout is not None and (
+        type(timeout) not in (int, float) or not math.isfinite(timeout) or timeout <= 0
+    ):
+        raise ValueError("native child timeout must be None or finite and positive")
     if request["input_text"] is not None and not isinstance(request["input_text"], str):
         raise ValueError("native child input_text must be text or None")
     if request["input_text"] is not None:
@@ -250,7 +252,7 @@ def _decode(reply: object, request: dict, returncode: int) -> subprocess.Complet
 
 
 def run(
-    argv: list[str], *, timeout: float, max_stdout_bytes: int, max_stderr_bytes: int,
+    argv: list[str], *, timeout: float | None, max_stdout_bytes: int, max_stderr_bytes: int,
     input_text: str | None, capture: bool,
     input_bytes: bytes | None = None,
     on_settled: Callable[[], None] | None = None,
@@ -289,7 +291,9 @@ def run(
                if budget is not None else {}),
         })
         if budget is not None and os.name != "nt" and not borrow_parent_scope:
-            target_deadline = min(time.monotonic() + timeout, budget.execution_deadline)
+            target_deadline = budget.execution_deadline
+            if timeout is not None:
+                target_deadline = min(time.monotonic() + timeout, target_deadline)
             capped = OwnedExecutionBudget(target_deadline + budget.cleanup_reserve, budget.cleanup_reserve)
             enclosed = capped.enclosed_budget()
             execution_budget = OwnedExecutionBudget(capped.deadline, capped.cleanup_reserve / 2)
@@ -345,7 +349,8 @@ def run(
                     str(Path(__file__).resolve().parents[1]), str(reader),
                     *([str(os.getpid())] if sys.platform == "darwin" else []),
                 ],
-                timeout=timeout + (budget.cleanup_reserve / 2 if budget else 0),
+                timeout=(timeout + (budget.cleanup_reserve / 2 if budget else 0)
+                         if timeout is not None else None),
                 input_text=frame, capture=True, pass_fds=(reader,),
                 capture_limits=(6 * (max_stdout_bytes + max_stderr_bytes) + 4096, 65536),
                 confirm_posix_group=True,

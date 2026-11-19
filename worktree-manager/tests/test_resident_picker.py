@@ -37,6 +37,12 @@ def handoff(tmp_path, monkeypatch):
 
 
 def test_entry_consumes_a_scoped_bootstrap_and_preserves_engine_selection(handoff, tmp_path, monkeypatch):
+    from worktree_manager import warm_picker_client
+
+    monkeypatch.setattr(
+        warm_picker_client, "run",
+        lambda *_a: pytest.fail("app entry must not wait on the Manager daemon"),
+    )
     calls = []
     monkeypatch.setenv(resident_picker.BOOTSTRAP_ENV, json.dumps(handoff))
     monkeypatch.setattr(runner, "run", lambda project, **kwargs: calls.append((project, kwargs)))
@@ -153,10 +159,10 @@ def test_retained_result_is_scoped_and_consumed_once_before_actions(handoff, tmp
         assert len(calls) == 1
 
 
-@pytest.mark.parametrize("entry", ["warm", "retained"])
+@pytest.mark.parametrize("entry", ["direct", "retained"])
 @pytest.mark.parametrize("switch_to_anchor", [False, True])
 def test_remote_restore_keeps_bootstrap_project_and_scalars(handoff, tmp_path, monkeypatch, entry, switch_to_anchor):
-    from worktree_manager import __main__ as cli, warm_picker_client
+    from worktree_manager import __main__ as cli
     from worktree_manager.production_picker import context, project_config
     from worktree_manager.production_picker.picker_tui import data_ssh, maintenance
 
@@ -196,8 +202,8 @@ def test_remote_restore_keeps_bootstrap_project_and_scalars(handoff, tmp_path, m
     monkeypatch.setattr(maintenance, "_ssh_json", remux)
     monkeypatch.setattr(cli, "_run_launch", lambda request: launches.append(request) or 17)
     monkeypatch.setattr(runner, "run", lambda *_a, **_k: pytest.fail("completion reopened the UI"))
-    if entry == "warm":
-        monkeypatch.setattr(warm_picker_client, "run", lambda *_a: (True, decision))
+    if entry == "direct":
+        monkeypatch.setattr(runner, "run", lambda *_a, **_k: decision)
         args = ["--project", "sample"]
         invoke = resident_picker.main
     else:

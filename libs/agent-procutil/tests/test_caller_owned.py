@@ -32,11 +32,36 @@ native_execution = pytest.mark.skipif(
 )
 
 
-def _run(code: str, *, timeout: float = 5, stdout: int = 4096, stderr: int = 4096, **kwargs):
+def _run(code: str, *, timeout: float | None = 5, stdout: int = 4096, stderr: int = 4096, **kwargs):
     return run_caller_owned(
         [sys.executable, "-I", "-c", code], timeout=timeout,
         max_stdout_bytes=stdout, max_stderr_bytes=stderr, **kwargs,
     )
+
+
+@native_execution
+def test_no_execution_deadline_preserves_capture_and_confirmed_settlement():
+    settled = []
+    result = _run(
+        "import time;time.sleep(.1);print('launch ready')",
+        timeout=None, on_settled=lambda: settled.append(True),
+    )
+    assert result.returncode == 0 and result.stdout == "launch ready\n"
+    assert settled == [True]
+
+
+@native_execution
+def test_no_execution_deadline_still_honors_the_aggregate_budget():
+    from agent_procutil.owned_budget import OwnedExecutionBudget
+
+    settled = []
+    with pytest.raises(subprocess.TimeoutExpired):
+        _run(
+            "import time;time.sleep(30)", timeout=None,
+            budget=OwnedExecutionBudget.from_timeout(3, cleanup_reserve=1),
+            on_settled=lambda: settled.append(True),
+        )
+    assert settled == [True]
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows creation audit")

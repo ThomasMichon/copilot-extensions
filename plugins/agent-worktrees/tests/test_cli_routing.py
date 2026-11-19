@@ -2021,7 +2021,7 @@ def test_failed_registered_provider_without_fallback_is_failure(
         if failure == "spawn":
             raise OSError("cannot spawn")
         if failure == "timeout":
-            raise m.subprocess.TimeoutExpired(command, kwargs["timeout"])
+            raise m.subprocess.TimeoutExpired(command, 1)
         return m.subprocess.CompletedProcess(
             command, 7 if failure == "exit" else 0,
             stdout="unknown" if failure == "version" else "0.1.0-dev20",
@@ -2030,7 +2030,7 @@ def test_failed_registered_provider_without_fallback_is_failure(
 
     monkeypatch.setattr(m.subprocess, "run", run)
     assert m.dispatch_bare_invocation(has_project) == 1
-    assert len(calls) == (2 if failure == "timeout" else 1)
+    assert len(calls) == 1
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "Cannot use 'worktree-manager' via" in captured.err
@@ -2166,27 +2166,22 @@ def test_usable_manager_rejects_unrunnable_binstub(monkeypatch, tmp_path):
     assert m._usable_worktree_manager() is None
 
 
-def test_usable_manager_survives_one_transient_timeout(monkeypatch, tmp_path):
-    """A `--version` probe that times out once (a cold `uv run` resync under
-    load) must not be declared unusable outright -- retrying recovers a
-    genuinely healthy install instead of falsely reporting it uninstalled."""
+def test_usable_manager_does_not_impose_a_startup_deadline(monkeypatch, tmp_path):
     command = _register_provider(tmp_path)
     monkeypatch.setenv(m._CONTROL_PLANE_PROVIDERS_DIR_ENV, str(_provider_registry_dir(tmp_path)))
     calls = []
 
-    def flaky(cmd, **kw):
+    def slow(cmd, **kw):
         calls.append(cmd)
-        if len(calls) == 1:
-            raise m.subprocess.TimeoutExpired(cmd, kw.get("timeout"))
+        assert kw.get("timeout") is None
         return _fake_run(0)(cmd, **kw)
 
-    monkeypatch.setattr(m.subprocess, "run", flaky)
+    monkeypatch.setattr(m.subprocess, "run", slow)
     assert m._usable_worktree_manager() == command
-    assert len(calls) == 2
+    assert len(calls) == 1
 
 
-def test_usable_manager_rejects_a_persistently_timing_out_binstub(monkeypatch, tmp_path):
-    """Every attempt timing out is still reported unusable, not retried forever."""
+def test_usable_manager_preserves_an_external_timeout_without_replaying(monkeypatch, tmp_path):
     _register_provider(tmp_path)
     monkeypatch.setenv(m._CONTROL_PLANE_PROVIDERS_DIR_ENV, str(_provider_registry_dir(tmp_path)))
     calls = []
@@ -2197,7 +2192,7 @@ def test_usable_manager_rejects_a_persistently_timing_out_binstub(monkeypatch, t
 
     monkeypatch.setattr(m.subprocess, "run", always_times_out)
     assert m._usable_worktree_manager() is None
-    assert len(calls) == 2  # retried once, then gave up -- not an unbounded loop
+    assert len(calls) == 1
 
 
 def test_usable_manager_does_not_retry_a_genuine_spawn_failure(monkeypatch, tmp_path):

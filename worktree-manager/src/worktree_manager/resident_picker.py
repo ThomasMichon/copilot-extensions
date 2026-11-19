@@ -107,7 +107,6 @@ def _run_decision(project: str, payload: dict, decision: dict) -> int:
 
 
 def main(args: list[str]) -> int:
-    raw = os.environ.get(BOOTSTRAP_ENV, "")
     try:
         project, payload = consume(args)
     except (TypeError, ValueError) as error:
@@ -117,13 +116,9 @@ def main(args: list[str]) -> int:
     from .process_priority import raise_current_process_priority, restore_normal_process_priority
     raise_current_process_priority()
     try:
-        from .warm_picker_client import run as run_warm
+        from .production_picker import runner
 
-        warm, decision = run_warm(json.loads(raw))
-        if not warm:
-            from .production_picker import runner
-
-            decision = runner.run(project, bootstrap_payload=payload)
+        decision = runner.run(project, bootstrap_payload=payload)
     except Exception as error:
         print(f"error: production Picker failed: {error}", file=sys.stderr)
         return 1

@@ -76,7 +76,8 @@ function Close-DaemonInstanceWorker {
 }
 
 function Start-DaemonInstanceWorker {
-    param([hashtable]$State)
+    param([hashtable]$State, [switch]$NoTimeout)
+    $startupSeconds = if ($NoTimeout) { [double]::PositiveInfinity } else { 30.0 }
     if ('CopilotExtensions.DaemonInstanceNative' -as [type]) {
         throw 'A legacy compiled daemon-instance adapter is already loaded. Use a fresh PowerShell process after the normal payload update; existing instance custody was not migrated.'
     }
@@ -157,13 +158,13 @@ sys.exit(main(packet))
         $State.error = $State.process.StandardError
         $State.diagnostics = $State.error.ReadToEndAsync()
         $qualification = $State.output.ReadLineAsync()
-        Wait-DaemonInstanceTask $qualification $clock 30
+        Wait-DaemonInstanceTask $qualification $clock $startupSeconds
         if ($qualification.Result -ceq 'daemon-python-unsupported') {
             $remaining = [Math]::Max(0, [Math]::Min(3000, 30000 - $clock.ElapsedMilliseconds))
             if (-not $State.process.WaitForExit([int]$remaining)) {
                 throw 'Unsupported Python process exit is unconfirmed; selection was not retried.'
             }
-            Wait-DaemonInstanceTask $State.diagnostics $clock 30
+            Wait-DaemonInstanceTask $State.diagnostics $clock $startupSeconds
             if ($State.process.ExitCode -ne 1) {
                 throw 'Unsupported Python returned an unexpected outcome; selection was not retried.'
             }
@@ -181,10 +182,10 @@ sys.exit(main(packet))
     }
     if (-not $compatible) { throw $prerequisiteError }
     $ready = $State.output.ReadLineAsync()
-    Wait-DaemonInstanceTask ($State.input.WriteLineAsync($encoded)) $clock 30
+    Wait-DaemonInstanceTask ($State.input.WriteLineAsync($encoded)) $clock $startupSeconds
     $State.offerPermitted = $true
-    Wait-DaemonInstanceTask ($State.input.WriteLineAsync('offer:' + $State.nonce)) $clock 30
-    Wait-DaemonInstanceTask $ready $clock 30
+    Wait-DaemonInstanceTask ($State.input.WriteLineAsync('offer:' + $State.nonce)) $clock $startupSeconds
+    Wait-DaemonInstanceTask $ready $clock $startupSeconds
     if (-not $ready.Result) { throw 'Daemon instance helper startup ended before a custody receipt.' }
     $receipt = $ready.Result | ConvertFrom-Json
     if ($receipt.version -cne 1 -or $receipt.nonce -cne $State.nonce -or $receipt.owner_pid -cne $PID -or
@@ -199,7 +200,7 @@ sys.exit(main(packet))
     if ((Get-DaemonInstanceProcessBirth $State.worker) -cne $receipt.job.worker_birth -or $State.worker.HasExited) {
         throw 'Daemon instance helper birth identity changed before acknowledgement.'
     }
-    Wait-DaemonInstanceTask ($State.input.WriteLineAsync($State.nonce)) $clock 30
+    Wait-DaemonInstanceTask ($State.input.WriteLineAsync($State.nonce)) $clock $startupSeconds
     $State.broken = $false
 }
 
@@ -238,6 +239,8 @@ function Read-DaemonInstanceResponse {
 
 function Invoke-DaemonInstanceRequest {
     param([Parameter(Mandatory)][hashtable]$Request, [switch]$Transient)
+    $noTimeout = $Request.command -eq 'run-query' -and
+        $Request.parameters.ContainsKey('timeout_ms') -and $null -eq $Request.parameters.timeout_ms
     $gate = [string]::Intern('copilot-daemon-instance-shell-v1')
     $pendingState = $null
     $outcomeReceived = $false
@@ -252,7 +255,7 @@ function Invoke-DaemonInstanceRequest {
             }
             if (-not $Transient) { [AppDomain]::CurrentDomain.SetData($gate, $state) }
             $pendingState = $state
-            try { Start-DaemonInstanceWorker $state }
+            try { Start-DaemonInstanceWorker $state -NoTimeout:$noTimeout }
             catch {
                 $failure = $_
                 $cleanupAttempted = $true
@@ -287,6 +290,7 @@ function Invoke-DaemonInstanceRequest {
         if ($Request.command -in @('run-owned', 'run-query')) {
             $seconds = [Math]::Max(30, $Request.parameters.timeout_ms / 1000.0 + 15)
         }
+        if ($noTimeout) { $seconds = [double]::PositiveInfinity }
         $clock = [Diagnostics.Stopwatch]::StartNew()
         try {
             $json = $Request | ConvertTo-Json -Depth 8 -Compress
