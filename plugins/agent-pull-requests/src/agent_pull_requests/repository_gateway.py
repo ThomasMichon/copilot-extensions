@@ -159,7 +159,7 @@ async def handle(owner: RepositoryGatewayOwner, request: LocalServiceRequest) ->
         except ValueError:
             return response(400, {"error": "invalid_repository_stream"})
 
-    def execute() -> Document:
+    def execute_request() -> Document:
         def checkpoint() -> None:
             owner._check(request)
             if request.context.namespace != owner.store.namespace:
@@ -175,6 +175,15 @@ async def handle(owner: RepositoryGatewayOwner, request: LocalServiceRequest) ->
                 expires_at=request.context.expires_at, checkpoint=checkpoint,
             )
         ))
+
+    def execute() -> Document:
+        if operation != "next-actions" and stream is None:
+            return execute_request()
+        from .repository_read_trace import read
+        return read(
+            execute_request, target=target, repository_key=identity.key,
+            payload=value["request"], stream=stream is not None,
+        )
 
     async def dispatch() -> _Response:
         try:
