@@ -12,17 +12,25 @@ import time
 import venv
 import zipfile
 from contextlib import ExitStack, contextmanager
+from collections.abc import Callable, Iterator
 from email import message_from_bytes
 from pathlib import Path
+from typing import cast
 
 import pytest
 from agent_procutil import no_window_kwargs, spawn_sync_in_kill_on_close_job
 
 from worktree_manager import self_install as si
+from worktree_manager.self_install_payload import _copy_payload
 from _manager_process_fixture import synthetic_runtime
 
+_SOURCE_PAYLOAD = Path(__file__).resolve().parents[1]
+_Launcher = tuple[list[str], dict[str, str], Path]
 
-def _run(argv, *, env, cwd, timeout=20):
+
+def _run(
+    argv: list[str], *, env: dict[str, str], cwd: Path, timeout: float = 20,
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         argv, env=env, cwd=cwd, capture_output=True, text=True,
         encoding="utf-8", timeout=timeout, **no_window_kwargs(),
@@ -33,7 +41,7 @@ def _installed_application_wheel(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, nested: bool,
 ) -> tuple[Path, Path, Path, Path]:
     source = tmp_path / "wheel-source"
-    si._copy_payload(si.running_payload_dir(), source)
+    _copy_payload(_SOURCE_PAYLOAD, source)
     wheels = tmp_path / "wheels"
     wheels.mkdir()
     result = _run(
@@ -97,7 +105,9 @@ def _installed_application_wheel(
 
 
 @contextmanager
-def _serving_installed_wheel(root: Path, slot: Path, python: Path, env: dict):
+def _serving_installed_wheel(
+    root: Path, slot: Path, python: Path, env: dict[str, str],
+) -> Iterator[tuple[subprocess.Popen[bytes], dict[str, int]]]:
     ready = root.parent / "serving-wheel.json"
     code = """
 import json, os, sys
@@ -170,7 +180,7 @@ def test_installed_application_wheel_passive_readiness_without_source_or_uv(
     )
     directories = (root / "mux-daemon-routing", home / ".local" / "bin", providers)
 
-    def publication_state() -> dict:
+    def publication_state() -> dict[Path, tuple[int, int, bytes] | None]:
         paths = {
             *monitored,
             *(path for directory in directories for path in directory.rglob("*") if path.is_file()),
@@ -225,8 +235,8 @@ def test_installed_application_wheel_passive_readiness_without_source_or_uv(
 @pytest.mark.parametrize("shell", ["ps1", "sh"] if os.name == "nt" else ["sh"])
 @pytest.mark.parametrize("nested", [False, True])
 def test_installed_application_wheel_launch_callbacks_without_source_or_uv(
-    tmp_path, monkeypatch, shell, nested,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shell: str, nested: bool,
+) -> None:
     root, slot, payload, _python = _installed_application_wheel(
         tmp_path, monkeypatch, nested=nested,
     )
@@ -234,13 +244,17 @@ def test_installed_application_wheel_launch_callbacks_without_source_or_uv(
     monkeypatch.syspath_prepend(str(Path(__file__).parent / "native"))
     from test_manager_mux_callbacks import exercise_retained_callbacks
 
-    exercise_retained_callbacks({
+    callbacks = cast(
+        Callable[[dict[str, str], Path, pytest.MonkeyPatch, str], None],
+        exercise_retained_callbacks,
+    )
+    callbacks({
         "directory": str(tmp_path), "root": str(root), "slot": str(slot), "payload": str(payload),
     }, tmp_path, monkeypatch, shell)
 
 
 @pytest.fixture(params=["cmd", "ps1", "sh"] if os.name == "nt" else ["sh"])
-def launcher(request, tmp_path):
+def launcher(request: pytest.FixtureRequest, tmp_path: Path) -> _Launcher:
     kind = request.param
     path = tmp_path / f"manager.{kind}"
     path.write_text(getattr(si, f"_{kind}_binstub")(), encoding="utf-8", newline="")
@@ -273,7 +287,7 @@ def launcher(request, tmp_path):
     return argv, env, slot
 
 
-def _payload(slot, version="1.2.3"):
+def _payload(slot: Path, version: str = "1.2.3") -> None:
     pkg = slot / "src" / "worktree_manager"
     pkg.mkdir(parents=True)
     (pkg / "__init__.py").write_text(f'__version__ = "{version}"\n', encoding="utf-8")
@@ -299,7 +313,9 @@ def _payload(slot, version="1.2.3"):
 
 @pytest.mark.skipif(os.name != "nt", reason="Native CMD compatibility")
 @pytest.mark.parametrize("launcher", ["cmd"], indirect=True)
-def test_cmd_without_powershell_keeps_the_legacy_picker_entry(launcher, tmp_path):
+def test_cmd_without_powershell_keeps_the_legacy_picker_entry(
+    launcher: _Launcher, tmp_path: Path,
+) -> None:
     argv, env, slot = launcher
     _payload(slot)
     runtime = slot / ".venv"
@@ -321,7 +337,9 @@ def test_cmd_without_powershell_keeps_the_legacy_picker_entry(launcher, tmp_path
     assert json.loads(result.stdout)["args"] == []
 
 
-def test_constructed_slot_runs_installed_package_without_resolution(launcher, tmp_path):
+def test_constructed_slot_runs_installed_package_without_resolution(
+    launcher: _Launcher, tmp_path: Path,
+) -> None:
     argv, env, slot = launcher
     _payload(slot)
     runtime = slot / ".venv"
@@ -397,7 +415,9 @@ def test_constructed_slot_runs_installed_package_without_resolution(launcher, tm
 
 @pytest.mark.skipif(os.name != "nt", reason="Native CMD compatibility")
 @pytest.mark.parametrize("launcher", ["cmd"], indirect=True)
-def test_native_cmd_unicode_root_fallback_never_allocates_cache(launcher, tmp_path):
+def test_native_cmd_unicode_root_fallback_never_allocates_cache(
+    launcher: _Launcher, tmp_path: Path,
+) -> None:
     argv, env, slot = launcher
     root = Path(env["WORKTREE_MANAGER_ROOT"])
     unicode_root = root.with_name("manager \u03bb root")
@@ -426,7 +446,7 @@ def test_native_cmd_unicode_root_fallback_never_allocates_cache(launcher, tmp_pa
     assert not (unicode_root / "cache").exists()
 
 
-def test_installed_evidence_reuses_sealed_cache(launcher, tmp_path):
+def test_installed_evidence_reuses_sealed_cache(launcher: _Launcher, tmp_path: Path) -> None:
     argv, env, slot = launcher
     _payload(slot)
     runtime = slot / ".venv"
@@ -473,16 +493,19 @@ def test_installed_evidence_reuses_sealed_cache(launcher, tmp_path):
     assert len(set(caches)) == 1
 
 
-def test_selected_payload_only_slot_is_not_an_installed_runtime(launcher, tmp_path, monkeypatch):
+def test_selected_payload_only_slot_is_not_an_installed_runtime(
+    launcher: _Launcher, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Failed canonical construction cannot bless an interpreter-only slot."""
     argv, env, previous_slot = launcher
     root = previous_slot.parents[1]
     monkeypatch.setattr(si, "local_bin", lambda: tmp_path / "local-bin")
     monkeypatch.setattr(si, "control_plane_providers_dir", lambda: tmp_path / "providers")
-    payload = si.running_payload_dir()
+    payload = _SOURCE_PAYLOAD
     version = si.payload_version(payload)
+    assert version is not None
     slot = si.version_slot(version, root)
-    si._copy_payload(payload, slot)
+    _copy_payload(payload, slot)
     (root / si.MARKER).write_text(version, encoding="utf-8")
     before = (root / si.MARKER).read_bytes()
     assert not si._slot_is_complete(slot)
@@ -499,12 +522,13 @@ def test_selected_payload_only_slot_is_not_an_installed_runtime(launcher, tmp_pa
     assert imported.returncode != 0
     assert "No module named 'worktree_manager'" in imported.stderr
     @contextmanager
-    def refused(*args, **kwargs):
+    def refused(*args: object, **kwargs: object) -> Iterator[None]:
         raise RuntimeError("fixture construction refused")
         yield
     monkeypatch.setattr(si._runtime_installer(), "candidate", refused)
-    result = si.self_install(payload, root=root, dry_run=False)
-    assert result.action == "error" and "construction refused" in result.reason
+    installed_result = si.self_install(payload, root=root, dry_run=False)
+    assert installed_result.action == "error"
+    assert installed_result.reason is not None and "construction refused" in installed_result.reason
     assert (root / si.MARKER).read_bytes() == before
     env["UV_OFFLINE"] = "1"
     result = _run(argv, env=env, cwd=tmp_path)
@@ -513,7 +537,9 @@ def test_selected_payload_only_slot_is_not_an_installed_runtime(launcher, tmp_pa
     assert not result.stdout.strip()
 
 
-def test_marker_identity_is_not_a_normalized_distribution_version(launcher, tmp_path):
+def test_marker_identity_is_not_a_normalized_distribution_version(
+    launcher: _Launcher, tmp_path: Path,
+) -> None:
     argv, env, previous_slot = launcher
     slot = previous_slot.with_name("1.2.3.dev1")
     slot.mkdir()
@@ -545,7 +571,9 @@ def test_marker_identity_is_not_a_normalized_distribution_version(launcher, tmp_
     assert Path(output["file"]).is_relative_to(runtime)
 
 
-def test_missing_runtime_does_not_attempt_project_resolution(launcher, tmp_path):
+def test_missing_runtime_does_not_attempt_project_resolution(
+    launcher: _Launcher, tmp_path: Path,
+) -> None:
     argv, env, slot = launcher
     _payload(slot)
     with (slot / "pyproject.toml").open("a", encoding="utf-8") as stream:
@@ -561,7 +589,9 @@ def test_missing_runtime_does_not_attempt_project_resolution(launcher, tmp_path)
 
 
 @pytest.mark.parametrize("damage", ["missing", "unexecutable"])
-def test_retained_launcher_cannot_report_success_without_starting_interpreter(launcher, tmp_path, damage):
+def test_retained_launcher_cannot_report_success_without_starting_interpreter(
+    launcher: _Launcher, tmp_path: Path, damage: str,
+) -> None:
     argv, env, slot = launcher
     bootstrap = slot / ".runtime-bootstrap" / "runtime_launcher.py"
     bootstrap.parent.mkdir()
@@ -577,7 +607,9 @@ def test_retained_launcher_cannot_report_success_without_starting_interpreter(la
 
 
 @pytest.mark.parametrize("exit_code", [0, 7])
-def test_retained_launcher_preserves_executed_child_status(launcher, tmp_path, exit_code):
+def test_retained_launcher_preserves_executed_child_status(
+    launcher: _Launcher, tmp_path: Path, exit_code: int,
+) -> None:
     argv, env, slot = launcher
     venv.EnvBuilder(with_pip=False).create(slot)
     bootstrap = slot / ".runtime-bootstrap" / "runtime_launcher.py"
@@ -593,7 +625,9 @@ def test_retained_launcher_preserves_executed_child_status(launcher, tmp_path, e
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell 5.1 native stderr semantics")
 @pytest.mark.parametrize("exit_code", [0, 7])
-def test_retained_powershell51_forwards_native_diagnostic_and_status(tmp_path, exit_code):
+def test_retained_powershell51_forwards_native_diagnostic_and_status(
+    tmp_path: Path, exit_code: int,
+) -> None:
     host = shutil.which("powershell")
     assert host, "Windows PowerShell 5.1 is required for this native contract"
     root = tmp_path / "manager"
@@ -616,7 +650,9 @@ def test_retained_powershell51_forwards_native_diagnostic_and_status(tmp_path, e
     assert "fixture diagnostic" in result.stderr
 
 
-def test_unconstructed_launcher_requires_explicit_canonical_bootstrap(launcher, tmp_path):
+def test_unconstructed_launcher_requires_explicit_canonical_bootstrap(
+    launcher: _Launcher, tmp_path: Path,
+) -> None:
     argv, env, slot = launcher
     _payload(slot)
     result = _run(argv, env=env, cwd=tmp_path)
@@ -630,7 +666,9 @@ def test_unconstructed_launcher_requires_explicit_canonical_bootstrap(launcher, 
 @pytest.mark.parametrize(
     "damage", ["uninstalled", "missing-metadata", "missing-completion", "missing-entrypoint"],
 )
-def test_incomplete_environment_does_not_use_foreign_package(launcher, tmp_path, damage):
+def test_incomplete_environment_does_not_use_foreign_package(
+    launcher: _Launcher, tmp_path: Path, damage: str,
+) -> None:
     argv, env, slot = launcher
     _payload(slot)
     venv.EnvBuilder(with_pip=False).create(slot / ".venv")
@@ -662,7 +700,7 @@ def test_incomplete_environment_does_not_use_foreign_package(launcher, tmp_path,
     assert not result.stdout.strip()
 
 
-def test_missing_selected_slot_is_not_another_project(launcher, tmp_path):
+def test_missing_selected_slot_is_not_another_project(launcher: _Launcher, tmp_path: Path) -> None:
     argv, env, slot = launcher
     shutil.rmtree(slot)
     _payload(tmp_path)
@@ -675,7 +713,9 @@ def test_missing_selected_slot_is_not_another_project(launcher, tmp_path):
 @pytest.mark.skipif(os.name != "nt", reason="cmd.exe batch-file resume contract")
 @pytest.mark.parametrize("exit_code", [0, 7])
 @pytest.mark.parametrize("runtime_kind", ["retained", "legacy"])
-def test_cmd_does_not_resume_replaced_launcher(tmp_path, exit_code, runtime_kind):
+def test_cmd_does_not_resume_replaced_launcher(
+    tmp_path: Path, exit_code: int, runtime_kind: str,
+) -> None:
     launcher = tmp_path / "manager.cmd"
     launcher.write_text(si._cmd_binstub(), encoding="utf-8", newline="")
     (tmp_path / "worktree-manager.ps1").write_text(si._ps1_binstub(), encoding="utf-8")
