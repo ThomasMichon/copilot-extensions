@@ -16,6 +16,7 @@ from agent_containers import config as config_mod
 from agent_containers import fleet as fleet_mod
 from agent_containers import fleet_growth
 from agent_containers import lease as lease_mod
+from agent_containers import lifecycle
 from agent_containers import plugin_config
 from agent_containers.config import ContainersConfig, FleetConfig, load_config
 from agent_containers.fleet_results import FleetOperationResult
@@ -203,7 +204,7 @@ def _removing(fake: FakeProvisioner, fail: bool) -> Callable[..., None]:
 def test_failed_growth_removes_the_partial_member(
     fake: FakeProvisioner, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(fleet_growth.lifecycle_mod, "remove_container", _removing(fake, False))
+    monkeypatch.setattr(lifecycle, "remove_container", _removing(fake, False))
     fake.fail_after_create = "dotfiles setup failed"
     config = _config(max_size=2)
     lease_mod.borrow(config, "a", fleet="example")
@@ -219,7 +220,7 @@ def test_failed_growth_removes_the_partial_member(
 def test_partial_member_is_quarantined_when_removal_fails(
     fake: FakeProvisioner, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(fleet_growth.lifecycle_mod, "remove_container", _removing(fake, True))
+    monkeypatch.setattr(lifecycle, "remove_container", _removing(fake, True))
     fake.fail_after_create = "dotfiles setup failed"
     config = _config(max_size=3)
     lease_mod.borrow(config, "a", fleet="example")
