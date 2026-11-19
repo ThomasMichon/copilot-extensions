@@ -345,6 +345,12 @@ named tracked objective before the whole effort is Done.
 
 ### Resident configuration-context correction
 
+- [ ] **POSIX producer correction #10799:** deliver the existing #10810
+  proposal against current Dev, verify its promoted release and qualify the
+  installed configured consumer with delivered context. The
+  [constructor qualification](journal/2026/11.18-posix-configuration-owner-retention.md)
+  covers fresh helper production and immutable completed-slot refusal; it
+  does not close installed acceptance or session reattachment.
 - [x] **Source merged:** #10951 correction landed through #10969 at
   `4cecd3fe3f677041e0beb0118397b2deb18b3227`: transport the caller's configuration
   root and bridge binding to the resident consumer, independently resolve the
