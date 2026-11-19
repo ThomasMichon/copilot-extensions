@@ -117,6 +117,25 @@ class PreparedJournal:
                     result[row["key"]] = payload
         return result
 
+    def put_immutable(self, kind: str, key: str, payload: bytes) -> None:
+        """Retain exact attempt intent without replacing an earlier publication."""
+        digest = hashlib.sha256(payload).hexdigest()
+        with closing(self.paths._connect()) as conn, conn:
+            conn.execute("BEGIN IMMEDIATE")
+            self._require_parent(conn)
+            row = conn.execute(
+                "SELECT payload, digest FROM prepared_crawl_rows "
+                "WHERE source = ? AND kind = ? AND key = ?", (self.source, kind, key),
+            ).fetchone()
+            if row is not None:
+                if (row["payload"], row["digest"]) != (payload, digest):
+                    raise PendingCrawlConflict("Prepared publication intent changed")
+                return
+            conn.execute(
+                "INSERT INTO prepared_crawl_rows VALUES (?, ?, ?, ?, ?)",
+                (self.source, kind, key, payload, digest),
+            )
+
     def reset_batches(self) -> None:
         with closing(self.paths._connect()) as conn, conn:
             conn.execute("BEGIN IMMEDIATE")
