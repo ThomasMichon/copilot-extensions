@@ -19,6 +19,8 @@ def install_hints_schema(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE tasks ADD COLUMN change_hints_version INTEGER NOT NULL DEFAULT 1")
     if "point_change_hints" not in columns:
         conn.execute("ALTER TABLE tasks ADD COLUMN point_change_hints TEXT")
+    if "point_claim_id" not in columns:
+        conn.execute("ALTER TABLE tasks ADD COLUMN point_claim_id TEXT")
     for name in ("tasks_park_hints_insert", "tasks_park_hints_update", "tasks_hints_immutable"):
         conn.execute(f"DROP TRIGGER IF EXISTS {name}")
     for trigger in ("""
@@ -84,6 +86,38 @@ def install_hints_schema(conn: sqlite3.Connection) -> None:
         BEGIN
             SELECT RAISE(ABORT, 'Change-hints v2 execution is unsupported; worker not registered');
         END;
+        """, """
+        CREATE TRIGGER IF NOT EXISTS tasks_point_claim_insert
+        BEFORE INSERT ON tasks
+        WHEN NEW.point_claim_id IS NOT NULL
+        BEGIN
+            SELECT RAISE(ABORT, 'Point claims must pin an existing parked task');
+        END;
+        """, """
+        CREATE TRIGGER IF NOT EXISTS tasks_point_claim_pin
+        BEFORE UPDATE OF point_claim_id ON tasks
+        WHEN OLD.point_claim_id IS NULL AND NEW.point_claim_id IS NOT NULL AND (
+            NEW.status != 'queued_hints_v2' OR NEW.change_hints_version != 2
+            OR NEW.full != 0 OR NEW.change_hints IS NOT NULL
+            OR NEW.point_change_hints IS NULL
+            OR length(NEW.point_claim_id) != 32
+            OR NEW.point_claim_id GLOB '*[^0-9a-f]*'
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'Point claims require a parked v2 task and claim identity');
+        END;
+        """, """
+        CREATE TRIGGER IF NOT EXISTS tasks_point_claim_immutable
+        BEFORE UPDATE OF id, source, full, change_hints, point_change_hints,
+            change_hints_version, point_claim_id ON tasks
+        WHEN OLD.point_claim_id IS NOT NULL
+        BEGIN
+            SELECT RAISE(ABORT, 'Pinned point claim and its entire scope are immutable');
+        END;
     """):
         conn.execute(trigger)
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_point_claim "
+        "ON tasks(point_claim_id) WHERE point_claim_id IS NOT NULL",
+    )
     conn.commit()
