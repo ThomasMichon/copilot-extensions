@@ -16,6 +16,9 @@ from .file_projection import RawFileProjection, RawModelProjection, capture_file
 from .scalar_index import (
     MAX_SEGMENTS,
     ScalarIndexPreparationRequired,
+    ScalarIndexState,
+    consolidate_index,
+    consolidation_rows,
     inspect_index,
     prepare_index,
     require_budget,
@@ -235,6 +238,20 @@ class ComponentLedger:
         prepare_index(self, column="point_key", max_rows=1)
         self._bind(self._get_or_create_table(), identity)
         return True
+
+    def consolidate(self, *, max_rows: int) -> ScalarIndexState:
+        """Explicitly consolidate the ledger index and rebind its witnessed version."""
+        with self._source_domain.operation(self._db):
+            table = self._bound_table()
+            state, dataset = inspect_index(table, column="point_key")
+            consolidation_rows(state, dataset, max_rows=max_rows)
+            if state.segments <= 1 and state.physical_unindexed_rows == 0:
+                return state
+            identity = table.schema.metadata[IDENTITY].decode("ascii")
+            with self._source_domain.write(self._db):
+                result = consolidate_index(self, column="point_key", max_rows=max_rows)
+                self._bind(self._get_or_create_table(), identity)
+                return result
 
 
 def initialize_component_ledger(config: IndexConfig, store: MultiModelStore) -> ComponentLedger:

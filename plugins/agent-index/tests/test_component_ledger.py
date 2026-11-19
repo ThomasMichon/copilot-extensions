@@ -21,6 +21,7 @@ from agent_index.store.component_ledger import (
 from agent_index.store.file_projection import capture_file_projection
 from agent_index.store.ingestion_index import prepare_ingestion_indices
 from agent_index.store.multi_model_store import MultiModelStore
+from agent_index.store.scalar_index import MAX_SEGMENTS, ScalarIndexPreparationRequired, inspect_index
 from agent_index.store.source_layout import (
     LAYOUT, SourceDomain, SourceLayoutError, initialize_source_store,
 )
@@ -334,3 +335,42 @@ def test_failed_binding_publication_leaves_native_effect_dirty_and_uncertain(
     assert receipt[BINDING] == before
     with pytest.raises(SourceLayoutError, match="incomplete or changed"):
         ledger.get(SOURCE, PATH)
+
+
+def test_segment_exhaustion_has_budgeted_binding_aware_consolidation_and_reopen(
+    cold: tuple[IndexConfig, MultiModelStore],
+) -> None:
+    config, store = cold
+    ledger = initialize_component_ledger(config, store)
+    prepare_ingestion_indices(store, max_rows=0)
+    base = evidence(config, store, deleted=True)
+    records = [
+        replace(
+            base,
+            content=replace(base.content, component=replace(base.content.component, path=f"empty/{n}")),
+            projection=replace(base.projection, file_path=f"empty/{n}"),
+        )
+        for n in range(MAX_SEGMENTS + 1)
+    ]
+    for record in records[:-1]:
+        assert put(ledger, store, record)
+    state, _ = inspect_index(store.content_store.db.open_table(TABLE), column="point_key")
+    assert state.segments == MAX_SEGMENTS
+    with domain(store).write(store.content_store.db):
+        with pytest.raises(ScalarIndexPreparationRequired, match="explicit index consolidation"):
+            ledger.put(records[-1], expected=None, max_rows=2)
+    before = domain(store).receipt()
+    with pytest.raises(ScalarIndexPreparationRequired, match="physical rows"):
+        ledger.consolidate(max_rows=1)
+    assert domain(store).receipt() == before
+    result = ledger.consolidate(max_rows=MAX_SEGMENTS)
+    assert result.prepared and result.physical_unindexed_rows == 0 and result.segments == 1
+    binding = domain(store).receipt()[BINDING]
+    assert binding["identity"] == before[BINDING]["identity"]
+    assert binding["version"] == result.version > before[BINDING]["version"]
+    assert put(ledger, store, records[-1])
+    reopened = MultiModelStore(config.lance_dir, content_table="canonical")
+    reopened.register_model(config.model_profiles["first"])
+    restored = ComponentLedger(config, reopened)
+    assert restored.get(SOURCE, "empty/0") == records[0]
+    assert restored.get(SOURCE, f"empty/{MAX_SEGMENTS}") == records[-1]

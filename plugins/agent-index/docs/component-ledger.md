@@ -52,9 +52,11 @@ writer retain that owner's existing failure semantics.
 
 `max_rows` bounds point candidates/retained IDs as described by raw projection,
 not aggregate payload bytes, model count or index metadata I/O. Ledger history
-is not pruned automatically. Exhausted index segment budgets need explicit
-owner-coordinated consolidation; generic maintenance must not bless a new
-ledger binding.
+is not pruned automatically. `ledger.consolidate(max_rows=physical_row_budget)`
+explicitly preflights the whole current physical table before entering its
+writer, then reuses scalar consolidation and rebinds the resulting native
+version under that same writer. Use this operation at the segment ceiling;
+generic scalar maintenance cannot advance the ledger's independent binding.
 
 ## Application and restore boundaries
 
