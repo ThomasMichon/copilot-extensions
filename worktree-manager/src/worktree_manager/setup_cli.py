@@ -24,7 +24,9 @@ def cmd_setup(rest: list[str], *, banner: str, register: bool = False) -> int:
     try:
         configure_selected(root=default_root(), apply=do_apply)
     except (OSError, ValueError, UnicodeError, configparser.Error) as error:
-        print(f"  ! toolchain configuration refused: {type(error).__name__}")
+        # Parser exceptions can contain native file contents.
+        reason = f": {error}" if type(error) is ValueError else ""
+        print(f"  ! toolchain configuration refused: {type(error).__name__}{reason}")
         return 2
     gaps = missing(detect_baseline())
     actions = provision_plan(gaps)

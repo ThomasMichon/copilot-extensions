@@ -573,6 +573,33 @@ def test_toolchain_config_standard_setup_applies_before_prerequisite_owner(
     assert setup_cli.cmd_setup(["--apply"], banner="fixture") == 0
 
 
+@pytest.mark.parametrize("failure", ["conflict", "parse"])
+def test_toolchain_config_setup_reports_safe_cause_before_prerequisites(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], failure: str,
+) -> None:
+    from worktree_manager import setup_cli
+
+    pip, _, _ = _native_fixture(monkeypatch, tmp_path)
+    selected = tmp_path / "toolchain.conf"
+    selected.write_text(f"schema=1\npython_index_url={INDEX}\n", encoding="ascii")
+    monkeypatch.setenv(tc.CONFIGURATION_ENV, str(selected))
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(tmp_path / "manager"))
+    private_value = "native-content-must-not-be-printed"
+    if failure == "conflict":
+        monkeypatch.setenv("PIP_INDEX_URL", private_value)
+    else:
+        pip.parent.mkdir()
+        pip.write_text(f"private-option={private_value}\n", encoding="ascii")
+    monkeypatch.setattr(setup_cli, "detect_baseline", lambda: pytest.fail("prerequisites reached"))
+    assert setup_cli.cmd_setup(["--apply"], banner="fixture") == 2
+    output = capsys.readouterr().out
+    if failure == "conflict":
+        assert "PIP_INDEX_URL conflicts with toolchain configuration" in output
+    else:
+        assert "MissingSectionHeaderError" in output
+    assert private_value not in output
+
+
 @pytest.mark.parametrize(("code", "expected"), [(2, 2), (None, 0), ("parse-error", 1)])
 def test_toolchain_config_setup_preserves_parser_exit_status(
     monkeypatch: pytest.MonkeyPatch, code: int | str | None, expected: int,

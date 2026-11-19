@@ -100,6 +100,8 @@ replacement. Cooperating writers therefore preserve unrelated settings written
 before lock acquisition; arbitrary external editors do not participate in this
 locking protocol. This is not a multi-file transaction or rollback of a later
 failed installation.
+Setup includes controlled validation reasons in refusals; parser exceptions
+remain categorized rather than echoing native file contents.
 An explicit pip configuration that disables discovery (`NUL` or `/dev/null`)
 is also refused. Relative native pip/npm config paths are anchored before
 bootstrap changes directories.
