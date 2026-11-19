@@ -100,11 +100,11 @@ finalization, settled-child discovery and test environment/source lifetime.
 Its source review precedes runtime implementation. It preserves the other
 tracks and each resource owner's independent effect authority.
 
-The next selected producer expansion follows the
-[owned producer-adoption subplan](producer-adoption.md). Its reviewed source
-contract must land before implementation. It reuses the allocation and process
-owners, preserves the existing test pilot and leaves installed adoption,
-historical cleanup and the other tracks with their current owners.
+The selected producer expansion follows the
+[owned producer-adoption subplan](producer-adoption.md). Plan #13436 preceded
+implementation #13444. The bounded source record preserves the existing test
+pilot, allocation and process owners, with installed adoption, historical
+cleanup and the other tracks still assigned to their current owners.
 
 ### Track A — Reclaim legacy `.test-venvs` (#10965)
 - [x] Standalone `tools/reclaim_legacy_test_dirs.py`: inventory root
@@ -198,6 +198,16 @@ unfinished ownership visible without turning finalize into a deletion sweep.
 The per-track Plan and Validation Plan define implementation and acceptance.
 
 ## Journal
+
+### 2026-11-19 - Selected producer source delivered
+
+- #13444 merged after current-head approval, required CI and resolution of
+  the strict-option parser finding. Eight actor-free cases join the existing
+  unit packet; real producer/process cases stay explicitly selected.
+- The [bounded completion record](producer-adoption.md#source-delivery-and-qualification)
+  records Windows x64/Linux consumers, 5,565 passing units, both strict targets,
+  shared-provider qualification reuse and unavailable lanes. It does not close
+  this parent effort or assign retained-resource cleanup to another owner.
 
 ### 2026-11-06 — Kickoff
 - Effort created from #10968 findings; architecture presented for approval.

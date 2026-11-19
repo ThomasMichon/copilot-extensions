@@ -10,9 +10,10 @@ repository task producers. A completed invocation must leave either a verified
 consumed allocation or a discoverable, bounded disposition. An uncertain child
 process result must leave the allocation and its responsibility open.
 
-This is a proposed source continuation. Review and merge this plan before
-implementation. It does not complete the parent effort, enable a default,
-install a runtime or authorize cleanup of existing data.
+Source implementation is delivered in #13444 after the plan review in #13436.
+The bounded qualification and remaining ownership are recorded below.
+This does not complete the parent effort, enable a default, install a runtime
+or authorize cleanup of existing data.
 
 ## Selected consumers
 
@@ -96,26 +97,92 @@ patterns. No runtime installer or dependency change is proposed.
 
 ## Implementation and validation
 
-- [ ] Preserve the test pilot through a focused shared-context regression packet.
-- [ ] Implement the opt-in literal-command consumer with capability/root refusal,
+- [x] Preserve the test pilot through a focused shared-context regression packet.
+- [x] Implement the opt-in literal-command consumer with capability/root refusal,
       bounded diagnostics, normalized exit handling and joined cleanup.
-- [ ] Prove the selected spike, build, extraction, report and qualification-image
+- [x] Prove the selected spike, build, extraction, report and qualification-image
       flows through real process entry points; record their exact commands.
-- [ ] Add focused unit coverage for argument handling and effect ordering.
+- [x] Add focused unit coverage for argument handling and effect ordering.
       Keep actual process, filesystem and native qualification in the explicit
       integration portfolio, not required unit CI.
-- [ ] Prove native Windows and available POSIX success, command failure, timeout,
+- [x] Prove native Windows and available POSIX success, command failure, timeout,
       unknown cleanup, partial removal and unsupported-owner cases. Include
       paths with spaces and the applicable link/permission/path-length negatives.
-- [ ] Run a first-touch fixture with no prior allocation, then a refusal case
+- [x] Run a first-touch fixture with no prior allocation, then a refusal case
       with an incompatible owner. Do not repair or adopt foreign resources.
-- [ ] Verify ledger disposition and exact remaining bytes after each native
+- [x] Verify ledger disposition and exact remaining bytes after each native
       result. Preserve a reusable-cache sentinel and unrelated sibling identity.
-- [ ] Update the canonical artifact/test documentation and entry points; run
+- [x] Update the canonical artifact/test documentation and entry points; run
       focused tests, source guards and the required publication checks.
-- [ ] Obtain current-head review and required CI, merge the implementation,
+- [x] Obtain current-head review and required CI, merge the implementation,
       then publish the bounded completion record. Report release and installed
       adoption separately; preserve every remaining parent item and owner.
+
+## Source delivery and qualification
+
+#13444 merged as `8c222798452e02456d96180bdf8b62ff7fa8f5a6`.
+The final reviewed head is `ff14f14b42fa04b81942aa5c81e1f85d92240c0f`.
+Current-head approval, required CI, resolved review threads and an empty
+closing-reference list passed before managed merge. #10968 remains open.
+This completion record must clear its normal review and merge before the
+bounded source task closes.
+
+| Selected flow | Real consumer exercised |
+|---|---|
+| Test | Existing `test_artifact_runner.py` shared-context packet |
+| Spike | Standard-library `ast` CLI and a standalone analysis against a real owner ledger |
+| Build | `zipapp` CLI, followed by execution and verification of the built Python archive |
+| Archive extraction | `zipfile` CLI, followed by consumption of the extracted contents |
+| Report | `cProfile` output, read and rendered through `pstats` before disposition |
+| Source worker | Git archive, extraction and consumption of a transient qualification image |
+
+The initial focused packet passed 41 tests on Windows x64 and 40 tests on
+Linux, with one Windows-only junction skip. The two test files corrected
+for strict typing then passed 26 tests on each platform.
+The unchanged allocator's qualified root, link, permission, identity and
+partial-reclaim controls remain the provider boundary from #13314; the new
+consumer does not override them. This is reuse of that provider qualification,
+not a claim that every negative was newly executed through every command kind.
+Unknown-cleanup fault injection preserves the full payload and open
+responsibility. Actual command failure and timeout retain only bounded
+diagnostics; successful consumers close the exact allocation and preserve
+the independent cache sentinel.
+
+The parser rejects long-option abbreviations. Three actor-free regressions
+and actual Windows CLI calls cover `--own`, `--ki` and `--time`, each refused
+with exit 2 before allocation. The final full supported unit/coverage packet
+passed 5,565 cases in 129.122 seconds, including eight new actor-free cases.
+Required CI keeps its existing effect restrictions and five-minute budget;
+native process cases remain in the explicit portfolio.
+
+Whole-file strict checking passed all six changed Python files for both
+declared Python 3.10 targets. The 43 admitted projects passed 86 target checks.
+Ruff F/E9, install contract, headless launch, changed-module size,
+documentation consistency, source-hash admission and whitespace checks passed.
+The focused reproducible entry points are:
+
+```text
+python tools/run-plugin-tests.py agent-worktrees --retirement-ready --test-file tests/test_artifact_runner_contract.py --test-file tests/test_artifact_runner.py --test-file tests/test_owned_producer.py --allow-explicit-tiers
+python tools/typecheck.py --new-code --base <pinned-comparison-commit>
+python tools/typecheck.py --enforced
+python tools/run-promotion-unit-tests.py --source-sha <full-source-commit> --output-dir <new-owned-evidence-directory>
+```
+
+The selected interpreter must already satisfy each command's documented
+prerequisites. Windows x64 and Linux were exercised; native ARM64 and macOS
+execution are not claimed. Windows-host checker preparation remained
+unqualified under its configured feed's dependency-age cutoff; the declared
+Linux/Win32 analysis targets passed on Linux without a cutoff exception.
+The devcontainer CLI was unavailable, so the declared contained Linux
+fallback was used. Full fresh-machine provisioning is not applicable because
+no installer or bootstrap changed; first-touch allocation remains a real
+native fixture. No external service deployment was exercised.
+
+The new entry point is repository source tooling, not an installed runtime
+verb. This record asserts source delivery only. Release, installed guidance,
+real legacy-history cutover and retained resource disposition keep their
+existing owners and independent acceptance gates. All other parent tracks
+and validation items remain unchanged.
 
 ## Boundaries
 
