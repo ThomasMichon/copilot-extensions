@@ -317,7 +317,6 @@ def test_query_frontdoors_refuse_point_domains_without_empty_success(
     queries.clear()
     with selected.operation(scoped._content.db, point_scope=claim().scope):
         for operation in (
-            lambda: engine.search("searchable"),
             lambda: scoped_engine.search("searchable"),
             lambda: scoped_engine.search_authorized("searchable", families=()),
             lambda: scoped_engine.search_authorized("searchable", families=("sample:components",)),
@@ -341,19 +340,23 @@ def test_query_frontdoors_refuse_point_domains_without_empty_success(
             lambda: vectors.get_vectors([]),
             lambda: vectors.get_vectors([chunks[0].chunk_id]),
             lambda: vectors.search(vector),
-            clusters.list_clusters,
-            lambda: clusters.get_cluster("missing"),
-            lambda: clusters.cluster_for_item("sample:components", "42.md"),
-            lambda: clusters.cluster_for_item("sample:unknown", "unknown.md"),
-            clusters.stats, clusters.slice_manifest,
-            lambda: clusters.covered_stats("unknown"),
-            lambda: exported_stores.ContentStore(config.lance_dir),
-            lambda: exported_stores.MultiModelStore(config.lance_dir),
         ):
-            with pytest.raises(SourceLayoutError):
+            with pytest.raises(SourceLayoutError, match="point-domain reads and application are not admitted"):
                 operation()
-    with pytest.raises(SourceLayoutError):
-        create_search_engine()
+    for legacy_operation in (
+        lambda: engine.search("searchable"),
+        clusters.list_clusters,
+        lambda: clusters.get_cluster("missing"),
+        lambda: clusters.cluster_for_item("sample:components", "42.md"),
+        lambda: clusters.cluster_for_item("sample:unknown", "unknown.md"),
+        clusters.stats, clusters.slice_manifest,
+        lambda: clusters.covered_stats("unknown"),
+        lambda: exported_stores.ContentStore(config.lance_dir),
+        lambda: exported_stores.MultiModelStore(config.lance_dir),
+        create_search_engine,
+    ):
+        with pytest.raises(SourceLayoutError, match="incompatible source-layout receipt"):
+            legacy_operation()
     for query_source in (None, "sample:components", "sample:other", "sample:unknown"):
         params = (
             {"q": "searchable"} if query_source is None
