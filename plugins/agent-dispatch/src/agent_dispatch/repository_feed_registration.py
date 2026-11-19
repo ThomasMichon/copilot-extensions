@@ -9,6 +9,7 @@ from typing import Any
 from .queue_feed_attempts import ATTEMPT_PROTOCOL
 from .queue_records import TaskError
 from .repository_feed_preparation import RepositoryFeedPreparer
+from .repository_feed_waiter_contract import validate_feed_delegation
 
 PROTOCOL = "agent-dispatch.repository-feed-registration/v1"
 _RECOVERY_PROTOCOL = "agent-pull-requests.repository-request-recovery/v1"
@@ -23,6 +24,20 @@ class RepositoryFeedRegistrar(RepositoryFeedPreparer):
     """
 
     protocol = PROTOCOL
+
+    async def prepare(
+        self, task_id: str, *, delegation: dict[str, Any], worker_id: str,
+        resume_worktree: str, reason: str, host: str | None = None,
+    ) -> dict[str, Any]:
+        """Refuse unsendable original intent before the native suspension transaction."""
+        selected = validate_feed_delegation(delegation)
+        intent = self._intent({"delegation": selected})
+        if time.time() >= intent["not_after"]:
+            raise TaskError("original repository-feed creation cutoff elapsed")
+        return await super().prepare(
+            task_id, delegation=selected, worker_id=worker_id, resume_worktree=resume_worktree,
+            reason=reason, host=host,
+        )
 
     async def _negotiate(self) -> dict[str, Any]:
         if getattr(self.queue, "repository_feed_attempt_protocol", None) != ATTEMPT_PROTOCOL:
@@ -44,7 +59,10 @@ class RepositoryFeedRegistrar(RepositoryFeedPreparer):
         baseline = feed["baseline"]
         ttl = math.ceil(waiter["delegation"]["timeout"])
         cutoff = math.floor(feed["deadline_at"])
-        if baseline is None or not 1 <= ttl <= 86400 or cutoff <= 0:
+        if (
+            baseline is None or not 1 <= ttl <= 86400 or not 0 < cutoff < 2**53
+            or baseline["event_cursor"] >= 2**53
+        ):
             raise ValueError("original repository-feed baseline or lifetime unsupported")
         return {"after": baseline["event_cursor"], "ttl": ttl, "not_after": cutoff}
 

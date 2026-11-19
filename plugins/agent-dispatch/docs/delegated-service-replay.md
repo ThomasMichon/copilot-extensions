@@ -440,6 +440,10 @@ The ordinary preparation-only adapter remains compatible and inert. Calling
 `await registrar.reconcile_registration(task_id, preparation_id)` then makes
 one registration or original-request inspection exchange. A missing original
 baseline refuses creation; no new baseline or request identity is allocated.
+The registrar rejects missing baselines, timeouts above the provider's 86,400
+second TTL limit, out-of-range provider cursors/cutoffs and an already elapsed
+creation cutoff before preparing or suspending a native task. The inert
+preparation-only adapter retains its broader storage contract.
 
 The original request freezes `after` from the retained baseline cursor, TTL
 from the original timeout rounded up to seconds, and `not_after` from the

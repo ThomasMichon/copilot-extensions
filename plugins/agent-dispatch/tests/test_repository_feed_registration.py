@@ -141,6 +141,16 @@ def test_unsupported_recovery_refuses_before_suspension(tmp_path: Path, feature:
     assert "subscribe" not in client.calls and not queue.list_run_waiter_wakes(task_id)
 
 
+def test_preparation_only_retains_its_broader_storage_lifetime(tmp_path: Path) -> None:
+    queue, task_id, spec, client, preparer = preparation.setup(tmp_path)
+    spec["timeout"] = 86401
+    spec["feed"]["deadline_at"] = spec["feed"]["issued_at"] + spec["timeout"]
+    asyncio.run(preparation.prepare(preparer, task_id, spec))
+    waiter = queue.find_delegated_preparation(task_id, spec["preparation_id"])
+    assert waiter is not None and waiter["delegation"] == spec and not waiter["replay_attempted"]
+    assert client.calls == ["capabilities", "next-actions"]
+
+
 def test_changed_task_retains_late_receipt_but_cannot_arm(tmp_path: Path) -> None:
     queue, task_id, spec, client, registrar = prepared(tmp_path)
 
@@ -186,21 +196,26 @@ def test_absence_after_original_cutoff_does_not_fabricate_native_completion(tmp_
     assert client.calls.count("subscribe") == 1 and not queue.list_run_waiter_wakes(task_id)
 
 
-@pytest.mark.parametrize("reason", ["baseline", "cutoff"])
+@pytest.mark.parametrize("reason", ["baseline", "cutoff", "timeout", "cursor"])
 def test_unqualified_original_intent_never_records_a_transmission(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reason: str,
 ) -> None:
     queue, task_id, spec, client, registrar = setup(tmp_path)
     if reason == "baseline":
         spec["feed"]["baseline"] = None
-    asyncio.run(preparation.prepare(registrar, task_id, spec))
-    if reason == "cutoff":
+    elif reason == "cutoff":
         monkeypatch.setattr("time.time", lambda: int(spec["feed"]["deadline_at"]))
-    with pytest.raises((ValueError, TaskError), match="baseline|cutoff"):
-        reconcile(registrar, task_id, spec)
+    elif reason == "timeout":
+        spec["timeout"] = 86401
+        spec["feed"]["deadline_at"] = spec["feed"]["issued_at"] + spec["timeout"]
+    else:
+        spec["feed"]["baseline"]["event_cursor"] = 2**53
+    before = queue.get(task_id)
+    with pytest.raises((ValueError, TaskError), match="baseline|cutoff|lifetime"):
+        asyncio.run(preparation.prepare(registrar, task_id, spec))
     waiter = queue.find_delegated_preparation(task_id, spec["preparation_id"])
-    assert waiter is not None and not waiter["replay_attempted"] and waiter["state"] == "preparing"
-    assert "subscribe" not in client.calls and not queue.list_run_waiter_wakes(task_id)
+    assert waiter is None and queue.get(task_id) == before
+    assert not client.calls and not queue.list_run_waiter_wakes(task_id)
 
 
 @pytest.mark.parametrize("status", ["cancelled", "expired"])
