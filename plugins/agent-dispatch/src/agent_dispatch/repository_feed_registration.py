@@ -14,11 +14,12 @@ from .repository_feed_preparation import RepositoryFeedPreparer
 from .repository_feed_waiter_contract import validate_feed_delegation
 
 PROTOCOL = REGISTRATION_PROTOCOL
+CANCELLATION_PROTOCOL = "agent-dispatch.repository-feed-cancellation/v1"
 _RECOVERY_PROTOCOL = "agent-pull-requests.repository-request-recovery/v1"
 
 
 class RepositoryFeedRegistrar(RepositoryFeedPreparer):
-    """Prepare and register explicitly; no arming, cycle, delivery, wake or ACK.
+    """Prepare, register and cancel explicitly; no arming, cycle, delivery, wake or ACK.
 
     The embedding owns the same trusted SDK client and native checkpoint as
     preparation. Every possible transmission is retained before IO; a later
@@ -26,6 +27,81 @@ class RepositoryFeedRegistrar(RepositoryFeedPreparer):
     """
 
     protocol = PROTOCOL
+    cancellation_protocol = CANCELLATION_PROTOCOL
+
+    def _io_deadline(self) -> float:
+        now = time.monotonic()
+        prior = self.client.deadline
+        if not math.isfinite(now) or prior is not None and (
+            isinstance(prior, bool) or not isinstance(prior, (int, float))
+            or not math.isfinite(prior)
+        ):
+            raise ValueError("repository-feed IO deadline unavailable")
+        deadline = min(now + 30, prior) if prior is not None else now + 30
+        if deadline <= now:
+            raise TaskError("repository-feed IO deadline elapsed")
+        return deadline
+
+    def _retired_registration(
+        self, task_id: str, preparation_id: str,
+    ) -> dict[str, Any]:
+        waiter = self.queue.find_delegated_preparation(task_id, preparation_id)
+        if waiter is None or waiter["delegation"].get("feed", {}).get("binding") != self._binding:
+            raise TaskError("original repository-feed preparation unavailable")
+        waiter = self.queue.replay_waiter_progress(waiter)
+        if waiter["replay_settled"]:
+            return waiter
+        if waiter["state"] != "retired":
+            raise TaskError("repository-feed cancellation requires a retired waiter")
+        registration = waiter["replay_registration_id"]
+        if (
+            not isinstance(registration, str) or not 1 <= len(registration) <= 128
+            or any(ord(char) < 32 for char in registration)
+        ):
+            raise TaskError("original repository-feed registration unavailable; inspect its request")
+        return waiter
+
+    async def cancel_registration(
+        self, task_id: str, preparation_id: str,
+    ) -> dict[str, Any]:
+        """Cancel only an already retired waiter's original known subscription.
+
+        A cancelled service response does not settle native or delivered-event
+        custody. Lost replies remain recoverable by original-request inspection.
+        """
+        if self._running:
+            raise TaskError("repository-feed operation already in flight")
+        self._checkpoint()
+        waiter = self._retired_registration(task_id, preparation_id)
+        if waiter["replay_settled"]:
+            return {"status": "settled"}
+        registration = waiter["replay_registration_id"]
+        prior_deadline = self.client.deadline
+        self.client.deadline = self._io_deadline()
+        self._running = True
+        try:
+            self._checkpoint()
+            await self._negotiate()
+            self._checkpoint()
+            current = self._retired_registration(task_id, preparation_id)
+            if any(current[key] != waiter[key] for key in (
+                "id", "task_id", "generation", "task_generation", "replay_registration_id",
+            )):
+                raise TaskError("original repository-feed cancellation identity changed")
+            if current["replay_settled"]:
+                return {"status": "settled"}
+            self._checkpoint()
+            result = await self.client.request("cancel", {"registration_id": registration})
+            if (
+                not isinstance(result, dict) or result.get("status") != "cancelled"
+                or result.get("registration_id") != registration
+            ):
+                raise ValueError("original repository-feed cancellation receipt differs")
+            self._checkpoint()
+            return {"status": "cancelled", "registration_id": registration}
+        finally:
+            self.client.deadline = prior_deadline
+            self._running = False
 
     async def prepare(
         self, task_id: str, *, delegation: dict[str, Any], worker_id: str,
@@ -133,10 +209,10 @@ class RepositoryFeedRegistrar(RepositoryFeedPreparer):
         if not waiter["replay_attempted"] and waiter["state"] != "preparing":
             return {"status": "retired"}
         prior_deadline = self.client.deadline
-        deadline = time.monotonic() + 30
-        self.client.deadline = min(prior_deadline, deadline) if prior_deadline is not None else deadline
+        self.client.deadline = self._io_deadline()
         self._running = True
         try:
+            self._checkpoint()
             await self._negotiate()
             self._checkpoint()
             if waiter["replay_attempted"]:

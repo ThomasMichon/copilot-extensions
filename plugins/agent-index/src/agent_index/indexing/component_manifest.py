@@ -3,10 +3,49 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
     from agent_index.indexing.manifest import CrawlManifest
+
+
+@dataclass(frozen=True)
+class ComponentIdentity:
+    """Version-independent logical identity supplied by the qualified adapter."""
+
+    kind: Literal["work_item_revision", "comment_version"]
+    item_id: str
+    comment_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.kind not in ("work_item_revision", "comment_version"):
+            raise ValueError("Unsupported component identity kind")
+        if not isinstance(self.item_id, str) or not self.item_id.strip():
+            raise ValueError("Component item_id must be a nonempty string")
+        if self.kind == "comment_version":
+            if not isinstance(self.comment_id, str) or not self.comment_id.strip():
+                raise ValueError("Component comment_id must be a nonempty string")
+        elif self.comment_id is not None:
+            raise ValueError("Work-item component identity cannot include a comment_id")
+
+    def to_dict(self) -> dict[str, str]:
+        """Retain the complete kind-specific identity, without parsing a path."""
+        result = {"kind": self.kind, "item_id": self.item_id}
+        if self.comment_id is not None:
+            result["comment_id"] = self.comment_id
+        return result
+
+    @classmethod
+    def from_dict(cls, raw: object) -> ComponentIdentity:
+        """Decode only an exact kind-specific identity."""
+        if not isinstance(raw, dict):
+            raise ValueError("Invalid component identity")
+        fields = {"kind", "item_id"}
+        if raw.get("kind") == "comment_version":
+            fields.add("comment_id")
+        if set(raw) != fields:
+            raise ValueError("Invalid component identity fields")
+        return cls(**raw)
 
 
 @dataclass(frozen=True)
@@ -21,6 +60,7 @@ class ComponentVersion:
     path: str
     version: int
     semantics: str
+    identity: ComponentIdentity | None = None
 
     def __post_init__(self) -> None:
         for name in ("source", "path", "semantics"):
@@ -29,13 +69,29 @@ class ComponentVersion:
                 raise ValueError(f"Component {name} must be a nonempty string")
         if type(self.version) is not int or self.version <= 0:
             raise ValueError("Component version must be a positive integer")
+        if self.identity is not None and type(self.identity) is not ComponentIdentity:
+            raise ValueError("Component identity must be a typed record")
+
+    def to_dict(self) -> dict[str, Any]:
+        """Preserve the legacy encoding when no typed identity was acquired."""
+        result: dict[str, Any] = {
+            "source": self.source, "path": self.path,
+            "version": self.version, "semantics": self.semantics,
+        }
+        if self.identity is not None:
+            result["identity"] = self.identity.to_dict()
+        return result
 
     @classmethod
     def from_dict(cls, raw: object) -> ComponentVersion:
         """Decode only the complete versioned component record."""
-        if not isinstance(raw, dict) or set(raw) != {"source", "path", "version", "semantics"}:
+        fields = {"source", "path", "version", "semantics"}
+        if not isinstance(raw, dict) or set(raw) not in (fields, fields | {"identity"}):
             raise ValueError("Invalid pending component version")
-        return cls(**raw)
+        return cls(
+            raw["source"], raw["path"], raw["version"], raw["semantics"],
+            ComponentIdentity.from_dict(raw["identity"]) if "identity" in raw else None,
+        )
 
 
 @dataclass(frozen=True)
@@ -49,7 +105,10 @@ class ComponentContent:
     def covered_by(self, previous: ComponentContent) -> bool:
         """Only matching identities can prove a duplicate or superseded version."""
         current, applied = self.component, previous.component
-        if (current.source, current.path) != (applied.source, applied.path):
+        if (
+            (current.source, current.path) != (applied.source, applied.path)
+            or current.identity != applied.identity
+        ):
             raise ValueError("Component application identity does not match")
         if current.version > applied.version:
             return False
@@ -68,6 +127,7 @@ def validate_components(manifest: CrawlManifest) -> None:
     if manifest.poll_refresh is not None:
         raise ValueError("Component versions cannot certify polling refresh")
     identities: set[tuple[str, str]] = set()
+    logical: set[tuple[str, ComponentIdentity]] = set()
     for version in versions:
         if not isinstance(version, ComponentVersion):
             raise ValueError("Invalid component version record")
@@ -75,6 +135,11 @@ def validate_components(manifest: CrawlManifest) -> None:
         if identity in identities:
             raise ValueError("Component versions repeat a mutation identity")
         identities.add(identity)
+        if version.identity is not None:
+            scoped_identity = version.source, version.identity
+            if scoped_identity in logical:
+                raise ValueError("Component versions repeat a logical identity")
+            logical.add(scoped_identity)
     mutations = {(entry.source, entry.path) for entry in manifest.upserts} | {
         (entry.source, entry.path) for entry in manifest.deletions
     }

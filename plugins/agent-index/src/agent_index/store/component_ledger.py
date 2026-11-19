@@ -80,7 +80,9 @@ def _encode(evidence: ComponentEvidence) -> bytes:
         {**asdict(model), "rows": model.rows.decode("utf-8")} for model in evidence.projection.models
     ]
     return json.dumps(
-        {**asdict(evidence), "projection": projection},
+        {**asdict(evidence), "projection": projection, "content": {
+            **asdict(evidence.content), "component": evidence.content.component.to_dict(),
+        }},
         sort_keys=True, separators=(",", ":"), allow_nan=False,
     ).encode("utf-8")
 

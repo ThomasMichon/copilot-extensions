@@ -399,6 +399,8 @@ class PendingCrawls(PollRefreshJournal):
             data.pop("poll_refresh")
         if manifest.component_versions is None:
             data.pop("component_versions")
+        else:
+            data["component_versions"] = [item.to_dict() for item in manifest.component_versions]
         return data
 
     def clear(
