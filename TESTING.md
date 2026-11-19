@@ -5635,7 +5635,12 @@ creation recovery and launch, rather than replacing it with a test double.
 
 The manual `installation-context-full.yml` portfolio `dispatch-recipes` qualifies
 only Dispatch's canonical installed payload and default legacy runtime root on
-native Windows and Ubuntu. Bounded independent packets cover Python/native
+native Windows and Ubuntu. Its twelve packets per platform retain twenty-four
+jobs. Python/native refusal packets include actual-installer missing-prerequisite
+controls; recipe controls include the copied foundation's actual lifecycle
+archive. A real pytest collection/keyword-selection guard checks that each of
+these seven cases is selected exactly once per platform, preserving every
+previous packet selection. Bounded independent packets cover Python/native
 no-write refusals, exact `stamp`/`provision` action custody, source replacement,
 deferred real stamping, and actual cold construction after the original caller's
 Job/group is closed. The original ordinary receipt must complete before any

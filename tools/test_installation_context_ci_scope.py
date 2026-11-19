@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+from collections import Counter
 import importlib.util
 import json
 import os
@@ -2279,6 +2280,7 @@ def test_dispatch_recipes_keep_literal_native_runners_and_bounded_packets(
     assert job["strategy"]["fail-fast"] is False
     assert set(job["strategy"]["matrix"]) == {"packet"}
     packets = job["strategy"]["matrix"]["packet"]
+    assert len(packets) == 12
     assert {item["name"]: item["file"] for item in packets} == {
         "python-refusals": "test_first_use_dispatch.py",
         "native-policy-refusals": "test_first_use_dispatch.py",
@@ -2298,10 +2300,14 @@ def test_dispatch_recipes_keep_literal_native_runners_and_bounded_packets(
         "or cell or installation-policy or nested or dispatcher or module)"
     )
     assert {item["name"]: item["select"] for item in packets} == {
-        "python-refusals": "refusal and python-api",
+        "python-refusals": "(refusal or actual_installer_missing_prerequisite) and python-api",
         "native-policy-refusals": "refusal and native-front and " + policy,
-        "native-source-refusals": "refusal and native-front and not " + policy,
-        "recipe-controls": "not refusal and not actual",
+        "native-source-refusals": (
+            "(refusal or actual_installer_missing_prerequisite) and native-front and not " + policy
+        ),
+        "recipe-controls": (
+            "(not refusal and not actual) or copied_foundation_supplies_the_actual_lifecycle_archive"
+        ),
         "deferred-stamp": "actual and stamp",
         "cold-original": "original_provision",
         "concurrent": "actual and concurrent",
@@ -2322,6 +2328,107 @@ def test_dispatch_recipes_keep_literal_native_runners_and_bounded_packets(
     ]
     required = yaml.safe_load((HERE.parent / ".github/workflows/ci.yml").read_text())
     assert name not in required["jobs"]
+
+
+@pytest.fixture(scope="module")
+def dispatch_recipe_collections() -> dict[str, dict[str, list[str]]]:
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-full.yml").read_text()
+    )
+    packets = {
+        platform: workflow["jobs"][f"dispatch-recipes-{platform}"]["strategy"]["matrix"]["packet"]
+        for platform in ("linux", "windows")
+    }
+    original = {
+        "python-refusals": "refusal and python-api",
+        "native-source-refusals": (
+            "refusal and native-front and not (client-only or no-self or pinned or managed "
+            "or malformed or custom-root or cell or installation-policy or nested or dispatcher or module)"
+        ),
+        "recipe-controls": "not refusal and not actual",
+    }
+    packets["baseline"] = [
+        {**packet, "select": original.get(packet["name"], packet["select"])}
+        for packet in packets["linux"]
+    ]
+    script = """
+import contextlib, io, json, sys
+from pathlib import Path
+root = Path.cwd()
+sys.path[:0] = [str(root / "libs" / name / "src") for name in
+               ("update-driver", "agent-procutil", "single-instance-lease", "zdd")]
+import pytest
+from _pytest.mark import KeywordMatcher
+from _pytest.mark.expression import Expression
+packets = json.load(sys.stdin)
+class Collected:
+    def pytest_collection_finish(self, session):
+        self.results = {
+            "inventory": {
+                name: [item.nodeid for item in session.items if item.path.name == name]
+                for name in ("test_first_use_dispatch.py", "test_first_use_bridge.py")
+            },
+        }
+        for platform, entries in packets.items():
+            self.results[platform] = {
+                packet["name"]: [
+                    item.nodeid for item in session.items
+                    if item.path.name == packet["file"]
+                    and Expression.compile(packet["select"]).evaluate(KeywordMatcher.from_item(item))
+                ]
+                for packet in entries
+            }
+collected = Collected()
+output = io.StringIO()
+with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+    status = pytest.main([
+        "--collect-only", "-q", "--color=no", "-p", "no:cacheprovider", "-o", "addopts=",
+        "libs/update-driver/tests/test_first_use_dispatch.py",
+        "libs/update-driver/tests/test_first_use_bridge.py",
+    ], plugins=[collected])
+if status:
+    print(output.getvalue(), file=sys.stderr)
+    raise SystemExit(status)
+print(json.dumps(collected.results))
+"""
+    environment = {
+        **os.environ, "PYTEST_ADDOPTS": "", "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
+    }
+    result = subprocess.run(
+        [sys.executable, "-c", script], input=json.dumps(packets), cwd=HERE.parent,
+        env=environment, capture_output=True, text=True, timeout=20,
+        creationflags=_CREATION_FLAGS,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    collections: dict[str, dict[str, list[str]]] = json.loads(result.stdout)
+    return collections
+
+
+@pytest.mark.parametrize("platform", ["linux", "windows"])
+def test_dispatch_recipes_collect_existing_and_new_controls_exactly_once(
+    platform: str, dispatch_recipe_collections: dict[str, dict[str, list[str]]],
+) -> None:
+    inventory = dispatch_recipe_collections["inventory"]["test_first_use_dispatch.py"]
+    prerequisites = {
+        node for node in inventory
+        if "::test_dispatch_actual_installer_missing_prerequisite_refuses_before_acquisition[" in node
+    }
+    archive = {
+        node for node in inventory
+        if node.endswith("::test_dispatch_copied_foundation_supplies_the_actual_lifecycle_archive")
+    }
+    assert len(prerequisites) == 6 and len(archive) == 1
+    additions = {
+        "python-refusals": {node for node in prerequisites if node.endswith("-python-api]")},
+        "native-source-refusals": {node for node in prerequisites if node.endswith("-native-front]")},
+        "recipe-controls": archive,
+    }
+    selected = dispatch_recipe_collections[platform]
+    for packet, previous in dispatch_recipe_collections["baseline"].items():
+        assert set(selected[packet]) == set(previous) | additions.get(packet, set()), packet
+    counts = Counter(node for nodes in selected.values() for node in nodes)
+    assert all(counts[node] == 1 for node in prerequisites | archive), counts
 
 
 def test_bridge_recipes_use_explicit_bounded_native_portfolio() -> None:

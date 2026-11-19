@@ -1160,16 +1160,16 @@ jobs:
         packet: &dispatch-recipe-packets
           - name: python-refusals
             file: test_first_use_dispatch.py
-            select: refusal and python-api
+            select: (refusal or actual_installer_missing_prerequisite) and python-api
           - name: native-policy-refusals
             file: test_first_use_dispatch.py
             select: refusal and native-front and (client-only or no-self or pinned or managed or malformed or custom-root or cell or installation-policy or nested or dispatcher or module)
           - name: native-source-refusals
             file: test_first_use_dispatch.py
-            select: refusal and native-front and not (client-only or no-self or pinned or managed or malformed or custom-root or cell or installation-policy or nested or dispatcher or module)
+            select: (refusal or actual_installer_missing_prerequisite) and native-front and not (client-only or no-self or pinned or managed or malformed or custom-root or cell or installation-policy or nested or dispatcher or module)
           - name: recipe-controls
             file: test_first_use_dispatch.py
-            select: not refusal and not actual
+            select: (not refusal and not actual) or copied_foundation_supplies_the_actual_lifecycle_archive
           - name: deferred-stamp
             file: test_first_use_dispatch.py
             select: actual and stamp
