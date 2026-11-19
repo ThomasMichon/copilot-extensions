@@ -224,6 +224,7 @@ source-owner coordination rather than one large rewrite.
 
 Append-only entries are preserved in dated files, newest first.
 
+- [2026-11-18 Azure DevOps body-batch completeness](journal/2026/11.18%20ado-body-batches.md)
 - [2026-11-18 Azure DevOps PR update-contract refusal](journal/2026/11.18%20ado-pr-update-contract.md)
 - [2026-11-18 Azure DevOps PR body completeness](journal/2026/11.18%20ado-pr-body-completeness.md)
 - [2026-11-16 explicit-backfill readiness](journal/2026/11.16%20backfill-readiness.md)
