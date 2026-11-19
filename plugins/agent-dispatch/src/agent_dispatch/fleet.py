@@ -39,6 +39,7 @@ import subprocess
 import time
 import uuid
 from collections.abc import Callable, Sequence
+from typing import Any
 
 from . import embody
 from .embody_prompts import validate_fleet_route
@@ -184,7 +185,7 @@ class FleetSpawner:
         all_repos: bool = False,
         verify_timeout: int = 0,
         liveness: LivenessFn | None = None,
-        spawn_fn: Callable[..., subprocess.CompletedProcess] | None = None,
+        spawn_fn: Callable[..., subprocess.CompletedProcess[str]] | None = None,
         now: Callable[[], float] = time.time,
     ):
         self.pool = [h.strip() for h in pool if h and h.strip()]
@@ -215,12 +216,12 @@ class FleetSpawner:
         self.verify_timeout = verify_timeout
         default_liveness = host_can_bridge if self.headless else host_can_embody
         self._liveness = liveness or default_liveness
-        default_spawn = (
+        default_spawn: Callable[..., subprocess.CompletedProcess[str]] = (
             embody.spawn_fleet_headless_worker
             if self.headless
             else embody.spawn_fleet_embodied_worker
         )
-        self._spawn = spawn_fn or default_spawn
+        self._spawn: Callable[..., subprocess.CompletedProcess[str]] = spawn_fn or default_spawn
         self._now = now
         #: task_id -> chosen host, so can_spawn() and __call__() agree per cycle.
         self._selection: dict[str, str] = {}
@@ -238,7 +239,7 @@ class FleetSpawner:
         self._live_cache[host] = (now, live)
         return live
 
-    def _candidates(self, task: dict) -> list[str]:
+    def _candidates(self, task: dict[str, Any]) -> list[str]:
         """Ordered candidate hosts for ``task``.
 
         An unpinned task may run on any pool host, in config order. A task
@@ -267,7 +268,7 @@ class FleetSpawner:
         pinned = [h for h in self.pool if machine_matches(target, h)][:1]
         return [h for h in pinned if admits(h)]
 
-    def select(self, task: dict) -> str | None:
+    def select(self, task: dict[str, Any]) -> str | None:
         """Pick the first live candidate host for ``task``; cache and return it,
         or ``None`` when the whole pool is asleep/unreachable this cycle."""
         tid = str(task.get("id"))
@@ -278,7 +279,7 @@ class FleetSpawner:
         self._selection.pop(tid, None)
         return None
 
-    def can_spawn(self, task: dict) -> bool:
+    def can_spawn(self, task: dict[str, Any]) -> bool:
         """Capacity gate: True iff a live pool host is available for ``task``.
 
         Used as the supervisor's ``capacity_gate`` so a task is reserved only when
@@ -289,7 +290,7 @@ class FleetSpawner:
 
     # -- spawn ---------------------------------------------------------------
 
-    def __call__(self, task: dict) -> tuple[bool, dict]:
+    def __call__(self, task: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
         """Spawn the task's body on its selected (or freshly selected) pool host.
 
         Returns ``(ok, handle)`` in the :data:`SpawnFn` contract. ``handle`` carries
