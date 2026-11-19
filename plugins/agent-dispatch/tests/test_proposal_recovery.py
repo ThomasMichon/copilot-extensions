@@ -47,3 +47,13 @@ def test_failed_journal_commit_is_not_acknowledged(tmp_path: Path) -> None:
         a.steer("next", {"answer": "no"})
     fresh = ProposalIntake.recover(a.records, tmp_path / "recovered")
     assert fresh.queue.steer_log(a.identity) == []
+
+
+def test_relative_paths_survive_caller_directory_change(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    intake = ProposalIntake.create(Path("lane"), title="proposal", repo="https://example.invalid/org/repo",
+                                   payload="fixture")
+    receipt = intake.steer("first", {"decision": "yes"})
+    after = ProposalIntake.recover(Path("lane/proposal.records"), Path("after"))
+    monkeypatch.chdir(tmp_path.parent)
+    assert after.steer("first", {"decision": "yes"}) == receipt

@@ -43,6 +43,7 @@ class ProposalIntake:
 
     @classmethod
     def create(cls, root: Path, *, title: str, repo: str, payload: str) -> ProposalIntake:
+        root = root.absolute()
         root.mkdir(mode=0o700)
         records = root / "proposal.records"
         generation = root / "generation"
@@ -94,6 +95,7 @@ class ProposalIntake:
     @classmethod
     def recover(cls, records: Path, generation: Path) -> ProposalIntake:
         """Caller supplies owner-private records and an absent offline destination."""
+        records, generation = records.absolute(), generation.absolute()
         with closing(sqlite3.connect(records.as_uri() + "?mode=rw", uri=True)) as db:
             db.execute("PRAGMA trusted_schema=OFF")
             db.execute("PRAGMA synchronous=FULL")
