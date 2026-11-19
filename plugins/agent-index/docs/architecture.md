@@ -1189,6 +1189,32 @@ combined documents, polling checkpoints, default readers and v1 work remain
 unchanged. Rollback preserves v2 rows; use a compatible current decoder for
 point inspection/retry, not a legacy source-only execution fallback.
 
+#### Component recovery carrier (application unsupported)
+
+`CrawlManifest.component_versions` optionally retains a strict
+`ComponentVersion(source, path, version, semantics)` for every upsert and
+deletion. Positive provider versions are local to the same scoped component;
+`semantics` identifies its representation/rendering contract, not an embedding
+profile. Missing, duplicate or extra identities refuse the manifest. This is
+acquired ordering input, not evidence that a version or deletion was applied.
+`FileEntry`, `DeletedFile` and legacy manifests retain their existing wire shape.
+
+The existing `PendingCrawls` owner stores this carrier in an incremental-only
+v8 envelope, under its existing opaque recovery scope. A qualified caller must
+bind the effective account/endpoint/query/representation to that scope; the
+carrier does not establish those provider facts. Older decoders reject v8;
+current decoders reject ordered
+metadata in legacy envelopes. Component carriers cannot certify polling refresh
+or full reconciliation. Reopen, exact-parent CAS and explicit scope checks retain
+the evidence without translating it into legacy work.
+
+Recovery and direct prepared/application entrypoints refuse these manifests
+before publication, embedding or store mutation. There is no ordered
+application capability, applied-version/deletion ledger or producer yet.
+Monotonic application, equal-version content checks, crash reconciliation and
+explicit read isolation remain required before this refusal or the v2 queue
+fences can be expanded.
+
 An in-process connector opts in by advertising `change_hints_versions = (1,)`
 on its actual `discover_hints(hints, last_commit, *, cancel_check=None)` callable.
 It must return a complete validated `SourceDelta` and preserve `last_commit`
