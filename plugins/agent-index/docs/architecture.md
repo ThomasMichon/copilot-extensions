@@ -1209,11 +1209,23 @@ or full reconciliation. Reopen, exact-parent CAS and explicit scope checks retai
 the evidence without translating it into legacy work.
 
 Recovery and direct prepared/application entrypoints refuse these manifests
-before publication, embedding or store mutation. There is no ordered
-application capability, applied-version/deletion ledger or producer yet.
-Monotonic application, equal-version content checks, crash reconciliation and
-explicit read isolation remain required before this refusal or the v2 queue
-fences can be expanded.
+before publication, embedding or store mutation. The pending owner also refuses
+v8-to-legacy or changed-v8 replacement and premature completion in the same
+SQLite transaction that would change the parent; refusal retains the original
+payload. An identical v8 retry is accepted without rewriting the retained row.
+
+`ComponentContent.covered_by` is a pure ordering comparison, not stored evidence.
+It compares matching source/path identities, considers lower versions covered,
+and requires equal-version fingerprints, deletion state and rendering semantics
+to match. A newer version is not covered. The caller must supply a qualified
+canonical fingerprint and retained applied record; neither exists in runtime
+application yet.
+
+There is no ordered application capability, applied-version/deletion ledger or
+producer yet. Monotonic application, equal-version content checks, crash/backup
+reconciliation and explicit read isolation remain required before recovery
+refusal or the v2 queue fences can be expanded. Legacy callers and stored rows
+are unchanged.
 
 An in-process connector opts in by advertising `change_hints_versions = (1,)`
 on its actual `discover_hints(hints, last_commit, *, cancel_check=None)` callable.

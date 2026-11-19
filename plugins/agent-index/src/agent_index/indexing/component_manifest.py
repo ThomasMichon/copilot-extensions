@@ -38,6 +38,26 @@ class ComponentVersion:
         return cls(**raw)
 
 
+@dataclass(frozen=True)
+class ComponentContent:
+    """Canonical replacement/deletion identity, independent of arrival order."""
+
+    component: ComponentVersion
+    fingerprint: str
+    deleted: bool
+
+    def covered_by(self, previous: ComponentContent) -> bool:
+        """Only matching identities can prove a duplicate or superseded version."""
+        current, applied = self.component, previous.component
+        if (current.source, current.path) != (applied.source, applied.path):
+            raise ValueError("Component application identity does not match")
+        if current.version > applied.version:
+            return False
+        if current.version == applied.version and self != previous:
+            raise ValueError("Equal component versions have conflicting content or semantics")
+        return True
+
+
 def validate_components(manifest: CrawlManifest) -> None:
     """Every mutation needs exactly one ordering record; legacy work needs none."""
     versions = manifest.component_versions
