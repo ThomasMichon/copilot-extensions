@@ -302,7 +302,8 @@ def bootstrap_source(tmp_path_factory: pytest.TempPathFactory) -> Path:
         "self_install_payload", "config_write_lock", "update_python_path", "runtime_identity",
         "runtime_launchers", "self_install_recovery", "mux_file_lock",
         "engine_client", "engine_progress", "engine_sessions", "agent_plugin_runtime", "picker_review", "engine_posix_process",
-        "engine_environment", "worktree_rows_contract", "worktree_observation_contract",
+        "engine_environment", "engine_update_process", "engine_toolchain_context",
+        "worktree_rows_contract", "worktree_observation_contract",
         "worktree_reporting_contract",
         "update_orchestration", "update_events", "project_update_controller", "toolchain_config",
     ):
