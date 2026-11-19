@@ -16,7 +16,8 @@ from fleet_manager.local_service_handler import LocalServiceRequest
 from single_instance_lease import OperationLockedError
 
 from .repository_subscriptions import (
-    OPERATIONS, RepositoryHistoryGap, RepositoryRequestConflict, RepositorySubscriptions,
+    OPERATIONS, RepositoryHistoryGap, RepositoryRequestConflict, RepositoryRequestExpired,
+    RepositorySubscriptions,
     contract,
 )
 from .watch_replay_store import ReplayCallerExpired, json_object
@@ -188,6 +189,10 @@ async def handle(owner: RepositoryGatewayOwner, request: LocalServiceRequest) ->
             return selected
         except RepositoryHistoryGap:
             return response(410, {"error": "repository_history_gap", "resync": "query_then_subscribe"})
+        except RepositoryRequestExpired:
+            return response(410, {
+                "error": "repository_request_expired", "reconcile": "inspect-request",
+            })
         except RepositoryRequestConflict:
             return response(409, {"error": "repository_request_conflict"})
         except KeyError:

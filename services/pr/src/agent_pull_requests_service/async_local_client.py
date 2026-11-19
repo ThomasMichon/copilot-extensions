@@ -23,7 +23,7 @@ from .local_client import (
 )
 
 OPERATIONS = frozenset({
-    "query", "next-actions", "subscribe", "inspect", "events", "acknowledge", "cancel",
+    "query", "next-actions", "subscribe", "inspect", "inspect-request", "events", "acknowledge", "cancel",
 })
 
 
@@ -158,9 +158,22 @@ class AsyncBoundRepositoryClient:
     ) -> dict[str, Any]:
         selected = self._selection
         selected._check_transport()
-        if operation is None or selected.binding is None:
+        recovery = operation == "inspect-request" or (
+            operation == "subscribe" and payload is not None and "not_after" in payload
+        )
+        if operation is None or selected.binding is None or recovery:
             capabilities = await self._http("GET", "capabilities")
             selected._accept_expected_selection(capabilities)
+            if recovery:
+                feature = capabilities.get("request_recovery")
+                if not isinstance(feature, dict) or any(
+                    feature.get(name) != expected for name, expected in {
+                        "protocol": "agent-pull-requests.repository-request-recovery/v1",
+                        "inspection": "inspect-request", "cutoff": "not_after",
+                        "clock": "unix-seconds", "expiry": "min-ttl-cutoff",
+                    }.items()
+                ):
+                    raise LocalClientError("selected local original-request recovery unsupported")
             if operation is None:
                 return copy.deepcopy(capabilities)
         assert operation is not None and payload is not None and selected.binding is not None

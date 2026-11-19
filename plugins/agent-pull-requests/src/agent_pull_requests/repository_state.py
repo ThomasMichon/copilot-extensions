@@ -137,13 +137,19 @@ def validate(value: object, namespace: str, *, version: int = 1, activity: bool 
         if row["acknowledged"] >= value["next_sequence"] or type(row["cancelled"]) is not bool:
             raise ValueError("invalid continuing cursor")
         if version == 2:
-            _fields(row["request"], "after ttl")
+            bounded = isinstance(row["request"], dict) and "not_after" in row["request"]
+            _fields(row["request"], "after ttl" + (" not_after" if bounded else ""))
             after = row["request"]["after"]
             if after is not None:
                 _integer(after)
             _integer(row["request"]["ttl"], 1)
             if row["request"]["ttl"] > 86400:
                 raise ValueError("invalid continuing request lifetime")
+            if bounded:
+                cutoff = row["request"]["not_after"]
+                _integer(cutoff, 1)
+                if cutoff > 2**53 - 1 or row["expires_at"] > cutoff:
+                    raise ValueError("invalid continuing request cutoff")
             _integer(row["delivered"])
             if not row["acknowledged"] <= row["delivered"] < value["next_sequence"] or (
                 row["acknowledged_event"] is not None and (

@@ -16,6 +16,7 @@ import pytest
 from agent_pull_requests_service.async_local_client import AsyncBoundRepositoryClient
 from agent_pull_requests_service import async_local_client
 from agent_pull_requests_service.local_client import LocalClientError, LocalDeadlineExpired
+from fleet_manager.gateway_service_handler import BoundedServiceResponse
 
 if TYPE_CHECKING:
     from services.pr.tests.test_bound_local_client import Host, running
@@ -47,6 +48,123 @@ def test_actual_async_cache_selection_and_original_registration(tmp_path: Path) 
             assert replay["subscription"] == receipt["subscription"]
             assert all(call["body"]["expected_consumer"] == "consumer"
                        for call in host.calls if call["method"] == "POST")
+            assert all(call["operation"] != "acknowledge" for call in host.calls)
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("operation", ["inspect-request", "subscribe"])
+@pytest.mark.parametrize("feature", [None, "malformed", {"protocol": "unsupported"}])
+def test_optional_request_recovery_refuses_unsupported_provider_before_new_syntax(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str, feature: object,
+) -> None:
+    async def scenario() -> None:
+        async with running(tmp_path) as host:
+            gateway = host.gateways[-1]
+            native: Callable[..., Any] = gateway.handle_local
+
+            async def prior_provider(request: Any) -> Any:
+                response = await native(request)
+                if request.target.endswith("/capabilities"):
+                    value = json.loads(response.body)
+                    if feature is None:
+                        value.pop("request_recovery")
+                    else:
+                        value["request_recovery"] = feature
+                    return BoundedServiceResponse(200, response.headers, json.dumps(value).encode())
+                return response
+
+            monkeypatch.setattr(gateway, "handle_local", prior_provider)
+            selected = client(host)
+            before = host.store.path.read_bytes()
+            payload: dict[str, Any] = {"request_id": "original"} if operation == "inspect-request" else {
+                "request_id": "original", "ttl": 60, "not_after": int(host.store.clock()) + 10,
+            }
+            with pytest.raises(LocalClientError, match="recovery unsupported"):
+                await selected.request(operation, payload)
+            assert [call["method"] for call in host.calls] == ["GET"]
+            assert host.store.path.read_bytes() == before
+            legacy = await selected.request("subscribe", {"request_id": "legacy", "ttl": 60})
+            assert legacy["status"] == "active" and host.calls[-1]["operation"] == "subscribe"
+            assert "not_after" not in host.calls[-1]["body"]["request"]
+    asyncio.run(scenario())
+
+
+def test_cached_capability_does_not_authorize_new_syntax_after_provider_rollback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def scenario() -> None:
+        async with running(tmp_path) as host:
+            selected = client(host)
+            advertised = await selected.negotiate()
+            advertised["request_recovery"]["protocol"] = "caller-mutated"
+            payload = {
+                "request_id": "original", "ttl": 60, "not_after": int(host.store.clock()) + 10,
+            }
+            original = await selected.request("subscribe", payload)
+            assert [call["method"] for call in host.calls] == ["GET", "GET", "POST"]
+            gateway = host.gateways[-1]
+            native: Callable[..., Any] = gateway.handle_local
+
+            async def rolled_back(request: Any) -> Any:
+                response = await native(request)
+                if request.target.endswith("/capabilities"):
+                    value = json.loads(response.body)
+                    value.pop("request_recovery")
+                    return BoundedServiceResponse(200, response.headers, json.dumps(value).encode())
+                return response
+
+            monkeypatch.setattr(gateway, "handle_local", rolled_back)
+            before = host.store.path.read_bytes()
+            with pytest.raises(LocalClientError, match="recovery unsupported"):
+                await selected.request("inspect-request", {"request_id": "original"})
+            assert host.calls[-1]["method"] == "GET" and host.store.path.read_bytes() == before
+            retained = await selected.request("inspect", {
+                "registration_id": original["subscription"]["registration_id"],
+            })
+            assert retained["subscription"] == original["subscription"]
+    asyncio.run(scenario())
+
+
+def test_cancelled_bounded_registration_recovers_by_request_without_resubscription(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def scenario() -> None:
+        async with running(tmp_path) as host:
+            gateway = host.gateways[-1]
+            native: Callable[..., Any] = gateway.handle_local
+            committed, release = asyncio.Event(), asyncio.Event()
+            accepted: dict[str, Any] = {}
+
+            async def delay_committed(request: Any) -> Any:
+                response = await native(request)
+                if request.target.endswith("/subscribe") and not accepted:
+                    accepted.update(json.loads(response.body)["result"])
+                    committed.set()
+                    await release.wait()
+                return response
+
+            monkeypatch.setattr(gateway, "handle_local", delay_committed)
+            selected = client(host)
+            original = {
+                "request_id": "original", "ttl": 60, "not_after": int(host.store.clock()) + 10,
+            }
+            task = asyncio.create_task(selected.request("subscribe", original))
+            try:
+                await asyncio.wait_for(committed.wait(), 2)
+                task.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await task
+            finally:
+                release.set()
+            recovered = await selected.request("inspect-request", {"request_id": "original"})
+            assert recovered["subscription"] == accepted["subscription"]
+            await selected.request("cancel", {
+                "registration_id": recovered["subscription"]["registration_id"],
+            })
+            assert (await selected.request("inspect-request", {
+                "request_id": "original",
+            }))["status"] == "cancelled"
+            assert sum(call["operation"] == "subscribe" for call in host.calls) == 1
             assert all(call["operation"] != "acknowledge" for call in host.calls)
     asyncio.run(scenario())
 
