@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from contextlib import closing
+import hashlib
 import json
 from pathlib import Path
 import shutil
@@ -52,9 +53,18 @@ def receive(records: Path, destination: Path, *, outgoing: Path) -> tuple[Propos
                 shutil.copytree(blobs, destination / "payloads")
             incoming = ProposalIntake(records=records, generation=destination, identity=identity)
             task = incoming.queue.get(identity)
-            if (task is None or task.title != title or task.status != "proposed" or task.owner is not None
-                    or (incoming.queue.read_payload(task) or "") != payload):
+            if task is None or task.title != title or task.status != "proposed" or task.owner is not None:
                 raise ValueError("cache does not match the offered proposal")
+            if task.payload_ref:
+                # The content address precedes the original writer's text-mode newline translation.
+                body = payload.encode("utf-8")
+                digest = hashlib.sha256(body).hexdigest()
+                if (task.payload_ref != "blob:" + digest or
+                        (destination / "payloads" / (digest + ".md")).read_bytes()
+                        not in (body, body.replace(b"\n", b"\r\n"))):
+                    raise ValueError("cache does not match the offered payload")
+            elif (incoming.queue.read_payload(task) or "") != payload:
+                raise ValueError("cache does not match the offered payload")
             log = incoming.queue.steer_log(identity)
             accepted = db.execute("SELECT key,fields,receipt FROM steer_v1 ORDER BY seq").fetchall()
             if len(log) != len(accepted) or any(

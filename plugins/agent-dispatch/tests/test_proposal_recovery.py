@@ -64,7 +64,9 @@ def test_offered_generation_is_used_only_by_matching_reader(tmp_path: Path, monk
                                                           reason: str) -> None:
     from agent_dispatch import proposal_transfer as transfer
 
-    a = ProposalIntake.create(tmp_path / "lane", title="task", repo="https://example.invalid/o/r", payload="data")
+    a = ProposalIntake.create(tmp_path / "lane", title="task", repo="https://example.invalid/o/r",
+                              payload="fixture line\r\n" * 100)
+    original = a.queue.read_payload(a.identity)
     receipt = a.steer("first", {"extension": {"unknown": [1, 2, 3]}})
     previous = Path(a.queue.db_path).parent
     transfer.offer(a)
@@ -77,6 +79,7 @@ def test_offered_generation_is_used_only_by_matching_reader(tmp_path: Path, monk
         transfer.receive(a.records, target, outgoing=tmp_path / "unrelated")
     b, selected = transfer.receive(a.records, target, outgoing=previous)
     assert selected == reason and b.queue.steer_receipt(a.identity, "first") == receipt
+    assert b.queue.read_payload(b.identity) == original
     with pytest.raises(ValueError):
         a.steer("late", {"decision": "no"})
     assert b.steer("first", {"extension": {"unknown": [1, 2, 3]}}) == receipt

@@ -70,6 +70,7 @@ def main() -> None:
     results = []
     for phase, exe in (("seed", args.baseline_python), ("incoming", args.candidate_python),
                        ("return", args.baseline_python)):
+        exe = exe.absolute()
         if phase != "seed" and args.expect_incompatible:
             outgoing = root / (root / "current-version").read_text(encoding="utf-8")
             outgoing.rename(root / ("withheld-" + phase))
