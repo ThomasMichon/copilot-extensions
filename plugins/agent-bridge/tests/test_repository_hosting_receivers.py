@@ -492,6 +492,74 @@ async def test_driver_backed_container_checks_through_provider_runtime_proxy(
 
 
 @pytest.mark.asyncio
+async def test_driver_exec_member_metadata_selects_portable_check_without_guest_worktrees(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A driver-exec member's resolved metadata needs no agent-worktrees inside it (#13366)."""
+    from agent_bridge.spawn_target import session_host_container
+
+    calls = []
+    instance = "0123456789ab"
+
+    async def run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        assert argv[:4] == ["/payload/bin/agent-containers", "runtime-proxy", "--fleet", "example"]
+        if argv[4] == "inspect":
+            assert argv[5:] == [instance]
+            return 0, json.dumps([{"Id": instance, "State": {"Running": True}}]).encode(), b""
+        return 0, json.dumps({
+            "version": 1, "allowed": True, "repository": "/workspaces/example",
+            "expose_agent": None, "sources": [], "denied_by": [],
+        }).encode(), b""
+
+    monkeypatch.setattr("agent_bridge.session_host.container_transport._run_provider", run)
+    # Exactly the container block agent-containers resolves for a driver-exec member.
+    target = SpawnTarget(
+        type="command", user="vscode", cwd=".",
+        spawn_command=["/payload/bin/agent-containers", "exec", "--stdio", "example-1"],
+        venue={"provider": "agent-containers", "target_id": "container:example-1",
+               "instance_id": instance, "driver": "example-driver", "fleet": "example",
+               "transport": "driver-exec", "capabilities": {"session_host": False}},
+        container={
+            "name": "example-1", "repo": "example-repo", "instance_id": instance,
+            "workspace_folder": "/workspaces/example", "security_profile": "trusted",
+            "user": "vscode", "portable_receiving_policy": {"version": 1},
+            "provider_command": ["/payload/bin/agent-containers"],
+            "relay_remote_port": None, "ssh": None,
+        },
+    )
+
+    from agent_bridge.provider_hosting import query_provider_policy
+
+    result = await query_provider_policy(target, operation="launch")
+
+    assert result["allowed"] is True
+    assert [argv[4] for argv, _ in calls] == ["inspect", "exec"]
+    exec_argv, exec_kwargs = calls[1]
+    assert exec_argv[4:11] == ["exec", "-i", "-u", "vscode", instance, "bash", "-lc"]
+    assert "cd -- /workspaces/example" in exec_argv[-1]
+    assert exec_kwargs["input_bytes"]
+    assert not any("agent-worktrees" in " ".join(argv) for argv, _ in calls)
+    # Identity metadata alone never selects the SSH container Session Host.
+    assert session_host_container(target) is None
+
+
+def test_session_host_container_requires_an_ssh_capable_member() -> None:
+    from agent_bridge.spawn_target import session_host_container
+
+    def target(container):
+        return SpawnTarget(type="command", spawn_command=["provider"], container=container)
+
+    assert session_host_container(target({"name": "m", "ssh": None})) is None
+    assert session_host_container(target({"ssh": {"host_alias": "a"}})) is None
+    assert session_host_container(target(None)) is None
+    ssh = {"name": "m", "ssh": {"host_alias": "a"}}
+    assert session_host_container(target(ssh)) is ssh
+    legacy = {"name": "m"}  # persisted before ``ssh`` was always declared
+    assert session_host_container(target(legacy)) is legacy
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("denied", [False, True])
 async def test_supported_codespace_checks_guest_and_closes_inspection(
     monkeypatch: pytest.MonkeyPatch, denied: bool,

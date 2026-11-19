@@ -95,6 +95,8 @@ def add_related_plugins(spec: dict, sources: list[str | dict]) -> dict:
     if sources:
         if not spec.get("container"):
             raise RuntimeError("Restricted containers cannot receive host plugin projection")
+        if "ssh" in spec["container"] and spec["container"]["ssh"] is None:
+            raise RuntimeError("Driver-exec containers cannot receive host plugin projection")
         spec["container"]["related_plugins"] = [selection_spec(value) for value in sources]
     return spec
 
@@ -794,7 +796,30 @@ class ContainerResolver:
             spec["venue"]["driver"] = fleet.driver
             spec["venue"]["transport"] = "ssh" if plan.ssh else "driver-exec"
             spec["venue"]["capabilities"]["session_host"] = plan.ssh
-        if not restricted and (plan is None or plan.ssh):
+        if not restricted:
+            # Identity, execution context and the portable receiving-policy
+            # declaration are transport independent: the bridge's pre-launch
+            # hosting check needs them for driver-exec members too (#13366).
+            container = {
+                "name": name,
+                "repo": getattr(info, "repo", None) or fleet.repo,
+                "instance_id": getattr(info, "container_id", None),
+                "workspace_folder": workspace_folder,
+                "security_profile": fleet.security_profile,
+                "user": user,
+                "portable_receiving_policy": {"version": 1},
+                "provider_command": payload_command_argv(),
+                "relay_remote_port": (
+                    config.relay_port
+                    if relay_enabled and (plan is None or plan.agent_relay)
+                    else None
+                ),
+            }
+        if not restricted and plan is not None and not plan.ssh:
+            # No SSH endpoint: an explicit null ``ssh`` tells the bridge this
+            # member is not a Session-Host target (it spawns via driver-exec).
+            spec["container"] = {**container, "ssh": None}
+        elif not restricted:
             from .hosting_policy import guarded_launch
 
             instance_id = getattr(info, "container_id", None)
@@ -811,21 +836,9 @@ class ContainerResolver:
                 user,
             )
             spec["container"] = {
-                "name": name,
-                "repo": getattr(info, "repo", None) or fleet.repo,
-                "instance_id": getattr(info, "container_id", None),
-                "workspace_folder": workspace_folder,
-                "security_profile": fleet.security_profile,
-                "user": user,
+                **container,
                 "acp_command": guarded_launch(config.acp_command_for(fleet), workspace_folder),
-                "portable_receiving_policy": {"version": 1},
                 "ssh": asdict(ssh_config),
-                "provider_command": payload_command_argv(),
-                "relay_remote_port": (
-                    config.relay_port
-                    if relay_enabled and (plan is None or plan.agent_relay)
-                    else None
-                ),
             }
         return spec
 

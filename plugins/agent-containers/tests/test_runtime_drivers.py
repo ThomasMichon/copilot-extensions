@@ -540,9 +540,30 @@ def test_resolver_routes_driver_member_through_exec_wrapper(
     config = _write_config(tmp_path, monkeypatch, relay_enabled=True)
     fleet.reconcile_up(config, "example")
 
+    monkeypatch.setattr(resolver, "payload_command_argv", lambda: ["/payload/bin/agent-containers"])
+    monkeypatch.setattr(resolver, "prepare_ssh_config", lambda *args: pytest.fail(
+        "a driver-exec member must receive no SSH preparation"))
+
     spec = asyncio.run(resolver.ContainerResolver().resolve_spec("example-1"))
     assert spec["spawn_command"][-3:] == ["exec", "--stdio", "example-1"]
-    assert "container" not in spec  # no Session Host / SSH projection
+    member = {c.name: c for c in lifecycle.list_containers(config)}["example-1"]
+    # Portable receiving-policy metadata without any SSH / Session Host projection
+    # (#13366): the bridge's hosting check needs no agent-worktrees in the member.
+    assert spec["container"] == {
+        "name": "example-1",
+        "repo": "example-repo",
+        "instance_id": member.container_id,
+        "workspace_folder": "/workspaces/example",
+        "security_profile": "trusted",
+        "user": "vscode",
+        "portable_receiving_policy": {"version": 1},
+        "provider_command": ["/payload/bin/agent-containers"],
+        "relay_remote_port": None,
+        "ssh": None,
+    }
+    assert member.container_id and spec["venue"]["instance_id"] == member.container_id
+    with pytest.raises(RuntimeError, match="Driver-exec containers cannot receive"):
+        resolver.add_related_plugins(spec, ["example-plugin"])
     venue = spec["venue"]
     assert venue["transport"] == "driver-exec"
     assert venue["driver"] == "example-driver"
@@ -551,6 +572,33 @@ def test_resolver_routes_driver_member_through_exec_wrapper(
     assert venue["ready"] is True
     assert asyncio.run(resolver.ContainerResolver().target_repo("example-1")) == "example-repo"
     asyncio.run(resolver.ContainerResolver().ensure_ready("example-1"))
+
+
+def test_resolver_keeps_session_host_ssh_for_ssh_capable_driver(
+    fake: SimpleNamespace, no_docker: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ssh_manager import SSHConfig
+
+    monkeypatch.setenv("FAKE_DRIVER_CAPS", json.dumps({"ssh_transport": True}))
+    config = _write_config(tmp_path, monkeypatch, relay_enabled=False)
+    fleet.reconcile_up(config, "example")
+    member = {c.name: c for c in lifecycle.list_containers(config)}["example-1"]
+    prepared: list[str] = []
+    monkeypatch.setattr(resolver, "payload_command_argv", lambda: ["/payload/bin/agent-containers"])
+    monkeypatch.setattr(resolver, "prepare_ssh_config", lambda handle, user: (
+        prepared.append(handle) or SSHConfig(host_alias="fixture", user=user)))
+
+    spec = asyncio.run(resolver.ContainerResolver().resolve_spec("example-1"))
+
+    assert prepared == [f"example-1.{member.container_id}"]
+    container = spec["container"]
+    assert container["ssh"]["host_alias"] == "fixture"
+    assert container["acp_command"]
+    assert container["instance_id"] == member.container_id
+    assert container["portable_receiving_policy"] == {"version": 1}
+    assert container["provider_command"] == ["/payload/bin/agent-containers"]
+    assert spec["venue"]["transport"] == "ssh"
+    assert spec["venue"]["capabilities"]["session_host"] is True
 
 
 def test_resolver_fails_closed_on_missing_relay_capability(
