@@ -110,7 +110,7 @@
     {
       "name": "copilot-extensions-maintainer",
       "description": "Opt-in contribution, review, release-triage and clean-room procedures for explicitly assigned copilot-extensions source work. Availability does not expand the operator's charter.",
-      "version": "0.1.1-dev1",
+      "version": "0.1.2-dev1",
       "source": "plugins/copilot-extensions-maintainer",
       "defaultEnabled": false
     },
@@ -123,7 +123,7 @@
     {
       "name": "agent-index",
       "description": "Portable indexing and semantic-search engine for a harness repo and its immediate ecosystem, with good-citizen ingestion.",
-      "version": "0.10.343-dev1",
+      "version": "0.10.344-dev1",
       "source": "plugins/agent-index"
     },
     {
