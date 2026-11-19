@@ -179,6 +179,15 @@ custody without an executor thread. It neither prepares a native waiter nor
 selects the coordinator factory. Native admission, historical-reader transition,
 effect-before-ACK recovery and operational enrollment remain separate exits.
 
+The [explicit native preparation adapter](../../../plugins/agent-dispatch/docs/delegated-service-replay.md#explicit-finite-task-preparation)
+now composes that async client with the existing waiter transaction for a
+retained finite reviewer task. It negotiates executing native/service support
+before suspension, then atomically rechecks recipe/dedup association, current
+owner/session/generation/steering, holds, forms, execution/relationship guards
+and original deadline. It does not subscribe, select useful activity, wake,
+ACK or enable a coordinator factory. Those recovery and adoption exits below
+remain open.
+
 ## Serial plan and validation
 
 - [x] Review this owner/contract refinement before new protocol or storage code

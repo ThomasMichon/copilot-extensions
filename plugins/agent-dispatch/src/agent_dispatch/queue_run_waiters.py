@@ -5,7 +5,8 @@ from __future__ import annotations
 import json
 import sqlite3
 import uuid
-from typing import Any
+from collections.abc import Callable
+from typing import Any, TYPE_CHECKING
 
 from .queue_common import PROGRESS_SUMMARY_MAX, RunWaiterWakeOperation, Task, _clip
 from .queue_records import Status, TaskError
@@ -13,10 +14,20 @@ from .queue_execution_wakes import wake_custody_clear_sql
 from .queue_run_waiter_transition_cleanup import CLAIM_RELEASE_SENDER
 from .queue_delegated_waiters import DelegatedWaiterBindingMixin
 from .queue_run_waiter_records import run_waiter_from_row, select_waiter_row
+from .queue_feed_preparation import FeedWaiterAdmission, require_feed_preparation
 
 
 class QueueRunWaitersMixin(DelegatedWaiterBindingMixin):
     """Detached-run waiter and event-note helpers for :class:`TaskQueue`."""
+
+    if TYPE_CHECKING:
+        _now: Callable[[float | None], float]
+        _audit: Callable[..., None]
+        _notify_run_waiter_prepare: Callable[[], None]
+        _notify_wake: Callable[[], None]
+        _notify_verification: Callable[[], None]
+        _insert_verification_request: Callable[..., object]
+        _enqueue_wake: Callable[..., object]
 
     _run_waiter_from_row = staticmethod(run_waiter_from_row)
     _select_waiter_row = staticmethod(select_waiter_row)
@@ -31,8 +42,9 @@ class QueueRunWaitersMixin(DelegatedWaiterBindingMixin):
         host: str | None = None,
         reason: str,
         kind: str = "process",
-        delegation: dict | None = None,
+        delegation: dict[str, Any] | None = None,
         now: float | None = None,
+        _feed_admission: FeedWaiterAdmission | None = None,
     ) -> dict[str, Any]:
         ts = self._now(now)
         release_enqueued = False
@@ -45,6 +57,14 @@ class QueueRunWaitersMixin(DelegatedWaiterBindingMixin):
             meaningful = f"PR watch {delegation['repo']}#{delegation['number']}"
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
+            if _feed_admission is not None:
+                require_feed_preparation(
+                    conn, self._fetch(conn, task_id), _feed_admission, worker_id=worker_id,
+                )
+                if delegation is None or "feed" not in delegation:
+                    raise TaskError("repository-feed admission requires its retained feed intent")
+                if self._now(now) >= delegation["feed"]["deadline_at"]:
+                    raise TaskError("original repository-feed deadline elapsed")
             if delegation is not None:
                 existing = self._find_delegated_preparation(conn, task_id, delegation["preparation_id"])
                 if existing:
@@ -158,7 +178,7 @@ class QueueRunWaitersMixin(DelegatedWaiterBindingMixin):
         host: str | None = None,
         start_token: str | None = None,
         kind: str = "process",
-        delegation: dict | None = None,
+        delegation: dict[str, Any] | None = None,
         now: float | None = None,
     ) -> dict[str, Any] | None:
         ts = self._now(now)
@@ -410,8 +430,8 @@ class QueueRunWaitersMixin(DelegatedWaiterBindingMixin):
         reason: str,
         message: str,
         sender: str,
-        delegation: dict | None = None,
-        event: dict | None = None,
+        delegation: dict[str, Any] | None = None,
+        event: dict[str, Any] | None = None,
         now: float | None = None,
     ) -> dict[str, Any] | None:
         ts = self._now(now)
@@ -928,37 +948,8 @@ class QueueRunWaitersMixin(DelegatedWaiterBindingMixin):
             self._notify_verification()
         if wake_kind is not None:
             self._notify_wake()
-        return result, int(cur.lastrowid), wake_kind  # type: ignore[return-value]
-
-    @staticmethod
-    def _run_waiter_matches_task(waiter: dict[str, Any], task: Task | None) -> bool:
-        return bool(
-            task is not None
-            and task.status == Status.SUSPENDED
-            and task.owner == waiter["owner"]
-            and task.generation == int(waiter["task_generation"])
-            and task.owner_session_id == waiter.get("owner_session_id")
-        )
-
-    def _run_waiter_wake_is_current(
-        self,
-        conn: sqlite3.Connection,
-        task: Task | None,
-        wake: RunWaiterWakeOperation,
-    ) -> bool:
-        if wake.sender == CLAIM_RELEASE_SENDER:
-            return task is not None and task.generation == wake.task_generation
-        if not (
-            task is not None
-            and task.status == Status.SUSPENDED
-            and task.owner == wake.owner
-            and task.generation == wake.task_generation
-            and task.owner_session_id == wake.owner_session_id
-        ):
-            return False
-        row = conn.execute("SELECT MAX(generation) AS generation FROM run_waiters WHERE task_id = ?", (wake.task_id,)).fetchone()
-        latest_generation = int((row["generation"] if row is not None else 0) or 0)
-        return latest_generation == int(wake.waiter_generation)
+        assert result is not None and cur.lastrowid is not None
+        return result, int(cur.lastrowid), wake_kind
 
     def _enqueue_run_waiter_wake(
         self,

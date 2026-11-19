@@ -311,6 +311,68 @@ is performed.
 `test_repository_feed_waiter_storage.py` exercises actual SQLite storage,
 original-request conflicts, detached baselines, full binding partition,
 unarmed/armed local-recovery exclusion and callback HTTP refusal without task
-or outbox changes. Actual typed feed transport, capability-before-preparation,
-native feed completion/expiry, wake-before-ACK recovery and coordinator
-enrollment remain subsequent implementation and validation exits.
+or outbox changes.
+
+### Explicit finite-task preparation
+
+`agent_dispatch.repository_feed_preparation.create_repository_feed_preparer`
+adds an opt-in in-process preparation adapter. Supply the separately installed
+PR-service SDK, trusted complete `binding`, canonical harness `lane`, explicit
+HTTPS `repository_target`, reviewer recipe `land` policy and the embedding's
+active-route/drain `checkpoint`. The target maps that service repository to
+the native reviewer recipe; obtain the mapping from configuration, not a feed
+item. Non-default ports and IPv6 literals remain unsupported because the
+existing recipe target canonicalizer does not distinguish them.
+
+```python
+preparer = create_repository_feed_preparer(
+    queue, binding=configured_binding, lane="review-harness",
+    repository_target="https://forge.example/owner/repository",
+    land="author", checkpoint=owner_checkpoint,
+)
+waiter = await preparer.prepare(
+    task_id, delegation=original_intent, worker_id=worker_id,
+    resume_worktree=resume_worktree, host=host, reason="waiting for new activity",
+)
+```
+
+Default imports do not import the optional SDK. Construction starts no service,
+and preparation makes no subscription, ACK, task creation or wake. Its native
+owner must expose `repository_feed_preparation_protocol` equal to
+`agent-dispatch.repository-feed-preparation/v1`; an older storage-only owner
+refuses before service IO. This is an in-process contract, not new support in
+the callback HTTP protocol.
+
+Preparation freezes the original intent and observes the retained task basis,
+then uses the bound asynchronous private-Unix client to negotiate the running
+repository/consumer and read one reviewer-action page with `limit=1`. These are
+cache-only reads, not action selection or freshness/coverage qualification.
+The configured original baseline remains unchanged, including an unknown one.
+The same native reviewer recipe supplies the stable dedup key; there is no
+event-specific task key or absent-association creation path.
+
+After service IO and the current owner checkpoint, the existing
+`prepare_run_waiter` transaction rechecks the exact association, finite recipe,
+owner/session, task generation and steering revision. Holds, pending operator
+forms, execution-admission closure and assignment-relationship protection remain
+effective under that write lock. The original deadline is rechecked after lock
+acquisition, not renewed after negotiation. Only then can that transaction
+suspend and retain the original waiter. Repeating an unchanged preparation
+reconciles its original generation; changed or retired custody is not replaced
+by a fresh request.
+
+There is at most one preparation in flight per adapter and two finite service
+operations per call. The original monotonic deadline bounds the SDK operations;
+network IO does not hold a queue transaction. The native queue's existing short
+synchronous reads/write transaction are retained; no executor, per-task thread,
+timer, poller, credential loader or default factory is introduced. Cancellation
+before the synchronous commit leaves the task unchanged.
+
+`test_repository_feed_preparation.py` exercises actual SDK/private-Unix/cache/
+SQLite composition, unsupported native/service selection, task/form/hold/
+generation races, execution and relationship guards, original deadlines,
+cancellation and lost-local-result reconciliation. These source integration
+controls do not qualify installed reader transition or consumer activation.
+Subscription recovery, useful activity selection, native feed completion/
+expiry, wake-before-ACK and shared coordinator cadence/drain enrollment remain
+subsequent implementation and validation exits.
