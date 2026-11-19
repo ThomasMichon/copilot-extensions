@@ -11,6 +11,7 @@ import threading
 import time
 from typing import Any
 from process_telemetry.buffer import BufferedSink
+from .identity import canonicalize_remote
 
 
 def _write(event: dict[str, Any]) -> None:
@@ -37,9 +38,12 @@ def start() -> None:
     global _started
     with _init_lock:
         if not _started:
-            _writer.start()
-            atexit.register(_close)
             _started = True
+            try:
+                _writer.start()
+                atexit.register(_close)
+            except (RuntimeError, OSError):
+                _writer.close()
 
 
 def _fingerprint(value: str) -> str:
@@ -57,8 +61,10 @@ def record(stage: str, origin: str, *, row: dict[str, Any] | None = None,
         event["outcome"] = outcome
     if row is not None:
         key = row.get("dedup_key")
-        if isinstance(key, str):
-            event["key_ref"] = _fingerprint(key)
+        repo = row.get("repo")
+        lane = canonicalize_remote(repo) if isinstance(repo, str) else None
+        if lane and isinstance(key, str):
+            event["key_ref"] = _fingerprint(json.dumps([lane, key], separators=(",", ":")))
         inline = row.get("payload_inline")
         if isinstance(inline, str) and len(inline) <= 8192:
             try:

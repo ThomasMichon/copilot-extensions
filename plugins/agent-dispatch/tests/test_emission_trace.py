@@ -38,7 +38,8 @@ def test_source_poll_and_actual_create_disposition_join_without_task_content(
         client = cast(DispatchClient, LocalClient())
         _author_tasks(client, spec, "[]")
         first, = _author_tasks(client, spec, json.dumps([row]))
-        second, = _author_tasks(client, spec, json.dumps([row]))
+        second, = _author_tasks(client, spec, json.dumps([{**row, "repo": "https://EXAMPLE/project.git"}]))
+        other, = _author_tasks(client, spec, json.dumps([{**row, "repo": "example/other"}]))
         unkeyed = dict(row)
         del unkeyed["dedup_key"]
         third, = _author_tasks(client, spec, json.dumps([unkeyed]))
@@ -52,11 +53,12 @@ def test_source_poll_and_actual_create_disposition_join_without_task_content(
     capture = capfd.readouterr()
     assert not capture.out and "not-loggable" not in capture.err
     traces = [json.loads(line) for line in capture.err.splitlines() if line.startswith('{"event":')]
-    assert [r["candidate_count"] for r in traces if r["event"] == "emitter.source_read"] == [0, 1, 1, 1]
+    assert [r["candidate_count"] for r in traces if r["event"] == "emitter.source_read"] == [0, 1, 1, 1, 1]
     writes = [r for r in traces if r["event"] == "dispatch.create_result"]
-    assert [r["outcome"] for r in writes] == ["created", "deduplicated", "created"]
+    assert [r["outcome"] for r in writes] == ["created", "deduplicated", "created", "created"]
     assert writes[-1]["task_id"] == third["id"] and "key_ref" not in writes[-1]
-    linked = [r for r in traces if "key_ref" in r]
+    assert writes[2]["key_ref"] != writes[0]["key_ref"] and writes[2]["task_id"] == other["id"]
+    linked = [r for r in traces if r.get("key_ref") == writes[0]["key_ref"]]
     assert len({(r["key_ref"], r["emitter_ref"], r["pr_number"], r["observed_head"]) for r in linked}) == 1
     assert [r["task_id"] for r in linked if r["event"] != "emitter.candidate"] == [first["id"]] * 4
 
@@ -71,6 +73,7 @@ def test_blocked_diagnostics_do_not_block_or_replay_creation(tmp_path: Path, mon
     writer = BufferedSink(blocked, capacity=1, batch_size=1).start()
     try:
         monkeypatch.setattr(emission_trace, "_writer", writer)
+        monkeypatch.setattr(emission_trace, "_started", True)
         deadline = time.monotonic() + 2
         while not entered.is_set() and time.monotonic() < deadline:
             writer({"event": "block"})
@@ -85,3 +88,26 @@ def test_blocked_diagnostics_do_not_block_or_replay_creation(tmp_path: Path, mon
         release.set()
         writer.close()
         writer.join(1)
+
+
+def test_writer_start_failure_does_not_prevent_emission(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    writer = BufferedSink(lambda _: None)
+    starts = []
+
+    def failed() -> None:
+        starts.append(True)
+        raise RuntimeError("no diagnostic thread available")
+
+    monkeypatch.setattr(writer, "start", failed)
+    monkeypatch.setattr(emission_trace, "_writer", writer)
+    monkeypatch.setattr(emission_trace, "_started", False)
+    with TestClient(create_app(TaskQueue(tmp_path / "tasks.db"))) as api:
+        class Client:
+            def create(self, title: str, **fields: Any) -> dict[str, Any]:
+                result = api.post("/tasks", json={"title": title, **fields})
+                result.raise_for_status()
+                return cast(dict[str, Any], result.json())
+
+        task, = _author_tasks(cast(DispatchClient, Client()), {"id": "sample"},
+                              '[{"title":"work","repo":"example/project","dedup_key":"sample"}]')
+        assert task["status"] == "queued" and starts == [True]
