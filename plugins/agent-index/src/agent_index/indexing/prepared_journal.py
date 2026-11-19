@@ -149,7 +149,20 @@ class PreparedJournal:
             return resolved
 
     def _read(self, conn: sqlite3.Connection, kind: str, keys: list[str]) -> dict[str, bytes]:
-        result = {}
+        return dict(self._iter_read(conn, kind, keys))
+
+    def iter_rows(self, kind: str, keys: list[str]) -> Iterator[tuple[str, bytes]]:
+        """Validate rows incrementally under one parent-checked read snapshot."""
+        with closing(self.paths._connect()) as conn, conn:
+            conn.execute("BEGIN")
+            self._require_parent(conn)
+            if kind == "batch":
+                raise ValueError("Batch plans require reference-qualified reads")
+            yield from self._iter_read(conn, kind, keys)
+
+    def _iter_read(
+        self, conn: sqlite3.Connection, kind: str, keys: list[str],
+    ) -> Iterator[tuple[str, bytes]]:
         for start in range(0, len(keys), 200):
             selected = keys[start:start + 200]
             placeholders = ",".join("?" for _ in selected)
@@ -161,8 +174,7 @@ class PreparedJournal:
                 payload = row["payload"]
                 if not isinstance(payload, bytes) or hashlib.sha256(payload).hexdigest() != row["digest"]:
                     raise ValueError("Corrupt prepared crawl data")
-                result[row["key"]] = payload
-        return result
+                yield row["key"], payload
 
     def put_immutable(self, kind: str, key: str, payload: bytes) -> None:
         """Retain exact attempt intent without replacing an earlier publication."""

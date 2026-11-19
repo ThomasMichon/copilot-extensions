@@ -163,7 +163,11 @@ scope/family mismatches, candidate changes and dirty domains refuse before
 changing existing preparation. Recomposition holds no native-domain exclusion;
 short native checks precede it. Whole-claim recomposition uses one existing
 journal read snapshot with batches of at most 200 keys and constant-time target
-membership; it does not open a connection per target.
+membership; it does not open a connection per target. Raw payloads stream from
+that snapshot and are released after validation rather than collected for the
+whole claim. Equal-version comparison retains canonical-content digests, not
+another copy of every historical body; only the selected candidate content is
+retained for output.
 For every source-aware preparation, the journal acquires its SQLite writer
 transaction before entering native exclusion for the final clean check and
 fresh plan insertion. SQLite contention therefore holds no native fence.

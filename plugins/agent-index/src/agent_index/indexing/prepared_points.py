@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import asdict, dataclass
 from typing import Any
@@ -178,13 +179,12 @@ class PreparedPoints:
         component_to_logical: dict[tuple[str, str], tuple[str, ...]] = {}
         versions: dict[tuple[str, str, int], str] = {}
         selected: dict[tuple[str, str], PointAcquisition] = {}
-        targets = self.claim.hints.targets
-        keys = [self._key(target) for target in targets]
-        stored = self.journal.get(_KIND, keys)
-        for target, key in zip(targets, keys, strict=True):
-            if key not in stored:
-                raise ValueError("Whole point acquisition is incomplete")
-            observed = self._decode(target, stored[key])
+        targets = {self._key(target): target for target in self.claim.hints.targets}
+        seen = set()
+        for key, payload in self.journal.iter_rows(_KIND, list(targets)):
+            target = targets[key]
+            seen.add(key)
+            observed = self._decode(target, payload)
             component = observed.component
             logical = (target.kind, target.item_id) + (
                 (target.comment_id,) if isinstance(target, CommentVersionTarget) else ()
@@ -197,7 +197,7 @@ class PreparedPoints:
                 raise ValueError("Point acquisition logical/component identity changed")
             data = observed.to_dict()
             del data["target"]
-            content = _json(data)
+            content = hashlib.sha256(_json(data).encode("utf-8")).hexdigest()
             version_key = (*physical, component.version)
             if versions.setdefault(version_key, content) != content:
                 raise ValueError("Equal point versions have conflicting acquisition content")
@@ -206,6 +206,8 @@ class PreparedPoints:
                 raise ValueError("Point acquisition component semantics changed")
             if previous is None or previous.component.version < component.version:
                 selected[physical] = observed
+        if seen != targets.keys():
+            raise ValueError("Whole point acquisition is incomplete")
         ordered = [selected[key] for key in sorted(selected)]
         upserts = [item.entry for item in ordered if item.entry is not None]
         deletions = [item.deletion for item in ordered if item.deletion is not None]

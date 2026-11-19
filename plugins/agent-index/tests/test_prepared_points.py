@@ -51,9 +51,11 @@ def _observed(target: PointTarget, *, deleted: bool = False) -> PointAcquisition
 
 @pytest.fixture
 def retained(tmp_path: Path, request: pytest.FixtureRequest) -> tuple[PreparedPoints, TaskStore]:
-    count = getattr(request, "param", None)
-    targets = _TARGETS if count is None else tuple(
-        WorkItemRevisionTarget(str(index), 1, (f"event-{index}",)) for index in range(count)
+    parameter = getattr(request, "param", None)
+    count, correlations = parameter if parameter is not None else (0, False)
+    targets = _TARGETS if parameter is None else tuple(
+        WorkItemRevisionTarget("shared" if correlations else str(index), 1, (f"event-{index}",))
+        for index in range(count)
     )
     hints = PointChangeHints(
         source="selected", canonical_family=_FAMILY, account_id="account-a",
@@ -79,7 +81,7 @@ def retained(tmp_path: Path, request: pytest.FixtureRequest) -> tuple[PreparedPo
     )), tasks
 
 
-@pytest.mark.parametrize("retained", [1024], indirect=True)
+@pytest.mark.parametrize("retained", [(1024, False), (1024, True)], indirect=True)
 def test_whole_claim_composition_uses_one_snapshot_and_batched_point_reads(
     retained: tuple[PreparedPoints, TaskStore], monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -89,6 +91,24 @@ def test_whole_claim_composition_uses_one_snapshot_and_batched_point_reads(
         points.retain(_observed(target), claim=points.claim)
     connect = points.journal.paths._connect
     counts = {"connections": 0, "batch_reads": 0}
+    memory = {"live": 0, "peak": 0, "largest": 0}
+
+    class Payload(bytes):
+        def __new__(cls, data: bytes) -> Payload:
+            result = super().__new__(cls, data)
+            memory["live"] += len(result)
+            memory["peak"] = max(memory["peak"], memory["live"])
+            memory["largest"] = max(memory["largest"], len(result))
+            return result
+
+        def __del__(self) -> None:
+            memory["live"] -= len(self)
+
+    def row_factory(cursor: Any, row: tuple[Any, ...]) -> dict[str, Any]:
+        values = dict(zip((column[0] for column in cursor.description), row, strict=True))
+        if isinstance(values.get("payload"), bytes):
+            values["payload"] = Payload(values["payload"])
+        return values
 
     def trace(sql: str) -> None:
         if sql.startswith("SELECT key, payload, digest"):
@@ -97,14 +117,17 @@ def test_whole_claim_composition_uses_one_snapshot_and_batched_point_reads(
     def observed_connect() -> Any:
         counts["connections"] += 1
         conn = connect()
+        conn.row_factory = row_factory
         conn.set_trace_callback(trace)
         return conn
 
     monkeypatch.setattr(points.journal.paths, "_connect", observed_connect)
     candidate = points.compose()
-    assert len(candidate.upserts) == 1024
     assert counts == {"connections": 1, "batch_reads": 6}
-    assert {entry.path for entry in candidate.upserts} == {f"{t.item_id}/body.md" for t in targets}
+    assert 0 < memory["peak"] <= memory["largest"] * 4
+    expected = {f"{t.item_id}/body.md" for t in targets}
+    assert len(candidate.upserts) == len(expected)
+    assert {entry.path for entry in candidate.upserts} == expected
 
 
 def _reopen(points: PreparedPoints) -> PreparedPoints:
