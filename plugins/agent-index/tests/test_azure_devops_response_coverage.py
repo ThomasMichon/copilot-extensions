@@ -59,9 +59,29 @@ def _connector(payload: object, phase: str) -> AzureDevOpsConnector:
         ("pulls", {"value": None}),
         ("pulls", {"count": 0}),
         ("pulls", {"value": [None]}),
+        *[
+            ("pulls", {"value": [item]})
+            for item in [
+                {},
+                {"pullRequestId": None},
+                {"pullRequestId": True},
+                {"pullRequestId": "7"},
+                {"pullRequestId": []},
+                {"pullRequestId": {}},
+                {"pullRequestId": 0},
+                {"pullRequestId": -7},
+                {"pullRequestId": 7, "repository": []},
+                {"pullRequestId": 7, "repository": {"id": 9}},
+            ]
+        ],
         ("threads", {}),
         ("threads", {"value": None}),
         ("threads", {"value": [None]}),
+        ("threads", {"value": [{"comments": {}}]}),
+        ("threads", {"value": [{"comments": "not a collection"}]}),
+        ("threads", {"value": [{"comments": [None]}]}),
+        ("threads", {"value": [{"comments": ["not a record"]}]}),
+        ("threads", {"value": [{"comments": [{"content": []}]}]}),
     ],
 )
 def test_invalid_response_cannot_publish_full_deletion_manifest(
@@ -150,5 +170,55 @@ def test_query_record_observations_survive_refusal() -> None:
             "identity_records": 2,
             "item_body_records": 0,
             "comment_body_records": 0,
+        },
+    }
+
+
+@pytest.mark.parametrize("item", [{}, {"pullRequestId": True}, {"pullRequestId": []}])
+def test_unusable_selected_identity_cannot_certify_path_inventory(
+    item: dict[str, Any],
+) -> None:
+    connector = _connector({"value": [item]}, "pulls")
+    try:
+        with pytest.raises(ValueError, match="Azure DevOps.*identity"):
+            connector.list_paths()
+    finally:
+        connector._http.client.close()
+
+
+@pytest.mark.parametrize(
+    "thread",
+    [{}, {"comments": None}, {"comments": []}, {"comments": [{}, {"content": None}]}],
+)
+def test_thread_serialized_defaults_remain_valid(thread: dict[str, Any]) -> None:
+    connector = _connector({"value": [thread]}, "threads")
+    try:
+        assert [entry.path for entry in connector.discover()] == ["pulls/7.md"]
+    finally:
+        connector._http.client.close()
+
+
+def test_nested_record_observations_survive_refusal() -> None:
+    connector = _connector(
+        {"value": [{"comments": [{"content": "parsed"}, None, {"content": None}]}]},
+        "threads",
+    )
+
+    @measure_reindex
+    def run() -> dict[str, object]:
+        with pytest.raises(ValueError, match="Azure DevOps"):
+            connector.discover()
+        return {}
+
+    try:
+        counts = run()["work_counts"]
+    finally:
+        connector._http.client.close()
+    assert isinstance(counts, dict)
+    assert counts["acquisition_by_source"] == {
+        "ado:acme/widgets:pulls": {
+            "identity_records": 1,
+            "item_body_records": 0,
+            "comment_body_records": 2,
         },
     }
