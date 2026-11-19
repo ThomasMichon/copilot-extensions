@@ -1243,6 +1243,32 @@ v8-to-legacy or changed-v8 replacement and premature completion in the same
 SQLite transaction that would change the parent; refusal retains the original
 payload. An identical v8 retry is accepted without rewriting the retained row.
 
+An explicit Python caller can capture `PendingPointClaim.from_task(pinned_task)`
+and pass it to `PendingCrawls.save(..., point_claim=claim)`. This stores a strict
+incremental-only **v9** envelope containing the whole immutable queue snapshot:
+task ID, `point_claim_id`, all typed targets and their complete account, endpoint,
+query and representation binding. Source and canonical component family must
+match the acquired manifest; polling refresh is forbidden. This retains intended
+work, not proof that the manifest acquired every target or that the task is
+still eligible. Manifest component versions alone cannot establish that coverage.
+
+Only `decode_point_pending` and an explicitly claim-bound
+`PreparedJournal(..., point_claim=claim)` read this envelope. Prepared cache
+creation compares the entire claim and manifest, then rechecks the exact
+source/scope/payload under the existing writer transaction; reuse stays bound to
+that parent's durable incarnation. An optional subordinate cache field is not
+the compatibility boundary. Ordinary decoders, recovery and application refuse
+v9 rather than stripping the claim. Durable pending-table triggers also refuse
+updates, deletion and replacement of a v9 parent by older journal writers,
+including SQLite replacement inserts with the same source. Existing plain and
+v8 journal operations retain their contracts.
+
+V9 completion and discard remain unsupported. Cancellation does not make the
+retained claim successful, and later queue arrivals remain trailing work.
+Future whole-claim completion must recheck the queue owner and bind per-target
+outcomes before retiring the exact pending parent, without advancing polling
+state. No runner, producer or native application selects this new envelope.
+
 `ComponentContent.covered_by` is a pure ordering comparison, not stored evidence.
 It compares matching source/path identities, considers lower versions covered,
 and requires equal-version fingerprints, deletion state and rendering semantics
