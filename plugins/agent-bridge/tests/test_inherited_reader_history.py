@@ -119,7 +119,8 @@ async def test_attention_wait_exits_when_its_inherited_source_retires(
         with pytest.raises(HTTPException) as unavailable:
             await asyncio.wait_for(task, 2)
         assert unavailable.value.status_code == 410
-        assert unavailable.value.detail["code"] == "source_unavailable"
+        detail: object = getattr(unavailable.value, "detail")
+        assert isinstance(detail, dict) and detail["code"] == "source_unavailable"
     finally:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
