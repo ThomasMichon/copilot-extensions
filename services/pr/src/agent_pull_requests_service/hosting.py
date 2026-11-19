@@ -132,7 +132,12 @@ async def run(config: ServiceConfig, *, stop: asyncio.Event | None = None) -> No
     """Start only while the caller has not already withdrawn the request."""
     if stop is not None and stop.is_set():
         return
-    await _run_service(config, stop=stop)
+    if isinstance(config, LocalHostConfig) and config.reviewer_actions:
+        from .read_logging import reviewer_reads
+        with reviewer_reads():
+            await _run_service(config, stop=stop)
+    else:
+        await _run_service(config, stop=stop)
 
 
 async def _workspace_operations(
