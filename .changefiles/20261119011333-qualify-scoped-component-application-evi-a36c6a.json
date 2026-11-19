@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify scoped component application evidence under the existing pending owner without enabling claim execution.",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

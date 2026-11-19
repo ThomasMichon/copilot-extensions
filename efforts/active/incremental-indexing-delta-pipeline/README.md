@@ -145,9 +145,10 @@ After the reviewed proposal, the operator admitted execution:
   Its [point-component contract proposal](azure-devops-point-targets.md)
   separates named target coverage from combined-document replacement (#13386);
   typed intake now retains parked v2 claims with v1-only dequeue isolation.
-  A [retained component carrier](../../../plugins/agent-index/docs/architecture.md#component-recovery-carrier-application-unsupported)
-  preserves ordering inputs behind pre-application refusal. Representation,
-  v2 execution, ordered application and read isolation remain unimplemented.
+  The [shared component recovery/application owner](../../../plugins/agent-index/docs/architecture.md#component-recovery-carrier-and-receiver-side-application)
+  retains inputs and separately qualifies receiver-side version/deletion
+  evidence. Ordinary recovery, checkpoint/whole-claim composition, interrupted
+  attempt reconciliation, representation, v2 execution and read isolation remain open.
 - [ ] Persist acquisition progress so retry/restart does not restart a
   corpus-wide listing.
 - [ ] Move authoritative full enumeration into separately budgeted, resumable
@@ -273,6 +274,7 @@ source-owner coordination rather than one large rewrite.
 
 Append-only entries are preserved in dated files, newest first.
 
+- [2026-11-19 component application prerequisites](journal/2026/11.19%20component-application.md)
 - [2026-11-18 Azure DevOps response and selected-record coverage](journal/2026/11.18%20ado-response-coverage.md)
 - [2026-11-18 Azure DevOps body-batch completeness](journal/2026/11.18%20ado-body-batches.md)
 - [2026-11-18 Azure DevOps PR update-contract refusal](journal/2026/11.18%20ado-pr-update-contract.md)
