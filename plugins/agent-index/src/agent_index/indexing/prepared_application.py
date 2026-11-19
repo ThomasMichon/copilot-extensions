@@ -28,6 +28,29 @@ if TYPE_CHECKING:
     from agent_index.store.multi_model_store import MultiModelStore
 
 
+def publish_prepared_manifest(
+    *, manifest: CrawlManifest, full: bool, application: Callable[..., tuple[int, int, int]],
+    store: MultiModelStore, prepared: PreparedApplication,
+) -> tuple[int, int, int]:
+    from agent_index.store.ingestion_index import prepare_ingestion_indices
+
+    domain = store._source_domain
+    with domain.operation(store.content_store.db) if domain is not None else nullcontext():
+        prepared.require_current_checkpoints()
+        if prepared.batch_count == 0 and not manifest.deletions:
+            return application(manifest=manifest, full=full, prepared=prepared)
+        planned_rows = (
+            sum(len(batch.chunks) for batch in prepared.batches()) if domain is not None else 0
+        )
+        if domain is not None:
+            prepare_ingestion_indices(store, max_rows=0, reserve_segment=planned_rows > 0)
+        with domain.write(store.content_store.db) if domain is not None else nullcontext():
+            result = application(manifest=manifest, full=full, prepared=prepared)
+            if domain is not None:
+                prepare_ingestion_indices(store, max_rows=planned_rows)
+            return result
+
+
 class PreparedApplication:
     """Cached inputs/results, never a store checkpoint or recovery authority."""
 

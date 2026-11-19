@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, cast
 from agent_index.store.source_layout import selected_layout
 from agent_index.indexing.work_counts import current_counts, measure_reindex
 from agent_index.indexing.source_ownership import own_reindex
+from agent_index.indexing.prepared_application import publish_prepared_manifest as _publish_prepared_manifest
 
 # UTF-8 stdio so human-facing status glyphs render safely (Rule B, #769).
 _utf8_sys = __import__("sys")
@@ -295,6 +296,7 @@ def run_reindex(
     embedding_runtime: EmbeddingRuntime | None = None,
     change_hints: ChangeHints | None = None,
     retirement_policy: SourceRetirementPolicy | None = None,
+    require_paged_acquisition: bool = False,
 ) -> dict[str, object]:
     """Run the four-phase indexing pipeline.
 
@@ -316,6 +318,7 @@ def run_reindex(
         change_hints: Required exact-source acquisition identities; never a poll fallback.
         retirement_policy: Optional source inventory and legacy naming policy.
             Defaults retain configured-source and registered-source collection.
+        require_paged_acquisition: Require v1 page acquisition, including retained replay.
 
     Returns:
         Dict with keys ``chunks_total``, ``chunks_deleted``, ``files_crawled``,
@@ -338,6 +341,8 @@ def run_reindex(
     from agent_index.indexing.state import IndexState
     from agent_index.store.multi_model_store import MultiModelStore
 
+    if type(require_paged_acquisition) is not bool:
+        raise ValueError("require_paged_acquisition must be a bool")
     config = config if config is not None else IndexConfig()
     runtime = embedding_runtime if embedding_runtime is not None else default_embedding_runtime()
     retirement = retirement_policy if retirement_policy is not None else SourceRetirementPolicy()
@@ -416,6 +421,7 @@ def run_reindex(
                     before_model_embed=prepare_embedding,
                     source_scope=source_scope_hash(spec),
                     connector=hinted_connector, change_hints=change_hints,
+                    require_paged_acquisition=require_paged_acquisition,
                 )
                 total_chunks += stored
                 total_deleted += deleted
@@ -423,7 +429,7 @@ def run_reindex(
             except IndexingCancelled:
                 raise
             except Exception as exc:
-                if change_hints is not None:
+                if change_hints is not None or require_paged_acquisition:
                     raise
                 logger.exception("Failed to index source: %s", src_name)
                 print(f"  ERROR: {src_name} failed - continuing with next source")
@@ -596,6 +602,7 @@ def run_reindex(
 
 
 setattr(run_reindex, "change_hints_versions", (1,))
+setattr(run_reindex, "paged_acquisition_versions", (1,))
 
 
 def _refresh_clusters(
@@ -629,6 +636,7 @@ def _index_source(
     source_scope: str | None = None,
     connector: SourceConnector | None = None,
     change_hints: ChangeHints | None = None,
+    require_paged_acquisition: bool = False,
 ) -> tuple[int, int, int]:
     """Replay pinned partial acquisition before observing newer source changes."""
     from agent_index.indexing.pending_crawl import recover_source, recovery_scope
@@ -638,6 +646,12 @@ def _index_source(
 
     if connector is None:
         connector = get_connector(source_name, **(connector_kwargs or {}))
+    from agent_index.indexing.acquisition_requirement import require_connector_pages
+
+    require_connector_pages(
+        connector, source=source_name, full=full, change_hints=change_hints,
+        required=require_paged_acquisition,
+    )
     scope = recovery_scope(source_scope or source_name, connector)
     application = partial(
         _apply_source_manifest, source_name, config=config, state=state,
@@ -673,35 +687,12 @@ def _index_source(
             _crawl_source, source_name, config=config, state=state, path_index=path_index,
             full=full, progress_cb=progress_cb, connector_kwargs=connector_kwargs,
             connector=connector, source_scope=source_scope, change_hints=change_hints,
+            require_paged_acquisition=require_paged_acquisition,
         ),
         apply=application, change_hints=change_hints,
+        require_paged_acquisition=require_paged_acquisition,
         prepare=prepare if isinstance(multi_store, MultiModelStore) else None,
     )
-
-
-def _publish_prepared_manifest(
-    *, manifest: CrawlManifest, full: bool, application: Callable[..., tuple[int, int, int]],
-    store: MultiModelStore, prepared: PreparedApplication,
-) -> tuple[int, int, int]:
-    from contextlib import nullcontext
-
-    from agent_index.store.ingestion_index import prepare_ingestion_indices
-
-    domain = store._source_domain
-    with domain.operation(store.content_store.db) if domain is not None else nullcontext():
-        prepared.require_current_checkpoints()
-        if prepared.batch_count == 0 and not manifest.deletions:
-            return application(manifest=manifest, full=full, prepared=prepared)
-        planned_rows = (
-            sum(len(batch.chunks) for batch in prepared.batches()) if domain is not None else 0
-        )
-        if domain is not None:
-            prepare_ingestion_indices(store, max_rows=0, reserve_segment=planned_rows > 0)
-        with domain.write(store.content_store.db) if domain is not None else nullcontext():
-            result = application(manifest=manifest, full=full, prepared=prepared)
-            if domain is not None:
-                prepare_ingestion_indices(store, max_rows=planned_rows)
-            return result
 
 
 def _apply_source_manifest(
@@ -841,6 +832,7 @@ def _crawl_source(
     connector: SourceConnector | None = None,
     source_scope: str | None = None,
     change_hints: ChangeHints | None = None,
+    require_paged_acquisition: bool = False,
 ) -> CrawlManifest:
     """Compatibility entrypoint for the separately owned crawl phase."""
     from agent_index.indexing.crawl import collect_source_changes
@@ -852,6 +844,7 @@ def _crawl_source(
         source_aware=bool(selected_layout()), progress_cb=progress_cb,
         connector_kwargs=connector_kwargs,
         connector=connector, source_scope=source_scope, change_hints=change_hints,
+        require_paged_acquisition=require_paged_acquisition,
     )
     counts = current_counts()
     if counts is not None:

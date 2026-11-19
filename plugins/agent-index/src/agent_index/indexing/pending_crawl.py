@@ -162,7 +162,7 @@ class PendingCrawls(PollRefreshJournal):
         data = json.loads(payload)
         completed = (
             self.decode_manifest(data["manifest"], source)
-            if isinstance(data, dict) and data.get("version") in (3, 6) else None
+            if isinstance(data, dict) and data.get("version") in (3, 6, 7) else None
         )
         with closing(self._paths._connect()) as conn, conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -196,6 +196,13 @@ class PendingCrawls(PollRefreshJournal):
     def decode_pending(cls, payload: str, source: str) -> tuple[CrawlManifest, bool] | None:
         """Decode one observed payload without rereading a possibly newer generation."""
         data = json.loads(payload)
+        if isinstance(data, dict) and type(data.get("version")) is int and data["version"] == 7:
+            if set(data) != {"version", "full", "manifest", "page_protocol"} or (
+                type(data["full"]) is not bool
+                or data["page_protocol"] != ("full" if data["full"] else "incremental")
+            ):
+                raise ValueError("Invalid pending page-protocol provenance")
+            return cls.decode_manifest(data["manifest"], source), data["full"]
         if isinstance(data, dict) and data.get("version") in (2, 4, 5, 6):
             from agent_index.indexing.paged_crawl import decode_acquisition
             from agent_index.indexing.snapshot_crawl import decode_snapshot
@@ -231,8 +238,8 @@ class PendingCrawls(PollRefreshJournal):
             if row is None or row["scope"] != scope or row["payload"] != expected_payload:
                 raise PendingCrawlConflict("Pending acquisition changed before explicit discard")
             data = json.loads(row["payload"])
-            if isinstance(data, dict) and data.get("version") == 6:
-                raise ValueError("Completed hinted acquisition requires mandatory replay")
+            if isinstance(data, dict) and data.get("version") in (6, 7):
+                raise ValueError("Completed acquisition requires mandatory replay")
             progress = (
                 decode_snapshot(row["payload"], source)
                 if isinstance(data, dict) and data.get("version") == 4
@@ -339,6 +346,7 @@ def recover_source(
     publication: Callable[[], AbstractContextManager[None]] | None = None,
     prepare: PrepareManifest | None = None,
     change_hints: ChangeHints | None = None,
+    require_paged_acquisition: bool = False,
 ) -> tuple[int, int, int]:
     """Publish pinned work and its scope before admitting another scoped acquisition."""
     journal = PendingCrawls(paths)
@@ -391,6 +399,10 @@ def recover_source(
 
     pending_raw = journal.read_payload(source, scope)
     pending = journal.decode_pending(pending_raw, source) if pending_raw is not None else None
+    from agent_index.indexing.acquisition_requirement import require_pending_pages
+
+    if require_paged_acquisition and pending_raw is not None:
+        require_pending_pages(pending_raw, full=full, change_hints=change_hints)
     if pending is not None:
         manifest, pending_full = pending
         data = json.loads(pending_raw or "")
@@ -409,6 +421,10 @@ def recover_source(
     manifest = acquire()
     acquired_raw = journal.read_payload(source, scope)
     acquired = journal.decode_pending(acquired_raw, source) if acquired_raw is not None else None
+    if require_paged_acquisition:
+        require_pending_pages(acquired_raw, full=full, change_hints=change_hints)
+        if acquired is None:
+            raise PendingCrawlConflict("Required acquisition did not finish its pending pages")
     if acquired is not None and acquired != (manifest, full):
         raise PendingCrawlConflict("Acquired manifest does not match pending publication")
     if acquired is None and (not manifest.is_empty or manifest.poll_refresh is not None):

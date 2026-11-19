@@ -166,6 +166,60 @@ does not inherit it just because the underlying function supports it. Advertise
 only versions the wrapper actually accepts, validates and forwards unchanged;
 the worker otherwise parks hinted tasks before invoking an unsupported adapter.
 
+### Requiring page acquisition
+
+The opt-in in-process contract `agent-index.paged-acquisition` v1 adds
+`require_paged_acquisition=True` to `run_reindex`. Omitting it retains legacy
+discovery and reconciliation defaults. Before supplying the keyword, negotiate
+on the actual selected callable, not its module, wrapped function or package:
+
+```python
+from agent_index.indexing.acquisition_requirement import require_execution_v1
+
+require_execution_v1(selected_indexer)
+result = selected_indexer(require_paged_acquisition=True, **consumer_arguments)
+```
+
+The selected callable advertises `paged_acquisition_versions = (1,)`. A wrapper
+must accept, enforce and forward the requirement before advertising support;
+an unsupported older callable refuses at negotiation without invocation.
+This initial contract adds no worker/service/CLI field or provider wire form.
+
+A required incremental round uses `discover_delta_page` with
+`acquisition_page_versions = (1,)`; a required full round uses
+`discover_snapshot_page` with `snapshot_page_versions = (1,)`. A required hinted
+round uses `discover_hints_page` with both change-hints and acquisition-page v1,
+the original exact-source/account claim and unchanged polling cursor. Capability
+declarations belong to those actual methods. Missing, malformed or unsupported
+declarations refuse before source acquisition or pending-manifest application,
+never through `list_paths`, legacy delta/discovery or unpaged hint fallback.
+Required failures propagate rather than being reported as a successful round.
+
+Retained work uses the existing SQLite `PendingCrawls` owner and source hash.
+Existing in-progress page versions 2/4/5 and terminal hinted version 6 retain
+their established meanings. Required incremental/full acquisition records its
+terminal page provenance in version 7 with `page_protocol` equal to
+`incremental`/`full`; legacy/default producers keep their original forms.
+Current readers accept both. A required caller refuses ready v1/v3 manifests
+because they do not prove page provenance, as well as a mismatched retained mode
+or hinted claim. It preserves those bytes and indexed state; complete the
+original policy's pending work before opting in, rather than relabelling or
+discarding it. Required acquisition still resumes its own partial or ready work
+after a failed application and process reopen.
+
+Expand this engine before migrating a caller. Rollback callers can omit the
+keyword and the expanded engine can still finish v7 work; an older engine's
+strict decoder refuses v7 before application. Finish it with a v7-capable engine
+before rolling back that engine. No existing journal form is retired. This is
+an operation compatibility condition, not an installer/readiness veto or a pin
+to the original executable.
+
+Page selection is not proof of bounded nested HTTP work, whole-manifest memory,
+payload bytes or provider coverage. Existing provider qualification, pending
+scope ownership, polling refresh and separately budgeted repair remain
+independent. In particular, this contract does not enable an unqualified
+connector or make one document's partial response a complete replacement.
+
 ## Verify the actual consumer path
 
 ### Repo filtering in a consumer retrieval facade

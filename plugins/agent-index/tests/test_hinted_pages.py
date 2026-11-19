@@ -451,6 +451,7 @@ def test_actual_engine_indexes_only_after_terminal_page_and_preserves_poll_curso
             config=config,
             change_hints=a.hints,
             embedding_runtime=runtime,
+            require_paged_acquisition=True,
         )
 
     with pytest.raises(RuntimeError, match="interrupted"):

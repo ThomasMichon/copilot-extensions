@@ -27,6 +27,7 @@ def collect_source_changes(
     connector: SourceConnector | None = None,
     source_scope: str | None = None,
     change_hints: ChangeHints | None = None,
+    require_paged_acquisition: bool = False,
 ) -> CrawlManifest:
     """Prefer explicit deltas; retain full reconciliation for legacy providers."""
     from agent_index.sources import get_connector
@@ -34,6 +35,12 @@ def collect_source_changes(
 
     if connector is None:
         connector = get_connector(source_name, **(connector_kwargs or {}))
+    from agent_index.indexing.acquisition_requirement import require_connector_pages
+
+    require_connector_pages(
+        connector, source=source_name, full=full, change_hints=change_hints,
+        required=require_paged_acquisition,
+    )
     canonical = connector.source_name if source_aware else None
     if source_aware and (not isinstance(canonical, str) or not canonical):
         raise RuntimeError("connector has no canonical stored family")
@@ -93,6 +100,7 @@ def collect_source_changes(
             source_name, family=connector.source_name, stored_family=canonical,
             scope=scope, last_commit=last_commit, journal=journal, discover=discover_snapshot,
             refresh=refresh, cancel_check=cancel_check,
+            require_paged_acquisition=require_paged_acquisition,
         )
     if pages_selected and callable(discover_page):
         if refresh is not None:
@@ -103,6 +111,7 @@ def collect_source_changes(
             source_name, family=connector.source_name, stored_family=canonical,
             scope=scope, last_commit=last_commit, journal=journal, discover=discover_page,
             cancel_check=cancel_check,
+            require_paged_acquisition=require_paged_acquisition,
         )
     if change_hints is not None:
         from agent_index.indexing.change_hints_contract import validate_scope
