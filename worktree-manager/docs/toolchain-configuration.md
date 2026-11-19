@@ -119,6 +119,15 @@ credential owner instead. Credential-bearing file contents are not copied.
 No-config requests retain their older context baseline. A configured request
 requires a product receiver supporting this request-context contract; do not
 strip mandatory inputs to make an older strict receiver accept it.
+The selected engine's existing `update --inventory --json` response advertises
+`toolchain_request_context` with schema
+`copilot-extensions.toolchain-request-context` and integer version `1`.
+Manager checks that exact engine before handing off a configured update,
+including an existing queued participant. Missing or unsupported metadata
+refuses the engine update before execution and directs setup/recovery; ordinary
+no-config updates do not require the new declaration. Windows `self-install
+--apply` participants also apply the selected configuration under installation
+custody before constructing a candidate.
 
 ## Channel and compatibility limits
 

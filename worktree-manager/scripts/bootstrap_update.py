@@ -26,7 +26,7 @@ def execute(args: argparse.Namespace, driver: ModuleType, *, source_digest: str)
     from worktree_manager.update_driver_cli import (
         _current_authority, _report, _runner_context_keys, _source_key,
         _update_context_directory, parse_options,
-        request_context, request_source_anchor,
+        installation_request_context as request_context, request_source_anchor,
     )
     from worktree_manager.engine_acquisition_budget import TIMEOUT_ENV, acquisition_timeout
 
@@ -40,7 +40,7 @@ def execute(args: argparse.Namespace, driver: ModuleType, *, source_digest: str)
     if budget is not None:
         budget = str(acquisition_timeout({TIMEOUT_ENV: budget}))
     source_anchor = request_source_anchor()
-    context = {**request_context(capture_toolchain=True), "WORKTREE_MANAGER_ROOT": str(args.root.resolve())}
+    context = {**request_context(), "WORKTREE_MANAGER_ROOT": str(args.root.resolve())}
     _update_context_directory(context)
     try:
         selected = _current_authority(

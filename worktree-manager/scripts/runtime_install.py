@@ -38,6 +38,7 @@ from runtime_install_environment import (  # noqa: E402
     installation_child_options as _installation_child_options,
     windows_console_stream as _windows_console_stream,
 )
+from runtime_install_inputs import validate_update_request as _validate_update_request  # noqa: E402
 from runtime_install_selection import (  # noqa: E402
     _source_profile_reuse,
     base_python as base_python,
@@ -488,16 +489,6 @@ def adopt_broker(root: Path, slot: Path) -> None:
         custody.assert_owned()
 
 
-def _validate_update_request(args: argparse.Namespace) -> None:
-    expected = getattr(args, "admitted_source", None)
-    if expected is not None:
-        from worktree_manager.update_driver_cli import _source_key, _update_context_directory
-
-        if _source_key() != expected:
-            raise RuntimeError("Manager source changed after submission; submit a new request")
-        _update_context_directory(os.environ)
-
-
 def _automatic_bootstrap_refusal(args: argparse.Namespace) -> str | None:
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     if command[:1] != ["update"]:
@@ -536,7 +527,7 @@ def _automatic_bootstrap_inhibited(args: argparse.Namespace) -> bool:
 def _foreground_install(args: argparse.Namespace, driver: ModuleType) -> Path | int:
     """Explicit bootstrap owns the existing finite driver, not a spawn fallback."""
     from worktree_manager.update_driver_cli import (
-        _runner_context_keys, parse_options, request_context,
+        _runner_context_keys, parse_options, installation_request_context as request_context,
     )
 
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
@@ -580,7 +571,7 @@ def _foreground_install(args: argparse.Namespace, driver: ModuleType) -> Path | 
     if automatic:
         identity.append("--auto")
     caller = str(Path.cwd().resolve())
-    context = {**request_context(capture_toolchain=True), "WORKTREE_MANAGER_ROOT": str(args.root.resolve())}
+    context = {**request_context(), "WORKTREE_MANAGER_ROOT": str(args.root.resolve())}
     request = driver.enqueue(
         driver.RequestSpec(
             "manager-bootstrap", tuple(identity), project=str(args.root.resolve()),

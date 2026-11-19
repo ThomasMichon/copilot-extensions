@@ -178,8 +178,9 @@ if ($ToolchainConfig) {
         $systemCandidates = if ($toolchainWindows) {
             if ($env:PROGRAMDATA) { Join-Path $env:PROGRAMDATA 'uv\uv.toml' }
         } else {
-            if ($env:XDG_CONFIG_DIRS) {
-                foreach ($base in ($env:XDG_CONFIG_DIRS -split ':')) {
+            $uvSystemDirs = if ($env:XDG_CONFIG_DIRS) { $env:XDG_CONFIG_DIRS } else { '/etc/xdg' }
+            if ($uvSystemDirs) {
+                foreach ($base in ($uvSystemDirs -split ':')) {
                     if ($base) { Join-Path $base 'uv/uv.toml' }
                 }
             }

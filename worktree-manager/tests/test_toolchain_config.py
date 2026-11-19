@@ -147,7 +147,7 @@ def test_toolchain_config_conflicts_do_not_partially_write(
 
 @pytest.mark.parametrize("kind", ["ps1", "sh"])
 @pytest.mark.parametrize("invalid", [
-    "", "unknown", "pip", "pip-colon", "uv", "uv-pip", "uv-system",
+    "", "unknown", "pip", "pip-colon", "uv", "uv-pip", "uv-system", "uv-system-default",
     "uv-inline", "uv-dotted", "npm", "environment",
     "mirror-only", "mirror-configfile", "mirror-noconfig",
 ])
@@ -157,6 +157,8 @@ def test_toolchain_config_native_entry_precedes_first_prerequisite(
     shell = shutil.which("pwsh") if kind == "ps1" else (shutil.which("bash") if os.name != "nt" else None)
     if shell is None:
         pytest.skip("native shell unavailable")
+    if invalid == "uv-system-default" and os.name == "nt":
+        pytest.skip("XDG system defaults are a POSIX native contract")
     # This first-touch control stops at uv discovery. No Python, package manager,
     # Git source or installed Manager is required or allowed to execute.
     bootstrap = Path(__file__).resolve().parents[1] / f"bootstrap.{kind}"
@@ -180,6 +182,14 @@ def test_toolchain_config_native_entry_precedes_first_prerequisite(
         PROGRAMDATA=str(home / "programdata"), XDG_CONFIG_HOME=str(home / ".config"),
         XDG_CONFIG_DIRS=str(home / "global-config"), WORKTREE_MANAGER_ROOT=str(home / "manager"),
     )
+    if invalid == "uv-system-default":
+        candidate = tmp_path / f"bootstrap.{kind}"
+        candidate.write_text(
+            bootstrap.read_text(encoding="utf-8").replace("/etc/xdg", str(home / "global-config")),
+            encoding="utf-8",
+        )
+        bootstrap = candidate
+        env.pop("XDG_CONFIG_DIRS")
     if invalid == "environment":
         env["PIP_INDEX_URL"] = "https://other.example.invalid/simple/"
     elif mirror_only:
@@ -193,14 +203,14 @@ def test_toolchain_config_native_entry_precedes_first_prerequisite(
             env["UV_CONFIG_FILE"] = str(target)
         elif invalid == "mirror-noconfig":
             env["UV_NO_CONFIG"] = "1"
-    elif invalid in {"pip", "pip-colon", "uv", "uv-pip", "uv-system", "uv-inline", "uv-dotted", "npm"}:
+    elif invalid in {"pip", "pip-colon", "uv", "uv-pip", "uv-system", "uv-system-default", "uv-inline", "uv-dotted", "npm"}:
         family = "pip" if invalid.startswith("pip") else "uv" if invalid.startswith("uv") else "npm"
         target = {
             "pip": home / "appdata" / "pip" / "pip.ini" if os.name == "nt" else home / ".config" / "pip" / "pip.conf",
             "uv": home / "appdata" / "uv" / "uv.toml" if os.name == "nt" else home / ".config" / "uv" / "uv.toml",
             "npm": home / ".npmrc",
         }[family]
-        if invalid == "uv-system":
+        if invalid in {"uv-system", "uv-system-default"}:
             target = (
                 home / "programdata" / "uv" / "uv.toml" if os.name == "nt"
                 else home / "global-config" / "uv" / "uv.toml"
@@ -545,3 +555,27 @@ def test_toolchain_config_checks_merged_uv_sources_before_writes(
         with pytest.raises(ValueError):
             tc.apply_configuration(config, home=tmp_path)
         assert {path: path.read_bytes() if path.exists() else None for path in before} == before
+
+
+@pytest.mark.parametrize("directories", [None, "", "/first:/second"])
+def test_toolchain_config_system_uv_uses_default_xdg_and_first_discovered_directory(
+    monkeypatch: pytest.MonkeyPatch, directories: str | None,
+) -> None:
+    available = {Path("/etc/xdg/uv/uv.toml"), Path("/first/uv/uv.toml"),
+                 Path("/second/uv/uv.toml"), Path("/etc/uv/uv.toml")}
+    checked: list[Path] = []
+
+    def exists(path: Path) -> bool:
+        checked.append(path)
+        return path in available
+
+    monkeypatch.setattr(Path, "exists", exists)
+    env = {} if directories is None else {"XDG_CONFIG_DIRS": directories}
+    expected = Path("/first/uv/uv.toml" if directories else "/etc/xdg/uv/uv.toml")
+    assert tc._system_uv_path(env, windows=False) == expected
+    assert checked == [expected]
+    available.remove(expected)
+    checked.clear()
+    assert tc._system_uv_path(env, windows=False) == Path(
+        "/second/uv/uv.toml" if directories else "/etc/uv/uv.toml",
+    )

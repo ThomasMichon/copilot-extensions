@@ -162,7 +162,7 @@ def _system_uv_path(env: Mapping[str, str], *, windows: bool) -> Path | None:
     else:
         candidates = [
             Path(directory) / "uv" / "uv.toml"
-            for directory in env.get("XDG_CONFIG_DIRS", "").split(":") if directory
+            for directory in (env.get("XDG_CONFIG_DIRS") or "/etc/xdg").split(":") if directory
         ] + [Path("/etc/uv/uv.toml")]
     return next((path for path in candidates if path.exists()), None)
 

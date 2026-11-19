@@ -287,12 +287,12 @@ def test_bootstrap_update_carries_uv_in_participant_arguments(
     runners: list[Any] = []
     context_requests: list[bool] = []
 
-    def request_context(*, capture_toolchain: bool = False) -> dict[str, str]:
-        context_requests.append(capture_toolchain)
+    def request_context() -> dict[str, str]:
+        context_requests.append(True)
         return {}
 
     monkeypatch.setattr(bootstrap_inputs, "retain", lambda payload, *a, **k: (payload, True))
-    monkeypatch.setattr(manager, "request_context", request_context)
+    monkeypatch.setattr(manager, "installation_request_context", request_context)
     monkeypatch.setattr(manager, "_source_key", lambda: "configured-source")
     monkeypatch.setattr(manager, "_update_context_directory", lambda context: None)
     monkeypatch.setattr(update_python_path, "finish_update", lambda command, code: code)

@@ -208,23 +208,33 @@ def request_context(*, capture_engine: bool = True, capture_toolchain: bool = Fa
 
     context["WORKTREE_MANAGER_ROOT"] = str(default_root().expanduser().resolve())
     if capture_toolchain:
-        version = os.environ.get(_TOOLCHAIN_REQUEST_KEY)
-        if version not in (None, "", "1") or (
-            version == "1" and not os.environ.get("COPILOT_EXTENSIONS_TOOLCHAIN_CONFIG")
-        ):
-            raise ValueError("Unsupported or incomplete toolchain request context")
-        selected = os.environ.get("COPILOT_EXTENSIONS_TOOLCHAIN_CONFIG")
-        if not selected:
-            for path in (
-                Path.cwd() / ".copilot-extensions" / "toolchain.conf",
-                Path(context["WORKTREE_MANAGER_ROOT"]) / "toolchain.conf",
-            ):
-                if path.exists():
-                    selected = str(path)
-                    break
-        if selected:
-            context.update(_toolchain_context(selected))
+        return _installation_context(context)
     return context
+
+
+def installation_request_context() -> dict[str, str]:
+    """Opt mutating entrypoints into routing without changing legacy readers."""
+    return _installation_context(request_context())
+
+
+def _installation_context(context: dict[str, str]) -> dict[str, str]:
+    from .source_config import default_root
+
+    version = os.environ.get(_TOOLCHAIN_REQUEST_KEY)
+    if version not in (None, "", "1") or (
+        version == "1" and not os.environ.get("COPILOT_EXTENSIONS_TOOLCHAIN_CONFIG")
+    ):
+        raise ValueError("Unsupported or incomplete toolchain request context")
+    selected = os.environ.get("COPILOT_EXTENSIONS_TOOLCHAIN_CONFIG")
+    if not selected:
+        for path in (
+            Path.cwd() / ".copilot-extensions" / "toolchain.conf",
+            Path(context.get("WORKTREE_MANAGER_ROOT") or default_root()) / "toolchain.conf",
+        ):
+            if path.exists():
+                selected = str(path)
+                break
+    return {**context, **_toolchain_context(selected)} if selected else context
 
 
 def _toolchain_context(configuration: str) -> dict[str, str]:
@@ -393,15 +403,18 @@ def self_install_request(operation: Callable[[], int]) -> int:
 
     try:
         installer_factory: Callable[[], Any] = _runtime_installer
-        with _request_environment(request_context(capture_toolchain=True)), installer_factory()._installation_custody() as custody:
+        with _request_environment(installation_request_context()), installer_factory()._installation_custody() as custody:
             if custody is not None:
+                from .toolchain_config import configure_selected
+
+                configure_selected(root=default_root().expanduser().resolve(), apply=True)
                 return operation()
             argv, environment = driver.runtime_command("worktree_manager", ["self-install", "--apply"])
             application_slot = running_application_slot()
             workspace = application_slot or running_payload_dir()
             root = str(default_root().expanduser().resolve())
             execution_directory = root if application_slot is not None else str(workspace)
-            context = {**request_context(capture_toolchain=True), "WORKTREE_MANAGER_ROOT": root}
+            context = {**installation_request_context(), "WORKTREE_MANAGER_ROOT": root}
             selected = _current_authority(
                 driver, context=context.get("COPILOT_EXTENSIONS_CONTEXT", ""), cwd=str(workspace),
             )
@@ -525,7 +538,7 @@ def cmd_update_request(rest: list[str]) -> int:
             for name in ("detach", "wait", "supervised_debug", "json")
             if getattr(options, name)
         ]
-        context = request_context(capture_toolchain=True)
+        context = installation_request_context()
         source_anchor = request_source_anchor()
         selected = _current_authority(
             driver,

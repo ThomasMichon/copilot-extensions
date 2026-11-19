@@ -156,7 +156,7 @@ if [ -n "$toolchain_config" ]; then
     fi
     if [ -n "$tc_index$tc_python" ]; then
         tc_paths+=("${XDG_CONFIG_HOME:-$HOME/.config}/uv/uv.toml"); tc_kinds+=(uv)
-        IFS=: read -r -a tc_system_dirs <<< "${XDG_CONFIG_DIRS:-}"
+        IFS=: read -r -a tc_system_dirs <<< "${XDG_CONFIG_DIRS:-/etc/xdg}"
         tc_system_dirs+=(/etc)
         for directory in "${tc_system_dirs[@]}"; do
             if [ -n "$directory" ] && [ -e "$directory/uv/uv.toml" ]; then
