@@ -463,10 +463,11 @@ the original identity rather than another `subscribe`.
 
 The returned receipt must match the configured consumer, full repository
 identity, original request and immutable intent, with expiry no later than its
-cutoff. Its registration is retained through the existing progress owner
-before arming. Task changes can prevent arming without losing that receipt.
-An active native waiter is not re-armed. Unknown responses retain the attempted
-identity; no exception is treated as proof of nonacceptance.
+cutoff. Its registration is retained through the existing progress owner, even
+after a task changes. This leaf does not arm a native waiter: a provider's
+`status: active` is a service receipt state, not native activation or permission
+to wake. Unknown responses retain the attempted identity; no exception is
+treated as proof of nonacceptance.
 
 Each explicit call has a thirty-second monotonic IO bound, shortened by an
 already selected client deadline. Inspection can reconcile after the original
@@ -478,10 +479,14 @@ not another scheduled cycle or acquisition loop.
 An absent receipt, including absence after cutoff, remains `unresolved` here.
 Cancelled/expired receipts are retained but cannot arm or complete the native
 waiter. This registration leaf does not cancel subscriptions, settle native
-expiry, select useful activity, wake a task, ACK delivery or supply a full
+arming/expiry, select useful activity, wake a task, ACK delivery or supply a full
 consumer. Those operations still require the existing owner's separately
 qualified completion/settlement path; do not activate this adapter as a
 standalone waiter loop.
+Before a later consumer can arm a recovered receipt, its actual expiry must be
+checked by the native arm transaction under its write lock and immediately
+before commit, as well as the existing task/wake/original-deadline guards.
+A pre-IO or pre-lock receipt check is not that qualification.
 
 `test_repository_feed_registration.py` composes actual native SQLite waiters
 with real repository receipt storage and a real private-Unix SDK/ingress case.

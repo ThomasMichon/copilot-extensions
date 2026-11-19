@@ -91,7 +91,11 @@ def reconcile(registrar: RepositoryFeedRegistrar, task_id: str, spec: dict[str, 
 def test_real_receipt_reopens_without_new_subscription_delivery_or_wake(tmp_path: Path) -> None:
     queue, task_id, spec, client, registrar = prepared(tmp_path)
     first = reconcile(registrar, task_id, spec)
-    assert first["status"] == first["waiter_state"] == "active"
+    assert first["status"] == "active" and first["waiter_state"] == "preparing"
+    native = queue.find_delegated_preparation(task_id, spec["preparation_id"])
+    assert native is not None and native["state"] == "preparing"
+    assert native["replay_registration_id"] == first["registration_id"]
+    assert "registration_id" not in native["delegation"]
     assert client.payloads == [{
         "request_id": spec["feed"]["request_id"], "ttl": spec["timeout"],
         "after": 0, "not_after": int(spec["feed"]["deadline_at"]),
@@ -219,7 +223,7 @@ def test_native_sender_cannot_extend_the_frozen_creation_cutoff(tmp_path: Path) 
     assert queue.find_delegated_preparation(task_id, spec["preparation_id"]) is None
 
 
-def test_changed_task_retains_late_receipt_but_cannot_arm(tmp_path: Path) -> None:
+def test_changed_task_retains_late_receipt_without_native_activation(tmp_path: Path) -> None:
     queue, task_id, spec, client, registrar = prepared(tmp_path)
 
     def hold(_result: dict[str, Any]) -> None:
@@ -227,8 +231,8 @@ def test_changed_task_retains_late_receipt_but_cannot_arm(tmp_path: Path) -> Non
             conn.execute("UPDATE tasks SET hold_reason='operator hold' WHERE id=?", (task_id,))
 
     client.after_receipt = hold
-    with pytest.raises(TaskError):
-        reconcile(registrar, task_id, spec)
+    result = reconcile(registrar, task_id, spec)
+    assert result["waiter_state"] == "preparing"
     waiter = queue.find_delegated_preparation(task_id, spec["preparation_id"])
     assert waiter is not None and waiter["replay_registration_id"] and waiter["state"] == "preparing"
     assert not waiter["replay_settled"] and not queue.list_run_waiter_wakes(task_id)
@@ -345,7 +349,7 @@ def test_actual_async_unix_registration_and_original_inspection(
             first = await registrar.reconcile_registration(task_id, spec["preparation_id"])
             before = host.store.path.read_bytes()
             again = await registrar.reconcile_registration(task_id, spec["preparation_id"])
-            assert first == again and first["waiter_state"] == "active"
+            assert first == again and first["waiter_state"] == "preparing"
             assert [call["operation"] for call in host.calls] == [
                 "capabilities", "next-actions", "capabilities", "capabilities", "subscribe",
                 "capabilities", "capabilities", "inspect-request",

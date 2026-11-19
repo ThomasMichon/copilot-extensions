@@ -17,7 +17,7 @@ _RECOVERY_PROTOCOL = "agent-pull-requests.repository-request-recovery/v1"
 
 
 class RepositoryFeedRegistrar(RepositoryFeedPreparer):
-    """Prepare and register explicitly; no cycle, scheduler, delivery, wake or ACK.
+    """Prepare and register explicitly; no arming, cycle, delivery, wake or ACK.
 
     The embedding owns the same trusted SDK client and native checkpoint as
     preparation. Every possible transmission is retained before IO; a later
@@ -81,7 +81,7 @@ class RepositoryFeedRegistrar(RepositoryFeedPreparer):
 
     def _receipt(
         self, waiter: dict[str, Any], result: dict[str, Any],
-    ) -> tuple[str, str, int]:
+    ) -> tuple[str, str]:
         from agent_pull_requests.repository_contract import RepositoryIdentity
 
         feed = waiter["delegation"]["feed"]
@@ -106,7 +106,7 @@ class RepositoryFeedRegistrar(RepositoryFeedPreparer):
             or (status == "cancelled") != row["cancelled"]
         ):
             raise ValueError("original repository-feed receipt differs")
-        return status, registration, expiry
+        return status, registration
 
     async def reconcile_registration(
         self, task_id: str, preparation_id: str,
@@ -114,7 +114,7 @@ class RepositoryFeedRegistrar(RepositoryFeedPreparer):
         """One original registration/inspection exchange, bounded to thirty seconds.
 
         Missing receipts, cancellation and original expiry remain reconciliation;
-        this operation neither completes a native waiter nor settles delivery.
+        this operation neither arms/completes a native waiter nor settles delivery.
         """
         if self._running:
             raise TaskError("repository-feed operation already in flight")
@@ -159,17 +159,9 @@ class RepositoryFeedRegistrar(RepositoryFeedPreparer):
                 result = await self.client.request("subscribe", {
                     "request_id": waiter["delegation"]["feed"]["request_id"], **intent,
                 })
-            status, registration, expiry = self._receipt(waiter, result)
+            status, registration = self._receipt(waiter, result)
             self._checkpoint()
             waiter = self.queue.replay_waiter_progress(waiter, registration_id=registration)
-            if status == "active" and time.time() < expiry and waiter["state"] == "preparing":
-                self._checkpoint()
-                armed = self.queue.arm_run_waiter(
-                    task_id, generation=waiter["generation"], kind="delegated",
-                    delegation={**waiter["delegation"], "registration_id": registration},
-                )
-                if armed is not None:
-                    waiter = armed
             return {
                 "status": status, "registration_id": registration,
                 "waiter_state": waiter["state"],
