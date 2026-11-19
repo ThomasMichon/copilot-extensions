@@ -148,6 +148,9 @@ After the reviewed proposal, the operator admitted execution:
   explicit whole-envelope pinning that separates trailing arrivals. An explicit
   claim-bound pending envelope retains that entire snapshot with exact prepared
   parent/incarnation checks; ordinary readers and premature retirement refuse it.
+  A disconnected named-point reader uses exact revision/comment-version APIs and
+  rechecks query/account context without acquiring the combined discussion;
+  its observations are not durable whole-claim acquisition/application coverage.
   A [retained component carrier](../../../plugins/agent-index/docs/architecture.md#component-recovery-carrier-application-unsupported)
   preserves ordering inputs behind pre-application refusal, including changed
   replacement and premature-completion refusal. Pure content/version comparison
