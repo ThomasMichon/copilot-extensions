@@ -213,6 +213,11 @@ Cancellation is checked before each page. Requests are unconditional because
 the shared HTTP validator cache does not retain response bodies; an unexpected
 304 refuses rather than returning an empty or partial inventory. Parsed-page
 observations and request counters remain intact on later failure.
+Saved-query selection results and PR review-thread bodies also request complete
+bodies without conditional validators. Repeated reads must retain selected
+identities and complete comments; an unexpected bodyless response refuses
+through the same response validation rather than certifying an empty source.
+Direct HTTP conditional-read support remains available outside these owners.
 The shared HTTP header-token helper remains available for APIs that use it,
 including repeat/cycle refusal and opaque-token preservation. Neither traversal
 budgets or persists its accumulated response memory. Mutable offsets do not

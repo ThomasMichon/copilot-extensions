@@ -333,6 +333,7 @@ class AzureDevOpsConnector:
         return self._http.get_json(
             self._project_path("_apis", "wit", "wiql", saved_query_id),
             params={"api-version": _DEFAULT_API_VERSION},
+            etag=False,
             purpose="identity_page",
         )
 
@@ -567,6 +568,7 @@ class AzureDevOpsConnector:
                     "threads",
                 ),
                 params={"api-version": _DEFAULT_API_VERSION},
+                etag=False,
                 purpose="comment_page",
             )
         except httpx.HTTPStatusError as exc:
