@@ -357,7 +357,7 @@ def test_gateway_native_groups_preserve_the_complete_disjoint_selection(platform
     assert continuity["timeout-minutes"] == 6
     assert continuity["needs"] == "gateway-host-application-" + platform
     followthrough = [step for step in continuity["steps"] if "run" in step]
-    assert len(followthrough) == 1 and not followthrough[0].get("continue-on-error")
+    assert len(followthrough) == 2 and not any(step.get("continue-on-error") for step in followthrough)
     assert shlex.split(followthrough[0]["run"]) == [
         "python", "tools/run-standalone-tests.py", "fleet-manager", "--prepare", "--timeout", "180",
     ]
@@ -386,10 +386,15 @@ def test_gateway_native_groups_preserve_the_complete_disjoint_selection(platform
     ]
     assert not any(step.get("continue-on-error") for step in normal_steps)
     controls = [
-        step for step in workflow["jobs"]["pr-artifacts-" + platform]["steps"]
+        step for step in continuity["steps"]
         if "tests/test_repository_continuity.py" in step.get("run", "")
     ]
     assert len(controls) == 1 and not controls[0].get("if")
+    assert followthrough[-1] == controls[0]
+    assert not any(
+        "tests/test_repository_continuity.py" in step.get("run", "")
+        for step in workflow["jobs"]["pr-artifacts-" + platform]["steps"]
+    )
     preparation_controls = normal_steps[-2]
     assert preparation_controls["if"] == "${{ !inputs.pr_artifacts }}"
     assert preparation_controls["run"] == controls[0]["run"]
@@ -418,7 +423,7 @@ def test_gateway_native_groups_preserve_the_complete_disjoint_selection(platform
     )
     assert preparation["steps"] == normal["steps"]
     expressions = []
-    for step in steps + followthrough + [lifecycle]:
+    for step in steps + [followthrough[0], lifecycle]:
         arguments = shlex.split(step["env"]["PYTEST_ADDOPTS"])
         expressions.append(Expression.compile(arguments[arguments.index("-k") + 1]))
     original = Expression.compile(

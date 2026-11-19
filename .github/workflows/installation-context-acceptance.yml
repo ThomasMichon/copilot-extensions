@@ -1789,13 +1789,6 @@ jobs:
         env:
           PYTEST_ADDOPTS: "-k regular_wheel_application_installs_an_inert_client"
         run: python tools/run-standalone-tests.py fleet-manager --prepare --timeout 120
-      - name: Repository source admission and pinned SSH setup controls
-        env:
-          PYTEST_ADDOPTS: "-vv --durations=20"
-        run: >-
-          python tools/run-plugin-tests.py agent-worktrees
-          --test-file tests/test_repository_continuity.py
-          -k "normal_ssh_setup or setup_status"
 
   pr-artifacts-windows:
     if: ${{ inputs.pr_artifacts }}
@@ -1877,6 +1870,13 @@ jobs:
             -vv --durations=20
             -k selected_continuity_ssh_application_first_touch_repeat_update_and_stop
         run: python tools/run-standalone-tests.py fleet-manager --prepare --timeout 180
+      - name: Repository source admission and pinned SSH setup controls
+        env:
+          PYTEST_ADDOPTS: "-vv --durations=20"
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees
+          --test-file tests/test_repository_continuity.py
+          -k "normal_ssh_setup or setup_status"
 
   gateway-continuity-application-windows:
     if: ${{ inputs.pr_artifacts }}

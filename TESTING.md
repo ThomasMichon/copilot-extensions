@@ -2128,6 +2128,11 @@ the acceptance boundary; this fixture does not establish complete Manager
 self-installation qualification.
 Preparation-only jobs retain the source controls locally; normal lifecycle jobs
 do not repeat that independently gated work inside their unchanged time budget.
+The unchanged source-admission ordering/status packet runs after the selected
+continuity SSH lifecycle on each platform, rather than after artifact construction.
+Normal setup still depends on both continuity and artifacts, so it cannot start
+until all the same prerequisite packets pass. This balances the same nine-job
+portfolio without changing selectors, cases, assertions or six-minute job bounds.
 Direct Git Sources without Main composition use the existing
 `install_source.py --install-application` receiver; fixture code must not invent
 Main metadata to satisfy a different update-planner contract. Source preparation
