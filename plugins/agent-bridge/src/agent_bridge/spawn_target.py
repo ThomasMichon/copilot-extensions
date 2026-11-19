@@ -103,18 +103,3 @@ class SpawnTarget:
                 if key in preparation:
                     data.setdefault(key, preparation[key])
         return cls(**data)
-
-
-def session_host_container(target: SpawnTarget) -> dict[str, Any] | None:
-    """The target's container metadata when it is a Session-Host (SSH) member.
-
-    Driver-exec members also carry identity and receiving-policy metadata but
-    declare ``ssh: None``: they spawn through their provider command, never
-    the container Session-Host transport.
-    """
-    container = target.container
-    if not isinstance(container, dict) or not container.get("name"):
-        return None
-    if "ssh" in container and container["ssh"] is None:
-        return None
-    return container

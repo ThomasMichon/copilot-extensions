@@ -13,7 +13,6 @@ from repository_policy import AgentHostingError
 from .connect import ConnectTracker
 from .models import SessionStatus
 from .session_host.codespace_transport import codespace_session_operation
-from .spawn_target import session_host_container
 from .session_manager import (
     _append_plugin_dirs,
     _container_remote_child_argv,
@@ -349,7 +348,10 @@ class _SessionHostRecoveryMixin:
             if session_ids is not None and session.session_id not in session_ids:
                 continue
             target = session.target
-            has_container_target = session_host_container(target) is not None
+            has_container_target = (
+                isinstance(target.container, dict)
+                and bool(target.container.get("name"))
+            )
             if not session.acp_session_id and not has_container_target:
                 continue
             existing = self._host_index.get(session.session_id)
@@ -361,7 +363,12 @@ class _SessionHostRecoveryMixin:
             ):
                 continue
             cs_target = None
-            container_target = session_host_container(target)
+            container_target = (
+                target.container
+                if isinstance(target.container, dict)
+                and target.container.get("name")
+                else None
+            )
             if isinstance(target.codespace, dict) and target.codespace.get("name"):
                 cs_target = target.codespace
             elif target.spawn_command:
@@ -485,7 +492,12 @@ class _SessionHostRecoveryMixin:
                 continue
             for session, existing, status, record in results:
                 if status == "live" and record is not None:
-                    container_target = session_host_container(session.target)
+                    container_target = (
+                        session.target.container
+                        if isinstance(session.target.container, dict)
+                        and session.target.container.get("name")
+                        else None
+                    )
                     codespace_target = (
                         session.target.codespace
                         if isinstance(session.target.codespace, dict)
@@ -705,7 +717,12 @@ class _SessionHostRecoveryMixin:
     ) -> tuple[AcpClient, str] | None:
         """Replace a dead remote Host and load/create its ACP session."""
         target = session.target
-        container_target = session_host_container(target)
+        container_target = (
+            target.container
+            if isinstance(target.container, dict)
+            and target.container.get("name")
+            else None
+        )
         if container_target is not None:
             from .venue_plugins import resolve_controller_cwd
             controller_cwd = await resolve_controller_cwd(

@@ -6258,7 +6258,7 @@
         "plugins/agent-containers/setup.py": "26029b05beca57b1d95aff89f6cc2ee25a7e0496496b7cdc386105605c283796",
         "plugins/agent-containers/src/agent_containers/__main__.py": "a56dc6d00d84c7339d3bf89115f1e3e65b3c053221dbdb8b3c0fcc17b8ae2523",
         "plugins/agent-containers/src/agent_containers/lifecycle.py": "0861d49e45406034d376dd00cdc0efa4757dda4eb1e252a5a5dc42978bf88291",
-        "plugins/agent-containers/src/agent_containers/resolver.py": "c2f7aac1c492f9f63c735d9b684e194d90ded7a584919333039579af789ef08d",
+        "plugins/agent-containers/src/agent_containers/resolver.py": "2be8ac1a7a85366dd638596de0680d2a35eeb933864408370d1b620969ec323a",
         "plugins/agent-dispatch/src/agent_dispatch/spawn_diagnostics.py": "f3b58b999cb6db16ec367eb601a543d8089711fc0564d44b34199489ee792678",
         "plugins/agent-machines/scripts/cell_installer.py": "041a28230551d926c65ff00866213f5944ff5d1e0596c75e37ffa8cd0af64795",
         "plugins/agent-machines/src/agent_machines/git_config_transaction.py": "5b054f3f2c2270672c55bab7de114e5e05541235d94553c4c1de2a06b26fe38d",

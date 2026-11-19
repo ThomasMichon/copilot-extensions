@@ -48,7 +48,6 @@ from ..session_manager import (
 from ..result_tokens import ResultHistoryChangedError, ResultTokenError
 from ..session_status import SessionStatus
 from ..session_start_models import StartSessionRequest
-from ..spawn_target import session_host_container
 from ..transport import SpawnTarget
 from ..remote_acp_config import is_remote_address
 from ..session_start_selection import find_reusable_caller_session as _find_reusable_session
@@ -673,7 +672,10 @@ async def _start_session_admitted(req: StartSessionRequest, request: Request) ->
         )
 
     if req.parity_fault:
-        is_remote = session_host_container(target) is not None or (
+        is_remote = (
+            isinstance(target.container, dict)
+            and bool(target.container.get("name"))
+        ) or (
             isinstance(target.codespace, dict)
             and bool(target.codespace.get("name"))
         )

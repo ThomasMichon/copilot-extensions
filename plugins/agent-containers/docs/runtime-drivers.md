@@ -334,14 +334,12 @@ that fleet's driver, so another runtime can neither delay the check nor answer
 for the same id. An agent-bridge without this support fails closed
 (its Docker inspection cannot find the member) rather than skipping the check.
 
-Driver-exec members (no `ssh_transport`) still publish a trusted `container`
-block with `name`, `instance_id`, `user`, `workspace_folder`,
-`security_profile`, `provider_command`, `relay_remote_port` and
-`portable_receiving_policy: {"version": 1}`, but with `ssh: null`. The bridge
-therefore runs the portable receiving-policy check over `runtime-proxy exec -i`
-and needs no `agent-worktrees` inside the member, while the explicit null
-`ssh` keeps such members off the container Session Host path and refuses
-host plugin projection.
+Driver-exec members (no `ssh_transport`) publish no `container` block, since
+its presence selects agent-bridge's SSH Session Host. Their venue instead
+declares `portable_receiving_policy: {"version": 1}` and `provider_command`
+next to its `instance_id`, `fleet` and `workspace_folder`. The bridge then runs
+the portable receiving-policy check over `runtime-proxy exec -i` as the
+resolved user and needs no `agent-worktrees` inside the member.
 
 Standalone entry points that receive a member name or instance id in a fresh
 process (`session-host-state`, `session-host-cleanup`, `runtime-proxy`)

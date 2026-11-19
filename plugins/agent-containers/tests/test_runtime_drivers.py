@@ -547,22 +547,16 @@ def test_resolver_routes_driver_member_through_exec_wrapper(
     spec = asyncio.run(resolver.ContainerResolver().resolve_spec("example-1"))
     assert spec["spawn_command"][-3:] == ["exec", "--stdio", "example-1"]
     member = {c.name: c for c in lifecycle.list_containers(config)}["example-1"]
-    # Portable receiving-policy metadata without any SSH / Session Host projection
-    # (#13366): the bridge's hosting check needs no agent-worktrees in the member.
-    assert spec["container"] == {
-        "name": "example-1",
-        "repo": "example-repo",
-        "instance_id": member.container_id,
-        "workspace_folder": "/workspaces/example",
-        "security_profile": "trusted",
-        "user": "vscode",
-        "portable_receiving_policy": {"version": 1},
-        "provider_command": ["/payload/bin/agent-containers"],
-        "relay_remote_port": None,
-        "ssh": None,
-    }
+    # No SSH / Session Host projection: the venue declares the portable
+    # receiving policy and provider command instead (#13366), so the bridge's
+    # hosting check needs no agent-worktrees inside the member.
+    assert "container" not in spec
+    assert spec["venue"]["portable_receiving_policy"] == {"version": 1}
+    assert spec["venue"]["provider_command"] == ["/payload/bin/agent-containers"]
     assert member.container_id and spec["venue"]["instance_id"] == member.container_id
-    with pytest.raises(RuntimeError, match="Driver-exec containers cannot receive"):
+    assert spec["venue"]["workspace_folder"] == "/workspaces/example"
+    assert spec["user"] == "vscode"
+    with pytest.raises(RuntimeError, match="cannot receive host plugin projection"):
         resolver.add_related_plugins(spec, ["example-plugin"])
     venue = spec["venue"]
     assert venue["transport"] == "driver-exec"
@@ -585,8 +579,12 @@ def test_resolver_keeps_session_host_ssh_for_ssh_capable_driver(
     member = {c.name: c for c in lifecycle.list_containers(config)}["example-1"]
     prepared: list[str] = []
     monkeypatch.setattr(resolver, "payload_command_argv", lambda: ["/payload/bin/agent-containers"])
-    monkeypatch.setattr(resolver, "prepare_ssh_config", lambda handle, user: (
-        prepared.append(handle) or SSHConfig(host_alias="fixture", user=user)))
+
+    def prepare(handle: str, user: str) -> SSHConfig:
+        prepared.append(handle)
+        return SSHConfig(host_alias="fixture", user=user)
+
+    monkeypatch.setattr(resolver, "prepare_ssh_config", prepare)
 
     spec = asyncio.run(resolver.ContainerResolver().resolve_spec("example-1"))
 
@@ -597,6 +595,7 @@ def test_resolver_keeps_session_host_ssh_for_ssh_capable_driver(
     assert container["instance_id"] == member.container_id
     assert container["portable_receiving_policy"] == {"version": 1}
     assert container["provider_command"] == ["/payload/bin/agent-containers"]
+    assert "portable_receiving_policy" not in spec["venue"]
     assert spec["venue"]["transport"] == "ssh"
     assert spec["venue"]["capabilities"]["session_host"] is True
 

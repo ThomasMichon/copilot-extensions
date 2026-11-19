@@ -23,10 +23,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-# Several tests patch ``subprocess.Popen`` with a plain function; its lazy
-# daemon-launch module evaluates ``subprocess.Popen[...]`` at import time, so
-# import it before any patch when this file runs alone.
-import agent_procutil.daemon  # noqa: F401
 from agent_bridge import winjob
 from agent_bridge.session_host import launcher
 from agent_bridge.session_host import protocol as proto

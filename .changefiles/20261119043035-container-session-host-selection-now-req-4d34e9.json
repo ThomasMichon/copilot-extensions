@@ -1,9 +1,0 @@
-{
-  "comment": "Container Session Host selection now requires an SSH-capable member; driver-exec members carrying identity metadata with ssh: null keep their provider-exec spawn path.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

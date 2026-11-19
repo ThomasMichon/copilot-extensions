@@ -442,10 +442,8 @@ class ContainerClaimConflictError(Exception):
 def _container_claim_key(target: "SpawnTarget") -> tuple[str, str] | None:
     """Resolve ``(container_name, owner_worktree)`` for a container target --
     the container counterpart to :func:`_codespace_claim_key`."""
-    from .spawn_target import session_host_container
-
-    container = session_host_container(target)
-    name = container.get("name") if container is not None else None
+    container = getattr(target, "container", None)
+    name = container.get("name") if isinstance(container, dict) else None
     if not name:
         return None
     owner = getattr(target, "caller_worktree", None)

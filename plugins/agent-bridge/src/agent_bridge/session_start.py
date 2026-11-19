@@ -38,7 +38,6 @@ from .session_manager import (
     SessionConflictError,
     log,
 )
-from .spawn_target import session_host_container
 from .transport import AgentProcess, SpawnTarget
 from .session_preferences import client_preferences
 from .venue_launch_policy import LaunchRefusedError
@@ -387,7 +386,12 @@ class _SessionStartMixin:
             elif target.spawn_command:
                 from .session_host.codespace_transport import parse_codespace_target
                 cs_target = parse_codespace_target(target.spawn_command)
-            container_target = session_host_container(target)
+            container_target = (
+                target.container
+                if isinstance(target.container, dict)
+                and target.container.get("name")
+                else None
+            )
             if (
                 cs_target is not None or container_target is not None or target.local_plugin_preparation
                 or (target.type == "ssh" and target.static_plugin_args is not None) or privileged_relay
