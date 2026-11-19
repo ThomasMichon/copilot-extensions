@@ -2112,6 +2112,11 @@ claim a performance fix.
 The fixture explicitly selects its Manager root as well as its private homes;
 a real generated-launcher control retains an inherited runner root override and
 verifies that the fixture still reaches its own selected slot.
+Installed-engine provenance resolves paths and normalizes Windows namespace
+spellings through the existing runtime helper before every equality/containment
+check. Real ordinary/extended-path controls preserve identity, while foreign
+prefixes, engine/SDK origins and checkout paths remain refusals. No installed
+origin or source-isolation assertion is skipped for an extended-length path.
 The real installed Manager front door and all native setup assertions remain
 the acceptance boundary; this fixture does not establish complete Manager
 self-installation qualification.

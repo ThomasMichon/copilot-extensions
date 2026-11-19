@@ -38,6 +38,36 @@ class RequiredDistribution(Protocol):
 DistributionT = TypeVar("DistributionT", bound=RequiredDistribution)
 
 
+class EngineOrigin(TypedDict):
+    prefix: str
+    engine: str
+    sdk: str | None
+    paths: list[str]
+
+
+def assert_installed_engine_origin(
+    facts: EngineOrigin, slot: Path, source: Path, *, with_sdk: bool,
+) -> None:
+    def resolved(value: str | Path) -> Path:
+        path = Path(value).resolve()
+        if os.name == "nt":
+            from versioned_runtime import _normalize_windows_extended_path
+
+            path = Path(_normalize_windows_extended_path(str(path)))
+        return path
+
+    installed, checkout = resolved(slot), resolved(source)
+    assert resolved(facts["prefix"]) == resolved(slot / ".venv")
+    assert resolved(facts["engine"]).is_relative_to(installed)
+    assert (facts["sdk"] is not None) is with_sdk
+    if facts["sdk"] is not None:
+        assert resolved(facts["sdk"]).is_relative_to(installed)
+    assert all(
+        not resolved(path).is_relative_to(checkout)
+        for path in facts["paths"] if path
+    )
+
+
 def native_setup_environment(
     environment: Mapping[str, str], home: Path, root: Path,
 ) -> dict[str, str]:

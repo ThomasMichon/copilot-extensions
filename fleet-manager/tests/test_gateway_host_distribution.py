@@ -401,6 +401,71 @@ def test_source_application_command_keeps_direct_source_without_main_composition
         source_application_command(snapshot, component, tmp_path / "runtime", Path(sys.executable))
 
 
+@pytest.mark.parametrize("with_sdk", [False, True])
+@pytest.mark.parametrize("native", [False, True])
+def test_installed_engine_origin_preserves_real_path_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, with_sdk: bool, native: bool,
+) -> None:
+    from repository_ssh_cohort_fixture import EngineOrigin, assert_installed_engine_origin
+
+    if native and os.name != "nt":
+        pytest.skip("actual Windows extended-path aliases")
+    monkeypatch.syspath_prepend(str(PROJECT.parent / "tools"))
+    import local_install_profile  # noqa: F401 - normal source-owner import roots
+    from installer_dependency_policy import _native_retained_path
+
+    slot = tmp_path / "runtime"
+    prefix = slot / ".venv"
+    prefix.mkdir(parents=True)
+    engine, sdk = prefix / "agent_worktrees.py", prefix / "fleet_manager.py"
+    engine.write_bytes(b"ENGINE = True\n")
+    sdk.write_bytes(b"SDK = True\n")
+
+    def spelling(path: Path) -> str:
+        return str(_native_retained_path(path)) if native else str(path)
+
+    facts: EngineOrigin = {
+        "prefix": spelling(prefix),
+        "engine": spelling(engine),
+        "sdk": spelling(sdk) if with_sdk else None,
+        "paths": [spelling(prefix), ""],
+    }
+    assert Path(facts["prefix"]).samefile(prefix)
+    assert_installed_engine_origin(facts, slot, tmp_path / "source", with_sdk=with_sdk)
+
+
+@pytest.mark.parametrize("foreign", ["prefix", "engine", "sdk", "source"])
+def test_installed_engine_origin_refuses_foreign_inputs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, foreign: str,
+) -> None:
+    from repository_ssh_cohort_fixture import EngineOrigin, assert_installed_engine_origin
+
+    monkeypatch.syspath_prepend(str(PROJECT.parent / "tools"))
+    import local_install_profile  # noqa: F401 - normal source-owner import roots
+    from installer_dependency_policy import _native_retained_path
+
+    slot, source = tmp_path / "runtime", tmp_path / "source"
+    prefix = slot / ".venv"
+    prefix.mkdir(parents=True)
+    source.mkdir()
+    facts: EngineOrigin = {
+        "prefix": str(_native_retained_path(prefix)),
+        "engine": str(_native_retained_path(prefix / "engine.py")),
+        "sdk": str(_native_retained_path(prefix / "sdk.py")),
+        "paths": [str(_native_retained_path(prefix)), ""],
+    }
+    if foreign == "source":
+        facts["paths"].append(str(_native_retained_path(source)))
+    elif foreign == "prefix":
+        facts["prefix"] = str(_native_retained_path(tmp_path / "other" / ".venv"))
+    elif foreign == "engine":
+        facts["engine"] = str(_native_retained_path(tmp_path / "other" / "engine.py"))
+    else:
+        facts["sdk"] = str(_native_retained_path(tmp_path / "other" / "sdk.py"))
+    with pytest.raises(AssertionError):
+        assert_installed_engine_origin(facts, slot, source, with_sdk=True)
+
+
 def test_manager_stack_diagnostic_preserves_script_entry_and_emits_stack(tmp_path: Path) -> None:
     from repository_ssh_cohort_fixture import manager_stack_diagnostic
 

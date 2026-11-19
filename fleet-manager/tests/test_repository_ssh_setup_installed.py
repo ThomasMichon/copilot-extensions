@@ -136,7 +136,8 @@ def test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop(
         json.dumps([url, "harness-a"], separators=(",", ":")).encode(),
     ).hexdigest())
     from repository_ssh_cohort_fixture import (
-        engine_cost_diagnostic, manager_activation_diagnostic, manager_stack_diagnostic, native_setup_environment,
+        assert_installed_engine_origin, engine_cost_diagnostic,
+        manager_activation_diagnostic, manager_stack_diagnostic, native_setup_environment,
         original_engine_owner, source_application_command,
     )
 
@@ -186,14 +187,8 @@ def test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop(
         ], cwd=home, env=clean, timeout=15)
         assert observed.returncode == 0, observed.stdout + observed.stderr
         facts = json.loads(observed.stdout)
-        assert Path(facts["prefix"]).resolve() == (slot / ".venv").resolve()
-        assert Path(facts["engine"]).resolve().is_relative_to(slot.resolve())
-        assert (facts["sdk"] is not None) is (component == "agent-worktrees")
-        if facts["sdk"] is not None:
-            assert Path(facts["sdk"]).resolve().is_relative_to(slot.resolve())
-        assert all(
-            not Path(path).resolve().is_relative_to(PROJECT.parent.resolve())
-            for path in facts["paths"] if path
+        assert_installed_engine_origin(
+            facts, slot, PROJECT.parent, with_sdk=component == "agent-worktrees",
         )
         progress(f"normal engine application {component} ready: {time.monotonic() - started:.2f}s")
 
