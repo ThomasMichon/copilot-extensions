@@ -3,10 +3,13 @@
 Back to the [canonical effort](README.md#subscriber-callback-context-and-truthful-legacy-outcomes-from-5947)
 and [accepted callback/state contract](subscriber-callback-context.md#persistence-per-version-isolation-and-restart-admission).
 
-**Status:** Concrete transition proposal for normal review before runtime
-realization. The operator accepted the one-time POSIX boot-boundary requirement
+**Status:** Concrete transition design reviewed and merged in #13493 before
+runtime realization. The operator accepted the one-time POSIX boot-boundary requirement
 as source design; the [complete decision](subscriber-callback-context.md#physical-transition-feasibility-and-accepted-migration-choice)
-retains its limits. Receiver groundwork is delivered in #13320. Nothing here
+retains its limits. Receiver groundwork is delivered in #13320. The first
+runtime slice adds an effect-free marker/path reader and legacy-absence
+guards under the existing storage owner. Every present phase still refuses;
+no phase label proves admission or selects an authority. Nothing here
 implements migration or enables versioned/map writes.
 
 **Scope:** Historical-root admission, one recoverable state authority and
@@ -189,12 +192,17 @@ is removed. Rollback of code is not downgrade of retained state.
 
 ## Serial realization and qualification
 
-1. Review this concrete transition amendment before adding its runtime paths.
-   Keep the receiver-only release and preserved provider prototype distinct.
-2. Implement the shared effect-free phase/path reader and legacy-compatible
-   absence behavior, then guarded migration/recovery under the existing
-   standalone/governed owners. Do not publish a capability from a decoder or
-   changefile alone.
+1. The concrete transition amendment cleared review in #13493. Keep the
+   receiver-only release and preserved provider prototype distinct while
+   implementing the following runtime paths.
+2. The shared storage reader now derives fixed paths and observes the
+   version-1 `agent-pull-requests.watch-state-transition` phase header.
+   Missing markers preserve legacy behavior only without orphan transition
+   artifacts. All present phases refuse through shared read and final-write
+   boundaries; header parsing does not validate installation, boot or inode
+   custody. Implement guarded migration/recovery under the existing
+   standalone/governed owners next. Do not publish a capability from a
+   decoder or changefile alone.
 3. Use actor-free units for phase/boot/source selection, malformed/foreign
    evidence, final-write races and injected failures at every durable boundary.
    Keep required PR/promotion CI unit-only.
