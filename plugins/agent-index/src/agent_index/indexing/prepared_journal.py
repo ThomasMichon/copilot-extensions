@@ -14,6 +14,7 @@ import numpy as np
 from agent_index.chunking.base import Chunk
 from agent_index.indexing.file_batches import FileBatch
 from agent_index.indexing.pending_crawl import PendingCrawlConflict, PendingCrawls
+from agent_index.indexing.point_claim import PendingPointClaim
 
 if TYPE_CHECKING:
     import sqlite3
@@ -29,10 +30,19 @@ class PreparedJournal:
     def __init__(
         self, paths: PathIndex, source: str, scope: str, payload: str, *,
         manifest: CrawlManifest | None = None, full: bool | None = None,
+        point_claim: PendingPointClaim | None = None,
     ) -> None:
         if (manifest is None) != (full is None) or full is not None and type(full) is not bool:
             raise ValueError("Prepared manifest and boolean full mode must be supplied together")
-        acquired = PendingCrawls.decode_pending(payload, source)
+        if point_claim is None:
+            acquired = PendingCrawls.decode_pending(payload, source)
+        else:
+            if type(point_claim) is not PendingPointClaim:
+                raise ValueError("Prepared point work requires a complete typed claim")
+            acquired_manifest, retained_claim = PendingCrawls.decode_point_pending(payload, source)
+            if retained_claim != point_claim:
+                raise PendingCrawlConflict("Prepared point claim does not match its pending crawl")
+            acquired = acquired_manifest, False
         if acquired is None:
             raise ValueError("Prepared application requires a completed pending crawl")
         if manifest is not None:
@@ -41,6 +51,7 @@ class PreparedJournal:
             if (supplied, full) != (retained, acquired[1]):
                 raise PendingCrawlConflict("Prepared manifest does not match its acquired pending crawl")
         self.paths, self.source, self.scope, self.payload = paths, source, scope, payload
+        self.point_claim = point_claim
         with closing(paths._connect()) as conn, conn:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(

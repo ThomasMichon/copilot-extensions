@@ -18,6 +18,7 @@ from agent_index.indexing.component_manifest import (
 from agent_index.indexing.manifest import CrawlManifest, CrawlStats, PollRefresh
 from agent_index.indexing.poll_refresh import PollRefreshJournal, validate_refresh
 from agent_index.indexing.path_index import PathIndex
+from agent_index.indexing.point_claim import PendingPointClaim, protect_point_parents
 from agent_index.indexing.state import IndexState, SourceState
 from agent_index.sources.base import FileEntry, SourceConnector
 from agent_index.sources.delta import DeletedFile, SourceDelta
@@ -67,6 +68,7 @@ class PendingCrawls(PollRefreshJournal):
                 "CREATE TABLE IF NOT EXISTS pending_crawls "
                 "(source TEXT PRIMARY KEY, scope TEXT NOT NULL, payload TEXT NOT NULL)",
             )
+            protect_point_parents(conn)
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS embedding_backfills "
                 "(source TEXT PRIMARY KEY, payload TEXT NOT NULL, complete INTEGER NOT NULL)",
@@ -163,6 +165,8 @@ class PendingCrawls(PollRefreshJournal):
     ) -> None:
         """Publish acquisition progress under the same family exclusion and journal key."""
         data = json.loads(payload)
+        if isinstance(data, dict) and data.get("version") == 9:
+            raise ValueError("Point-claim pending publication requires explicit claim binding")
         completed = None
         if isinstance(data, dict) and data.get("version") == 8:
             decoded = self.decode_pending(payload, source)
@@ -170,7 +174,7 @@ class PendingCrawls(PollRefreshJournal):
             completed = decoded[0]
         elif isinstance(data, dict) and data.get("version") in (3, 6, 7):
             completed = self.decode_manifest(data["manifest"], source)
-        expected_components = expected is not None and json.loads(expected).get("version") == 8
+        expected_components = expected is not None and json.loads(expected).get("version") in (8, 9)
         with closing(self._paths._connect()) as conn, conn:
             conn.execute("BEGIN IMMEDIATE")
             self._assert_family_available(conn, source, family)
@@ -213,6 +217,8 @@ class PendingCrawls(PollRefreshJournal):
     ) -> tuple[CrawlManifest, bool] | None:
         """Decode one observed payload without rereading a possibly newer generation."""
         data = json.loads(payload)
+        if isinstance(data, dict) and data.get("version") == 9:
+            raise ValueError("Point-claim pending work requires explicit claim binding")
         if required_pages:
             from agent_index.indexing.acquisition_requirement import require_pending_pages
 
@@ -248,6 +254,36 @@ class PendingCrawls(PollRefreshJournal):
             raise ValueError("Pending polling refresh requires the expanded journal version")
         return manifest, data["full"]
 
+    @classmethod
+    def decode_point_pending(cls, payload: str, source: str) -> tuple[CrawlManifest, PendingPointClaim]:
+        """Inspect bound work explicitly, without admitting ordinary application."""
+        def unique_fields(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+            result: dict[str, Any] = {}
+            for key, value in pairs:
+                if key in result:
+                    raise ValueError("Duplicate pending point-claim field")
+                result[key] = value
+            return result
+
+        data = json.loads(payload, object_pairs_hook=unique_fields)
+        if (
+            not isinstance(data, dict)
+            or set(data) != {"version", "full", "manifest", "point_claim"}
+            or type(data["version"]) is not int or data["version"] != 9
+            or data["full"] is not False
+        ):
+            raise ValueError("Invalid pending point-claim envelope")
+        manifest = cls.decode_manifest(data["manifest"], source, components=True)
+        claim = PendingPointClaim.from_dict(data["point_claim"])
+        if (
+            claim.hints.source != source
+            or manifest.accounting_family != claim.hints.canonical_family
+            or manifest.stored_family not in (None, claim.hints.canonical_family)
+            or manifest.poll_refresh is not None
+        ):
+            raise ValueError("Pending point claim requires its exact source and component family")
+        return manifest, claim
+
     def discard_acquisition(
         self, source: str, *, scope: str, expected_payload: str, family: str,
     ) -> None:
@@ -263,7 +299,7 @@ class PendingCrawls(PollRefreshJournal):
             if row is None or row["scope"] != scope or row["payload"] != expected_payload:
                 raise PendingCrawlConflict("Pending acquisition changed before explicit discard")
             data = json.loads(row["payload"])
-            if isinstance(data, dict) and data.get("version") in (6, 7, 8):
+            if isinstance(data, dict) and data.get("version") in (6, 7, 8, 9):
                 raise ValueError("Completed acquisition requires mandatory replay")
             progress = (
                 decode_snapshot(row["payload"], source)
@@ -324,16 +360,26 @@ class PendingCrawls(PollRefreshJournal):
         ).validate(manifest.accounting_family or manifest.stored_family or manifest.source)
         validate_components(manifest)
 
-    def save(self, manifest: CrawlManifest, *, scope: str, full: bool) -> None:
+    def save(
+        self, manifest: CrawlManifest, *, scope: str, full: bool,
+        point_claim: PendingPointClaim | None = None,
+    ) -> None:
         self._validate(manifest)
         if manifest.component_versions is not None and full:
             raise ValueError("Component recovery cannot authorize full reconciliation")
-        payload = json.dumps({
+        data: dict[str, Any] = {
             "version": 8 if manifest.component_versions is not None else (
                 3 if manifest.poll_refresh is not None else 1
             ),
             "full": full, "manifest": self.manifest_data(manifest),
-        })
+        }
+        if point_claim is not None:
+            if type(point_claim) is not PendingPointClaim:
+                raise ValueError("Pending point work requires a complete typed claim")
+            data.update(version=9, point_claim=point_claim.to_dict())
+        payload = json.dumps(data)
+        if point_claim is not None:
+            self.decode_point_pending(payload, manifest.source)
         with closing(self._paths._connect()) as conn, conn:
             conn.execute("BEGIN IMMEDIATE")
             self._assert_family_available(
@@ -367,7 +413,7 @@ class PendingCrawls(PollRefreshJournal):
             if row is None:
                 return
             data = json.loads(row["payload"])
-            if data.get("version") == 8:
+            if data.get("version") in (8, 9):
                 raise ValueError("Component pending completion is not supported")
             if manifest is not None:
                 assert scope is not None
