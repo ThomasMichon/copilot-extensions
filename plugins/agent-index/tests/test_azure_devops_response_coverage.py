@@ -24,6 +24,8 @@ def _connector(payload: object, phase: str) -> AzureDevOpsConnector:
         elif path.endswith("/wiql"):
             result = payload
         elif path.endswith("/pullrequests"):
+            if int(request.url.params["$skip"]):
+                return httpx.Response(200, json={"value": []})
             result = (
                 payload
                 if phase == "pulls"
