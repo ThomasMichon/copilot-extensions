@@ -40,6 +40,21 @@ checks nor yields, declines, abandons first, unregisters or terminates a native.
 The existing session/conclusion owners retain their later responsibilities.
 It does not delete the checkout or directly release a reservation.
 
+For a started or suspended `pr-review` task with an independent evaluator,
+the original worker retains a submission proposal **before** settling the
+assignment. The receiver verifies the finalized workspace, the original
+worker/native binding and the retained proposal before it submits the task
+and schedules ordinary verification. Submission is not confirmation. A lost
+finish reply must not cause another finalization or verification request.
+The worker negotiates `submit-finalized-review/v1` on its existing closeout
+route; a legacy caller cannot finish this case as abandonment on a new
+receiver. Roll out the receiver before the caller. Existing acknowledged
+legacy abandonments are not rewritten.
+
+Never-claimed work without resources can instead be abandoned when the
+source explicitly confirms closure. An allocated workspace or pending
+launch is not resource-free merely because no worker has affirmed start.
+
 ## Compatibility and retries
 
 The receiver expansion precedes this conditional caller. Newly accepted
@@ -65,6 +80,23 @@ or unsupported protocol metadata, including provider rollback, refuses before
 that mutation. An unsupported Worktrees finalization contract refuses before
 finalization; preparation may already have settled the exact task claim.
 There is no equivalent legacy abandon fallback.
+
+For a review that requires submission, the mixed-version window works as follows:
+
+| Caller | Receiver | Result |
+|---|---|---|
+| Old | Old | Both use the previous abandonment contract; neither can submit a finalized review. |
+| Old | New | Discovery refuses the old caller. A direct prepare or finish without the submission action also fails. |
+| New | Old | Discovery does not advertise a finish action. The caller stops before preparation. |
+| New | New | Both check the action and original assignment. Finish submits the finalized review for evaluation. |
+
+Roll out the receiver first and keep it available until participating callers
+finish. Discovery is not a lock across services. If the receiver rolls back
+between discovery and a POST, the old receiver rejects the new `finish_action`
+body field before its handler runs. A rollback after preparation can therefore
+leave a closed assignment; after local finalization it can leave a finalized
+workspace without a submission. Restore a compatible receiver and resume the
+original closeout; do not strip the field or switch to an old caller to finish.
 
 Readiness/relationship calls reuse the existing bounded 300-second owner
 settlement read timeout without changing the general client timeout. Unknown
