@@ -36,6 +36,16 @@ extra row to detect overflow or duplicates; model/ID queries use the existing
 historical index entries, row byte sizes and model count remain additional work:
 this is not an aggregate byte/I/O/time budget or a source-isolated path index.
 
+`require_file_projection_capacity(store, replacements, max_rows=...)` preflights
+the projected final same-path occupancy for a finite map of exact source/path
+points to replacement chunk counts (zero for deletions). It reuses the capped
+path lookup under source-domain exclusion, subtracts the selected points'
+current rows and retains every unselected neighbor before adding all planned
+replacements. The explicit native application calls it before writer entry:
+individually bounded components must not overflow a shared path's capture cap
+after native mutation. This helper requires an already-prepared path index and
+performs no mutation or automatic preparation.
+
 Retained IDs expose known vector remnants when their canonical rows have been
 deleted. An ID that now belongs to a different canonical point refuses capture.
 Unknown vector orphans are not discovered by scanning a model table. Empty raw
@@ -44,9 +54,10 @@ not a way to prove their vectors are absent.
 
 The helper changes no default reader or writer and enables no component receiver
 or v2 executor. The opt-in [native component ledger](component-ledger.md) can
-retain ordering/tombstone observations, but backup reconciliation, exact pending
-parent ownership, prepare/revalidate/publish sequencing and component read
-isolation remain separate application obligations.
+retain ordering/tombstone observations. Its explicit native application composes
+pending-parent ownership and prepare/revalidate/publish sequencing; backup
+reconciliation, whole-claim completion and component read isolation remain
+separate unfinished obligations.
 
 See [the architecture overview](architecture.md) and
 [prepared point-read ownership](chunk-id-index.md).

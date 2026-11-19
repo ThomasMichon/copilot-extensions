@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from agent_index.indexing.component_manifest import require_unordered_application
+from agent_index.indexing.component_manifest import require_unordered_application, validate_components
 from agent_index.indexing.embedding_batch import routed_model_chunks
 from agent_index.indexing.embedding_coverage import EmbeddingCoverage, input_hash
 from agent_index.indexing.file_batches import FileBatch, file_batches
@@ -63,8 +63,22 @@ class PreparedApplication:
         before_embed: Callable[[], None] | None = None,
         before_model_embed: Callable[[str], None] | None = None,
         progress_cb: ProgressCallback | None = None,
+        component_selection: frozenset[tuple[str, str]] | None = None,
     ) -> None:
-        require_unordered_application(manifest)
+        if component_selection is None:
+            require_unordered_application(manifest)
+        else:
+            validate_components(manifest)
+            if (
+                manifest.component_versions is None or full
+                or not isinstance(component_selection, frozenset)
+                or not component_selection <= {(entry.source, entry.path) for entry in manifest.upserts}
+            ):
+                raise ValueError("Component preparation requires selected acquired upserts")
+        files = [
+            entry for entry in manifest.upserts
+            if component_selection is None or (entry.source, entry.path) in component_selection
+        ]
         profiles = dict(config.model_profiles)
         if any(model not in profiles for model in clients):
             raise ValueError("Prepared application requires every embedding client's model profile")
@@ -76,15 +90,17 @@ class PreparedApplication:
         )
         self.profiles = profiles
         self.progress_cb = progress_cb
-        self.identities = [(entry.source, entry.path) for entry in manifest.upserts]
+        self.identities = [(entry.source, entry.path) for entry in files]
         self.checkpoints = paths.get_entries(self.identities)
         self.batch_count = 0
         self.journal.reset_batches()
         coverage = EmbeddingCoverage(paths)
         for batch in file_batches(
-            manifest.upserts, path_index=paths, model_profiles=profiles,
-            stream_batch_size=config.stream_batch_size, force=full,
-            resume_since=resume_since, chunker_revision=getattr(config, "chunker_revision", "1"),
+            files, path_index=paths, model_profiles=profiles,
+            stream_batch_size=config.stream_batch_size,
+            force=full or component_selection is not None,
+            resume_since=resume_since if component_selection is None else None,
+            chunker_revision=getattr(config, "chunker_revision", "1"),
             progress_cb=progress_cb, resume_index=self.checkpoints,
         ):
             for offset in range(0, len(batch.chunks), config.stream_batch_size):
