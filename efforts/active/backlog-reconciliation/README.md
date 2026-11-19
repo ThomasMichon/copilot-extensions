@@ -3424,11 +3424,15 @@ sources, transferring owners or turning partial/planning gains into completion.
   The [finite lifecycle receiving and corrective closeout](journal/2026/11.18-lifecycle-receiving-and-corrective-closeout.md)
   records #13197's actual reviewed merge, all three unsupported retirements
   withdrawn with zero credit, preserved source conditions and 24 open parent
-  items. Only two new unchecked #6467 Plan/actual-global Validation rows are
-  proposed in the existing Draft qualification effort, with complete finite
+  items. #13343 accepted two unchecked #6467 Plan/actual-global Validation rows
+  in the existing Draft qualification effort, with complete finite
   consumer/recovery scope and later-driver acceptance retained. No executor,
-  owner or resource is assigned. The complete post-resumption count is
-  915 whole, 186 above fixed 729; #6467 and the three restored sources stay OPEN.
+  owner or resource is assigned. Complete intake of fourteen eligible arrivals
+  retains actual source claims, complementary attachment/reaper and mux/exit
+  boundaries, diagnostic owners and distinct failed fixture packets without
+  another umbrella or unsupported closure. The later complete count is
+  917 whole, 188 above fixed 729; #6467, the fourteen arrivals and the three
+  restored sources stay OPEN.
   **The following receiving entries retain their earlier observation times;
   the dated closeout above supplies the latest census and publication status.**
   The [Fleet refinements and remote scope](journal/2026/11.17-fleet-refinements-and-remote-scope.md)
