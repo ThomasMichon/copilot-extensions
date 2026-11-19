@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 from dataclasses import dataclass
+import errno
 import json
 import os
 from pathlib import Path
@@ -24,15 +25,17 @@ _POLICY = "protected-installation.json"
 _MAX_ENTRIES = 100_000
 _MOUNTINFO = Path("/proc/self/mountinfo")
 _FILESYSTEMS = {"ext2", "ext3", "ext4", "xfs", "btrfs", "tmpfs", "overlay"}
+_metadata = Path.lstat
 
 
-def _native_mounts(paths: tuple[Path, ...]) -> None:
+def _native_mounts(paths: tuple[Path, ...]) -> dict[Path, tuple[bytes, Path]]:
     """Refuse mode-bit emulation and foreign filesystems, including nested mounts."""
     with _MOUNTINFO.open("rb") as stream:
         content = stream.read((4 << 20) + 1)
     if len(content) > 4 << 20:
         raise ValueError("protected installation mount table exceeds its bound")
     root_seen = False
+    mounts: dict[Path, tuple[bytes, Path]] = {}
     for line in content.splitlines():
         before, separator, after = line.partition(b" - ")
         fields, filesystem = before.split(), after.split()
@@ -44,18 +47,54 @@ def _native_mounts(paths: tuple[Path, ...]) -> None:
             fields[4],
         )
         mount = Path(os.fsdecode(name))
-        if not mount.is_absolute() or ".." in mount.parts:
+        origin = Path(
+            os.fsdecode(
+                re.sub(
+                    rb"\\(040|011|012|134)",
+                    lambda match: bytes([int(match[1], 8)]),
+                    fields[3],
+                )
+            )
+        )
+        if (
+            not mount.is_absolute()
+            or ".." in mount.parts
+            or not origin.is_absolute()
+            or ".." in origin.parts
+        ):
             raise ValueError("protected installation mount table is invalid")
         root_seen |= mount == Path("/")
         if any(
             mount.is_relative_to(path) or path.is_relative_to(mount) for path in paths
         ):
+            if mount in mounts or any(
+                mount != path and mount.is_relative_to(path) for path in paths
+            ):
+                raise ValueError(
+                    "protected installation has nested or ambiguous mounts"
+                )
+            mounts[mount] = (fields[2], origin)
             if os.fsdecode(filesystem[0]) not in _FILESYSTEMS:
                 raise ValueError(
                     "protected installation requires supported native Linux filesystems"
                 )
     if not root_seen:
         raise ValueError("protected installation has no native root mount")
+    result: dict[Path, tuple[bytes, Path]] = {}
+    for path in paths:
+        mount = max(
+            (mount for mount in mounts if path.is_relative_to(mount)),
+            key=lambda mount: len(mount.parts),
+        )
+        device, origin = mounts[mount]
+        result[path] = (device, origin / path.relative_to(mount))
+    return result
+
+
+def _overlap(first: tuple[bytes, Path], second: tuple[bytes, Path]) -> bool:
+    return first[0] == second[0] and (
+        first[1].is_relative_to(second[1]) or second[1].is_relative_to(first[1])
+    )
 
 
 def select_entry(code: Path) -> Path:
@@ -147,7 +186,7 @@ def _path(value: object) -> Path:
 def _protected(path: Path, *, directory: bool) -> None:
     """Require native root custody, including every replaceable ancestor."""
     for candidate in (*reversed(path.parents), path):
-        info = candidate.lstat()
+        info = _metadata(candidate)
         is_directory = candidate != path or directory
         if (
             info.st_uid != 0
@@ -163,6 +202,56 @@ def _protected(path: Path, *, directory: bool) -> None:
             )
 
 
+def _output_directory(path: Path) -> None:
+    try:
+        acl = os.getxattr(path, "system.posix_acl_default", follow_symlinks=False)
+    except OSError as error:
+        if error.errno == errno.ENODATA:
+            return
+        raise ValueError("protected output default ACL cannot be inspected") from error
+    if acl:
+        raise ValueError("protected output directory has a default ACL")
+
+
+def _os_file(path: Path) -> None:
+    """Follow only a completely protected, bounded OS-prefix link chain."""
+    prefix = Path(sys.base_prefix)
+    _protected(prefix, directory=True)
+    for _ in range(40):
+        if not path.is_relative_to(prefix):
+            raise ValueError("protected interpreter link leaves its OS prefix")
+        current = prefix
+        for part in path.relative_to(prefix).parts:
+            current /= part
+            info = _metadata(current)
+            if (
+                info.st_uid != 0
+                or info.st_mode & 0o022
+                and not stat.S_ISLNK(info.st_mode)
+            ):
+                raise ValueError("protected interpreter link is replaceable")
+            if stat.S_ISLNK(info.st_mode):
+                path = Path(
+                    os.path.abspath(
+                        current.parent
+                        / os.readlink(current)
+                        / path.relative_to(current)
+                    )
+                )
+                break
+            if not (
+                stat.S_ISDIR(info.st_mode)
+                if current != path
+                else stat.S_ISREG(info.st_mode)
+            ):
+                raise ValueError(
+                    "protected interpreter link is not an ordinary OS file"
+                )
+        else:
+            return
+    raise ValueError("protected interpreter link chain exceeds its bound")
+
+
 def _tree(root: Path, *, deadline: float, internal_links: bool = False) -> None:
     """Inspect protection, not incumbent provenance or installation receipts."""
     _protected(root, directory=True)
@@ -170,6 +259,8 @@ def _tree(root: Path, *, deadline: float, internal_links: bool = False) -> None:
     count = 0
     while pending:
         directory = pending.pop()
+        if internal_links:
+            _output_directory(directory)
         with os.scandir(directory) as entries:
             for entry in entries:
                 count += 1
@@ -178,7 +269,7 @@ def _tree(root: Path, *, deadline: float, internal_links: bool = False) -> None:
                         "protected installation admission exceeds its inspection bound"
                     )
                 path = Path(entry.path)
-                info = path.lstat()
+                info = _metadata(path)
                 if internal_links and stat.S_ISSOCK(info.st_mode) and info.st_uid == 0:
                     continue
                 if stat.S_ISLNK(info.st_mode) and internal_links and info.st_uid == 0:
@@ -195,7 +286,7 @@ def _tree(root: Path, *, deadline: float, internal_links: bool = False) -> None:
                             raise ValueError(
                                 "protected installation link leaves its addressed root"
                             )
-                        _protected(target, directory=False)
+                        _os_file(target)
                     continue
                 if (
                     info.st_uid != 0
@@ -230,15 +321,21 @@ def _document(path: Path) -> dict[str, Any]:
     return record
 
 
+def _root_identity() -> bool:
+    return all(
+        identity() == 0
+        for identity in (
+            os.getuid,
+            os.geteuid,
+            os.getgid,
+            os.getegid,
+        )
+    )
+
+
 def admit(policy: Path, *, code: Path) -> ProtectedApplication:
     """Admit an already protected seed and addressed operation without effects."""
-    if (
-        sys.platform != "linux"
-        or os.getuid() != 0
-        or os.geteuid() != 0
-        or os.getgid() != 0
-        or os.getegid() != 0
-    ):
+    if sys.platform != "linux" or not _root_identity():
         raise ValueError(
             "protected installation provider supports Linux root identity only"
         )
@@ -292,8 +389,9 @@ def admit(policy: Path, *, code: Path) -> ProtectedApplication:
         raise ValueError("unsupported protected installation policy")
     selected = {key: _path(record[key]) for key in paths}
     global_bin = None if record["global_bin"] is None else _path(record["global_bin"])
-    _native_mounts(
+    mounts = _native_mounts(
         (
+            code,
             *selected.values(),
             *((global_bin,) if global_bin is not None else ()),
         )
@@ -310,15 +408,12 @@ def admit(policy: Path, *, code: Path) -> ProtectedApplication:
         selected[key] for key in ("root", "home", "cache", "temporary")
     ) + ((global_bin,) if global_bin is not None else ())
     for output in writable:
-        if any(
-            output.is_relative_to(source) or source.is_relative_to(output)
-            for source in immutable
-        ):
+        if any(_overlap(mounts[output], mounts[source]) for source in immutable):
             raise ValueError(
                 "protected installation outputs overlap admitted code or inputs"
             )
     if any(
-        first == second or first.is_relative_to(second) or second.is_relative_to(first)
+        _overlap(mounts[first], mounts[second])
         for index, first in enumerate(writable)
         for second in writable[index + 1 :]
     ):
@@ -355,6 +450,13 @@ def install(selected: ProtectedApplication, *, code: Path) -> dict[str, str]:
         raise ValueError(
             "protected incoming package closure leaves its admitted snapshot"
         )
+    if (
+        "application" not in source.project
+        or not install_source.engine.application_uv_selection(
+            install_source._member(selected.snapshot, source.project["application"])
+        )
+    ):
+        raise ValueError("protected application lacks absolute UV executable selection")
     return install_source.install_application(
         selected.snapshot,
         selected.component,

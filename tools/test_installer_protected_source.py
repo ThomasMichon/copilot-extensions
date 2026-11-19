@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from collections.abc import Iterator
+from contextlib import contextmanager
+import errno
 import json
 import os
 from pathlib import Path
@@ -12,9 +15,13 @@ import sys
 from types import SimpleNamespace
 from typing import Any
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "libs/installer-engine"))
 import installer_protected_source as protected
 import pytest
-from test_local_install_source import application_adapter as application_adapter
+from test_local_install_source import (
+    application_adapter as application_adapter,
+    prepare_native_source,
+)
 
 pytestmark = pytest.mark.skipif(
     sys.platform != "linux", reason="Linux protected-provider source controls"
@@ -68,13 +75,17 @@ def administrative_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
             fields[0] = int(fields[0]) & ~0o022
         return os.stat_result(fields)
 
-    monkeypatch.setattr(Path, "lstat", info)
+    monkeypatch.setattr(protected, "_metadata", info)
     monkeypatch.setattr(sys, "platform", "linux")
-    for name in ("getuid", "geteuid", "getgid", "getegid"):
-        monkeypatch.setattr(os, name, lambda: 0, raising=False)
+    monkeypatch.setattr(protected, "_root_identity", lambda: True)
     mounts = tmp_path / "mountinfo"
     mounts.write_bytes(b"1 0 0:1 / / rw - ext4 /dev/fixture rw\n")
     monkeypatch.setattr(protected, "_MOUNTINFO", mounts)
+
+    def no_default_acl(*_args: Any, **_kwargs: Any) -> bytes:
+        raise OSError(errno.ENODATA, "inert absent ACL")
+
+    monkeypatch.setattr(os, "getxattr", no_default_acl)
 
 
 @pytest.fixture
@@ -263,6 +274,99 @@ def test_native_mode_emulation_is_not_protected_custody(
         _admit(policy)
 
 
+@pytest.mark.parametrize("role", ["root", "home", "cache", "temporary", "global_bin"])
+@pytest.mark.parametrize("nested", [False, True])
+def test_output_default_acl_refuses_before_creating_children(
+    policy: tuple[Path, dict[str, Any]],
+    monkeypatch: pytest.MonkeyPatch,
+    role: str,
+    nested: bool,
+) -> None:
+    _, record = policy
+    if role == "global_bin":
+        record[role] = record["root"]
+    directory = Path(record[role])
+    if nested:
+        directory /= "nested"
+        directory.mkdir(mode=0o700)
+
+    def inherited_acl(path: Path, *_args: Any, **_kwargs: Any) -> bytes:
+        if path == directory:
+            return b"inert default ACL granting controller write"
+        raise OSError(errno.ENODATA, "inert absent ACL")
+
+    monkeypatch.setattr(os, "getxattr", inherited_acl)
+    with pytest.raises(ValueError, match="default ACL"):
+        _admit(policy)
+    assert list(directory.iterdir()) == []
+
+
+@pytest.mark.parametrize("cause", [errno.EACCES, errno.EOPNOTSUPP])
+def test_unverifiable_output_acl_refuses(
+    policy: tuple[Path, dict[str, Any]],
+    monkeypatch: pytest.MonkeyPatch,
+    cause: int,
+) -> None:
+    def unavailable(*_args: Any, **_kwargs: Any) -> bytes:
+        raise OSError(cause, "inert unavailable ACL inspection")
+
+    monkeypatch.setattr(os, "getxattr", unavailable)
+    with pytest.raises(ValueError, match="cannot be inspected"):
+        _admit(policy)
+
+
+@pytest.mark.parametrize("alias", ["input", "output", "nested", "stacked"])
+def test_mount_aliases_cannot_overlap_lexically_disjoint_roles(
+    policy: tuple[Path, dict[str, Any]],
+    tmp_path: Path,
+    alias: str,
+) -> None:
+    _, record = policy
+    root = Path(record["root"])
+    origin = Path(record["snapshot"] if alias == "input" else record["home"])
+    mount = root / "nested" if alias == "nested" else root
+    if alias == "nested":
+        mount.mkdir()
+    line = f"2 1 0:1 {origin} {mount} rw - ext4 /dev/fixture rw\n"
+    with (tmp_path / "mountinfo").open("a") as stream:
+        stream.write(line + (line if alias == "stacked" else ""))
+    with pytest.raises(ValueError, match="overlap|disjoint|nested|ambiguous"):
+        _admit(policy)
+    assert not (root / "versions").exists()
+
+
+@pytest.mark.parametrize("fault", [None, "foreign", "writable", "escape", "loop"])
+def test_os_interpreter_chain_checks_every_link_and_directory(
+    policy: tuple[Path, dict[str, Any]],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fault: str | None,
+) -> None:
+    _, record = policy
+    prefix = tmp_path / "os-prefix"
+    prefix.mkdir(mode=0o700)
+    directory = prefix / ("foreign" if fault == "foreign" else "bin")
+    directory.mkdir(mode=0o700)
+    if fault == "writable":
+        directory.chmod(0o777)
+    interpreter = directory / "python3.12"
+    interpreter.write_bytes(b"inert physical OS executable")
+    interpreter.chmod(0o500)
+    link = prefix / "python3"
+    link.symlink_to(
+        link
+        if fault == "loop"
+        else (Path(record["uv"]) if fault == "escape" else interpreter)
+    )
+    (Path(record["root"]) / "retained-python").symlink_to(link)
+    monkeypatch.setattr(sys, "base_prefix", str(prefix))
+    if fault is None:
+        assert _admit(policy).root == Path(record["root"])
+    else:
+        with pytest.raises(ValueError, match="interpreter"):
+            _admit(policy)
+
+
 def test_existing_os_interpreter_link_does_not_require_incumbent_provenance(
     policy: tuple[Path, dict[str, Any]],
     tmp_path: Path,
@@ -278,15 +382,191 @@ def test_existing_os_interpreter_link_does_not_require_incumbent_provenance(
     mount_reads: list[tuple[Path, ...]] = []
     original = protected._native_mounts
 
-    def observe(paths: tuple[Path, ...]) -> None:
+    def observe(paths: tuple[Path, ...]) -> dict[Path, tuple[bytes, Path]]:
         mount_reads.append(paths)
-        original(paths)
+        return original(paths)
 
     monkeypatch.setattr(protected, "_native_mounts", observe)
     for index in range(10):
         (Path(record["root"]) / f"retained-python-{index}").symlink_to(interpreter)
     assert _admit(policy).root == Path(record["root"])
     assert len(mount_reads) == 2, "mount inspection must not repeat for every OS link"
+
+
+@pytest.mark.parametrize("fault", [None, "changed-selection", "old-launcher"])
+def test_main_keeps_real_prepared_source_and_admitted_selections_through_construction(
+    policy: tuple[Path, dict[str, Any]],
+    tmp_path: Path,
+    request: pytest.FixtureRequest,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    fault: str | None,
+) -> None:
+    from runtime_application_project import emit
+
+    source, snapshot = prepare_native_source(tmp_path / "native-source", request)
+    path, record = policy
+    application = snapshot / "application"
+    with source.project_inputs(snapshot, "demo-app") as (project, inputs):
+        selection = source.native_selection(project, inputs)
+        emit(
+            application,
+            distribution="demo-app",
+            version="1.0.0",
+            requires_python=">=3.11",
+            commands={"demo-app": "demo_app:main"},
+            setup=[],
+            start=[],
+            wheels={
+                "demo-app": snapshot
+                / project.project["wheels"]
+                / inputs.distributions[0][2]
+            },
+            runtime_source=project.identity.document(),
+            construction=source.application_inputs(project, inputs),
+        )
+    manifest = snapshot / source.MANIFEST
+    document = json.loads(manifest.read_text())
+    document["projects"]["demo-app"]["application"] = "application"
+    manifest.write_text(json.dumps(document))
+    for member in (snapshot, *snapshot.parents):
+        if member.is_relative_to(tmp_path):
+            member.chmod(member.stat().st_mode & ~0o022)
+    for member in snapshot.rglob("*"):
+        member.chmod(member.stat().st_mode & ~0o022)
+    record.update(
+        snapshot=str(snapshot),
+        expected_version=selection["runtime_version"],
+        expected_hash="b" * 64
+        if fault == "changed-selection"
+        else selection["payload_hash"],
+    )
+    if fault == "old-launcher":
+        (application / "install.sh").write_text('#!/bin/sh\nexec uv "$@"\n')
+    path.write_text(json.dumps(record))
+    (path.parent / "versioned_runtime.py").write_text(
+        "# inert packaged-family presence\n"
+    )
+    (path.parent / "versioned_runtime.py").chmod(0o600)
+    admitted = protected.admit(path, code=path.parent)
+    calls: list[dict[str, Any]] = []
+    engine = source.engine
+
+    def child(argv: list[str], **options: Any) -> None:
+        slot = options["candidate"]
+        calls.append({"argv": argv, **options})
+        if "--stage" in argv:
+            environment = options["environment"]
+            assert environment["PATH"] == "/usr/bin:/bin"
+            assert environment["COPILOT_INSTALLER_UV"] == str(admitted.uv)
+            assert environment["HOME"] == str(admitted.home)
+            assert environment["TMPDIR"] == str(admitted.temporary)
+            assert environment["UV_CACHE_DIR"] == str(admitted.cache / "uv")
+            directory = slot / ".venv/bin"
+            directory.mkdir(parents=True)
+            (directory / "python").write_bytes(b"inert constructor output")
+            (slot / ".venv/pyvenv.cfg").write_bytes(b"inert constructor output")
+        else:
+            (slot / "install-success.json").write_text(
+                json.dumps(
+                    {
+                        "state": "installed",
+                        "version": slot.name,
+                    }
+                )
+            )
+
+    @contextmanager
+    def candidate(root: Path, version: str, **options: Any) -> Iterator[Any]:
+        assert root == admitted.root and options["uv"] == admitted.uv
+        assert version == admitted.expected_version
+        packages = engine._package_roots(options["plugin"])
+        frozen = engine.FrozenInputs(
+            options["plugin"],
+            packages,
+            selection["payload_hash"],
+            retained_hash=engine.runtime.fingerprint_source(
+                engine._source_files(packages)
+            ),
+            extras=tuple(selection["extras"]),
+            local_packages=tuple(selection["local_packages"]),
+            wheel_inputs=options["wheel_inputs"],
+            application=options["application"],
+        )
+        slot = root / "versions" / version
+        slot.mkdir(parents=True)
+        engine._construct(frozen, slot, admitted.uv, options["base_python"], None, 30)
+        options["validate_candidate"](slot)
+        yield engine.ReadyCandidate(
+            slot, selection["payload_hash"], False, None, frozen.plugin
+        )
+
+    monkeypatch.setattr(engine, "numbered_candidate", candidate)
+    monkeypatch.setattr(engine, "_child", child)
+    monkeypatch.setitem(sys.modules, "install_source", source)
+    monkeypatch.setattr(sys, "path", sys.path[:])
+    monkeypatch.setattr(sys, "argv", ["protected-provider"])
+    flags = SimpleNamespace(
+        **{
+            name: getattr(sys.flags, name)
+            for name in dir(sys.flags)
+            if not name.startswith("_")
+        }
+    )
+    flags.isolated = flags.no_site = True
+    monkeypatch.setattr(sys, "flags", flags)
+    monkeypatch.setattr(sys, "prefix", sys.base_prefix)
+    monkeypatch.setattr(
+        protected, "__file__", str(path.parent / "installer_protected_source.py")
+    )
+    monkeypatch.setattr(os, "environ", os.environ.copy())
+    monkeypatch.chdir(tmp_path)
+    if fault:
+        with pytest.raises(ValueError, match="selection changed|absolute UV"):
+            protected.main()
+        assert calls == []
+        assert not (admitted.root / "versions").exists()
+    else:
+        assert protected.main() == 0
+        assert json.loads(capsys.readouterr().out) == {
+            "state": "installed",
+            "slot": str(admitted.root / "versions" / admitted.expected_version),
+        }
+        assert len(calls) == 2
+        assert (
+            source.select_project(snapshot, admitted.component).payload
+            == project.payload
+        )
+
+
+def test_generated_install_entry_executes_the_exact_renamed_uv_without_sibling_lookup(
+    tmp_path: Path,
+) -> None:
+    from runtime_application_binstubs import slot_binstubs
+
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    uv = tools / "admitted-executable"
+    uv.write_text('#!/bin/sh\nprintf \'%s\\n\' "$0" "$@"\n')
+    uv.chmod(0o700)
+    for name in ("uv", "dirname", "cygpath"):
+        (tools / name).write_text(
+            "#!/bin/sh\necho 'unadmitted sibling executed' >&2\nexit 91\n"
+        )
+        (tools / name).chmod(0o700)
+    entry = tmp_path / "install.sh"
+    entry.write_text(slot_binstubs("demo-app", "demo_app")["install.sh"])
+    result = subprocess.run(
+        ["/bin/sh", str(entry), "--stage"],
+        env={"PATH": "/usr/bin:/bin", "COPILOT_INSTALLER_UV": str(uv)},
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines()[0] == str(uv)
+    assert result.stdout.splitlines()[-1] == "--stage"
+    assert result.stderr == ""
 
 
 @pytest.mark.parametrize(
@@ -309,6 +589,9 @@ def test_protected_dispatch_reaches_actual_application_adapter_without_replay(
     source = fixture.source
     snapshot = fixture.application.parent
     source.select_project(snapshot, "demo-app").payload = snapshot / "payload"
+    (fixture.application / "install.sh").write_bytes(
+        b"#!/bin/sh\n# installer-uv-selection: absolute/v1\n"
+    )
     selected = replace(
         _admit(policy),
         snapshot=snapshot,

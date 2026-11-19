@@ -507,6 +507,17 @@ def _verify_application_wheels(inputs: FrozenInputs, slot: Path) -> None:
     verify_application_wheels(inputs.wheel_inputs, slot)
 
 
+def application_uv_selection(application: Path) -> bool:
+    """Inspect explicit executable support in the selected POSIX application."""
+    entry = application / "install.sh"
+    if _ordinary(entry).st_size > 65_536:
+        raise ValueError("Application install entry exceeds its inspection bound")
+    with _open(entry) as stream:
+        return stream.read(65_537).startswith(
+            b"#!/bin/sh\n# installer-uv-selection: absolute/v1\n"
+        )
+
+
 def _construct(
     inputs: FrozenInputs, slot: Path, uv: Path, base_python: Path,
     descriptor: int | None, timeout: float, *, refresh: bool = False, nested_environment: bool = False,
@@ -560,8 +571,13 @@ def _construct(
         if runtime.fingerprint_source(tuple(copied)) != before:
             raise RuntimeError("Application inputs changed while copying the slot project")
         _verify_application_wheels(inputs, slot)
+        exact_uv = os.name != "nt" and application_uv_selection(inputs.application)
         environment = {
-            **os.environ, "PATH": str(uv.parent) + os.pathsep + os.environ.get("PATH", ""),
+            **os.environ,
+            **(
+                {"COPILOT_INSTALLER_UV": str(uv)} if exact_uv else
+                {"PATH": str(uv.parent) + os.pathsep + os.environ.get("PATH", "")}
+            ),
             "UV_PYTHON": str(base_python), "UV_PYTHON_DOWNLOADS": "never", "UV_OFFLINE": "1",
         }
         command = (

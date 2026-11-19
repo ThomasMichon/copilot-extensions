@@ -39,7 +39,10 @@ copies or a native package owner's equivalent. Merely changing ownership/modes
 of controller-owned files does not revoke a controller's already-open writable
 descriptors and is not supported adoption.
 Supported native filesystems are ext2/3/4, XFS, Btrfs, tmpfs and OverlayFS.
-The provider checks the actual mount table, including nested mounts; DrvFS/9p,
+The provider checks the actual mount table and device/subtree coordinates,
+so bind-mounted aliases cannot make input and output roles appear disjoint.
+Nested mounts inside an addressed tree and ambiguous stacked mounts refuse.
+DrvFS/9p,
 network and FUSE filesystems are refused rather than treated as equivalent
 mode-bit enforcement.
 
@@ -91,6 +94,9 @@ selection, not from invented version strings. `global_bin` may instead be
 within this policy's private home. All fields are required; unknown or duplicate
 fields, a changed contract and an absent policy refuse before construction.
 Output roles are disjoint from one another and from the seed, Source and UV.
+Every existing output directory, including nested directories, must have no
+POSIX default ACL. Unavailable ACL inspection refuses; umask alone does not
+override inherited default ACLs.
 The selected command directory's existing contents must also be protected:
 matching launcher bytes alone cannot make a controller-writable command safe
 to reuse. A dedicated protected command directory can avoid mixing this role
@@ -116,11 +122,19 @@ closure must remain inside the admitted snapshot. Existing Source/profile
 association, closed-wheel retention, expected selection, numbered construction,
 application callbacks, publication, readiness and uncertain-effect recovery
 remain with their existing owners.
+The prepared POSIX install launcher must declare
+`installer-uv-selection: absolute/v1`. The constructor passes the admitted
+absolute UV executable through `COPILOT_INSTALLER_UV`, without adding UV's
+directory to `PATH`; other tools retain the sanitized OS lookup. A legacy
+launcher without this capability refuses before protected construction.
+Ordinary non-protected callers retain their legacy launcher compatibility.
 
 No incumbent receipt, provenance or recovery approval is consulted by this
 provider. Root-protected internal selectors may be dangling; they are not
 followed during native inspection. Existing references to ordinary protected
-files in the trusted OS interpreter prefix are also permitted.
+files in the trusted OS interpreter prefix are also permitted, including
+bounded symlink chains whose every link, directory and final file is protected
+and remains inside that prefix.
 Root-owned output-state sockets are preserved without opening or contacting
 them; sockets cannot supply the seed or Source input closure.
 Escaping writable/indirect content is a real native-protection failure,

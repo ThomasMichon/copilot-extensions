@@ -62,7 +62,8 @@
         "installer_engine_uninstall_darwin.py", "installer_engine_uninstall_windows.py",
         "installer_engine_footprint.py", "installer_engine_uninstall_controllers.py",
         "installer_engine_commands.py", "installer_engine_stop.py", "installer_engine_process.py",
-        "runtime_application_binstubs.py", "runtime_application_install.py"
+        "runtime_application_binstubs.py", "runtime_application_install.py",
+        "installer_protected_source.py", "bootstrap-protected-install.sh"
       ]
     },
     {
@@ -264,6 +265,8 @@
         "installer-engine/installer_native_feed.py",
         "installer-engine/installer_packaging_seed.py",
         "installer-engine/installer_provider_roots.py",
+        "installer-engine/installer_protected_source.py",
+        "installer-engine/bootstrap-protected-install.sh",
         "installer-engine/installer_retained_content.py",
         "installer-engine/installer_source_build.py",
         "installer-engine/installer_source_wheel_cache.py",
