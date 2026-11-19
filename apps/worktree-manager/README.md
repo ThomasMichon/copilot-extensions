@@ -21,6 +21,10 @@ plugins. It is the one piece that must work *before* the plugins do.
 
 ## Bare entry and first-run diagnostics
 
+For organization-neutral package-index and acquisition-mirror defaults before
+Python/uv exists, see [adopter toolchain configuration](docs/toolchain-configuration.md).
+The standard bootstrap owns its application; adopters supply only data.
+
 Run `worktree-manager` without arguments in an interactive terminal to open
 Worktrees when exactly one launchable project and an engine command are available.
 Otherwise the same app opens **Setup / Doctor**, without inventing a project or

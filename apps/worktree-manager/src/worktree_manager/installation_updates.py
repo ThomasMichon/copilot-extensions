@@ -6,6 +6,8 @@ import argparse
 import json
 import os
 import sys
+from collections.abc import Sequence
+from typing import Any, cast
 
 from update_telemetry import redact
 
@@ -15,17 +17,17 @@ PIVOT_NAME = "manager-installation-updates"
 ENGINE_INVENTORY_TIMEOUT = 8
 
 
-def _stored_target(arguments):
+def _stored_target(arguments: Sequence[str]) -> str | None:
     parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False, exit_on_error=False)
     parser.add_argument("--target")
     try:
         parsed, _unknown = parser.parse_known_args(arguments)
     except argparse.ArgumentError as error:
         raise ValueError(f"Invalid durable update target: {error}") from error
-    return parsed.target
+    return cast(str | None, parsed.target)
 
 
-def _restore_engine_context(pointer):
+def _restore_engine_context(pointer: str) -> None:
     from . import agent_plugin_runtime
 
     environment = {**os.environ, "COPILOT_EXTENSIONS_CONTEXT": pointer}
@@ -35,7 +37,7 @@ def _restore_engine_context(pointer):
     os.environ["COPILOT_EXTENSIONS_CONTEXT"] = pointer
 
 
-def _engine_rows(payload):
+def _engine_rows(payload: Any) -> list[dict[str, Any]]:
     from .maintenance_policy import CONTROL_ID
     from .bootstrap_policy import CONTROL_ID as BOOTSTRAP_CONTROL_ID
 
@@ -78,8 +80,9 @@ def run_targeted_update(rest: list[str]) -> int:
             with run.self_update_phase():
                 result = self_update(dry_run=False)
                 cutover = result.cutover if isinstance(result.cutover, dict) else {}
+                cutover_result = cutover.get("result")
                 failed = cutover.get("action") == "error" or (
-                    isinstance(cutover.get("result"), dict) and cutover["result"].get("ok") is False
+                    isinstance(cutover_result, dict) and cutover_result.get("ok") is False
                 )
                 run.say(f"Manager: {result.action}; {result.reason or result.version}")
                 if failed:
@@ -104,16 +107,19 @@ def run_targeted_update(rest: list[str]) -> int:
         raise
 
 
-def _operations(*, engine_source=None):
+def _operations(*, engine_source: str | None = None) -> dict[str, dict[str, Any]]:
     import update_driver
     from .update_driver_cli import _source_key
 
-    operations = {}
+    operations: dict[str, dict[str, Any]] = {}
     source = _source_key()
-    for request in update_driver.status():
+    requests = update_driver.status()
+    if not isinstance(requests, tuple):
+        raise ValueError("Durable update history returned an invalid request list")
+    for request in requests:
         argv = request.spec.argv
         target = _stored_target(argv)
-        if target is None or (request.spec.backend == "manager" and target != "worktree-manager"):
+        if target is None:
             continue
         expected_source = source if request.spec.backend == "manager" else (
             engine_source if request.spec.backend == "engine" else None
@@ -141,13 +147,13 @@ def _operations(*, engine_source=None):
     return operations
 
 
-def inventory():
+def inventory() -> dict[str, Any]:
     from .catalog import load_catalog
     from .discovery import DiscoverySource, discover
     from .self_install import current_version, default_root, manager_ref, manager_repo
 
     root = default_root()
-    rows = [{
+    rows: list[dict[str, Any]] = [{
         "id": "worktree-manager", "title": "Worktree Manager", "kind": "application",
         "enabled": "not applicable", "installed": current_version(root) is not None,
         "payload": __version__, "selected": current_version(root) or "missing",
@@ -156,7 +162,7 @@ def inventory():
         "limitation": "",
     }]
     findings = []
-    authored = {}
+    authored: dict[str, Any] = {}
     try:
         authored = {item.name: item for item in load_catalog().plugins}
     except (OSError, ValueError, KeyError, TypeError) as error:
@@ -254,7 +260,7 @@ def inventory():
     }}
 
 
-def request_result_screen(label):
+def request_result_screen(label: str) -> Any:
     from .production_picker.picker_tui.configuration_form import ConfigurationResultScreen
 
     class InstallationRequestScreen(ConfigurationResultScreen):
@@ -262,10 +268,10 @@ def request_result_screen(label):
         success_message = "Request accepted. Installation is not yet complete; return and refresh for owner progress."
         failure_message = "Submission failed. Inspect the owner receipt below before retrying."
 
-    return InstallationRequestScreen(label)
+    return cast(Any, InstallationRequestScreen)(label)
 
 
-def diagnostic_result_screen(label):
+def diagnostic_result_screen(label: str) -> Any:
     from .production_picker.picker_tui.configuration_form import ConfigurationResultScreen
 
     class DiagnosticResultScreen(ConfigurationResultScreen):
@@ -273,7 +279,7 @@ def diagnostic_result_screen(label):
         success_message = "Diagnostics completed. Read the report for scope and limitations; no setup or repair was applied."
         failure_message = "Diagnostics failed or are incomplete. Read the report before retrying; no repair was applied."
 
-    return DiagnosticResultScreen(label)
+    return cast(Any, DiagnosticResultScreen)(label)
 
 
 def submit(target: str) -> int:
@@ -287,7 +293,7 @@ def submit(target: str) -> int:
     return cmd_update_request(["--target", target, "--detach", "--json"])
 
 
-def main(argv=None):
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     parser.add_argument("--engine-argv", help=argparse.SUPPRESS)
     parser.add_argument("--engine-context", help=argparse.SUPPRESS)
@@ -342,7 +348,7 @@ def main(argv=None):
     return submit(args.target)
 
 
-def configuration_pivot():
+def configuration_pivot() -> Any:
     from .maintenance_policy import CONTROL_ID
     from .bootstrap_policy import CONTROL_ID as BOOTSTRAP_CONTROL_ID
     from .production_picker.picker_tui.pivots import parse_manifest

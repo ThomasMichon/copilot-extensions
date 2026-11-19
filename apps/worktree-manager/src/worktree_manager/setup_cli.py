@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import configparser
+
 from .core_install import core_status, install_command, install_core
 from .prereqs import detect_baseline, missing
 from .provision import apply as provision_apply
@@ -14,8 +16,18 @@ def cmd_setup(rest: list[str], *, banner: str, register: bool = False) -> int:
     try:
         args = repository_bootstrap.parse(rest, register=register)
     except SystemExit as error:
-        return int(error.code)
+        return error.code if isinstance(error.code, int) else (0 if error.code is None else 1)
     do_apply = args.apply
+    from .self_install import default_root
+    from .toolchain_config import configure_selected
+
+    try:
+        configure_selected(root=default_root(), apply=do_apply)
+    except (OSError, ValueError, UnicodeError, configparser.Error) as error:
+        # Parser exceptions can contain native file contents.
+        reason = f": {error}" if type(error) is ValueError else ""
+        print(f"  ! toolchain configuration refused: {type(error).__name__}{reason}")
+        return 2
     gaps = missing(detect_baseline())
     actions = provision_plan(gaps)
     core = core_status()
@@ -69,19 +81,19 @@ def cmd_setup(rest: list[str], *, banner: str, register: bool = False) -> int:
     else:
         print(f"    state: {core.state} → drive the harness's own installer:")
         print(f"        $ {' '.join(command)}")
-    result = install_core(dry_run=not do_apply)
+    core_result = install_core(dry_run=not do_apply)
     if do_apply and (
-        (result.ran and result.returncode != 0)
-        or (not result.ran and result.reason != "already-installed")
+        (core_result.ran and core_result.returncode != 0)
+        or (not core_result.ran and core_result.reason != "already-installed")
     ):
         detail = (
-            f"exit code {result.returncode}" if result.ran
-            else result.reason or "installer did not run"
+            f"exit code {core_result.returncode}" if core_result.ran
+            else core_result.reason or "installer did not run"
         )
         print(f"    ! core install failed: {detail}")
         return 1
-    if do_apply and result.ran:
-        print(f"    installer exit code: {result.returncode}")
+    if do_apply and core_result.ran:
+        print(f"    installer exit code: {core_result.returncode}")
         core = core_status()
         if core.installed:
             print("    ✓ core install complete.")
