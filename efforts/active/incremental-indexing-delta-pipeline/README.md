@@ -148,10 +148,14 @@ After the reviewed proposal, the operator admitted execution:
   reconciliation slices. A missing checkpoint or expired cursor requests
   visible repair; it must not disguise an unlimited rebuild as a tiny update.
 
-#### Explicit caller acquisition requirements (proposed)
+#### Explicit caller acquisition requirements
 
 Issue [#13392](https://github.com/ThomasMichon/copilot-extensions/issues/13392)
-owns an **agent-recommended, opt-in in-process requirement** before implementation.
+owns the reviewed **agent-recommended, opt-in in-process requirement**.
+The [consumer contract](../../../plugins/agent-index/docs/consumer-migration.md#requiring-page-acquisition)
+documents `require_paged_acquisition`, selected-callable negotiation and retained
+v7 page provenance; legacy/default producers and all existing source hashes
+remain unchanged.
 The existing collector prefers page protocols but otherwise permits legacy
 `list_paths()` / `discover_changed()` acquisition. Give a consumer a way to
 require the declared paged protocol instead of silently accepting that fallback;

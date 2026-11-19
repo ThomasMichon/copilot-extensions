@@ -2,6 +2,8 @@
     "profile": "copilot-extensions.promotion-units/v1",
     "max_seconds": 300,
     "nodes": [
+        "tools/promotion_unit_tests/test_paged_acquisition_requirement.py::test_selected_callable_and_connector_require_explicit_v1_without_legacy_effects",
+        "tools/promotion_unit_tests/test_paged_acquisition_requirement.py::test_retained_provenance_never_promotes_unknown_or_different_mode_work",
         "tools/promotion_unit_tests/test_checkout_disposition.py::test_known_history_or_unqualified_source_never_queries[agenda]",
         "tools/promotion_unit_tests/test_checkout_disposition.py::test_known_history_or_unqualified_source_never_queries[empty]",
         "tools/promotion_unit_tests/test_checkout_disposition.py::test_known_history_or_unqualified_source_never_queries[unqualified]",
@@ -5541,6 +5543,7 @@
         "tools/promotion_unit_tests/test_typecheck_new_code.py::test_ordinary_installer_uses_its_composed_sdk_and_preserves_outer_scope[True-True]"
     ],
     "coverage_targets": [
+        "plugins/agent-index/src/agent_index/indexing/acquisition_requirement.py",
         "plugins/agent-worktrees/src/agent_worktrees/checkout_data.py",
         "plugins/agent-worktrees/src/agent_worktrees/prune.py",
         "plugins/agent-pull-requests/src/agent_pull_requests/watch_storage.py",
@@ -5917,6 +5920,8 @@
         "tools/promotion_source_history.py"
     ],
     "sources": {
+        "tools/promotion_unit_tests/test_paged_acquisition_requirement.py": "e1a1d3f2940c83e5cae2d858654a29d1fade73ca5a60aecb992a7859e01c63d6",
+        "plugins/agent-index/src/agent_index/indexing/acquisition_requirement.py": "c04cac55a9dd6682eb7d3e354c450b8488cdef6e0905f0a80874e781d124207c",
         "tools/promotion_unit_tests/test_checkout_disposition.py": "6fb76b462dbf84919ededfe62ecc181aa51533c61d71489b6d7dc140c70c8bc9",
         "plugins/agent-worktrees/src/agent_worktrees/prune.py": "933a34e607f4eebb34e967d8920132bf4695842f6e0897e19ff718daadcfe049",
         "plugins/agent-pull-requests/src/agent_pull_requests/watch_storage.py": "a906dabaf190c45bb7a4188c770124864f6abeda310478c4fecd5de113e3b1ff",
