@@ -38,9 +38,15 @@ def _require_child_payload(
             self, exc_type: type[BaseException] | None, exc_value: BaseException | None,
             traceback: TracebackType | None,
         ) -> Literal[False]:
-            assert self.allocation is not None
-            assert (Path(self.allocation["path"]) / "work" / name).read_bytes() == payload
-            return super().__exit__(exc_type, exc_value, traceback)
+            if exc_type is not None:
+                return super().__exit__(exc_type, exc_value, traceback)
+            try:
+                assert self.allocation is not None
+                observed = (Path(self.allocation["path"]) / "work" / name).read_bytes()
+            finally:
+                settled = super().__exit__(exc_type, exc_value, traceback)
+            assert observed == payload
+            return settled
 
     monkeypatch.setattr(runner, "OwnedProducerSandbox", StartedScope)
 
@@ -221,10 +227,12 @@ def test_real_failure_or_timeout_retains_only_bounded_diagnostics(
 
 def test_unknown_cleanup_preserves_payload_and_open_responsibility(
     producer_owner: ProducerOwner, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     from plugin_test_containment import UnreapedProcessError
 
     runner, owner, selected, _, ledger = producer_owner
+    _require_child_payload(runner, monkeypatch, "absent-child-signal.bin", b"never written")
 
     def unknown(*args: object, cwd: Path, **kwargs: object) -> int:
         (cwd / "unsettled.bin").write_bytes(b"keep")
@@ -242,6 +250,26 @@ def test_unknown_cleanup_preserves_payload_and_open_responsibility(
     assert producer["phase"] == "bound" and claim.is_unsettled
     assert (allocation / "work" / "unsettled.bin").read_bytes() == b"keep"
     assert not (allocation / "runner-diagnostic.txt").exists()
+    errors = capsys.readouterr().err
+    assert "fixture-owned unknown cleanup" in errors
+    assert "[KEEP] Unknown process cleanup" in errors
+
+
+@pytest.mark.timeout(60)
+def test_missing_child_signal_fails_after_the_owner_settles_custody(
+    producer_owner: ProducerOwner, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner, owner, selected, _, ledger = producer_owner
+    _require_child_payload(runner, monkeypatch, "absent-child-signal.bin", b"never written")
+    assert runner.main([
+        "--owner", owner, "--kind", "spike", "--timeout", "20",
+        "--", sys.executable, "-c", "pass",
+    ]) == 125
+    claim, = tracking.load_record(ledger).resources
+    producer = claim.producer
+    assert isinstance(producer, dict)
+    assert producer["phase"] == "closed" and not claim.is_unsettled
+    assert not (selected / artifact_scratch._name(producer["recovery"])).exists()
 
 
 @pytest.mark.timeout(60)
@@ -329,10 +357,15 @@ def test_native_windows_overlong_path_refuses_without_losing_custody(
     capsys: pytest.CaptureFixture[str], stage: str,
 ) -> None:
     runner, owner, selected, _, ledger = producer_owner
-    if stage == "root":
-        valid = selected.parent / ("r" * 240)
+    valid = selected.parent / ("r" * 240)
+    try:
         valid.mkdir()
-        valid.rmdir()
+    except OSError as error:
+        if getattr(error, "winerror", None) in {123, 206}:
+            pytest.skip("native Windows long-path fixture prerequisite is unavailable")
+        raise
+    valid.rmdir()
+    if stage == "root":
         overlong = selected.parent / ("r" * 256)
         with pytest.raises(OSError) as failure:
             overlong.mkdir()

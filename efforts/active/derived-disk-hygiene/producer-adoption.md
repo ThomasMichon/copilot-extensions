@@ -149,6 +149,10 @@ diagnostics; successful consumers close the exact allocation and preserve
 the independent cache sentinel. Failure and timeout controls read the actual
 child-written payload inside the target scope before the owner can prune it.
 Setup exhausting the deadline before launch cannot satisfy those controls.
+The observer always runs the owner's exit, even if the read fails, and checks
+the bytes only after settlement. Exceptional body exits delegate unchanged.
+A missing-signal regression proves failed observation leaves no bound custody;
+the unknown-cleanup control checks that the original error and open custody survive.
 
 The explicit two-allocation control is
 `test_owned_producer.py::test_target_disposition_preserves_an_unrelated_sibling_allocation`.
@@ -172,6 +176,8 @@ a valid long component, encounters the native overlong-component refusal,
 and verifies bounded retained diagnostics with settled custody. Windows APIs
 can report errors 123/206; Python's file API can instead expose `EINVAL`
 without a Windows error attribute.
+Both cases first probe the fixture's long-path prerequisite. An unavailable
+venue is reported as a skip, not a component-length acceptance result.
 This tests component-length refusal, not every possible Windows total-path
 limit or filesystem policy. The 12 existing producer cases, now including
 positive child-start checks, passed on Windows x64. The first path-control
@@ -179,6 +185,11 @@ attempt failed because it expected only error 206; after the native error
 normalization above, both path cases passed in 6.47 seconds. The Linux file
 passed 12 cases with two Windows-only skips in 22.17 seconds. The final
 six-file whole-file strict matrix passes both declared targets.
+The final cleanup-safe observer and prerequisite-aware file passed all
+15 cases on Windows x64 in 49.45 seconds. Linux passed 13 cases with two
+Windows-only skips in 22.42 seconds. Strict checking passes the final six-file
+cohort for both declared targets. No runtime or required unit-source admission
+changed.
 
 The parser rejects long-option abbreviations. Three actor-free regressions
 and actual Windows CLI calls cover `--own`, `--ki` and `--time`, each refused
