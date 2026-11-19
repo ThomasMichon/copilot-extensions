@@ -18,6 +18,8 @@ from urllib.parse import quote
 import httpx
 
 from agent_index.config import install_dir
+from agent_index.sources.azure_devops_responses import collection_values as _values
+from agent_index.sources.azure_devops_responses import work_item_ids as _work_item_ids_from_result
 from agent_index.sources.base import FileEntry, nonsecret_target
 from agent_index.sources.good_citizen_http import GoodCitizenSession
 
@@ -200,7 +202,7 @@ class AzureDevOpsConnector:
                 purpose="item_body",
             )
             self._observe_records(result.data, kind="workitems")
-            items = _values(result.data)
+            items = _values(result.data, context="work-item body batch")
             expected, seen = set(chunk), set()
             for item in items:
                 item_id = item.get("id") if isinstance(item, dict) else None
@@ -233,7 +235,7 @@ class AzureDevOpsConnector:
         expected = set(ids)
         seen: set[int] = set()
         changed: set[int] = set()
-        for item in _values(result.data):
+        for item in _values(result.data, context="work-item metadata batch"):
             item_id = item.get("id") if isinstance(item, dict) else None
             if type(item_id) is not int or item_id not in expected or item_id in seen:
                 raise ValueError("Azure DevOps work-item metadata has invalid identities")
@@ -872,29 +874,6 @@ def _pull_request_query_from_env() -> dict[str, Any] | None:
     query.setdefault("name", "env-pr")
     query.setdefault("status", "all")
     return query
-
-
-def _work_item_ids_from_result(data: Any) -> list[int]:
-    ids: list[int] = []
-    for item in data.get("workItems", []) if isinstance(data, dict) else []:
-        if isinstance(item, dict) and item.get("id") is not None:
-            ids.append(int(item["id"]))
-    relations = data.get("workItemRelations", []) if isinstance(data, dict) else []
-    for relation in relations:
-        target = relation.get("target") if isinstance(relation, dict) else None
-        if isinstance(target, dict) and target.get("id") is not None:
-            ids.append(int(target["id"]))
-    return ids
-
-
-def _values(data: Any) -> list[Any]:
-    if isinstance(data, list):
-        return data
-    if isinstance(data, dict):
-        value = data.get("value")
-        if isinstance(value, list):
-            return value
-    return []
 
 
 def _chunks(values: list[int], size: int) -> Iterable[list[int]]:
