@@ -16,13 +16,15 @@ import pytest
 
 from agent_index.chunking.base import Chunk
 from agent_index.index_config import IndexConfig, ModelProfile
+from agent_index.indexing.component_manifest import ComponentContent, ComponentIdentity, ComponentVersion
 from agent_index.indexing.point_hints import PointBinding, PointChangeHints, WorkItemRevisionTarget
 from agent_index.store.cluster_store import ClusterStore
 from agent_index.store.clustering import Cluster, ClusterMember
 from agent_index.store.component_ledger import (
-    BINDING, TABLE, ComponentLedger, initialize_component_ledger,
+    BINDING, TABLE, ComponentEvidence, ComponentLedger, initialize_component_ledger,
 )
 from agent_index.store.content_store import ContentStore
+from agent_index.store.file_projection import capture_file_projection
 from agent_index.store.ingestion_index import prepare_ingestion_indices
 from agent_index.store.multi_model_store import MultiModelStore
 from agent_index.store.scalar_index import (
@@ -309,6 +311,121 @@ def test_point_preparation_requires_exact_selection_without_effects(
         with pytest.raises(SourceLayoutError, match="scope"):
             prepare()
         assert snapshot(legacy_domain.path) == before
+
+
+def test_point_ledger_retains_ordering_under_an_already_owned_exact_writer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AGENT_INDEX_STORE_LAYOUT", LAYOUT)
+    config = IndexConfig(
+        data_dir=tmp_path / "point",
+        model_profiles={"small": ModelProfile("small", "fixture", dim=2)},
+    )
+    hints = claim()
+    scope = hints.scope
+    store = initialize_source_store(config, point_scope=scope)
+    ledger = initialize_component_ledger(config, store, point_scope=scope)
+    prepare_ingestion_indices(store, max_rows=0, point_scope=scope)
+    domain = store._source_domain
+    assert domain is not None
+    first = ComponentEvidence(
+        ComponentContent(ComponentVersion(
+            scope[1], "opaque-body", 7, "fixture/v1", ComponentIdentity("work_item_revision", "42"),
+        ), "deleted-v7", True),
+        "account-endpoint-query", "fixture-policy",
+        capture_file_projection(config, store, scope[1], "opaque-body", max_rows=1, point_scope=scope),
+    )
+    before = snapshot(config.data_dir)
+    with pytest.raises(SourceLayoutError, match="owning source writer"):
+        ledger.put(first, expected=None, max_rows=1, point_scope=scope)
+    assert snapshot(config.data_dir) == before
+    with domain._write(store.content_store.db, point_scope=scope):
+        for selected_scope in (None, replace(hints, account_id="other").scope):
+            before = snapshot(config.data_dir)
+            with pytest.raises(SourceLayoutError):
+                ledger.put(first, expected=None, max_rows=1, point_scope=selected_scope)
+            assert snapshot(config.data_dir) == before
+        foreign = replace(
+            first, content=replace(first.content, component=replace(
+                first.content.component, source="other:points",
+            )), projection=replace(first.projection, source="other:points"),
+        )
+        before = snapshot(config.data_dir)
+        with pytest.raises(SourceLayoutError, match="outside its selected family"):
+            ledger.put(foreign, expected=None, max_rows=1, point_scope=scope)
+        assert snapshot(config.data_dir) == before
+        assert ledger.put(first, expected=None, max_rows=1, point_scope=scope)
+    second = replace(first, content=replace(
+        first.content, component=replace(first.content.component, version=8), fingerprint="deleted-v8",
+    ))
+    with domain._write(store.content_store.db, point_scope=scope):
+        assert ledger.put(second, expected=first, max_rows=1, point_scope=scope)
+        assert not ledger.put(first, expected=second, max_rows=1, point_scope=scope)
+        assert not ledger.put(second, expected=second, max_rows=1, point_scope=scope)
+    assert domain.receipt()["state"] == "clean"
+    before = snapshot(config.data_dir)
+    reopened = initialize_source_store(config, point_scope=scope)
+    restored = initialize_component_ledger(config, reopened, point_scope=scope)
+    assert restored.get(scope[1], "opaque-body", point_scope=scope) == second
+    assert snapshot(config.data_dir) == before
+    with domain.operation(store.content_store.db, point_scope=scope):
+        for ordinary in (
+            lambda: ledger.get(scope[1], "opaque-body"),
+            lambda: ledger.consolidate(max_rows=1),
+        ):
+            with pytest.raises(SourceLayoutError, match="not admitted"):
+                ordinary()
+        with pytest.raises(SourceLayoutError, match="not admitted"):
+            with domain.write(store.content_store.db):
+                pytest.fail("ordinary point writes remain disabled")
+    assert snapshot(config.data_dir) == before
+
+
+@pytest.mark.parametrize("stage", ["index", "binding"])
+def test_interrupted_point_ledger_write_requires_existing_explicit_recovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stage: str,
+) -> None:
+    from agent_index.store import component_ledger
+
+    monkeypatch.setenv("AGENT_INDEX_STORE_LAYOUT", LAYOUT)
+    config = IndexConfig(
+        data_dir=tmp_path / "point",
+        model_profiles={"small": ModelProfile("small", "fixture", dim=2)},
+    )
+    scope = claim().scope
+    store = initialize_source_store(config, point_scope=scope)
+    ledger = initialize_component_ledger(config, store, point_scope=scope)
+    prepare_ingestion_indices(store, max_rows=0, point_scope=scope)
+    domain = store._source_domain
+    assert domain is not None
+    record = ComponentEvidence(
+        ComponentContent(ComponentVersion(
+            scope[1], "opaque-body", 7, "fixture/v1", ComponentIdentity("work_item_revision", "42"),
+        ), "deleted-v7", True),
+        "account-endpoint-query", "fixture-policy",
+        capture_file_projection(config, store, scope[1], "opaque-body", max_rows=1, point_scope=scope),
+    )
+
+    def fail(*_args: Any, **_kwargs: Any) -> Any:
+        raise RuntimeError("fixture ledger publication interruption")
+
+    with monkeypatch.context() as patch:
+        if stage == "index":
+            patch.setattr(component_ledger, "prepare_index", fail)
+        else:
+            patch.setattr(ComponentLedger, "_bind", fail)
+        with pytest.raises(RuntimeError, match="ledger publication interruption"):
+            with domain._write(store.content_store.db, point_scope=scope):
+                ledger.put(record, expected=None, max_rows=1, point_scope=scope)
+    receipt = domain.receipt()
+    assert receipt["state"] == "dirty" and receipt["uncertain_effect"]
+    before = snapshot(config.data_dir)
+    with pytest.raises(SourceLayoutError, match="incomplete or changed"):
+        ledger.get(scope[1], "opaque-body", point_scope=scope)
+    with pytest.raises(SourceLayoutError, match="explicit recovery"):
+        with domain._write(store.content_store.db, point_scope=scope):
+            pytest.fail("dirty point evidence must not retry itself")
+    assert snapshot(config.data_dir) == before
 
 
 def test_point_index_segment_reservation_preflights_every_owner(
