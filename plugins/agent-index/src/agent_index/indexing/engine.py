@@ -674,7 +674,7 @@ def _index_source(
             full=full, progress_cb=progress_cb, connector_kwargs=connector_kwargs,
             connector=connector, source_scope=source_scope, change_hints=change_hints,
         ),
-        apply=application,
+        apply=application, change_hints=change_hints,
         prepare=prepare if isinstance(multi_store, MultiModelStore) else None,
     )
 

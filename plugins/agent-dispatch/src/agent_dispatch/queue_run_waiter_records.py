@@ -6,6 +6,9 @@ import json
 import sqlite3
 from typing import Any, cast
 
+from .queue_feed_preparation import FeedWaiterAdmission
+from .queue_records import TaskError
+
 
 def select_waiter_row(
     conn: sqlite3.Connection, task_id: str, *, states: tuple[str, ...],
@@ -35,9 +38,21 @@ def run_waiter_from_row(row: sqlite3.Row) -> dict[str, Any]:
         delegation = validate_feed_delegation(
             delegation, armed="registration_id" in delegation,
         )
+    admission = json.loads(row["feed_admission_json"] or "null")
+    if admission is not None:
+        basis = FeedWaiterAdmission.from_record(admission)
+        if (
+            not isinstance(delegation, dict) or "feed" not in delegation
+            or basis.task_id != row["task_id"] or basis.worker_id != row["owner"]
+            or basis.owner_session_id != row["owner_session_id"]
+            or basis.task_generation != row["task_generation"]
+        ):
+            raise TaskError("retained repository-feed admission does not match its waiter")
+        admission = basis.record()
     return {
         "kind": row["kind"],
         "delegation": delegation,
+        "feed_admission": admission,
         "event_id": row["event_id"],
         "replay_registration_id": row["replay_registration_id"],
         "replay_attempted": bool(row["replay_attempted"]),

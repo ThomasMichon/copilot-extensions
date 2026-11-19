@@ -303,6 +303,11 @@ export async function activateBridgeExtension({ joinSession, pluginRoot }) {
     }
   }
 
+  function observeDelivery(data) {
+    if (data.session_id !== state.nativeSessionId) return;
+    enqueueEvents([{ type: "bridge.delivery_observation", data }]);
+  }
+
   // Ordinary representation remains best-effort. Retry actual root-input evidence
   // under its original session binding; a send reply or hook return is not evidence.
   async function flushEvents() {
@@ -443,10 +448,21 @@ export async function activateBridgeExtension({ joinSession, pluginRoot }) {
   }
 
   // --- Extension ---
-  const pendingInputHook = (input, invocation) => state.pendingInput.postTool(
-    input, invocation, state.nativeSessionId,
-    state.deliveryEnabled && state.registered && state.sessionId === state.nativeSessionId,
-  );
+  const pendingInputHook = (input, invocation) => {
+    const notice = state.pendingInput.postTool(
+      input, invocation, state.nativeSessionId,
+      state.deliveryEnabled && state.registered && state.sessionId === state.nativeSessionId,
+    );
+    if (notice) observeDelivery({
+      stage: "hook_notice", source: "pending-input-set-v1",
+      session_id: state.nativeSessionId,
+      consumer_incarnation: retainedInbox?.consumerIncarnation?.(state.nativeSessionId),
+      pending_count: state.pendingInput.pending.size,
+      incomplete: state.pendingInput.incomplete,
+      delivery_path: RETAINED_INBOX ? "retained" : "legacy",
+    });
+    return notice;
+  };
   const session = await joinSession({
     hooks: {
       onPostToolUse: pendingInputHook,
@@ -493,6 +509,7 @@ export async function activateBridgeExtension({ joinSession, pluginRoot }) {
       onPending: (sid, messages) => state.pendingInput.offered(sid, messages),
       onSubmitted: (sid, id) => state.pendingInput.confirmed(sid, id),
       onConsumed: (sid, id) => state.pendingInput.confirmed(sid, id),
+      onObservation: observeDelivery,
       sourceAllowed: (source) => source === "agent-bridge" || isRemoteDriverSource(source),
       ...(process.env.AGENT_BRIDGE_RECEIVING_PLUGIN_ROOT
         ? {

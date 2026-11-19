@@ -325,9 +325,9 @@ const bindingFor = (sessionId, overrides = {}) => ({
   registeredAt: "2026-01-01T00:00:00", project: "proj-bound", creationNonce: "abc123", ...overrides,
 });
 
-// `git` answers at once; `agent-worktrees` records each call and then hangs
+// `git` answers at once; `agent-worktrees` records each call and by default hangs
 // far past the lookup timeout, like a CLI starved on a contended host.
-function useHangingAgentWorktrees(t) {
+function useHangingAgentWorktrees(t, { hang = true } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "agent-bridge-metadata-hang-"));
   const marker = join(dir, "agent-worktrees.calls");
   const isWin = process.platform === "win32";
@@ -338,8 +338,8 @@ function useHangingAgentWorktrees(t) {
   };
   script("git", ["echo main"]);
   script("agent-worktrees", isWin
-    ? [`echo %*>>"${marker}"`, `"${process.execPath}" -e "setTimeout(() => {}, 10000)"`, "echo late"]
-    : [`echo "$*" >> "${marker}"`, "exec sleep 10"]);
+    ? [`echo %*>>"${marker}"`, ...(hang ? [`"${process.execPath}" -e "setTimeout(() => {}, 10000)"`] : []), "echo late"]
+    : [`echo "$*" >> "${marker}"`, ...(hang ? ["exec sleep 10"] : ["echo late"])]);
   const originalPath = process.env.PATH;
   process.env.PATH = `${dir}${isWin ? ";" : ":"}${originalPath}`;
   t.after(() => { process.env.PATH = originalPath; });
@@ -547,7 +547,7 @@ test("native Linux overlay roots retain the safe older-provider fallback", async
 });
 
 test("live naming uses the reporter and permits CLI fallback only for an absent provider route", async (t) => {
-  const cli = useHangingAgentWorktrees(t);
+  const cli = useHangingAgentWorktrees(t, { hang: false });
   const observation = { hostname: "host", environment: "wsl" };
   const requests = [];
   const responses = [
@@ -567,11 +567,11 @@ test("live naming uses the reporter and permits CLI fallback only for an absent 
     requests.push([method, path]);
     return responses.shift();
   }, { observe: async () => observation });
-  const resolve = () => resolveMachineAsync({ cwd: cli.cwd, timeoutMs: 1_000, lookup });
+  const resolve = () => resolveMachineAsync({ cwd: cli.cwd, lookup });
   assert.equal(await resolve(), "guest-one");
   for (let index = 0; index < 3; index += 1) assert.equal(await resolve(), null);
   assert.equal(cli.called(), false);
-  assert.equal(await resolve(), null);
+  assert.equal(await resolve(), "late");
   assert.equal(cli.called(), true);
   assert.ok(requests.every(([method, path]) =>
     method === "GET" && path === "/api/v1/execution-context?hostname=host&environment=wsl"));

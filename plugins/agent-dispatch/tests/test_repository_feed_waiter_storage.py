@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import copy
 from collections.abc import Callable
 import sqlite3
@@ -163,17 +164,18 @@ def test_explicit_namespace_and_consumer_boundaries_keep_independent_request_spa
 def test_feed_custody_never_becomes_a_local_pid_or_preparing_recovery(
     tmp_path: Path, armed: bool,
 ) -> None:
+    from tests.test_repository_feed_preparation import prepare as prepare_native, setup
+
     database = tmp_path / "tasks.db"
-    queue = TaskQueue(database)
-    task_id, spec = task(queue), feed_intent(queue)
-    prepared = prepare(queue, task_id, spec, now=1000)
+    queue, task_id, spec, _, preparer = setup(tmp_path)
+    prepared = asyncio.run(prepare_native(preparer, task_id, spec))
     waiter, = queue.scan_repository_feed_waiters(spec["feed"]["binding"]).waiters
     queue.replay_waiter_progress(waiter, attempt=True)
     if armed:
         queue.replay_waiter_progress(waiter, registration_id="original-registration")
         queue.arm_run_waiter(
             task_id, generation=prepared["generation"], kind="delegated",
-            delegation={**spec, "registration_id": "original-registration"}, now=1001,
+            delegation={**spec, "registration_id": "original-registration"},
         )
     queue = TaskQueue(database)
 

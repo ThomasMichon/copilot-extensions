@@ -28,6 +28,7 @@ import subprocess
 import sys
 from dataclasses import asdict
 from pathlib import Path
+from typing import Any, cast
 
 from agent_procutil import no_window_flags as _creation_flags
 
@@ -64,7 +65,7 @@ log = logging.getLogger("agent-containers")
 _BUSY_EXIT = 75
 
 
-def _runtime_drivers():
+def _runtime_drivers() -> Any:
     from . import runtime_drivers
 
     return runtime_drivers
@@ -299,7 +300,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         if getattr(args, "func", None) is not None:
-            return args.func(args)
+            return cast(int, args.func(args))
         if args.command == "fleet":
             return _cmd_fleet(args)
         if args.command == "up":
@@ -439,7 +440,7 @@ def _cmd_installer_readiness() -> int:
     return emit(evaluate(config, containers, failures))
 
 
-def _trusted_session_host_context(name: str, expected_instance: str | None = None):
+def _trusted_session_host_context(name: str, expected_instance: str | None = None) -> Any:
     """Resolve a trusted fleet member without launching its Session Host."""
     from .session_host_context import resolve_context
 
@@ -450,12 +451,7 @@ def _cmd_session_host_prepare(args: argparse.Namespace) -> int:
     """Prepare endpoint + auth inputs; agent-bridge owns the Host lifecycle."""
     policy_context = getattr(args, "repository_policy_context", None)
     from ._invoke import payload_command_argv
-    from .container_shims import (
-        deploy as deploy_shims,
-    )
-    from .container_shims import (
-        git_credential_environment,
-    )
+    from .container_shims import deploy as deploy_shims, git_credential_environment
     from .relay_provider import token_for
 
     context = _trusted_session_host_context(args.name, args.expected_instance)
@@ -643,7 +639,8 @@ def _cmd_namespace_ensure_ready(args: argparse.Namespace) -> int:
 
 def _cmd_namespace_recreate(args: argparse.Namespace) -> int:
     """Recreate one exact trusted container and emit redacted identity data."""
-    from .fleet import RecreateMemberError, recreate_member
+    from .fleet import recreate_member
+    from .fleet_results import RecreateMemberError
 
     try:
         result = recreate_member(
@@ -686,13 +683,13 @@ def _cmd_fleet(args: argparse.Namespace) -> int:
     if getattr(args, "json", False):
         # Bare JSON array, one object per container, so the picker's Containers
         # pivot (and any other machine-readable consumer) can render the fleet.
-        out = []
+        out: list[dict[str, Any]] = []
         for c in containers:
             lease = get_lease(c.name)
             hold_status = deploy_hold_status(c.name)
             fleet = config.fleets.get(c.fleet or "")
             posture_errors = []
-            actual_profile = c.security_profile
+            actual_profile: str | None = c.security_profile
             actual_network = None
             inspected = None
             if (fleet and fleet.restricted) or actual_profile == RESTRICTED_PROFILE:
@@ -991,7 +988,7 @@ def _cmd_exec(args: argparse.Namespace) -> int:
         return launch_task(args, _exec_stdio)
     extra = resolve_extra_copilot_args(getattr(args, "copilot_args", None))
     target = resolve_live_exec_target(args.name, config=load_config())
-    hosting_policy.require_container_hosting(target)
+    portable = hosting_policy.require_exec_hosting(target)
 
     if target.actual_profile == RESTRICTED_PROFILE:
         from .lease import ProviderAdmissionError, session_admission
@@ -1032,6 +1029,7 @@ def _cmd_exec(args: argparse.Namespace) -> int:
             target.user,
             _append_copilot_args(target.acp_command, extra),
             handle=target.container_id,
+            portable_policy=portable,
         )
     finally:
         target_lock.release()
@@ -1047,6 +1045,7 @@ def _launch_container_agent(
     *,
     container_id: str | None = None,
     handle: str | None = None,
+    portable_policy: bool = False,
 ) -> int:
     """Launch through the trust-profiled transport while holding its lock."""
     if actual_profile == RESTRICTED_PROFILE:
@@ -1143,15 +1142,16 @@ def _launch_container_agent(
     try:
         ssh_config = prepare_ssh_config(member, user) if plan.ssh else None
         copilot_auth_env = process_auth.prepare_launch(config, fleet, member, user)
-        acp_command = hosting_policy.guarded_launch(
+        acp_command = hosting_policy.exec_launch(  # portable: no guest agent-worktrees guard
             process_auth.wrap_command(acp_command, copilot_auth_env), fleet.workspace_folder or config.workspace_folder,
+            portable=portable_policy and not plan.ssh,
         )
         remote_command = build_remote_command(acp_command, remote_env)
         spawn_cmd = build_ssh_command(
             ssh_config,
             remote_command,
             reverse_forwards=reverse_forwards,
-        ) if plan.ssh else _runtime_drivers().stream_routed(
+        ) if ssh_config is not None else _runtime_drivers().stream_routed(
             ["docker", "exec", "-i", "-u", user, member, "sh", "-c", remote_command],
         )
         if not plan.ssh and spawn_cmd[:1] == ["docker"]:  # never fall back to Docker

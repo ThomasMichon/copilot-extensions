@@ -73,6 +73,13 @@ class AcquisitionPage:
     Opt-in connectors advertise ``acquisition_page_versions = (1,)`` on their
     ``discover_delta_page`` method. Cursors are opaque nonsecret strings bound
     to the effective recovery scope; all pages retain the same target commit.
+
+    ``discover_hints_page(hints, last_commit, cursor, cancel_check=None)`` opts in
+    with both ``change_hints_versions = (1,)`` and ``acquisition_page_versions =
+    (1,)`` on that callable. Each call finishes a bounded unit of the immutable
+    claimed hints (including nested item/comment work), not an entire unbounded
+    document wrapped as a page. Every hinted page preserves ``last_commit``;
+    terminal completion covers only those hints, never the polling interval.
     """
 
     delta: SourceDelta
