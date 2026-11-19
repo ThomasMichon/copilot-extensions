@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import asdict
-from typing import Any
+from typing import Any, cast
 
 from . import telemetry
 from .events import EventBus
@@ -18,7 +18,8 @@ from .producers.evaluator import (
     NoOp,
     Reject,
 )
-from .queue import Status, TaskError, TaskQueue
+from .queue import TaskQueue
+from .queue_records import Status, TaskError
 from .pr_observation_store import observation_store_path
 from .registrations import RegistrationKind
 from .reviewer_loops import wrap_reviewer_loop_evaluator
@@ -50,7 +51,7 @@ def _release_handoff_claim(task: dict[str, Any]) -> None:
 
 def _event_notes(queue: TaskQueue, task_id: str) -> list[dict[str, Any]]:
     notes: list[dict[str, Any]] = []
-    for row in queue.events(task_id):
+    for row in cast(list[dict[str, object]], queue.events(task_id)):
         note = row.get("note")
         if isinstance(note, str) and note.startswith("event note: "):
             notes.append(
