@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .wake_recovery_records import WakeRecoveryRecords
 
 from .bridge_command_delivery import NativePromptNotSent
 from .coordinator_execution_sender import CoordinatorExecutionProvenance
@@ -14,7 +18,8 @@ from .queue_records import TaskError
 
 
 def deliver_execution_wake(
-    queue: TaskQueue, wake: Wake, incarnation: str | None, deliver: Callable[[], bool]
+    queue: TaskQueue, wake: Wake, incarnation: str | None, deliver: Callable[[], bool],
+    *, records: WakeRecoveryRecords | None = None,
 ) -> bool:
     from .queue_pool_recovery import prepare_recovery_wake
     prepare_recovery_wake(queue, wake)
@@ -37,6 +42,10 @@ def deliver_execution_wake(
     outcome: SendOutcome = "unknown"
     detail = "coordinator wake transport did not establish acceptance or absence"
     try:
+        if records is not None:
+            if wake_table(wake) != "wake_outbox":
+                raise TaskError("independent records require an ordinary wake")
+            records.retain(queue, wake.task_id, wake.id, admission.identity)
         accepted = deliver()
         if accepted:
             outcome = "sent"
@@ -59,3 +68,5 @@ def deliver_execution_wake(
                 outcome=outcome,
                 detail=detail,
             )
+            if records is not None and outcome == "sent":
+                records.retain_settlement(queue, wake.task_id, wake.id, admission.identity)
