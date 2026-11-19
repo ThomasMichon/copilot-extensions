@@ -6778,7 +6778,7 @@
         "tools/plugin_test_containment_observation.py": "3a216c9051cccc4c1d4448638166651895621fe2fbeba350ff27c6ad86de78a0",
         "tools/plugin_test_containment_posix.py": "0d5fca39319742d34f858f1db3829172bd4541cbb6be6b39772f938f35ebeb19",
         "tools/plugin_test_environment.py": "52ea6846d91c74eacce935fa8225761fc2850312f4556fd19193756ad8242d06",
-        "tools/plugin_test_lifecycle.py": "88ad7b2acc7fe5cc73d332f5603968d8c14168b9b5320de27dde8e49c6730e1a",
+        "tools/plugin_test_lifecycle.py": "9475d4d2bd4ad024c7a4100ed1c04a671ec3ac0355f77cd0bb2f3cc5ed2953e4",
         "tools/promotion_unit_tests/test_lifecycle_pins.py": "ba6f6ab2d947eec5684be35e77421e07e00b0b6281b9a793b84287b31e6e1093",
         "tools/promote_release.py": "b226d383d6a2a4dc9375dbfdee80bf61ed6b1249d5ddd129e611acea80c2a217",
         "tools/promotion_admission_evidence.py": "fcfca78b764933b5d40e347eb296a3d4f471a4ec0c0e5c5eaa81136c75419365",
