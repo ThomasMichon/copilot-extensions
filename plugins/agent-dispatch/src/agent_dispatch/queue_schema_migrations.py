@@ -239,6 +239,10 @@ def run_queue_schema_migrations(
                 raise
     conn.execute(            "CREATE INDEX IF NOT EXISTS idx_task_steer_task ON task_steer(task_id)"
     )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_task_steer_wake ON task_steer(task_id,wake_operation_id)"
+        " WHERE wake_operation_id IS NOT NULL"
+    )
     # A client-side retry of an ambiguous (already-committed-but-the-
     # response-timed-out) submission reuses the same key -- this
     # unique index is what makes ``submit_steer``'s dedup check a
