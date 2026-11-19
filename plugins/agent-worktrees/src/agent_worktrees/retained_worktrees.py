@@ -75,7 +75,7 @@ def inventory(
             receiving = projects[repo]
             path = cfg.project_dir(repo) / "worktrees" / f"{wid}.yaml"
             record = tracking.load_record(path)
-        except (OSError, ValueError, KeyError, yaml.YAMLError) as exc:
+        except (OSError, ValueError, KeyError, TypeError, OverflowError, yaml.YAMLError) as exc:
             unknown(ref, f"record unavailable: {type(exc).__name__}")
             return
         if (
@@ -141,7 +141,7 @@ def cmd_retained(args: argparse.Namespace, target: list[str]) -> int:
             record = worktree_identity.tracked_invocation_record(
                 Path.cwd(), project=config.repo_name, anchor=Path(config.default_repo.anchor),
             )
-        except (OSError, ValueError, RuntimeError, yaml.YAMLError) as exc:
+        except (OSError, ValueError, RuntimeError, TypeError, OverflowError, yaml.YAMLError) as exc:
             return output._json_error(f"tracked checkout unavailable: {type(exc).__name__}", 2)
         wid = record.worktree_id if record is not None else None
     if not wid:

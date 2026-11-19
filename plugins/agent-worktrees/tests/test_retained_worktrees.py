@@ -121,6 +121,34 @@ def test_missing_remote_and_environment_mismatch_are_not_empty_success(graph: Gr
     assert len(result["unresolved"]) == 3
 
 
+@pytest.mark.parametrize(("pid", "failure"), [
+    ({"invalid": 1}, "TypeError"), (float("inf"), "OverflowError"), ("not-a-pid", "ValueError"),
+])
+def test_corrupt_descendant_is_unresolved_without_hiding_an_independent_sibling(
+    graph: Graph, pid: object, failure: str,
+) -> None:
+    config, save = graph
+    save("root", "parent", [
+        ("host/source/broken", "released"), ("host/library/sibling", "at-rest"),
+    ])
+    save("source", "broken")
+    save("library", "sibling", status="finalized")
+    path = cfg.project_dir("source") / "worktrees" / "broken.yaml"
+    value = yaml.safe_load(path.read_text(encoding="utf-8"))
+    value["sessions"] = [{"session_id": "fixture", "pid": pid}]
+    path.write_text(yaml.safe_dump(value), encoding="utf-8")
+    before = path.read_bytes()
+
+    result = inventory("parent", config)
+
+    assert not result["complete"]
+    assert [node["worktree_id"] for node in result["nodes"]] == ["parent", "sibling"]
+    assert result["unresolved"] == [{
+        "ref": "host/source/broken", "reason": f"record unavailable: {failure}",
+    }]
+    assert path.read_bytes() == before
+
+
 @pytest.mark.parametrize("limits", [{"max_nodes": 1}, {"max_depth": 1}])
 def test_bounds_preserve_an_explicit_unresolved_edge(graph: Graph, limits: dict[str, int]) -> None:
     config, save = graph
