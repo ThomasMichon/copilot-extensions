@@ -43,7 +43,10 @@ def test_original_deadline_retirement_and_native_wake_reopen_once(
     queue, task_id, spec, waiter = prepared(tmp_path)
     if armed:
         queue.replay_waiter_progress(waiter, attempt=True)
-        queue.replay_waiter_progress(waiter, registration_id="original-receipt")
+        queue.replay_waiter_progress(
+            waiter, registration_id="original-receipt",
+            registration_expires_at=int(spec["feed"]["deadline_at"]),
+        )
         armed_waiter = queue.arm_run_waiter(
             task_id, generation=waiter["generation"], kind="delegated",
             delegation={**spec, "registration_id": "original-receipt"},

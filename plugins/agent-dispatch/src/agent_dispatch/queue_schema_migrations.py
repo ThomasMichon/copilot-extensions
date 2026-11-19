@@ -276,6 +276,7 @@ def run_queue_schema_migrations(
         ("replay_scope", "TEXT"),
         ("replay_request_id", "TEXT"),
         ("replay_registration_id", "TEXT"),
+        ("replay_registration_expires_at", "INTEGER"),
         ("replay_attempted", "INTEGER NOT NULL DEFAULT 0"),
         ("replay_settled", "INTEGER NOT NULL DEFAULT 0"),
     ):

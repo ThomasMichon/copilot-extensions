@@ -172,7 +172,10 @@ def test_feed_custody_never_becomes_a_local_pid_or_preparing_recovery(
     waiter, = queue.scan_repository_feed_waiters(spec["feed"]["binding"]).waiters
     queue.replay_waiter_progress(waiter, attempt=True)
     if armed:
-        queue.replay_waiter_progress(waiter, registration_id="original-registration")
+        queue.replay_waiter_progress(
+            waiter, registration_id="original-registration",
+            registration_expires_at=int(spec["feed"]["deadline_at"]),
+        )
         queue.arm_run_waiter(
             task_id, generation=prepared["generation"], kind="delegated",
             delegation={**spec, "registration_id": "original-registration"},

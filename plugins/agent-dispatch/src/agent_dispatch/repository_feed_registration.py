@@ -8,6 +8,7 @@ from typing import Any
 
 from .queue_feed_attempts import ATTEMPT_PROTOCOL
 from .queue_feed_preparation import FeedWaiterAdmission, REGISTRATION_PROTOCOL
+from .queue_feed_receipts import RECEIPT_PROTOCOL
 from .queue_records import TaskError
 from .repository_feed_preparation import RepositoryFeedPreparer
 from .repository_feed_waiter_contract import validate_feed_delegation
@@ -45,6 +46,8 @@ class RepositoryFeedRegistrar(RepositoryFeedPreparer):
             raise TaskError("native repository-feed attempt unsupported")
         if getattr(self.queue, "repository_feed_registration_protocol", None) != PROTOCOL:
             raise TaskError("native repository-feed creation cutoff unsupported")
+        if getattr(self.queue, "repository_feed_receipt_protocol", None) != RECEIPT_PROTOCOL:
+            raise TaskError("native repository-feed receipt expiry unsupported")
         capabilities = await super()._negotiate()
         feature = capabilities.get("request_recovery")
         if not isinstance(feature, dict) or any(
@@ -81,7 +84,7 @@ class RepositoryFeedRegistrar(RepositoryFeedPreparer):
 
     def _receipt(
         self, waiter: dict[str, Any], result: dict[str, Any],
-    ) -> tuple[str, str]:
+    ) -> tuple[str, str, int]:
         from agent_pull_requests.repository_contract import RepositoryIdentity
 
         feed = waiter["delegation"]["feed"]
@@ -106,7 +109,7 @@ class RepositoryFeedRegistrar(RepositoryFeedPreparer):
             or (status == "cancelled") != row["cancelled"]
         ):
             raise ValueError("original repository-feed receipt differs")
-        return status, registration
+        return status, registration, expiry
 
     async def reconcile_registration(
         self, task_id: str, preparation_id: str,
@@ -159,9 +162,11 @@ class RepositoryFeedRegistrar(RepositoryFeedPreparer):
                 result = await self.client.request("subscribe", {
                     "request_id": waiter["delegation"]["feed"]["request_id"], **intent,
                 })
-            status, registration = self._receipt(waiter, result)
+            status, registration, expiry = self._receipt(waiter, result)
             self._checkpoint()
-            waiter = self.queue.replay_waiter_progress(waiter, registration_id=registration)
+            waiter = self.queue.replay_waiter_progress(
+                waiter, registration_id=registration, registration_expires_at=expiry,
+            )
             return {
                 "status": status, "registration_id": registration,
                 "waiter_state": waiter["state"],
