@@ -245,7 +245,7 @@ def test_query_frontdoors_refuse_point_domains_without_empty_success(
     from fastapi.testclient import TestClient
 
     from agent_index import __main__ as cli
-    from agent_index import mcp_app, transport
+    from agent_index import mcp_app, store as exported_stores, transport
     from agent_index.client import AgentIndexClient
     from agent_index.engine.client import EngineClient, EngineUnavailableError
     from agent_index.search.engine import SearchEngine, create_search_engine
@@ -310,6 +310,9 @@ def test_query_frontdoors_refuse_point_domains_without_empty_success(
     assert selected is not None
     scoped = MultiModelStore(config.lance_dir, point_scope=claim().scope)
     scoped_engine = SearchEngine({}, scoped)
+    profile = next(iter(config.model_profiles.values()))
+    vectors = scoped.register_model(profile)
+    vector = np.zeros(profile.dim, dtype=np.float32)
     before = snapshot(config.data_dir)
     queries.clear()
     with selected.operation(scoped._content.db, point_scope=claim().scope):
@@ -317,10 +320,35 @@ def test_query_frontdoors_refuse_point_domains_without_empty_success(
             lambda: engine.search("searchable"),
             lambda: scoped_engine.search("searchable"),
             lambda: scoped_engine.search_authorized("searchable", families=()),
+            lambda: scoped_engine.search_authorized("searchable", families=("sample:components",)),
             lambda: scoped_engine.find_similar("missing"),
             lambda: scoped.fts_search("searchable"),
             lambda: scoped.get_document("sample:other", "43.md"),
+            scoped.projection_snapshot, scoped.distinct_sources, scoped.source_counts,
+            scoped.distinct_items, scoped.distinct_forge_repos,
+            lambda: scoped.search(profile.model_id, vector),
+            lambda: scoped.hybrid_search(profile.model_id, vector, "searchable"),
+            lambda: scoped.search_all({}, "searchable"),
+            lambda: scoped.compare_search({}, "searchable"),
+            lambda: scoped.content_store.get_by_ids([]),
+            lambda: scoped.content_store.get_by_ids([chunks[0].chunk_id]),
+            lambda: scoped.content_store.get_chunk_ids_by_source_exact("sample:components"),
+            lambda: scoped.content_store.get_chunk_ids_by_file("sample:components", "42.md"),
+            lambda: scoped.content_store.get_document("sample:other", "43.md"),
+            scoped.content_store.source_counts, scoped.content_store.distinct_sources,
+            scoped.content_store.stats,
+            vectors.count, lambda: vectors.get_vector("missing"),
+            lambda: vectors.get_vectors([]),
+            lambda: vectors.get_vectors([chunks[0].chunk_id]),
+            lambda: vectors.search(vector),
             clusters.list_clusters,
+            lambda: clusters.get_cluster("missing"),
+            lambda: clusters.cluster_for_item("sample:components", "42.md"),
+            lambda: clusters.cluster_for_item("sample:unknown", "unknown.md"),
+            clusters.stats, clusters.slice_manifest,
+            lambda: clusters.covered_stats("unknown"),
+            lambda: exported_stores.ContentStore(config.lance_dir),
+            lambda: exported_stores.MultiModelStore(config.lance_dir),
         ):
             with pytest.raises(SourceLayoutError):
                 operation()
