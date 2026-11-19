@@ -36,6 +36,8 @@ class FakeProvisioner:
     during: Callable[[], None] | None = None
     # Fail after the member exists, like a failed post-create setup step.
     fail_after_create: str | None = None
+    driver: str | None = None
+    removed: list[str] = field(default_factory=list)
 
     def reconcile_up(
         self, config: ContainersConfig, fleet_name: str, count: int | None = None,
@@ -51,7 +53,7 @@ class FakeProvisioner:
             name = f"{fleet_name}-{idx}"
             member = DockerContainerInfo(
                 f"tmp-{idx}", name, "img", "running", "", fleet=fleet_name,
-                labels={"agent-containers.instance": name},
+                labels={"agent-containers.instance": name}, driver=self.driver,
             )
             self.members.append(member)
             if self.during is not None:
@@ -194,10 +196,11 @@ def test_marker_stays_live_past_its_heartbeat_ttl_during_a_long_build(
 
 
 def _removing(fake: FakeProvisioner, fail: bool) -> Callable[..., None]:
-    def remove(name: str, force: bool = False) -> None:
+    def remove(handle: str, force: bool = False) -> None:
+        fake.removed.append(handle)
         if fail:
             raise RuntimeError("example-driver remove failed")
-        fake.members[:] = [m for m in fake.members if m.container_id != name]
+        fake.members[:] = [m for m in fake.members if m.container_id != handle.split(".")[-1]]
     return remove
 
 
@@ -206,6 +209,7 @@ def test_failed_growth_removes_the_partial_member(
 ) -> None:
     monkeypatch.setattr(lifecycle, "remove_container", _removing(fake, False))
     fake.fail_after_create = "dotfiles setup failed"
+    fake.driver = "example-driver"
     config = _config(max_size=2)
     lease_mod.borrow(config, "a", fleet="example")
 
@@ -213,6 +217,7 @@ def test_failed_growth_removes_the_partial_member(
         lease_mod.borrow(config, "b", fleet="example")
 
     assert [m.name for m in fake.members] == ["example-1"]
+    assert fake.removed == ["tmp-2.example-2"]  # the driver's incarnation-qualified handle
     assert fleet_growth._read_markers(fake.state_dir) == {}
     assert [lease.effort for lease in lease_mod.list_leases()] == ["a"]
 
@@ -235,6 +240,21 @@ def test_partial_member_is_quarantined_when_removal_fails(
             with lease_mod.session_admission(name):
                 pass
     assert [lease.effort for lease in lease_mod.list_leases()] == ["a"]
+
+
+def test_quarantine_is_scoped_to_its_fleet(fake: FakeProvisioner) -> None:
+    # Driver-native ids are only unique per runtime: another fleet may reuse one.
+    fake.members.append(DockerContainerInfo("other-1", "i1", "img", "running", "", fleet="other"))
+    fleet_growth._write_markers(fake.state_dir, {"t": {
+        "fleet": "example", "quarantine": ["i1"], "names": ["example-1"],
+        "started_at": time.time(),
+    }})
+    config = _config()
+    config.fleets["other"] = FleetConfig(image="img")
+
+    assert lease_mod.borrow(config, "a", fleet="other").container == "other-1"
+    with pytest.raises(RuntimeError, match="No fleet containers found"):
+        lease_mod.borrow(config, "b", fleet="example")
 
 
 def test_unlistable_fleet_after_failure_keeps_the_whole_barrier(

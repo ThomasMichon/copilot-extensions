@@ -147,7 +147,8 @@ def admissible(
 
     def provisioning(member: DockerContainerInfo) -> bool:
         return any(
-            member.container_id in m["quarantine"] if m.get("quarantine") else (
+            (member.fleet == m.get("fleet") and member.container_id in m["quarantine"])
+            if m.get("quarantine") else (
                 member.name == m.get("target")
                 or member.labels.get(INSTANCE_LABEL) == m.get("target")
                 or (member.fleet == m.get("fleet")
@@ -203,6 +204,7 @@ def _settle_failed_growth(
     and session admission (``QUARANTINE_TTL``) instead of becoming leasable.
     """
     from . import fleet as fleet_mod
+    from . import runtime_drivers
 
     with lease_lock():
         marker = _read_markers(state_dir).get(token)
@@ -225,7 +227,8 @@ def _settle_failed_growth(
         return
     for member in partial:
         try:
-            lifecycle_mod.remove_container(member.container_id, force=True)
+            # A driver's native id is only unique per runtime: use its routing handle.
+            lifecycle_mod.remove_container(runtime_drivers.route_handle(member), force=True)
             log.info("Removed partial on-demand member '%s'", member.name)
         except Exception:  # noqa: BLE001 -- quarantine whatever cannot be removed
             log.exception("Could not remove partial on-demand member '%s'", member.name)
