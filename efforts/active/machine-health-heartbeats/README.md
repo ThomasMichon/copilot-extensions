@@ -65,9 +65,10 @@ single successful hourly run or restart is not that finish line.
 ### Now
 
 The installed local Windows collection/report slice has recorded verification.
-The Linux retained finite-action foundation is merged. Native enrollment and
-pair recovery source is under validation; real-user-manager qualification
-remains open. Receiver
+The Linux retained finite-action foundation, native enrollment and pair-recovery
+source are merged. Real-user-manager and closed installed-runtime qualification
+remain open; the next slice prepares and exercises the isolated native fixture
+only in an explicitly available, authorized Linux test venue. Receiver
 selection and broader carrier, preference and domain gates remain open.
 Preserve current operator holds and the local-only result; do not infer new
 receiving, binding, credential or rollout authority.
@@ -216,6 +217,14 @@ attendance or block publication, CI or an enrollment decision. No admin/CI
 bypass or fabricated visual pass is permitted. Independent deployment and
 enrollment authority/holds remain unchanged.
 
+A subsequent explicit operator answer selects an existing Linux test venue and
+approves bounded fixture-only native unit creation, execution and removal there.
+Use its already-running user manager, unique isolated service/timer names, finite
+leases and exact cleanup. This excludes `sudo`, lingering, provisioning, existing
+units/services, credentials, carrier writes, rollout and production enrollment.
+The exact private venue selector and approval response remain in adopter records;
+this grant does not release receiving or carrier-selection holds.
+
 ## Plan
 
 ### Phase 1 - Reviewed architecture and design
@@ -341,6 +350,39 @@ semantics; Manager renders cached reports; Worktrees contributes observations.
 The [owner comparison](architecture.md#owner-decision) explains this choice.
 
 ## Journal
+
+### 2026-11-19 - Bounded Linux native fixture prepared
+- Prepared an opt-in closed installed-CLI and real-user-manager packet with
+  isolated installation-owned units, two absolute UTC trigger instants,
+  interpreter expiry and exact reference-settled cleanup. Persistent per-case
+  recovery records remain outside disposable runner storage.
+- Eleven focused controls pass, including actual retained-helper construction,
+  interpreter expiry acceptance/refusal and bounded pending-job polling;
+  both Linux-native cases skip on the source validation platform.
+  Whole-file strict Linux/Windows checks, lint and installation contracts pass.
+- The configured native route did not establish access. Real Linux execution,
+  interruption, failure and hourly acceptance remain open; preparing this
+  reproducible flow is not native qualification or rollout. No parent Plan or
+  Validation Plan item closes, and existing holds remain unchanged.
+
+### 2026-11-19 - Linux enrollment source merged; native qualification remains open
+- Merged #13316 as `623c9b776b40244577ce88d79d84440ffe8e8142` after
+  exact-head required CI and a clean owner-authored Comment verdict. All five
+  inline findings were resolved; the additional stop-time drift and interrupted
+  publication observations were addressed in the source.
+- Final focused validation passed 118 portable enrollment/native-adapter controls,
+  including the existing Windows enrollment set, plus 41 actor-free composition
+  controls, strict Linux/Windows checks and lint. These are source controls,
+  not actual systemd or Linux process-death qualification.
+- Recovery separates synchronous publication custody, native client cleanup and
+  queued manager work. Withdrawal does not require collection readiness; exact
+  unit contents and identities survive drift refusal. Unknown native cleanup
+  retains its fence and runtime references.
+- The next platform gate remains the normal installed CLI in an isolated real
+  user manager: closed retained execution, fresh enrollment, replacement and
+  rollback, two periodic cycles, failure controls and exact cleanup. No parent
+  Plan or Validation Plan item closes from this source merge. Target authority,
+  carrier selection, publication, receiving and peer-receipt gates are unchanged.
 
 ### 2026-11-18 - Linux enrollment and pair-recovery source controls
 - Extended the existing enrollment/reference transaction with explicit
