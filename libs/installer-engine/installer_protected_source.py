@@ -24,7 +24,7 @@ PROTECTED_INSTALLATION_CONTRACT = {
 _POLICY = "protected-installation.json"
 _MAX_ENTRIES = 100_000
 _MOUNTINFO = Path("/proc/self/mountinfo")
-_FILESYSTEMS = {"ext2", "ext3", "ext4", "xfs", "btrfs", "tmpfs", "overlay"}
+_FILESYSTEMS = {"ext2", "ext3", "ext4", "xfs", "btrfs", "tmpfs"}
 _metadata = Path.lstat
 
 
@@ -215,12 +215,12 @@ def _output_directory(path: Path) -> None:
         raise ValueError("protected output directory has a default ACL")
 
 
-def _os_file(path: Path) -> None:
+def _os_file(path: Path, *, prefix: Path | None = None) -> Path:
     """Follow only a completely protected, bounded OS-prefix link chain."""
-    prefix = Path(sys.base_prefix)
+    prefix = Path(sys.base_prefix) if prefix is None else prefix
     _protected(prefix, directory=True)
     for _ in range(40):
-        if not path.is_relative_to(prefix):
+        if path == prefix or not path.is_relative_to(prefix):
             raise ValueError("protected interpreter link leaves its OS prefix")
         current = prefix
         for part in path.relative_to(prefix).parts:
@@ -250,8 +250,13 @@ def _os_file(path: Path) -> None:
                     "protected interpreter link is not an ordinary OS file"
                 )
         else:
-            return
+            return path
     raise ValueError("protected interpreter link chain exceeds its bound")
+
+
+def _uv_interpreter(path: Path) -> None:
+    physical = _os_file(path, prefix=Path("/"))
+    _native_mounts((physical,))
 
 
 def _tree(root: Path, *, deadline: float, internal_links: bool = False) -> None:
@@ -445,6 +450,9 @@ def install(selected: ProtectedApplication, *, code: Path) -> dict[str, str]:
     # importing this module in an elevated controller is not a trusted bootstrap.
     sys.path.insert(0, str(code))
     import install_source
+    from installer_native_executable import require_native_executable
+
+    require_native_executable(selected.uv, check_interpreter=_uv_interpreter)
 
     source = install_source.select_project(selected.snapshot, selected.component)
     if not source.payload.is_relative_to(selected.snapshot) or any(
@@ -461,6 +469,14 @@ def install(selected: ProtectedApplication, *, code: Path) -> dict[str, str]:
         )
     ):
         raise ValueError("protected application lacks absolute UV executable selection")
+    application = install_source._member(
+        selected.snapshot, source.project["application"]
+    )
+    if (
+        install_source._read(application / "application.json").get("name")
+        == "agent-worktrees"
+    ):
+        raise ValueError("protected application requires unsupported callback context")
     return install_source.install_application(
         selected.snapshot,
         selected.component,

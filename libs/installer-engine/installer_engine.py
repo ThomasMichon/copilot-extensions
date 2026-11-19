@@ -510,12 +510,10 @@ def _verify_application_wheels(inputs: FrozenInputs, slot: Path) -> None:
 def application_uv_selection(application: Path) -> bool:
     """Inspect explicit executable support in the selected POSIX application."""
     entry = application / "install.sh"
-    if _ordinary(entry).st_size > 65_536:
-        raise ValueError("Application install entry exceeds its inspection bound")
+    _ordinary(entry)
+    prefix = b"#!/bin/sh\n# installer-uv-selection: absolute/v1\n"
     with _open(entry) as stream:
-        return stream.read(65_537).startswith(
-            b"#!/bin/sh\n# installer-uv-selection: absolute/v1\n"
-        )
+        return stream.read(len(prefix)) == prefix
 
 
 def _construct(

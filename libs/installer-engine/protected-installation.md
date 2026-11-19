@@ -38,14 +38,20 @@ The independent seed-installation owner must publish fresh protected file
 copies or a native package owner's equivalent. Merely changing ownership/modes
 of controller-owned files does not revoke a controller's already-open writable
 descriptors and is not supported adoption.
-Supported native filesystems are ext2/3/4, XFS, Btrfs, tmpfs and OverlayFS.
+Supported native filesystems are ext2/3/4, XFS, Btrfs and tmpfs.
 The provider checks the actual mount table and device/subtree coordinates,
 so bind-mounted aliases cannot make input and output roles appear disjoint.
 Nested mounts inside an addressed tree and ambiguous stacked mounts refuse.
-DrvFS/9p,
+OverlayFS is refused because its merged view and directly addressed backing
+layers do not share reliable overlap coordinates. DrvFS/9p,
 network and FUSE filesystems are refused rather than treated as equivalent
 mode-bit enforcement.
 
+The selected UV must be a native ELF executable, not an interpreted script.
+Its bounded ELF program table is inspected; any declared dynamic interpreter
+must have a complete root-protected file/link chain under native OS custody.
+The native bootstrap protects this ELF-inspection helper before Python starts;
+the helper is imported only after admission of the complete protected seed.
 The OS installation, its interpreter/standard library/native dependencies and
 the selected UV executable remain independently trusted prerequisites. This
 provider acquires none of them, creates no privileged prefix, writes no native
@@ -128,6 +134,12 @@ absolute UV executable through `COPILOT_INSTALLER_UV`, without adding UV's
 directory to `PATH`; other tools retain the sanitized OS lookup. A legacy
 launcher without this capability refuses before protected construction.
 Ordinary non-protected callers retain their legacy launcher compatibility.
+Capability inspection reads only the fixed launcher prefix; it does not impose
+a new size limit on ordinary legacy launchers.
+Prepared `agent-worktrees` applications currently refuse before construction:
+their publication callback needs original command-owner context that this
+closed provider policy does not supply. The provider does not inherit ambient
+controller variables or guess that missing context.
 
 No incumbent receipt, provenance or recovery approval is consulted by this
 provider. Root-protected internal selectors may be dangling; they are not

@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import stat
+import struct
 import subprocess
 import sys
 from types import SimpleNamespace
@@ -26,6 +27,26 @@ from test_local_install_source import (
 pytestmark = pytest.mark.skipif(
     sys.platform != "linux", reason="Linux protected-provider source controls"
 )
+
+
+def _elf_image(loader: Path | None = None, *, wide: bool = True) -> bytes:
+    size, width = (64, 56) if wide else (52, 32)
+    content = bytearray(size + width)
+    content[:16] = b"\x7fELF" + bytes((2 if wide else 1, 1, 1)) + bytes(9)
+    struct.pack_into("<HHI", content, 16, 2, 62 if wide else 3, 1)
+    struct.pack_into("<Q" if wide else "<I", content, 32 if wide else 28, size)
+    struct.pack_into("<HHH", content, 52 if wide else 40, size, width, 1)
+    struct.pack_into("<I", content, size, 1 if loader is None else 3)
+    if loader is not None:
+        encoded = str(loader).encode("ascii") + b"\0"
+        struct.pack_into(
+            "<Q" if wide else "<I", content, size + (8 if wide else 4), len(content)
+        )
+        struct.pack_into(
+            "<Q" if wide else "<I", content, size + (32 if wide else 16), len(encoded)
+        )
+        content.extend(encoded)
+    return bytes(content)
 
 
 @pytest.mark.parametrize(
@@ -94,6 +115,11 @@ def policy(
 ) -> tuple[Path, dict[str, Any]]:
     code = tmp_path / "provider"
     code.mkdir(mode=0o700)
+    native_helper = code / "installer_native_executable.py"
+    native_helper.write_bytes(
+        Path(protected.__file__).with_name(native_helper.name).read_bytes()
+    )
+    native_helper.chmod(0o600)
     record: dict[str, Any] = {
         "contract": dict(protected.PROTECTED_INSTALLATION_CONTRACT),
         "component": "demo-app",
@@ -109,7 +135,7 @@ def policy(
         selected.mkdir(mode=0o700)
         record[name] = str(selected)
     uv = tmp_path / "uv"
-    uv.write_bytes(b"inert tool; never executed")
+    uv.write_bytes(_elf_image())
     uv.chmod(0o700)
     record["uv"] = str(uv)
     path = code / "protected-installation.json"
@@ -259,7 +285,9 @@ def test_admission_inspection_keeps_its_finite_bound(
         protected.admit(path, code=path.parent)
 
 
-@pytest.mark.parametrize("filesystem", ["9p", "drvfs", "nfs4", "fuse", "cifs"])
+@pytest.mark.parametrize(
+    "filesystem", ["9p", "drvfs", "nfs4", "fuse", "cifs", "overlay"]
+)
 def test_native_mode_emulation_is_not_protected_custody(
     policy: tuple[Path, dict[str, Any]],
     tmp_path: Path,
@@ -393,7 +421,16 @@ def test_existing_os_interpreter_link_does_not_require_incumbent_provenance(
     assert len(mount_reads) == 2, "mount inspection must not repeat for every OS link"
 
 
-@pytest.mark.parametrize("fault", [None, "changed-selection", "old-launcher"])
+@pytest.mark.parametrize(
+    "fault",
+    [
+        None,
+        "changed-selection",
+        "old-launcher",
+        "script-tool",
+        "callback-context",
+    ],
+)
 def test_main_keeps_real_prepared_source_and_admitted_selections_through_construction(
     policy: tuple[Path, dict[str, Any]],
     tmp_path: Path,
@@ -443,6 +480,17 @@ def test_main_keeps_real_prepared_source_and_admitted_selections_through_constru
     )
     if fault == "old-launcher":
         (application / "install.sh").write_text('#!/bin/sh\nexec uv "$@"\n')
+    if fault == "script-tool":
+        Path(record["uv"]).write_bytes(b"#!/controller/writable-python\npass\n")
+    if fault == "callback-context":
+        declaration = application / "application.json"
+        values = json.loads(declaration.read_bytes())
+        values.update(
+            name="agent-worktrees",
+            commands=["agent-worktrees"],
+            start=["__source-start"],
+        )
+        declaration.write_text(json.dumps(values))
     path.write_text(json.dumps(record))
     (path.parent / "versioned_runtime.py").write_text(
         "# inert packaged-family presence\n"
@@ -522,7 +570,10 @@ def test_main_keeps_real_prepared_source_and_admitted_selections_through_constru
     monkeypatch.setattr(os, "environ", os.environ.copy())
     monkeypatch.chdir(tmp_path)
     if fault:
-        with pytest.raises(ValueError, match="selection changed|absolute UV"):
+        with pytest.raises(
+            ValueError,
+            match="selection changed|absolute UV|native ELF|callback context",
+        ):
             protected.main()
         assert calls == []
         assert not (admitted.root / "versions").exists()
@@ -567,6 +618,60 @@ def test_generated_install_entry_executes_the_exact_renamed_uv_without_sibling_l
     assert result.stdout.splitlines()[0] == str(uv)
     assert result.stdout.splitlines()[-1] == "--stage"
     assert result.stderr == ""
+
+
+@pytest.mark.parametrize("declared", [False, True])
+def test_uv_capability_inspection_reads_only_its_prefix_without_a_legacy_size_limit(
+    tmp_path: Path,
+    declared: bool,
+) -> None:
+    import installer_engine
+
+    prefix = b"#!/bin/sh\n"
+    if declared:
+        prefix += b"# installer-uv-selection: absolute/v1\n"
+    (tmp_path / "install.sh").write_bytes(prefix + b"# legacy content\n" * 8192)
+    assert installer_engine.application_uv_selection(tmp_path) is declared
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "static64",
+        "static32",
+        "protected-loader",
+        "foreign-loader",
+        "script",
+        "bad-layout",
+    ],
+)
+def test_uv_selection_refuses_replaceable_interpreters_and_non_native_inputs(
+    tmp_path: Path,
+    administrative_metadata: None,
+    case: str,
+) -> None:
+    from installer_native_executable import require_native_executable
+
+    loader = tmp_path / ("foreign" if case == "foreign-loader" else "os-loader")
+    loader.write_bytes(b"inert loader reference")
+    loader.chmod(0o500)
+    uv = tmp_path / "native-uv"
+    content = _elf_image(
+        loader if case.endswith("loader") else None,
+        wide=case != "static32",
+    )
+    if case == "script":
+        content = b"#!" + str(loader).encode() + b"\ncontroller code\n"
+    elif case == "bad-layout":
+        content = content[:32]
+    uv.write_bytes(content)
+    if case in {"foreign-loader", "script", "bad-layout"}:
+        with pytest.raises(
+            ValueError, match="interpreter|native executable|native ELF"
+        ):
+            require_native_executable(uv, check_interpreter=protected._uv_interpreter)
+    else:
+        require_native_executable(uv, check_interpreter=protected._uv_interpreter)
 
 
 @pytest.mark.parametrize(

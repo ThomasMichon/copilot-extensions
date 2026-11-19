@@ -26,7 +26,7 @@ protected_path() {
         [[ $type == "$kind" ]] || return 1
         filesystem="$(/usr/bin/stat -f --format='%T' -- "$path")" || return 1
         case "$filesystem" in
-            ext2/ext3|xfs|btrfs|tmpfs|overlayfs) ;;
+            ext2/ext3|xfs|btrfs|tmpfs) ;;
             *) return 1 ;;
         esac
         [[ $path != / ]] || break
@@ -42,6 +42,7 @@ protected_path "$entry" 'regular file' || exit 2
 directory="${entry%/*}"
 provider="$directory/installer_protected_source.py"
 protected_path "$provider" 'regular file' || exit 2
+protected_path "$directory/installer_native_executable.py" 'regular file' || exit 2
 
 # These are OS installation tools, never PATH, policy or controller selections.
 python="$(/usr/bin/readlink -e -- /usr/bin/python3)" || exit 2

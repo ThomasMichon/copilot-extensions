@@ -52,6 +52,7 @@ PYTHON_FILES = (
     "installer_source_wheel_cache.py",
     "installer_provider_roots.py",
     "installer_protected_source.py",
+    "installer_native_executable.py",
 )
 PYTHON_ADOPTERS = (
     "agent-worktrees", "agent-vault", "agent-pull-requests", "agent-ssh",
