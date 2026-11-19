@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import quote
 
 from .client_errors import DispatchError, DispatchUpgradeRequired
 from .task_relevance_contract import CLOSEOUT_PROTOCOL
+from .review_closeout_submission import SUBMIT
 
 if TYPE_CHECKING:
     import httpx
@@ -19,7 +20,7 @@ class RelevanceCloseoutClientMixin:
         _unwrap: Callable[[httpx.Response], Any]
         _owner_settlement_timeout: Callable[[], httpx.Timeout]
 
-    def _closeout_result(self, response: httpx.Response) -> dict:
+    def _closeout_result(self, response: httpx.Response) -> dict[str, Any]:
         try:
             value = self._unwrap(response)
         except DispatchError as exc:
@@ -39,17 +40,18 @@ class RelevanceCloseoutClientMixin:
             or not isinstance(value.get("result"), dict)
         ):
             raise DispatchUpgradeRequired("running coordinator lacks a valid closeout v1 response")
-        return value["result"]
+        return cast(dict[str, Any], value["result"])
 
-    def relevance_closeout(self, task_id: str) -> dict:
+    def relevance_closeout(self, task_id: str) -> dict[str, Any]:
         """Negotiate on the worker's own route, without global health authority."""
         return self._closeout_result(
             self._http.get(
                 f"/tasks/{quote(task_id, safe='')}/relevance-closeout",
+                headers={"X-Dispatch-Closeout-Action": SUBMIT},
             )
         )
 
-    def _mutate_relevance_closeout(self, task_id: str, arguments: dict, operation: str) -> dict:
+    def _mutate_relevance_closeout(self, task_id: str, arguments: dict[str, Any], operation: str) -> dict[str, Any]:
         current = self.relevance_closeout(task_id)
         expected = {
             "task_id": task_id,
@@ -71,8 +73,8 @@ class RelevanceCloseoutClientMixin:
             )
         )
 
-    def prepare_relevance_closeout(self, task_id: str, arguments: dict) -> dict:
+    def prepare_relevance_closeout(self, task_id: str, arguments: dict[str, Any]) -> dict[str, Any]:
         return self._mutate_relevance_closeout(task_id, arguments, "prepare")
 
-    def finish_relevance_closeout(self, task_id: str, arguments: dict) -> dict:
+    def finish_relevance_closeout(self, task_id: str, arguments: dict[str, Any]) -> dict[str, Any]:
         return self._mutate_relevance_closeout(task_id, arguments, "finish")

@@ -40,6 +40,21 @@ checks nor yields, declines, abandons first, unregisters or terminates a native.
 The existing session/conclusion owners retain their later responsibilities.
 It does not delete the checkout or directly release a reservation.
 
+For a started or suspended `pr-review` task with an independent evaluator,
+the original worker retains a submission proposal **before** settling the
+assignment. The receiver verifies the finalized workspace, the original
+worker/native binding and the retained proposal before it submits the task
+and schedules ordinary verification. Submission is not confirmation. A lost
+finish reply must not cause another finalization or verification request.
+The worker negotiates `submit-finalized-review/v1` on its existing closeout
+route; a legacy caller cannot finish this case as abandonment on a new
+receiver. Roll out the receiver before the caller. Existing acknowledged
+legacy abandonments are not rewritten.
+
+Never-claimed work without resources can instead be abandoned when the
+source explicitly confirms closure. An allocated workspace or pending
+launch is not resource-free merely because no worker has affirmed start.
+
 ## Compatibility and retries
 
 The receiver expansion precedes this conditional caller. Newly accepted

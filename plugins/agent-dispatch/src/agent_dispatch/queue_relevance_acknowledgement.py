@@ -6,19 +6,20 @@ from collections.abc import Callable
 import json
 import math
 import sqlite3
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from .queue_common import CompletionOutcome, _task_transition_spec
+from .queue_common import CompletionOutcome, Task, _task_transition_spec
 from .queue_records import Status, TaskError
 from .queue_relevance_readiness import _state
 from .queue_task_relationships import _encoded
+from . import review_closeout_submission as submission
 
 if TYPE_CHECKING:
     from .queue import TaskQueue
 
 
 def _replay(
-    queue: TaskQueue, conn: sqlite3.Connection, task_id: str, arguments: dict,
+    queue: TaskQueue, conn: sqlite3.Connection, task_id: str, arguments: dict[str, Any],
 ) -> CompletionOutcome | None:
     row = conn.execute(
         "SELECT * FROM task_relevance_closeouts WHERE task_id=?", (task_id,),
@@ -27,22 +28,26 @@ def _replay(
         return None
     receipt = json.loads(row["acknowledgement"])
     task = queue._fetch(conn, task_id)
+    submitted = receipt.get("finish_action") == submission.SUBMIT
     if (
         type(arguments["expected_generation"]) is not int
         or receipt["arguments"] != arguments or receipt["task_id"] != task_id
         or receipt["binding"] != json.loads(row["resource_binding"])
-        or task is None or task.status != Status.ABANDONED or task.owner is not None
+        or task is None or task.owner is not None
         or task.generation != arguments["expected_generation"]
         or {
             "generation": task.generation, "owner_session_id": task.owner_session_id,
         } != receipt["task_attachment"]
-        or task.updated_at != receipt["at"]
+        or (not submitted and (task.status != Status.ABANDONED or task.updated_at != receipt["at"]))
+        or (submitted and (task.status not in {Status.SUBMITTED, Status.COMPLETED, Status.ABANDONED}
+                           or task.completed_at != receipt["at"] or task.completed_by != arguments["worker_id"]
+                           or task.result_ref != f"relevance-closeout:{arguments['request_id']}"))
     ):
         raise TaskError("relevance closeout acknowledgement incarnation changed; custody retained")
     return CompletionOutcome(task, None)
 
 
-def _prepared(queue: TaskQueue, conn: sqlite3.Connection, task_id: str, arguments: dict) -> dict:
+def _prepared(queue: TaskQueue, conn: sqlite3.Connection, task_id: str, arguments: dict[str, Any]) -> dict[str, Any]:
     state = _state(queue, conn, task_id, arguments)
     row = conn.execute(
         "SELECT readiness FROM task_relevance_closeouts WHERE task_id=?", (task_id,),
@@ -65,7 +70,7 @@ def _prepared(queue: TaskQueue, conn: sqlite3.Connection, task_id: str, argument
 
 def finish(
     queue: TaskQueue, task_id: str, *,
-    authority_guard: Callable[[], None] | None = None, **arguments: str | int,
+    submit_review: bool = False, authority_guard: Callable[[], None] | None = None, **arguments: str | int,
 ) -> CompletionOutcome:
     """Internal receiver: no caller-supplied finalization or terminal proof."""
     if authority_guard is not None:
@@ -76,6 +81,8 @@ def finish(
         if replay is not None:
             return replay
         original = _prepared(queue, conn, task_id, arguments)
+        if submit_review != submission.eligible(queue._fetch(conn, task_id)):
+            raise TaskError("original-worker closeout disposition changed; use the negotiated finish action")
     from .pool_decline_observation import observe
 
     try:
@@ -105,6 +112,9 @@ def finish(
         },
     }
 
+    if submit_review:
+        receipt["finish_action"] = submission.SUBMIT
+
     def retain(conn: sqlite3.Connection) -> None:
         if authority_guard is not None:
             authority_guard()
@@ -119,8 +129,11 @@ def finish(
 
     allowed, to = _task_transition_spec("abandon")
     try:
+        if submit_review:
+            return submission.submit(queue, task_id, worker_id=str(arguments["worker_id"]),
+                                     original=original, ts=ts, retain=retain)
         task = queue._transition(
-            task_id, allowed=allowed, to=to, worker_id=arguments["worker_id"],
+            task_id, allowed=allowed, to=to, worker_id=str(arguments["worker_id"]),
             require_owner=False, now=ts, note="source relevance owner closeout acknowledged",
             extra={"owner": None, "lease_expires_at": None},
             expected_generation=receipt["task_attachment"]["generation"],
@@ -136,4 +149,5 @@ def finish(
             if replay is not None:
                 return replay
         raise
+    assert isinstance(task, Task)
     return CompletionOutcome(task, "task.abandoned")

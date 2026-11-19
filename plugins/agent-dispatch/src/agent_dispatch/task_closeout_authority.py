@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import time
+from typing import Any
 
 from fastapi import HTTPException, Request
 
 from .lease import FencingGuard
-from .queue import TaskError, TaskQueue
+from .queue import TaskQueue
+from .queue_records import TaskError
 from .queue_relevance_acknowledgement import _replay
 from .queue_relevance_binding import closeout_detail
 from .queue_relevance_readiness import _state
+from . import review_closeout_submission as submission
 
 CLOSEOUT_PATH = "/tasks/{task_id}/relevance-closeout"
 CLOSEOUT_ROUTES = frozenset(
@@ -40,8 +43,8 @@ def resolve_closeout_authority(
     queue: TaskQueue,
     fencing_guard: FencingGuard | None,
     task_id: str,
-    arguments: dict | None = None,
-) -> dict:
+    arguments: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Recheck captured ownership or exact terminal replay, never generic task authority."""
     require_closeout_fencing(request, fencing_guard)
     scope = getattr(request.state, "task_scope", None)
@@ -75,6 +78,14 @@ def resolve_closeout_authority(
                 raise TaskError("relevance closeout arguments do not match the captured owner")
             if _replay(queue, conn, task_id, captured) is None:
                 _state(queue, conn, task_id, captured)
-            return closeout_detail(row)
+            detail = closeout_detail(row)
+            if detail is None:
+                raise TaskError("original closeout is unavailable")
+            receipt = detail.get("acknowledgement") or {}
+            if receipt.get("finish_action") == submission.SUBMIT or (
+                not receipt and submission.eligible(queue._fetch(conn, task_id))
+            ):
+                detail["finish_action"] = submission.SUBMIT
+            return detail
     except TaskError as exc:
         raise HTTPException(403 if scope is not None else 409, detail=str(exc)) from exc
