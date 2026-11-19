@@ -139,6 +139,66 @@ def test_destination_directory_barrier_precedes_source_writer_fence(
     assert rescue(packet)["activated"] is True
 
 
+def test_source_fence_directory_barrier_precedes_destination_activation(
+    packet: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, target = packet["source"], packet["target"]
+    original_rows = rows(source)
+    sync = EXPORT._sync_directory
+    with monkeypatch.context() as patch:
+        def unavailable(home: Path, fd: int | None) -> None:
+            if home == source:
+                for selected in (source, target):
+                    with pytest.raises(STORE.AgendaError, match="unsupported"):
+                        STORE.read(selected)
+                raise OSError("fixture source fence directory barrier failed")
+            sync(home, fd)
+
+        patch.setattr(EXPORT, "_sync_directory", unavailable)
+        with pytest.raises((OSError, STORE.AgendaError), match="source fence directory barrier"):
+            rescue(packet)
+    assert rows(source) == original_rows
+    for selected in (source, target):
+        with pytest.raises(STORE.AgendaError, match="unsupported"):
+            STORE.read(selected)
+    assert rescue(packet)["activated"] is True
+    assert rows(source) == rows(target) == original_rows
+
+
+def test_checkout_relative_goal_refuses_before_allocation_or_cutover(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    checkout = tmp_path / "checkout"
+    (checkout / ".git").mkdir(parents=True)
+    (checkout / "mission.md").write_text("# Mission\n\n## Goal\n\nPreserve this mission.\n")
+    source = checkout / ".effort-agenda" / "main"
+    source.mkdir(parents=True)
+    board = CORE.board()
+    board["source"] = {"kind": "effort", "ref": "mission.md"}
+    STORE.mutate(source, v2({
+        "operation": "init", "worktree": "fixture-lane", "board": board,
+        "baseline_context": CORE.context("fixture input"), "resource_caps": CORE.CAPS,
+    }, 0, "init"))
+    assert "Preserve this mission." in STORE.read(source)["snapshot"]["root"]
+    saved = destination(source)
+    selected = selection(source)
+    EXPORT.export_store(source, saved, **selected, expected_revision=1)
+    before = source_bytes(source), source_bytes(saved)
+
+    def unexpected_allocation(*args: Any) -> None:
+        pytest.fail("relative canonical reference reached destination allocation")
+
+    monkeypatch.setattr(RESCUE.managed, "allocate", unexpected_allocation)
+    with pytest.raises(STORE.AgendaError, match="absolute local effort references"):
+        RESCUE.relocate(
+            source, saved, provider_python=sys.executable, project="fixture-project",
+            creation_nonce="fixture-incarnation", lane="main", operation_id="fixture-rescue",
+            expected_revision=1, **selected,
+        )
+    assert (source_bytes(source), source_bytes(saved)) == before
+    assert "Preserve this mission." in STORE.read(source)["snapshot"]["root"]
+
+
 @pytest.mark.parametrize("stage", ["source-fence", "reservation", "activation"])
 @pytest.mark.parametrize("when", ["before-open", "after-open"])
 def test_database_replacement_before_sqlite_recovery_preserves_all_files(
@@ -279,14 +339,19 @@ def test_export_longer_than_a_history_page_moves_every_accepted_operation(
     packet: dict[str, Any],
 ) -> None:
     source = packet["source"]
-    for index in range(50):
-        outcome(source)
-        revisit(source, {"content": f"accepted-{index}"})
+    frame, item, _attempt = current(source)
+    for index in range(100):
+        STORE.mutate(source, v2({
+            "operation": "wait", "frame_id": frame, "item_id": item,
+            "reason_kind": "external", "reason_ref": f"fixture-{index}",
+            "next_action": "Inspect the next synthetic input", "evidence": proof(),
+        }, 3 + index, f"accepted-{index}"))
     saved = destination(source, "long-export")
     packet["export"] = saved
     packet["arguments"]["expected_revision"] = 103
     EXPORT.export_store(source, saved, **selection(source), expected_revision=103)
     original = rows(source)
+    assert len(original["operations"]) == 103
     assert rescue(packet)["source_revision"] == 103
     assert rows(packet["target"]) == original
     assert len(STORE.history(packet["target"])) == 100

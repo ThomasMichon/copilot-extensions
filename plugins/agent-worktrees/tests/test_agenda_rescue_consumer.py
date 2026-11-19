@@ -50,8 +50,11 @@ def test_actual_allocator_cutover_preserves_history_and_has_one_writable_locator
     )
     source = tmp_path / "old-checkout" / ".effort-agenda" / "main"
     source.mkdir(parents=True)
+    canonical = tmp_path / "canonical-effort.md"
+    canonical.write_text("# Mission\n\n## Goal\n\nPreserve the canonical mission.\n", encoding="utf-8")
     request = json.loads((skill / "assets" / "init.context-qualified.example.json").read_text())
     request["change"]["worktree"] = worktree
+    request["change"]["board"]["source"] = {"kind": "effort", "ref": str(canonical)}
     accepted, _ = rescue.store.mutate(source, request, initial_store_id=identity)
     transition = accepted["transition"]
     rescue.store.mutate(source, {
@@ -99,6 +102,7 @@ def test_actual_allocator_cutover_preserves_history_and_has_one_writable_locator
         if code == 0:
             current = json.loads(read.stdout)
             assert current["store_id"] == identity and current["revision"] == 2
+            assert "Preserve the canonical mission." in current["snapshot"]["root"]
         else:
             assert "unsupported" in read.stderr
     assert rescue.export.verify_export(

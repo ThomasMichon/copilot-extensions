@@ -375,3 +375,31 @@ skips before adding the timeout case. Windows passes 42 applicable focused cases
 the new lock controls are POSIX-only. Five in-process rescue units and fatal-error
 lint pass. The preceding published head separately passed both hosted Windows
 requests and required CI; the new correction requires fresh publication gates.
+
+### 2026-11-19 - Complete the source barrier and canonical-reference preflight
+
+The next review reported no open findings but named two broader risks. Direct
+inspection and failing native controls confirmed both. The source fence now
+flushes its containing directory after commit, before destination activation.
+This persists journal deletion as well as database bytes. An injected barrier
+failure leaves both stores fenced, preserves their history and permits only an
+exact retry.
+
+Every effort-kind board source must now use an absolute local canonical
+reference. Relative references refuse before allocation or fencing; the rescue
+does not rewrite accepted history to compensate for a new home. The actual
+allocator consumer reads an independent canonical Goal after relocation.
+Canonical effort retention remains separate from later checkout cleanup.
+
+The corrected Linux selections pass 49 rescue/placement cases, 21 real
+allocator/CLI cases and seven in-process units. Windows passes 44 cases with five
+POSIX-only skips. Its long-history fixture still preserves all 103 accepted
+operations beyond the 100-entry presentation ceiling. Replacing an unrelated
+deep context lineage with repeated accepted wait records keeps that same
+completeness assertion within the original timeout; two earlier local runs
+timed out during old ledger verification and are not counted as passes.
+No deadline or production validation bound was increased.
+Whole-file strict checking passes all six changed Python files for both Linux
+and Windows targets in the existing Linux qualification environment. Local
+Windows checker preparation was unavailable; this is not a native Windows
+typing pass. Fatal-error lint passes.

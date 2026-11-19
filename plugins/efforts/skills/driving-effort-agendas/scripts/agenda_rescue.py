@@ -66,6 +66,16 @@ def _members(home: Path) -> None:
         raise AgendaError("relocation destination contains unrelated files; preserve and reconcile")
 
 
+def _references(documents: dict[str, Any]) -> None:
+    for board in documents["boards"].values():
+        source = board["source"]
+        if source["kind"] == "effort" and not Path(source["ref"].split("#", 1)[0]).is_absolute():
+            raise AgendaError(
+                "relocation requires absolute local effort references; preserve the source "
+                "and reconcile its canonical references before exporting again",
+            )
+
+
 def _reserve(home: Path, request: dict[str, Any]) -> list[int]:
     if _identity(home) != request["destination_directory"]:
         raise AgendaError("allocated destination directory changed")
@@ -185,6 +195,8 @@ def relocate(
     with export._verified_export(
         export_home, worktree=worktree, store_id=store_id, expected_revision=expected_revision,
     ) as (manifest, raw, snapshot, budget):
+        documents = snapshot.execute("SELECT documents FROM state").fetchone()[0]
+        _references(decode(documents.encode(), "exported documents", limit=1048576))
         with store.transaction(source_home, readonly=True, relocation=True) as source:
             if source.execute("PRAGMA user_version").fetchone()[0] == 2:
                 _identity_header, revision, _committed = history._header(source, worktree, store_id)
@@ -205,7 +217,10 @@ def relocate(
             "worktree": worktree, "store_id": store_id, "revision": manifest["revision"],
         }
         # Both homes must support the same durability contract as complete export.
-        with export._pinned_directory(source_home), export._pinned_directory(destination) as directory_fd:
+        with (
+            export._pinned_directory(source_home) as source_fd,
+            export._pinned_directory(destination) as directory_fd,
+        ):
             selected = request["source_database"]
             with store.transaction(source_home, write=True, relocation=True,
                                    expected_file_id=(selected[0], selected[1])) as source:
@@ -227,6 +242,8 @@ def relocate(
                         raise AgendaError("source is fenced for a different relocation; preserve and reconcile")
                     if export._table_hashes(source, budget) != manifest["tables"]:
                         raise AgendaError("fenced source history differs from its complete export")
+            # Persist journal deletion as well as database bytes before activation.
+            export._sync_directory(source_home, source_fd)
             # The source commit is durable before destination activation. A
             # previously loaded old writer rechecks user_version after its lock.
             revision, activated = _activate(destination, snapshot, record, manifest, budget)

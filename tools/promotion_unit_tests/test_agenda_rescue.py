@@ -91,6 +91,23 @@ def test_oversized_recovery_refuses_before_changing_the_database(owners: Owners)
     assert source.execute("PRAGMA user_version").fetchone()[0] == 2
 
 
+@pytest.mark.parametrize("relative", [True, False])
+def test_relocation_refuses_home_dependent_canonical_references(
+    owners: Owners, relative: bool,
+) -> None:
+    rescue, _source, _target, _record = owners
+    documents = {"boards": {
+        "root": {"source": {"kind": "task", "ref": "fixture-assignment"}},
+        "queued": {"source": {"kind": "effort", "ref":
+                             "mission.md" if relative else str(SCRIPTS / "mission.md")}},
+    }}
+    if relative:
+        with pytest.raises(rescue.AgendaError, match="absolute local effort references"):
+            rescue._references(documents)
+    else:
+        rescue._references(documents)
+
+
 @pytest.mark.parametrize("fault", ["wrong-operation", "history", "copy-failure"])
 def test_activation_refuses_foreign_reservation_and_rolls_back_partial_copy(
     owners: Owners, monkeypatch: pytest.MonkeyPatch, fault: str,

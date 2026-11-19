@@ -5545,7 +5545,9 @@
         "tools/promotion_unit_tests/test_agenda_rescue.py::test_activation_refuses_foreign_reservation_and_rolls_back_partial_copy[wrong-operation]",
         "tools/promotion_unit_tests/test_agenda_rescue.py::test_activation_refuses_foreign_reservation_and_rolls_back_partial_copy[history]",
         "tools/promotion_unit_tests/test_agenda_rescue.py::test_activation_refuses_foreign_reservation_and_rolls_back_partial_copy[copy-failure]",
-        "tools/promotion_unit_tests/test_agenda_rescue.py::test_oversized_recovery_refuses_before_changing_the_database"
+        "tools/promotion_unit_tests/test_agenda_rescue.py::test_oversized_recovery_refuses_before_changing_the_database",
+        "tools/promotion_unit_tests/test_agenda_rescue.py::test_relocation_refuses_home_dependent_canonical_references[True]",
+        "tools/promotion_unit_tests/test_agenda_rescue.py::test_relocation_refuses_home_dependent_canonical_references[False]"
     ],
     "coverage_targets": [
         "plugins/agent-index/src/agent_index/indexing/acquisition_requirement.py",
@@ -6817,7 +6819,7 @@
         "plugins/efforts/skills/driving-effort-agendas/scripts/agenda_operations.py": "4147405c3d621a1efaf71ba9331c704c497b0a93fe506f7d3020c7528941df97",
         "plugins/efforts/skills/driving-effort-agendas/scripts/agenda_publish.py": "5d79d21b05ca13fa9616826315338deb794adf420a6ea185f95465a67f12151f",
         "plugins/efforts/skills/driving-effort-agendas/scripts/agenda_queue.py": "d24061baeb7bee15f23aeb5b995e380ccec08eb68d4b5a11cca2aa814d7607d5",
-        "plugins/efforts/skills/driving-effort-agendas/scripts/agenda_rescue.py": "81f1a3abdab03e5641552ec0b102e2adf1d5799ae13442f7d88adb3f93b80584",
+        "plugins/efforts/skills/driving-effort-agendas/scripts/agenda_rescue.py": "f9234b7d3e976a6fb42fbbfc913a76166d69fdbce382877db79a5f1a36bc7b1f",
         "plugins/efforts/skills/driving-effort-agendas/scripts/agenda_store.py": "d654fcd30207337b0d581c8b6af4e4c1a58506ff13a7265256140014246e1786",
         "plugins/efforts/skills/driving-effort-agendas/scripts/agenda_store_v2.py": "432de3403f96e5bda6df7ea776ab56b563de0ccc2906ab63b749e1c11792410b",
         "plugins/efforts/skills/driving-effort-agendas/scripts/agenda_v2_graph.py": "a6106aab00ef9a06991656b85bdd8f6bc9a893a5c92e487970dec06bb102f567",
@@ -6825,6 +6827,6 @@
         "plugins/efforts/skills/driving-effort-agendas/scripts/agenda_v2_projection.py": "f9507f81d1e91abb1a92f9938ef8c75cded910472b0c8e499cc35316652a1c6c",
         "plugins/efforts/skills/driving-effort-agendas/scripts/agenda_v2_records.py": "0eb64fe209149583b7ee2487ade6be3a261d8a2d07d9509912ac61a11dd6aa0d",
         "plugins/efforts/skills/driving-effort-agendas/scripts/agenda_v2_schema.py": "f79bf3814f205ddd11b1b903b0e6a0ab644c8416dd0113eddfa173ef71405048",
-        "tools/promotion_unit_tests/test_agenda_rescue.py": "dd15ccc4bf4b0b3945aea6e15d8eb4f0f1888f0a86dffc766ef8c67cc3d68036"
+        "tools/promotion_unit_tests/test_agenda_rescue.py": "12a13246161d3bdc9da202585c353d3470d7f97fad564d38045517534d7327e1"
     }
 }
