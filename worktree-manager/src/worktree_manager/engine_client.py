@@ -9,9 +9,9 @@ import json
 import os
 import shlex
 import subprocess
-import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, cast
 
 from .worktree_reporting_contract import row_execution_machine
 
@@ -19,6 +19,7 @@ from . import agent_plugin_runtime, picker_review
 from .engine_sessions import list_worktree_session_snapshot as list_worktree_session_snapshot
 from .engine_progress import error_from_envelope as _error_from_envelope
 from .engine_progress import json_with_failure_detail
+from .engine_update_process import run_engine_passthrough as run_engine_passthrough
 from .engine_posix_process import EngineCleanupError as EngineCleanupError
 from .worktree_rows_contract import (
     _int_field as _int_field,
@@ -145,9 +146,7 @@ def installed_engine_command(environment: dict[str, str] | None = None) -> list[
     The shared receipt resolver never accepts PATH or a bare command name.
     An explicit recovery environment must not reuse an inherited stale command.
     """
-    return agent_plugin_runtime.resolve_installed_plugin_command(
-        ENGINE_BIN, **({"environment": environment} if environment is not None else {}),
-    )
+    return agent_plugin_runtime.resolve_installed_plugin_command(ENGINE_BIN, environment=environment)
 
 
 #: In-process base-command override (wins over the env). Set by the Picker's
@@ -198,7 +197,7 @@ def _run(
     *,
     timeout: int | None = _DEFAULT_TIMEOUT,
     allow_nonzero: bool = False,
-    runner=None,
+    runner: Any = None,
     cwd: str | None = None,
     stream_progress: bool = False,
     environment: dict[str, str] | None = None,
@@ -226,7 +225,7 @@ def _run(
         if runner is not None:
             proc = runner(cmd, timeout)
         else:
-            kwargs = {
+            kwargs: dict[str, Any] = {
                 "capture_output": True, "text": True, "encoding": "utf-8", "timeout": timeout,
                 "check": False, "env": _engine_environment(environment),
                 "stdin": subprocess.DEVNULL,
@@ -260,7 +259,7 @@ def _run(
         if legacy_error is not None:
             raise legacy_error
     if preserve_failure_detail and allow_nonzero:
-        return json_with_failure_detail(proc.stdout, proc.stderr, failed=proc.returncode != 0)
+        return cast(str, cast(Any, json_with_failure_detail)(proc.stdout, proc.stderr, failed=proc.returncode != 0))
     if proc.returncode != 0 and allow_nonzero:
         try:
             json.loads(proc.stdout)
@@ -274,25 +273,23 @@ def _run(
         raise EngineError(
             f"{ENGINE_BIN} {' '.join(args)} failed "
             f"(exit {proc.returncode}): {detail or 'no output'}")
-    return proc.stdout
+    return cast(str, proc.stdout)
 
 
 def run_json(project: str | None, args: list[str], *,
              timeout: int | None = _DEFAULT_TIMEOUT,
              allow_nonzero: bool = False,
-             runner=None,
+             runner: Any = None,
              stream_progress: bool = False,
              environment: dict[str, str] | None = None,
              engine_command: list[str] | None = None,
              preserve_failure_detail: bool = False,
-             max_bytes: int | None = None) -> dict:
+             max_bytes: int | None = None) -> dict[str, Any]:
     """Run a ``--json`` verb; bound its UTF-8 stdout to ``max_bytes``, then parse it."""
     raw = _run(
         project, args, timeout=timeout, allow_nonzero=allow_nonzero, runner=runner,
-        stream_progress=stream_progress,
-        **({"environment": environment} if environment is not None else {}),
-        **({"engine_command": engine_command} if engine_command is not None else {}),
-        **({"preserve_failure_detail": True} if preserve_failure_detail else {}),
+        stream_progress=stream_progress, environment=environment, engine_command=engine_command,
+        preserve_failure_detail=preserve_failure_detail,
     )
     if max_bytes is not None and len(raw.encode("utf-8", errors="surrogatepass")) > max_bytes:
         raise EngineError(
@@ -305,57 +302,6 @@ def run_json(project: str | None, args: list[str], *,
     if not isinstance(obj, dict):
         raise EngineError(f"{ENGINE_BIN} {' '.join(args)} returned non-object JSON")
     return obj
-
-
-def run_engine_passthrough(project: str | None, args: list[str], *,
-                           timeout: int | None = None,
-                           environment: dict[str, str] | None = None,
-                           terminal_aware: bool = False,
-                           headless: bool = False,
-                           engine_command: list[str] | None = None) -> int:
-    """Run an engine verb with **inherited stdio**, returning its exit code.
-
-    Unlike :func:`run_json` (which captures + parses), this streams the engine's
-    live output straight to the user's terminal -- for interactive, non-``--json``
-    verbs the Manager *orchestrates* rather than reads, notably
-    ``agent-worktrees update --no-manager`` (the seam bypass the Manager re-enters
-    through). Raises :class:`EngineError` with ``install_hint`` when the engine
-    binstub is absent.
-    A supplied environment is the complete call-scoped selection and child
-    environment; it bypasses stale inherited command handles.
-    """
-    picker_review.require_writable()
-    base = engine_command if engine_command is not None else (
-        engine_base_command() if environment is None else installed_engine_command(environment)
-    )
-    if base is None:
-        raise EngineError(
-            f"the {ENGINE_BIN} engine is not installed", install_hint=True)
-    cmd = [*base]
-    if project:
-        cmd += ["--project", project]
-    cmd += args
-    from .update_driver_cli import handoff_environment, handoff_launch_options
-
-    handoff = handoff_environment(args)
-    child_environment = _engine_environment() if environment is None else _engine_environment(environment)
-    from agent_procutil import no_window_kwargs
-
-    headless_options = no_window_kwargs() if headless else {}
-    if headless and os.name == "nt":
-        # CREATE_NO_WINDOW needs explicit streams to retain a caller's capture pipes.
-        headless_options.update(stdout=sys.stdout, stderr=sys.stderr)
-    try:
-        return subprocess.run(
-            cmd, timeout=timeout, check=False,
-            **{**handoff_launch_options(child_environment, handoff, update=args[:1] == ["update"]),
-               **(_terminal_aware_launch_options() if terminal_aware else {}),
-               **headless_options},
-        ).returncode
-    except subprocess.TimeoutExpired as e:
-        raise EngineError(f"{ENGINE_BIN} {' '.join(args)} timed out") from e
-    except (OSError, ValueError) as e:
-        raise EngineError(f"could not run {ENGINE_BIN}: {e}") from e
 
 
 def project_binstub_command(project: str) -> Path:
@@ -475,7 +421,7 @@ class Worktree:
     dirty: bool
     status: str | None         # tracking status (active/complete/...)
     path: str | None
-    raw: dict
+    raw: dict[str, Any]
 
     @property
     def id4(self) -> str:
@@ -492,7 +438,7 @@ class Worktree:
         return "".join(bits)
 
 
-def worktree_from_dict(d: dict) -> Worktree:
+def worktree_from_dict(d: dict[str, Any]) -> Worktree:
     """Build the Manager's cross-cutting worktree model from a contract row."""
     return Worktree(
         id=str(d.get("id") or ""),
@@ -531,20 +477,20 @@ class LaunchPlan:
     cmd: list[str]
     work_dir: str | None
     status_path: str | None
-    env: dict
+    env: dict[str, Any]
     worktree_id: str | None
     post_exit: bool
     no_mux: bool                # the *engine's* mux suppression (always set by --json)
     exit_code: int
     seed_claimed: bool          # True only when THIS plan's `cmd` embeds a seed
-    raw: dict
+    raw: dict[str, Any]
 
     @property
     def is_exec(self) -> bool:
         return self.action == "exec"
 
 
-def launch_plan_from_dict(d: dict) -> LaunchPlan:
+def launch_plan_from_dict(d: dict[str, Any]) -> LaunchPlan:
     """Parse one engine launch-plan payload."""
     cmd = d.get("cmd")
     return LaunchPlan(
@@ -564,7 +510,7 @@ def launch_plan_from_dict(d: dict) -> LaunchPlan:
     )
 
 
-def require_agent_hosting(path: str, *, operation: str = "launch") -> dict:
+def require_agent_hosting(path: str, *, operation: str = "launch") -> dict[str, Any]:
     """Require fresh engine policy, including on unadopted source repositories."""
     from .hosting_admission import require_agent_hosting as require
 
@@ -737,7 +683,7 @@ def resolve_launch_plan(
 
 
 def list_worktree_rows(
-    project: str,
+    project: str | None,
     *,
     classify: bool = True,
     mux_details: bool = False,
@@ -746,8 +692,8 @@ def list_worktree_rows(
     worktree_id: str | None = None,
     refresh: bool = False,
     current: bool = True,
-    runner=None,
-) -> list[dict]:
+    runner: Any = None,
+) -> list[dict[str, Any]]:
     """Return raw worktree rows from the provider's JSON list contract.
 
     Current-roster authority is mandatory by default. Optional presentation
@@ -756,7 +702,7 @@ def list_worktree_rows(
     if picker_review.active():
         if not current or refresh:
             raise EngineError(picker_review.MESSAGE)
-        return picker_review.worktree_rows(project, worktree_id=worktree_id)
+        return picker_review.worktree_rows(cast(str, project), worktree_id=worktree_id)
     args = ["list", "--json"]
     if current:
         args.append("--current")
@@ -807,7 +753,7 @@ def list_worktree_rows(
                     timeout=60,
                     runner=runner,
                 )
-            rows = list_worktree_rows(
+            refreshed_rows = list_worktree_rows(
                 project,
                 classify=classify,
                 mux_details=mux_details,
@@ -815,11 +761,11 @@ def list_worktree_rows(
                 fresh=fresh,
                 runner=runner,
             )
-            exact = [row for row in rows if row.get("id") == worktree_id]
+            exact = [row for row in refreshed_rows if row.get("id") == worktree_id]
             if exact:
                 return exact
             matches = [
-                row for row in rows
+                row for row in refreshed_rows
                 if isinstance(row.get("id"), str)
                 and row["id"].endswith(worktree_id)
             ]
@@ -855,8 +801,8 @@ def current_worktree_status(
     path: str | None = None,
     fetch: bool = False,
     project: str | None = None,
-    runner=None,
-) -> dict | None:
+    runner: Any = None,
+) -> dict[str, Any] | None:
     """Cheap, single-worktree status snapshot via ``status-segment --json``.
 
     Prefer this over ``list_worktree_rows(..., worktree_id=...)`` for a
@@ -883,8 +829,8 @@ def find_worktree_for_path(
     path: str,
     *,
     project: str | None = None,
-    runner=None,
-) -> dict | None:
+    runner: Any = None,
+) -> dict[str, Any] | None:
     """Return the raw ``list --json`` row whose worktree contains ``path``.
 
     Cache-only (no ``--classify``) so this is cheap enough to call before the
@@ -896,7 +842,7 @@ def find_worktree_for_path(
     Returns ``None`` when no tracked worktree contains ``path``.
     """
     rows = list_worktree_rows(project, classify=False, cache_only=True, runner=runner)
-    by_path: dict[str, dict] = {}
+    by_path: dict[str, dict[str, Any]] = {}
     for row in rows:
         row_path = row.get("path")
         if not isinstance(row_path, str) or not row_path:
@@ -910,9 +856,9 @@ def find_worktree_for_path(
     except OSError:
         return None
     for candidate in (current, *current.parents):
-        row = by_path.get(str(candidate))
-        if row is not None:
-            return row
+        matching = by_path.get(str(candidate))
+        if matching is not None:
+            return matching
     return None
 
 
@@ -920,8 +866,8 @@ def list_worktree_sessions(
     project: str,
     worktree_id: str,
     *,
-    runner=None,
-) -> list[dict]:
+    runner: Any = None,
+) -> list[dict[str, Any]]:
     """Return one worktree's registered sessions through the provider CLI."""
     obj = list_worktree_session_snapshot(project, worktree_id, runner=runner)
     rows = obj.get("sessions")
@@ -935,8 +881,8 @@ def recent_worktree_messages(
     worktree_id: str,
     *,
     limit: int = 3,
-    runner=None,
-) -> dict:
+    runner: Any = None,
+) -> dict[str, Any]:
     """Return one worktree's recent conversation messages."""
     return run_json(
         project,
@@ -952,7 +898,7 @@ def recent_worktree_messages(
     )
 
 
-def orphaned_obligations(project: str, *, runner=None) -> list[dict]:
+def orphaned_obligations(project: str, *, runner: Any = None) -> list[dict[str, Any]]:
     """Return this machine's durable claims-orphanage for ``project``.
 
     Mirrors ``agent-worktrees claims orphans --json``: obligations re-homed by
@@ -978,7 +924,7 @@ def orphaned_obligations(project: str, *, runner=None) -> list[dict]:
     return [row for row in rows if isinstance(row, dict)]
 
 
-def __getattr__(name: str):
+def __getattr__(name: str) -> Any:
     """Lazily resolve the re-exported `execution_leg_*` names (PEP 562).
 
     Deferring the import to first access (rather than a top-level import)

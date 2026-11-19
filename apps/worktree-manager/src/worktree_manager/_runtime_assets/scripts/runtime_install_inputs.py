@@ -4,8 +4,20 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import sys
+
+
+def validate_update_request(args: argparse.Namespace) -> None:
+    """Recheck the admitted source and native invocation directory before install."""
+    expected = getattr(args, "admitted_source", None)
+    if expected is not None:
+        from worktree_manager.update_driver_cli import _source_key, _update_context_directory
+
+        if _source_key() != expected:
+            raise RuntimeError("Manager source changed after submission; submit a new request")
+        _update_context_directory(os.environ)
 
 
 def describe_source_inputs(args: argparse.Namespace, parser: argparse.ArgumentParser) -> bool:

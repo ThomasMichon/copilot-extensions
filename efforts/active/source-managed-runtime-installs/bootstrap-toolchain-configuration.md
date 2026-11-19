@@ -1,7 +1,7 @@
 # Adopter Bootstrap Toolchain Configuration
 
 Parent: [Source-Managed Runtime Installs](README.md).
-Coordination: #13409, within #7028. Status: proposal before implementation.
+Coordination: #13409, within #7028. Status: reviewed contract; implementation open.
 
 ## Goal
 
@@ -59,9 +59,10 @@ live registration, maintenance policy, source pin or deployment permission.
 
 ## Plan
 
-- [ ] Review and merge this bounded contract before implementation.
-- [ ] Declare the minimal portable configuration and native selection contract.
-  Keep the adopter's file independent of organization-specific code.
+- [x] Review and merge this bounded contract before implementation. Accepted in #13412.
+- [x] Declare the minimal portable configuration and native selection contract.
+  The [version-1 input](../../../worktree-manager/docs/toolchain-configuration.md)
+  keeps the adopter's file independent of organization-specific code.
 - [ ] Apply it in the real standard bootstrap before prerequisite/package
   consumption, then carry it through standard setup and its actual consumers.
   Reuse native tool configuration and existing installer owners.
@@ -87,3 +88,21 @@ live registration, maintenance policy, source pin or deployment permission.
 - [ ] Existing no-configuration bootstrap, standard setup and retained source/
   application contracts still pass. Source merge, release availability and
   authorized installed adoption remain distinct evidence.
+
+## Journal
+
+2026-11-19: The contract merged in #13412 after clean Copilot approval and required
+CI. No runtime behavior or installation was qualified. Implement the native
+configuration/provider seam next under #13409, then converge the adopter on
+released support; the parent Goal and all technical validation above remain open.
+
+2026-11-19: The provider candidate adds early native file selection, strict
+preflight and child environment propagation, followed by standard setup-owned
+native uv/pip/npm persistence. Local Windows qualification passed 107 focused
+tests plus the actual setup-ordering control; real pip/npm configuration reads,
+offline uv index and managed-Python-mirror controls, and source-skew refusals
+are included. The new provider passes strict typing; the pending full Manager
+typing probe remains blocked by three prior-CLI fixture import errors, not
+qualified as a pass. Native Linux coverage is added to the existing path-gated
+CI lane. Source review/CI, release availability and adopter migration remain
+open; no installed runtime or deployment is qualified by this entry.

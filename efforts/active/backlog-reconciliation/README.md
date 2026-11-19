@@ -374,6 +374,13 @@ the non-public approval conversation.
 
 ## Plan
 
+The [current qualification and ownership record](journal/2026/11.19-current-qualification-and-retained-ownership.md)
+records #13463's reviewed delivery, credits changed feed/snapshot and
+point-binding source slices without completing their whole acceptance,
+and retains the actual operation and resident-lifecycle owners. The complete
+15:57:23 UTC census is 899 whole open, 170 above fixed 729, with no new
+disposition credit. Every existing Plan/Validation checkbox state remains.
+
 The [original-reviewer and presentation audit](journal/2026/11.19-original-reviewer-and-presentation-acceptance.md)
 records #13442's actual reviewed publication and lossless parent return,
 the separately verified whole #13407 source completion through #13413,

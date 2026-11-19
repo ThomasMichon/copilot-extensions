@@ -218,11 +218,18 @@ def _source_repo(root: Path, *, long_path: bool = False, uv_contract: str | None
         entry = repo / _LONG_SOURCE_PATH
         entry.parent.mkdir(parents=True)
         entry.write_text("long source path\n", encoding="utf-8")
-    subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
+    subprocess.run(
+        ["git", "init", "-q", "-b", "main", str(repo)], check=True,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
     subprocess.run(
         ["git", "-C", str(repo), "-c", "core.longpaths=true", "add", "-A"], check=True,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
-    subprocess.run(["git", "-C", str(repo), *_GIT_ID, "commit", "-q", "-m", "payload"], check=True)
+    subprocess.run(
+        ["git", "-C", str(repo), *_GIT_ID, "commit", "-q", "-m", "payload"], check=True,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
     return repo
 
 
