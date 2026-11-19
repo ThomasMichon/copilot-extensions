@@ -356,8 +356,9 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   isolated installation-owned units, two absolute UTC trigger instants,
   interpreter expiry and exact reference-settled cleanup. Persistent per-case
   recovery records remain outside disposable runner storage.
-- Seven focused controls pass, including actual interpreter expiry acceptance
-  and refusal; both Linux-native cases skip on the source validation platform.
+- Eleven focused controls pass, including actual retained-helper construction,
+  interpreter expiry acceptance/refusal and bounded pending-job polling;
+  both Linux-native cases skip on the source validation platform.
   Whole-file strict Linux/Windows checks, lint and installation contracts pass.
 - The configured native route did not establish access. Real Linux execution,
   interruption, failure and hourly acceptance remain open; preparing this

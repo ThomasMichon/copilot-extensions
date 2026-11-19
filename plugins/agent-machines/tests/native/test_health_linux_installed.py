@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from datetime import datetime, timezone
 import importlib.util
 import json
@@ -10,7 +9,6 @@ import os
 from pathlib import Path
 import stat
 import sys
-import time
 from typing import Any, cast
 import uuid
 
@@ -93,18 +91,6 @@ def _store(directory: Path, port: int | None = None) -> Path:
     }), encoding="utf-8")
     (directory / "collection.lock").write_bytes(b"\0")
     return directory
-
-
-def _until(
-    predicate: Callable[[], dict[str, Any] | None], seconds: float,
-) -> dict[str, Any]:
-    deadline = time.monotonic() + seconds
-    while time.monotonic() < deadline:
-        value = predicate()
-        if value:
-            return value
-        time.sleep(.5)
-    raise AssertionError("bounded native Linux fixture deadline")
 
 
 def _cleanup(owner: enrollment.Enrollment, scope: Path, path: Path) -> None:
@@ -191,7 +177,7 @@ def test_finite_calendar_retained_action_replacement_and_rollback(
                 native = owner.backend.call("read")
                 return native if not native["instances"] and native["last_result"] is not None else None
 
-            native = _until(observed_twice, 95)
+            native = fixture.until(observed_twice, 95)
             assert native["last_result"] == {"result": "success", "code": "1", "status": "0"}
             assert datetime.fromisoformat(native["last_run"]) >= times[1]
             records = [

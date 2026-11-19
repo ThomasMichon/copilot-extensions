@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime, timedelta
 import importlib.util
 import json
 from pathlib import Path
 import shutil
 import sys
+import time
 from typing import Any
 import venv
 
-from agent_machines import health_enrollment as enrollment, health_jobs
+from agent_machines import health_enrollment as enrollment, health_jobs, health_slots
 
 REPO = Path(__file__).resolve().parents[4]
 PLUGIN = REPO / "plugins" / "agent-machines"
@@ -26,11 +28,7 @@ def _module(path: Path, name: str) -> Any:
     return module
 
 
-def installed(root: Path, version: str) -> enrollment.Installation:
-    if sys.platform != "linux":
-        raise RuntimeError("Linux installed fixture required")
-    inputs = root.parent / ("build-input-" + version)
-    helpers = inputs / "helpers"
+def stage_helpers(helpers: Path, name: str) -> Any:
     helpers.mkdir(parents=True)
     for source in (REPO / "libs" / "versioned-runtime").glob("versioned_runtime*.py"):
         shutil.copyfile(source, helpers / source.name)
@@ -38,8 +36,19 @@ def installed(root: Path, version: str) -> enrollment.Installation:
         REPO / "libs" / "installer-engine" / "runtime_launcher.py",
         helpers / "runtime_launcher.py",
     )
+    shutil.copyfile(
+        PLUGIN / "scripts" / "daemon_instance_runtime.pyz",
+        helpers / "daemon_instance_runtime.pyz",
+    )
+    return _module(helpers / "versioned_runtime.py", name)
+
+
+def installed(root: Path, version: str) -> enrollment.Installation:
+    if sys.platform != "linux":
+        raise RuntimeError("Linux installed fixture required")
+    inputs = root.parent / ("build-input-" + version)
     suffix = version.replace(".", "_")
-    runtime = _module(helpers / "versioned_runtime.py", "_health_linux_build_" + suffix)
+    runtime = stage_helpers(inputs / "helpers", "_health_linux_build_" + suffix)
     slot = runtime.slot(root, version)
     environment = slot / ".venv"
     venv.EnvBuilder(with_pip=False).create(environment)
@@ -93,6 +102,23 @@ def calendar(now: datetime) -> tuple[tuple[datetime, datetime], datetime]:
         raise ValueError("UTC fixture clock required")
     start = now.replace(microsecond=0) + timedelta(seconds=20)
     return (start, start + timedelta(seconds=30)), start + timedelta(seconds=130)
+
+
+def until(
+    predicate: Callable[[], dict[str, Any] | None], seconds: float,
+) -> dict[str, Any]:
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        try:
+            value = predicate()
+        except health_slots.HealthError as error:
+            if str(error) != "native-health-pair-operation-unconfirmed":
+                raise
+            value = None
+        if value:
+            return value
+        time.sleep(.5)
+    raise AssertionError("bounded native Linux fixture deadline")
 
 
 class FiniteInstallation:

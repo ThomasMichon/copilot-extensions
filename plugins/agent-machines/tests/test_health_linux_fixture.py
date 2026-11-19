@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from agent_machines import health_jobs
+from agent_machines import health_jobs, health_slots
 from agent_procutil.owned_process import run_caller_owned
 
 _PATH = Path(__file__).parent / "native" / "health_linux_fixture.py"
@@ -97,3 +97,56 @@ def test_fixture_expiry_command_qualifies_and_refuses_in_real_interpreter(expire
         max_stdout_bytes=4096, max_stderr_bytes=4096,
     )
     assert result.returncode == (1 if expired else 0), result.stderr
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("filesystem")
+def test_staged_helpers_satisfy_real_retained_bootstrap_owner(tmp_path: Path) -> None:
+    source = tmp_path / "helpers"
+    runtime = fixture.stage_helpers(source, "_health_linux_helper_retention_control")
+    slot = tmp_path / "slot"
+    slot.mkdir()
+    runtime.retain_runtime_helpers(slot, complete=False)
+    runtime.retain_runtime_helpers(slot, complete=True)
+    bootstrap = slot / ".runtime-bootstrap"
+    assert (bootstrap / "daemon_instance_runtime.pyz").read_bytes() == (
+        source / "daemon_instance_runtime.pyz"
+    ).read_bytes()
+
+
+@pytest.mark.parametrize("reason", ["native-health-pair-operation-unconfirmed", "foreign-or-drifted-health-pair"])
+def test_snapshot_wait_retries_only_pending_native_work(
+    monkeypatch: pytest.MonkeyPatch, reason: str,
+) -> None:
+    calls: list[int] = []
+    monkeypatch.setattr(fixture.time, "sleep", lambda _seconds: None)
+
+    def observe() -> dict[str, Any]:
+        calls.append(1)
+        if len(calls) == 1:
+            raise health_slots.HealthError(reason)
+        return {"settled": True}
+
+    if reason == "native-health-pair-operation-unconfirmed":
+        assert fixture.until(observe, 1) == {"settled": True}
+        assert len(calls) == 2
+    else:
+        with pytest.raises(health_slots.HealthError, match=reason):
+            fixture.until(observe, 1)
+        assert len(calls) == 1
+
+
+def test_snapshot_wait_preserves_its_original_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+    clock = [0.0]
+    monkeypatch.setattr(fixture.time, "monotonic", lambda: clock[0])
+
+    def sleep(seconds: float) -> None:
+        clock[0] += seconds
+
+    def pending() -> dict[str, Any]:
+        raise health_slots.HealthError("native-health-pair-operation-unconfirmed")
+
+    monkeypatch.setattr(fixture.time, "sleep", sleep)
+    with pytest.raises(AssertionError, match="fixture deadline"):
+        fixture.until(pending, 1)
+    assert clock[0] == 1

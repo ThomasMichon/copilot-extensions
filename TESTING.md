@@ -7548,9 +7548,12 @@ the normal installed CLI's disabled enrollment/collection/removal, then tests
 two accelerated calendar cycles and replacement/rollback through the enrollment
 owner with a fixture-only cadence adapter. Installed code is unmodified. Select
 it through `tools/run-plugin-tests.py agent-machines --test-file
-tests/native/test_health_linux_installed.py --allow-explicit-tiers
+tests/native/test_health_linux_installed.py --allow-explicit-tiers --allow-host-state
 --test-timeout 240 --timeout 600 --plugin-timeout 600` only with separate
-fixture-unit approval. Set `AGENT_MACHINES_NATIVE_SYSTEMD=1`,
+fixture-unit approval. Host-state opt-in preserves the explicitly selected native
+config and persistent evidence paths instead of remapping them into disposable
+runner storage; it does not authorize unrelated host access.
+Set `AGENT_MACHINES_NATIVE_SYSTEMD=1`,
 `AGENT_MACHINES_NATIVE_SYSTEMD_CONFIG_HOME` to the current user's existing config
 home, and `AGENT_MACHINES_NATIVE_SYSTEMD_ROOT` to a precreated private persistent
 fixture/evidence directory. The actual user manager must already be running;
@@ -7567,8 +7570,9 @@ Per-case timestamped evidence directories remain outside disposable runner
 storage for recovery after interruption; review their `fixture-owner.json` and
 `cleanup.json` before the caller removes an exact fixture directory. An
 interrupted/failed cleanup remains owned recovery, not automatic deletion.
-`tests/test_health_linux_fixture.py` supplies portable calendar controls and
-explicit T2 real-interpreter expiry checks. Passing those controls, or skipping
+`tests/test_health_linux_fixture.py` supplies portable calendar and bounded
+pending-job controls, plus explicit T2 retained-helper and real-interpreter
+expiry checks. Passing those controls, or skipping
 the native cases on another platform, is not Linux installed qualification.
 Process-death recovery, late-start/overlap and deadline/storage failure
 qualification remain separate acceptance items.
