@@ -23,6 +23,12 @@ def _normalize_repo_basename(name: str) -> str:
     return name.strip().lower().split("/")[-1].replace(".", "-")
 
 
+def parse_worktree_capability(value: object) -> bool | None:
+    if value is None or isinstance(value, bool):
+        return value
+    raise ValueError("supports_worktrees must be a Boolean or null")
+
+
 @dataclass
 class AgentConfig:
     """Parsed agent configuration from acp-agents.json."""
@@ -50,8 +56,12 @@ class AgentConfig:
     requires_admin: bool = False
     provider: str | None = None
     spawn_command: list[str] | None = None
-    codespace: dict | None = None
+    codespace: dict[str, Any] | None = None
     mcp_servers: list[dict[str, Any]] = field(default_factory=list)
+    supports_worktrees: bool | None = None
+
+    def __post_init__(self) -> None:
+        parse_worktree_capability(self.supports_worktrees)
 
 
 @dataclass
@@ -64,6 +74,10 @@ class NamespaceAgentInfo:
     icon: str | None = None
     state: str = "available"
     aliases: list[str] = field(default_factory=list)
+    supports_worktrees: bool | None = None
+
+    def __post_init__(self) -> None:
+        parse_worktree_capability(self.supports_worktrees)
 
 
 class AmbiguousAgentError(Exception):

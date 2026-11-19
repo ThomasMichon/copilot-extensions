@@ -6,6 +6,7 @@ import asyncio
 import inspect
 import logging
 import threading
+from collections.abc import Mapping
 from dataclasses import replace
 from typing import Any
 
@@ -15,6 +16,7 @@ from machine_transport import AmbiguousMachineError, find_machine_entry
 from .agent_registry_common import (
     AgentConfig,
     AmbiguousAgentError,
+    parse_worktree_capability,
 )
 from .agent_registry_discovery import DiscoveryResult, _ProviderDiscoveryMixin
 from .agent_registry_locality import _LocalTransportMixin
@@ -103,12 +105,12 @@ class AgentResolver(_ProviderDiscoveryMixin, _LocalTransportMixin):
         self._agent_alias_index: dict[str, str | None] = {}
         for canonical, config in agents.items():
             for alias in [canonical, *config.aliases]:
-                key = alias.casefold()
-                existing = self._agent_alias_index.get(key)
-                if existing is None and key in self._agent_alias_index:
+                alias_key = alias.casefold()
+                existing = self._agent_alias_index.get(alias_key)
+                if existing is None and alias_key in self._agent_alias_index:
                     continue
                 if existing is not None and existing != canonical:
-                    self._agent_alias_index[key] = None
+                    self._agent_alias_index[alias_key] = None
                     warning = (
                         f"agent alias {alias!r} is ambiguous between "
                         f"{existing!r} and {canonical!r}"
@@ -116,8 +118,10 @@ class AgentResolver(_ProviderDiscoveryMixin, _LocalTransportMixin):
                     self._topology_warnings.append(warning)
                     log.warning(warning)
                 else:
-                    self._agent_alias_index[key] = canonical
+                    self._agent_alias_index[alias_key] = canonical
 
+        self._local_machine: MachineConfig | None
+        self._local_platform: str
         if resolved_local_identity is not None:
             key, platform = resolved_local_identity
             if (
@@ -292,6 +296,7 @@ class AgentResolver(_ProviderDiscoveryMixin, _LocalTransportMixin):
         """Resolve an agent name to a SpawnTarget (async path)."""
         from . import agent_registry as compat
 
+        resolver: NamespaceResolver | None
         if is_remote_address(agent_name):
             return await asyncio.to_thread(self._resolve_remote, agent_name, sender_repo)
         self.refresh_provider_resolvers()
@@ -380,6 +385,7 @@ class AgentResolver(_ProviderDiscoveryMixin, _LocalTransportMixin):
         """Resolve ``<repo>@<venue>``: the venue, bound to run ``<repo>``."""
         from . import agent_registry as compat
 
+        resolver: NamespaceResolver | None
         repo_remote = compat.resolve_repo_remote(repo)
         ns = self._parse_namespaced_agent(venue)
         if ns:
@@ -697,6 +703,7 @@ class AgentResolver(_ProviderDiscoveryMixin, _LocalTransportMixin):
             )
 
         machine, alias_env = self._resolve_machine(config.host, config.ssh_environment)
+        ssh_env: SshEnvironment | None
         if alias_env:
             ssh_env = alias_env
             if not config.project:
@@ -858,6 +865,7 @@ class AgentResolver(_ProviderDiscoveryMixin, _LocalTransportMixin):
             "auto_discovered": config.auto_discovered,
             "derived": config.derived,
             "provider": config.provider,
+            "supports_worktrees": parse_worktree_capability(config.supports_worktrees),
         }
 
     async def scan_namespace_async(self, prefix: str) -> list[dict[str, Any]]:
@@ -875,6 +883,7 @@ class AgentResolver(_ProviderDiscoveryMixin, _LocalTransportMixin):
         resolver_timeout = compat._namespace_list_resolver_timeout()
         list_kwargs: dict[str, Any] = {}
         if resolver_timeout > 0:
+            params: Mapping[str, inspect.Parameter]
             try:
                 params = inspect.signature(resolver.list).parameters
             except (TypeError, ValueError):
@@ -914,6 +923,9 @@ class AgentResolver(_ProviderDiscoveryMixin, _LocalTransportMixin):
             "provider": prefix,
             "bare_addressable": getattr(resolver, "bare_addressable", True),
             "state": agent.state,
+            "supports_worktrees": parse_worktree_capability(
+                getattr(agent, "supports_worktrees", None),
+            ),
         }
 
     def list_agents(self, *, project: str | None = None) -> list[dict[str, Any]]:
@@ -951,8 +963,8 @@ class AgentResolver(_ProviderDiscoveryMixin, _LocalTransportMixin):
             return_exceptions=True,
         )
         incomplete_namespaces: list[str] = []
-        for prefix, outcome in zip(prefixes, listings):
-            if isinstance(outcome, asyncio.TimeoutError):
+        for prefix, listing in zip(prefixes, listings):
+            if isinstance(listing, asyncio.TimeoutError):
                 log.warning(
                     "Namespace resolver '%s' timed out listing agents "
                     "(AGENT_BRIDGE_NAMESPACE_LIST_RESOLVER_TIMEOUT) -- dropped "
@@ -961,15 +973,15 @@ class AgentResolver(_ProviderDiscoveryMixin, _LocalTransportMixin):
                 )
                 incomplete_namespaces.append(prefix)
                 continue
-            if isinstance(outcome, BaseException):
+            if isinstance(listing, BaseException):
                 log.warning(
                     "Namespace resolver '%s' failed to list agents",
                     prefix,
-                    exc_info=outcome,
+                    exc_info=listing,
                 )
                 incomplete_namespaces.append(prefix)
                 continue
-            result.extend(outcome)
+            result.extend(listing)
         result, remote_changed = reconcile_remote_rows(
             result, catalog, remote_report, self.remote_acp_catalog,
         )
