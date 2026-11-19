@@ -2,6 +2,7 @@
 
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+import os
 from pathlib import Path
 import platform
 import shutil
@@ -273,6 +274,7 @@ def test_new_creation_requires_passive_version_admission_before_preparation(
     monkeypatch.setattr(platform, "system", lambda: "Windows")
     monkeypatch.setattr(shutil, "which", lambda binary: r"C:\fixture\psmux.exe")
     monkeypatch.setattr(windows_mux_version, "file_version", lambda binary: version)
+    monkeypatch.setattr(windows_mux_version, "default_search_roots", lambda: [])
 
     @contextmanager
     def acquired(*args: object, **kwargs: object) -> Iterator[Callable[[], None]]:
@@ -301,6 +303,107 @@ def test_new_creation_requires_passive_version_admission_before_preparation(
         result = mux_creation.run_or_join([], binary="psmux", session="wt-fixture", prepare=prepare)
         assert result is not None and result.returncode == 0
         assert calls == ["prepare", "start"]
+
+
+def _versioned_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    versions: dict[str, tuple[int, int, int, int] | None],
+) -> dict[str, str]:
+    paths: dict[str, str] = {}
+    for name in versions:
+        directory = tmp_path / name
+        directory.mkdir(parents=True)
+        (directory / "psmux.exe").write_bytes(b"fixture")
+        paths[name] = str(directory / "psmux.exe")
+    by_path = {
+        str(Path(path).resolve()).lower(): versions[name] for name, path in paths.items()
+    }
+    monkeypatch.setattr(
+        windows_mux_version, "file_version",
+        lambda binary: by_path.get(str(Path(binary).resolve()).lower()),
+    )
+    return paths
+
+
+def test_creation_selects_newest_side_by_side_copy_when_path_copy_is_old(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths = _versioned_tree(tmp_path, monkeypatch, {
+        "path-bin": (3, 3, 8, 0),
+        "side/3.4.0": (3, 4, 0, 0),
+        "side/3.5.1": (3, 5, 1, 0),
+        "side/3.2.0": (3, 2, 0, 0),
+        "package": (3, 4, 2, 0),
+    })
+    monkeypatch.setattr(shutil, "which", lambda binary: paths["path-bin"])
+    selected = windows_mux_version.require_creation_binary(
+        "psmux", search_roots=[str(tmp_path / "side"), str(tmp_path / "package")],
+    )
+    assert Path(selected) == Path(paths["side/3.5.1"])
+
+
+def test_creation_ignores_incomplete_side_by_side_install_directories(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths = _versioned_tree(tmp_path, monkeypatch, {
+        "path-bin": (3, 3, 8, 0),
+        "side/3.4.0": (3, 4, 0, 0),
+        "side/3.9.0.partial-abc": (3, 9, 0, 0),
+        "side/.staging-abc": (3, 9, 0, 0),
+    })
+    monkeypatch.setattr(shutil, "which", lambda binary: paths["path-bin"])
+    selected = windows_mux_version.require_creation_binary(
+        "psmux", search_roots=[str(tmp_path / "side")],
+    )
+    assert Path(selected) == Path(paths["side/3.4.0"])
+
+
+def test_creation_keeps_compatible_path_copy_before_side_by_side_copies(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths = _versioned_tree(tmp_path, monkeypatch, {
+        "path-bin": (3, 4, 0, 0), "side/3.6.0": (3, 6, 0, 0),
+    })
+    monkeypatch.setattr(shutil, "which", lambda binary: paths["path-bin"])
+
+    def no_scan(roots: object) -> list[tuple[tuple[int, int, int, int], str]]:
+        raise AssertionError("a compatible PATH copy must not scan other roots")
+
+    monkeypatch.setattr(windows_mux_version, "compatible_candidates", no_scan)
+    assert windows_mux_version.require_creation_binary(
+        "psmux", search_roots=[str(tmp_path / "side")],
+    ) == paths["path-bin"]
+
+
+def test_creation_refusal_names_side_by_side_remedy_when_no_copy_is_compatible(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths = _versioned_tree(tmp_path, monkeypatch, {
+        "path-bin": None, "side/3.3.8": (3, 3, 8, 0),
+    })
+    monkeypatch.setattr(shutil, "which", lambda binary: paths["path-bin"])
+    with pytest.raises(RuntimeError, match="require version 3.4.0") as raised:
+        windows_mux_version.require_creation_binary(
+            "psmux", search_roots=[str(tmp_path / "side")],
+        )
+    message = str(raised.value)
+    assert "existing sessions were not changed" in message
+    assert "side by side" in message and "version unknown" in message
+
+
+def test_creation_puts_selected_side_by_side_directory_first_on_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(platform, "system", lambda: "Windows")
+    selected = tmp_path / "side" / "3.4.0"
+    old = tmp_path / "old"
+    monkeypatch.setenv("PATH", os.pathsep.join([str(old), str(selected)]))
+    env = mux_creation._creation_env([str(selected / "psmux.exe"), "new-session"])
+    assert env is not None
+    key = next(name for name in env if name.upper() == "PATH")
+    entries = env[key].split(os.pathsep)
+    assert entries[0] == str(selected)
+    assert entries.count(str(selected)) == 1 and str(old) in entries
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="native Windows file-version resource")

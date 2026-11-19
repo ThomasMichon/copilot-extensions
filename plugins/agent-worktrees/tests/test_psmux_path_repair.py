@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -266,8 +267,14 @@ function Get-AwPsmuxSessionState {
     [pscustomobject]@{ Known = ($script:Mode -notlike '*unknown'); Sessions = $sessions }
 }
 function Find-AwCompatiblePsmuxPackageBinary {
-    param($PackageRoot)
+    param($PackageRoot, $SideBySideRoot)
     [pscustomobject]@{ Version = '3.4.0' }
+}
+function Get-AwPsmuxSideBySideRoot { 'fixture-side-by-side' }
+function Install-AwPsmuxSideBySide {
+    param($Version, $Root)
+    $script:SideBySide.Add(@($Version, $Root))
+    [pscustomobject]@{ Status = 'installed'; Version = $Version; Directory = (Join-Path $Root $Version); Message = '' }
 }
 """,
         encoding="utf-8",
@@ -283,6 +290,7 @@ $ErrorActionPreference = 'Stop'
 $script:Mode = $Mode
 $script:Calls = [Collections.Generic.List[object]]::new()
 $script:PathRepair = $false
+$script:SideBySide = [Collections.Generic.List[object]]::new()
 $env:LOCALAPPDATA = $PSScriptRoot
 function Get-Command {
     param($Name, $ErrorAction)
@@ -300,7 +308,11 @@ function winget {
 }
 """ + source[start:end] + """
 Ensure-Psmux
-@{ calls = @($script:Calls.ToArray()); pathRepair = $script:PathRepair } |
+@{
+    calls = @($script:Calls.ToArray())
+    pathRepair = $script:PathRepair
+    sideBySide = @($script:SideBySide.ToArray())
+} |
     ConvertTo-Json -Depth 4 -Compress
 """,
         encoding="utf-8",
@@ -311,11 +323,16 @@ Ensure-Psmux
     )
     observed = json.loads(result.stdout.splitlines()[-1])
     if state in {"live", "unknown", "missing-live", "missing-unknown"}:
-        assert observed == {"calls": [], "pathRepair": False}
+        # Live or unknown provider activity never replaces the package; the
+        # required version is installed beside it and then selected on PATH.
+        assert observed["calls"] == []
+        assert observed["sideBySide"] == [["3.4.0", "fixture-side-by-side"]]
+        assert observed["pathRepair"] is True
     else:
         command, = observed["calls"]
         assert command[command.index("--version") + 1] == "3.4.0"
         assert ("--uninstall-previous" in command) is (state == "cold")
+        assert observed["sideBySide"] == []
         assert observed["pathRepair"] is True
 
 
@@ -344,6 +361,160 @@ def test_path_repair_does_not_mutate_live_sessions() -> None:
     assert "$psmuxVer = Get-AwPsmuxBinaryVersion -Path $muxBin" in ensure
     assert "& winget install" not in unknown_branch
     assert "not replacing it" in unknown_branch
+    assert "Install-AwPsmuxSideBySideForUpdate" in unknown_branch
     assert "& winget install" not in live_branch
     assert "not replacing it now" in live_branch
+    assert "Install-AwPsmuxSideBySideForUpdate" in live_branch
     assert "--uninstall-previous --force" in ensure
+
+
+@pytest.mark.skipif(_PWSH is None, reason="PowerShell is not available")
+def test_side_by_side_copy_is_selected_and_replaces_stale_path_entries(tmp_path: Path) -> None:
+    assert _PWSH is not None
+    package_root = tmp_path / "Microsoft" / "WinGet" / "Packages"
+    legacy_dir = package_root / "marlocarlo.psmux_legacy"
+    legacy_dir.mkdir(parents=True)
+    (legacy_dir / "psmux.exe").touch()
+    side_root = tmp_path / "side-by-side"
+    old_side = side_root / "3.3.8"
+    new_side = side_root / "3.4.1"
+    staging = side_root / ".staging-x"
+    partial = side_root / "3.5.0.partial-x"
+    for directory in (old_side, new_side, staging, partial):
+        directory.mkdir(parents=True)
+        (directory / "psmux.exe").touch()
+    keep = tmp_path / "keep"
+    keep.mkdir()
+    script = tmp_path / "probe.ps1"
+    script.write_text(
+        """
+param($Helper, $Root, $SideRoot, $Legacy, $OldSide, $NewSide, $Keep)
+. $Helper
+$probe = {
+    param($Path)
+    if ($Path -like '*legacy*') { return '3.3.8' }
+    if ($Path -like '*.staging-*' -or $Path -like '*.partial-*') { return '3.9.0' }
+    return (Split-Path (Split-Path $Path -Parent) -Leaf)
+}
+$selected = Find-AwCompatiblePsmuxPackageBinary -PackageRoot $Root `
+    -SideBySideRoot $SideRoot -VersionProbe $probe
+$withoutSide = Find-AwCompatiblePsmuxPackageBinary -PackageRoot $Root -VersionProbe $probe
+$first = Repair-AwPsmuxPath -SelectedDirectory $selected.Directory `
+    -UserPath "$Legacy;$OldSide;$Keep" -ProcessPath "$Keep;$OldSide" `
+    -PackageRoot $Root -SideBySideRoot $SideRoot
+$second = Repair-AwPsmuxPath -SelectedDirectory $selected.Directory `
+    -UserPath $first.UserPath -ProcessPath $first.ProcessPath `
+    -PackageRoot $Root -SideBySideRoot $SideRoot
+[pscustomobject]@{
+    selected = $selected.Path
+    version = $selected.Version
+    withoutSide = $null -eq $withoutSide
+    userPath = $first.UserPath
+    processPath = $first.ProcessPath
+    secondChanged = $second.UserChanged -or $second.ProcessChanged
+} | ConvertTo-Json -Compress
+""",
+        encoding="utf-8",
+    )
+    proc = subprocess.run(
+        [_PWSH, "-NoLogo", "-NoProfile", "-File", str(script), str(_HELPER),
+         str(package_root), str(side_root), str(legacy_dir), str(old_side),
+         str(new_side), str(keep)],
+        capture_output=True, text=True, check=True, **no_window_kwargs(),
+    )
+    result = json.loads(proc.stdout)
+    assert Path(result["selected"]) == new_side / "psmux.exe"
+    assert result["version"] == "3.4.1"
+    assert result["withoutSide"] is True
+    assert result["userPath"].split(";") == [str(new_side), str(keep)]
+    assert result["processPath"].split(";") == [str(new_side), str(keep)]
+    assert result["secondChanged"] is False
+
+
+def _write_side_by_side_installer_probe(tmp_path: Path) -> Path:
+    script = tmp_path / "install-probe.ps1"
+    script.write_text(
+        """
+param($Helper, $Root, $Mode)
+$ErrorActionPreference = 'Stop'
+. $Helper
+$script:Downloads = 0
+$downloader = {
+    param($Version, $Directory)
+    $script:Downloads++
+    $payload = Join-Path $Directory 'payload'
+    New-Item -ItemType Directory -Force -Path $payload | Out-Null
+    Set-Content -LiteralPath (Join-Path $payload 'psmux.exe') -Value $Version
+    Set-Content -LiteralPath (Join-Path $payload 'tmux.exe') -Value $Version
+    $zip = Join-Path $Directory "psmux_$($Version)_portable.zip"
+    Compress-Archive -Path (Join-Path $payload '*') -DestinationPath $zip
+    Remove-Item -LiteralPath $payload -Recurse -Force
+    $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $zip).Hash
+    if ($Mode -eq 'tampered') { $hash = '0' * 64 }
+    Set-Content -LiteralPath (Join-Path $Directory "psmux_$($Version)_portable.yaml") `
+        -Value "PackageIdentifier: marlocarlo.psmux`nInstallerSha256: $hash"
+}
+$probe = {
+    param($Path)
+    if ($script:Mode -eq 'wrong-version') { return '3.3.8' }
+    return (Get-Content -LiteralPath $Path -Raw).Trim()
+}
+$script:Mode = $Mode
+if ($Mode -eq 'conflict') {
+    New-Item -ItemType Directory -Force -Path (Join-Path $Root '3.4.0') | Out-Null
+    Set-Content -LiteralPath (Join-Path $Root '3.4.0\\psmux.exe') -Value '3.3.8'
+}
+$first = Install-AwPsmuxSideBySide -Version '3.4.0' -Root $Root `
+    -Downloader $downloader -VersionProbe $probe
+$second = Install-AwPsmuxSideBySide -Version '3.4.0' -Root $Root `
+    -Downloader $downloader -VersionProbe $probe
+[pscustomobject]@{
+    first = $first.Status
+    second = $second.Status
+    version = $first.Version
+    downloads = $script:Downloads
+    firstDirectory = Split-Path $first.Directory -Leaf
+    selected = (Find-AwCompatiblePsmuxPackageBinary -PackageRoot (Join-Path $Root 'none') `
+        -SideBySideRoot $Root -VersionProbe $probe).Directory
+    entries = @(Get-ChildItem -LiteralPath $Root -Force -Name | Sort-Object)
+    files = @(Get-ChildItem -LiteralPath (Join-Path $Root '3.4.0') -Name -ErrorAction SilentlyContinue | Sort-Object)
+} | ConvertTo-Json -Compress
+""",
+        encoding="utf-8",
+    )
+    return script
+
+
+@pytest.mark.skipif(_PWSH is None, reason="PowerShell is not available")
+@pytest.mark.parametrize("mode", ["valid", "tampered", "wrong-version", "conflict"])
+def test_side_by_side_install_verifies_archive_and_is_idempotent(tmp_path: Path, mode: str) -> None:
+    assert _PWSH is not None
+    root = tmp_path / "side-by-side"
+    script = _write_side_by_side_installer_probe(tmp_path)
+    proc = subprocess.run(
+        [_PWSH, "-NoLogo", "-NoProfile", "-File", str(script), str(_HELPER), str(root), mode],
+        capture_output=True, text=True, timeout=120, check=True, **no_window_kwargs(),
+    )
+    result = json.loads(proc.stdout)
+    if mode == "valid":
+        assert (result["first"], result["second"]) == ("installed", "present")
+        assert result["version"] == "3.4.0"
+        assert result["downloads"] == 1
+        assert result["entries"] == ["3.4.0"]
+        assert result["files"] == ["psmux.exe", "tmux.exe"]
+    elif mode == "conflict":
+        # The damaged directory stays unchanged; the verified copy goes into a
+        # new generation directory that discovery selects.
+        assert (result["first"], result["second"]) == ("installed", "present")
+        assert result["downloads"] == 1
+        generation = result["firstDirectory"]
+        assert re.fullmatch(r"3\.4\.0-r[0-9a-f]{8}", generation)
+        assert result["entries"] == ["3.4.0", generation]
+        assert Path(result["selected"]).name == generation
+        assert (root / "3.4.0" / "psmux.exe").read_text(encoding="utf-8").strip() == "3.3.8"
+    else:
+        # A tampered archive or an unexpected binary version installs nothing
+        # and leaves no staging directory behind.
+        assert (result["first"], result["second"]) == ("failed", "failed")
+        assert result["downloads"] == 2
+        assert result["entries"] == []
