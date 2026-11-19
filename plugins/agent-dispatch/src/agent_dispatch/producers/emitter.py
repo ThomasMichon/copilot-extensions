@@ -20,13 +20,14 @@ import threading
 import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict, TypeVar, cast
 
 from agent_procutil import no_window_kwargs
 
 from ..client import DispatchClient
+from ..emission_trace import record as trace_emission
 from ..repository_resources import (
-    resolve_execution_resources, resolve_resource_argument, validate_resource_arguments,
+    RepositoryResourceSnapshot, resolve_execution_resources, resolve_resource_argument, validate_resource_arguments,
 )
 
 
@@ -34,9 +35,14 @@ class EmitterError(ValueError):
     """A malformed command-emitter spec."""
 
 
-def validate_spec(spec: dict[str, Any], *, resolve_resources: bool = False, snapshot=None) -> None:
+class _SnapshotOptions(TypedDict, total=False):
+    snapshot: RepositoryResourceSnapshot
+
+
+def validate_spec(spec: dict[str, Any], *, resolve_resources: bool = False,
+                  snapshot: RepositoryResourceSnapshot | None = None) -> None:
     """Validate shape before admission; only held work resolves resources."""
-    snapshot_options = (
+    snapshot_options: _SnapshotOptions = (
         {"snapshot": snapshot.with_execution(execution=True)} if snapshot is not None else {}
     )
     if not isinstance(spec, dict):
@@ -84,10 +90,10 @@ def validate_spec(spec: dict[str, Any], *, resolve_resources: bool = False, snap
             )
         if not isinstance(builtin, dict):
             raise EmitterError("'repository_issue_loop' must be an object")
-        from ..repository_issue_loops import validate_config
+        from ..repository_issue_loops import validate_config as validate_issue_loop
 
         try:
-            validate_config(
+            validate_issue_loop(
                 builtin, cwd=spec.get("cwd"), resolve_resources=resolve_resources,
                 worker_identity_cwd=spec.get("worker_identity_cwd"),
                 **snapshot_options,
@@ -102,16 +108,16 @@ def validate_spec(spec: dict[str, Any], *, resolve_resources: bool = False, snap
             )
         if not isinstance(effort_builtin, dict):
             raise EmitterError("'effort_driver_loop' must be an object")
-        from ..effort_driver_loops import validate_config
+        from ..effort_driver_loops import validate_config as validate_effort_loop
 
         try:
-            validate_config(
+            validate_effort_loop(
                 effort_builtin, cwd=spec.get("cwd"), resolve_resources=resolve_resources, **snapshot_options,
             )
         except ValueError as exc:
             raise EmitterError(str(exc)) from exc
     try:
-        interval = float(spec.get("interval_seconds"))
+        interval = float(spec.get("interval_seconds", ""))
     except (TypeError, ValueError) as exc:
         raise EmitterError("'interval_seconds' must be a number > 0") from exc
     if interval <= 0:
@@ -168,14 +174,14 @@ def validate_spec(spec: dict[str, Any], *, resolve_resources: bool = False, snap
         except ValueError as exc:
             raise EmitterError(str(exc)) from exc
     if spec.get("relevance") is not None:
-        from .emitter_relevance import validate_config
+        from .emitter_relevance import validate_config as validate_relevance
 
-        validate_config(spec)
+        validate_relevance(spec)
     if spec.get("managed_producer") is not None:
-        from .emitter_managed import validate_config
+        from .emitter_managed import validate_config as validate_producer
 
         try:
-            validate_config(spec)
+            validate_producer(spec)
         except ValueError as exc:
             raise EmitterError(str(exc)) from exc
 
@@ -183,6 +189,8 @@ def validate_spec(spec: dict[str, Any], *, resolve_resources: bool = False, snap
 def load_spec(path: str | Path) -> dict[str, Any]:
     """Load and validate a command-emitter JSON spec."""
     data = json.loads(Path(path).expanduser().read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise EmitterError("command emitter needs a JSON object")
     validate_spec(data, resolve_resources=False)
     return data
 
@@ -231,6 +239,7 @@ def _author_tasks(
     runner: Callable[..., Any] = subprocess.run,
 ) -> list[dict[str, Any]]:
     rows = _task_specs(stdout)
+    trace_emission("emitter.source_read", spec["id"], count=len(rows))
     grant = None
     if rows and spec.get("managed_producer") is not None:
         from .emitter_managed import load_grant
@@ -246,12 +255,19 @@ def _author_tasks(
         fields.setdefault(
             "require_verification", bool(spec.get("require_verification", False))
         )
-        if grant is None:
-            created.append(client.create(title, **fields))
-        else:
-            from .emitter_managed import create_or_observe
+        trace_emission("emitter.candidate", spec["id"], row=fields)
+        try:
+            if grant is None:
+                matched = client.create(title, **fields)
+            else:
+                from .emitter_managed import create_or_observe
 
-            created.append(create_or_observe(client, title, fields, grant))
+                matched = create_or_observe(client, title, fields, grant)
+        except Exception:
+            trace_emission("emitter.task_result", spec["id"], row=fields, outcome="unconfirmed")
+            raise
+        created.append(matched)
+        trace_emission("emitter.task_result", spec["id"], row=fields, task_id=matched.get("id"), outcome="observed")
     return created
 
 
@@ -715,7 +731,14 @@ def _parse_tick_process_output(completed: Any) -> dict[str, Any]:
     }
 
 
-@daemon_entrypoint("agent-dispatch-emitter", source=__file__, purpose="production")
+_F = TypeVar("_F", bound=Callable[..., Any])
+
+
+def _admitted(function: _F) -> _F:
+    return cast(_F, daemon_entrypoint("agent-dispatch-emitter", source=__file__, purpose="production")(function))
+
+
+@_admitted
 def serve(
     spec_path: str | Path,
     *,

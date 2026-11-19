@@ -5,13 +5,15 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import platform
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import asdict
+from typing import Any
 import uuid
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 
 from . import telemetry
+from .emission_trace import record as trace_emission
 from .assignment_workspace import AssignmentWorkspace
 from .coordinator_auth import _make_control_auth
 from .coordinator_categories import CategorySelection, register_category_routes
@@ -53,29 +55,17 @@ from .coordinator_verification import register_verification_routes
 from .events import EventBus
 from .queue_records import WorkerAdmissionInhibited
 from .lease import FencingGuard
-from .queue import (
-    CompletionOutcome,
-    ProducerFenceError,
-    ProducerScopeValidationError,
-    ResultTooLargeError,
-    ResultValidationError,
-    Task,
-    TaskError,
-    TaskQueue,
-    worker_id_for,
-)
+from .queue import TaskQueue
+from .queue_common import CompletionOutcome, ResultTooLargeError, ResultValidationError, Task, worker_id_for
+from .queue_producer_fences import ProducerFenceError, ProducerScopeValidationError
+from .queue_records import TaskError
 from .task_authority import (
     mint_task_token, register_task_grant_route, resolve_task_authority, start_incarnation,
 )
 from .queue_dedup import DedupConflictError
 from .steering import SteeringError, steer_request_fingerprint, steer_wake_message
 
-#: Event types that run periodically for every live task without ever
-#: transitioning its state (a heartbeat lease extension, a routine activity
-#: string update) -- excluded from `_emit`'s telemetry side effect so a
-#: configured telemetry spool doesn't accumulate misleading high-volume
-#: `kind: state_transition` records for them. The bus publish (the actual
-#: wake every `--subscribe` relay/poller needs) still fires unconditionally.
+# Heartbeats and activity still wake subscribers but are not state transitions.
 _NO_TELEMETRY_EVENT_TYPES = frozenset({"task.heartbeat", "task.activity_updated"})
 
 
@@ -83,7 +73,7 @@ def _assignment_workspace(body: AssignmentWorkspaceBody) -> AssignmentWorkspace:
     return AssignmentWorkspace.from_dict(body.model_dump())
 
 
-def _draft_scope(queue: TaskQueue) -> dict:
+def _draft_scope(queue: TaskQueue) -> dict[str, Any]:
     from .install_paths import install_dir, normalized_path
     return {
         "queue": queue.run_waiter_coordinator_id(),
@@ -92,7 +82,7 @@ def _draft_scope(queue: TaskQueue) -> dict:
     }
 
 
-def _run_waiter_summary(queue: TaskQueue, task_id: str) -> dict | None:
+def _run_waiter_summary(queue: TaskQueue, task_id: str) -> dict[str, Any] | None:
     """The active `run --detach` waiter for a task, trimmed to what a
     caller (the Tasks board, a claim-status callback, `agent-dispatch show`)
     actually needs to explain *why* a suspended task is suspended: the exact
@@ -106,7 +96,7 @@ def _run_waiter_summary(queue: TaskQueue, task_id: str) -> dict | None:
     return run_waiter_summary(waiter)
 
 
-def _task_with_spawn_dict(queue: TaskQueue, task: Task) -> dict:
+def _task_with_spawn_dict(queue: TaskQueue, task: Task) -> dict[str, Any]:
     result = _task_dict(task)
     result["draft_scope"] = _draft_scope(queue)
     latest = queue.latest_reservation(task.id)
@@ -139,7 +129,7 @@ def register_task_routes(
             raise HTTPException(status_code=404, detail="no such task")
         return task
 
-    def _bulk_tasks(tasks) -> list[dict]:
+    def _bulk_tasks(tasks: Iterable[Task]) -> list[dict[str, Any]]:
         scope = _draft_scope(queue)
         return [_bulk_task_dict(task, scope) for task in tasks]
 
@@ -157,7 +147,7 @@ def register_task_routes(
         scope = getattr(request.state, "task_scope", None)
         return scope.generation if scope is not None else fallback
 
-    def _emit(event_type: str, task: dict) -> None:
+    def _emit(event_type: str, task: dict[str, Any]) -> None:
         event_task = _event_task_dict(task)
         bus.publish({"type": event_type, "task": event_task})
         # Heartbeats and activity updates run periodically for every live
@@ -179,7 +169,7 @@ def register_task_routes(
             "task.create_rejected", exc.event(operation="create")
         )
 
-    def _guard(op, event_type: str | None = None) -> dict:
+    def _guard(op: Callable[[], Task | CompletionOutcome], event_type: str | None = None) -> dict[str, Any]:
         try:
             mutation = op()
             if isinstance(mutation, CompletionOutcome):
@@ -215,7 +205,7 @@ def register_task_routes(
     register_closeout_routes(app, queue, guard=_guard)
 
     @app.get("/producer-scopes/status")
-    def producer_scope_status(repo: str, source: str) -> dict:
+    def producer_scope_status(repo: str, source: str) -> dict[str, Any]:
         try:
             return asdict(queue.producer_scope_status(repo, source))
         except ProducerScopeValidationError as exc:
@@ -229,7 +219,7 @@ def register_task_routes(
             Depends(_make_control_auth(control_token, _emit_producer_event))
         ],
     )
-    def producer_scope_handoff(body: ProducerScopeHandoffBody) -> dict:
+    def producer_scope_handoff(body: ProducerScopeHandoffBody) -> dict[str, Any]:
         try:
             transition = queue.handoff_producer_scope(
                 body.repo,
@@ -254,7 +244,7 @@ def register_task_routes(
             raise HTTPException(status_code=409, detail=detail) from exc
         result = transition.as_dict()
         state = transition.state
-        detail: dict[str, object] = {
+        transition_detail: dict[str, object] = {
             "repo": state.scope["repo"],
             "source": state.scope["source"],
             "from_generation": body.expected_generation,
@@ -263,12 +253,12 @@ def register_task_routes(
             "replayed": transition.replayed,
         }
         if state.required_label is not None:
-            detail["required_label"] = state.required_label
-        _emit_producer_event("producer_scope.transitioned", detail)
+            transition_detail["required_label"] = state.required_label
+        _emit_producer_event("producer_scope.transitioned", transition_detail)
         return result
 
     @app.post("/tasks")
-    def create(body: CreateBody) -> dict:
+    def create(body: CreateBody) -> dict[str, Any]:
         data = body.model_dump()
         proposed = data.pop("proposed")
         try:
@@ -297,6 +287,8 @@ def register_task_routes(
             raise HTTPException(status_code=409, detail=exc.detail()) from exc
         except TaskError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if body.origin_ref and body.dedup_key:
+            trace_emission("dispatch.create_result", body.origin_ref, row=data, task_id=task["id"], outcome=outcome.disposition)
         if outcome.event_type is not None:
             _emit(outcome.event_type, task)
         return task
@@ -319,7 +311,7 @@ def register_task_routes(
         limit: int | None = None,
         standing_parent_id: str | None = None,
         kind: str | None = None,
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         if dedup_key is not None:
             selectors = {
                 "status": status, "target_machine": target_machine, "target_repo": target_repo,
@@ -366,7 +358,7 @@ def register_task_routes(
         return _bulk_tasks(tasks)
 
     @app.get("/run-waiters")
-    def list_run_waiters() -> dict[str, dict]:
+    def list_run_waiters() -> dict[str, dict[str, Any]]:
         """Every currently-active `run --detach` waiter, keyed by task id --
         a single bulk lookup so a board/list consumer can explain *why* each
         suspended task is suspended (the exact blocking-wait command) without
@@ -379,7 +371,7 @@ def register_task_routes(
         }
 
     @app.get("/tasks/mine")
-    def mine(machine: str, worktree: str, repo: str | None = None) -> dict:
+    def mine(machine: str, worktree: str, repo: str | None = None) -> dict[str, Any]:
         result = queue.mine(machine, worktree, repo=repo)
         return {k: _bulk_tasks(v) for k, v in result.items()}
 
@@ -387,7 +379,7 @@ def register_task_routes(
     def get_task(
         task_id: str, native_restart_policy: bool = False,
         obligation_assignment_event_id: int | None = Query(None, ge=1, le=2**63 - 1),
-    ) -> dict:
+    ) -> dict[str, Any]:
         if native_restart_policy and obligation_assignment_event_id is not None:
             raise HTTPException(422, detail="task obligation and native restart observations are separate")
         if native_restart_policy:
@@ -403,7 +395,7 @@ def register_task_routes(
         )
 
     @app.get("/tasks/{task_id}/result")
-    def get_result(task_id: str) -> dict:
+    def get_result(task_id: str) -> dict[str, Any]:
         task = _require(queue.get(task_id))
         return {
             "task_id": task.id,
@@ -419,31 +411,31 @@ def register_task_routes(
     )
 
     @app.get("/tasks/{task_id}/events")
-    def get_events(task_id: str) -> list[dict]:
+    def get_events(task_id: str) -> list[dict[str, Any]]:
         _require(queue.get(task_id))
         return queue.events(task_id)
 
     @app.get("/tasks/{task_id}/wakes")
-    def get_wakes(task_id: str) -> list[dict]:
+    def get_wakes(task_id: str) -> list[dict[str, Any]]:
         _require(queue.get(task_id))
         return [asdict(wake) for wake in queue.list_wakes(task_id)]
 
     @app.get("/tasks/{task_id}/progress-log")
-    def get_progress_log(task_id: str) -> list[dict]:
+    def get_progress_log(task_id: str) -> list[dict[str, Any]]:
         _require(queue.get(task_id))
         return queue.progress_log(task_id)
 
     @app.get("/tasks/{task_id}/attachments")
-    def get_attachments(task_id: str) -> list[dict]:
+    def get_attachments(task_id: str) -> list[dict[str, Any]]:
         _require(queue.get(task_id))
         return [asdict(record) for record in queue.attachment_history(task_id)]
 
     @app.get("/sessions/{session_id}/tasks")
-    def get_tasks_for_session(session_id: str) -> list[dict]:
+    def get_tasks_for_session(session_id: str) -> list[dict[str, Any]]:
         return [asdict(entry) for entry in queue.tasks_for_session(session_id)]
 
     @app.get("/tasks/{task_id}/payload")
-    def get_payload(task_id: str) -> dict:
+    def get_payload(task_id: str) -> dict[str, Any]:
         task = _require(queue.get(task_id))
         content = queue.read_payload(task)
         return {
@@ -454,11 +446,11 @@ def register_task_routes(
         }
 
     @app.post("/tasks/{task_id}/approve")
-    def approve(task_id: str) -> dict:
+    def approve(task_id: str) -> dict[str, Any]:
         return _guard(lambda: queue.approve(task_id), "task.approved")
 
     @app.post("/claim")
-    def claim(request: Request, body: ClaimBody) -> dict | None:
+    def claim(request: Request, body: ClaimBody) -> dict[str, Any] | None:
         gate: DrainGate = request.app.state.drain_gate
         owner = body.worker_id
         if owner is None and body.machine and body.worktree:
@@ -513,7 +505,7 @@ def register_task_routes(
         return result
 
     @app.post("/drain")
-    async def drain(request: Request, body: DrainRequest | None = None) -> dict:
+    async def drain(request: Request, body: DrainRequest | None = None) -> dict[str, Any]:
         gate: DrainGate = request.app.state.drain_gate
         opts = body or DrainRequest()
         timeout = max(0.0, float(opts.timeout))
@@ -530,31 +522,33 @@ def register_task_routes(
         }
 
     @app.post("/undrain")
-    async def undrain(request: Request) -> dict:
+    async def undrain(request: Request) -> dict[str, Any]:
         gate: DrainGate = request.app.state.drain_gate
         gate.set_draining(False)
         return {"draining": False}
 
     @app.post("/shutdown")
-    def shutdown(request: Request) -> dict:
+    def shutdown(request: Request) -> dict[str, Any]:
         server = getattr(request.app.state, "uvicorn_server", None)
         if server is not None:
             server.should_exit = True
         return {"shutdown": True}
 
     @app.post("/adopt-relay")
-    def adopt_relay() -> dict:
+    def adopt_relay() -> dict[str, Any]:
         return {"adopted": False, "reason": "agent-dispatch has no relay"}
 
     @app.post("/tasks/{task_id}/start")
     @app.post("/tasks/{task_id}/pool-start")
-    def start(task_id: str, body: StartBody, request: Request) -> dict:
+    def start(task_id: str, body: StartBody, request: Request) -> dict[str, Any]:
         if request.url.path.endswith("/pool-start") and body.pool_placement_version is None:
             raise HTTPException(422, detail="explicit pool start requires pool_placement_version")
         worker_id, owner_session_id = _resolve_task_authority(
             request, task_id, body.worker_id, body.owner_session_id
         )
         owner_session_id = owner_session_id or resolve_owner_session_id(worker_id)
+        if worker_id is None:
+            raise HTTPException(403, detail="missing task worker identity")
         generation, expected_owner = start_incarnation(request, body, owner_session_id)
         result = _guard(
             lambda: queue.start(
@@ -575,7 +569,7 @@ def register_task_routes(
         return result
 
     @app.post("/tasks/{task_id}/yield")
-    def yield_task(task_id: str, body: YieldBody) -> dict:
+    def yield_task(task_id: str, body: YieldBody) -> dict[str, Any]:
         return _guard(
             lambda: queue.yield_task(
                 task_id,
@@ -588,8 +582,8 @@ def register_task_routes(
         )
 
     @app.post("/tasks/{task_id}/suspend")
-    def suspend(task_id: str, body: SuspendBody) -> dict:
-        kwargs: dict = {}
+    def suspend(task_id: str, body: SuspendBody) -> dict[str, Any]:
+        kwargs: dict[str, Any] = {}
         if "cooldown_seconds" in body.model_fields_set:
             kwargs["cooldown_seconds"] = body.cooldown_seconds
         return _guard(
@@ -607,7 +601,7 @@ def register_task_routes(
         )
 
     @app.post("/tasks/{task_id}/resume")
-    def resume(task_id: str, body: ResumeBody) -> dict:
+    def resume(task_id: str, body: ResumeBody) -> dict[str, Any]:
         message = body.message or (
             f"Task {task_id} has been resumed. Continue toward its goal "
             "from the durable progress already recorded."
@@ -650,7 +644,7 @@ def register_task_routes(
         }
 
     @app.post("/tasks/{task_id}/release")
-    def release(task_id: str, body: ReleaseBody) -> dict:
+    def release(task_id: str, body: ReleaseBody) -> dict[str, Any]:
         return _guard(
             lambda: queue.release_suspended(
                 task_id, body.worker_id, reason=body.reason
@@ -659,10 +653,12 @@ def register_task_routes(
         )
 
     @app.post("/tasks/{task_id}/complete")
-    def complete(task_id: str, body: CompleteBody, request: Request) -> dict:
+    def complete(task_id: str, body: CompleteBody, request: Request) -> dict[str, Any]:
         worker_id, owner_session_id = _resolve_task_authority(
             request, task_id, body.worker_id, body.expected_owner_session_id
         )
+        if worker_id is None:
+            raise HTTPException(403, detail="missing task worker identity")
         return _guard(
             lambda: queue.complete_with_outcome(
                 task_id,
@@ -676,7 +672,7 @@ def register_task_routes(
         )
 
     @app.post("/tasks/{task_id}/abandon")
-    def abandon(task_id: str, body: AbandonBody, request: Request) -> dict:
+    def abandon(task_id: str, body: AbandonBody, request: Request) -> dict[str, Any]:
         worker_id, owner_session_id = _resolve_task_authority(
             request, task_id, body.worker_id, body.expected_owner_session_id
         )
@@ -693,7 +689,7 @@ def register_task_routes(
         )
 
     @app.post("/tasks/{task_id}/hold")
-    def hold(task_id: str, body: HoldBody) -> dict:
+    def hold(task_id: str, body: HoldBody) -> dict[str, Any]:
         return _guard(
             lambda: queue.set_hold(
                 task_id,
@@ -705,7 +701,7 @@ def register_task_routes(
         )
 
     @app.post("/tasks/{task_id}/unhold")
-    def unhold(task_id: str, body: UnholdBody) -> dict:
+    def unhold(task_id: str, body: UnholdBody) -> dict[str, Any]:
         return _guard(
             lambda: queue.clear_hold(
                 task_id,
@@ -716,7 +712,7 @@ def register_task_routes(
         )
 
     @app.post("/tasks/{task_id}/unexclude")
-    def unexclude(task_id: str, body: UnexcludeBody) -> dict:
+    def unexclude(task_id: str, body: UnexcludeBody) -> dict[str, Any]:
         return _guard(
             lambda: queue.clear_exclude(
                 task_id,
@@ -728,7 +724,7 @@ def register_task_routes(
         )
 
     @app.post("/tasks/{task_id}/reset")
-    def reset(task_id: str, body: ResetBody) -> dict:
+    def reset(task_id: str, body: ResetBody) -> dict[str, Any]:
         return _guard(
             lambda: queue.reset(
                 task_id,
@@ -741,7 +737,7 @@ def register_task_routes(
         )
 
     @app.post("/tasks/{task_id}/confirm")
-    def confirm(task_id: str, body: ConfirmBody) -> dict:
+    def confirm(task_id: str, body: ConfirmBody) -> dict[str, Any]:
         return _guard(
             lambda: queue.confirm(
                 task_id,
@@ -753,7 +749,7 @@ def register_task_routes(
         )
 
     @app.post("/tasks/{task_id}/reopen")
-    def reopen(task_id: str, body: ReopenBody) -> dict:
+    def reopen(task_id: str, body: ReopenBody) -> dict[str, Any]:
         return _guard(
             lambda: queue.reopen_completed(
                 task_id,
@@ -767,8 +763,10 @@ def register_task_routes(
         )
 
     @app.post("/tasks/{task_id}/heartbeat")
-    def heartbeat(task_id: str, body: WorkerBody, request: Request) -> dict:
+    def heartbeat(task_id: str, body: WorkerBody, request: Request) -> dict[str, Any]:
         worker_id, session_id = _resolve_task_authority(request, task_id, body.worker_id)
+        if worker_id is None:
+            raise HTTPException(403, detail="missing task worker identity")
         return _guard(
             lambda: queue.heartbeat(
                 task_id, worker_id,
@@ -778,7 +776,7 @@ def register_task_routes(
         )
 
     @app.post("/tasks/{task_id}/activity")
-    def activity(task_id: str, body: ActivityBody) -> dict:
+    def activity(task_id: str, body: ActivityBody) -> dict[str, Any]:
         return _guard(
             lambda: queue.set_activity(
                 task_id, body.activity, reservation_key=body.reservation_key,
@@ -789,7 +787,7 @@ def register_task_routes(
         )
 
     @app.post("/tasks/{task_id}/owner-session")
-    def bind_owner_session(task_id: str, body: OwnerSessionBody) -> dict:
+    def bind_owner_session(task_id: str, body: OwnerSessionBody) -> dict[str, Any]:
         return _guard(
             lambda: queue.bind_owner_session(
                 task_id,
@@ -801,8 +799,10 @@ def register_task_routes(
         )
 
     @app.post("/tasks/{task_id}/progress")
-    def progress(task_id: str, body: ProgressBody, request: Request) -> dict:
+    def progress(task_id: str, body: ProgressBody, request: Request) -> dict[str, Any]:
         worker_id, session_id = _resolve_task_authority(request, task_id, body.worker_id)
+        if worker_id is None:
+            raise HTTPException(403, detail="missing task worker identity")
         return _guard(
             lambda: queue.record_progress(
                 task_id,
@@ -818,18 +818,18 @@ def register_task_routes(
         )
 
     @app.post("/tasks/{task_id}/detach")
-    def detach(task_id: str) -> dict:
+    def detach(task_id: str) -> dict[str, Any]:
         return _guard(lambda: queue.detach(task_id), "task.detached")
 
     @app.post("/tasks/{task_id}/card")
-    def set_card(task_id: str, body: CardBody) -> dict:
+    def set_card(task_id: str, body: CardBody) -> dict[str, Any]:
         return _guard(
             lambda: queue.set_card(task_id, body.worker_id, card=body.card),
             "task.card",
         )
 
     @app.post("/tasks/{task_id}/steer")
-    def steer(task_id: str, body: SteerBody) -> dict:
+    def steer(task_id: str, body: SteerBody) -> dict[str, Any]:
         message = steer_wake_message(task_id, body.message)
         try:
             request_id = body.idempotency_key or (
@@ -868,13 +868,13 @@ def register_task_routes(
         }
 
     @app.post("/tasks/{task_id}/steer/guarded")
-    def guarded_steer(task_id: str, body: SteerBody) -> dict:
+    def guarded_steer(task_id: str, body: SteerBody) -> dict[str, Any]:
         if not body.expected_revision:
             raise HTTPException(status_code=422, detail="expected_revision is required for guarded steering")
         return steer(task_id, body)
 
     @app.get("/tasks/{task_id}/steer-receipt")
-    def get_steer_receipt(task_id: str, request_id: str) -> dict:
+    def get_steer_receipt(task_id: str, request_id: str) -> dict[str, Any]:
         _require(queue.get(task_id))
         try:
             receipt = queue.steer_receipt(task_id, request_id)
@@ -884,7 +884,7 @@ def register_task_routes(
             raise HTTPException(status_code=404, detail="no such steering receipt")
         return receipt
 
-    def _require_steering_scope(expected: dict) -> dict:
+    def _require_steering_scope(expected: dict[str, Any]) -> dict[str, Any]:
         scope = _draft_scope(queue)
         if expected != scope:
             raise HTTPException(
@@ -893,35 +893,35 @@ def register_task_routes(
         return scope
 
     @app.post("/tasks/{task_id}/steer/scoped")
-    def scoped_steer(task_id: str, body: ScopedSteerBody) -> dict:
+    def scoped_steer(task_id: str, body: ScopedSteerBody) -> dict[str, Any]:
         scope = _require_steering_scope(body.expected_scope.model_dump())
         return {**steer(task_id, body), "steering_scope": scope}
 
     @app.get("/tasks/{task_id}/steer-receipt/scoped")
     def scoped_steer_receipt(
         task_id: str, request_id: str, queue: str, installation: str, machine: str,
-    ) -> dict:
+    ) -> dict[str, Any]:
         scope = _require_steering_scope({
             "queue": queue, "installation": installation, "machine": machine,
         })
         return {**get_steer_receipt(task_id, request_id), "steering_scope": scope}
 
     @app.post("/tasks/{task_id}/card-draft")
-    def save_card_draft(task_id: str, body: CardDraftBody) -> dict:
+    def save_card_draft(task_id: str, body: CardDraftBody) -> dict[str, Any]:
         return _guard(
             lambda: queue.save_card_draft(task_id, fields=body.fields),
             "task.card_draft",
         )
 
     @app.delete("/tasks/{task_id}/card-draft")
-    def clear_card_draft(task_id: str) -> dict:
+    def clear_card_draft(task_id: str) -> dict[str, Any]:
         return _guard(
             lambda: queue.clear_card_draft(task_id),
             "task.card_draft_cleared",
         )
 
     @app.post("/tasks/{task_id}/card-draft/guarded")
-    def save_guarded_card_draft(task_id: str, body: GuardedCardDraftBody) -> dict:
+    def save_guarded_card_draft(task_id: str, body: GuardedCardDraftBody) -> dict[str, Any]:
         return _guard(
             lambda: queue.save_card_draft(
                 task_id, fields=body.fields, expected_revision=body.expected_revision,
@@ -931,7 +931,7 @@ def register_task_routes(
         )
 
     @app.post("/tasks/{task_id}/card-draft/guarded-clear")
-    def clear_guarded_card_draft(task_id: str, body: GuardedCardDraftBody) -> dict:
+    def clear_guarded_card_draft(task_id: str, body: GuardedCardDraftBody) -> dict[str, Any]:
         return _guard(
             lambda: queue.clear_card_draft(
                 task_id, expected_revision=body.expected_revision,
@@ -940,7 +940,7 @@ def register_task_routes(
             "task.card_draft_cleared",
         )
 
-    def _scoped_draft(task_id: str, body: ScopedCardDraftBody, *, clear: bool) -> dict:
+    def _scoped_draft(task_id: str, body: ScopedCardDraftBody, *, clear: bool) -> dict[str, Any]:
         scope = _draft_scope(queue)
         if body.expected_queue_id != scope["queue"]:
             raise HTTPException(status_code=409, detail="draft belongs to another queue; refresh before retrying")
@@ -949,15 +949,15 @@ def register_task_routes(
         return result
 
     @app.post("/tasks/{task_id}/card-draft/scoped")
-    def save_scoped_card_draft(task_id: str, body: ScopedCardDraftBody) -> dict:
+    def save_scoped_card_draft(task_id: str, body: ScopedCardDraftBody) -> dict[str, Any]:
         return _scoped_draft(task_id, body, clear=False)
 
     @app.post("/tasks/{task_id}/card-draft/scoped-clear")
-    def clear_scoped_card_draft(task_id: str, body: ScopedCardDraftBody) -> dict:
+    def clear_scoped_card_draft(task_id: str, body: ScopedCardDraftBody) -> dict[str, Any]:
         return _scoped_draft(task_id, body, clear=True)
 
     @app.post("/tasks/{task_id}/steer/take")
-    def steer_take(task_id: str, body: SteerTakeBody) -> dict:
+    def steer_take(task_id: str, body: SteerTakeBody) -> dict[str, Any]:
         try:
             steer = queue.take_steer(
                 task_id, body.worker_id, all_pending=body.all_pending
@@ -975,12 +975,12 @@ def register_task_routes(
         return {"task_id": task_id, key: steer}
 
     @app.get("/tasks/{task_id}/steer-log")
-    def get_steer_log(task_id: str) -> list[dict]:
+    def get_steer_log(task_id: str) -> list[dict[str, Any]]:
         _require(queue.get(task_id))
         return queue.steer_log(task_id)
 
     @app.post("/recover")
-    def recover() -> dict:
+    def recover() -> dict[str, Any]:
         counts = queue.reconcile_liveness()
         # Manual recovery can requeue, suspend, or dead-letter rows: publish
         # a content-free wake so the agent-dispatch relay's `--subscribe`

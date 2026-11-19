@@ -21,6 +21,24 @@ remote pin, a stale lease, and unknown/failing command health. The stale
 threshold includes two declared intervals plus the command timeout.
 Staleness is evidence for investigation, not proof that the holder died.
 
+For JSON command sources, inspect the emitter and coordinator stderr logs.
+`emitter.source_read` counts the candidates actually returned by a successful
+source read (including zero); it does not count every open PR. For each
+`emitter.candidate`, follow its `key_ref` and `emitter_ref` to
+`dispatch.create_result`. The coordinator reports the committed disposition:
+`created`, `deduplicated` or `replayed`. `emitter.task_result` records the task
+ID observed by the emitter, not another creation. `unconfirmed` means the
+caller did not confirm an outcome; check the existing receipt and original
+task before retrying. A managed lookup may observe an existing task without
+sending a create request. Concurrent reads can overlap: matching keys identify
+the same logical work, not necessarily a unique call.
+
+For a PR-review descriptor the trace includes its PR number and valid observed
+head SHA. It never includes task text, raw dedup keys, command arguments,
+environment or source response bodies. Follow the task ID into its queue
+events, reservation and wake records. A returned task is not a worker start;
+a pending wake is not delivery, finalization or submission.
+
 After independently confirming the intended migration and that no old command
 is in flight, explicitly authorize recovery using the observed holder:
 
