@@ -106,9 +106,12 @@ Report per-resource partial outcomes without releasing unresolved custody.
 
 - [x] R0 Review and merge this subplan before runtime implementation.
       #13280 merged after exact-head approval and required checks.
-- [ ] R1 Deliver explicit retained finalization and runtime support declaration.
-- [ ] R2 Deliver retained relationship discovery without changing obligations.
-- [ ] R3 Deliver selected test-cache/source-lifetime disposition.
+- [x] R1 Deliver explicit retained finalization and runtime support declaration.
+      Source #13314 merged; installed adoption is separate.
+- [x] R2 Deliver retained relationship discovery without changing obligations.
+      Source #13314 merged with bounded native consumer evidence.
+- [x] R3 Deliver selected test-cache/source-lifetime disposition.
+      Source #13314 merged; existing legacy caches remain outside retirement.
 - [ ] R4 Complete native consumer and legacy-protection qualification.
 - [ ] R5 Publish reality documentation, reconcile parent acceptance and preserve
       release/adopter obligations without claiming an unperformed rollout.
@@ -275,3 +278,35 @@ packet, current-head CI and review before merge. Earlier native Windows
 qualification includes 140 published-head CLI/recovery cases in
 [run 44417101889](https://github.com/ThomasMichon/copilot-extensions/actions/runs/44417101889);
 updated native qualification is still separate from those prior results.
+
+### 2026-11-19 - Complete-history rescue candidate
+
+#13314 merged the retained-resource core after current-head approval and passing
+required checks. R1-R3 are source-delivered, not installed adoption. R4/RV5
+remain open for the complete legacy-protection and rescue qualification.
+
+The bounded format-2 rescue candidate reuses Worktrees' actual allocation owner,
+verifies a complete export and binds its original store identity and history.
+It reserves a fenced destination, commits the source writer fence and recovery
+record, then activates the copied tables in one transaction. Matching retries
+preserve later accepted work; provider presentation additions do not change
+stable placement identity. Unsupported manual JSON and format-1 lanes remain
+protected. No operator data, installed selection or checkout has been moved or
+deleted by this source candidate.
+
+The native Linux allocator/rescue/parser/independent-reader selection passed
+21 cases within its original deadlines. The preceding agenda compatibility
+packet passed 322 cases with two platform skips on Linux and 259 with 65 skips
+on Windows. The source now also has bounded-recovery and additive-metadata
+controls; those final controls require refreshed source checks before
+publication. The broad packet does not substitute for the separate required
+unit-only CI, current-head review or installed/adopter evidence.
+
+Documentation impact: the Efforts entrypoint and command references now name
+the explicit rescue procedure, unsupported legacy states, durable cutover,
+unknown outcomes and retained evidence. Contract impact: the optional helper
+advertises `agenda-managed-rescue-v1` independently, reuses the existing
+`worktree-data-v1` provider contract and leaves fresh initialization and ordinary
+format-2 commands compatible. Old readers refuse the fenced source through
+their existing transaction-time format check; the new destination remains
+ordinary format 2. Source adoption does not require peers to upgrade together.

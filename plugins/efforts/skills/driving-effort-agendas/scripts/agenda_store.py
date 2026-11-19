@@ -21,6 +21,7 @@ import agenda_migration
 DATABASE = "agenda.sqlite3"
 SCHEMA = "efforts.agenda-request"
 MAX_REVISION = (1 << 63) - 1
+RELOCATED_VERSION = 0x41524731
 
 
 def _revision(value: Any, label: str, *, increment: bool = False) -> int:
@@ -100,7 +101,7 @@ def validate_documents(home: Path, documents: Any) -> Snapshot:
         name = board_name(home, name)
         if name not in boards:
             raise AgendaError(f"missing referenced board: {name}")
-        return boards[name]
+        return _object(boards[name], "referenced board")
 
     queue = cursor.get("queue")
     if not isinstance(queue, list):
@@ -167,9 +168,12 @@ def _schema(db: sqlite3.Connection) -> None:
 
 @contextmanager
 def transaction(home: Path, *, create: bool = False, write: bool = False,
-                store_version: int | None = None, readonly: bool = False) -> Iterator[sqlite3.Connection]:
+                store_version: int | None = None, readonly: bool = False,
+                relocation: bool = False) -> Iterator[sqlite3.Connection]:
     if readonly and (create or write):
         raise AgendaError("read-only agenda transactions cannot create or write")
+    if relocation and (create or store_version is not None):
+        raise AgendaError("relocation access cannot initialize or select an execution policy")
     home = safe_path(home, directory=True)
     if not home.is_dir():
         raise AgendaError("explicit state home must already exist")
@@ -191,7 +195,7 @@ def transaction(home: Path, *, create: bool = False, write: bool = False,
             db.execute("PRAGMA synchronous=FULL")
             # SQLite owns journal fsync and commit ordering; sync a newly-created directory entry.
             if create and os.name == "posix":
-                fd = os.open(home, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+                fd = os.open(home, os.O_RDONLY | getattr(os, "O_DIRECTORY") | getattr(os, "O_NOFOLLOW"))
                 try:
                     os.fsync(fd)
                 finally:
@@ -203,7 +207,8 @@ def transaction(home: Path, *, create: bool = False, write: bool = False,
             if version == 0 and not create and (home / agenda_migration.RECOVERY).exists():
                 raise AgendaError("initialization interrupted; retry the saved init request in "
                                   "agenda.init-recovery.json; never restore stale cursor.json")
-            if version not in (0, 1, 2) or (version == 0 and not create):
+            versions = (2, RELOCATED_VERSION) if relocation else (0, 1, 2)
+            if version not in versions or (version == 0 and not create):
                 raise AgendaError("unsupported or uninitialized agenda store version")
             if store_version is not None and version not in (0, store_version):
                 raise AgendaError("request and store execution policy versions disagree; no automatic migration")
