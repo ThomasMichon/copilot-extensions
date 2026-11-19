@@ -243,45 +243,28 @@ def _ensure_retired_daemon_exited(
 
 
 def _pid_is_agent_bridge(pid: int, timeout: float = 15.0) -> bool:
-    """True if *pid* has a supported Bridge daemon entrypoint command line."""
+    """Recognize native OS arguments without starting a shell inside a probe."""
     if pid <= 0:
         return False
-    import subprocess as sp
 
-    from .service_process_identity import bridge_daemon_argv, split_windows_command
+    from .service_process_identity import bridge_daemon_argv
 
     try:
-        if sys.platform == "win32":
-            out = sp.run(
-                [
-                    _powershell_host(),
-                    "-NoProfile",
-                    "-NonInteractive",
-                    "-Command",
-                    "(Get-CimInstance Win32_Process -Filter "
-                    f"'ProcessId={pid}' -ErrorAction SilentlyContinue).CommandLine",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                **_core().no_window_kwargs(),
-            )
-            return out.returncode == 0 and bool((out.stdout or "").strip()) and bridge_daemon_argv(
-                split_windows_command((out.stdout or "").strip()),
-            )
-        try:
-            with open(f"/proc/{pid}/cmdline", "rb") as fh:
-                return bridge_daemon_argv(
-                    [os.fsdecode(argument) for argument in fh.read().rstrip(b"\0").split(b"\0")],
-                )
-        except OSError:
-            import psutil
-
+        if sys.platform != "win32":
             try:
-                return bridge_daemon_argv(psutil.Process(pid).cmdline())
-            except psutil.Error:
-                return False
-    except (OSError, sp.TimeoutExpired, ValueError):
+                with open(f"/proc/{pid}/cmdline", "rb") as fh:
+                    return bridge_daemon_argv(
+                        [os.fsdecode(argument) for argument in fh.read().rstrip(b"\0").split(b"\0")],
+                    )
+            except OSError:
+                pass
+        import psutil
+
+        try:
+            return bridge_daemon_argv(psutil.Process(pid).cmdline())
+        except psutil.Error:
+            return False
+    except (OSError, ValueError):
         return False
 
 

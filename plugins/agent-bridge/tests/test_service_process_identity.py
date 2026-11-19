@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import subprocess
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -144,37 +145,80 @@ def test_pid_guard_native_argument_fallback(monkeypatch, arguments, expected):
     assert service._pid_is_agent_bridge(1234, timeout=2) is expected
 
 
-@pytest.mark.parametrize(("output", "returncode", "expected"), [
-    ("console", 0, True), ("module", 0, True),
-    ("unrelated", 0, False), ("console", 1, False), ("", 0, False),
+@pytest.mark.parametrize(("arguments", "expected"), [
+    (["python.exe", r"C:\Runtime\Scripts\agent-bridge.exe", "start"], True),
+    (["pythonw.exe", "-m", "agent_bridge", "start"], True),
+    (["python.exe", "other.py", "agent_bridge", "start"], False),
+    ([], False),
 ])
-def test_windows_pid_guard_is_bounded_and_headless(monkeypatch, output, returncode, expected):
-    observed = []
-    monkeypatch.setattr(service.sys, "platform", "win32")
-    monkeypatch.setattr(service, "_powershell_host", lambda: "pwsh")
-    monkeypatch.setattr(
-        service, "_core", lambda: SimpleNamespace(no_window_kwargs=lambda: {"creationflags": 123}),
+def test_windows_pid_guard_observes_native_arguments_with_short_probe(
+    monkeypatch: pytest.MonkeyPatch, arguments: list[str], expected: bool,
+) -> None:
+    import psutil
+
+    monkeypatch.setattr(service, "sys", SimpleNamespace(platform="win32"))
+    monkeypatch.setattr(identity, "sys", SimpleNamespace(platform="win32"))
+
+    def process(pid: int) -> SimpleNamespace:
+        assert pid == 1234
+        return SimpleNamespace(cmdline=lambda: arguments)
+
+    def slow_shell(*_args: object, **_kwargs: object) -> None:
+        raise subprocess.TimeoutExpired("powershell", 1.0)
+
+    monkeypatch.setattr(psutil, "Process", process)
+    monkeypatch.setattr(subprocess, "run", slow_shell)
+    assert service._pid_is_agent_bridge(1234, timeout=1.0) is expected
+
+
+@pytest.mark.parametrize("failure", ["missing", "denied"])
+def test_windows_pid_guard_refuses_unavailable_native_process(
+    monkeypatch: pytest.MonkeyPatch, failure: str,
+) -> None:
+    import psutil
+
+    monkeypatch.setattr(service, "sys", SimpleNamespace(platform="win32"))
+
+    def unavailable(pid: int) -> psutil.Process:
+        assert pid == 1234
+        if failure == "missing":
+            raise psutil.NoSuchProcess(pid)
+        raise psutil.AccessDenied(pid)
+
+    def no_shell(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("unavailable native identity must not launch another observer")
+
+    monkeypatch.setattr(psutil, "Process", unavailable)
+    monkeypatch.setattr(subprocess, "run", no_shell)
+    assert service._pid_is_agent_bridge(1234, timeout=1.0) is False
+    assert service._pid_is_agent_bridge(0, timeout=1.0) is False
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="native Windows process observation")
+@pytest.mark.parametrize(("name", "command", "expected"), [
+    ("agent-bridge", "start", True),
+    ("agent-bridge", "status", False),
+    ("other", "start", False),
+])
+def test_windows_pid_guard_reads_real_process_arguments(
+    tmp_path: Path, name: str, command: str, expected: bool,
+) -> None:
+    script = tmp_path / name
+    script.write_text("import time; time.sleep(30)\n", encoding="utf-8")
+    process = subprocess.Popen(
+        [sys.executable, str(script), command],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        creationflags=subprocess.CREATE_NO_WINDOW,
     )
-
-    def split(command):
-        return {
-            "console": ["python.exe", r"C:\Runtime\Scripts\agent-bridge.exe", "start"],
-            "module": ["pythonw.exe", "-m", "agent_bridge", "start"],
-            "unrelated": ["python.exe", "other.py", "agent_bridge", "start"],
-        }[command]
-
-    def run(command, **kwargs):
-        assert command[0] == "pwsh"
-        assert "-NonInteractive" in command
-        assert kwargs["creationflags"] == 123
-        assert kwargs["timeout"] == 2
-        observed.append(command)
-        return SimpleNamespace(stdout=output, returncode=returncode)
-
-    monkeypatch.setattr(identity, "split_windows_command", split)
-    monkeypatch.setattr(subprocess, "run", run)
-    assert service._pid_is_agent_bridge(1234, timeout=2) is expected
-    assert len(observed) == 1
+    try:
+        assert process.poll() is None
+        assert service._pid_is_agent_bridge(process.pid, timeout=1.0) is expected
+    finally:
+        if process.poll() is None:
+            process.terminate()
+        process.wait(timeout=10)
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX native fallback observation")

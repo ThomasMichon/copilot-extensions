@@ -600,6 +600,13 @@ for the compatibility, cwd and acceptance boundaries.
 
 ### Platform-Specific Service Management
 
+Daemon PID observation uses native OS argument vectors and the same exact
+Bridge entrypoint parser on every platform. Windows uses the existing native
+process-query dependency instead of starting PowerShell/CIM within each short
+liveness probe. Missing, inaccessible or unrecognized processes remain negative
+observations; process recognition does not replace the serving-health check.
+Startup and launch-grace limits are unchanged.
+
 | Platform | Service manager | Install location | Config |
 |----------|----------------|-----------------|--------|
 | Windows | Scheduled task + PID | `~/.agent-bridge/` | At-logon, 15s delay |

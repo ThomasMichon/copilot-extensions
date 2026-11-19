@@ -1,0 +1,9 @@
+{
+  "comment": "Observe Windows daemon arguments natively without shell startup inside liveness probes.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
