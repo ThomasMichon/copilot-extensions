@@ -8129,6 +8129,14 @@ listing, including no-call files and invalid inputs.
 
 `tools/run-promotion-unit-tests.py` executes only the exact nodes declared by
 `tools/promotion-unit-manifest.json`, in one Python process with coverage.
+Ten namespace capability controls use the actual Bridge namespace decoder
+and shared declarations with substituted provider bytes. They preserve true,
+false, null and legacy omission and reject numeric/string/container values
+without a provider process, socket or actor. The separate Bridge
+`tests/test_catalog_worktree_capability.py` packet exercises actual cached
+HTTP/detail consumers, names/aliases, malformed-source last-good retention
+and provider rollback. Passive capability does not replace dispatch admission;
+neither packet establishes installed adoption or runs a live provider.
 The create-only attachment controls in `test_vault_attachment_import.py` execute
 the actual import-owner, CLI-dispatch and backend bodies with inert storage,
 lock, transport and temporary-file owners. Collision, failed/unknown creation,

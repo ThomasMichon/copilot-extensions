@@ -594,6 +594,26 @@ the atomic boundary. A malformed selected registration is not permission to
 overwrite it or stop a healthy incumbent. Legacy-list decoding retains its
 original restore semantics.
 
+The shared storage owner now observes the fixed-path
+`watch-state-transition.json` marker before state reads and before atomic
+replacement. Its internal version-1 header uses schema
+`agent-pull-requests.watch-state-transition` and phases `prepared`,
+`sealed-legacy`, `import-ready` and `active`. Reading a phase establishes
+neither sealing nor custody. This groundwork refuses **every** present
+transition rather than selecting the legacy file or isolated candidate.
+Malformed, linked, oversized or unreadable markers also refuse. An
+unjournaled historical-lock directory, retained transition lock, staged
+barrier or `watch-state` path is not ordinary absence. Missing transition
+evidence preserves existing legacy behavior, including a regular historical
+lease file; inspecting an empty root does not create it.
+
+No publisher or migration command creates these markers yet. Do not write
+one by hand or delete transition evidence to regain startup. Guarded
+preparation, physical sealing, boot qualification, authority validation and
+recovery are separate, still-unimplemented steps; this receiver alone does
+not make any transition phase usable. It performs no boot probe, lease
+transfer or automatic migration, and does not change installation selection.
+
 This is a receiver expansion baseline, not a migration tool, map/callback-cwd
 support or a cross-process writer lease. Existing writer/lifecycle ownership remains required.
 It does not retrofit historical executables that overwrite unknown state.

@@ -23,7 +23,84 @@ def storage(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     module = importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules, spec.name, module)
     spec.loader.exec_module(module)
+    monkeypatch.setattr(module, "_regular_bytes", lambda _path: None)
+
+    def missing(_path: Path, **_kwargs: Any) -> Any:
+        raise FileNotFoundError
+
+    monkeypatch.setattr(Path, "stat", missing)
     return module
+
+
+@pytest.mark.parametrize("phase", ["prepared", "sealed-legacy", "import-ready", "active"])
+def test_recorded_transition_never_selects_either_subscription_authority(
+    storage: Any, monkeypatch: pytest.MonkeyPatch, phase: str,
+) -> None:
+    raw = json.dumps({
+        "schema": "agent-pull-requests.watch-state-transition", "version": 1, "phase": phase,
+        "untrustedPath": "must-not-be-followed",
+    }).encode()
+    monkeypatch.setattr(storage, "_regular_bytes", lambda _path: raw)
+    monkeypatch.setattr(
+        Path, "read_text", lambda *_args, **_kwargs: pytest.fail("must not read a subscription file"),
+    )
+    monkeypatch.setattr(
+        storage, "_atomic_write_json",
+        lambda *_args, **_kwargs: pytest.fail("must not begin a subscription write"),
+    )
+    root = Path("fixture-state")
+    assert storage.read_transition_phase(root) == phase
+    with pytest.raises(ValueError, match="watch state transition"):
+        storage.read_subscriptions_state(root)
+    with pytest.raises(storage.StateWriteRefused, match="watch state transition"):
+        storage.write_subscriptions_state([], root)
+
+
+def test_transition_is_rechecked_at_the_final_storage_boundary(
+    storage: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    current: list[bytes | None] = [None]
+    monkeypatch.setattr(storage, "_regular_bytes", lambda _path: current[0])
+    monkeypatch.setattr(Path, "read_text", lambda *_args, **_kwargs: "[]")
+
+    def atomic(_path: Path, _entries: object, *, before_replace: Callable[[], None]) -> None:
+        current[0] = json.dumps({
+            "schema": "agent-pull-requests.watch-state-transition",
+            "version": 1, "phase": "prepared",
+        }).encode()
+        before_replace()
+        pytest.fail("a newly prepared transition must prevent replacement")
+
+    monkeypatch.setattr(storage, "_atomic_write_json", atomic)
+    with pytest.raises(storage.StateWriteRefused, match="watch state transition"):
+        storage.write_subscriptions_state([], Path("fixture-state"))
+
+
+@pytest.mark.parametrize("artifact", ["barrier", "retained", "staging", "reparse"])
+def test_unjournaled_transition_is_not_legacy_absence(
+    storage: Any, monkeypatch: pytest.MonkeyPatch, artifact: str,
+) -> None:
+    import stat
+    from types import SimpleNamespace
+
+    names = {
+        "barrier": "agent-pull-requests-watch.lock",
+        "retained": "watch-state-transition.legacy.lock",
+        "staging": "watch-state",
+        "reparse": "agent-pull-requests-watch.lock",
+    }
+
+    def info(path: Path, **_kwargs: Any) -> Any:
+        if path.name != names[artifact]:
+            raise FileNotFoundError
+        return SimpleNamespace(
+            st_mode=stat.S_IFREG if artifact == "reparse" else stat.S_IFDIR,
+            st_file_attributes=0x400 if artifact == "reparse" else 0,
+        )
+
+    monkeypatch.setattr(Path, "stat", info)
+    with pytest.raises(ValueError, match="watch state transition"):
+        storage.read_subscriptions_state(Path("fixture-state"))
 
 
 @pytest.mark.parametrize("document,reason", [

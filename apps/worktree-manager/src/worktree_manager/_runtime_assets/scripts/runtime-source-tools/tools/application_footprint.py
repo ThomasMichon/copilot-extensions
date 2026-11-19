@@ -260,6 +260,32 @@ def export(
     return destination
 
 
+def source_line(repository: Path, commit: str, *, deadline: float) -> tuple[str, str]:
+    """Classify an exact object against the fetched release and development tips."""
+    import prepare_runtime_source as source
+
+    if not source._OBJECT_ID.fullmatch(commit):
+        raise ValueError("automatic source selection requires a full commit ID")
+    repository = repository.resolve(strict=True)
+
+    def git(*args: str) -> str:
+        return source._git(repository, *args, deadline=deadline)
+
+    if git("rev-parse", "--verify", f"{commit}^{{commit}}") != commit:
+        raise ValueError("automatic source selection did not resolve the exact commit")
+    if git("rev-parse", "--is-shallow-repository") != "false":
+        raise ValueError("automatic source selection requires complete Main and Dev history")
+    tips = {line: git("rev-parse", "--verify", f"refs/remotes/origin/{line}^{{commit}}")
+            for line in ("main", "dev")}
+    matches = [
+        line for line, tip in tips.items()
+        if not git("rev-list", "--max-count=1", commit, "--not", tip)
+    ]
+    if len(matches) != 1:
+        raise ValueError("commit does not uniquely identify fetched Main or Dev; select an explicit source mode")
+    return matches[0], tips["main"]
+
+
 def main(argv: list[str] | None = None) -> int:
     """Prepare the reference through the existing promotion owner, then export."""
     import local_install_source as preparation
@@ -267,8 +293,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     parser.add_argument("--source-checkout", type=Path, required=True)
     parser.add_argument("--source-commit", required=True)
-    parser.add_argument("--main-head", required=True)
-    parser.add_argument("--branch", choices=("main", "dev", "wip"), required=True)
+    parser.add_argument("--main-head", help="Main seed; inferred from fetched Main in automatic mode")
+    parser.add_argument("--branch", choices=("main", "dev", "wip"),
+                        help="Omit to classify an exact commit by fetched Main/Dev ancestry")
     parser.add_argument("--dev-head", help="Fetched Dev ancestor of an explicitly frozen WIP commit")
     parser.add_argument("--source-descriptor", help="Existing installation source descriptor as JSON")
     parser.add_argument("--output", type=Path, required=True)
@@ -278,12 +305,19 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--timeout must be finite seconds in (0, 7200]")
     if (args.branch == "wip") != (args.dev_head is not None):
         parser.error("--dev-head is required only with --branch wip")
+    if args.branch is not None and args.main_head is None:
+        parser.error("--main-head is required with an explicit --branch")
     if args.branch == "wip" and args.source_descriptor is not None:
         parser.error("--source-descriptor applies to Main/Dev acquisition, not frozen WIP")
     uv = shutil.which("uv")
     if uv is None:
         parser.error("application preparation requires uv on PATH")
     deadline = time.monotonic() + args.timeout
+    if args.branch is None:
+        args.branch, main_tip = source_line(args.source_checkout, args.source_commit, deadline=deadline)
+        if args.main_head is not None and args.main_head != main_tip:
+            parser.error("--main-head differs from fetched Main in automatic mode")
+        args.main_head = main_tip
     with redirect_stdout(sys.stderr):
         if args.branch == "wip":
             snapshots = prepare_frozen(

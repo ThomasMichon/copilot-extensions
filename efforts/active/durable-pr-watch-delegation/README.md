@@ -803,10 +803,16 @@ landed in #13320 with epoch-aware admission, strict registry validation and
 opaque-partition preservation. Physical
 historical-writer isolation and recoverable migration remain prerequisites to
 publishing versioned state or enabling context registrations.
-The [physical transition proposal](subscriber-state-transition.md) adds the
-operator-accepted POSIX boot boundary and proposed Windows sealing/recovery
-mechanics; normal review precedes its runtime realization. Its native
-open-handle experiment is not complete transition or historical-install proof.
+The [physical transition design](subscriber-state-transition.md), reviewed in
+#13493, adds the operator-accepted POSIX boot boundary and Windows
+sealing/recovery requirements. Runtime realization follows that accepted
+design. Its native open-handle experiment is not complete transition or
+historical-install proof.
+The next receiver slice observes fixed transition paths and the phase header
+through shared storage, preserving absent-transition legacy behavior and
+refusing every present or orphaned transition before legacy reads/writes.
+Guarded recovery and authority selection remain unimplemented; no phase,
+map/cwd capability or new state publisher is activated.
 
 #6019 already delivered outage-independent expiry and the acknowledged-delivery
 foundation. Preserve that positive credit; the unchecked rows below retain
