@@ -2,6 +2,9 @@
     "profile": "copilot-extensions.promotion-units/v1",
     "max_seconds": 300,
     "nodes": [
+        "tools/promotion_unit_tests/test_watch_preparation.py::test_inherited_lease_release_closes_without_unlocking_parent[False]",
+        "tools/promotion_unit_tests/test_watch_preparation.py::test_inherited_lease_release_closes_without_unlocking_parent[True]",
+        "tools/promotion_unit_tests/test_watch_preparation.py::test_preparation_checks_deadline_after_the_last_journal_read",
         "tools/promotion_unit_tests/test_watch_preparation.py::test_preparation_commit_and_recovery_never_select_isolated_state",
         "tools/promotion_unit_tests/test_watch_preparation.py::test_preparation_rechecks_every_custody_boundary[scope]",
         "tools/promotion_unit_tests/test_watch_preparation.py::test_preparation_rechecks_every_custody_boundary[lease]",
@@ -6025,7 +6028,7 @@
         "plugins/agent-index/src/agent_index/indexing/acquisition_requirement.py": "c04cac55a9dd6682eb7d3e354c450b8488cdef6e0905f0a80874e781d124207c",
         "tools/promotion_unit_tests/test_checkout_disposition.py": "6fb76b462dbf84919ededfe62ecc181aa51533c61d71489b6d7dc140c70c8bc9",
         "plugins/agent-worktrees/src/agent_worktrees/prune.py": "933a34e607f4eebb34e967d8920132bf4695842f6e0897e19ff718daadcfe049",
-        "plugins/agent-pull-requests/src/agent_pull_requests/watch_storage.py": "58ced57e9aa322ae2b89d1c79addd8baa665fd15b0acf2d750e2c6179c899e9c",
+        "plugins/agent-pull-requests/src/agent_pull_requests/watch_storage.py": "04fdfaa78089ac14792490d8b36723b14f89f0de9fecf3a1d4692574298ecc32",
         "tools/promotion_unit_tests/test_watch_storage_contract.py": "ec615a7b615ef20546b79283e31b437e8917dfdfb9621b9a59dad2fa39556246",
         "plugins/agent-worktrees/src/agent_worktrees/git_process.py": "6cc675a4d988e7d1fd6b0d76a48fde5909f78f085ef194ec69625c6334b4f80f",
         "plugins/agent-worktrees/src/agent_worktrees/daemon_launch_context.py": "b8250e9aaef5fdc70f881b979d52d164c408aa08cf8322278be11569a01c3d30",
@@ -6300,7 +6303,7 @@
         "libs/remote-login-shell/src/remote_login_shell/__init__.py": "339e08c120b8310de198a3fa675e1089c2229e985e9389cc2f507eabd0b6ffe6",
         "libs/remote-login-shell/tests/test_remote_login_shell.py": "90207324577ffe76445016c76643e66130017d4d90d7a9d4dcf6ebafeb030952",
         "libs/single-instance-lease/src/single_instance_lease/__init__.py": "be9bdd78ca0093a72b68f8f2fd6098166a737e1b5c2bd3b94c08c866807702b9",
-        "libs/single-instance-lease/src/single_instance_lease/lease.py": "4f824f5654b875bb2361e09831fe4e9be1747190b4024a6b3aadc7485a5624db",
+        "libs/single-instance-lease/src/single_instance_lease/lease.py": "12fd3a842448e1118f9c5605d5cae40b207e39e23eaf874a933ccb71f26f0dc3",
         "libs/single-instance-lease/src/single_instance_lease/operation.py": "77f77b782bf5976805659d6fd50b6b38fc8c68b84e3aa8122dc36f32dbafe13e",
         "libs/single-instance-lease/src/single_instance_lease/reaper.py": "d1dd3e91b7f526c84bfc1ff4a141915ecbc86312758b69693b7d79082f66f914",
         "libs/single-instance-lease/src/single_instance_lease/supersession.py": "d5d910ad8133514fb0bf46b07803b84092b582a4966faa70d011e93ce9ab431d",
@@ -6933,7 +6936,7 @@
         "libs/agent-procutil/src/agent_procutil/async_foreground.py": "ec3c91e2da4fb394da6bad935a6dea98dd7037f5de7b59091e94a90d0107b7a1",
         "libs/agent-procutil/src/agent_procutil/python_cache_legacy.py": "258d2046cbdebb005cbb65cdbce0827121b896f17234d97b6585eafef3a6d14c",
         "libs/agent-procutil/src/agent_procutil/scratch.py": "3d4f488761f75b4e743feb22bbffaf8de903b39ed34be6a6bc2bc7c84a6af58f",
-        "plugins/agent-pull-requests/src/agent_pull_requests/watch_transition.py": "c7b89c10df6e2133ed2399c9f6e057fb5bb5caa689b6ae5ab75b7be081cfc293",
-        "tools/promotion_unit_tests/test_watch_preparation.py": "aad3830e18f82158bd488d410ad774953ab2be72e33169d14fd13bdfa470b273"
+        "plugins/agent-pull-requests/src/agent_pull_requests/watch_transition.py": "e4c77d5cfafdd1a629295cd0d6872a9a52bede695079bffd265ea1668d3403aa",
+        "tools/promotion_unit_tests/test_watch_preparation.py": "cc54e2062a6f3bf98d5f11242f3eb490174f68f6252582484dbc3a93bca10379"
     }
 }

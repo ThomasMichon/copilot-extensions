@@ -235,6 +235,17 @@ existing owner path; no process, filesystem scan or boot probe per callback.
 
 ### Guarded preparation candidate
 
+Preparation pins the prechecked historical inode through existing-only native
+acquisition, including descriptor/path comparison before PID publication.
+Native custody and strict legacy-entry validation run both before drain and
+at the final atomic drain-state replacement. A deadline check follows all
+final validation reads before marker publication. Incomplete drain preserves
+previous read readiness for authorized abort; completed quiescence disables
+it before publication, including uncertain publication. Proven custody loss
+or malformed legacy state invalidates readiness rather than licensing abort
+over rejected evidence. Inherited POSIX lease release never unlocks the
+parent's shared open-file description.
+
 The internal writer first revalidates its owner authorization and, when
 supplied, the pinned current `WatchInstallation`. It recognizes only an
 absent transition or a complete prepared record at the unchanged historical

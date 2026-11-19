@@ -175,7 +175,10 @@ class WatchDaemon:
     def _read_state(self) -> list[dict[str, Any]]:
         return read_watch_state(self._state_root)
 
-    def _persist(self, entries: list[dict[str, Any]] | None = None) -> None:
+    def _persist(
+        self, entries: list[dict[str, Any]] | None = None, *,
+        before_replace: Callable[[], None] | None = None,
+    ) -> None:
         """Serialize every persist call against every other -- multiple
         poller threads (any of them, firing concurrently, plus register/
         unregister from a control-plane handler thread) can all call this
@@ -189,7 +192,12 @@ class WatchDaemon:
         with self._persist_lock:
             try:
                 snapshot = self._registry.snapshot_state() if entries is None else entries
-                if self._state_root is None:
+                if before_replace is not None:
+                    _write_subscriptions_state(
+                        snapshot, self._state_root, validate=validate_versioned_entries,
+                        before_replace=before_replace,
+                    )
+                elif self._state_root is None:
                     write_subscriptions_state(snapshot)
                 else:
                     write_subscriptions_state(snapshot, self._state_root)
@@ -470,7 +478,10 @@ class WatchDaemon:
         if time.monotonic() >= deadline:
             raise TimeoutError("PR watch lifecycle deadline expired")
 
-    def quiesce(self, timeout: float = _SHUTDOWN_REQUEST_DEADLINE_S) -> None:
+    def quiesce(
+        self, timeout: float = _SHUTDOWN_REQUEST_DEADLINE_S, *,
+        before_persist: Callable[[], None] | None = None,
+    ) -> None:
         """Retain ownership until admitted writes and accepted callbacks have stopped."""
         with self._lifecycle_operation(timeout) as deadline:
             if self._lifecycle_shutdown_event.is_set():
@@ -482,7 +493,10 @@ class WatchDaemon:
             if self._lifecycle_shutdown_event.is_set():
                 raise RuntimeError("PR watch shutdown interrupted quiescence")
             if self._state_loaded:
-                self._persist()
+                if before_persist is None:
+                    self._persist()
+                else:
+                    self._persist(before_replace=before_persist)
             self._check_lifecycle_deadline(deadline)
             self._quiescent = True
 

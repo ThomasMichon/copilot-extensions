@@ -122,10 +122,43 @@ class WatchWriter:
         self, *, timeout: float, installation: WatchInstallation | None = None,
     ) -> dict[str, Any]:
         """Prepare explicitly under existing custody; never seal, import or activate."""
-        from .watch_transition import prepare, read_preparation
+        from .watch_registry import WatchRegistry
+        from .watch_storage import _read_subscriptions_state, watch_state_paths
+        from .watch_transition import _historical_identity, prepare, read_preparation
 
         with self._operation(timeout) as deadline:
             binding: dict[str, Any] = {"kind": "legacy", "stateRoot": str(self.root)}
+
+            def check_deadline() -> None:
+                self._remaining(deadline)
+
+            def validate_custody() -> None:
+                self._validate("prepare-state-transition", deadline)
+                if installation is not None:
+                    installation.require_current()
+                    if installation.state_root != self.root:
+                        raise PermissionError("watch preparation installation state root differs")
+                try:
+                    if self._lease.held_file_identity() != identity:
+                        raise PermissionError("watch preparation historical lease identity changed")
+                except PermissionError:
+                    self._read_ready = False
+                    raise
+                if read_preparation(self.root, binding) != prior:
+                    raise PermissionError("watch preparation journal changed during drain")
+                check_deadline()
+
+            def validate_legacy() -> None:
+                validate_custody()
+                try:
+                    WatchRegistry().restore_state(
+                        _read_subscriptions_state(watch_state_paths(self.root).legacy_subscriptions),
+                        strict=True,
+                    )
+                except ValueError:
+                    self._read_ready = False
+                    raise
+                validate_custody()
 
             def validate() -> None:
                 self._validate("prepare-state-transition", deadline)
@@ -135,6 +168,7 @@ class WatchWriter:
                         raise PermissionError("watch preparation installation state root differs")
                 if not self.daemon.quiescent or self.daemon.effects_enabled:
                     raise PermissionError("watch preparation requires completed quiescence")
+                check_deadline()
 
             self._validate("prepare-state-transition", deadline)
             if installation is not None:
@@ -142,14 +176,20 @@ class WatchWriter:
                 if installation.state_root != self.root:
                     raise PermissionError("watch preparation installation state root differs")
                 binding.update(kind="installation", installation=installation.evidence())
-            read_preparation(self.root, binding)
+            identity = _historical_identity(self.root)
+            prior = read_preparation(self.root, binding)
             if not self.writer_held:
-                self._lease.acquire()
-            self._read_ready = False
+                self._lease.acquire(expected_file_identity=identity)
+            validate_legacy()
             self._drain_started = True
             if not self.daemon.quiescent:
-                self.daemon.quiesce(timeout=self._remaining(deadline))
-            return prepare(self.root, binding, self._lease, validate=validate)
+                self.daemon.quiesce(
+                    timeout=self._remaining(deadline), before_persist=validate_legacy,
+                )
+            self._read_ready = False
+            return prepare(
+                self.root, binding, self._lease, validate=validate, check_deadline=check_deadline,
+            )
 
     def drain_and_release(self, *, timeout: float) -> None:
         """Never release on incomplete drain or failed post-drain authorization."""

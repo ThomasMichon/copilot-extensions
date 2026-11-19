@@ -1,6 +1,7 @@
 """Preparation retains the original native writer and never activates migration."""
 
 import json
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -203,3 +204,166 @@ def test_preparation_rechecks_authority_before_atomic_publication(
     assert calls == ["refused"]
     assert writer.writer_held
     assert not watch_state_paths(tmp_path).journal.exists()
+
+
+@pytest.mark.parametrize("change", ["missing", "replacement"])
+def test_preparation_pins_prechecked_inode_before_acquisition(
+    writer: WatchWriter, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str,
+) -> None:
+    paths = watch_state_paths(tmp_path)
+    paths.historical_lock.write_bytes(b"original")
+    acquire = writer._lease.acquire
+
+    def raced(**kwargs: Any) -> None:
+        paths.historical_lock.rename(tmp_path / "displaced.lock")
+        if change == "replacement":
+            paths.historical_lock.write_bytes(b"replacement")
+        acquire(**kwargs)
+
+    monkeypatch.setattr(writer._lease, "acquire", raced)
+    with pytest.raises((OSError, PermissionError)):
+        writer.prepare_state_transition(timeout=1)
+    assert not writer.writer_held
+    assert not paths.journal.exists()
+    assert (tmp_path / "displaced.lock").read_bytes() == b"original"
+    if change == "missing":
+        assert not paths.historical_lock.exists()
+    else:
+        assert paths.historical_lock.read_bytes() == b"replacement"
+
+
+@pytest.mark.parametrize("boundary", ["before-drain", "after-workers"])
+def test_preparation_preserves_malformed_legacy_entries(
+    writer: WatchWriter, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, boundary: str,
+) -> None:
+    writer.adopt(timeout=1)
+    writer.activate(timeout=1)
+    paths = watch_state_paths(tmp_path)
+    malformed = b"[17]\n"
+    if boundary == "before-drain":
+        paths.legacy_subscriptions.write_bytes(malformed)
+    else:
+        stop = writer.daemon._stop_workers
+
+        def changed(*args: Any, **kwargs: Any) -> None:
+            stop(*args, **kwargs)
+            paths.legacy_subscriptions.write_bytes(malformed)
+
+        monkeypatch.setattr(writer.daemon, "_stop_workers", changed)
+    with pytest.raises((ValueError, OSError)):
+        writer.prepare_state_transition(timeout=1)
+    assert paths.legacy_subscriptions.read_bytes() == malformed
+    assert not paths.journal.exists()
+
+
+def test_preparation_rechecks_native_custody_at_drain_replacement(
+    writer: WatchWriter, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_pull_requests import watch_storage
+
+    writer.adopt(timeout=1)
+    writer.activate(timeout=1)
+    paths = watch_state_paths(tmp_path)
+    paths.legacy_subscriptions.write_bytes(b" [ ] \n")
+    persist = watch_storage._atomic_write_json
+
+    def released(path: Path, data: object, **kwargs: Any) -> None:
+        writer._lease.release()
+        persist(path, data, **kwargs)
+
+    monkeypatch.setattr(watch_storage, "_atomic_write_json", released)
+    with pytest.raises(PermissionError, match="not held"):
+        writer.prepare_state_transition(timeout=1)
+    assert paths.legacy_subscriptions.read_bytes() == b" [ ] \n"
+    assert not paths.journal.exists()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows prevents moving an open lease")
+@pytest.mark.parametrize("boundary", ["before-drain", "before-replace"])
+def test_preparation_refuses_displaced_custody_before_any_drain_write(
+    writer: WatchWriter, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, boundary: str,
+) -> None:
+    from agent_pull_requests import watch_storage
+
+    writer.adopt(timeout=1)
+    writer.activate(timeout=1)
+    paths = watch_state_paths(tmp_path)
+    paths.legacy_subscriptions.write_bytes(b" [ ] \n")
+
+    def displace() -> None:
+        paths.historical_lock.rename(tmp_path / "displaced.lock")
+        paths.historical_lock.write_bytes(b"replacement-owner")
+
+    if boundary == "before-drain":
+        displace()
+    else:
+        persist = watch_storage._atomic_write_json
+
+        def changed(path: Path, data: object, **kwargs: Any) -> None:
+            displace()
+            persist(path, data, **kwargs)
+
+        monkeypatch.setattr(watch_storage, "_atomic_write_json", changed)
+    with pytest.raises(PermissionError):
+        writer.prepare_state_transition(timeout=1)
+    assert paths.legacy_subscriptions.read_bytes() == b" [ ] \n"
+    assert paths.historical_lock.read_bytes() == b"replacement-owner"
+    assert not paths.journal.exists()
+
+
+def test_preparation_timeout_during_drain_can_resume_retained_work(
+    writer: WatchWriter, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    writer.adopt(timeout=1)
+    writer.activate(timeout=1)
+
+    def unfinished(*_args: Any, **_kwargs: Any) -> None:
+        raise TimeoutError("controlled unfinished drain")
+
+    with monkeypatch.context() as blocked:
+        blocked.setattr(writer.daemon, "_stop_workers", unfinished)
+        with pytest.raises(TimeoutError, match="unfinished drain"):
+            writer.prepare_state_transition(timeout=1)
+    assert writer.writer_held and writer.read_ready
+    assert not writer.daemon.quiescent
+    assert not watch_state_paths(tmp_path).journal.exists()
+    writer.resume(timeout=1)
+    assert writer.daemon.effects_enabled
+
+
+def test_preparation_deadline_is_checked_after_final_publication_reads(
+    writer: WatchWriter, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_pull_requests import watch_transition
+
+    writer.adopt(timeout=1)
+    expired = False
+    publishing = False
+    read = watch_transition.read_preparation
+    publish = watch_transition.write_private
+
+    def remaining(_deadline: float) -> float:
+        if expired:
+            raise TimeoutError("controlled final-read deadline")
+        return 1.0
+
+    def late_read(*args: Any, **kwargs: Any) -> Any:
+        nonlocal expired
+        result = read(*args, **kwargs)
+        if publishing:
+            expired = True
+        return result
+
+    def about_to_publish(*args: Any, **kwargs: Any) -> None:
+        nonlocal publishing
+        publishing = True
+        publish(*args, **kwargs)
+
+    with monkeypatch.context() as late:
+        late.setattr(writer, "_remaining", remaining)
+        late.setattr(watch_transition, "read_preparation", late_read)
+        late.setattr(watch_transition, "write_private", about_to_publish)
+        with pytest.raises(TimeoutError, match="final-read deadline"):
+            writer.prepare_state_transition(timeout=1)
+    assert not watch_state_paths(tmp_path).journal.exists()
+    assert not writer.read_ready

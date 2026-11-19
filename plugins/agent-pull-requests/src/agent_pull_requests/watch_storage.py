@@ -267,6 +267,7 @@ def read_subscriptions_state(root: Path | None = None) -> list[dict[str, Any]]:
 def write_subscriptions_state(
     entries: list[dict[str, Any]], root: Path | None = None, *,
     validate: Callable[[list[dict[str, Any]]], None] | None = None,
+    before_replace: Callable[[], None] | None = None,
 ) -> None:
     path = subscriptions_path(root)
 
@@ -301,6 +302,8 @@ def write_subscriptions_state(
             current, _ = checked_document()
             if current != original:
                 raise StateWriteRefused("persisted watch subscriptions changed before replacement")
+            if before_replace is not None:
+                before_replace()
 
         _atomic_write_json(path, document, before_replace=check_existing_contract)
 

@@ -82,10 +82,12 @@ def fixture_owner(module: Any) -> tuple[Path, dict[str, Any], Any]:
 def test_preparation_commit_and_recovery_never_select_isolated_state(preparation: Any) -> None:
     module, state = preparation
     root, binding, lease = fixture_owner(module)
-    document = module.prepare(root, binding, lease, validate=lambda: None)
+    document = module.prepare(root, binding, lease, validate=lambda: None, check_deadline=lambda: None)
     assert document["phase"] == "prepared"
     assert state["writes"] == 1
-    assert module.prepare(root, binding, lease, validate=lambda: None) == document
+    assert module.prepare(
+        root, binding, lease, validate=lambda: None, check_deadline=lambda: None,
+    ) == document
     assert state["writes"] == 1 and state["confirmed"] == 1
 
 
@@ -113,7 +115,7 @@ def test_preparation_rechecks_every_custody_boundary(
 
     monkeypatch.setattr(module, "write_private", changed)
     with pytest.raises((ValueError, PermissionError)):
-        module.prepare(root, binding, lease, validate=validate)
+        module.prepare(root, binding, lease, validate=validate, check_deadline=lambda: None)
     assert state["writes"] == 0
 
 
@@ -123,7 +125,7 @@ def test_prepared_record_is_not_custody_proof(
 ) -> None:
     module, state = preparation
     root, binding, lease = fixture_owner(module)
-    module.prepare(root, binding, lease, validate=lambda: None)
+    module.prepare(root, binding, lease, validate=lambda: None, check_deadline=lambda: None)
     if corruption == "binding":
         state["document"]["binding"]["stateRoot"] = "foreign"
     elif corruption == "boolean-inode":
@@ -145,7 +147,7 @@ def test_preparation_does_not_equate_boolean_and_integer_installation_identity(
     binding.update(
         kind="installation", installation={"stateRoot": str(root), "generation": 1},
     )
-    module.prepare(root, binding, lease, validate=lambda: None)
+    module.prepare(root, binding, lease, validate=lambda: None, check_deadline=lambda: None)
     state["document"]["binding"]["installation"]["generation"] = True
     with pytest.raises(PermissionError):
         module.read_preparation(root, binding)
@@ -175,3 +177,55 @@ def test_lease_identity_is_current_descriptor_custody_not_a_pid_record(
     else:
         with pytest.raises(PermissionError):
             owner.held_file_identity()
+
+
+@pytest.mark.parametrize("inherited", [False, True])
+def test_inherited_lease_release_closes_without_unlocking_parent(
+    monkeypatch: pytest.MonkeyPatch, inherited: bool,
+) -> None:
+    path = ROOT / "libs/single-instance-lease/src/single_instance_lease/lease.py"
+    spec = importlib.util.spec_from_file_location("promotion_lease_release", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    owner = module.SingleInstance(Path("root"))
+    owner._owner_pid = os.getpid() + int(inherited)
+    calls: list[str] = []
+    owner._fh = SimpleNamespace(close=lambda: calls.append("close"))
+    monkeypatch.setattr(module, "_release_os_lock", lambda _handle: calls.append("unlock"))
+    owner.release()
+    assert calls == (["close"] if inherited else ["unlock", "close"])
+    assert owner._fh is None and owner._owner_pid is None
+
+
+def test_preparation_checks_deadline_after_the_last_journal_read(
+    preparation: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module, state = preparation
+    root, binding, lease = fixture_owner(module)
+    read = module.read_preparation
+    publish = module.write_private
+    publishing = False
+    expired = False
+
+    def late_read(*args: Any, **kwargs: Any) -> Any:
+        nonlocal expired
+        result = read(*args, **kwargs)
+        if publishing:
+            expired = True
+        return result
+
+    def about_to_publish(*args: Any, **kwargs: Any) -> None:
+        nonlocal publishing
+        publishing = True
+        publish(*args, **kwargs)
+
+    def deadline() -> None:
+        if expired:
+            raise TimeoutError("final reads exceeded deadline")
+
+    monkeypatch.setattr(module, "read_preparation", late_read)
+    monkeypatch.setattr(module, "write_private", about_to_publish)
+    with pytest.raises(TimeoutError, match="final reads"):
+        module.prepare(root, binding, lease, validate=lambda: None, check_deadline=deadline)
+    assert state["writes"] == 0

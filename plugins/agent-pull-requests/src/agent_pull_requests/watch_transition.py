@@ -89,7 +89,7 @@ def read_preparation(root: Path, binding: Document) -> Document | None:
 
 def prepare(
     root: Path, binding: Document, lease: SingleInstance, *,
-    validate: Callable[[], None],
+    validate: Callable[[], None], check_deadline: Callable[[], None],
 ) -> Document:
     """Publish only after completed drain; the owner retains the original lease.
 
@@ -116,6 +116,7 @@ def prepare(
             raise PermissionError("watch preparation native custody changed")
         if read_preparation(root, binding) != prior:
             raise PermissionError("watch preparation changed before publication")
+        check_deadline()
 
     recheck()
     if prior is None:
@@ -127,4 +128,5 @@ def prepare(
     validate()
     if lease.held_file_identity() != identity or read_preparation(root, binding) != document:
         raise PermissionError("watch preparation changed after publication; recovery is required")
+    check_deadline()
     return document

@@ -611,9 +611,15 @@ The internal `WatchWriter.prepare_state_transition()` API can now publish
 only a bound `prepared` record after completed quiescence. It rechecks the
 caller's `prepare-state-transition` authorization, optional current installation,
 original held lease inode and journal at the final no-replace publication
-boundary. Its strict legacy-state validation starts no effects. The writer
-retains its native lease with read/effect readiness disabled. Failed drain,
-authority checks or durability acknowledgement never grant a later phase.
+boundary, checking the deadline after those reads. Acquisition opens only
+the prechecked original file, without creating or changing a raced inode.
+Its strict legacy-state and native-custody guards run before drain and at
+the final drain-state replacement, preserving rejected bytes. The writer
+retains its native lease and disables read readiness after completed
+quiescence, before any marker publication. An incomplete drain retains prior
+read readiness for authorized same-owner abort; lost custody or malformed
+legacy state instead invalidates that readiness. Failed drain, authority
+checks or durability acknowledgement never grant a later phase.
 Prepared-only recovery validates that same root, installation and original
 inode before acquiring the historical lease, then confirms journal durability;
 it never selects or opens a retained/new writer inode.
