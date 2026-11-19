@@ -331,11 +331,13 @@ def test_readonly_configuration_refuses_mutable_resolver_before_import(tmp_path:
         configuration._legacy_report(tmp_path)
 
 
-@pytest.mark.parametrize("producer,reference", [
-    ("fixture", "explicit"), ("constructor", "explicit"), ("constructor", "named"),
+@pytest.mark.parametrize("producer,reference,inherited_selectors", [
+    ("fixture", "explicit", False), ("constructor", "explicit", False),
+    ("constructor", "named", False), ("constructor", "explicit", True),
 ])
 def test_fresh_slot_loader_reads_qualified_peer_in_real_subprocess(
-    tmp_path: Path, producer: str, reference: str,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    producer: str, reference: str, inherited_selectors: bool,
 ) -> None:
     import os
     import re
@@ -358,14 +360,32 @@ def test_fresh_slot_loader_reads_qualified_peer_in_real_subprocess(
             pytest.skip("POSIX native construction integration")
         anchor = tmp_path / "anchor"
         git = ["git", "-c", "core.hooksPath=" + os.devnull, "-c", "commit.gpgsign=false"]
-        subprocess.run([*git, "init", "-q", str(anchor)], check=True)
-        subprocess.run([
-            *git, "-C", str(anchor), "-c", "user.name=Fixture",
-            "-c", "user.email=fixture@example.invalid",
-            "commit", "--allow-empty", "-qm", "Fixture",
-        ], check=True)
-        subprocess.run([*git, "-C", str(anchor), "worktree", "add", "--detach",
-                        str(base), "HEAD"], check=True, capture_output=True)
+        outside = tmp_path / "unselected-repository"
+        with monkeypatch.context() as selectors:
+            if inherited_selectors:
+                for key, selector_path in {
+                    "GIT_DIR": outside / ".git",
+                    "GIT_WORK_TREE": outside,
+                    "GIT_INDEX_FILE": outside / "index",
+                }.items():
+                    selectors.setenv(key, str(selector_path))
+            git_environment = {
+                key: value for key, value in os.environ.items()
+                if not key.upper().startswith("GIT_")
+            }
+            subprocess.run(
+                [*git, "init", "-q", str(anchor)], check=True, env=git_environment,
+            )
+            subprocess.run([
+                *git, "-C", str(anchor), "-c", "user.name=Fixture",
+                "-c", "user.email=fixture@example.invalid",
+                "commit", "--allow-empty", "-qm", "Fixture",
+            ], check=True, env=git_environment)
+            subprocess.run(
+                [*git, "-C", str(anchor), "worktree", "add", "--detach", str(base), "HEAD"],
+                check=True, capture_output=True, env=git_environment,
+            )
+        assert not outside.exists()
         assert (base / ".git").is_file()
     else:
         base.mkdir()
