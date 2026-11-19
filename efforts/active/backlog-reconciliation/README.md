@@ -410,6 +410,14 @@ the non-public approval conversation.
 
 ## Plan
 
+The [read-only and bounded-Windows receiving unit](journal/2026/11.19-read-only-and-bounded-windows-receiving.md)
+proposes complete direct #9056 Bridge-acquisition and #9568 Phase 5
+test-portfolio receiving, with the latter's existing Phase 7 intake route.
+It also records #13485's reviewed delivery and #11113's separately verified
+tracking retirement. The complete 20:08:54 UTC census is 903 whole open,
+174 above fixed 729. No new issue disposition or technical credit follows
+from these proposals; all incumbent campaign Plan/Validation states remain.
+
 The [current qualification and ownership record](journal/2026/11.19-current-qualification-and-retained-ownership.md)
 records #13463's reviewed delivery, credits changed feed/snapshot and
 point-binding source slices without completing their whole acceptance,
@@ -4912,6 +4920,15 @@ closure credit, resource release or parent checkbox change follows.
   normal publication flow.
 
 ## Validation Plan
+
+The [two-source receiving proposal](journal/2026/11.19-read-only-and-bounded-windows-receiving.md)
+retains six direct #9056 Plan/global Validation pairs and four #9568
+Plan/local Validation pairs plus its actual global gate. All remain unchecked.
+Normal review must cover complete domain acceptance and #9568 deduplication/
+ownership; actual delivery and permitted current source/receiver/custody
+readback precede separate source-specific judgments. No automatic closure,
+extra receipt-PR bar, implementation, native run or source/resource release
+is inferred; all incumbent check states and the whole-queue gate remain.
 
 The [whole fork/composition receiving proposal](journal/2026/11.17-attention-receipt-and-whole-domain-proposals.md)
 preserves every existing domain/campaign check state, actual original
