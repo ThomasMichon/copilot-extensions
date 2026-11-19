@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -28,6 +29,8 @@ class FakeProvisioner:
     calls: list[int | None] = field(default_factory=list)
     fail: str | None = None
     delay: float = 0.0
+    # Runs while a new member is visible under its temporary pre-rename name.
+    during: Callable[[], None] | None = None
 
     def reconcile_up(
         self, config: ContainersConfig, fleet_name: str, count: int | None = None,
@@ -41,9 +44,14 @@ class FakeProvisioner:
         created = []
         for idx in fleet_mod._next_indices(existing, fleet_name, (count or 0) - len(existing)):
             name = f"{fleet_name}-{idx}"
-            self.members.append(
-                DockerContainerInfo(name, name, "img", "running", "", fleet=fleet_name),
+            member = DockerContainerInfo(
+                f"tmp-{idx}", name, "img", "running", "", fleet=fleet_name,
+                labels={"agent-containers.instance": name},
             )
+            self.members.append(member)
+            if self.during is not None:
+                self.during()
+            member.name = name  # like the devcontainer path's final rename
             created.append(name)
         return FleetOperationResult(created=created)
 
@@ -133,6 +141,33 @@ def test_released_grown_member_stays_warm_and_is_reused(fake: FakeProvisioner) -
     assert fake.calls == [2]
 
 
+def test_member_being_provisioned_is_hidden_until_the_grower_leases_it(
+    fake: FakeProvisioner,
+) -> None:
+    config = _config(max_size=2)
+    lease_mod.borrow(config, "a", fleet="example")
+    checked: list[str] = []
+
+    def during() -> None:
+        # Visible to inventory under its temporary name, but not borrowable.
+        assert any(c.name == "tmp-2" for c in fake.members)
+        with pytest.raises(RuntimeError, match="All fleet containers"):
+            lease_mod.borrow(config, "intruder", fleet="example", grow=False)
+        with pytest.raises(lease_mod.ProviderAdmissionError, match="still being provisioned"):
+            with lease_mod.session_admission("example-2"):
+                pass
+        checked.append("during")
+
+    fake.during = during
+    grown = lease_mod.borrow(config, "b", fleet="example")
+
+    assert checked == ["during"]
+    assert (grown.container, grown.effort) == ("example-2", "b")
+    assert lease_mod.fleet_growth._read_markers(lease_mod.STATE_DIR) == {}
+    with lease_mod.session_admission("example-2"):
+        pass
+
+
 def test_provisioning_failure_leaves_no_lease_and_reports_the_error(
     fake: FakeProvisioner,
 ) -> None:
@@ -148,6 +183,7 @@ def test_provisioning_failure_leaves_no_lease_and_reports_the_error(
     assert "out of memory" in message
     assert fake.calls == [2]
     assert [lease.effort for lease in lease_mod.list_leases()] == ["a"]
+    assert lease_mod.fleet_growth._read_markers(lease_mod.STATE_DIR) == {}
 
 
 def test_concurrent_borrows_never_overshoot_max_size(fake: FakeProvisioner) -> None:

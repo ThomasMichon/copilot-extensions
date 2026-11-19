@@ -494,13 +494,18 @@ def borrow(
     def attempt() -> Lease:
         return _borrow_once(config, effort, container, fleet, ttl, force)
 
+    def lease_grown(name: str, token: str) -> Lease:
+        return _borrow_once(config, effort, name, fleet, ttl, False, token)
+
     if container or not grow:
         return attempt()
-    return fleet_growth.borrow_or_grow(config, fleet, STATE_DIR, attempt)
+    return fleet_growth.borrow_or_grow(
+        config, fleet, STATE_DIR, _lease_lock, attempt, lease_grown,
+    )
 
 
 def _borrow_once(config: ContainersConfig, effort: str, container: str | None,
-                 fleet: str | None, ttl: float, force: bool) -> Lease:
+                 fleet: str | None, ttl: float, force: bool, grown: str | None = None) -> Lease:
     with _lease_lock():
         admissions = _read_live_records(
             _SESSION_ADMISSIONS_FILE,
@@ -517,7 +522,7 @@ def _borrow_once(config: ContainersConfig, effort: str, container: str | None,
             DeployHold,
             DEPLOY_HOLD_TTL,
         )
-        members = list_containers(config)
+        members = fleet_growth.admissible(list_containers(config), STATE_DIR, grown)
         if fleet:
             members = [c for c in members if c.fleet == fleet]
         if not members:
@@ -630,6 +635,8 @@ def _borrow_once(config: ContainersConfig, effort: str, container: str | None,
             lease.reclaimed_at = now
         leases[chosen] = lease
         _write_leases(leases)
+        if grown is not None:  # lease and unhide the grown member atomically
+            fleet_growth.clear_marker(STATE_DIR, grown)
         if reclaimed is not None:
             log.info(
                 "Reclaimed lease on '%s' from effort '%s': "
@@ -942,6 +949,8 @@ def session_admission(
                 f"Container '{container}' is unavailable while provider "
                 f"{hold.operation} is in progress"
             )
+        if fleet_growth.is_provisioning(STATE_DIR, container):
+            raise ProviderAdmissionError(f"Container '{container}' is still being provisioned")
         admissions = _read_live_records(
             _SESSION_ADMISSIONS_FILE,
             SessionAdmission,
