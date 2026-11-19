@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -17,8 +19,15 @@ from agent_index.index_config import IndexConfig, ModelProfile
 from agent_index.indexing.point_hints import PointBinding, PointChangeHints, WorkItemRevisionTarget
 from agent_index.store.cluster_store import ClusterStore
 from agent_index.store.clustering import Cluster, ClusterMember
+from agent_index.store.component_ledger import (
+    BINDING, TABLE, ComponentLedger, initialize_component_ledger,
+)
 from agent_index.store.content_store import ContentStore
+from agent_index.store.ingestion_index import prepare_ingestion_indices
 from agent_index.store.multi_model_store import MultiModelStore
+from agent_index.store.scalar_index import (
+    MAX_SEGMENTS, ScalarIndexPreparationRequired, inspect_index, prepare_index,
+)
 from agent_index.store.source_layout import (
     LAYOUT,
     MARKER,
@@ -214,6 +223,211 @@ def test_point_schema_bootstrap_refuses_vector_table_as_content(
     with pytest.raises(SourceLayoutError, match="schema (?:changed|is incompatible)"):
         initialize_source_store(changed, point_scope=claim().scope)
     assert snapshot(config.data_dir) == before
+
+
+def test_selected_point_ledger_and_ingestion_preparation_reopen_without_default_access(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AGENT_INDEX_STORE_LAYOUT", LAYOUT)
+    profile = ModelProfile("small", "fixture", dim=2)
+    config = IndexConfig(data_dir=tmp_path / "point", model_profiles={"small": profile})
+    scope = claim().scope
+    store = initialize_source_store(config, point_scope=scope)
+    domain = store._source_domain
+    assert domain is not None
+    ledger = initialize_component_ledger(config, store, point_scope=scope)
+    prepare_ingestion_indices(store, max_rows=0, point_scope=scope)
+    receipt = domain.receipt()
+    assert receipt["state"] == "clean"
+    assert set(receipt["versions"]) == {config.content_table, profile.table_name, TABLE}
+    for name, columns in (
+        (config.content_table, ("chunk_id", "file_path")),
+        (profile.table_name, ("chunk_id",)), (TABLE, ("point_key",)),
+    ):
+        table = store.content_store.db.open_table(name)
+        assert table.count_rows() == 0
+        for column in columns:
+            state, _ = inspect_index(table, column=column)
+            assert state.prepared and state.physical_unindexed_rows == 0
+    assert receipt[BINDING]["version"] == store.content_store.db.open_table(TABLE).version
+    before = snapshot(config.data_dir)
+
+    def forbidden(*_args: Any, **_kwargs: Any) -> None:
+        raise AssertionError("reopening/prepared indices counted the corpus")
+
+    monkeypatch.setattr(type(table), "count_rows", forbidden)
+    reopened = initialize_source_store(config, point_scope=scope)
+    restored = initialize_component_ledger(config, reopened, point_scope=scope)
+    prepare_ingestion_indices(reopened, max_rows=0, point_scope=scope)
+    assert restored.get(scope[1], "unknown.md", point_scope=scope) is None
+    with domain.operation(store.content_store.db, point_scope=scope):
+        for ordinary in (
+            lambda: ledger.get(scope[1], "unknown.md"),
+            lambda: initialize_component_ledger(config, store),
+            lambda: prepare_ingestion_indices(store, max_rows=0),
+            lambda: prepare_index(store.content_store, column="chunk_id", max_rows=0),
+            lambda: ledger.consolidate(max_rows=0), store.stats,
+            lambda: store.upsert_content([]),
+        ):
+            with pytest.raises(SourceLayoutError, match="not admitted"):
+                ordinary()
+    assert domain.receipt() == receipt
+    assert snapshot(config.data_dir) == before
+
+
+def test_point_preparation_requires_exact_selection_without_effects(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AGENT_INDEX_STORE_LAYOUT", LAYOUT)
+    config = IndexConfig(
+        data_dir=tmp_path / "point",
+        model_profiles={"small": ModelProfile("small", "fixture", dim=2)},
+    )
+    store = initialize_source_store(config, point_scope=claim().scope)
+    before = snapshot(config.data_dir)
+    for scope in (None, replace(claim(), account_id="other").scope):
+        for prepare in (
+            lambda: initialize_component_ledger(config, store, point_scope=scope),
+            lambda: prepare_ingestion_indices(store, max_rows=0, point_scope=scope),
+            lambda: prepare_index(
+                store.content_store, column="chunk_id", max_rows=0, point_scope=scope,
+            ),
+        ):
+            with pytest.raises(SourceLayoutError):
+                prepare()
+            assert snapshot(config.data_dir) == before
+    legacy = initialize_source_store(replace(config, data_dir=tmp_path / "legacy"))
+    legacy_domain = legacy._source_domain
+    assert legacy_domain is not None
+    before = snapshot(legacy_domain.path)
+    for prepare in (
+        lambda: initialize_component_ledger(
+            replace(config, data_dir=tmp_path / "legacy"), legacy, point_scope=claim().scope,
+        ),
+        lambda: prepare_ingestion_indices(legacy, max_rows=0, point_scope=claim().scope),
+    ):
+        with pytest.raises(SourceLayoutError, match="scope"):
+            prepare()
+        assert snapshot(legacy_domain.path) == before
+
+
+def test_point_index_segment_reservation_preflights_every_owner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_index.store import ingestion_index
+
+    monkeypatch.setenv("AGENT_INDEX_STORE_LAYOUT", LAYOUT)
+    profile = ModelProfile("small", "fixture", dim=2)
+    config = IndexConfig(data_dir=tmp_path / "point", model_profiles={"small": profile})
+    store = initialize_source_store(config, point_scope=claim().scope)
+    before = snapshot(config.data_dir)
+    inspect_native = inspect_index
+
+    def at_limit(table: Any, *, column: str) -> Any:
+        state, dataset = inspect_native(table, column=column)
+        if table.name == profile.table_name:
+            state = replace(state, segments=MAX_SEGMENTS)
+        return state, dataset
+
+    monkeypatch.setattr(ingestion_index, "inspect_index", at_limit)
+    with pytest.raises(ScalarIndexPreparationRequired, match="segment budget"):
+        prepare_ingestion_indices(
+            store, max_rows=0, reserve_segment=True, point_scope=claim().scope,
+        )
+    assert snapshot(config.data_dir) == before
+
+
+@pytest.mark.parametrize("populated", ["content", "vector"])
+def test_point_ledger_refuses_existing_data_and_indices_keep_physical_tail_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, populated: str,
+) -> None:
+    monkeypatch.setenv("AGENT_INDEX_STORE_LAYOUT", LAYOUT)
+    profile = ModelProfile("small", "fixture", dim=2)
+    config = IndexConfig(data_dir=tmp_path / "point", model_profiles={"small": profile})
+    scope = claim().scope
+    store = initialize_source_store(config, point_scope=scope)
+    domain = store._source_domain
+    assert domain is not None
+    table = store.content_store.db.open_table(
+        config.content_table if populated == "content" else profile.table_name,
+    )
+    row: dict[str, Any] = (
+        {
+            "chunk_id": "fixture", "source": scope[1], "file_path": "one.md",
+            "chunk_type": "text", "language": "markdown", "content": "retain",
+            "content_hash": "fixture", "line_start": 1, "line_end": 1,
+            "metadata": "{}", "indexed_at": 0.0,
+        } if populated == "content" else {
+            "chunk_id": "fixture", "vector": [1.0, 0.0], "indexed_at": 0.0,
+        }
+    )
+    with domain._write(store.content_store.db, point_scope=scope):
+        domain.effect("fixture-point-seed")
+        table.add([row])
+    rows_before = table.to_arrow().to_pylist()
+    before = snapshot(config.data_dir)
+    with pytest.raises(SourceLayoutError, match="empty configured"):
+        initialize_component_ledger(config, store, point_scope=scope)
+    with pytest.raises(ScalarIndexPreparationRequired, match="budget"):
+        prepare_ingestion_indices(store, max_rows=0, point_scope=scope)
+    assert snapshot(config.data_dir) == before
+    prepare_ingestion_indices(store, max_rows=1, point_scope=scope)
+    assert table.to_arrow().to_pylist() == rows_before
+    before = snapshot(config.data_dir)
+    with pytest.raises(SourceLayoutError, match="empty configured"):
+        initialize_component_ledger(config, store, point_scope=scope)
+    assert snapshot(config.data_dir) == before
+
+
+@pytest.mark.parametrize("stage", ["ledger", "index"])
+def test_interrupted_point_preparation_retains_existing_dirty_recovery_boundary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stage: str,
+) -> None:
+    monkeypatch.setenv("AGENT_INDEX_STORE_LAYOUT", LAYOUT)
+    config = IndexConfig(
+        data_dir=tmp_path / "point",
+        model_profiles={"small": ModelProfile("small", "fixture", dim=2)},
+    )
+    scope = claim().scope
+    store = initialize_source_store(config, point_scope=scope)
+    domain = store._source_domain
+    assert domain is not None
+    with monkeypatch.context() as patch:
+        if stage == "ledger":
+            def fail_binding(*_args: Any, **_kwargs: Any) -> None:
+                raise RuntimeError("fixture preparation interruption")
+
+            patch.setattr(ComponentLedger, "_bind", fail_binding)
+            with pytest.raises(RuntimeError, match="preparation interruption"):
+                initialize_component_ledger(config, store, point_scope=scope)
+            assert TABLE in store.content_store.db.list_tables().tables
+            assert BINDING not in domain.receipt()
+        else:
+            maintenance = domain.physical_maintenance
+
+            @contextmanager
+            def interrupt(table_name: str, operation: str) -> Iterator[None]:
+                with maintenance(table_name, operation):
+                    yield
+                    raise RuntimeError("fixture preparation interruption")
+
+            patch.setattr(domain, "physical_maintenance", interrupt)
+            with pytest.raises(RuntimeError, match="preparation interruption"):
+                prepare_ingestion_indices(store, max_rows=0, point_scope=scope)
+            state, _ = inspect_index(
+                store.content_store.db.open_table(config.content_table), column="chunk_id",
+            )
+            assert state.prepared
+    receipt = domain.receipt()
+    assert receipt["state"] == "dirty" and receipt["uncertain_effect"]
+    before = snapshot(config.data_dir)
+    for prepare in (
+        lambda: initialize_component_ledger(config, store, point_scope=scope),
+        lambda: prepare_ingestion_indices(store, max_rows=0, point_scope=scope),
+    ):
+        with pytest.raises(SourceLayoutError, match="incomplete or changed"):
+            prepare()
+        assert snapshot(config.data_dir) == before
 
 
 def test_relative_cluster_connection_cannot_retarget_to_marked_destination(

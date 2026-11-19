@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from typing import Any
 
 import pytest
 
@@ -13,7 +14,7 @@ from agent_containers.lifecycle import DockerContainerInfo
 
 
 @pytest.fixture(autouse=True)
-def _no_lifecycle_state(monkeypatch):
+def _no_lifecycle_state(monkeypatch: pytest.MonkeyPatch) -> None:
     import agent_containers.lease as lease
     import agent_containers.rescue as rescue
 
@@ -26,7 +27,7 @@ def _no_lifecycle_state(monkeypatch):
     monkeypatch.setattr(rescue, "latest_rescue_status", lambda _name: None)
 
 
-def _container(name, **kw):
+def _container(name: str, **kw: Any) -> DockerContainerInfo:
     return DockerContainerInfo(
         name=name,
         container_id=kw.get("container_id", "cid-" + name),
@@ -40,7 +41,10 @@ def _container(name, **kw):
     )
 
 
-def _patch(monkeypatch, containers, lease_effort=None):
+def _patch(
+    monkeypatch: pytest.MonkeyPatch, containers: list[DockerContainerInfo],
+    lease_effort: str | None = None,
+) -> ContainersConfig:
     config = ContainersConfig()
     config.fleets["myrepo"] = FleetConfig()
     monkeypatch.setattr(cli, "load_config", lambda: config)
@@ -67,7 +71,9 @@ def _patch(monkeypatch, containers, lease_effort=None):
     return config
 
 
-def test_fleet_json_emits_bare_array_with_expected_fields(monkeypatch, capsys):
+def test_fleet_json_emits_bare_array_with_expected_fields(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     _patch(monkeypatch, [_container("aperture-1")], lease_effort="my-effort")
     rc = cli._cmd_fleet(argparse.Namespace(json=True))
     assert rc == 0
@@ -81,9 +87,10 @@ def test_fleet_json_emits_bare_array_with_expected_fields(monkeypatch, capsys):
         "security_policy_errors", "network", "environment_names",
         "host_credentials", "lifecycle_hold", "rescue",
         "subtitle", "activity", "session_id", "claims_summary", "sess", "worktree_id",
-        "has_driving_worktree", "worktree_status",
+        "has_driving_worktree", "worktree_status", "fleet_size", "fleet_max_size",
     }
     assert row["name"] == "aperture-1"
+    assert (row["fleet_size"], row["fleet_max_size"]) == (1, None)
     assert row["state"] == "running"
     assert row["fleet"] == "myrepo"
     assert row["fleet_source"] is None
@@ -104,7 +111,9 @@ def test_fleet_json_emits_bare_array_with_expected_fields(monkeypatch, capsys):
     }
 
 
-def test_fleet_json_lease_is_null_when_unheld(monkeypatch, capsys):
+def test_fleet_json_lease_is_null_when_unheld(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     _patch(monkeypatch, [_container("free-1")], lease_effort=None)
     cli._cmd_fleet(argparse.Namespace(json=True))
     data = json.loads(capsys.readouterr().out)
@@ -113,13 +122,15 @@ def test_fleet_json_lease_is_null_when_unheld(monkeypatch, capsys):
 
 # --- picker-only fields (picker-venue-pivots Phase 2) ----------------------
 
-def test_fleet_json_wires_picker_fields_from_lease(monkeypatch, capsys):
+def test_fleet_json_wires_picker_fields_from_lease(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     """`picker.picker_fields` is called with (container name, lease effort)
     and its result is merged straight into the row."""
     _patch(monkeypatch, [_container("aperture-1")], lease_effort="3bac")
-    seen = []
+    seen: list[tuple[str, str | None]] = []
 
-    def fake_picker_fields(name, lease_effort):
+    def fake_picker_fields(name: str, lease_effort: str | None) -> dict[str, Any]:
         seen.append((name, lease_effort))
         return {
             "subtitle": "→ claimed by 3bac",
@@ -149,7 +160,7 @@ def test_fleet_json_wires_picker_fields_from_lease(monkeypatch, capsys):
     assert row["worktree_status"]["title"] == "Worktree a1c4"
 
 
-def test_fleet_json_picker_fields_blank_when_unclaimed_and_no_dependencies():
+def test_fleet_json_picker_fields_blank_when_unclaimed_and_no_dependencies() -> None:
     """Without agent-worktrees/agent-bridge installed alongside (this
     plugin's own test venv), the picker fields degrade to blank rather than
     raising."""
@@ -171,7 +182,9 @@ def test_fleet_json_picker_fields_blank_when_unclaimed_and_no_dependencies():
     }
 
 
-def test_fleet_json_reports_unknown_hold_state_without_failing(monkeypatch, capsys):
+def test_fleet_json_reports_unknown_hold_state_without_failing(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     _patch(monkeypatch, [_container("example-1")])
     import agent_containers.lease as lease
 
@@ -191,13 +204,17 @@ def test_fleet_json_reports_unknown_hold_state_without_failing(monkeypatch, caps
     assert row["lifecycle_hold"]["state"] == "unknown"
 
 
-def test_fleet_json_empty_is_empty_array(monkeypatch, capsys):
+def test_fleet_json_empty_is_empty_array(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     _patch(monkeypatch, [])
     cli._cmd_fleet(argparse.Namespace(json=True))
     assert json.loads(capsys.readouterr().out) == []
 
 
-def test_fleet_json_reports_restricted_posture(monkeypatch, capsys):
+def test_fleet_json_reports_restricted_posture(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     config = ContainersConfig()
     config.fleets["myrepo"] = FleetConfig(
         security_profile="restricted",
@@ -248,7 +265,9 @@ def test_fleet_json_reports_restricted_posture(monkeypatch, capsys):
     }
 
 
-def test_fleet_json_exposes_stale_restricted_policy(monkeypatch, capsys):
+def test_fleet_json_exposes_stale_restricted_policy(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     config = ContainersConfig()
     config.fleets["myrepo"] = FleetConfig(security_profile="restricted")
     monkeypatch.setattr(cli, "load_config", lambda: config)
@@ -288,7 +307,9 @@ def test_fleet_json_exposes_stale_restricted_policy(monkeypatch, capsys):
     assert row["security_policy_current"] is False
 
 
-def test_fleet_human_table_unaffected(monkeypatch, capsys):
+def test_fleet_human_table_unaffected(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     _patch(monkeypatch, [_container("aperture-1")], lease_effort="my-effort")
     cli._cmd_fleet(argparse.Namespace(json=False))
     out = capsys.readouterr().out
@@ -296,10 +317,26 @@ def test_fleet_human_table_unaffected(monkeypatch, capsys):
     assert not out.lstrip().startswith("[")                  # not JSON
 
 
-def test_fleet_json_reports_the_source_that_defined_the_fleet(monkeypatch, capsys):
+def test_fleet_json_reports_the_source_that_defined_the_fleet(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     config = _patch(monkeypatch, [_container("aperture-1")])
     config.configuration_provenance = {
         "/fleets/myrepo/image": {"id": "plugin:example@example", "tier": "plugin"},
     }
     assert cli._cmd_fleet(argparse.Namespace(json=True)) == 0
     assert json.loads(capsys.readouterr().out)[0]["fleet_source"] == "plugin:example@example"
+
+
+def test_fleet_reports_size_and_max_size(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    config = _patch(monkeypatch, [_container("myrepo-1"), _container("myrepo-2")])
+    config.fleets["myrepo"] = FleetConfig(size=1, max_size=3)
+
+    cli._cmd_fleet(argparse.Namespace(json=True))
+    rows = json.loads(capsys.readouterr().out)
+    assert {(r["fleet_size"], r["fleet_max_size"]) for r in rows} == {(1, 3)}
+
+    cli._cmd_fleet(argparse.Namespace(json=False))
+    assert "Fleet myrepo: 2 member(s), size 1, max_size 3" in capsys.readouterr().out

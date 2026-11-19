@@ -37,7 +37,6 @@ from . import copilot_process_auth as process_auth
 from .application_provider import add_install_parsers
 from .config import (
     RESTRICTED_PROFILE,
-    SECURITY_PROFILE_LABEL,
     ContainersConfig,
     FleetConfig,
     load_config,
@@ -133,6 +132,8 @@ def main(argv: list[str] | None = None) -> int:
     borrow_p.add_argument("--container", help="Borrow a specific container")
     borrow_p.add_argument("--fleet", help="Restrict to a fleet")
     borrow_p.add_argument("--force", action="store_true", help="Force takeover")
+    borrow_p.add_argument("--no-grow", action="store_true",
+                          help="Never grow a max_size fleet on demand; refuse when full")
 
     release_p = sub.add_parser("release", help="Release a lease")
     release_p.add_argument("target", help="Container name or effort name")
@@ -674,100 +675,9 @@ def _cmd_relay_profile() -> int:
 
 
 def _cmd_fleet(args: argparse.Namespace) -> int:
-    from . import picker
-    from .lease import deploy_hold_status, get_lease
-    from .lifecycle import inspect_container, list_containers, restricted_policy_errors
-    from .rescue import latest_rescue_status
-    config = load_config()
-    containers = list_containers(config)
-    if getattr(args, "json", False):
-        # Bare JSON array, one object per container, so the picker's Containers
-        # pivot (and any other machine-readable consumer) can render the fleet.
-        out: list[dict[str, Any]] = []
-        for c in containers:
-            lease = get_lease(c.name)
-            hold_status = deploy_hold_status(c.name)
-            fleet = config.fleets.get(c.fleet or "")
-            posture_errors = []
-            actual_profile: str | None = c.security_profile
-            actual_network = None
-            inspected = None
-            if (fleet and fleet.restricted) or actual_profile == RESTRICTED_PROFILE:
-                try:
-                    inspected = inspect_container(c.name)
-                    actual_profile = (
-                        (inspected.get("Config") or {}).get("Labels") or {}
-                    ).get(SECURITY_PROFILE_LABEL)
-                    actual_network = (inspected.get("HostConfig") or {}).get(
-                        "NetworkMode"
-                    )
-                except RuntimeError as exc:
-                    actual_profile = "unknown"
-                    posture_errors = [str(exc)]
-            forward, relay = (
-                config.credentials_for(fleet) if fleet else (False, False)
-            )
-            workspace = (
-                fleet.workspace_folder if fleet and fleet.workspace_folder else None
-            ) or config.workspace_folder
-            exec_user = (
-                fleet.exec_user if fleet and fleet.exec_user else None
-            ) or config.exec_user
-            if fleet and fleet.restricted:
-                try:
-                    posture_errors.extend(restricted_policy_errors(
-                        c,
-                        fleet,
-                        workspace_folder=workspace,
-                        exec_user=exec_user,
-                        inspected=inspected,
-                    ))
-                except RuntimeError as exc:
-                    posture_errors.append(str(exc))
-            elif actual_profile == RESTRICTED_PROFILE:
-                posture_errors.append(
-                    "restricted container has no matching fleet configuration"
-                )
-            if actual_profile == RESTRICTED_PROFILE:
-                forward, relay = False, False
-            out.append({
-                "name": c.name,
-                "container_id": c.container_id,
-                "image": c.image,
-                "state": c.state,
-                "status": c.status,
-                "fleet": c.fleet,
-                "fleet_source": config.fleet_source(c.fleet),
-                "driver": c.driver,
-                "local_folder": c.local_folder,
-                "lease": lease.effort if lease else None,
-                "lifecycle_hold": hold_status,
-                "security_profile": actual_profile,
-                "configured_security_profile": (
-                    fleet.security_profile if fleet else None
-                ),
-                "security_policy_current": not posture_errors,
-                "security_policy_errors": posture_errors,
-                "network": actual_network,
-                "environment_names": sorted(fleet.environment) if fleet else [],
-                "host_credentials": {
-                    "github_token": forward,
-                    "relay": relay,
-                },
-                "rescue": latest_rescue_status(c.name),
-            })
-            out[-1].update(picker.picker_fields(c.name, out[-1]["lease"]))
-        print(json.dumps(out, indent=2, default=str))
-        return 0
-    if not containers:
-        print("No fleet containers found. Run `agent-containers up <fleet>`.")
-        return 0
-    print(f"{'CONTAINER':<28} {'STATE':<10} {'FLEET':<12} {'LEASE'}")
-    for c in containers:
-        lease = get_lease(c.name)
-        holder = lease.effort if lease else "-"
-        print(f"{c.name:<28} {c.state:<10} {(c.fleet or '-'):<12} {holder}")
-    return 0
+    from .fleet_cli import cmd_fleet
+
+    return cmd_fleet(args, load_config())
 
 
 def _cmd_up(args: argparse.Namespace) -> int:
@@ -858,7 +768,8 @@ def _cmd_borrow(args: argparse.Namespace) -> int:
     from .lease import borrow
     try:
         lease = borrow(load_config(), args.effort, container=args.container,
-                        fleet=args.fleet, force=getattr(args, "force", False))
+                        fleet=args.fleet, force=getattr(args, "force", False),
+                        grow=not getattr(args, "no_grow", False))
     except RuntimeError as exc:
         if not args.container:  # not a specific-target conflict; bookkeeping
             raise

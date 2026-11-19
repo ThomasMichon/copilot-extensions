@@ -17,6 +17,7 @@ from .scalar_index import (
 if TYPE_CHECKING:
     from .content_store import ContentStore
     from .multi_model_store import MultiModelStore
+    from .source_layout import PointScope
     from .vector_table import VectorTable
 
 
@@ -35,14 +36,15 @@ def _owners(store: MultiModelStore) -> list[tuple[ContentStore | VectorTable, st
 
 def prepare_ingestion_indices(
     store: MultiModelStore, *, max_rows: int, reserve_segment: bool = False,
+    point_scope: PointScope | None = None,
 ) -> None:
-    """Cover only budgeted tails; refuse implicit corpus builds or consolidation."""
+    """Cover budgeted tails in the explicitly selected domain, without consolidation."""
     if type(max_rows) is not int or max_rows < 0:
         raise ValueError("Ingestion preparation budget must be a nonnegative integer")
     domain = store._source_domain
     if domain is None:
         raise ScalarIndexPreparationRequired("Ingestion indices require a participating source store")
-    with domain.operation(store.content_store.db):
+    with domain.operation(store.content_store.db, point_scope=point_scope):
         owners = _owners(store)
         for owner, column in owners:
             state, _ = inspect_index(owner._get_or_create_table(), column=column)
@@ -52,7 +54,7 @@ def prepare_ingestion_indices(
                     "Ingestion index segment budget exceeded; explicit consolidation required"
                 )
         for owner, column in owners:
-            prepare_index(owner, column=column, max_rows=max_rows)
+            prepare_index(owner, column=column, max_rows=max_rows, point_scope=point_scope)
 
 
 def consolidate_ingestion_indices(store: MultiModelStore, *, max_rows: int) -> None:

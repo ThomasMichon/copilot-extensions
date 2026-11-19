@@ -260,11 +260,13 @@ class ComponentLedger:
                 return result
 
 
-def initialize_component_ledger(config: IndexConfig, store: MultiModelStore) -> ComponentLedger:
+def initialize_component_ledger(
+    config: IndexConfig, store: MultiModelStore, *, point_scope: PointScope | None = None,
+) -> ComponentLedger:
     """Explicit cold bootstrap only; never recreate a missing ledger or adopt existing rows."""
     ledger = ComponentLedger(config, store)
     domain = ledger._source_domain
-    with domain.operation(ledger._db):
+    with domain.operation(ledger._db, point_scope=point_scope):
         has_binding = BINDING in domain.receipt()
         exists = TABLE in ledger._db.list_tables().tables
         if has_binding or exists:
@@ -272,10 +274,10 @@ def initialize_component_ledger(config: IndexConfig, store: MultiModelStore) -> 
             return ledger
         if any(ledger._db.open_table(name).count_rows() for name in ledger._data_tables):
             raise SourceLayoutError("Component ledger bootstrap requires empty configured data tables")
-        with domain.write(ledger._db):
+        with domain._write(ledger._db, point_scope=point_scope):
             identity = uuid.uuid4().hex
             domain.effect("component-evidence-bootstrap:" + TABLE)
             ledger._db.create_table(TABLE, schema=_schema(identity))
-            prepare_index(ledger, column="point_key", max_rows=0)
+            prepare_index(ledger, column="point_key", max_rows=0, point_scope=point_scope)
             ledger._bind(ledger._get_or_create_table(), identity)
     return ledger
