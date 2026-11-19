@@ -69,6 +69,10 @@ def add_parsers(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> Non
     )
     p.add_argument("--dry-run", action="store_true")
     p.add_argument(
+        "--retain-checkout", action="store_true",
+        help="Complete normal finalization without removing the checkout or branch; cleanup stays separate",
+    )
+    p.add_argument(
         "--recover-retired-owner", metavar="OWNER",
         help="Explicitly recover finalization of a legacy child with an absent archived "
         "original parent; preserve normal source, ownership and cleanup gates",
@@ -376,7 +380,7 @@ def cmd_finalize(args: argparse.Namespace) -> int:
         if any(value is None for value in dispatch) or any(getattr(args, name, None) for name in (
             "worktree_id", "worktree_id_flag", "config", "dry_run", "abandon",
             "handoff_to", "force_open_pr", "explain_landing",
-            "recover_retired_owner",
+            "recover_retired_owner", "retain_checkout",
         )):
             return output._json_error(
                 "Dispatch closeout requires task, reservation and native IDs without finalize overrides", 2,
@@ -386,11 +390,9 @@ def cmd_finalize(args: argparse.Namespace) -> int:
             "--task-id", str(dispatch[0]), "--reservation-key", str(dispatch[1]), "--native-id", str(dispatch[2]),
         ])
     use_json = getattr(args, "json", False)
-    if use_json:
-        ctx = output.stdout_to_stderr()
+    ctx = output.stdout_to_stderr() if use_json else None
+    if ctx is not None:
         ctx.__enter__()
-    else:
-        ctx = None
 
     try:
         try:
@@ -457,6 +459,7 @@ def cmd_finalize(args: argparse.Namespace) -> int:
                     abandon=abandon,
                     handoff_to=handoff_to or None,
                     force_open_pr=getattr(args, "force_open_pr", False),
+                    retain_checkout=getattr(args, "retain_checkout", False),
                 )
         except (ExecutionSpaceError, OSError, ValueError, KeyError, TimeoutError, yaml.YAMLError) as exc:
             if recovery_owner is None:
@@ -489,11 +492,9 @@ def cmd_finalize(args: argparse.Namespace) -> int:
 
 def cmd_push_changes(args: argparse.Namespace) -> int:
     use_json = getattr(args, "json", False)
-    if use_json:
-        ctx = output.stdout_to_stderr()
+    ctx = output.stdout_to_stderr() if use_json else None
+    if ctx is not None:
         ctx.__enter__()
-    else:
-        ctx = None
 
     try:
         recovery_reason = getattr(args, "break_glass_reason", None)
@@ -614,11 +615,9 @@ def cmd_push_changes(args: argparse.Namespace) -> int:
 
 def cmd_create_pr(args: argparse.Namespace) -> int:
     use_json = getattr(args, "json", False)
-    if use_json:
-        ctx = output.stdout_to_stderr()
+    ctx = output.stdout_to_stderr() if use_json else None
+    if ctx is not None:
         ctx.__enter__()
-    else:
-        ctx = None
 
     try:
         try:
@@ -728,7 +727,10 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
                 expected_head=getattr(args, "expected_head", None),
             )
             if result.get("error"):
-                output._json_output(result) if use_json else output.err(result["error"])
+                if use_json:
+                    output._json_output(result)
+                else:
+                    output.err(result["error"])
                 return 2
             if use_json:
                 output._json_output(result)
@@ -929,8 +931,7 @@ def cmd_mark_complete(args: argparse.Namespace) -> int:
     if not yaml_path.exists():
         output.warn(f"Tracking file not found at {yaml_path}")
         print("Creating minimal tracking file...")
-        record_type: Any = tracking.WorktreeRecord
-        record: tracking.WorktreeRecord = record_type(
+        record = tracking.WorktreeRecord(
             worktree_id=worktree_id,
             branch=git_ops.get_current_branch("."),
             worktree_path=str(Path.cwd()),
