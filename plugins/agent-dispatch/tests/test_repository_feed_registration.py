@@ -6,6 +6,7 @@ import asyncio
 from collections.abc import Callable
 import copy
 import importlib
+import math
 from pathlib import Path
 import sys
 import time
@@ -14,6 +15,7 @@ from typing import Any
 import pytest
 
 from agent_dispatch.queue_records import TaskError
+from agent_dispatch.repository_feed_preparation import RepositoryFeedPreparer
 from agent_dispatch.repository_feed_registration import RepositoryFeedRegistrar
 from agent_pull_requests.repository_contract import RepositoryIdentity
 from agent_pull_requests.repository_projection import RepositoryProjection
@@ -126,13 +128,15 @@ def test_lost_reply_uses_original_inspection_without_creation_replay(
     assert not queue.list_run_waiter_wakes(task_id)
 
 
-@pytest.mark.parametrize("feature", ["service", "native"])
+@pytest.mark.parametrize("feature", ["service", "native", "registration"])
 def test_unsupported_recovery_refuses_before_suspension(tmp_path: Path, feature: str) -> None:
     queue, task_id, spec, client, registrar = setup(tmp_path)
     if feature == "service":
         client.capabilities.pop("request_recovery")
-    else:
+    elif feature == "native":
         queue.repository_feed_attempt_protocol = "unsupported"
+    else:
+        queue.repository_feed_registration_protocol = "unsupported"
     with pytest.raises((ValueError, TaskError), match="unsupported"):
         asyncio.run(preparation.prepare(registrar, task_id, spec))
     task = queue.get(task_id)
@@ -149,6 +153,70 @@ def test_preparation_only_retains_its_broader_storage_lifetime(tmp_path: Path) -
     waiter = queue.find_delegated_preparation(task_id, spec["preparation_id"])
     assert waiter is not None and waiter["delegation"] == spec and not waiter["replay_attempted"]
     assert client.calls == ["capabilities", "next-actions"]
+
+
+@pytest.mark.parametrize("sender", [False, True])
+def test_rounded_cutoff_crossed_during_negotiation_is_fenced_at_suspension(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sender: bool,
+) -> None:
+    queue, task_id, spec, client, registrar = setup(tmp_path)
+    spec["feed"]["issued_at"] = math.floor(time.time()) + .9
+    spec["feed"]["deadline_at"] = spec["feed"]["issued_at"] + spec["timeout"]
+    cutoff = math.floor(spec["feed"]["deadline_at"])
+    client.during = lambda: monkeypatch.setattr(time, "time", lambda: cutoff + .5)
+    selected = registrar if sender else RepositoryFeedPreparer(
+        queue, binding=spec["feed"]["binding"], client=client, lane="harness",
+        repository_target=preparation.TARGET, land="author", checkpoint=lambda: None,
+    )
+    before = queue.get(task_id)
+    if sender:
+        with pytest.raises(TaskError, match="creation cutoff"):
+            asyncio.run(preparation.prepare(selected, task_id, spec))
+        assert queue.get(task_id) == before
+        assert queue.find_delegated_preparation(task_id, spec["preparation_id"]) is None
+    else:
+        asyncio.run(preparation.prepare(selected, task_id, spec))
+        waiter = queue.find_delegated_preparation(task_id, spec["preparation_id"])
+        assert waiter is not None and waiter["delegation"] == spec
+    assert client.calls == ["capabilities", "next-actions"]
+    assert not queue.list_run_waiter_wakes(task_id)
+
+
+@pytest.mark.parametrize("stage", ["lock", "commit"])
+def test_creation_cutoff_is_rechecked_under_native_suspension_write_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stage: str,
+) -> None:
+    queue, task_id, spec, _, registrar = setup(tmp_path)
+    spec["feed"]["issued_at"] = math.floor(time.time()) + .9
+    spec["feed"]["deadline_at"] = spec["feed"]["issued_at"] + spec["timeout"]
+    cutoff = math.floor(spec["feed"]["deadline_at"])
+    times = iter((cutoff - .5, cutoff + .5) if stage == "lock" else (
+        cutoff - .5, cutoff - .25, cutoff + .5,
+    ))
+    monkeypatch.setattr(queue, "_now", lambda _now: next(times))
+    before = queue.get(task_id)
+    with pytest.raises(TaskError, match="creation cutoff"):
+        asyncio.run(preparation.prepare(registrar, task_id, spec))
+    assert queue.get(task_id) == before
+    assert queue.find_delegated_preparation(task_id, spec["preparation_id"]) is None
+    assert not queue.list_run_waiter_wakes(task_id)
+
+
+def test_native_sender_cannot_extend_the_frozen_creation_cutoff(tmp_path: Path) -> None:
+    from agent_dispatch.queue_feed_preparation import FeedWaiterAdmission
+
+    queue, task_id, spec, _, _ = setup(tmp_path)
+    task = queue.get(task_id)
+    assert task is not None and task.dedup_key is not None
+    basis = FeedWaiterAdmission.observe(task, lane="harness", dedup_key=task.dedup_key)
+    with pytest.raises(TaskError, match="cutoff"):
+        queue.prepare_repository_feed_waiter(
+            task_id, admission=basis, delegation=spec, worker_id="worker",
+            resume_worktree="host/wt", host="host", reason="original wait",
+            creation_cutoff=math.floor(spec["feed"]["deadline_at"]) + 1,
+        )
+    assert queue.get(task_id) == task and not queue.list_run_waiter_wakes(task_id)
+    assert queue.find_delegated_preparation(task_id, spec["preparation_id"]) is None
 
 
 def test_changed_task_retains_late_receipt_but_cannot_arm(tmp_path: Path) -> None:

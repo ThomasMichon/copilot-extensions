@@ -96,6 +96,15 @@ class RepositoryFeedPreparer:
             raise ValueError("executing repository/consumer selection differs")
         return capabilities
 
+    def _prepare_native(
+        self, task_id: str, *, admission: FeedWaiterAdmission, delegation: dict[str, Any],
+        worker_id: str, resume_worktree: str, reason: str, host: str | None,
+    ) -> dict[str, Any]:
+        return self.queue.prepare_repository_feed_waiter(
+            task_id, admission=admission, delegation=delegation, worker_id=worker_id,
+            resume_worktree=resume_worktree, reason=reason, host=host,
+        )
+
     async def prepare(
         self, task_id: str, *, delegation: dict[str, Any], worker_id: str,
         resume_worktree: str, reason: str, host: str | None = None,
@@ -147,7 +156,7 @@ class RepositoryFeedPreparer:
             ):
                 raise ValueError("executing reviewer-feed selection differs")
             self._checkpoint()
-            return self.queue.prepare_repository_feed_waiter(
+            return self._prepare_native(
                 task_id, admission=admission, delegation=selected, worker_id=worker_id,
                 resume_worktree=resume_worktree, reason=reason, host=host,
             )

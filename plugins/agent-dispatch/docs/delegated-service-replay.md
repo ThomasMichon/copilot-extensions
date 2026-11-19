@@ -434,7 +434,7 @@ bound asynchronous PR-service client. Its in-process protocol is
 `agent-dispatch.repository-feed-registration/v1`. It is not selected by the
 coordinator factory, callback route, CLI or default startup.
 
-Its inherited `prepare` requires the executing native attempt protocol above
+Its `prepare` requires the executing native attempt protocol above
 and the service's `repository-request-recovery/v1` capability before suspension.
 The ordinary preparation-only adapter remains compatible and inert. Calling
 `await registrar.reconcile_registration(task_id, preparation_id)` then makes
@@ -444,6 +444,14 @@ The registrar rejects missing baselines, timeouts above the provider's 86,400
 second TTL limit, out-of-range provider cursors/cutoffs and an already elapsed
 creation cutoff before preparing or suspending a native task. The inert
 preparation-only adapter retains its broader storage contract.
+The selected queue must additionally declare
+`repository_feed_registration_protocol` equal to the registrar's protocol.
+Only that capable owner receives the optional `creation_cutoff` on its existing
+preparation operation. It verifies the immutable rounded cutoff under the same
+suspension write lock, both after acquisition and immediately before commit.
+Crossing the cutoff rolls back task suspension and waiter creation, without
+rewriting the original deadline. Older preparation-only callers send no new
+argument and retain their original lifetime and commit behavior.
 
 The original request freezes `after` from the retained baseline cursor, TTL
 from the original timeout rounded up to seconds, and `not_after` from the

@@ -7,11 +7,12 @@ import time
 from typing import Any
 
 from .queue_feed_attempts import ATTEMPT_PROTOCOL
+from .queue_feed_preparation import FeedWaiterAdmission, REGISTRATION_PROTOCOL
 from .queue_records import TaskError
 from .repository_feed_preparation import RepositoryFeedPreparer
 from .repository_feed_waiter_contract import validate_feed_delegation
 
-PROTOCOL = "agent-dispatch.repository-feed-registration/v1"
+PROTOCOL = REGISTRATION_PROTOCOL
 _RECOVERY_PROTOCOL = "agent-pull-requests.repository-request-recovery/v1"
 
 
@@ -42,6 +43,8 @@ class RepositoryFeedRegistrar(RepositoryFeedPreparer):
     async def _negotiate(self) -> dict[str, Any]:
         if getattr(self.queue, "repository_feed_attempt_protocol", None) != ATTEMPT_PROTOCOL:
             raise TaskError("native repository-feed attempt unsupported")
+        if getattr(self.queue, "repository_feed_registration_protocol", None) != PROTOCOL:
+            raise TaskError("native repository-feed creation cutoff unsupported")
         capabilities = await super()._negotiate()
         feature = capabilities.get("request_recovery")
         if not isinstance(feature, dict) or any(
@@ -52,6 +55,16 @@ class RepositoryFeedRegistrar(RepositoryFeedPreparer):
         ):
             raise ValueError("original repository request recovery unsupported")
         return capabilities
+
+    def _prepare_native(
+        self, task_id: str, *, admission: FeedWaiterAdmission, delegation: dict[str, Any],
+        worker_id: str, resume_worktree: str, reason: str, host: str | None,
+    ) -> dict[str, Any]:
+        return self.queue.prepare_repository_feed_waiter(
+            task_id, admission=admission, delegation=delegation, worker_id=worker_id,
+            resume_worktree=resume_worktree, reason=reason, host=host,
+            creation_cutoff=self._intent({"delegation": delegation})["not_after"],
+        )
 
     @staticmethod
     def _intent(waiter: dict[str, Any]) -> dict[str, Any]:
