@@ -171,6 +171,9 @@ class ServingWatchdog:
         if self._on_dead(reason) is not False:
             return False
         if declined + 1 >= self._max_declined:
+            if self._is_shutting_down():
+                self._await_shutdown()
+                return False
             self._on_shutdown_stuck(f"{reason}; no replacement could be scheduled")
             return False
         return True

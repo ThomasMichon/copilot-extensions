@@ -485,6 +485,27 @@ def test_startup_declines_carry_into_serving_budget() -> None:
     assert len(exits) == 1
 
 
+def test_shutdown_during_final_declined_handoff_gets_graceful_wait() -> None:
+    # A graceful shutdown that begins during the last declined launch is
+    # allowed to finish instead of being cut short by the hard exit.
+    dead: list[str] = []
+    exits: list[str] = []
+    shutting = {"v": False}
+
+    def on_dead(reason: str) -> bool:
+        dead.append(reason)
+        shutting["v"] = True
+        return False
+
+    wd, _, _ = _make(
+        probe_serving=lambda: False, on_dead=on_dead, on_shutdown_stuck=exits.append,
+        max_declined=1, is_shutting_down=lambda: shutting["v"], is_stopped=lambda: True,
+    )
+    wd.run()
+    assert len(dead) == 1
+    assert exits == []
+
+
 def test_declined_startup_handoff_retries_then_hard_exits() -> None:
     dead: list[str] = []
     exits: list[str] = []
