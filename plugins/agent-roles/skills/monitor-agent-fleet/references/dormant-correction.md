@@ -143,8 +143,11 @@ otherwise.
    at least one reobservation interval. A pane that appeared and exited is a
    failed resume, not a recovery; reconcile it before retrying.
 4. **Relay the goal once.** After a verified resume, send one message that
-   restates the recorded root goal and next action, under the steering scope
-   or the standing goal-establishment authority. Do not repeat it.
+   restates the recorded root goal and next action, only under a current
+   steering scope that covers the resumed head and that relay purpose. A
+   repair grant, or a steering scope for the interactive helper, does not
+   cover it. Without such a scope, report the proposed relay without sending
+   it. Do not repeat it.
 
 ## Coverage and report
 

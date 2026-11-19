@@ -36,16 +36,19 @@ should have decided, or asked with a default and a revisit time.
 
 Under relentless [drive posture](watchdog-checks.md#drive-posture), the
 charter's answer scope may also grant the **goal-advancing option** class.
-Without that recorded grant, the classes above stand: operator-only and
-unclear questions are never answered. With it, the monitor may answer a
-parked question by choosing an offered option, as follows:
+The grant widens which offered option the monitor picks, not whose authority
+it may exercise: the classes above still stand, and operator-only and unclear
+questions are never answered. With the grant, the monitor may answer a parked
+question whose authority boundary and intent are established from the record,
+by choosing an offered option, as follows:
 
 1. **Re-capture.** Immediately before answering, re-capture the same form and
    the same request identifier or cursor. If the question, its options, the
    head, a hold or an operator reply changed, reassess from the start.
 2. **Choose the goal-advancing option.** Pick the offered standing or
-   class-level option that advances the target's recorded root goal. Never
-   write free text that widens an offered option.
+   class-level option that advances the target's recorded root goal and that
+   lies within the worker's established delegated authority and recorded
+   intent. Never write free text that widens an offered option.
 3. **Exclusions.** Never pick an option that deploys, bypasses review or CI,
    deletes, elevates, changes credentials, reboots, changes network or system
    configuration, restarts all agents, or replays an operation with an
@@ -56,8 +59,10 @@ parked question by choosing an offered option, as follows:
    Record the actual result after, as in the steps below.
 
 Permission and approval prompts stay operator-only, even under this scope.
-An unclear question qualifies only when an offered option clearly advances
-the root and avoids every exclusion; otherwise it stays operator-only.
+Every operator-only class above and every charter exclusion still applies. A
+question whose authority boundary or intent cannot be established stays
+unclear and operator-only; advancing the root and avoiding the exclusions do
+not by themselves establish authority.
 
 ## Answer within an answer scope
 

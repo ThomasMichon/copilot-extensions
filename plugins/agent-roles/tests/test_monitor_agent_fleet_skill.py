@@ -584,13 +584,15 @@ def test_relentless_drive_posture_is_opt_in_and_bounded() -> None:
     ):
         assert requirement in watchdog, requirement
     for requirement in (
-        "Without that recorded grant, the classes above stand",
+        "The grant widens which offered option the monitor picks, not whose authority",
         "re-capture the same form and the same request identifier or cursor",
         "Never pick an option that deploys, bypasses review or CI, deletes, "
         "elevates, changes credentials, reboots, changes network or system "
         "configuration, restarts all agents, or replays an operation with an "
         "unknown outcome.",
         "Permission and approval prompts stay operator-only, even under this scope.",
+        "A question whose authority boundary or intent cannot be established stays "
+        "unclear and operator-only",
     ):
         assert requirement in pending, requirement
     assert "## Every blocker has an owner" in repair
@@ -601,6 +603,7 @@ def test_relentless_drive_posture_is_opt_in_and_bounded() -> None:
         "Launch from an interactive logon on Windows.",
         "**Verify the pane stays live.**",
         "**Relay the goal once.**",
+        "report the proposed relay without sending it",
     ):
         assert requirement in dormant, requirement
     assert "Never finalize, abandon, reset, resume, start or message the target" in dormant
