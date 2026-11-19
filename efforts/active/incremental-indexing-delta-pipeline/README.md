@@ -155,8 +155,14 @@ After the reviewed proposal, the operator admitted execution:
   [native component ledger](../../../plugins/agent-index/docs/component-ledger.md)
   retains scoped ordering/tombstone observations with missing-history refusal and
   binding-aware bounded consolidation; it is not an applied-content certificate.
-  Representation,
-  v2 execution, ordered application and read isolation remain unimplemented.
+  [Prepared work](../../../plugins/agent-index/docs/prepared-application.md)
+  also binds its exact acquired manifest, payload, mode and scope before cache
+  mutation. The explicit
+  [native application](../../../plugins/agent-index/docs/component-ledger.md#explicit-native-application)
+  composes monotonic point writes with prepared/routed coverage and path
+  checkpoints, retaining pending work and refusing uncertain state.
+  Representation, v2 execution, automatic partial-effect/restore reconciliation,
+  whole-claim completion and read isolation remain unimplemented.
 - [ ] Persist acquisition progress so retry/restart does not restart a
   corpus-wide listing.
 - [ ] Move authoritative full enumeration into separately budgeted, resumable
