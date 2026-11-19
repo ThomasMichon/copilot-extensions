@@ -27,10 +27,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import logging
+from pathlib import Path
 from typing import Callable, Optional
 
 from . import git_ops, tracking
 from .retirement_safety import retirement_blocker
+from .tracking_claims import ResourceClaim, effective_open_follow_up_count, parse_claim_ref
 
 log = logging.getLogger(__name__)
 
@@ -252,7 +254,7 @@ class CleanupDisposition:
 
 
 def _count_cross_machine_worktree_claims(
-    held_claims: list, this_machine: str,
+    held_claims: list[ResourceClaim], this_machine: str,
 ) -> int:
     """How many of ``held_claims`` (outbound claims THIS record holds) are
     ``worktree``-kind claims whose qualified ref names a worktree hosted on
@@ -279,7 +281,7 @@ def _count_cross_machine_worktree_claims(
     for claim in held_claims:
         if claim.kind != "worktree":
             continue
-        parsed = tracking.parse_claim_ref(claim.ref)
+        parsed = parse_claim_ref(claim.ref)
         if parsed is None or not parsed.is_qualified:
             continue
         if parsed.machine != this_machine:
@@ -403,7 +405,7 @@ def cleanup_disposition(
     # `tracking.effective_open_follow_up_count`. Validation Plan "Blocker
     # precedence": also applies to UNUSED (``empty``)/CONVO
     # (``conversation-only``), mirroring the held-claims override above.
-    open_follow_ups = tracking.effective_open_follow_up_count(rec)
+    open_follow_ups = effective_open_follow_up_count(rec)
     if open_follow_ups and (
         rec.status == "finalized" or info.state == S.COMPLETED
         or v.category in ("merged", "empty", "conversation-only")
@@ -466,9 +468,9 @@ def cleanup_disposition(
     if info.state == S.DIRTY or info.dirty > 0:
         return CleanupDisposition(False, "dirty", v.reason)
 
-    from .checkout_data import preservation_reason
+    from .checkout_data import preservation_hint
     if rec.checkout_managed and rec.worktree_path:
-        if reason := preservation_reason(rec.worktree_path):
+        if reason := preservation_hint(rec.worktree_path):
             return CleanupDisposition(False, "retained-data", reason)
 
     if rec.status == "finalized" or info.state == S.COMPLETED:
@@ -586,7 +588,7 @@ def reconcile_and_persist_best_effort(
     rec: tracking.WorktreeRecord,
     lookup: Callable[[str, int], "object | None"],
     *,
-    rec_path: "object | None" = None,
+    rec_path: Path | None = None,
 ) -> list[tuple[int, str, str]]:
     """Reconcile PR states from the provider, then persist without lost updates.
 
@@ -611,6 +613,8 @@ def reconcile_and_persist_best_effort(
     if not changes:
         return changes
     path = rec_path if rec_path is not None else rec.yaml_path
+    if path is None:
+        return changes
     from .execution_spaces import ExecutionSpaceError, require_project_record_mutation
 
     try:

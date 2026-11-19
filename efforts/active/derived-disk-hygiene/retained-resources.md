@@ -241,3 +241,31 @@ rescue/cutover and final exact-head native qualification remain open gates.
 The source-replacement cache control also passes in the updated Linux packet:
 64 passes and the same one Windows-only skip. Whole-file strict typing passes
 all 18 touched Python files for both target platforms.
+
+### 2026-11-18 - Review corrections
+
+Review of #13314 found four real gaps. Fresh disposal now inspects tracked
+gitlinks and conservatively retains nonempty submodule paths. Advisory
+classification uses a separate cheap history hint, so classified list and both
+status renderers start no ignored-data observation. CWD retained discovery uses
+existing records only, without invoking adoption. Marker publication uses unique
+temporary files with exception cleanup; fresh previews recover valid retiring
+state with orphan temporary files, including the older fixed temporary name.
+
+Focused controls cover actual submodule evidence, owner-led disposition and
+deinitialization, both tracked/untracked CWD cases with byte-preserved ledgers,
+real rendering work counts, and interruption inside final marker publication.
+The lifecycle/status/classification selection passes 256 cases with four legacy
+fixture failures. All four failed selectors also fail against the committed
+pre-review `prune.py`; #13300 tracks that receiver/pair-fixture gap, not a CI
+exception. The cache and actor-free selection passes 77 cases with one
+Windows-only skip.
+
+The original required unit job refused changed source hashes before test
+execution. Its corrected local packet passed all 5,499 admitted cases with
+coverage in 132.381 seconds under the unchanged 300-second budget. The review
+corrections add two more actor-free controls and require a refreshed complete
+packet, current-head CI and review before merge. Earlier native Windows
+qualification includes 140 published-head CLI/recovery cases in
+[run 44417101889](https://github.com/ThomasMichon/copilot-extensions/actions/runs/44417101889);
+updated native qualification is still separate from those prior results.

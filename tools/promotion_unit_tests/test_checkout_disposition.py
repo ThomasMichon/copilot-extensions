@@ -13,6 +13,7 @@ from types import CodeType, ModuleType, SimpleNamespace
 import pytest
 
 SOURCE = Path(__file__).resolve().parents[2] / "plugins/agent-worktrees/src/agent_worktrees/checkout_data.py"
+PRUNE = SOURCE.with_name("prune.py")
 
 
 @dataclass
@@ -21,6 +22,9 @@ class Observation:
     empty: bool = False
     qualified: bool = True
     result: subprocess.CompletedProcess[str] | Exception = field(
+        default_factory=lambda: subprocess.CompletedProcess(["git"], 0, "", ""),
+    )
+    index: subprocess.CompletedProcess[str] = field(
         default_factory=lambda: subprocess.CompletedProcess(["git"], 0, "", ""),
     )
     calls: list[dict[str, object]] = field(default_factory=list)
@@ -36,8 +40,10 @@ def api(monkeypatch: pytest.MonkeyPatch, source_code: CodeType) -> tuple[ModuleT
     state = Observation()
 
     class View:
-        def __init__(self, name: str) -> None:
-            self.name = name
+        name: str
+
+        def __init__(self, name: str | View) -> None:
+            self.name = name.name if isinstance(name, View) else name
 
         def __truediv__(self, part: str) -> View:
             return View(self.name + "/" + part)
@@ -54,8 +60,10 @@ def api(monkeypatch: pytest.MonkeyPatch, source_code: CodeType) -> tuple[ModuleT
             return iter(()) if state.empty else iter((self / "payload",))
 
     def observe(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
-        assert argv[:2] == ["fixture-git", "ls-files"]
+        assert argv[0] == "fixture-git" and "ls-files" in argv
         state.calls.append(kwargs)
+        if any(value.startswith("--format=") for value in argv):
+            return state.index
         if isinstance(state.result, Exception):
             raise state.result
         return state.result
@@ -95,18 +103,23 @@ def test_known_history_or_unqualified_source_never_queries(
     assert state.calls == []
 
 
-@pytest.mark.parametrize("kind", ["clean", "ignored", "failed", "oversized"])
+@pytest.mark.parametrize("kind", ["clean", "ignored", "failed", "oversized", "submodule"])
 def test_ignored_disposition_uses_bounded_selected_observation(
     api: tuple[ModuleType, Observation], kind: str,
 ) -> None:
     module, state = api
     text = "evidence/\0" if kind == "ignored" else "x" * 65537 if kind == "oversized" else ""
     state.result = subprocess.CompletedProcess(["git"], 128 if kind == "failed" else 0, text, "")
+    if kind == "submodule":
+        state.index = subprocess.CompletedProcess(["git"], 0, "160000\tnested\0", "")
     reason = module.preservation_reason("checkout")
     assert (reason is None) is (kind == "clean")
-    assert len(state.calls) == 1
-    assert state.calls[0]["env"] == {"selected-repository": "fixture"}
-    assert state.calls[0]["timeout"] == 5
+    assert len(state.calls) == (2 if kind in {"clean", "submodule"} else 1)
+    assert state.calls[0]["env"] == {
+        "selected-repository": "fixture", "GIT_OPTIONAL_LOCKS": "0", "GIT_NO_LAZY_FETCH": "1",
+    }
+    timeout = state.calls[0]["timeout"]
+    assert isinstance(timeout, (int, float)) and 0 < timeout <= 5
     assert state.calls[0]["max_stdout_bytes"] == 65536
     assert state.calls[0]["max_stderr_bytes"] == 8192
 
@@ -118,3 +131,40 @@ def test_unavailable_observation_preserves_data(
     module, state = api
     state.result = subprocess.TimeoutExpired("git", 5) if kind == "timeout" else subprocess.SubprocessError("output limit")
     assert "cannot classify" in module.preservation_reason("checkout")
+
+
+def test_cached_classification_uses_history_hint_without_fresh_process_work(
+    api: tuple[ModuleType, Observation], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data, state = api
+    prefix = data.__package__
+    assert prefix is not None
+    git = ModuleType(prefix + ".git_ops")
+    vars(git)["WorktreeState"] = SimpleNamespace(ACTIVE="active", COMPLETED="completed", WIP="wip", DIRTY="dirty")
+    tracking = ModuleType(prefix + ".tracking")
+    vars(tracking).update(WorktreeRecord=object, effective_open_follow_up_count=lambda rec: 0)
+    claims = ModuleType(prefix + ".tracking_claims")
+    vars(claims).update(
+        ResourceClaim=object, effective_open_follow_up_count=lambda rec: 0, parse_claim_ref=lambda ref: None,
+    )
+    retirement = ModuleType(prefix + ".retirement_safety")
+    vars(retirement)["retirement_blocker"] = lambda rec: None
+    closure = ModuleType(prefix + ".closure_descriptor")
+    for name in (
+        "BLOCKER_CODES", "DESCRIPTOR_VERSION", "FACT_NAMES", "ClosureDescriptor",
+        "assemble_closure_descriptor", "interpret_descriptor_payload",
+    ):
+        vars(closure)[name] = None
+    module = ModuleType(prefix + ".prune")
+    module.__package__ = prefix
+    module.__file__ = str(PRUNE)
+    for imported in (git, tracking, claims, retirement, closure, module):
+        monkeypatch.setitem(sys.modules, imported.__name__, imported)
+    exec(compile(PRUNE.read_bytes(), str(PRUNE), "exec"), module.__dict__)
+    vars(module)["assess"] = lambda *a, **k: module.PruneVerdict(True, "completed-local", "cached Git facts")
+    record = SimpleNamespace(
+        resources=[], status="finalized", is_paired=False, checkout_managed=True, worktree_path="checkout",
+    )
+    result = module.cleanup_disposition(record, SimpleNamespace(state="completed", dirty=0))
+    assert result.cleanable and result.bucket == "clean"
+    assert state.calls == []

@@ -44,8 +44,12 @@ only needs its environment rebuilt.
 A partial failure returns `source_retirement_safe: false`. Keep the source and
 remaining cache contents. The marker continues to block preparation. After the
 blocking condition is resolved, obtain a new preview before retrying. An
-unreadable or interrupted marker remains a refusal, not permission to delete
-or rebuild it. Do not stop another process or change permissions to force
+unreadable canonical marker remains a refusal, not permission to delete
+or rebuild it. Marker writes use unique temporary files and clean their own
+failed publication when possible. A stopped writer can leave an orphan temporary
+file; a fresh preview can resume a valid `retiring` marker and retire that
+selected environment, including stale temporary publication files.
+Do not stop another process or change permissions to force
 retirement.
 
 ## Interpret the result narrowly

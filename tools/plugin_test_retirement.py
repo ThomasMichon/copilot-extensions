@@ -12,6 +12,7 @@ import re
 import stat
 import sys
 from typing import cast
+import uuid
 
 from _admission_protocol import acquire
 from single_instance_lease import AlreadyRunningError as AlreadyRunningError
@@ -152,12 +153,18 @@ def parse_preview(value: object) -> Preview:
 def _write_marker(environment: Path, plan: Preview, state: str) -> None:
     data = asdict(plan)
     data["state"] = state
-    temporary = native_test_path(environment / (MARKER + ".new"))
-    with temporary.open("x", encoding="utf-8") as stream:
-        json.dump(data, stream, sort_keys=True)
-        stream.flush()
-        os.fsync(stream.fileno())
-    temporary.replace(native_test_path(environment / MARKER))
+    temporary = native_test_path(environment / (MARKER + ".new-" + uuid.uuid4().hex))
+    try:
+        with temporary.open("x", encoding="utf-8") as stream:
+            json.dump(data, stream, sort_keys=True)
+            stream.flush()
+            os.fsync(stream.fileno())
+        temporary.replace(native_test_path(environment / MARKER))
+    finally:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def apply(plan: Preview) -> dict[str, object]:

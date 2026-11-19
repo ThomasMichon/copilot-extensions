@@ -131,9 +131,17 @@ def cmd_retained(args: argparse.Namespace, target: list[str]) -> int:
     if len(target) > 1:
         return output._json_error("claims retained accepts at most one worktree id", 2)
     config = cfg.load_config()
-    wid = worktree_identity._infer_worktree_id(target[0] if target else None, config)
+    wid = target[0] if target else None
+    if wid is None:
+        try:
+            record = worktree_identity.tracked_invocation_record(
+                Path.cwd(), project=config.repo_name, anchor=Path(config.default_repo.anchor),
+            )
+        except (OSError, ValueError, RuntimeError, yaml.YAMLError) as exc:
+            return output._json_error(f"tracked checkout unavailable: {type(exc).__name__}", 2)
+        wid = record.worktree_id if record is not None else None
     if not wid:
-        return output._json_error("could not determine worktree id", 2)
+        return output._json_error("no existing tracked worktree; pass a tracked worktree id", 2)
     try:
         result = inventory(wid, config, max_depth=args.max_depth, max_nodes=args.max_nodes)
     except ValueError as exc:
