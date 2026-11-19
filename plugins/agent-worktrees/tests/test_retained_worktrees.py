@@ -77,6 +77,34 @@ def test_settled_cross_project_children_and_grandchildren_remain_visible(graph: 
     assert result["removal_authorized"] is False
 
 
+@pytest.mark.parametrize("opaque", [
+    {"kind": {"invalid": 1}, "ref": "host/source/child"},
+    {"kind": "worktree", "ref": "host/source/child", "metadata_opaque": True},
+    {"kind": "task", "ref": "opaque", "metadata_opaque": True},
+])
+def test_opaque_claim_metadata_cannot_report_a_complete_inventory(
+    graph: Graph, opaque: dict[str, object],
+) -> None:
+    config, save = graph
+    save("root", "parent")
+    save("source", "child", status="finalized")
+    save("library", "sibling", status="finalized")
+    path = cfg.project_dir("root") / "worktrees" / "parent.yaml"
+    value = yaml.safe_load(path.read_text(encoding="utf-8"))
+    value["resources"] = [
+        opaque, {"kind": "worktree", "ref": "host/library/sibling", "state": "released"},
+    ]
+    path.write_text(yaml.safe_dump(value), encoding="utf-8")
+    before = path.read_bytes()
+
+    result = inventory("parent", config)
+
+    assert not result["complete"]
+    assert any("opaque" in item["reason"] for item in result["unresolved"])
+    assert any(node["worktree_id"] == "sibling" for node in result["nodes"])
+    assert path.read_bytes() == before
+
+
 @pytest.mark.parametrize("child_machine", ["host", "registry-key", "remote"])
 def test_reporter_registry_key_and_record_scoped_aliases(
     graph: Graph, monkeypatch: pytest.MonkeyPatch, child_machine: str,

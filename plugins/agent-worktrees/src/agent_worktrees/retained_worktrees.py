@@ -107,6 +107,9 @@ def inventory(
             if claims_read > MAX_CLAIMS:
                 unknown(ref, "claim observation limit")
                 return
+            if claim.metadata_opaque:
+                unknown(ref, "opaque resource metadata; child relationships unqualified")
+                continue
             if claim.kind != "worktree":
                 continue
             edges.append({"parent": ref, "child": claim.ref, "state": claim.state})
