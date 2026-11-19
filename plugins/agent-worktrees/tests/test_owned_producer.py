@@ -52,6 +52,36 @@ def _require_child_payload(
     monkeypatch.setattr(runner, "OwnedProducerSandbox", StartedScope)
 
 
+def _probe_component_length_fixture(parent: Path) -> None:
+    valid = parent / ("r" * 240)
+    try:
+        valid.mkdir()
+    except OSError as error:
+        if error.errno == errno.ENAMETOOLONG or getattr(error, "winerror", None) in {123, 206}:
+            pytest.skip("native component-length fixture prerequisite is unavailable")
+        raise
+    valid.rmdir()
+
+
+@pytest.mark.parametrize("failure_code", [errno.ENAMETOOLONG, errno.EACCES])
+def test_component_length_probe_preserves_other_failures(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure_code: int,
+) -> None:
+    def refuse(path: Path, *args: Any, **kwargs: Any) -> None:
+        assert path == tmp_path / ("r" * 240)
+        raise OSError(failure_code, "fixture-only positive-probe refusal")
+
+    monkeypatch.setattr(Path, "mkdir", refuse)
+    if failure_code == errno.ENAMETOOLONG:
+        with pytest.raises(pytest.skip.Exception, match="component-length fixture prerequisite"):
+            _probe_component_length_fixture(tmp_path)
+    else:
+        with pytest.raises(OSError) as failure:
+            _probe_component_length_fixture(tmp_path)
+        assert failure.value.errno == failure_code
+    assert not list(tmp_path.iterdir())
+
+
 @pytest.fixture
 def producer_owner(
     final_owner: tuple[Path, Path, Config], tmp_path_factory: pytest.TempPathFactory,
@@ -357,14 +387,7 @@ def test_native_overlong_path_refuses_without_losing_custody(
     capsys: pytest.CaptureFixture[str], stage: str,
 ) -> None:
     runner, owner, selected, _, ledger = producer_owner
-    valid = selected.parent / ("r" * 240)
-    try:
-        valid.mkdir()
-    except OSError as error:
-        if getattr(error, "winerror", None) in {123, 206}:
-            pytest.skip("native Windows long-path fixture prerequisite is unavailable")
-        raise
-    valid.rmdir()
+    _probe_component_length_fixture(selected.parent)
     if stage == "root":
         overlong = selected.parent / ("r" * 256)
         with pytest.raises(OSError) as failure:

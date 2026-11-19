@@ -176,9 +176,10 @@ a valid long component, encounters the native overlong-component refusal,
 and verifies bounded retained diagnostics with settled custody. Windows APIs
 can report errors 123/206; Python's file API can instead expose `EINVAL`
 without a Windows error attribute.
-On Windows, both cases first probe the fixture's long-path prerequisite. An
-unavailable venue is reported as a skip, not a component-length acceptance
-result. The same consumer controls run on POSIX and require native
+Both cases first probe the fixture's component-length prerequisite. A
+Windows long-path refusal or POSIX `ENAMETOOLONG` at this positive probe
+reports an unavailable venue as a skip, not an acceptance result. Other
+failures, including permission errors, still fail. The same consumer controls run on POSIX and require native
 `ENAMETOOLONG` at both root admission and child execution.
 This tests component-length refusal, not every possible Windows total-path
 limit or filesystem policy. The 12 existing producer cases, now including
@@ -204,6 +205,12 @@ The expanded file passes all 16 cases on Windows x64 in 55.63 seconds and
 Linux in 25.75 seconds. A subsequent direct-`os` import correction passes the
 affected partial-removal case on both platforms, in 4.85 and 1.25 seconds,
 and the final six-file strict matrix passes both declared targets.
+The portable positive-probe correction passes the two native path cases and
+two injected fixture-error regressions on Windows in 7.39 seconds and Linux
+in 1.64 seconds. These focused results qualify the final prerequisite change;
+the other 14 cases reuse the unchanged qualification above, not a claimed
+full 18-case rerun. The selected hosts exercised both native controls without
+skips. A filesystem that cannot provide the positive fixture remains unavailable.
 
 The parser rejects long-option abbreviations. Three actor-free regressions
 and actual Windows CLI calls cover `--own`, `--ki` and `--time`, each refused
