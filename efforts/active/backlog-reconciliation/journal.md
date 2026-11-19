@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-19 - Cold-fixture and guard-map qualification receiving](journal/2026/11.19-cold-fixture-and-guard-map-receiving.md)
+
 - [2026-11-19 - Read-only and bounded Windows receiving proposals](journal/2026/11.19-read-only-and-bounded-windows-receiving.md)
 
 - [2026-11-19 - Non-live cause reconciliation and current identity accounting](journal/2026/11.19-non-live-cause-reconciliation-and-identity-accounting.md)

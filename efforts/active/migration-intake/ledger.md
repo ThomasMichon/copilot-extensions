@@ -917,3 +917,33 @@ hosted-Windows quiescence and OPEN #1303 remain. No implementation, native
 execution, installer acceptance, source/resource transfer or custody release
 is authorized. The [campaign record](../backlog-reconciliation/journal/2026/11.19-read-only-and-bounded-windows-receiving.md)
 preserves the separate proposal and disposition boundaries.
+
+## Proposed finite fixture and guard-map qualification receiving - 2026-11-19 UTC
+
+| Source | Disposition | Primary canonical owner | Retained gates |
+|---|---|---|---|
+| #9970 cold authoritative-override fixture initialization and bounded publication | routed (proposed; effective after actual reviewed complete domain acceptance) | [Test Portfolio Rationalization](../test-portfolio-rationalization/README.md), Phase 4 Dispatch wave, P9970/V9970/G9970 through Phase 7 | Full initial-observation, genuinely pending refusal, pending/no-duplicate assertions and unchanged reconciliation/cycle bounds; no production relaxation |
+| #10031 large prepared-caller INITIAL startup/cutover qualification | routed (proposed; effective after actual reviewed complete domain acceptance) | [Test Portfolio Rationalization](../test-portfolio-rationalization/README.md), Phase 3 Worktrees pilot, P10031/V10031/G10031 through Phase 7 | Existing native lifecycle owner/deadline, acquisition failures, listener/continuity timings, diagnostics/retries and bounded cleanup; independent platform/full-harness owners |
+| #10032 native UNC and complete POSIX guard-map entry/deployment qualification | routed (proposed; effective after actual reviewed complete domain acceptance) | [Test Portfolio Rationalization](../test-portfolio-rationalization/README.md), Phase 3 Worktrees pilot, P10032/V10032/G10032 through Phase 7 | Actual native entry/producer/both consumers/deployed-reader closure, original path/input/concurrency/missing-map controls, identities/skips/cleanup; no network or privilege expansion |
+
+This same planning unit supplies complete direct domain Plan, local and actual
+global Validation, Coordination and dated Journal for ordinary review.
+Ledger-only publication is not domain acceptance. Each family has one primary
+phase; existing source issues supply the trackers during proposal. The existing
+maintainer, fixture/source/override, map/consumer, lifecycle/deployment/native,
+runner/release and resource owners retain responsibility. No new issue,
+administrative checkbox, generic acknowledgement, executor or receipt-PR gate
+is introduced. Keep sources OPEN until actual reviewed whole receiving
+delivery and permitted current source/receiver/custody readback support
+separate tracking judgments.
+
+The completed [guard-map effort](../precomputed-hook-guard-map/README.md)
+remains Done, with its source and ordinary Windows installed-consumer credit;
+its original qualification transfer is preserved, not re-executed or recredited.
+All eighteen new technical rows remain unchecked. Preserve OPEN #1303,
+unit-only required PR/promotion CI, hosted-Windows quiescence, every original
+deadline/alternative, actual claim/hold and resource boundary. Planned
+receiving grants no native run, implementation, service action, deployment,
+privilege change or custody release. The
+[campaign record](../backlog-reconciliation/journal/2026/11.19-cold-fixture-and-guard-map-receiving.md)
+retains the independent source and prior-publication evidence.
