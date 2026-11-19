@@ -9,9 +9,9 @@ from typing import Any
 
 import yaml
 
-from . import config as cfg, output, tracking, worktree_identity
+from . import config as cfg, output, record_reporting, tracking, worktree_identity
 from .claims_transitive_cli import _is_safe_path_component
-from .legacy_wsl_record_locality import record_namespace_matches
+from .legacy_wsl_record_locality import record_namespace_matches, resolve_legacy_wsl_owner_ref
 from .tracking_claims import format_claim_ref, parse_claim_ref
 
 SCHEMA = "agent-worktrees.retained-worktrees"
@@ -42,9 +42,10 @@ def inventory(
         raise ValueError("max-nodes must be between 1 and 1024")
     if not _is_safe_path_component(worktree_id):
         raise ValueError("invalid worktree id")
-    machine, project = config.machine, config.repo_name
-    if not machine or not _is_safe_path_component(project):
+    project = config.repo_name
+    if not _is_safe_path_component(project):
         raise ValueError("retained discovery requires a qualified local project")
+    machine = record_reporting.current_context(project).execution_machine
     nodes: list[dict[str, Any]] = []
     edges: list[dict[str, Any]] = []
     unresolved: list[dict[str, str]] = []
@@ -68,9 +69,6 @@ def inventory(
             unknown(ref, "traversal limit")
             return
         visited.add(key)
-        if host != machine:
-            unknown(ref, "remote owner; inspect through that resource owner")
-            return
         try:
             if repo not in projects:
                 projects[repo] = cfg.load_project_config(repo, include_control_plane_related_pr=False)
@@ -82,12 +80,18 @@ def inventory(
             return
         if (
             record.worktree_id != wid or record.repo != repo
-            or record.execution_machine != host or record.platform != config.platform
+            or record.platform != config.platform
             or receiving.platform != config.platform
+            or getattr(getattr(record, "_reporting_context", None), "unavailable", False)
             or not record_namespace_matches(record, receiving)
         ):
             unknown(ref, "record identity or execution environment mismatch")
             return
+        if host != record.execution_machine:
+            owner = parse_claim_ref(ref)
+            if owner is None or resolve_legacy_wsl_owner_ref(owner, receiving) != path:
+                unknown(ref, "remote owner; inspect through that resource owner")
+                return
         presence = _presence(record.worktree_path)
         nodes.append({
             "ref": ref, "project": repo, "worktree_id": wid,

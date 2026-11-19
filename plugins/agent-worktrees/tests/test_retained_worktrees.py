@@ -7,8 +7,9 @@ import socket
 from typing import Protocol
 
 import pytest
+import yaml
 
-from agent_worktrees import config as cfg, tracking
+from agent_worktrees import config as cfg, record_reporting, tracking
 from agent_worktrees import claims_cli, output
 from agent_worktrees.__main__ import build_parser
 from agent_worktrees.retained_worktrees import inventory
@@ -74,6 +75,35 @@ def test_settled_cross_project_children_and_grandchildren_remain_visible(graph: 
     assert result["nodes"][1]["checkout_presence"] == "absent"
     assert len(result["edges"]) == 2
     assert result["removal_authorized"] is False
+
+
+@pytest.mark.parametrize("child_machine", ["host", "registry-key", "remote"])
+def test_reporter_registry_key_and_record_scoped_aliases(
+    graph: Graph, monkeypatch: pytest.MonkeyPatch, child_machine: str,
+) -> None:
+    config, save = graph
+    save("root", "parent", [(f"{child_machine}/source/child", "released")])
+    save("source", "child", status="finalized")
+    anchor = Path(config.default_repo.anchor)
+    monkeypatch.setattr(record_reporting, "configured_repository_paths", lambda project: {project: anchor})
+    (anchor / "machines.yaml").write_text(yaml.safe_dump({"machines": {
+        "registry-key": {"hostname": "host", "os": "linux"},
+        "remote": {"hostname": "another-host", "os": "linux"},
+    }}), encoding="utf-8")
+    paths = [cfg.project_dir(project) / "worktrees" / f"{wid}.yaml"
+             for project, wid in (("root", "parent"), ("source", "child"))]
+    before = {path: path.read_bytes() for path in paths}
+    assert config.machine == "host"
+    assert tracking.load_record(paths[0]).execution_machine == "registry-key"
+
+    result = inventory("parent", config)
+
+    assert result["root"] == "registry-key/root/parent"
+    assert [node["worktree_id"] for node in result["nodes"]] == (
+        ["parent"] if child_machine == "remote" else ["parent", "child"]
+    )
+    assert result["complete"] is (child_machine != "remote")
+    assert {path: path.read_bytes() for path in paths} == before
 
 
 def test_missing_remote_and_environment_mismatch_are_not_empty_success(graph: Graph) -> None:

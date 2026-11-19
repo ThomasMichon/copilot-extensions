@@ -65,6 +65,37 @@ def test_runner_cannot_rebuild_a_retired_inode(
         runner._prepare_venv("example", "must-not-run", reinstall=True, environment={})
 
 
+def test_standalone_prepare_cannot_recreate_retired_shared_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    from _admission_protocol import acquire
+    from test_run_standalone_tests import runner as standalone
+
+    source = tmp_path / "source"
+    (source / "worktree-manager" / "tests").mkdir(parents=True)
+    monkeypatch.setenv("AGENT_SCRATCH_ROOT", str(tmp_path / "cache"))
+    monkeypatch.setattr(standalone, "REPO", source)
+    python = standalone.default_python("worktree-manager")
+    python.parent.mkdir(parents=True)
+    python.touch()
+    root = python.parent.parent
+    assert retirement.apply(retirement.preview(source, "worktree-manager"))["outcome"] == "retired"
+    before = root.stat()
+    marker = (root / retirement.MARKER).read_bytes()
+    monkeypatch.setattr(
+        standalone.subprocess, "run",
+        lambda *args, **kwargs: pytest.fail("retired environment started preparation"),
+    )
+
+    assert standalone.main(["worktree-manager", "--prepare"]) == 1
+
+    assert "terminally retired" in capsys.readouterr().err
+    assert not python.exists()
+    assert (root.stat().st_dev, root.stat().st_ino) == (before.st_dev, before.st_ino)
+    assert (root / retirement.MARKER).read_bytes() == marker
+    acquire(0, root).release()
+
+
 @pytest.mark.parametrize("change", ["contents", "replacement", "source-replacement", "wrong-source", "foreign-platform"])
 def test_stale_or_wrong_scope_preview_never_removes(
     environment: tuple[Path, Path], change: str,

@@ -14,10 +14,14 @@ import sys
 import tempfile
 import time
 from collections import Counter
+from collections.abc import Callable
 from functools import partial
 from pathlib import Path
+from types import TracebackType
+from typing import Any, cast
 
-from _admission_protocol import AlreadyRunningError, acquire
+from _admission_protocol import acquire
+from single_instance_lease import AlreadyRunningError
 from plugin_test_containment import (
     ContainmentError,
     Limits,
@@ -31,6 +35,7 @@ from standalone_consumers import (
 )
 from seasoned_uv import run_uv_install
 from plugin_test_cache import ordinary_cache_root
+from plugin_test_retirement import require_active
 from plugin_test_resources import record_owner, run_prefix, runs_root, venv_root
 
 REPO = Path(__file__).resolve().parent.parent
@@ -51,8 +56,8 @@ def extended_windows_path(path: str) -> str:
     return "\\\\?\\" + path
 
 
-def _owned_file_links(root: Path) -> Counter:
-    links = Counter()
+def _owned_file_links(root: Path) -> Counter[tuple[int, int]]:
+    links: Counter[tuple[int, int]] = Counter()
     for directory, children, files in os.walk(root, followlinks=False):
         current = Path(directory)
         retained = []
@@ -71,7 +76,11 @@ def _owned_file_links(root: Path) -> Counter:
     return links
 
 
-def _remove_readonly_file(root: Path, function, path: str, exc_info, *, link_counts=None) -> None:
+def _remove_readonly_file(
+    root: Path, function: Callable[..., Any], path: str,
+    exc_info: tuple[type[BaseException], BaseException, TracebackType | None], *,
+    link_counts: Counter[tuple[int, int]] | None = None,
+) -> None:
     error = exc_info[1]
     if (
         not isinstance(error, PermissionError)
@@ -98,9 +107,9 @@ def _remove_readonly_file(root: Path, function, path: str, exc_info, *, link_cou
     function(path)
 
 
-def cleanup_sandbox(temporary: tempfile.TemporaryDirectory) -> None:
+def cleanup_sandbox(temporary: tempfile.TemporaryDirectory[str]) -> None:
     deadline = time.monotonic() + 15
-    link_counts = {}
+    link_counts: Counter[tuple[int, int]] = Counter()
     while True:
         try:
             if os.name == "nt" and isinstance(temporary, tempfile.TemporaryDirectory):
@@ -158,15 +167,16 @@ def prepare(component: str, python: Path, *, smoke: bool = False) -> None:
     Core packages own their local dependency graph in both development and
     materialized layouts; injecting canonical copies adds conflicting sources.
     """
-    flags = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
     root = python.parent.parent
+    require_active(root)
+    creationflags: int = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
     if not python.is_file():
         before = root.stat()
         subprocess.run(
             ["uv", "venv", "--allow-existing", str(root)], cwd=REPO, check=True,
             capture_output=True, text=True,
             env={key: value for key, value in os.environ.items() if key != "UV_VENV_CLEAR"},
-            **flags,
+            creationflags=creationflags,
         )
         after = root.stat()
         if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino):
@@ -199,7 +209,9 @@ def prepare(component: str, python: Path, *, smoke: bool = False) -> None:
     extra = ("test" if smoke else "native,test") if component == "services/index" else "dev"
     sources.append(str(REPO / component) + f"[{extra}]")
     # Keep retained source/override topology below the Windows relative-path limit.
-    with TestSandbox(prefix=run_prefix(component), dir=runs_root(REPO)) as temporary:
+    with cast(Callable[..., TestSandbox], TestSandbox)(
+        prefix=run_prefix(component), dir=runs_root(REPO),
+    ) as temporary:
         record_owner(Path(temporary), REPO, retention="disposable dependency overrides")
         overrides: list[str] = []
         if component == "services/index":
@@ -256,8 +268,8 @@ def prepare(component: str, python: Path, *, smoke: bool = False) -> None:
             check=True,
             capture_output=True,
             text=True,
-            **({"non_editable": True} if component == "worktree-manager" else {}),
-            **flags,
+            non_editable=component == "worktree-manager",
+            creationflags=creationflags,
         )
 
 
@@ -431,7 +443,7 @@ def main(argv: list[str] | None = None) -> int:
         # Windows: it tries to create the temp dir under a nonexistent
         # subdirectory). Sanitize for this use only.
         safe_component = args.component.replace("/", "-")
-        temporary = TestSandbox(
+        temporary = cast(Callable[..., TestSandbox], TestSandbox)(
             prefix=run_prefix(safe_component),
             dir=Path(os.environ["RUNNER_TEMP"]) if native_ssh else runs_root(REPO),
         )
@@ -467,7 +479,7 @@ def main(argv: list[str] | None = None) -> int:
                 env=env,
                 sandbox=sandbox,
                 limits=limits,
-                **({"native_application": True} if native_ssh else {}),
+                native_application=native_ssh,
             )
             if chat_suite is not None:
                 return export_chat_membership(
