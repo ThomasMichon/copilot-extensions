@@ -39,6 +39,29 @@ change only a demonstrated gap under its current owner.
   existing claims, then records accepted responsibility. No acceptance or
   worker availability is inferred here.
 
+### Proposed finite #6467 receiving scope
+
+The original recommendation capture and its Request remain unchanged.
+This amendment proposes retaining the complete finite #6467 progress/watchdog
+and deadline/recovery contract here, rather than only its two supplemental
+vectors. It does not appoint the documentary coordinator or plan-preparer as
+the implementation driver. This effort remains Draft, and the next driver's
+actual acceptance requirement above still applies.
+
+The existing independent lifecycle owner remains the watchdog consumer;
+Bridge/Dispatch, process/pipe cleanup, selected-state and worker-custody owners
+retain their respective boundaries. No new daemon, whole-#5301/#5655 completion
+prerequisite, generic owner ACK or resource release follows. Existing action,
+native and installed qualification need their applicable authority.
+
+#6467 remains OPEN during this proposal. Normal reviewed acceptance of the
+complete planned receiving, fresh complete permitted original/ALL-discussion
+and current receiving-section/eligibility readback, known inherited retirement
+receipts and actual source-specific owner/claim/resource conditions precede
+any separate tracker judgment. Any independent physical-OPEN, accepted-handoff
+or unresolved applicability condition retains the source OPEN. A draft,
+two new rows, a link or unassigned metadata alone is not that acceptance.
+
 ## Context
 
 Five portable recommendations map to the following existing and new work:
@@ -125,6 +148,13 @@ authority._
 - [ ] Preserve the current scheduler, task store, driver/process authority,
   evaluator and permission owners. No new SDK worker driver, global profile/
   result registry, watchdog daemon or domain-specific Dispatch state machine.
+- [ ] Retain #6467's finite remaining integration with the existing independent
+  lifecycle-owned watchdog as the consumer of phase/cycle/receipt progress,
+  without another daemon. Credit #6487's bounded whole-cycle, tracked-pool,
+  durable uncertain-operation and bounded-drainage repair; qualify only remaining
+  consumer/recovery gaps. Preserve selected-state and worker custody, one durable
+  in-flight receipt operation, generation revalidation and no duplicate
+  embodiment. Original stack attribution and digest-change cause remain unproven.
 
 ### Phase 4 - Qualify and return evidence
 
@@ -162,6 +192,13 @@ authority._
 - [ ] Preserve supported peer/version-skew behavior and existing general-purpose
   profiles. Native/installed checks require an applicable authorized lane;
   this plan adds no all-host deployment or unconditional external-effect test.
+- [ ] For #6467's independent lifecycle consumer, fault-inject slow receipt
+  integrity checks, root-lock contention, retained pipe handles, interrupted
+  publication and restart; prove unrelated lane progress, no duplicate
+  operations or embodiment, and generation-fenced recovery retaining selection
+  and worker ownership when outcomes remain uncertain. Reuse the direct progress,
+  deadline, recovery and authorized-consumer cases above; a healthy heartbeat or
+  acknowledged stop is not proof of advancement or settled cleanup.
 
 ## Proposal
 
@@ -176,6 +213,27 @@ work. This proposal is prepared for handoff; implementation ownership is
 unassigned and the effort remains Draft.
 
 ## Journal
+
+### 2026-11-18 - Complete finite lifecycle receiving proposed
+
+The complete current #6467 original and both discussions were compared with
+this entire current ROOT. Existing direct Validation already retains heartbeat
+versus progress, descendant-held pipes/native cleanup custody, uncertain effects
+and supported consumer/authority boundaries. No duplicate checklist is added
+for those cases.
+
+One unchecked Phase 3 Plan and one actual global Validation row directly
+retain the remaining existing lifecycle-consumer integration and complete
+fault/recovery matrix, with #6487 credit and unproven historical attribution
+preserved. The actual recommendation-only Request, Draft status, unassigned
+implementation driver and explicit later-driver acceptance remain unchanged.
+The scope proposal is documentary receiving, not driver acceptance, execution
+authority, whole-provider completion or a source/resource transfer.
+
+#6467 remains OPEN until reviewed complete receiving, current source/inherited/
+contract/eligibility and actual condition readback and a separate judgment;
+any genuine independent condition remains binding. No implementation, test,
+native operation, live effect or tracker disposition occurred.
 
 ### 2026-11-06 - Recommendation capture
 

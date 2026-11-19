@@ -227,8 +227,9 @@ resource-enforcement qualification.
 Linux jobs using a cached immutable image. It renders a single bounded
 container command with no pull/build fallback, a non-root identity, no network,
 no capabilities or privilege escalation, read-only root and explicit read-only
-inputs. Only the private results directory and an optional separate declared
-cache are writable host binds; both must be outside the repository. Narrow
+inputs. Only the private results directory, an optional separate declared
+cache and an optional private workspace are writable host binds; all must be
+outside the repository and disjoint from one another and read-only inputs. Narrow
 read-only repository inputs remain supported. Test HOME and temporary files
 remain below the results mount; no host environment or credentials are forwarded.
 The plan explicitly clears all uppercase/lowercase Docker proxy defaults so
@@ -256,6 +257,15 @@ does none of those things.
 The caller supplies a `Job`, private existing `results` directory, absent
 `control` directory below an existing private parent, repository boundary,
 absolute `deadline_epoch`, aggregate limits and a host-driver partition.
+An optional `Job.workspace` is an existing ordinary-owned mode-0700 directory
+bound at `/job/workspace`. Unlike fresh per-job results, it can retain a
+scenario's runtime at a stable path between separately authorized fresh jobs,
+with a separate package cache at `/job/cache`. The owner does not create,
+repair, empty or adopt workspace contents, grant reuse authority, or bypass
+fresh-container identity checks. The caller owns content provenance, exclusive
+use, construction/inspection ordering and independent cleanup between jobs.
+Control records and client configuration must remain outside this bind too;
+the exact writable workspace mount is checked before starting the container.
 The actual ordinary UID/GID must match the job. The existing Linux cgroup-v2
 host boundary must already enforce finite memory/CPU/PID limits no greater
 than that partition, with zero extra swap. The owner creates no cgroup or

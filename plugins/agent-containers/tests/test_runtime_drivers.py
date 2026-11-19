@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 from collections.abc import Callable, Iterator, Sequence
-from typing import TypedDict, cast
+from typing import Any, TypedDict, cast
 
 import pytest
 import yaml
@@ -540,9 +540,24 @@ def test_resolver_routes_driver_member_through_exec_wrapper(
     config = _write_config(tmp_path, monkeypatch, relay_enabled=True)
     fleet.reconcile_up(config, "example")
 
+    monkeypatch.setattr(resolver, "payload_command_argv", lambda: ["/payload/bin/agent-containers"])
+    monkeypatch.setattr(resolver, "prepare_ssh_config", lambda *args: pytest.fail(
+        "a driver-exec member must receive no SSH preparation"))
+
     spec = asyncio.run(resolver.ContainerResolver().resolve_spec("example-1"))
     assert spec["spawn_command"][-3:] == ["exec", "--stdio", "example-1"]
-    assert "container" not in spec  # no Session Host / SSH projection
+    member = {c.name: c for c in lifecycle.list_containers(config)}["example-1"]
+    # No SSH / Session Host projection: the venue declares the portable
+    # receiving policy and provider command instead (#13366), so the bridge's
+    # hosting check needs no agent-worktrees inside the member.
+    assert "container" not in spec
+    assert spec["venue"]["portable_receiving_policy"] == {"version": 1}
+    assert spec["venue"]["provider_command"] == ["/payload/bin/agent-containers"]
+    assert member.container_id and spec["venue"]["instance_id"] == member.container_id
+    assert spec["venue"]["workspace_folder"] == "/workspaces/example"
+    assert spec["user"] == "vscode"
+    with pytest.raises(RuntimeError, match="cannot receive host plugin projection"):
+        resolver.add_related_plugins(spec, ["example-plugin"])
     venue = spec["venue"]
     assert venue["transport"] == "driver-exec"
     assert venue["driver"] == "example-driver"
@@ -551,6 +566,38 @@ def test_resolver_routes_driver_member_through_exec_wrapper(
     assert venue["ready"] is True
     assert asyncio.run(resolver.ContainerResolver().target_repo("example-1")) == "example-repo"
     asyncio.run(resolver.ContainerResolver().ensure_ready("example-1"))
+
+
+def test_resolver_keeps_session_host_ssh_for_ssh_capable_driver(
+    fake: SimpleNamespace, no_docker: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ssh_manager import SSHConfig
+
+    monkeypatch.setenv("FAKE_DRIVER_CAPS", json.dumps({"ssh_transport": True}))
+    config = _write_config(tmp_path, monkeypatch, relay_enabled=False)
+    fleet.reconcile_up(config, "example")
+    member = {c.name: c for c in lifecycle.list_containers(config)}["example-1"]
+    prepared: list[str] = []
+    monkeypatch.setattr(resolver, "payload_command_argv", lambda: ["/payload/bin/agent-containers"])
+
+    def prepare(handle: str, user: str) -> SSHConfig:
+        prepared.append(handle)
+        return SSHConfig(host_alias="fixture", user=user)
+
+    monkeypatch.setattr(resolver, "prepare_ssh_config", prepare)
+
+    spec = asyncio.run(resolver.ContainerResolver().resolve_spec("example-1"))
+
+    assert prepared == [f"example-1.{member.container_id}"]
+    container = spec["container"]
+    assert container["ssh"]["host_alias"] == "fixture"
+    assert container["acp_command"]
+    assert container["instance_id"] == member.container_id
+    assert container["portable_receiving_policy"] == {"version": 1}
+    assert container["provider_command"] == ["/payload/bin/agent-containers"]
+    assert "portable_receiving_policy" not in spec["venue"]
+    assert spec["venue"]["transport"] == "ssh"
+    assert spec["venue"]["capabilities"]["session_host"] is True
 
 
 def test_resolver_fails_closed_on_missing_relay_capability(
@@ -598,6 +645,74 @@ def test_exec_launches_acp_through_driver_stream(
     # The driver owns the relay: agent-containers injects none of its wiring.
     assert not any(name.startswith("LC_GIT_CREDENTIAL_RELAY") for name in seen["staged"])
     assert not any(name.startswith("LC_GIT_CREDENTIAL_RELAY") for name in seen["env"])
+
+
+@posix_only
+@pytest.mark.parametrize("allowed", [True, False])
+def test_exec_admits_driver_member_through_portable_policy_without_guest_worktrees(
+    fake: SimpleNamespace, no_docker: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    allowed: bool,
+) -> None:
+    from agent_containers.resolver import AGENT_CONTAINERS_EXEC_POLICY_CONTEXT_ENV
+
+    monkeypatch.setenv("FAKE_DRIVER_CAPS", json.dumps({"owns_relay": True}))
+    workspace = tmp_path / "workspace"
+    policy = workspace / ".copilot-extensions" / "agent-worktrees" / "config.yaml"
+    policy.parent.mkdir(parents=True)
+    policy.write_text(f"expose_agent: {str(allowed).lower()}\n")
+    config = _write_config(
+        tmp_path, monkeypatch, relay_enabled=True, workspace_folder=str(workspace),
+        acp_command="./start-agent --acp",
+    )
+    fleet.reconcile_up(config, "example")
+    monkeypatch.setenv(AGENT_CONTAINERS_EXEC_POLICY_CONTEXT_ENV, json.dumps({
+        "schema": "agent-bridge.receiving-policy", "version": 1, "marketplaceId": "example",
+    }))
+    seen: LaunchCapture = {}
+    monkeypatch.setattr(cli, "host_gh_token", lambda: "gh-token")
+    monkeypatch.setattr(cli, "prepare_ssh_config", lambda *a: pytest.fail("no SSH"))
+    monkeypatch.setattr(cli, "write_remote_env", lambda name, user, values: "/launch/1.env")
+    monkeypatch.setattr(cli, "cleanup_remote_env", lambda *a: None)
+    monkeypatch.setattr(cli, "container_environment", lambda *a: {"PATH": "/usr/bin"})
+
+    def execute(argv: list[str], env: dict[str, str]) -> int:
+        seen["argv"] = argv
+        return 0
+
+    monkeypatch.setattr(cli, "_exec_stdio", execute)
+    args = argparse.Namespace(name="example-1", stdio=True, force=False, copilot_args=None)
+
+    if allowed:
+        assert cli._cmd_exec(args) == 0
+    else:
+        with pytest.raises(RuntimeError, match="expose_agent"):
+            cli._cmd_exec(args)
+
+    calls = cast(list[dict[str, Any]], fake.state()["calls"])
+    checks = [call["request"] for call in calls if call["verb"] == "exec"]
+    # The real hosting check ran once in the member, via the portable receiver.
+    assert len(checks) == 1 and "python3 -I -S" in checks[0]["argv"][-1]
+    assert not any("agent-worktrees" in json.dumps(call["request"]) for call in calls)
+    if allowed:
+        launch = json.loads(seen["argv"][seen["argv"].index("--request") + 1])["argv"][2]
+        # No guest guard, but a relative custom command still runs in the workspace.
+        assert "agent-policy" not in launch
+        assert f"cd -- {workspace} || return $?\n  ./start-agent --acp" in launch
+    else:
+        assert "argv" not in seen
+
+
+@posix_only
+def test_portable_exec_launch_stops_compound_command_when_workspace_is_missing(
+    tmp_path: Path,
+) -> None:
+    marker = tmp_path / "started"
+    script = hosting_policy.exec_launch(
+        f"true; touch {marker}", str(tmp_path / "missing"), portable=True,
+    )
+    done = subprocess.run(["bash", "-c", script], capture_output=True, timeout=30)
+    assert done.returncode != 0
+    assert not marker.exists()
 
 
 def test_copilot_verb_requires_ssh_capability(

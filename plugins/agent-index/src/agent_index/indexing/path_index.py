@@ -7,8 +7,8 @@ currently indexed in LanceDB.  Used for:
 - Stale chunk cleanup after modified-file re-indexing
 - Quick path enumeration without materializing LanceDB to Pandas
 
-Each public method opens its own WAL-mode connection, matching the
-thread-safety pattern from ``task_store.py``.
+Each public method opens its own connection, matching the thread-safety
+pattern from ``task_store.py``. Qualification reads never change journal mode.
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ CREATE INDEX IF NOT EXISTS idx_indexed_files_source
 class PathIndex:
     """SQLite-backed index of files stored in LanceDB.
 
-    Thread-safe: each method opens a fresh connection with WAL mode.
+    Thread-safe: each method opens a fresh connection.
     """
 
     def __init__(self, db_path: str | Path) -> None:
@@ -48,10 +48,20 @@ class PathIndex:
         Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
         self._init_schema()
 
-    def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self._db_path, timeout=10)
+    def _connect(self, *, read_only: bool = False) -> sqlite3.Connection:
+        target = self._db_path
+        if read_only:
+            path = Path(self._db_path).resolve()
+            if any(journal.exists() and journal.stat().st_size for journal in (
+                Path(str(path) + "-wal"), Path(str(path) + "-journal"),
+            )):
+                raise sqlite3.OperationalError("Read-only qualification requires checkpointed path evidence")
+            # Immutable reads cannot create WAL/SHM files; never ignore an existing journal.
+            target = path.as_uri() + "?mode=ro&immutable=1"
+        conn = sqlite3.connect(target, timeout=10, uri=read_only)
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
+        if not read_only:
+            conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA busy_timeout=5000")
         return conn
 
@@ -231,7 +241,7 @@ class PathIndex:
                       OR (source >= ? COLLATE BINARY AND source < ? COLLATE BINARY)""",
                 (family, f"{family}:", f"{family};"),
             ).fetchone()
-            return row["total"]
+            return int(row["total"])
         finally:
             conn.close()
 
@@ -408,6 +418,31 @@ class PathIndex:
         finally:
             conn.close()
 
+    def get_checkpoint_rows(
+        self, identities: list[tuple[str, str]],
+        *, read_only: bool = False,
+    ) -> dict[tuple[str, str], tuple[str | None, int, float]]:
+        """Read selected hashes, counts and timestamps for exact publication recovery."""
+        identities = list(dict.fromkeys(identities))
+        result: dict[tuple[str, str], tuple[str | None, int, float]] = {}
+        conn = self._connect(read_only=True) if read_only else self._connect()
+        try:
+            for offset in range(0, len(identities), 100):
+                batch = identities[offset:offset + 100]
+                predicate = " OR ".join("(source = ? AND file_path = ?)" for _ in batch)
+                rows = conn.execute(
+                    "SELECT source, file_path, content_hash, chunk_count, indexed_at "
+                    f"FROM indexed_files WHERE {predicate}",
+                    [value for identity in batch for value in identity],
+                )
+                for row in rows:
+                    result[(row["source"], row["file_path"])] = (
+                        row["content_hash"], row["chunk_count"], row["indexed_at"],
+                    )
+            return result
+        finally:
+            conn.close()
+
     def get_content_hashes(self, source: str) -> dict[str, str | None]:
         """Return {file_path: content_hash} for all files in a source."""
         conn = self._connect()
@@ -433,7 +468,7 @@ class PathIndex:
                 row = conn.execute(
                     "SELECT COUNT(*) AS cnt FROM indexed_files",
                 ).fetchone()
-            return row["cnt"]
+            return int(row["cnt"])
         finally:
             conn.close()
 

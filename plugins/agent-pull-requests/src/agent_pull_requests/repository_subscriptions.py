@@ -17,7 +17,8 @@ RESPONSE_BYTES = 1_048_576
 OPERATIONS: dict[str, tuple[set[str], set[str]]] = {
     "query": (set(), {"after", "limit", "number"}),
     "next-actions": ({"reviewer"}, {"after", "limit", "cursor", "max_age_seconds"}),
-    "subscribe": ({"request_id", "ttl"}, {"after"}),
+    "subscribe": ({"request_id", "ttl"}, {"after", "not_after"}),
+    "inspect-request": ({"request_id"}, set()),
     "inspect": ({"registration_id"}, set()),
     "events": ({"registration_id"}, {"after", "limit"}),
     "acknowledge": ({"registration_id", "event_id"}, set()),
@@ -33,6 +34,10 @@ class RepositoryRequestConflict(ValueError):
     """An original identity cannot be reused with changed intent or scope."""
 
 
+class RepositoryRequestExpired(ValueError):
+    """Creation crossed its original cutoff; inspect the original request."""
+
+
 def _integer(value: object, minimum: int = 0, maximum: int = 2**53 - 1) -> int:
     if type(value) is not int or not minimum <= value <= maximum:
         raise ValueError("invalid bounded repository integer")
@@ -45,6 +50,12 @@ def _text(value: object) -> str:
     ):
         raise ValueError("invalid repository identity")
     return value
+
+
+def _status(row: dict[str, Any], now: int) -> str:
+    return "cancelled" if row["cancelled"] else (
+        "expired" if row["expires_at"] <= now else "active"
+    )
 
 
 def _page(
@@ -104,7 +115,19 @@ class RepositorySubscriptions:
                 **authority,
             )
 
+        creation_cutoff: int | None = None
+        checkpoint = authority.get("checkpoint")
+        if checkpoint is not None and not callable(checkpoint):
+            raise ValueError("invalid request checkpoint")
+
+        def check_creation() -> None:
+            if checkpoint is not None:
+                checkpoint()
+            if creation_cutoff is not None and self.store.clock() >= creation_cutoff:
+                raise RepositoryRequestExpired("original subscription creation cutoff elapsed")
+
         def transact(document: dict[str, Any], commit: Callable[[], None]) -> dict[str, Any]:
+            nonlocal creation_cutoff
             state = document["repository_cache"]
             now = int(self.store.clock())
             changed = False
@@ -115,6 +138,8 @@ class RepositorySubscriptions:
                            "ttl": _integer(payload["ttl"], 1, 86400)}
                 if request["after"] is not None:
                     _integer(request["after"])
+                if "not_after" in payload:
+                    request["not_after"] = _integer(payload["not_after"], 1)
                 existing = next((row for row in state["registrations"]
                                  if row["consumer"] == consumer and row["request_id"] == request_id), None)
                 if existing is not None:
@@ -122,6 +147,9 @@ class RepositorySubscriptions:
                         raise RepositoryRequestConflict("original subscription intent differs")
                     row = existing
                 else:
+                    creation_cutoff = request.get("not_after")
+                    if creation_cutoff is not None:
+                        check_creation()
                     after = state["next_sequence"] - 1 if request["after"] is None else request["after"]
                     floor = state["events"][0]["sequence"] - 1 if state["events"] else state["next_sequence"] - 1
                     if after < floor:
@@ -140,20 +168,30 @@ class RepositorySubscriptions:
                         state["repositories"].append(_new_repository(identity))
                     row = {
                         "registration_id": uuid.uuid4().hex, "request_id": request_id,
-                        "consumer": consumer, "target": key, "expires_at": now + request["ttl"],
+                        "consumer": consumer, "target": key,
+                        "expires_at": min(now + request["ttl"], creation_cutoff) if (
+                            creation_cutoff is not None
+                        ) else now + request["ttl"],
                         "acknowledged": after, "cancelled": False, "request": request,
                         "delivered": after, "acknowledged_event": None,
                     }
                     state["registrations"].append(row)
                     changed = True
-                status = "cancelled" if row["cancelled"] else (
-                    "expired" if row["expires_at"] <= now else "active"
-                )
+                status = _status(row, now)
                 result = {"status": status, "subscription": copy.deepcopy(row), "baseline": None}
                 overhead = len(json.dumps(result, allow_nan=False).encode()) - len(b"null")
                 result["baseline"] = _page(
                     state, identity, now=now, budget=RESPONSE_BYTES - 8192 - overhead,
                 )
+            elif operation == "inspect-request":
+                request_id = _text(payload["request_id"])
+                found = next((row for row in state["registrations"] if (
+                    row["request_id"], row["consumer"], row["target"]
+                ) == (request_id, consumer, key)), None)
+                result = {
+                    "status": _status(found, now) if found is not None else "not_found",
+                    "request_id": request_id, "subscription": copy.deepcopy(found), "now": now,
+                }
             else:
                 registration_id = _text(payload["registration_id"])
                 row = next((row for row in state["registrations"] if (
@@ -161,9 +199,7 @@ class RepositorySubscriptions:
                 ) == (registration_id, consumer, key)), None)
                 if row is None:
                     raise KeyError("subscription not found in admitted scope")
-                status = "cancelled" if row["cancelled"] else (
-                    "expired" if row["expires_at"] <= now else "active"
-                )
+                status = _status(row, now)
                 if operation == "inspect":
                     result = {"status": status, "subscription": copy.deepcopy(row)}
                 elif operation == "cancel":
@@ -213,7 +249,9 @@ class RepositorySubscriptions:
                 commit()
             return result
         return self.store._review_transaction(
-            transact, staged=True, persist=False, **authority,
+            transact, staged=True, persist=False, **{
+                **authority, "checkpoint": check_creation,
+            },
         )
 
 
@@ -222,6 +260,11 @@ def contract(*, reviewer_actions: bool = False) -> dict[str, object]:
     result = {"protocol": PROTOCOL, "storage": "repository_cache_version:2",
             "continuing": True, "effects": "local-subscription-state",
             "response_bytes": RESPONSE_BYTES, "forge_writes": False, "task_emissions": False}
+    result["request_recovery"] = {
+        "protocol": "agent-pull-requests.repository-request-recovery/v1",
+        "inspection": "inspect-request", "cutoff": "not_after",
+        "clock": "unix-seconds", "expiry": "min-ttl-cutoff",
+    }
     if reviewer_actions:
         from .repository_reviewer import capability
         result["reviewer_actions"] = capability()

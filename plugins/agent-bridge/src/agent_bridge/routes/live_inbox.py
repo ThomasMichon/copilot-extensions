@@ -11,7 +11,7 @@ import time
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from ..db import Database
-from .. import compatible_inbox
+from .. import compatible_inbox, delivery_telemetry
 from ..db_live_message_receipts import MAX_RECOVERY_MESSAGE_ID
 from ..inbox_custody import InboxConsumer
 from ..live_inbox_models import (
@@ -177,7 +177,7 @@ def enqueue_message(
     except RuntimeCustodyError as exc:
         refusal = str(exc)
     with _refusals():
-        return db.enqueue_live_message_if_fresh(
+        result = db.enqueue_live_message_if_fresh(
             session_id, sender=body.sender, body=body.body, now=now,
             reply_to=body.reply_to, kind=kind, delivery=body.delivery,
             expected_session_id=expected_session_id, idempotency_key=body.idempotency_key,
@@ -186,6 +186,10 @@ def enqueue_message(
             exact_session=body.exact_session,
             message_version=body.message_version, message_requires=tuple(body.message_requires),
         )
+    message_id, reason = result
+    if message_id is not None and reason is None:
+        delivery_telemetry.committed(db, session_id, message_id, "admitted")
+    return result
 
 
 @router.post("/negotiate", response_model=InboxNegotiationInfo)
@@ -276,6 +280,8 @@ def begin(session_id: str, body: InboxHandoffRequest, request: Request) -> Inbox
                 db, _consumer(session_id, body), body.message_id, body.handoff_id, now=time.time(),
                 native_only=body.receiving_api is None,
             )
+        if granted:
+            delivery_telemetry.committed(db, session_id, body.message_id, "handoff_started")
         return InboxBeginResult(begin=granted)
     db, governance, runtime = _current_owners(request)
     with _refusals():
@@ -283,6 +289,8 @@ def begin(session_id: str, body: InboxHandoffRequest, request: Request) -> Inbox
             db, governance, _consumer(session_id, body), body.binding.observation(),
             body.message_id, body.handoff_id, now=time.time(),
         )
+    if granted:
+        delivery_telemetry.committed(db, session_id, body.message_id, "handoff_started")
     return InboxBeginResult(begin=granted)
 
 
@@ -331,4 +339,5 @@ def outcome(
             outcome=body.outcome, now=time.time(),
             compatible_consumer=body.receiving_api == "native-sdk-v1",
         )
+    delivery_telemetry.committed(db, session_id, body.message_id, stage)
     return InboxOutcomeResult.model_validate({"stage": stage})

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  createRetainedInbox, retainedDeliverySelected, retainedConsumption,
+  createRetainedInbox, retainedDeliverySelected, retainedConsumption, retainedConsumptionReason,
 } from "../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/retained-delivery.mjs";
 import { isRemoteDriverSource } from "../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/remote-driver.mjs";
 import { PendingInputNotice } from "../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/delivery.mjs";
@@ -129,6 +129,70 @@ function fixture() {
   });
   return f;
 }
+
+test("runtime datetime prefixes reconcile original SDK input without resending", async () => {
+  const f = fixture();
+  f.add();
+  const inbox = f.consumer();
+  await inbox.tick(sid);
+  const receipt = f.receipt(f.rows[0]);
+  const good = f.event();
+  for (const prefix of [
+    "<current_datetime>2026-01-02T03:04:05.678-08:00</current_datetime>\n\n",
+    "<current_datetime>2026-01-02T03:04:05Z</current_datetime>\r\n\r\n",
+  ]) {
+    const event = { ...good, data: { ...good.data, content: "display only",
+      transformedContent: prefix + good.data.content } };
+    assert.equal(retainedConsumptionReason(event, receipt), "matched");
+    assert.equal(retainedConsumption(event, receipt), true);
+    f.events = [event];
+  }
+  for (const prefix of [
+    "quoted input:\n",
+    "> ",
+    "<system_reminder>context</system_reminder>\n",
+    "<current_datetime>arbitrary text</current_datetime>\n\n",
+    "<current_datetime>2026-01-02T03:04:05Z</current_datetime>\n",
+    "<current_datetime>2026-01-02T03:04:05Z</current_datetime>\n\n"
+      + "<current_datetime>2026-01-02T03:04:05Z</current_datetime>\n\n",
+  ]) {
+    const event = { ...good, data: { ...good.data, transformedContent: prefix + good.data.content } };
+    assert.equal(retainedConsumptionReason(event, receipt), "header_mismatch");
+    assert.equal(retainedConsumption(event, receipt), false);
+  }
+  assert.equal(retainedConsumptionReason(good, null), "invalid_receipt");
+  assert.equal(retainedConsumption(good, null), false);
+  f.clock += 30_001;
+  await inbox.tick(sid);
+  assert.equal(f.rows[0].handoff_stage, "consumed");
+  assert.equal(f.sends.length, 1);
+  assert.equal(f.calls.filter((call) => call.path.endsWith("/begin")).length, 1);
+});
+
+test("match diagnostics contain correlation and fixed reason counts, never input or replay", async () => {
+  const f = fixture();
+  f.add();
+  const observations = [];
+  const inbox = f.consumer("consumer-a", { onObservation: (event) => observations.push(event) });
+  await inbox.tick(sid);
+  const event = f.event();
+  event.data.content = event.data.content.replace("handoff-1", "other-handoff");
+  f.events = [event, { type: "assistant.message", data: { content: "private-output-sentinel" } }];
+  f.clock += 30_001;
+  await inbox.tick(sid);
+  assert.deepEqual(observations, [{
+    stage: "match_failed", source: "retained-sdk-recovery", session_id: sid,
+    message_id: 1, handoff_id: "handoff-1", consumer_incarnation: "consumer-a",
+    event_count: 2, failures: { header_mismatch: 1, not_root_input: 1 },
+  }]);
+  assert.equal(JSON.stringify(observations).includes("private-output-sentinel"), false);
+  assert.equal(JSON.stringify(observations).includes("body-1"), false);
+  f.clock += 30_001;
+  await f.consumer("consumer-b", { onObservation: () => { throw new Error("sink failed"); } })
+    .tick(sid, { allowSend: false });
+  assert.equal(f.sends.length, 1);
+  assert.equal(f.rows[0].handoff_stage, "sdk_accepted");
+});
 
 test("accepted retained recovery clears submission attention without consuming or resending", async () => {
   const f = fixture();

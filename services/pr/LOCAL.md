@@ -170,7 +170,7 @@ already-delivered unsettled IDs remain reconcilable and protected until ACK.
 `GET /v1/repositories` lists only the admitted principal's configured targets.
 `GET /v1/repositories/TARGET/capabilities` advertises the **running** protocol,
 namespace, complete repository key, storage support and budgets. Other
-operations are `POST /v1/repositories/TARGET/{query,subscribe,inspect,events,acknowledge,cancel}`
+operations are `POST /v1/repositories/TARGET/{query,subscribe,inspect,inspect-request,events,acknowledge,cancel}`
 with JSON:
 
 ```json
@@ -187,6 +187,150 @@ not the expected-binding fields. Missing/prior support refuses; clients never
 fall back to one-shot watch, a state-file read or an ambient account.
 The separately selected [reviewer-action capability](REVIEWER.md) adds
 `next-actions` and finite local SSE subscriptions under this same envelope.
+
+### Original-request recovery
+
+The running capability response advertises this optional provider expansion:
+
+```json
+{
+  "request_recovery": {
+    "protocol": "agent-pull-requests.repository-request-recovery/v1",
+    "inspection": "inspect-request",
+    "cutoff": "not_after",
+    "clock": "unix-seconds",
+    "expiry": "min-ttl-cutoff"
+  }
+}
+```
+
+Select this support before sending the new HTTP forms. The existing generic
+programmatic client's `request` method can carry them; the CLI's existing
+commands are unchanged. Missing support must not trigger a new-form attempt
+followed by a legacy retry.
+
+`inspect-request` takes `{"request_id": "ORIGINAL_REQUEST_ID"}`. It reads only
+the admitted repository and consumer's local receipt, returning `request_id`,
+provider Unix-seconds `now`, `subscription` and `status`. A retained receipt has
+its original registration, request and current `active`, `expired` or
+`cancelled` status. Absence returns `subscription: null` and `status:
+"not_found"`. Inspection neither creates nor renews a registration, advances a
+cursor, trims history or fetches a provider.
+
+`subscribe` additionally accepts optional integer Unix-seconds `not_after`.
+Persist it with the original request, alongside unchanged `request_id`, TTL
+and `after`. A new registration must be admitted before that cutoff, including
+after a writer-lock wait and at the commit checkpoint; its expiry is the
+earlier of the TTL-based expiry and the cutoff. Reconciliation of a retained
+request still returns the original registration after expiry. Changed intent
+refuses. Legacy requests without `not_after` keep their old shape and behavior.
+
+Recover a lost response by `inspect-request`, not by repeating `subscribe`.
+Expired, fully acknowledged receipts can be collected after their existing
+retention window. The immutable cutoff prevents a late original bounded
+request from recreating a collected registration. It is not permission to
+reuse collected request IDs with later cutoffs or changed intent.
+
+For cancellation with an unknown registration, retain the original request
+obligation. Cancel a found registration through the existing `cancel`
+operation; inspect again after an uncertain result. Absence before the cutoff
+does not exclude delayed acceptance. A provider observation at or beyond the
+original cutoff excludes further acceptance of that same request, and any
+accepted registration has expired by then. Already-delivered unacknowledged
+events remain retained. Clock rollback, unavailable inspection or a changed
+binding is not settlement. A `repository_request_expired` HTTP 410 recommends
+`inspect-request`; it must not be interpreted as proof that an earlier or
+just-committed attempt had no effect.
+
+The strict continuing-state reader accepts legacy requests and bounded
+requests together. A prior strict reader cannot interpret the added intent
+and refuses without rewriting it. This provider expansion does not perform
+reader lifecycle adoption, install a new runtime, promise transparent rollback,
+or enable a Dispatch consumer.
+
+### Explicit expected-consumer client
+
+The optional programmatic `BoundRepositoryClient` reuses that Unix transport
+while selecting the complete expected repository and OS-admitted consumer from
+trusted configuration, not the first capability response:
+
+```python
+from pathlib import Path
+from agent_pull_requests.repository_contract import RepositoryIdentity
+from agent_pull_requests_service.bound_local_client import BoundRepositoryClient
+
+client = BoundRepositoryClient(
+    Path("/data/pr-cache/local.sock"), "example-github",
+    identity=RepositoryIdentity(
+        "installation-a", "github", "https://github.com", "account-a", "owner/repository",
+    ),
+    consumer="local-reader",
+)
+support = client.negotiate()
+```
+
+Negotiation reads the executing server's existing capabilities route. It
+requires the exact repository identity/key, namespace, target and
+`consumer_binding` with protocol
+`agent-pull-requests.repository-consumer/v1` and the configured consumer.
+Missing or incompatible support refuses; it does not select an older wire form,
+register a subscription, prepare a task or start anything. Callers still check
+the selected reviewer/stream support before relying on those optional features.
+The first request also negotiates automatically if no selection exists.
+
+The client sends `expected_consumer` beside the ordinary envelope fields on
+every operation, including SSE. The server compares it with the consumer
+already derived from the transport principal and target, before registration,
+delivery or ACK effects. It is an expectation, never caller identity or
+authority. A changed OS binding returns `repository_consumer_mismatch`;
+original request/registration identities remain with their existing owner.
+Changing this client object's selected transport or repository metadata refuses
+instead of retargeting a retained request.
+
+Ordinary clients still send their original four-field envelopes and retain
+their existing semantics. The optional assertion is advertised/enforced only
+for this repository profile, not silently added to filtered or watch profiles.
+No CLI selector, Dispatch dependency, consumer factory or operational enrollment
+is introduced. Linux remains the supported private local transport.
+
+### Asynchronous bound requests
+
+An embedding with an existing event loop can explicitly construct
+`async_local_client.AsyncBoundRepositoryClient` with the same path, target,
+identity and consumer arguments. Its `await client.negotiate()` and
+`await client.request(operation, payload)` use native asyncio Unix streams,
+not blocking calls or executor threads. They reuse the same expected-selection
+validator and expected-consumer envelope. The synchronous client is unchanged.
+
+Each call permits one in-flight operation and bounds negotiation plus the
+requested exchange by `operation_seconds` (positive and at most 30 seconds).
+An optional absolute monotonic `client.deadline` further shortens that budget;
+an elapsed deadline refuses before IPC. Request intent is detached before the
+first await, so changing a caller's dictionary cannot replace an emitted request.
+The current operations use shallow scalar request fields. Before copying, the
+client admits at most eight fields with bounded keys, strings and numeric
+values; nested collections and oversized inputs refuse before encoding or IPC.
+Headers, request bodies and response bodies retain the local byte budgets.
+The client rejects ambiguous framing rather than adding another HTTP profile.
+
+For `inspect-request` and `subscribe` with `not_after`, the asynchronous client
+reads fresh executing capabilities inside each call's original budget before
+sending the new form, even when its repository binding was already selected.
+Missing or incompatible original-request recovery support refuses before POST;
+it does not disable legacy operations or retry through an older form. This
+also covers a provider rollback after an earlier successful negotiation.
+Embeddings must account for that capability exchange in their aggregate call
+budget. A lost bounded-subscribe result can be recovered with
+`await client.request("inspect-request", {"request_id": original_id})`,
+then cancelled by its returned registration ID. Retain the immutable cutoff
+and uncertain-effect obligations described above; lookup is not renewal.
+
+Cancellation closes and joins the owned connection, with up to one additional
+second for close cleanup. It does not roll back an operation the service may
+already have accepted. Preserve the original request/registration/deadline and
+reconcile its result through the existing owner; there is no internal retry,
+replacement request, ACK, task preparation or process fallback. This finite
+request client does not implement SSE or enroll a Dispatch consumer.
 
 Source limits are eight admitted requests/connections, 8 KiB headers, 32 KiB
 request bodies, 1 MiB selected responses, query/event pages of 1..16 and

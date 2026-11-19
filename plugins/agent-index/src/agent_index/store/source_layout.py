@@ -9,16 +9,34 @@ import logging
 import os
 import threading
 import uuid
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable, Iterator
+from contextlib import AbstractContextManager
 from contextlib import contextmanager, nullcontext
+from importlib import import_module
 from pathlib import Path
-from typing import BinaryIO
+from typing import TYPE_CHECKING, Any, BinaryIO, Protocol, TypeVar, cast
+
+from ..indexing.change_hints import _identity
+from ..indexing.point_hints import PointBinding
+
+if TYPE_CHECKING:
+    from agent_index.index_config import IndexConfig
+
+    from .multi_model_store import MultiModelStore
+
+F = TypeVar("F", bound=Callable[..., Any])
+PointScope = tuple[str, str, str, PointBinding]
+
+
+class _ValidationTable(Protocol):
+    def search(self) -> Any: ...
+
 
 LAYOUT = "source-aware-v1"
 MARKER = ".source-layout.json"
 LOCK = ".source-writer.lock"
 FTS_LOCK = ".source-fts.lock"
-_domains: dict[tuple[int, int], SourceDomain] = {}
+_domains: dict[tuple[int, int, str | None], SourceDomain] = {}
 _registry = threading.Lock()
 _child_guards = []
 log = logging.getLogger(__name__)
@@ -27,8 +45,8 @@ def _open_receipt(path: Path) -> BinaryIO:
     """Keep an atomic snapshot readable without preventing its replacement."""
     if os.name != "nt":
         return path.open("rb")
-    import ctypes
-    import msvcrt
+    ctypes = import_module("ctypes")
+    msvcrt = import_module("msvcrt")
     from ctypes import wintypes
 
     kernel = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -47,7 +65,9 @@ def _open_receipt(path: Path) -> BinaryIO:
         code = ctypes.get_last_error()
         raise OSError(0, ctypes.FormatError(code), str(path), code)
     try:
-        descriptor = msvcrt.open_osfhandle(handle, os.O_RDONLY | os.O_BINARY | os.O_NOINHERIT)
+        descriptor = msvcrt.open_osfhandle(
+            handle, os.O_RDONLY | getattr(os, "O_BINARY") | getattr(os, "O_NOINHERIT"),
+        )
     except OSError:
         close(handle)
         raise
@@ -62,7 +82,7 @@ def _replace_receipt(source: Path, target: Path) -> None:
     if os.name != "nt" or not target.exists():
         os.replace(source, target)
         return
-    import ctypes
+    ctypes = import_module("ctypes")
     from ctypes import wintypes
 
     # MoveFileExW (os.replace) rejects an open destination even with delete sharing.
@@ -78,7 +98,7 @@ def _replace_receipt(source: Path, target: Path) -> None:
         raise OSError(0, ctypes.FormatError(code), str(source), code, str(target))
 
 
-def kernel_lock(path: Path):
+def kernel_lock(path: Path) -> BinaryIO:
     stream = path.open("a+b")
     try:
         if stream.seek(0, 2) == 0:
@@ -86,11 +106,11 @@ def kernel_lock(path: Path):
             stream.flush()
         stream.seek(0)
         if os.name == "nt":
-            import msvcrt
+            msvcrt = import_module("msvcrt")
 
             msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
         else:
-            import fcntl
+            fcntl = import_module("fcntl")
 
             fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
         return stream
@@ -103,6 +123,25 @@ class SourceLayoutError(RuntimeError):
     """Unprepared, changed, busy or incompatible isolated domain."""
 
 
+def _point_scope_json(scope: PointScope | None) -> str | None:
+    if scope is None:
+        return None
+    if not isinstance(scope, tuple) or len(scope) != 4 or type(scope[3]) is not PointBinding:
+        raise SourceLayoutError("point domain requires an exact typed point scope")
+    source, family, account, binding = scope
+    try:
+        for name, value in (("source", source), ("canonical_family", family), ("account_id", account)):
+            _identity(value, name)
+        if source == "all":
+            raise ValueError("point domain requires an exact source")
+    except ValueError as exc:
+        raise SourceLayoutError("point domain requires an exact typed point scope") from exc
+    return json.dumps({
+        "source": source, "canonical_family": family, "account_id": account,
+        "binding": binding.to_dict(),
+    }, sort_keys=True)
+
+
 def selected_layout() -> str | None:
     value = os.environ.get("AGENT_INDEX_STORE_LAYOUT")
     if value not in (None, "", LAYOUT):
@@ -110,22 +149,43 @@ def selected_layout() -> str | None:
     return value or None
 
 
-def _versions(db) -> dict[str, int]:
+def _versions(db: Any) -> dict[str, int]:
     return {name: db.open_table(name).version for name in db.list_tables().tables}
 
 
+def _refuse_marked_legacy(store: Any) -> None:
+    path = getattr(store, "_source_path", None)
+    if path is None:
+        content = getattr(store, "_content", store)
+        uri = getattr(getattr(content, "_db", None), "uri", None)
+        path = uri if isinstance(uri, (str, Path)) else getattr(store, "_db_path", None)
+    if isinstance(path, (str, Path)) and (Path(path) / MARKER).exists():
+        raise SourceLayoutError("legacy handle refuses a newly selected source-aware domain")
+
+
 class SourceDomain:
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, *, point_scope: PointScope | None = None) -> None:
         self.path = path
+        self._point_scope = _point_scope_json(point_scope)
         self._mutex = threading.RLock()
         self._local = threading.local()
+
+    def _require_legacy_access(self) -> None:
+        if self._point_scope is not None:
+            raise SourceLayoutError("point-domain reads and application are not admitted")
+
+    def _require_read_access(self, point_scope: PointScope | None) -> None:
+        if point_scope is None:
+            self._require_legacy_access()
+        elif self._point_scope is None or _point_scope_json(point_scope) != self._point_scope:
+            raise SourceLayoutError("point read scope differs from its selected domain")
 
     @property
     def writing(self) -> bool:
         return bool(getattr(self._local, "depth", 0))
 
     @contextmanager
-    def exclusion(self):
+    def exclusion(self) -> Iterator[None]:
         if getattr(self._local, "operation", False):
             yield
             return
@@ -154,14 +214,16 @@ class SourceDomain:
             self._mutex.release()
 
     @contextmanager
-    def operation(self, db):
+    def operation(self, db: Any, *, point_scope: PointScope | None = None) -> Iterator[None]:
         """Hold existing exclusion across independently committed reads/writes."""
+        self._require_read_access(point_scope)
         if self.writing or getattr(self._local, "operation", False):
+            self.receipt()
             yield
             return
         with self.exclusion():
             value = self.receipt()
-            if (value.get("fts_pending") or value.get("state") != "clean"
+            if (value.get("fts_pending") or "reconciliation" in value or value.get("state") != "clean"
                     or value["versions"] != _versions(db)):
                 raise SourceLayoutError("source projection incomplete or changed")
             self._local.operation = True
@@ -170,23 +232,45 @@ class SourceDomain:
             finally:
                 self._local.operation = False
 
-    def receipt(self) -> dict:
+    def receipt(self) -> dict[str, Any]:
+        duplicate = False
+
+        def fields(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+            nonlocal duplicate
+            result: dict[str, Any] = {}
+            for key, item in pairs:
+                duplicate |= key in result
+                result[key] = item
+            return result
+
         try:
             with _open_receipt(self.path / MARKER) as stream:
                 raw = stream.read(65537)
             if len(raw) > 65536:
                 raise SourceLayoutError("invalid source-layout receipt")
-            value = json.loads(raw)
+            value = json.loads(raw, object_pairs_hook=fields)
         except (OSError, ValueError) as exc:
             raise SourceLayoutError("source-aware layout not initialized") from exc
+        if duplicate:
+            raise SourceLayoutError("invalid source-layout receipt: duplicate fields")
+        self._validate_receipt(value)
+        return cast("dict[str, Any]", value)
+
+    def _validate_receipt(self, value: object) -> None:
         if (not isinstance(value, dict) or value.get("layout") != LAYOUT
-                or type(value.get("protocol")) is not int or value["protocol"] != 1
+                or type(value.get("protocol")) is not int
+                or value["protocol"] != (2 if self._point_scope is not None else 1)
                 or value.get("state") not in ("clean", "dirty")
                 or not isinstance(value.get("versions"), dict)):
             raise SourceLayoutError("incompatible source-layout receipt")
-        return value
+        if (self._point_scope is not None
+                and json.dumps(value.get("point_scope"), sort_keys=True) != self._point_scope):
+            raise SourceLayoutError("point-domain scope differs from its retained binding")
 
-    def save(self, value: dict) -> None:
+    def save(self, value: dict[str, Any]) -> None:
+        self._validate_receipt(value)
+        if (self.path / MARKER).exists():
+            self.receipt()
         payload = json.dumps(value, sort_keys=True)
         logical = value.get("logical_projection")
         if (len(payload.encode("utf-8")) > 65536 and isinstance(logical, dict)
@@ -213,13 +297,15 @@ class SourceDomain:
             temporary.unlink(missing_ok=True)
 
     @contextmanager
-    def read(self, db):
+    def read(self, db: Any, *, point_scope: PointScope | None = None) -> Iterator[None]:
+        self._require_read_access(point_scope)
         if self.writing or getattr(self._local, "reading", False):
+            self.receipt()
             yield
             return
         with self.exclusion():
             value = self.receipt()
-            if (value.get("fts_pending") or value.get("state") != "clean"
+            if (value.get("fts_pending") or "reconciliation" in value or value.get("state") != "clean"
                     or value["versions"] != _versions(db)):
                 raise SourceLayoutError("source projection incomplete or changed")
             self._local.reading = True
@@ -240,13 +326,14 @@ class SourceDomain:
 
     def _persist_effect(self, operation: str) -> None:
         value = self.receipt()
+        value.pop("reconciliation", None)
         kind, _, table = operation.partition(":")
         if kind in ("content-upsert", "canonical-delete", "content-compact"):
             value.setdefault("fts_coverage", {}).pop(table, None)
         value.update(uncertain_effect=True, operation=operation)
         self.save(value)
 
-    def _table_identity(self, table_name: str):
+    def _table_identity(self, table_name: str) -> dict[str, Any] | None:
         from .logical_projection import physical_tables
 
         return physical_tables(
@@ -256,7 +343,7 @@ class SourceDomain:
     @contextmanager
     def bucket_mutation(
         self, table_name: str, operation: str, sources: Iterable[str] | None,
-    ):
+    ) -> Iterator[None]:
         """Qualify only a contiguous, owner-described table transition."""
         from .bucket_projection import MAX_BUCKETS, mutation_buckets
 
@@ -284,7 +371,7 @@ class SourceDomain:
             self._local.bucket_witness[table_name] = after[table_name]
 
     @contextmanager
-    def physical_maintenance(self, table_name: str, operation: str):
+    def physical_maintenance(self, table_name: str, operation: str) -> Iterator[None]:
         """Exempt only the witnessed transition of this maintenance operation."""
         if not self.writing:
             raise SourceLayoutError("maintenance requires participating writer ownership")
@@ -300,7 +387,7 @@ class SourceDomain:
                 and self._local.bucket_witness.get(table_name) == before[table_name]):
             self._local.bucket_witness[table_name] = after[table_name]
 
-    def cover_fts(self, content) -> None:
+    def cover_fts(self, content: Any) -> None:
         if not self.writing:
             raise SourceLayoutError("FTS coverage requires owning writer")
         value = self.receipt()
@@ -310,7 +397,7 @@ class SourceDomain:
         value.setdefault("fts_coverage", {})[content._table_name] = table.version
         self.save(value)
 
-    def require_fts(self, content) -> bool:
+    def require_fts(self, content: Any) -> bool:
         table = content._get_or_create_table()
         version = self.receipt().get("fts_coverage", {}).get(content._table_name)
         if version != table.version:
@@ -323,7 +410,7 @@ class SourceDomain:
         return True
 
     @contextmanager
-    def fts_handoff(self, *, table_name: str | None = None):
+    def fts_handoff(self, *, table_name: str | None = None) -> Iterator[str]:
         """Pending intent closes the pre-spawn gap; child guard closes parent-death gap."""
         maintenance = (
             self.physical_maintenance(table_name, "fts-builder")
@@ -343,9 +430,39 @@ class SourceDomain:
             finally:
                 self._local.fts_guard = kernel_lock(self.path / FTS_LOCK)
 
+    def seal_reconciliation(self, owner: str, token: str) -> None:
+        """Retain an owner's completed native phase, never an uncertain effect."""
+        from .logical_projection import physical_tables
+
+        if not self.writing or not owner or not token:
+            raise SourceLayoutError("reconciliation seal requires owning writer and retained intent")
+        value = self.receipt()
+        physical = physical_tables(self.path, _versions(self._local.db))
+        if value.get("fts_pending") or physical is None:
+            raise SourceLayoutError("reconciliation requires settled native ownership")
+        value["reconciliation"] = {
+            "owner": owner, "token": token, "physical": physical,
+        }
+        # Older participating validators must refuse even an empty native phase.
+        value["uncertain_effect"] = True
+        self.save(value)
+
+    def write(self, db: Any) -> AbstractContextManager[None]:
+        return self._write(db)
+
+    def reconcile(self, db: Any, *, owner: str, token: str) -> AbstractContextManager[None]:
+        """Resume only an exact sealed phase; arbitrary dirty stores still refuse."""
+        return self._write(db, reconciliation=(owner, token))
+
     @contextmanager
-    def write(self, db):
+    def _write(
+        self, db: Any, *, reconciliation: tuple[str, str] | None = None,
+    ) -> Iterator[None]:
+        self._require_legacy_access()
         if self.writing:
+            self.receipt()
+            if reconciliation is not None:
+                raise SourceLayoutError("reconciliation requires outer source ownership")
             self._local.depth += 1
             try:
                 yield
@@ -355,12 +472,23 @@ class SourceDomain:
         with self.exclusion():
             value = self.receipt()
             versions = _versions(db)
-            if (value.get("fts_pending") or value.get("state") != "clean"
-                    or value["versions"] != versions):
-                raise SourceLayoutError("source projection requires explicit recovery")
             from .logical_projection import commit_projection, physical_tables
 
             before = physical_tables(self.path, versions)
+            if reconciliation is None:
+                if (value.get("fts_pending") or "reconciliation" in value or value.get("state") != "clean"
+                        or value["versions"] != versions):
+                    raise SourceLayoutError("source projection requires explicit recovery")
+            else:
+                seal = value.get("reconciliation")
+                if (value.get("fts_pending") or value.get("state") != "dirty"
+                        or not isinstance(seal, dict)
+                        or set(seal) != {"owner", "token", "physical"}
+                        or (seal["owner"], seal["token"]) != reconciliation
+                        or before is None or seal["physical"] != before):
+                    raise SourceLayoutError("source reconciliation seal is missing or changed")
+                # Recovery cannot reconstruct the interrupted writer's bucket witnesses.
+                before = None
             value["state"] = "dirty"
             self.save(value)
             self._local.depth = 1
@@ -379,6 +507,7 @@ class SourceDomain:
                 value["state"] = "clean"
                 value.pop("uncertain_effect", None)
                 value.pop("operation", None)
+                value.pop("reconciliation", None)
                 after = physical_tables(self.path, value["versions"])
                 preserved = {
                     name for name in self._local.physical_only - self._local.bucket_changes.keys()
@@ -403,34 +532,50 @@ class SourceDomain:
                 self._local.bucket_witness = {}
 
 
-def domain_for(path: str | Path) -> SourceDomain | None:
+def domain_for(
+    path: str | Path, *, point_scope: PointScope | None = None,
+) -> SourceDomain | None:
+    """Open one exact receipt selection; ordinary callers remain protocol-1-only."""
+    scope = _point_scope_json(point_scope)
     path = Path(path).resolve()
     marker = path / MARKER
     if selected_layout() != LAYOUT:
-        if marker.exists():
+        if marker.exists() or scope is not None:
             raise SourceLayoutError("source-aware store refuses unselected binary mode")
         return None
     if not marker.is_file():
         raise SourceLayoutError("initialize a fresh isolated source-aware store explicitly")
     info = path.stat()
-    identity = (info.st_dev, info.st_ino)
+    identity = (info.st_dev, info.st_ino, scope)
     with _registry:
         if identity not in _domains:
-            _domains[identity] = SourceDomain(path)
+            _domains[identity] = SourceDomain(path, point_scope=point_scope)
         result = _domains[identity]
     result.receipt()
     return result
 
 
-def initialize_source_layout(path: str | Path) -> dict:
+def initialize_source_layout(
+    path: str | Path, *, point_scope: PointScope | None = None,
+) -> dict[str, Any]:
     """Writer bootstrap only; no legacy adoption, transfer, backfill or offline assertion."""
     if selected_layout() != LAYOUT:
         raise SourceLayoutError("source-aware layout must be explicitly selected")
+    domain = SourceDomain(Path(path).resolve(), point_scope=point_scope)
+    receipt: dict[str, Any] = {
+        "layout": LAYOUT, "protocol": 2 if point_scope is not None else 1,
+        "state": "clean", "domain": uuid.uuid4().hex, "versions": {},
+    }
+    if domain._point_scope is not None:
+        receipt["point_scope"] = json.loads(domain._point_scope)
+    if len(json.dumps(receipt).encode("utf-8")) > 65536:
+        raise SourceLayoutError("source-layout receipt exceeds its size limit")
     path = Path(path).resolve()
+    if (path / MARKER).exists():
+        domain.receipt()
     if path.exists() and not (path / MARKER).exists() and any(path.iterdir()):
         raise SourceLayoutError("cold initialization refuses nonempty or legacy state")
     path.mkdir(parents=True, exist_ok=True)
-    domain = SourceDomain(path)
     with domain.exclusion():
         if (path / MARKER).exists():
             receipt = domain.receipt()
@@ -438,24 +583,24 @@ def initialize_source_layout(path: str | Path) -> dict:
                 raise SourceLayoutError(
                     "uncertain effect requires owner repair or fresh isolated reindex"
                 )
-            if receipt.get("state") != "clean":
+            if "reconciliation" in receipt or receipt.get("state") != "clean":
                 raise SourceLayoutError("source projection requires explicit recovery")
             return receipt
         if any(item.name not in (LOCK, FTS_LOCK) for item in path.iterdir()):
             raise SourceLayoutError("cold initialization refuses nonempty or legacy state")
-        receipt = {"layout": LAYOUT, "protocol": 1, "state": "clean",
-                   "domain": uuid.uuid4().hex, "versions": {}}
         domain.save(receipt)
         return receipt
 
 
-def initialize_source_store(config):
+def initialize_source_store(config: IndexConfig) -> MultiModelStore:
     """Cold writer bootstrap, including its canonical content/model tables."""
     initialize_source_layout(config.lance_dir)
     from .multi_model_store import MultiModelStore
 
     store = MultiModelStore(config.lance_dir, content_table=config.content_table)
     domain = store._source_domain
+    if domain is None:
+        raise SourceLayoutError("source-aware store requires its configured domain")
     existing = domain.receipt()["versions"]
     names = {config.content_table, *(p.table_name for p in config.model_profiles.values())}
     for profile in config.model_profiles.values():
@@ -464,13 +609,13 @@ def initialize_source_store(config):
         with domain.read(store.content_store.db):
             return store
     with domain.write(store.content_store.db):
-        store.content_store._get_or_create_table()
+        cast("Callable[[], object]", store.content_store._get_or_create_table)()
         for profile in config.model_profiles.values():
-            store.register_model(profile)._get_or_create_table()
+            cast("Callable[[], object]", store.register_model(profile)._get_or_create_table)()
     return store
 
 
-def validate_source_store(store) -> dict:
+def validate_source_store(store: MultiModelStore) -> dict[str, Any]:
     """Explicit NEW-domain recovery: validate only; never guess or backfill provenance."""
     from .source_projection import PAGE_SIZE
 
@@ -480,6 +625,8 @@ def validate_source_store(store) -> dict:
     db = store.content_store.db
     with domain.exclusion():
         receipt = domain.receipt()
+        if "reconciliation" in receipt:
+            raise SourceLayoutError("retained publication requires its owning reconciliation")
         if receipt.get("fts_pending"):
             raise SourceLayoutError("FTS writer ownership is unsettled")
         if receipt.get("uncertain_effect"):
@@ -491,7 +638,9 @@ def validate_source_store(store) -> dict:
             raise SourceLayoutError(
                 "unexplained version drift requires retained intent or fresh reindex"
             )
-        content = store.content_store._get_or_create_table()
+        content = cast(
+            "Callable[[], _ValidationTable]", store.content_store._get_or_create_table,
+        )()
         for name in versions:
             table = db.open_table(name)
             if "vector" not in table.schema.names:
@@ -524,22 +673,23 @@ def validate_source_store(store) -> dict:
         return receipt
 
 
-def source_write(method):
+def source_write(method: F) -> F:
     """Serialize actual participating mutation paths and latch uncertainty on failure."""
     @functools.wraps(method)
-    def call(self, *args, **kwargs):
+    def call(self: Any, *args: Any, **kwargs: Any) -> Any:
         domain = getattr(self, "_source_domain", None)
         if domain is None:
+            _refuse_marked_legacy(self)
             return method(self, *args, **kwargs)
         db = (self._content.db if hasattr(self, "_content")
               else getattr(self, "_source_db", getattr(self, "_db", None)))
         with domain.write(db):
             return method(self, *args, **kwargs)
-    return call
+    return cast(F, call)
 
 
 @contextmanager
-def child_fts_owner(path: str, nonce: str):
+def child_fts_owner(path: str, nonce: str) -> Iterator[None]:
     """Child process only: retain the kernel guard until interpreter/process exit."""
     domain = SourceDomain(Path(path))
     guard = kernel_lock(domain.path / FTS_LOCK)
@@ -557,13 +707,14 @@ def child_fts_owner(path: str, nonce: str):
         domain.save(value)
 
 
-def source_read(method):
+def source_read(method: F) -> F:
     """Hold selected-domain exclusion over each public operation, including lazy iteration."""
     @contextmanager
-    def owned(self):
+    def owned(self: Any) -> Iterator[None]:
         store = getattr(self, "_store", self)
         domain = getattr(store, "_source_domain", None)
         if domain is None:
+            _refuse_marked_legacy(store)
             yield
             return
         db = (store._content.db if hasattr(store, "_content")
@@ -573,26 +724,26 @@ def source_read(method):
 
     if inspect.isgeneratorfunction(method):
         @functools.wraps(method)
-        def iterate(self, *args, **kwargs):
+        def iterate(self: Any, *args: Any, **kwargs: Any) -> Iterator[Any]:
             with owned(self):
                 yield from method(self, *args, **kwargs)
-        return iterate
+        return cast(F, iterate)
 
     @functools.wraps(method)
-    def call(self, *args, **kwargs):
+    def call(self: Any, *args: Any, **kwargs: Any) -> Any:
         with owned(self):
             return method(self, *args, **kwargs)
-    return call
+    return cast(F, call)
 
 
-def source_fts_read(method):
+def source_fts_read(method: F) -> F:
     @source_read
     @functools.wraps(method)
-    def call(self, *args, **kwargs):
+    def call(self: Any, *args: Any, **kwargs: Any) -> Any:
         store = getattr(self, "_store", self)
         domain = getattr(store, "_source_domain", None)
         if domain is not None:
             content = store._content if hasattr(store, "_content") else store
             domain.require_fts(content)
         return method(self, *args, **kwargs)
-    return call
+    return cast(F, call)

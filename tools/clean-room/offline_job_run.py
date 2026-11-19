@@ -83,12 +83,16 @@ def run_job(
     )
     observed_host = admit_host(job, host)
     private_directory(results)
+    if job.workspace is not None:
+        private_directory(job.workspace)
     if control.anchor != "/" or ".." in control.parts or control.is_symlink():
         raise PlanRefusal("control directory has indirect ancestry")
     private_directory(control.parent)
     roots = [results, repository.resolve(), *(item.source for item in job.inputs)]
     if job.cache is not None:
         roots.append(job.cache)
+    if job.workspace is not None:
+        roots.append(job.workspace)
     if any(_overlap(control, root) for root in roots):
         raise PlanRefusal("control directory overlaps a payload bind or repository")
     budget.remaining()
@@ -129,6 +133,9 @@ def run_job(
                 "results": str(results),
                 "host_limits": asdict(host),
                 "container_limits": asdict(job.limits),
+                "workspace": (
+                    str(job.workspace) if job.workspace is not None else None
+                ),
             },
         )
         report.stage = "fresh-name"

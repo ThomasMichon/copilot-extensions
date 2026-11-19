@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 from fastapi import FastAPI
@@ -18,7 +20,10 @@ from agent_index.indexing.change_hints_contract import (
 from agent_index.indexing.task_store import TaskStore
 
 
-def _hints(**kwargs):
+Service = tuple[TestClient, TaskStore, list[str]]
+
+
+def _hints(**kwargs: Any) -> ChangeHints:
     return ChangeHints(**{
         "source": "git:sample", "canonical_family": "git",
         "account_id": "account-a", "item_ids": ("a",), **kwargs,
@@ -26,34 +31,38 @@ def _hints(**kwargs):
 
 
 @pytest.fixture
-def service(tmp_path, monkeypatch):
+def service(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Service:
     monkeypatch.setenv("AGENT_INDEX_HOME", str(tmp_path / "home"))
     monkeypatch.setenv("AGENT_INDEX_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setattr(server, "_missing_indexing_dependencies", lambda: [])
     monkeypatch.setattr(engine, "run_reindex", lambda **_: pytest.fail("intake must not execute"))
     store = TaskStore(tmp_path / "tasks.db")
     app = server.build_app()
-    notifications = []
+    notifications: list[str] = []
     app.state.task_store = store
     app.state.task_runner = SimpleNamespace(notify=lambda: notifications.append("notify"))
     return TestClient(app), store, notifications
 
 
-def _connected_api(client):
-    calls = []
+def _connected_api(client: TestClient) -> tuple[AgentIndexClient, list[tuple[str, str]]]:
+    calls: list[tuple[str, str]] = []
     api = AgentIndexClient("http://fixture")
 
-    def request(method, path, json=None, params=None):
+    def request(
+        method: str, path: str, json: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         calls.append((method, path))
         response = client.request(method, path, json=json, params=params)
         response.raise_for_status()
-        return response.json()
+        payload: dict[str, Any] = response.json()
+        return payload
 
-    api._request = request
+    setattr(api, "_request", request)
     return api, calls
 
 
-def test_old_source_only_caller_unchanged_and_hinted_burst_unions(service):
+def test_old_source_only_caller_unchanged_and_hinted_burst_unions(service: Service) -> None:
     client, store, notifications = service
     plain = client.post("/reindex", json={"source": "git:sample"}).json()
     assert plain["accepted"]
@@ -68,37 +77,42 @@ def test_old_source_only_caller_unchanged_and_hinted_burst_unions(service):
     assert calls == [("GET", "/health"), ("POST", "/reindex/hints")] * 2
     assert len(notifications) == 3
     assert store.get_pending_count() == 2
-    assert store.dequeue_next().id == plain["task"]["id"]
+    claimed = store.dequeue_next()
+    assert claimed is not None and claimed.id == plain["task"]["id"]
     assert store.dequeue_next() is None
 
 
 @pytest.mark.parametrize("versions", [(), (2,), (True,), None, 1, "1"])
-def test_execution_capability_is_explicit_and_callable_bound(monkeypatch, versions):
-    def legacy(**kwargs):
+def test_execution_capability_is_explicit_and_callable_bound(
+    monkeypatch: pytest.MonkeyPatch, versions: Any,
+) -> None:
+    def legacy(**kwargs: Any) -> None:
         pytest.fail("a capability read must not invoke indexing")
 
     monkeypatch.setattr(engine, "run_reindex", legacy)
     monkeypatch.setattr(engine, "CHANGE_HINTS_VERSIONS", (1,), raising=False)
-    legacy.change_hints_versions = versions
+    setattr(legacy, "change_hints_versions", versions)
     assert execution_versions(legacy) == []
     assert intake_contract() == {
-        "id": CONTRACT_ID, "intake_versions": [1], "execution_versions": [],
+        "id": CONTRACT_ID, "intake_versions": [1, 2], "execution_versions": [],
     }
 
 
-def test_health_uses_exact_current_callable_and_never_inherits_module_capability(service, monkeypatch):
+def test_health_uses_exact_current_callable_and_never_inherits_module_capability(
+    service: Service, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     client, _, _ = service
 
-    def capable(**kwargs):
+    def capable(**kwargs: Any) -> None:
         pytest.fail("health must not execute indexing")
 
-    capable.change_hints_versions = (1,)
+    setattr(capable, "change_hints_versions", (1,))
     monkeypatch.setattr(engine, "run_reindex", capable)
     assert client.get("/health").json()["indexing_contract"]["execution_versions"] == [1]
     monkeypatch.setattr(engine, "CHANGE_HINTS_VERSIONS", (1,), raising=False)
     monkeypatch.setattr(engine, "run_reindex", lambda **kwargs: None)
     health = client.get("/health").json()
-    assert health["indexing_contract"]["intake_versions"] == [1]
+    assert health["indexing_contract"]["intake_versions"] == [1, 2]
     assert health["indexing_contract"]["execution_versions"] == []
 
 
@@ -109,7 +123,9 @@ def test_health_uses_exact_current_callable_and_never_inherits_module_capability
     {"change_hints": {**_hints().to_dict(), "item_ids": "a"}},
     {"change_hints": {**_hints().to_dict(), "snapshot_complete": True}},
 ])
-def test_bad_scope_unknown_fields_and_versions_do_not_enqueue(service, change):
+def test_bad_scope_unknown_fields_and_versions_do_not_enqueue(
+    service: Service, change: dict[str, Any],
+) -> None:
     client, store, notifications = service
     payload = {"source": "git:sample", "change_hints": _hints().to_dict(), **change}
     response = client.post("/reindex/hints", json=payload)
@@ -123,13 +139,13 @@ def test_bad_scope_unknown_fields_and_versions_do_not_enqueue(service, change):
     '{"source":"git:sample","change_hints":{"version":1,"version":2}}',
     "null", "{",
 ])
-def test_duplicate_or_corrupt_json_does_not_enqueue(service, payload):
+def test_duplicate_or_corrupt_json_does_not_enqueue(service: Service, payload: str) -> None:
     client, store, _ = service
     assert client.post("/reindex/hints", content=payload).status_code == 422
     assert store.get_pending_count() == 0
 
 
-def test_legacy_endpoint_refuses_required_hints_instead_of_silently_dropping(service):
+def test_legacy_endpoint_refuses_required_hints_instead_of_silently_dropping(service: Service) -> None:
     client, store, _ = service
     assert client.post("/reindex", json={
         "source": "git:sample", "change_hints": _hints().to_dict(),
@@ -137,7 +153,9 @@ def test_legacy_endpoint_refuses_required_hints_instead_of_silently_dropping(ser
     assert store.get_queue() == []
 
 
-def test_body_limit_and_drain_refuse_without_queue_effects(service, monkeypatch):
+def test_body_limit_and_drain_refuse_without_queue_effects(
+    service: Service, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     client, store, _ = service
     from agent_index import reindex_intake
 
@@ -145,7 +163,7 @@ def test_body_limit_and_drain_refuse_without_queue_effects(service, monkeypatch)
     assert client.post("/reindex/hints", json={
         "source": "git:sample", "change_hints": _hints().to_dict(),
     }).status_code == 413
-    client.app.state.drain_gate.set_draining(True)
+    cast(FastAPI, client.app).state.drain_gate.set_draining(True)
     assert client.post("/reindex/hints", json={}).status_code == 503
     assert store.get_queue() == []
 
@@ -156,39 +174,40 @@ def test_body_limit_and_drain_refuse_without_queue_effects(service, monkeypatch)
     {"indexing_contract": {"id": CONTRACT_ID, "intake_versions": [True]}},
     {"indexing_contract": {"id": "other", "intake_versions": [1]}},
 ])
-def test_new_caller_old_or_unadvertised_provider_refuses_before_post(health):
+def test_new_caller_old_or_unadvertised_provider_refuses_before_post(health: dict[str, Any]) -> None:
     api = AgentIndexClient("http://fixture")
-    calls = []
+    calls: list[tuple[str, str]] = []
 
-    def request(method, path, **kwargs):
+    def request(method: str, path: str, **kwargs: Any) -> dict[str, Any]:
         calls.append((method, path))
         assert method == "GET"
         return health
 
-    api._request = request
+    setattr(api, "_request", request)
     with pytest.raises(RuntimeError, match="does not advertise"):
         api.reindex(source="git:sample", change_hints=_hints())
     assert calls == [("GET", "/health")]
 
 
-def test_provider_rollback_after_negotiation_never_falls_back_to_legacy_post():
+def test_provider_rollback_after_negotiation_never_falls_back_to_legacy_post() -> None:
     legacy = FastAPI()
-    legacy_posts = []
+    legacy_posts: list[dict[str, Any]] = []
 
     @legacy.get("/health")
-    def health():
+    def health() -> dict[str, Any]:
         # Discovery succeeded immediately before the provider rolled back.
         return {"indexing_contract": intake_contract()}
 
     @legacy.post("/reindex")
-    def reindex(body: dict):
+    def reindex(body: dict[str, Any]) -> dict[str, Any]:
         legacy_posts.append(body)
         return {"accepted": True}
 
     api, calls = _connected_api(TestClient(legacy))
     with pytest.raises(Exception, match="404") as refused:
         api.reindex(source="git:sample", change_hints=_hints())
-    assert refused.value.response.status_code == 404
+    response = getattr(refused.value, "response", None)
+    assert response is not None and response.status_code == 404
     assert calls == [("GET", "/health"), ("POST", "/reindex/hints")]
     assert legacy_posts == []
 
@@ -201,23 +220,23 @@ def test_provider_rollback_after_negotiation_never_falls_back_to_legacy_post():
         "change_hints": _hints(item_ids=()).to_dict(),
     }},
 ])
-def test_missing_acceptance_receipt_is_unknown_not_replayed(receipt):
+def test_missing_acceptance_receipt_is_unknown_not_replayed(receipt: dict[str, Any]) -> None:
     api = AgentIndexClient("http://fixture")
-    calls = []
+    calls: list[tuple[str, str]] = []
 
-    def request(method, path, **kwargs):
+    def request(method: str, path: str, **kwargs: Any) -> dict[str, Any]:
         calls.append((method, path))
         if method == "GET":
             return {"indexing_contract": intake_contract()}
         return receipt
 
-    api._request = request
+    setattr(api, "_request", request)
     with pytest.raises(RuntimeError, match="outcome unknown"):
         api.reindex(source="git:sample", change_hints=_hints())
     assert calls == [("GET", "/health"), ("POST", "/reindex/hints")]
 
 
-def test_ordinary_client_request_does_not_require_negotiation(service):
+def test_ordinary_client_request_does_not_require_negotiation(service: Service) -> None:
     client, _, _ = service
     api, calls = _connected_api(client)
     assert api.reindex(source="git:sample", full=True)["accepted"]

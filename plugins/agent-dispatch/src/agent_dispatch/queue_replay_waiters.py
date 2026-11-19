@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from collections.abc import Callable
 import sqlite3
+import time
 from typing import Any, TYPE_CHECKING
 
 from .delegated_replay_contract import replay_scope
 from .queue_common import Task
+from .queue_feed_attempts import ATTEMPT_PROTOCOL, require_feed_attempt
+from .queue_feed_receipts import RECEIPT_PROTOCOL, receipt_expiry
 from .queue_records import TaskError
 from .repository_feed_waiter_contract import CACHE_PROTOCOL, FeedWaiterPage, feed_service_scope
 
@@ -17,6 +20,9 @@ def _service_scope(binding: dict[str, Any]) -> str:
 
 
 class ReplayWaiterProgressMixin:
+    repository_feed_attempt_protocol = ATTEMPT_PROTOCOL
+    repository_feed_receipt_protocol = RECEIPT_PROTOCOL
+
     if TYPE_CHECKING:
         _connect: Callable[[], sqlite3.Connection]
         _run_waiter_from_row: Callable[[sqlite3.Row], dict[str, Any]]
@@ -102,6 +108,7 @@ class ReplayWaiterProgressMixin:
     def replay_waiter_progress(
         self, waiter: dict[str, Any], *, attempt: bool = False,
         registration_id: str | None = None,
+        registration_expires_at: int | None = None,
         settled: bool = False, settle_unattempted: bool = False,
     ) -> dict[str, Any]:
         """Short transaction only; no remote operation runs with this lock held."""
@@ -118,6 +125,20 @@ class ReplayWaiterProgressMixin:
                     or current["generation"] != waiter["generation"]
                     or current["task_generation"] != waiter["task_generation"]):
                 raise TaskError("replay waiter identity mismatch")
+            if attempt and "feed" in current["delegation"]:
+                require_feed_attempt(
+                    conn, self._fetch(conn, current["task_id"]), current, waiter, now=time.time(),
+                )
+            expiry = receipt_expiry(
+                current["delegation"], registration_id, registration_expires_at,
+            )
+            if expiry is not None:
+                if current["replay_registration_expires_at"] not in (None, expiry):
+                    raise TaskError("original repository-feed receipt expiry changed")
+                conn.execute(
+                    "UPDATE run_waiters SET replay_registration_expires_at=? WHERE id=?",
+                    (expiry, row["id"]),
+                )
             if registration_id is not None:
                 if current["replay_registration_id"] not in (None, registration_id):
                     raise TaskError("replay registration mismatch")

@@ -16,13 +16,14 @@ from fleet_manager.local_service_handler import LocalServiceRequest
 from single_instance_lease import OperationLockedError
 
 from .repository_subscriptions import (
-    OPERATIONS, RepositoryHistoryGap, RepositoryRequestConflict, RepositorySubscriptions,
+    OPERATIONS, RepositoryHistoryGap, RepositoryRequestConflict, RepositoryRequestExpired,
+    RepositorySubscriptions,
     contract,
 )
 from .watch_replay_store import ReplayCallerExpired, json_object
 from .watch_replay_store import ReplayStore
 from .watch_replay import ConsumerScope
-from .repository_contract import RepositoryIdentity
+from .repository_contract import CONSUMER_BINDING_PROTOCOL, RepositoryIdentity
 from .repository_projection import RepositoryProjection
 from .filtered_projection import FilteredProjection
 from .filtered_state import Checkpoint, Document
@@ -116,6 +117,10 @@ async def handle(owner: RepositoryGatewayOwner, request: LocalServiceRequest) ->
         if owner.store.repository_activity and not owner.store.repository_filtered:
             from .repository_stream import capability
             extra["stream"] = capability()
+        if route == "repositories":
+            extra["consumer_binding"] = {
+                "protocol": CONSUMER_BINDING_PROTOCOL, "consumer": scope.consumer,
+            }
         return response(200, {**binding, **declaration(), "identity": identity.document(), **extra})
     streaming = operation == "stream" and owner.store.repository_activity and not owner.store.repository_filtered
     if (operation not in operations and not streaming) or request.method != "POST":
@@ -126,12 +131,16 @@ async def handle(owner: RepositoryGatewayOwner, request: LocalServiceRequest) ->
         return response(415, {"error": "repository_json_required"})
     try:
         value = json_object(request.body)
-        if set(value) != {"protocol", "namespace", "repository_key", "request"} or (
+        required = {"protocol", "namespace", "repository_key", "request"}
+        optional = {"expected_consumer"} if route == "repositories" else set()
+        if not required <= value.keys() or value.keys() - required - optional or (
             not isinstance(value["request"], dict)
         ):
             raise ValueError
         if any(value[name] != binding[name] for name in ("protocol", "namespace", "repository_key")):
             return response(409, {"error": "repository_binding_mismatch"})
+        if "expected_consumer" in value and value["expected_consumer"] != scope.consumer:
+            return response(409, {"error": "repository_consumer_mismatch"})
     except (ValueError, UnicodeError, RecursionError):
         return response(400, {"error": "invalid_repository_request"})
     if len(owner._tasks) >= 8:
@@ -150,7 +159,7 @@ async def handle(owner: RepositoryGatewayOwner, request: LocalServiceRequest) ->
         except ValueError:
             return response(400, {"error": "invalid_repository_stream"})
 
-    def execute() -> Document:
+    def execute_request() -> Document:
         def checkpoint() -> None:
             owner._check(request)
             if request.context.namespace != owner.store.namespace:
@@ -167,6 +176,15 @@ async def handle(owner: RepositoryGatewayOwner, request: LocalServiceRequest) ->
             )
         ))
 
+    def execute() -> Document:
+        if operation != "next-actions" and stream is None:
+            return execute_request()
+        from .repository_read_trace import read
+        return read(
+            execute_request, target=target, repository_key=identity.key,
+            payload=value["request"], stream=stream is not None,
+        )
+
     async def dispatch() -> _Response:
         try:
             result = await asyncio.to_thread(execute)
@@ -180,6 +198,10 @@ async def handle(owner: RepositoryGatewayOwner, request: LocalServiceRequest) ->
             return selected
         except RepositoryHistoryGap:
             return response(410, {"error": "repository_history_gap", "resync": "query_then_subscribe"})
+        except RepositoryRequestExpired:
+            return response(410, {
+                "error": "repository_request_expired", "reconcile": "inspect-request",
+            })
         except RepositoryRequestConflict:
             return response(409, {"error": "repository_request_conflict"})
         except KeyError:

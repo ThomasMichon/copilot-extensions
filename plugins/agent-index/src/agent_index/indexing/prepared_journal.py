@@ -7,27 +7,58 @@ import json
 import uuid
 from contextlib import closing
 from dataclasses import fields
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 from agent_index.chunking.base import Chunk
 from agent_index.indexing.file_batches import FileBatch
-from agent_index.indexing.pending_crawl import PendingCrawlConflict
+from agent_index.indexing.pending_crawl import PendingCrawlConflict, PendingCrawls
+from agent_index.indexing.point_claim import PendingPointClaim
 
 if TYPE_CHECKING:
     import sqlite3
     from collections.abc import Iterator
 
+    from agent_index.indexing.manifest import CrawlManifest
     from agent_index.indexing.path_index import PathIndex
 
 
 class PreparedJournal:
     """No cursor or ownership of its own; the parent journal retires these rows."""
 
-    def __init__(self, paths: PathIndex, source: str, scope: str, payload: str) -> None:
+    def __init__(
+        self, paths: PathIndex, source: str, scope: str, payload: str, *,
+        manifest: CrawlManifest | None = None, full: bool | None = None,
+        point_claim: PendingPointClaim | None = None,
+    ) -> None:
+        if (manifest is None) != (full is None) or full is not None and type(full) is not bool:
+            raise ValueError("Prepared manifest and boolean full mode must be supplied together")
+        if point_claim is None:
+            acquired = PendingCrawls.decode_pending(payload, source)
+        else:
+            if type(point_claim) is not PendingPointClaim:
+                raise ValueError("Prepared point work requires a complete typed claim")
+            acquired_manifest, retained_claim = PendingCrawls.decode_point_pending(payload, source)
+            if retained_claim != point_claim:
+                raise PendingCrawlConflict("Prepared point claim does not match its pending crawl")
+            acquired = acquired_manifest, False
+        if acquired is None:
+            raise ValueError("Prepared application requires a completed pending crawl")
+        if manifest is not None:
+            supplied = json.dumps(PendingCrawls.manifest_data(manifest), sort_keys=True, allow_nan=False)
+            retained = json.dumps(PendingCrawls.manifest_data(acquired[0]), sort_keys=True, allow_nan=False)
+            if (supplied, full) != (retained, acquired[1]):
+                raise PendingCrawlConflict("Prepared manifest does not match its acquired pending crawl")
         self.paths, self.source, self.scope, self.payload = paths, source, scope, payload
+        self.point_claim = point_claim
         with closing(paths._connect()) as conn, conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT scope, payload FROM pending_crawls WHERE source = ?", (source,),
+            ).fetchone()
+            if row is None or (row["scope"], row["payload"]) != (scope, payload):
+                raise PendingCrawlConflict("Prepared application no longer matches its pending crawl")
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS prepared_crawl_rows "
                 "(source TEXT NOT NULL, kind TEXT NOT NULL, key TEXT NOT NULL, "
@@ -50,12 +81,6 @@ class PreparedJournal:
                 "DELETE FROM prepared_crawl_rows WHERE source = old.source; "
                 "DELETE FROM prepared_crawl_parents WHERE source = old.source; END",
             )
-            conn.execute("BEGIN IMMEDIATE")
-            row = conn.execute(
-                "SELECT scope, payload FROM pending_crawls WHERE source = ?", (source,),
-            ).fetchone()
-            if row is None or (row["scope"], row["payload"]) != (scope, payload):
-                raise PendingCrawlConflict("Prepared application no longer matches its pending crawl")
             conn.execute(
                 "INSERT OR IGNORE INTO prepared_crawl_parents VALUES (?, ?, ?)",
                 (source, scope, uuid.uuid4().hex),
@@ -66,6 +91,18 @@ class PreparedJournal:
             if bound["scope"] != scope:
                 raise PendingCrawlConflict("Prepared cache belongs to a different account scope")
             self.generation = bound["generation"]
+
+    @classmethod
+    def for_point_application(
+        cls, paths: PathIndex, source: str, scope: str, payload: str, *,
+        manifest: CrawlManifest, point_claim: PendingPointClaim,
+    ) -> PreparedJournal:
+        """Bind a complete retained point candidate without replacing its pending parent."""
+        from agent_index.indexing.prepared_points import PreparedPoints
+
+        journal = cls(paths, source, scope, payload, point_claim=point_claim)
+        PreparedPoints(journal).bind_application(manifest)
+        return journal
 
     def _require_parent(self, conn: sqlite3.Connection) -> None:
         row = conn.execute(
@@ -103,6 +140,25 @@ class PreparedJournal:
                     result[row["key"]] = payload
         return result
 
+    def put_immutable(self, kind: str, key: str, payload: bytes) -> None:
+        """Retain exact attempt intent without replacing an earlier publication."""
+        digest = hashlib.sha256(payload).hexdigest()
+        with closing(self.paths._connect()) as conn, conn:
+            conn.execute("BEGIN IMMEDIATE")
+            self._require_parent(conn)
+            row = conn.execute(
+                "SELECT payload, digest FROM prepared_crawl_rows "
+                "WHERE source = ? AND kind = ? AND key = ?", (self.source, kind, key),
+            ).fetchone()
+            if row is not None:
+                if (row["payload"], row["digest"]) != (payload, digest):
+                    raise PendingCrawlConflict("Prepared publication intent changed")
+                return
+            conn.execute(
+                "INSERT INTO prepared_crawl_rows VALUES (?, ?, ?, ?, ?)",
+                (self.source, kind, key, payload, digest),
+            )
+
     def reset_batches(self) -> None:
         with closing(self.paths._connect()) as conn, conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -134,7 +190,7 @@ class PreparedJournal:
                  for source, path, fingerprint, size in data["checkpoints"]],
             )
 
-    def vectors(self, keys: list[str], dim: int) -> dict[str, np.ndarray]:
+    def vectors(self, keys: list[str], dim: int) -> dict[str, np.ndarray[Any, Any]]:
         result = {}
         for key, payload in self.get("vector", keys).items():
             if len(payload) != dim * 4:
@@ -145,7 +201,7 @@ class PreparedJournal:
             result[key] = vector
         return result
 
-    def put_vectors(self, keys: list[str], vectors: np.ndarray, dim: int) -> None:
+    def put_vectors(self, keys: list[str], vectors: np.ndarray[Any, Any], dim: int) -> None:
         vectors = np.asarray(vectors, dtype="<f4")
         if vectors.shape != (len(keys), dim) or not np.isfinite(vectors).all():
             raise ValueError("Embedding response has an incompatible shape or nonfinite values")

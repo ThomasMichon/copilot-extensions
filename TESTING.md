@@ -120,12 +120,25 @@ Worktrees Python owner; ordinary runs and reusable caches keep their existing
 behavior. The real consumer qualification is the opt-in Worktrees
 `tests/test_artifact_runner.py` T3 packet, not an installed rollout.
 
+The same allocation/process owners support selected disposable commands through
+`tools/run-owned-producer.py`; see
+[other disposable producers](plugins/agent-worktrees/docs/artifact-scratch.md#other-disposable-producers).
+The explicit T3 `tests/test_owned_producer.py` packet exercises real analysis,
+build, archive, report and qualification-image consumers. Pair it with
+`tests/test_artifact_runner_contract.py` and the existing pilot packet after
+changing the shared context. Ordinary tests and reusable-cache defaults do not
+change; external durable output remains separately owned.
+
 This page is a reference catalog, not a sequential checklist. Read the lane
 needed for the changed behavior; optional packets below do not all become
 prerequisites for one contribution.
 
 For explicit retirement of a source-bound test environment, see
 [Retained test environments and source lifetime](docs/retained-test-environments.md).
+Select `--retirement-ready` on plugin or standalone preparation and execution
+to use the separate retirement-aware cache. Existing defaults and legacy caches
+do not migrate; older preparers cannot select this namespace through their
+existing path helper.
 An idle prepared environment can still depend on its checkout. Retirement uses
 the runner's existing lease, keeps its directory identity and blocks later
 preparation; it does not authorize checkout deletion or retire sibling caches.
@@ -1148,10 +1161,16 @@ and non-replying peers. Warm interpreter/client and synchronous requests are
 trapped; incompatible membership explicitly retains its original admission
 lookup. Original 30-second item, 10-second child and 300-second group limits
 remain unchanged. The Windows production sender shares a 100-ms allocation/
-connect/write ceiling, subtracting elapsed time from both waits. Controlled-clock
+connect/write ceiling, subtracting elapsed time after async connection setup,
+stream acquisition and async write setup before either wait. Controlled-clock
 and transport-adapter tests execute the real sender/encoder to prove the
 remaining connection/write allowances and refusal after budget exhaustion;
 these are deadline arithmetic controls, not native delivery/performance samples.
+The selected-owner functional routing matrix holds only the copied sender's
+elapsed clock at zero while retaining real shell entry, sockets, original
+receiver, payload and invalidation assertions. Its phase/error diagnostics
+describe controlled routing, not production latency. This separation does not
+change the production budget or substitute for the real-clock controls below.
 The uninstrumented cold-process tail cases run three separate shell processes
 per group across four fresh fixtures per shell, retain every real receiver/
 accounting assertion, and report entry and complete-process durations.
@@ -1971,6 +1990,31 @@ capability list and export/verify manifest contract while separately advertising
 the new command. These isolated source controls do not enable a logging consumer,
 scheduled collection, native Windows qualification or actual archive acknowledgment.
 Required unit-only CI is unchanged.
+
+Efforts' optional `--test-file tests/test_agenda_rescue.py
+--test-file tests/test_agenda_managed.py --allow-explicit-tiers` packet checks
+complete format-2 history relocation, the durable source fence, interrupted
+destination activation, exact retry after later accepted work and refusal of
+changed identities, stale exports and unsupported legacy lanes. A preloaded
+writer reaches its real write-lock boundary before cutover and must refuse
+afterward. File-replacement controls inject before and after SQLite connection
+creation at source fencing, first reservation and activation, preserving both
+the foreign database/hot journal and the original selected file byte-for-byte.
+POSIX lock controls retain another in-process writer through successful reads,
+identity rejection and a real overlapping-write timeout. An independent
+process remains excluded until that writer rolls back, then acquires the lock.
+The source-fence directory-barrier control refuses activation after a committed
+fence when directory flush fails, preserves both fenced stores and finishes an
+exact retry. A checkout-relative canonical Goal refuses before allocation; the
+actual consumer retains a readable absolute Goal after relocation.
+Worktrees' `--test-file tests/test_agenda_rescue_consumer.py
+--allow-explicit-tiers` composes the actual isolated placement process, rescue
+parser, canonical locator readback and independent ordinary agenda readers.
+These synthetic native controls do not migrate operator data or grant checkout
+deletion. Seven in-process rescue units use SQLite memory only, substituting
+filesystem, placement and transaction ownership; they create no database file,
+child, listener or service. Their exact nodes, source closure and production
+coverage target are declared in `tools/promotion-unit-manifest.json`.
 
 Worktrees' optional `--test-file tests/test_worktree_data_store.py
 --test-file tests/test_worktree_data_cli.py --allow-explicit-tiers` packet checks
@@ -7477,6 +7521,51 @@ evidence separate.
 
 ## Unit-only promotion packet
 
+The point-domain receipt units use in-memory receipt bytes to check exact
+scope/protocol selection, malformed and duplicate binding refusal, unchanged
+protocol-1 metadata, save-time downgrade refusal, late marking and nested/lazy default-reader
+drift. They start no actor or native database and create no domain directory.
+`plugins/agent-index/tests/test_point_source_domain.py` separately covers cold
+directory bootstrap/reopen, both cross-domain refusals, default store and
+cluster constructors, cached-handle separation and unchanged bytes on refusal.
+Late-marked native content, vector, combined-store and sibling-cluster handles
+refuse before reads or writes, including empty input and empty inventory.
+The same native controls cover relative opens followed by a working-directory
+change; in-memory controls cover both duplicate-protocol orders for default
+and explicitly selected readers.
+The cluster connection regression also marks a destination reached only after
+`chdir`: the original handle must keep reading and mutating its original
+database without changing the marked destination's files.
+The FTS maintenance case uses a real contained child build after a relative
+content-store open and `chdir`, proves the original content becomes searchable,
+and preserves every marked-destination file without creating a lock there.
+Neither lane enables component-shaped reads, applied-version qualification or
+v2 execution; selected point-domain handles still refuse legacy operations.
+
+The component-manifest units exercise strict provider-version/semantics records,
+exact mutation coverage, monotonic/deletion ordering, equal-version conflicts
+and pre-application refusal without importing stores, opening SQLite or starting
+an actor. The plugin's
+`tests/test_component_manifest.py` separately covers native SQLite reopen/CAS,
+legacy-envelope compatibility, preserved polling state and refusal at actual
+recovery/prepared/application entrypoints. It also checks transactional refusal
+of v8-to-legacy or changed-v8 replacement and premature completion, accepts an
+identical retry without losing a retained deletion, reopens the retained
+parent and proves ordinary recovery still refuses without callbacks or
+checkpoint changes. Downgrade preflight permits an independent SQLite writer
+while decoding the expected parent, then binds that parent through exact CAS.
+Neither lane qualifies ordered store application, durable
+applied-version/deletion evidence, backup recovery or component read isolation.
+
+`plugins/agent-index/tests/test_file_projection.py` is a separately selected
+native-store packet for raw point observations. It covers prepared-index
+preflight before queries, same-path candidate and retained-ID budgets, duplicate
+rows, exact metadata, configured models, provenance, finite vectors, known vector
+remnants and backend failure propagation. A 10,001-row synthetic native base
+checks indexed file/content/vector plans select only the one requested point.
+It is not part of required actor-free unit admission and does not qualify an
+ordered receiver, durable tombstones, backup recovery or native Windows execution.
+
 The exclusive attachment-export consumer packet executes the real export
 entrypoint, health-selected command transport, extension registry, provider
 dispatch and descriptor-pinned writer with an in-memory filesystem and
@@ -7501,6 +7590,13 @@ It starts no mux, observer or service. Worktrees'
 `tests/test_status_monitor_presentation.py`, `tests/test_observation_progress.py`
 and `tests/test_worktrees_producer.py` compose the actual collector and producer
 seams; continuous installed publication remains a separate native check.
+The completed-content case also composes the real segment-cache owner with
+fresh, expired, invalidated and refreshed active-row presentation. It retains
+the same content label with an explicit stale marker, without renewing fresh
+evidence or computing Git during projection. Subject changes, retained cleanup
+and retiring owners refuse the advisory copy. The contained Worktrees
+presentation and Windows observation-custody files cover the real descriptor
+parser, missing/unsupported roster rows and the unchanged hard fences.
 Portable private-store creation units select the portable snapshot replacement
 path as well as portable creation. Native Windows replacement and ownership
 remain in their separate qualification lanes, not implicit unit effects.
@@ -7931,6 +8027,14 @@ admission refusals and Windows owned-worker timeout cleanup. Actor-free
 projection, candidate-witness, recheck, safe resolver-stop and isolated-worker
 deadline controls (including pre-launch expiry) live in
 `tools/promotion_unit_tests/test_guarded_core_contract.py`.
+`tools/promotion_unit_tests/test_guarded_request_diagnostics.py` drives the
+real acquisition request normalizer with a substituted opener, derives
+index/wheel stage from retained owner code identities, checks recorded numeric
+causes and the existing connection-reset retry count, and rejects sensitive or
+unbounded fields. Legacy and detailed resolver refusals round-trip through the
+actual worker JSON writer and parent reader in process; unrelated or late
+worker failures retain their existing opaque category. These controls do not
+probe a feed, launch UV or establish a historical cause.
 `tools/test_core_public_feed_native.py` compares real local-TLS producer outputs
 across separate machine-local keyed identities and source containers, and checks
 that credentials or a mismatched feed are refused before any feed request.
@@ -7990,6 +8094,14 @@ listing, including no-call files and invalid inputs.
 
 `tools/run-promotion-unit-tests.py` executes only the exact nodes declared by
 `tools/promotion-unit-manifest.json`, in one Python process with coverage.
+Ten namespace capability controls use the actual Bridge namespace decoder
+and shared declarations with substituted provider bytes. They preserve true,
+false, null and legacy omission and reject numeric/string/container values
+without a provider process, socket or actor. The separate Bridge
+`tests/test_catalog_worktree_capability.py` packet exercises actual cached
+HTTP/detail consumers, names/aliases, malformed-source last-good retention
+and provider rollback. Passive capability does not replace dispatch admission;
+neither packet establishes installed adoption or runs a live provider.
 The create-only attachment controls in `test_vault_attachment_import.py` execute
 the actual import-owner, CLI-dispatch and backend bodies with inert storage,
 lock, transport and temporary-file owners. Collision, failed/unknown creation,

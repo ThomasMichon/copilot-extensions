@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from .change_hints import ChangeHints
+from .point_hints import AcquisitionHints, PointChangeHints, read_change_hints, union_change_hints
 from .task_hints_schema import install_hints_schema
 
 if sys.version_info >= (3, 11):
@@ -31,7 +32,8 @@ else:
         """String rendering for the explicit queue states on Python 3.10."""
 
         __str__ = str.__str__
-        __format__ = str.__format__
+        def __format__(self, format_spec: str) -> str:
+            return str.__format__(self, format_spec)
 
 log = logging.getLogger(__name__)
 
@@ -68,6 +70,7 @@ CREATE INDEX IF NOT EXISTS idx_tasks_finished_at
 class TaskStatus(_TaskStatusBase):
     QUEUED = "queued"
     QUEUED_HINTS = "queued_hints"
+    QUEUED_HINTS_V2 = "queued_hints_v2"
     PROCESSING = "processing"
     COMPLETE = "complete"
     PARTIAL = "partial"
@@ -117,7 +120,8 @@ class TaskRecord:
     started_at: float | None
     finished_at: float | None
     updated_at: float
-    change_hints: ChangeHints | None = field(default=None, kw_only=True)
+    change_hints: AcquisitionHints | None = field(default=None, kw_only=True)
+    point_claim_id: str | None = field(default=None, kw_only=True)
 
     def to_dict(self) -> dict[str, Any]:
         result = {
@@ -141,16 +145,33 @@ class TaskRecord:
         }
         if self.change_hints is not None:
             result["change_hints"] = self.change_hints.to_dict()
+        if self.point_claim_id is not None:
+            result["point_claim_id"] = self.point_claim_id
         return result
 
 
 def _row_to_record(row: sqlite3.Row) -> TaskRecord:
     raw_hints = row["change_hints"] if "change_hints" in row.keys() else None
-    hints = ChangeHints.from_json(raw_hints) if raw_hints is not None else None
+    point_hints = row["point_change_hints"] if "point_change_hints" in row.keys() else None
+    if point_hints is not None:
+        if raw_hints is not None:
+            raise ValueError("Persisted task mixes v1 and v2 change hints")
+        raw_hints = point_hints
+    hints = read_change_hints(raw_hints) if raw_hints is not None else None
+    if hints is not None and hints.version != row["change_hints_version"]:
+        raise ValueError("Persisted change-hints version does not match payload")
+    if row["change_hints_version"] != 1 and hints is None:
+        raise ValueError("Persisted point task has no change hints")
     if hints is not None and (hints.source != row["source"] or row["full"]):
         raise ValueError("Persisted change hints do not match incremental task scope")
-    if row["status"] == TaskStatus.QUEUED_HINTS and hints is None:
+    if row["status"] in {TaskStatus.QUEUED_HINTS, TaskStatus.QUEUED_HINTS_V2} and hints is None:
         raise ValueError("Parked hinted task has no change hints")
+    claim_id = row["point_claim_id"] if "point_claim_id" in row.keys() else None
+    if claim_id is not None and (
+        type(hints) is not PointChangeHints or not isinstance(claim_id, str)
+        or len(claim_id) != 32 or any(char not in "0123456789abcdef" for char in claim_id)
+    ):
+        raise ValueError("Invalid pinned point claim")
     # Parse result_stats JSON if present
     raw_stats = row["result_stats"] if "result_stats" in row.keys() else None
     result_stats: dict[str, Any] | None = None
@@ -183,6 +204,7 @@ def _row_to_record(row: sqlite3.Row) -> TaskRecord:
         finished_at=row["finished_at"],
         updated_at=row["updated_at"],
         change_hints=hints,
+        point_claim_id=claim_id,
     )
 
 
@@ -249,7 +271,7 @@ class TaskStore:
 
     def enqueue(
         self, source: str = "all", *, full: bool = False,
-        trigger_source: str = "unknown", change_hints: ChangeHints | None = None,
+        trigger_source: str = "unknown", change_hints: AcquisitionHints | None = None,
     ) -> TaskRecord:
         """Create a new queued task and return it.
 
@@ -290,8 +312,8 @@ class TaskStore:
         full task, and unions only with queued hints in the same exact scope.
         """
         if change_hints is not None:
-            if type(change_hints) is not ChangeHints:
-                raise ValueError("change_hints must be a ChangeHints value")
+            if type(change_hints) not in (ChangeHints, PointChangeHints):
+                raise ValueError("change_hints must be a supported typed hints value")
             if full or source != change_hints.source:
                 raise ValueError("Change hints require matching incremental source scope")
             return self._enqueue_hints(change_hints, trigger_source)
@@ -380,15 +402,16 @@ class TaskStore:
         finally:
             conn.close()
 
-    def _enqueue_hints(self, hints: ChangeHints, trigger_source: str) -> TaskRecord:
+    def _enqueue_hints(self, hints: AcquisitionHints, trigger_source: str) -> TaskRecord:
         now = time.time()
         conn = self._connect()
         try:
             conn.execute("BEGIN IMMEDIATE")
             rows = conn.execute(
-                "SELECT * FROM tasks WHERE status = 'queued_hints' AND source = ? "
+                "SELECT * FROM tasks WHERE status IN ('queued_hints', 'queued_hints_v2') "
+                "AND source = ? AND change_hints_version = ? AND point_claim_id IS NULL "
                 "ORDER BY created_at, id",
-                (hints.source,),
+                (hints.source, hints.version),
             ).fetchall()
             existing = [_row_to_record(row) for row in rows]
             matching = [
@@ -400,24 +423,67 @@ class TaskStore:
                 # Retry can leave multiple pending rows; retain each row and its
                 # attempt history, while all new deliveries union into the first.
                 assert record.change_hints is not None
-                merged = record.change_hints.union(hints)
+                merged = union_change_hints(record.change_hints, hints)
                 task_id = record.id
                 conn.execute(
-                    "UPDATE tasks SET change_hints = ?, updated_at = ? WHERE id = ?",
-                    (merged.to_json(), now, task_id),
+                    "UPDATE tasks SET change_hints = ?, point_change_hints = ?, "
+                    "updated_at = ? WHERE id = ?",
+                    (merged.to_json() if merged.version == 1 else None,
+                     merged.to_json() if merged.version == 2 else None, now, task_id),
                 )
             else:
                 task_id = uuid.uuid4().hex[:12]
                 conn.execute(
                     """INSERT INTO tasks
-                       (id, source, full, status, trigger_source, change_hints, created_at, updated_at)
-                       VALUES (?, ?, 0, 'queued_hints', ?, ?, ?, ?)""",
-                    (task_id, hints.source, trigger_source, hints.to_json(), now, now),
+                       (id, source, full, status, trigger_source, change_hints, point_change_hints,
+                        change_hints_version, created_at, updated_at)
+                       VALUES (?, ?, 0, 'queued', ?, ?, ?, ?, ?, ?)""",
+                    (task_id, hints.source, trigger_source,
+                     hints.to_json() if hints.version == 1 else None,
+                     hints.to_json() if hints.version == 2 else None, hints.version, now, now),
                 )
             row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
             record = _row_to_record(row)
             conn.commit()
             return record
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def pin_point_claim(
+        self, task_id: str, *, expected_hints: PointChangeHints,
+    ) -> TaskRecord:
+        """Freeze an entire parked v2 target set without admitting execution.
+
+        Compare the complete typed snapshot under the queue writer lock. Later
+        arrivals union into a different row; retries retain this claim identity.
+        No worker, acquisition, completion or polling-cursor authority is granted.
+        """
+        if type(expected_hints) is not PointChangeHints:
+            raise ValueError("Point claims require complete typed v2 hints")
+        conn = self._connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+            if row is None:
+                raise ValueError("Point claim task does not exist")
+            record = _row_to_record(row)
+            if (
+                record.status != TaskStatus.QUEUED_HINTS_V2
+                or record.change_hints != expected_hints
+            ):
+                raise ValueError("Point claim no longer matches the parked target set")
+            if record.point_claim_id is None:
+                conn.execute(
+                    "UPDATE tasks SET point_claim_id = ?, updated_at = ? WHERE id = ?",
+                    (uuid.uuid4().hex, time.time(), task_id),
+                )
+            fresh = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+            result = _row_to_record(fresh)
+            conn.commit()
+            return result
         except Exception:
             conn.rollback()
             raise
@@ -448,7 +514,8 @@ class TaskStore:
         try:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
-                "SELECT * FROM tasks WHERE status IN ('queued', ?) "
+                "SELECT * FROM tasks WHERE status = 'queued' OR "
+                "(status = ? AND change_hints_version = 1) "
                 "ORDER BY full DESC, created_at ASC LIMIT 1",
                 ("queued_hints" if accept_change_hints else "queued",),
             ).fetchone()
@@ -550,7 +617,7 @@ class TaskStore:
             affected = conn.execute(
                 """UPDATE tasks
                    SET status = 'cancelled', finished_at = ?, updated_at = ?
-                   WHERE id = ? AND status IN ('queued', 'queued_hints')""",
+                   WHERE id = ? AND status IN ('queued', 'queued_hints', 'queued_hints_v2')""",
                 (now, now, task_id),
             ).rowcount
             conn.commit()
@@ -613,7 +680,7 @@ class TaskStore:
         try:
             rows = conn.execute(
                 """SELECT * FROM tasks
-                   WHERE status IN ('queued', 'queued_hints', 'processing')
+                   WHERE status IN ('queued', 'queued_hints', 'queued_hints_v2', 'processing')
                    ORDER BY created_at""",
             ).fetchall()
             return [_row_to_record(r) for r in rows]
@@ -664,9 +731,10 @@ class TaskStore:
         conn = self._connect()
         try:
             row = conn.execute(
-                "SELECT COUNT(*) AS cnt FROM tasks WHERE status IN ('queued', 'queued_hints')",
+                "SELECT COUNT(*) AS cnt FROM tasks "
+                "WHERE status IN ('queued', 'queued_hints', 'queued_hints_v2')",
             ).fetchone()
-            return row["cnt"]
+            return int(row["cnt"])
         finally:
             conn.close()
 
@@ -678,7 +746,8 @@ class TaskStore:
                 "SELECT * FROM tasks WHERE status = 'processing' LIMIT 1",
             ).fetchone()
             queued_rows = conn.execute(
-                "SELECT * FROM tasks WHERE status IN ('queued', 'queued_hints') ORDER BY created_at",
+                "SELECT * FROM tasks WHERE status IN "
+                "('queued', 'queued_hints', 'queued_hints_v2') ORDER BY created_at",
             ).fetchall()
             history_rows = conn.execute(
                 """SELECT * FROM tasks

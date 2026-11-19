@@ -334,6 +334,19 @@ that fleet's driver, so another runtime can neither delay the check nor answer
 for the same id. An agent-bridge without this support fails closed
 (its Docker inspection cannot find the member) rather than skipping the check.
 
+Driver-exec members (no `ssh_transport`) publish no `container` block, since
+its presence selects agent-bridge's SSH Session Host. Their venue instead
+declares `portable_receiving_policy: {"version": 1}` and `provider_command`
+next to its `instance_id`, `fleet` and `workspace_folder`. For such a venue the
+bridge runs the portable receiving-policy check over `runtime-proxy exec -i`
+before launch, then sets `AGENT_CONTAINERS_EXEC_REPOSITORY_POLICY_CONTEXT` to
+its installation-bound receiving context when it spawns `agent-containers exec`.
+The wrapper then re-runs the same portable check through the driver instead of
+the guest `agent-worktrees agent-policy check`, and adds no guest-side
+`agent-worktrees` launch guard. No `agent-worktrees` is needed inside the
+member. Without that variable, as with an older bridge, the wrapper keeps the
+guest check.
+
 Standalone entry points that receive a member name or instance id in a fresh
 process (`session-host-state`, `session-host-cleanup`, `runtime-proxy`)
 enumerate driver fleets first so the handle routes to its driver; a

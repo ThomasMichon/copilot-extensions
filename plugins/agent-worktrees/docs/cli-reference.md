@@ -1954,6 +1954,11 @@ defines its scope and distinguishes authorization from native settlement.
 The [Manager reference](../../../worktree-manager/README.md#durable-update-execution)
 defines the shared lifetime, output, interruption and migration boundary.
 
+A validated native lifecycle refusal retains its specific reason and
+`publication_committed` disposition in the failure diagnostic before the
+temporary result is cleaned up. The native nonzero exit remains a failure;
+committed incoming publication is not whole-update success.
+
 Required payload acquisition is a barrier before the engine's runtime work:
 if its own payload refresh or an active/activation-unknown target refresh
 fails, the engine returns that failure without running runtime installers,

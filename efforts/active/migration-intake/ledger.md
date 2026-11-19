@@ -738,3 +738,158 @@ support a separate administrative supersession judgment. No automatic closure,
 generic owner-ACK or technical-completion claim follows. No implementation,
 native/authentication operation, live migration, owner appointment or
 claim/resource release follows.
+
+## Finite tool and qualification intake (2026-11-19 UTC)
+
+This proposes `routed`; it takes effect only when normal review accepts and
+merges the accompanying complete direct domain amendment. Ledger publication
+alone is not domain acceptance. Prior rows and unresolved residuals remain
+unchanged.
+
+| Candidate | Source | Disposition | Primary canonical owner | Tracker outcome |
+|-----------|--------|-------------|-------------------------|-----------------|
+| Complete bounded offline-job continuation, including separately authorized native/scenario qualification and retained private-workspace custody | Public #13278, complete original and both eligible comments; source foundations credited to #13281/#13304/#13312 | routed (proposed; effective after reviewed complete domain acceptance) | [test-portfolio-rationalization](../test-portfolio-rationalization/README.md), Phase 4 P13278/V13278/G13278 only | Existing #13278 remains OPEN pending actual reviewed receiving delivery, current permitted receiving/source/custody readback and separate source-specific judgment; no new issue or umbrella |
+| Complete receiving-ledger/reporter fixture correction, original twelve-file packet, independent authority negatives and four exact prune/pair selectors | Public #13300, complete original and eligible refinement; #13314 is not whole packet fulfillment | routed (proposed; effective after reviewed complete domain acceptance) | [test-portfolio-rationalization](../test-portfolio-rationalization/README.md), Phase 4 P13300/V13300/G13300 only | Existing #13300 remains OPEN pending actual reviewed receiving delivery, current permitted source/receiver/custody readback and separate administrative judgment; technical work unchecked, no new issue, execution or custody transfer |
+| Complete finite hosted-Windows containment/build-tooling/standalone qualification packet | Public #13334, complete original and reported candidate/baseline context; different #13314 controls are not packet acceptance | routed (proposed; effective after reviewed complete domain acceptance) | [test-portfolio-rationalization](../test-portfolio-rationalization/README.md), Phase 4 P13334/V13334/G13334 only | Existing #13334 remains OPEN pending actual reviewed receiving delivery, current permitted source/receiver/custody readback and separate administrative judgment; Windows evidence and execution boundaries retained, no new issue or resource release |
+
+Phase 7 I13278/I13300/I13334 record deduplication and each single Phase 4
+domain placement, not another primary owner. Preserve the continuing source
+claimants, independent clean-room contracts and actual fixture, runner,
+platform, container/output/workspace and cleanup custodians.
+Neither this record nor the domain amendment appoints an executor, authorizes
+execution or cleanup, releases a claim/resource, or establishes native
+technical acceptance. All technical P13278/V13278/G13278, P13300/V13300/G13300
+and P13334/V13334/G13334 rows remain unchecked.
+
+## Reviewed finite tool and qualification intake receipt (2026-11-19 UTC)
+
+#13384 actually merged the accompanying complete direct domain plans,
+local and actual global Validation, Coordination, dated Journal and three
+intake registrations. Its explicit review scope included the whole domain
+plans, deduplication ownership and intake routes. Approval 5970281763 on
+9775b5fa73b642d52962ae0d5e8d43b3c324936c preceded merge
+680fd7c05fc4b14a45faec65617996bfd40bfa2b. Current receiving readback confirms
+delivery; the preceding conditional proposal remains unchanged history.
+This receipt records satisfied domain/intake acceptance, not acceptance
+inferred from ledger publication, matching identities or empty assignments.
+
+| Candidate | Source | Disposition | Primary canonical owner | Tracker outcome |
+|-----------|--------|-------------|-------------------------|-----------------|
+| Complete bounded offline-job and retained-workspace continuation | Public #13278, original and both eligible comments; #13281/#13304/#13312 retain their partial source credit | routed | [test-portfolio-rationalization](../test-portfolio-rationalization/README.md), Phase 4 P13278/V13278/G13278 only | Reviewed receiving/intake delivered; existing #13278 remains OPEN pending separate source-specific judgment; native/scenario acceptance and actual claimant/resource custody remain unchanged |
+| Complete receiving-ledger/reporter fixture family, twelve-file packet AND independent authority negatives AND four prune/pair selectors | Public #13300, original and eligible refinement | routed | [test-portfolio-rationalization](../test-portfolio-rationalization/README.md), Phase 4 P13300/V13300/G13300 only | Reviewed receiving/intake delivered; existing #13300 remains OPEN pending separate source-specific judgment; failed qualification, guards, deadlines and actual fixture/resource custody remain |
+| Complete finite hosted-Windows containment/build-tooling/standalone packet | Public #13334, original and reported candidate/baseline context | routed | [test-portfolio-rationalization](../test-portfolio-rationalization/README.md), Phase 4 P13334/V13334/G13334 only | Reviewed receiving/intake delivered; existing #13334 remains OPEN pending separate source-specific judgment; original Windows tier, unknown passing-control identity, failed evidence and execution/resource holds remain |
+
+Phase 7 I13278/I13300/I13334 record these administrative placements, not a
+second owner or executed technical acceptance. Preserve immutable/no-fallback
+offline isolation, aggregate limits and cleanup reserve, exact-ID/unknown-
+outcome safety, retained workspace/container/output custody, the complete
+receiving-ledger/reporter/prune-pair assertion union and the original Windows
+containment/build-tooling/control-packet distinctions. All corresponding
+technical P/V/G rows remain unchecked. No implementation appointment,
+execution, cleanup, source closure, claim expiry or resource release follows.
+
+## Finite tool and qualification tracker outcomes (2026-11-19 UTC)
+
+After #13384's complete reviewed receiving and #13388's reviewed administrative
+receipt actually merged, separate source-specific judgments retired the
+following redundant tracking tokens. Earlier proposal and receiving records
+remain unchanged history; these entries update tracker outcomes, not technical
+acceptance or primary ownership.
+
+| Source | Current tracker outcome | Unchanged primary canonical owner and residual |
+|--------|-------------------------|-----------------------------------------------|
+| #13278 | `NOT_PLANNED`; audited explanation 7001897602 | [test-portfolio-rationalization](../test-portfolio-rationalization/README.md), Phase 4 P13278/V13278/G13278; native/scenario/caller-loss and retained container/output/workspace qualification remain unchecked |
+| #13300 | `NOT_PLANNED`; audited explanation 7001904583 | [test-portfolio-rationalization](../test-portfolio-rationalization/README.md), Phase 4 P13300/V13300/G13300; exact packet AND authority negatives AND prune/pair qualification remain unchecked |
+| #13334 | `NOT_PLANNED`; audited explanation 7001910813 | [test-portfolio-rationalization](../test-portfolio-rationalization/README.md), Phase 4 P13334/V13334/G13334; original Windows containment/build-tooling/standalone evidence, unknown control and unproved cause remain unchecked |
+
+Fresh complete author/editor/comment metadata, the stable full collaborator
+roster, direct receiver bindings and unchanged source/custody invariants were
+verified around each explanation and closure. Original reports, all prior
+discussions, actual custodians and resource claims remain unchanged. The three
+administrative I receipts stay checked; every corresponding technical P/V/G
+row stays unchecked. No implementation, native job, execution-hold waiver,
+resource cleanup, claim expiry or owner transfer follows.
+
+## Proposed finite Windows collector attribution intake (2026-11-19 UTC)
+
+This proposes `routed`; it takes effect only when normal review accepts and
+actually merges the accompanying complete direct domain amendment and intake
+route. Ledger publication alone is not domain acceptance. Preserve every
+prior row and receipt unchanged.
+
+| Candidate | Source | Disposition | Primary canonical owner | Tracker outcome |
+|-----------|--------|-------------|-------------------------|-----------------|
+| Complete finite Windows-native unit-collector extended-path source/bytecode attribution contract, both exact CPython versions, focused native and actor-free controls, and preserved admission/refusal boundaries | Public #13294, complete unchanged original and zero comments; #13295/#13320 explicitly retain the collector gap, also retained by #13362 | routed (proposed; effective after reviewed complete domain acceptance) | [test-portfolio-rationalization](../test-portfolio-rationalization/README.md), Phase 4 P13294/V13294/G13294 only | Existing #13294 remains OPEN pending actual complete reviewed receiving/intake delivery, permitted current source/receiver/custody readback and separate source-specific judgment; no new issue, technical completion or custody transfer |
+
+Phase 7 I13294 records this single canonical placement, not another owner.
+All six technical rows and I13294 remain unchecked during the proposal.
+Preserve existing collector/loader/admission/audit/fixture/runner/native/
+release/resource custody, hosted-Windows quiescence and source holds.
+Native unfinishedness remains technical work, not an added generic physical
+tracker barrier. No implementation appointment, ACK requirement, execution,
+source/bytecode mutation, claim expiry or resource release follows.
+
+## Accepted finite Windows collector attribution intake (2026-11-19 UTC)
+
+#13395 actually merged the complete direct domain Plan, local and actual
+global Validation, Coordination, dated Journal and intake route after
+review explicitly covering domain acceptance, deduplication and ownership.
+Approval 5970637083 on 0c4e645a87ac66a38d30887da395e56cf8ca716b preceded
+merge 344987f52bba88ac141926fda9d9af36498dd797. Permitted current
+receiving/source/custody readback confirms that delivery. The earlier
+conditional proposal remains unchanged history.
+
+| Candidate | Source | Disposition | Primary canonical owner | Tracker outcome |
+|-----------|--------|-------------|-------------------------|-----------------|
+| Complete finite Windows-native unit-collector extended-path source/bytecode attribution contract | Public #13294, complete unchanged original and zero prior comments; separately referenced passing selections remain distinct | routed | [test-portfolio-rationalization](../test-portfolio-rationalization/README.md), Phase 4 P13294/V13294/G13294 only | Complete reviewed receiving/intake accepted; separate redundant-tracking retirement `NOT_PLANNED` audited at explanation 7002336101; technical qualification and actual custody remain unchanged |
+
+I13294 records administrative acceptance, not another canonical owner.
+All six technical rows remain unchecked. Preserve BOTH CPython 3.11.9 AND
+3.14.7, focused native AND actor-free controls, byte-identical LF admission,
+source/bytecode/mutation/actor refusals, hosted-Windows quiescence and
+existing custodians/holds. No implementation, execution, claim expiry,
+source/bytecode mutation or resource release follows.
+
+## Proposed finite reaper and publication receiving - 2026-11-19 UTC
+
+These rows propose routed ownership. They become accepted routing records
+only after explicit normal domain review, actual merge and current readback
+of the complete receiving contract. Ledger text alone establishes neither
+acceptance nor source retirement, implementation or resource transfer.
+
+| Source | Disposition | Canonical owner | Tracker outcome |
+|---|---|---|---|
+| #13207 and its terminal-client/victim-argv refinement | routed (proposed; effective after reviewed complete domain acceptance) | [Installation-Independent Sessions](../installation-independent-sessions/README.md), P13207/V13207/G13207 | Existing source and #8669 coordination preserved; separate source judgment pending. Diagnostic proposals remain proposals; no launcher-only fulfillment or process/resource authority. |
+| #13208, including bounded observation-ticket handling, truthful degraded publication and supported current-owner recovery | routed (proposed; effective after reviewed complete domain acceptance) | [Authoritative Write-Through Daemon](../agent-worktrees-authoritative-daemon/README.md), P13208/V13208/G13208 | Existing #6748 recovery coordination and independent reservations preserved; separate source judgment pending. Ticket handling does not expire claims or resource obligations. |
+
+No new administrative checkbox, companion #6748 clause or receipt-PR gate is
+introduced. Preserve its applicable current OPEN-parent/full-readback condition
+and independent publisher/planning/resource custodians. All ten technical
+receiving rows remain unchecked; the source trackers stay OPEN through this
+proposal and any later disposition is separate.
+
+## Accepted finite reaper and publication receiving - 2026-11-19 UTC
+
+#13402 actually merged the complete domain Plan, local and actual global
+Validation, Coordination, dated Journal and both intake routes after normal
+review explicitly covering whole domain acceptance, deduplication and ownership.
+Complete permitted current receiving/source/custody readback confirms delivery;
+ledger publication alone was not substituted. Prior conditional proposals
+remain unchanged history.
+
+| Source | Disposition | Canonical owner | Current tracker outcome |
+|---|---|---|---|
+| #13207 and its terminal-client/victim-argv refinement | routed | [Installation-Independent Sessions](../installation-independent-sessions/README.md), P13207/V13207/G13207 | Separate redundant-tracking retirement `NOT_PLANNED`, audited explanation 7003450544; all five technical rows remain unchecked, with original/refinement and actual custodians preserved |
+| #13208 bounded observation-ticket, degraded-publication and current-owner recovery contract | routed | [Authoritative Write-Through Daemon](../agent-worktrees-authoritative-daemon/README.md), P13208/V13208/G13208 | Separate redundant-tracking retirement `NOT_PLANNED`, audited explanation 7003459171; all five technical rows remain unchecked, with full current OPEN #6748 readback and existing recovery/planning/resource boundaries preserved |
+
+The separately recorded #13203 placement uses its existing Dispatch lifecycle
+Plan/local/global acceptance and ROOT Journal, not an invented administrative
+checkbox or additional intake gate. Its separate explanation 7003442792 retains
+all five unchecked Plan/link/local/global rows.
+
+Diagnostic proposals grant no process-kill authority; observation-ticket
+handling does not expire resource duties or claims. Existing #5579/#6748
+coordination, actual nonexpiry reservations, owner/effect agreements and
+independent technical acceptance remain. No implementation, native job,
+restart, ticket/resource release, custody transfer or new tracker effect
+follows from recording these completed administrative placements.

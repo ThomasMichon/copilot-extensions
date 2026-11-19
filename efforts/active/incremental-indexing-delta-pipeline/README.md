@@ -139,12 +139,95 @@ After the reviewed proposal, the operator admitted execution:
 - [x] Make local Git use commit-range changes and tombstones without enumerating
   all tracked paths and commit history on each ordinary round.
 - [ ] Bound hosted issue/PR acquisition and timestamp overlap replay by cursor
-  and identity. Provider limitations must remain explicit.
+  and identity. Provider limitations must remain explicit; the
+  [Azure DevOps proposal](azure-devops-acquisition.md) stages query-qualified
+  exact identities before broader polling and repair coverage (#13363).
+  Its [point-component contract proposal](azure-devops-point-targets.md)
+  separates named target coverage from combined-document replacement (#13386);
+  typed intake now retains parked v2 claims with v1-only dequeue isolation and
+  explicit whole-envelope pinning that separates trailing arrivals. An explicit
+  claim-bound pending envelope retains that entire snapshot with exact prepared
+  parent/incarnation checks; ordinary readers and premature retirement refuse it.
+  A disconnected named-point reader uses exact revision/comment-version APIs and
+  rechecks query/account context without acquiring the combined discussion;
+  explicit pending-parent retention can resume each exact target and compose a
+  whole-claim candidate only after every named version/correlation is retained.
+  An explicit prepared-journal binding requalifies and retains that exact complete
+  application candidate without replacing the pending parent. Application
+  constructors do not consume it yet, and it establishes no durable
+  application/current-claim completion coverage.
+  A [retained component carrier](../../../plugins/agent-index/docs/architecture.md#component-recovery-carrier-application-unsupported)
+  preserves ordering inputs behind pre-application refusal, including changed
+  replacement and premature-completion refusal. Pure content/version comparison
+  does not qualify durable application or deletion evidence.
+  [Raw file-point observations](../../../plugins/agent-index/docs/file-projection.md)
+  provide a separately budgeted native snapshot prerequisite, not applied-version
+  or deletion proof. The opt-in
+  [native component ledger](../../../plugins/agent-index/docs/component-ledger.md)
+  retains scoped ordering/tombstone observations with missing-history refusal and
+  binding-aware bounded consolidation; it is not an applied-content certificate.
+  [Prepared work](../../../plugins/agent-index/docs/prepared-application.md)
+  also binds its exact acquired manifest, payload, mode and scope before cache
+  mutation. The explicit
+  [native application](../../../plugins/agent-index/docs/component-ledger.md#explicit-native-application)
+  composes monotonic point writes with prepared/routed coverage and path
+  checkpoints, retaining pending work and refusing uncertain state.
+  Applied snapshots qualify the existing native/checkpoint/routed-coverage
+  owners, retaining optional typed acquisition identity without enriching
+  legacy records. A separate exact-scope point-domain binding and default
+  reader refusal are implemented, with an explicit
+  [named-component read](../../../plugins/agent-index/docs/component-ledger.md#selected-named-component-reads)
+  through the existing qualification owners. Default query/HTTP/MCP/CLI
+  frontdoors have bounded native refusal qualification; the remaining direct
+  read-route and consumer composition inventory stays open. Point-domain
+  application, v2 execution, automatic partial-effect/restore reconciliation
+  and whole-claim completion remain unimplemented.
 - [ ] Persist acquisition progress so retry/restart does not restart a
   corpus-wide listing.
 - [ ] Move authoritative full enumeration into separately budgeted, resumable
   reconciliation slices. A missing checkpoint or expired cursor requests
   visible repair; it must not disguise an unlimited rebuild as a tiny update.
+
+#### Explicit caller acquisition requirements
+
+Issue [#13392](https://github.com/ThomasMichon/copilot-extensions/issues/13392)
+owns the reviewed **agent-recommended, opt-in in-process requirement**.
+The [consumer contract](../../../plugins/agent-index/docs/consumer-migration.md#requiring-page-acquisition)
+documents `require_paged_acquisition`, selected-callable negotiation and retained
+v7 page provenance; legacy/default producers and all existing source hashes
+remain unchanged.
+The existing collector prefers page protocols but otherwise permits legacy
+`list_paths()` / `discover_changed()` acquisition. Give a consumer a way to
+require the declared paged protocol instead of silently accepting that fallback;
+retain compatibility behavior for callers that do not opt in.
+
+Use the existing engine/collector preflight and selected-callable capability
+owners. A required incremental round selects `AcquisitionPage` v1; a required
+hinted round also retains negotiated hints v1 and its immutable claim; a required
+full round selects `SnapshotPage` v1. Unsupported or malformed selections fail
+visibly before acquisition or application of unqualified retained work. Selecting
+a protocol is not new proof of provider coverage, finite nested HTTP work,
+bounded whole-manifest memory or payload bytes. Existing provider qualification
+and explicit repair requirements remain independent.
+
+The realization must preserve source/account and pending-state ownership,
+polling checkpoints, source-scope hashes and old callable behavior. Do not add a
+caller policy to `SourceSpec`'s hashed source identity. Negotiate support on the
+actual selected indexing callable before an opted-in caller supplies the new
+requirement; an old callable must not silently ignore it. Keep this initial
+slice in-process: new service/CLI/provider wire forms require their own
+contract-evolution review, not incidental forwarding.
+
+Focused controls must exercise the actual engine plus the existing collector:
+compatible legacy calls still work; a required call cannot invoke legacy
+listing/discovery; all three admitted page forms retain their scope and cursor
+semantics; malformed capability declarations refuse; and incompatible
+pending/ready replay cannot evade preflight, discard progress or mutate the
+indexed projection. Reopen retained state in the recovery cases. Qualify new
+caller/new engine and old caller/new engine behavior; an unsupported old selected
+callable refuses the new requirement. Put only small contract cases in required
+CI. Preserve both parent plans, the #13386 Azure DevOps coverage gate and
+separately budgeted reconciliation; this proposal authorizes no live operation.
 
 ### Phase 4 - Delta writes and derived maintenance
 
@@ -224,6 +307,12 @@ source-owner coordination rather than one large rewrite.
 
 Append-only entries are preserved in dated files, newest first.
 
+- [2026-11-19 point-domain binding and read refusal](journal/2026/11.19%20point-read-domains.md)
+- [2026-11-19 component application prerequisites](journal/2026/11.19%20component-application.md)
+- [2026-11-18 Azure DevOps response and selected-record coverage](journal/2026/11.18%20ado-response-coverage.md)
+- [2026-11-18 Azure DevOps body-batch completeness](journal/2026/11.18%20ado-body-batches.md)
+- [2026-11-18 Azure DevOps PR update-contract refusal](journal/2026/11.18%20ado-pr-update-contract.md)
+- [2026-11-18 Azure DevOps PR body completeness](journal/2026/11.18%20ado-pr-body-completeness.md)
 - [2026-11-16 explicit-backfill readiness](journal/2026/11.16%20backfill-readiness.md)
 - [2026-11-15 native Windows retrieval qualification](journal/2026/11.15%20windows-retrieval-qualification.md)
 - [2026-11-14 retrieval-glob intake](journal/2026/11.14-retrieval-glob-intake.md)

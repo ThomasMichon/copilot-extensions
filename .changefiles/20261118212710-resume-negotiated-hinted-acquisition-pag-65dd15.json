@@ -1,0 +1,9 @@
+{
+  "comment": "Resume negotiated hinted acquisition pages through the existing pending-crawl journal while preserving polling checkpoints and refresh ownership",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

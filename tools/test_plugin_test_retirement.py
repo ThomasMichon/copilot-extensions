@@ -13,21 +13,45 @@ import venv
 
 import pytest
 
+from _admission_protocol import acquire
+from plugin_test_cache import PREPARATION_GENERATION, advance_preparation_generation, preparation_generation
 import plugin_test_retirement as retirement
-from plugin_test_resources import resource_root
+from plugin_test_resources import ENVIRONMENT_LAYOUT, retirement_venv_root, venv_root
 from test_run_plugin_tests import runner
+
+
+def declare_support(source: Path) -> Path:
+    directory = source / "tools"
+    directory.mkdir()
+    path = directory / "test-environment-capabilities.json"
+    path.write_bytes(Path(retirement.__file__).with_name(path.name).read_bytes())
+    return path
 
 
 @pytest.fixture
 def environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path]:
     source = tmp_path / "source"
     (source / "plugins" / "example").mkdir(parents=True)
+    declare_support(source)
     monkeypatch.setenv("AGENT_SCRATCH_ROOT", str(tmp_path / "cache"))
-    root = resource_root(source) / "venvs" / sys.platform / "example"
+    root = retirement_venv_root(source) / "example"
     root.mkdir(parents=True)
     (root / "interpreter").write_bytes(b"fixture")
     (root / ".dep-fingerprint").write_text("fixture", encoding="utf-8")
     return source, root
+
+
+@pytest.fixture
+def standalone_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path, Path]:
+    source = tmp_path / "source"
+    (source / "worktree-manager" / "tests").mkdir(parents=True)
+    declare_support(source)
+    monkeypatch.setenv("AGENT_SCRATCH_ROOT", str(tmp_path / "cache"))
+    root = retirement_venv_root(source) / "worktree-manager"
+    python = root / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b"fixture")
+    return source, root, python
 
 
 def test_retirement_keeps_identity_source_and_other_targets(environment: tuple[Path, Path]) -> None:
@@ -63,6 +87,279 @@ def test_runner_cannot_rebuild_a_retired_inode(
     monkeypatch.setattr(runner, "VENV_ROOT", root.parent)
     with pytest.raises(ValueError, match="terminally retired"):
         runner._prepare_venv("example", "must-not-run", reinstall=True, environment={})
+
+
+def test_plugin_cli_selects_and_refuses_the_retired_protocol_environment(
+    environment: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    source, root = environment
+    assert retirement.apply(retirement.preview(source, "example"))["outcome"] == "retired"
+    tests = source / "plugins" / "example" / "tests"
+    tests.mkdir()
+    (tests / "test_unused.py").write_text("raise AssertionError('must not import')\n", encoding="utf-8")
+    monkeypatch.setattr(runner, "REPO", source)
+    monkeypatch.setattr(runner, "PLUGINS", source / "plugins")
+    monkeypatch.setattr(runner, "VENV_ROOT", None)
+    monkeypatch.setattr(runner, "RETIREMENT_READY", False)
+
+    assert runner.main(["example", "--retirement-ready", "--prepare-only"]) == 1
+
+    assert "terminally retired" in capsys.readouterr().err
+    assert [child.name for child in root.iterdir()] == [retirement.MARKER]
+    acquire(0, root).release()
+
+
+def test_standalone_prepare_cannot_recreate_retired_shared_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    from test_run_standalone_tests import runner as standalone
+
+    source = tmp_path / "source"
+    (source / "worktree-manager" / "tests").mkdir(parents=True)
+    declare_support(source)
+    monkeypatch.setenv("AGENT_SCRATCH_ROOT", str(tmp_path / "cache"))
+    monkeypatch.setattr(standalone, "REPO", source)
+    python = standalone.default_python("worktree-manager", retirement_ready=True)
+    python.parent.mkdir(parents=True)
+    python.touch()
+    root = python.parent.parent
+    assert retirement.apply(retirement.preview(source, "worktree-manager"))["outcome"] == "retired"
+    before = root.stat()
+    marker = (root / retirement.MARKER).read_bytes()
+    monkeypatch.setattr(
+        standalone.subprocess, "run",
+        lambda *args, **kwargs: pytest.fail("retired environment started preparation"),
+    )
+
+    assert standalone.main(["worktree-manager", "--prepare", "--retirement-ready"]) == 1
+
+    assert "terminally retired" in capsys.readouterr().err
+    assert not python.exists()
+    assert (root.stat().st_dev, root.stat().st_ino) == (before.st_dev, before.st_ino)
+    assert (root / retirement.MARKER).read_bytes() == marker
+    acquire(0, root).release()
+
+
+def test_standalone_execution_refuses_an_interrupted_retirement_with_interpreter_present(
+    standalone_environment: tuple[Path, Path, Path], monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from test_run_standalone_tests import runner as standalone
+
+    source, root, python = standalone_environment
+
+    def interrupt(path: Path, *, preserve: frozenset[str] = frozenset()) -> None:
+        raise PermissionError("fixture interrupted before clearing interpreter")
+
+    monkeypatch.setattr(retirement, "clear_cache_contents", interrupt)
+    result = retirement.apply(retirement.preview(source, "worktree-manager"))
+    assert result["outcome"] == "partial-failure" and python.is_file()
+    assert json.loads((root / retirement.MARKER).read_text())["state"] == "retiring"
+    monkeypatch.setattr(standalone, "REPO", source)
+    monkeypatch.setattr(
+        standalone, "run_contained",
+        lambda *args, **kwargs: pytest.fail("fenced environment executed tests"),
+    )
+
+    assert standalone.main(["worktree-manager", "--retirement-ready"]) == 1
+
+    assert "terminally retired" in capsys.readouterr().err
+    assert python.is_file()
+    acquire(0, root).release()
+
+
+@pytest.mark.parametrize("preparer", ["plugin", "standalone"])
+def test_preparation_generation_invalidates_preview_before_deep_mutation(
+    standalone_environment: tuple[Path, Path, Path], monkeypatch: pytest.MonkeyPatch, preparer: str,
+) -> None:
+    from test_run_standalone_tests import runner as standalone
+
+    source, root, python = standalone_environment
+    payload = root / "lib" / "python" / "site-packages" / "fixture.py"
+    payload.parent.mkdir(parents=True)
+    payload.write_bytes(b"old")
+    lease = acquire(0, root)
+    try:
+        advance_preparation_generation(root)
+    finally:
+        lease.release()
+    before = preparation_generation(root)
+    plan = retirement.preview(source, "worktree-manager")
+    lease = acquire(0, root)
+    try:
+        if preparer == "standalone":
+            def update(uv: str, arguments: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+                payload.write_bytes(b"new")
+                return subprocess.CompletedProcess(arguments, 0, "", "")
+
+            monkeypatch.setattr(standalone, "REPO", source)
+            monkeypatch.setattr(standalone, "run_uv_install", update)
+            standalone.prepare("worktree-manager", python)
+        else:
+            def interrupted_clear(path: Path) -> None:
+                payload.write_bytes(b"new")
+                raise PermissionError("fixture interrupted inside a deep rebuild")
+
+            monkeypatch.setattr(runner, "REPO", source)
+            monkeypatch.setattr(runner, "VENV_ROOT", root.parent)
+            monkeypatch.setattr(runner, "_dep_fingerprint", lambda name: "fixture")
+            monkeypatch.setattr(runner, "clear_cache_contents", interrupted_clear)
+            with pytest.raises(PermissionError, match="deep rebuild"):
+                runner._prepare_venv("worktree-manager", "must-not-run", reinstall=True, environment={})
+    finally:
+        lease.release()
+
+    assert preparation_generation(root) != before
+    with pytest.raises(ValueError, match="stale"):
+        retirement.apply(plan)
+    assert payload.read_bytes() == b"new"
+    assert not (root / retirement.MARKER).exists()
+
+
+def test_corrupt_preparation_generation_refuses_before_mutation(environment: tuple[Path, Path]) -> None:
+    source, root = environment
+    generation = root / PREPARATION_GENERATION
+    generation.write_bytes(b"corrupt")
+    with pytest.raises(ValueError, match="preparation generation"):
+        retirement.preview(source, "example")
+    lease = acquire(0, root)
+    try:
+        with pytest.raises(ValueError, match="preparation generation"):
+            advance_preparation_generation(root)
+    finally:
+        lease.release()
+    assert generation.read_bytes() == b"corrupt" and (root / "interpreter").is_file()
+
+
+def test_failed_preparation_generation_publication_keeps_prior_generation(
+    environment: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, root = environment
+    lease = acquire(0, root)
+    try:
+        advance_preparation_generation(root)
+        before = preparation_generation(root)
+        original = Path.replace
+
+        def fail(path: Path, target: str | Path) -> Path:
+            if path.name.startswith(PREPARATION_GENERATION + ".new-"):
+                raise PermissionError("fixture generation publication failed")
+            return original(path, target)
+
+        monkeypatch.setattr(Path, "replace", fail)
+        with pytest.raises(PermissionError, match="generation publication"):
+            advance_preparation_generation(root)
+    finally:
+        lease.release()
+    assert preparation_generation(root) == before
+    assert not list(root.glob(PREPARATION_GENERATION + ".new-*"))
+    assert (root / "interpreter").is_file()
+
+
+@pytest.mark.parametrize("target", ["fleet-manager", "services/index"])
+def test_standalone_preparation_and_retirement_select_the_same_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, target: str,
+) -> None:
+    from test_run_standalone_tests import runner as standalone
+
+    source = tmp_path / "source"
+    project = source / target
+    (project / "tests").mkdir(parents=True)
+    declare_support(source)
+    monkeypatch.setenv("AGENT_SCRATCH_ROOT", str(tmp_path / "cache"))
+    monkeypatch.setattr(standalone, "REPO", source)
+    python = standalone.default_python(target, retirement_ready=True)
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b"fixture")
+    root = python.parent.parent
+    before = root.stat()
+
+    plan = retirement.preview(source, target)
+    assert Path(plan.environment) == root
+    result = retirement.apply(plan)
+
+    assert result["outcome"] == "retired"
+    assert not python.exists() and project.is_dir()
+    assert (root.stat().st_dev, root.stat().st_ino) == (before.st_dev, before.st_ino)
+    assert [child.name for child in root.iterdir()] == [retirement.MARKER]
+
+
+@pytest.mark.parametrize("target", ["services/unregistered", "services/../index", "../fleet-manager"])
+def test_nested_target_allowlist_does_not_admit_arbitrary_paths(
+    environment: tuple[Path, Path], target: str,
+) -> None:
+    source, root = environment
+    with pytest.raises(ValueError, match="Invalid test target"):
+        retirement.preview(source, target)
+    assert (root / "interpreter").read_bytes() == b"fixture"
+
+
+@pytest.mark.parametrize("support", ["missing", "incompatible", "boolean-version"])
+def test_legacy_source_is_not_retired_by_a_new_tool(
+    environment: tuple[Path, Path], support: str,
+) -> None:
+    source, root = environment
+    declaration = source / "tools" / "test-environment-capabilities.json"
+    if support == "missing":
+        declaration.unlink()
+    elif support == "boolean-version":
+        value = json.loads(declaration.read_text())
+        value["retirement"]["version"] = True
+        declaration.write_text(json.dumps(value), encoding="utf-8")
+    else:
+        declaration.write_text('{"version": 0}', encoding="utf-8")
+    with pytest.raises((OSError, ValueError)):
+        retirement.preview(source, "example")
+    assert (root / "interpreter").read_bytes() == b"fixture"
+    assert not (root / retirement.MARKER).exists()
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+def test_legacy_waiter_cannot_rebuild_the_retirement_aware_namespace(
+    environment: tuple[Path, Path],
+) -> None:
+    source, root = environment
+    legacy = venv_root(source) / "example"
+    legacy.mkdir(parents=True)
+    ready = source.parent / "legacy-waiter-ready"
+    code = (
+        "import pathlib,sys;"
+        "sys.path.insert(0,sys.argv[1]);"
+        "from _admission_protocol import acquire;"
+        "root=pathlib.Path(sys.argv[2]);"
+        "pathlib.Path(sys.argv[3]).write_text('legacy waiter ready');"
+        "sys.stdin.readline();"
+        "lease=acquire(10,root);"
+        "(root/'legacy-imports').write_text('legacy rebuild');"
+        "lease.release()"
+    )
+    process = subprocess.Popen(
+        [sys.executable, "-B", "-c", code, str(Path(__file__).parent), str(legacy), str(ready)],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    lease = acquire(0, legacy)
+    try:
+        deadline = time.monotonic() + 10
+        while not ready.exists() and process.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert ready.exists(), "legacy waiter did not become ready"
+        assert process.stdin is not None
+        process.stdin.write("\n")
+        process.stdin.flush()
+        assert ENVIRONMENT_LAYOUT in root.parts and root != legacy
+        assert retirement.apply(retirement.preview(source, "example"))["outcome"] == "retired"
+    finally:
+        lease.release()
+        _, error = process.communicate(timeout=10)
+    assert process.returncode == 0, error
+    assert (legacy / "legacy-imports").read_text() == "legacy rebuild"
+    assert [child.name for child in root.iterdir()] == [retirement.MARKER]
+    with pytest.raises(ValueError, match="terminally retired"):
+        retirement.require_active(root)
 
 
 @pytest.mark.parametrize("change", ["contents", "replacement", "source-replacement", "wrong-source", "foreign-platform"])

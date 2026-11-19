@@ -55,6 +55,11 @@ it does not publish an archive or restore execution authority. Its separately
 negotiated contributor projection preserves all accepted nullable caller
 identities from the same verified snapshot, without changing the export manifest
 or enabling a collection consumer.
+The separate [format-2 rescue owner](skills/driving-effort-agendas/references/agenda-rescue.md)
+can relocate a completely exported checkout-local store into an empty managed
+home. It commits an old-writer fence before destination activation and preserves
+identity, full history and matching retries. Manual JSON and older stores remain
+protected; rescue does not restore agency authority or permit cleanup.
 The [field contract](skills/driving-effort-agendas/references/field-contract.md)
 distinguishes exact enums/identifiers from prose/raw JSON and documents literal
 text versus Markdown rendering; accepted string punctuation does not imply a

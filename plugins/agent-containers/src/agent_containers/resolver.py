@@ -20,15 +20,18 @@ Usage:
 from __future__ import annotations
 
 import asyncio
+import builtins
 import json
 import logging
 import os
 import shlex
 import subprocess
+import sys
 import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
 from agent_procutil import no_window_flags
 from plugin_resolve.reflection import selection_spec
@@ -91,7 +94,9 @@ def target_repo_for_cli(name: str) -> int:
     return 0
 
 
-def add_related_plugins(spec: dict, sources: list[str | dict]) -> dict:
+def add_related_plugins(
+    spec: dict[str, Any], sources: list[str | dict[str, Any]],
+) -> dict[str, Any]:
     if sources:
         if not spec.get("container"):
             raise RuntimeError("Restricted containers cannot receive host plugin projection")
@@ -202,7 +207,9 @@ def copilot_cli_account_missing_hint(account: str, container_name: str) -> str:
     )
 
 
-def resolve_copilot_cli_token_or_raise(config, fleet, container_name: str) -> str | None:
+def resolve_copilot_cli_token_or_raise(
+    config: ContainersConfig, fleet: FleetConfig | None, container_name: str,
+) -> str | None:
     """Return ``config.copilot_cli_account_for(fleet)``'s live host token.
 
     None if no account is configured for this fleet (the common case --
@@ -295,7 +302,7 @@ def _import_copilot_cli_token_locked(account: str, token: str, path: Path) -> No
     body_text = "\n".join(lines[body_start:]).strip()
     if not body_text:
         # Genuinely missing/empty file: safe to initialize a new document.
-        data: dict = {}
+        data: dict[str, Any] = {}
     else:
         try:
             data = json.loads(body_text)
@@ -335,7 +342,7 @@ def _import_copilot_cli_token_locked(account: str, token: str, path: Path) -> No
     try:
         fd = os.open(str(tmp_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
         created = True
-        if os.name != "nt" and strict_posix_modes(tmp_path):
+        if sys.platform != "win32" and strict_posix_modes(tmp_path):
             os.fchmod(fd, 0o600)
         else:
             enforce_mode(tmp_path, 0o600)
@@ -409,6 +416,11 @@ def build_restricted_spawn_command(
 
 
 AGENT_CONTAINERS_EXEC_COPILOT_ARGS_ENV = "AGENT_CONTAINERS_EXEC_COPILOT_ARGS"
+# Set by agent-bridge for driver-exec venues that declare the portable
+# receiving policy: the Bridge-bound receiving context for the exec wrapper's
+# own portable hosting check (an env var, like the copilot args above, so it
+# survives ``.cmd`` shim reparsing on Windows).
+AGENT_CONTAINERS_EXEC_POLICY_CONTEXT_ENV = "AGENT_CONTAINERS_EXEC_REPOSITORY_POLICY_CONTEXT"
 
 
 def build_restricted_inference_spawn_command(
@@ -602,7 +614,9 @@ def resolve_live_exec_target(
     )
 
 
-def _lookup(config: ContainersConfig, name: str, inventory):
+def _lookup(
+    config: ContainersConfig, name: str, inventory: Callable[[ContainersConfig, str], Any],
+) -> tuple[bool, Any]:
     """``(scoped, member)``: a driver member from its own fleet, else ``inventory``.
 
     Keeps a healthy selected driver fleet independent of unrelated slow
@@ -619,7 +633,9 @@ def _lookup(config: ContainersConfig, name: str, inventory):
     return False, inventory(config, name)
 
 
-def _member(config: ContainersConfig, name: str, inventory):
+def _member(
+    config: ContainersConfig, name: str, inventory: Callable[[ContainersConfig, str], Any],
+) -> Any:
     return _lookup(config, name, inventory)[1]
 
 
@@ -660,7 +676,7 @@ class ContainerResolver:
             return None
         return (getattr(info, "repo", None) or getattr(fleet, "repo", None)) or None
 
-    async def resolve_spec(self, name: str) -> dict:
+    async def resolve_spec(self, name: str) -> dict[str, Any]:
         """Resolve a container name to a **plain-dict** spawn spec.
 
         The agent_bridge-free core of :meth:`resolve` -- returns
@@ -718,7 +734,7 @@ class ContainerResolver:
         # plugins, etc.) on the fleet's trust posture -- a `restricted` fleet is a
         # fail-closed boundary and must never be silently upgraded (venue-parity).
         workspace_folder = fleet.workspace_folder or config.workspace_folder
-        spec = {
+        spec: dict[str, Any] = {
             "type": "command",
             "spawn_command": spawn_cmd,
             "user": user,
@@ -794,6 +810,14 @@ class ContainerResolver:
             spec["venue"]["driver"] = fleet.driver
             spec["venue"]["transport"] = "ssh" if plan.ssh else "driver-exec"
             spec["venue"]["capabilities"]["session_host"] = plan.ssh
+            if not plan.ssh:
+                # A driver-exec member has no Session Host ``container`` block
+                # (its presence selects the SSH Session Host in agent-bridge),
+                # so the venue itself declares the portable receiving policy
+                # and provider command: the bridge's hosting check then needs
+                # no agent-worktrees inside the member (#13366).
+                spec["venue"]["portable_receiving_policy"] = {"version": 1}
+                spec["venue"]["provider_command"] = payload_command_argv()
         if not restricted and (plan is None or plan.ssh):
             from .hosting_policy import guarded_launch
 
@@ -807,7 +831,7 @@ class ContainerResolver:
             validate_session_owner(fleet, (inspection.get("Config") or {}).get("Labels") or {})
             ssh_config = await asyncio.to_thread(
                 prepare_ssh_config,
-                handle,
+                handle or instance_id,
                 user,
             )
             spec["container"] = {
@@ -835,7 +859,7 @@ class ContainerResolver:
 
         return [NamespaceAgentInfo(**spec) for spec in await self.list_specs()]
 
-    async def list_specs(self) -> list[dict]:
+    async def list_specs(self) -> builtins.list[dict[str, Any]]:
         """List fleet containers as **plain-dict** agent specs.
 
         The agent_bridge-free core of :meth:`list` -- the ``namespace-list`` CLI

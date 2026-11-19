@@ -1,0 +1,9 @@
+{
+  "comment": "Accept and advertise versioned toolchain routing for queued Manager handoffs.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

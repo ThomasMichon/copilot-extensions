@@ -1043,8 +1043,13 @@ independent health watchdog treats a sustained Windows failure as terminal
 after a short bounded grace, schedules a detached replacement from the same
 versioned runtime with the original `start` flags, and then hard-exits the
 wedged frontend to release the singleton lock. Session Hosts remain independent
-and the replacement frontend reattaches them from the durable ledger; recovery
-does not wait for a later CLI command to notice the dead endpoint.
+and the replacement frontend reattaches them from the durable ledger; when the
+replacement is scheduled, recovery does not wait for a later CLI command to
+notice the dead endpoint. If scheduling fails, the frontend keeps serving and
+the watchdog retries after a doubling wait (capped at 300s), resetting the wait
+and decline count after any healthy probe. After four consecutive declines with
+no healthy probe it hard-exits without a replacement, and recovery then waits
+for a later ensure.
 The delayed Windows helper runs the module in its already-admitted process,
 preserving its native PID and instance custody; Windows CRT `exec` would create
 a different PID carrying stale admission metadata. POSIX retains `exec`.

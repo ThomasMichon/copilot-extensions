@@ -92,12 +92,12 @@ def test_wmi_refusal_never_creates_a_caller_owned_bridge(
         for name, value in environment.items():
             monkeypatch.setenv(name, value)
         if entry == "watchdog":
-            m._watchdog_dead("listener stopped")
+            assert m._watchdog_dead("listener stopped") is False
             assert events == [
                 ("replacement-requested", "listener stopped"),
-                ("replacement-failed", "DaemonSpawnError"),
+                ("replacement-failed", "DaemonSpawnError; continuing to serve"),
             ]
-            assert exits == ["listener stopped"]
+            assert exits == []
         else:
             with pytest.raises(agent_procutil.DaemonSpawnError) as caught:
                 m._spawn_detached_daemon()
@@ -362,7 +362,7 @@ def test_watchdog_dead_schedules_replacement_before_exit(monkeypatch: pytest.Mon
     assert calls == ["replacement", ("exit", "listener stopped")]
 
 
-def test_watchdog_dead_still_exits_when_replacement_scheduling_crashes(
+def test_watchdog_dead_keeps_serving_when_replacement_scheduling_crashes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from agent_bridge import watchdog
@@ -374,7 +374,7 @@ def test_watchdog_dead_still_exits_when_replacement_scheduling_crashes(
         raise RuntimeError("unexpected helper failure")
 
     def forbidden_log(*_args: object, **_kwargs: object) -> None:
-        pytest.fail("replacement failure synchronously logged before exit")
+        pytest.fail("replacement failure synchronously logged")
 
     monkeypatch.setattr(core, "_spawn_watchdog_replacement", crash)
     monkeypatch.setattr(watchdog, "_record_event", lambda event, detail: diagnostics.append(
@@ -382,9 +382,9 @@ def test_watchdog_dead_still_exits_when_replacement_scheduling_crashes(
     ))
     monkeypatch.setattr(watchdog.log, "error", forbidden_log)
     monkeypatch.setattr(watchdog, "_force_exit", lambda reason: calls.append(("exit", reason)))
-    m._watchdog_dead("listener stopped")
-    assert calls == [("exit", "listener stopped")]
+    assert m._watchdog_dead("listener stopped") is False
+    assert calls == []
     assert diagnostics == [
         ("replacement-requested", "listener stopped"),
-        ("replacement-failed", "RuntimeError"),
+        ("replacement-failed", "RuntimeError; continuing to serve"),
     ]

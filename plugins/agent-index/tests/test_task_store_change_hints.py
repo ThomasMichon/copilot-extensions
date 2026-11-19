@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import multiprocessing
 import sqlite3
+from collections.abc import Callable
+from multiprocessing.synchronize import Barrier
+from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -11,30 +15,37 @@ from agent_index.indexing.change_hints import ChangeHints, MetadataRevision, Ref
 from agent_index.indexing.task_store import TaskRecord, TaskStore, _SCHEMA
 
 
-def _hints(**kwargs):
+def _hints(**kwargs: Any) -> ChangeHints:
     return ChangeHints(**{
         "source": "git:sample", "canonical_family": "git",
         "account_id": "account-a", "item_ids": ("a",), **kwargs,
     })
 
 
-def _enqueue(store, hints=None):
+def _enqueue(store: TaskStore, hints: ChangeHints | None = None) -> TaskRecord:
     payload = hints if hints is not None else _hints()
     return store.enqueue(payload.source, change_hints=payload)
 
 
-def _sql(path, statement, args=()):
+def _sql(
+    path: Path, statement: str, args: tuple[Any, ...] = (),
+) -> list[tuple[Any, ...]]:
     with sqlite3.connect(path) as conn:
         return conn.execute(statement, args).fetchall()
 
 
-def _concurrent_enqueue(path, barrier, index):
+def _concurrent_enqueue(path: Path, barrier: Barrier, index: int) -> None:
     barrier.wait(timeout=15)
     store = TaskStore(path)
     _enqueue(store, _hints(item_ids=(f"item-{index}",), event_ids=(f"event-{index}",)))
 
 
-def test_duplicates_union_all_identities_and_serialized_api(tmp_path):
+def _present(value: TaskRecord | None) -> TaskRecord:
+    assert value is not None
+    return value
+
+
+def test_duplicates_union_all_identities_and_serialized_api(tmp_path: Path) -> None:
     store = TaskStore(tmp_path / "tasks.db")
     first_hints = _hints(
         ref_ranges=(RefRange("a", "b"),), event_ids=("event-1",),
@@ -49,6 +60,7 @@ def test_duplicates_union_all_identities_and_serialized_api(tmp_path):
     merged = _enqueue(store, second_hints)
     assert merged.id == first.id
     assert merged.change_hints == first_hints.union(second_hints)
+    assert isinstance(merged.change_hints, ChangeHints)
     assert merged.to_dict()["change_hints"] == merged.change_hints.to_dict()
     assert merged.status == "queued_hints"
     assert store.get_pending_count() == 1
@@ -57,7 +69,7 @@ def test_duplicates_union_all_identities_and_serialized_api(tmp_path):
     assert store.get_all_tasks()["queued"] == [merged.to_dict()]
 
 
-def test_concurrent_processes_union_without_lost_updates(tmp_path):
+def test_concurrent_processes_union_without_lost_updates(tmp_path: Path) -> None:
     path = tmp_path / "tasks.db"
     # Leave a legacy DB for the concurrent constructors to migrate together.
     with sqlite3.connect(path) as conn:
@@ -74,6 +86,7 @@ def test_concurrent_processes_union_without_lost_updates(tmp_path):
     store = TaskStore(path)
     assert store.get_pending_count() == 1
     task = store.get_queue()[0]
+    assert isinstance(task.change_hints, ChangeHints)
     assert task.change_hints.item_ids == tuple(f"item-{i}" for i in range(4))
     assert task.change_hints.event_ids == tuple(f"event-{i}" for i in range(4))
 
@@ -81,7 +94,7 @@ def test_concurrent_processes_union_without_lost_updates(tmp_path):
 @pytest.mark.parametrize("field,value", [
     ("source", "git:alias"), ("canonical_family", "other"), ("account_id", "account-b"),
 ])
-def test_source_family_and_account_fences(tmp_path, field, value):
+def test_source_family_and_account_fences(tmp_path: Path, field: str, value: str) -> None:
     store = TaskStore(tmp_path / "tasks.db")
     first = _enqueue(store)
     second = _enqueue(store, _hints(**{field: value}))
@@ -91,7 +104,9 @@ def test_source_family_and_account_fences(tmp_path, field, value):
 
 @pytest.mark.parametrize("full_source", ["all", "git:sample"])
 @pytest.mark.parametrize("full_first", [False, True])
-def test_legacy_full_never_covers_hints(tmp_path, full_source, full_first):
+def test_legacy_full_never_covers_hints(
+    tmp_path: Path, full_source: str, full_first: bool,
+) -> None:
     store = TaskStore(tmp_path / "tasks.db")
     if full_first:
         full = store.enqueue(full_source, full=True)
@@ -100,20 +115,21 @@ def test_legacy_full_never_covers_hints(tmp_path, full_source, full_first):
         hinted = _enqueue(store)
         full = store.enqueue(full_source, full=True)
     assert hinted.id != full.id
-    assert store.get_task(hinted.id).status == "queued_hints"
-    assert store.dequeue_next(accept_change_hints=True).id == full.id
-    assert store.dequeue_next(accept_change_hints=True).id == hinted.id
+    assert _present(store.get_task(hinted.id)).status == "queued_hints"
+    assert _present(store.dequeue_next(accept_change_hints=True)).id == full.id
+    assert _present(store.dequeue_next(accept_change_hints=True)).id == hinted.id
 
 
-def test_active_hints_are_immutable_and_trailing_deliveries_union(tmp_path):
+def test_active_hints_are_immutable_and_trailing_deliveries_union(tmp_path: Path) -> None:
     path = tmp_path / "tasks.db"
     store = TaskStore(path)
     active = _enqueue(store)
-    assert store.dequeue_next(accept_change_hints=True).id == active.id
+    assert _present(store.dequeue_next(accept_change_hints=True)).id == active.id
     trailing = _enqueue(store, _hints(item_ids=("b",)))
     merged = _enqueue(store, _hints(item_ids=("c",)))
     assert active.id != trailing.id == merged.id
-    assert store.get_task(active.id).change_hints == active.change_hints
+    assert _present(store.get_task(active.id)).change_hints == active.change_hints
+    assert isinstance(merged.change_hints, ChangeHints)
     assert merged.change_hints.item_ids == ("b", "c")
     for statement, args in [
         ("UPDATE tasks SET change_hints = ? WHERE id = ?", (_hints(item_ids=("z",)).to_json(), active.id)),
@@ -126,11 +142,13 @@ def test_active_hints_are_immutable_and_trailing_deliveries_union(tmp_path):
 
 
 @pytest.mark.parametrize("full_source", ["all", "git:sample"])
-def test_processing_full_task_preserves_hundred_delivery_trailing_union(tmp_path, full_source):
+def test_processing_full_task_preserves_hundred_delivery_trailing_union(
+    tmp_path: Path, full_source: str,
+) -> None:
     path = tmp_path / "tasks.db"
     store = TaskStore(path)
     full = store.enqueue(full_source, full=True)
-    processing = store.dequeue_next(accept_change_hints=True)
+    processing = _present(store.dequeue_next(accept_change_hints=True))
     assert processing.id == full.id and processing.full
     expected = _hints(item_ids=(), event_ids=())
     trailing_ids = set()
@@ -147,39 +165,39 @@ def test_processing_full_task_preserves_hundred_delivery_trailing_union(tmp_path
     assert restarted.get_task(full.id) == processing
     assert restarted.get_pending_count() == 1
     assert {task.id for task in restarted.get_queue()} == trailing_ids | {full.id}
-    assert restarted.get_task(next(iter(trailing_ids))).change_hints == expected
+    assert _present(restarted.get_task(next(iter(trailing_ids)))).change_hints == expected
     restarted.update_status(full.id, "complete")
-    claimed = restarted.dequeue_next(accept_change_hints=True)
+    claimed = _present(restarted.dequeue_next(accept_change_hints=True))
     assert claimed.id in trailing_ids and not claimed.full
     assert claimed.change_hints == expected
-    assert TaskStore(path).get_task(claimed.id).change_hints == expected
+    assert _present(TaskStore(path).get_task(claimed.id)).change_hints == expected
 
 
-def test_restart_retry_cancel_and_recovery_preserve_payload(tmp_path):
+def test_restart_retry_cancel_and_recovery_preserve_payload(tmp_path: Path) -> None:
     path = tmp_path / "tasks.db"
     store = TaskStore(path)
     original = _enqueue(store, _hints(ref_ranges=(RefRange("a", "b"),)))
     assert store.dequeue_next() is None
     restarted = TaskStore(path)
-    claimed = restarted.dequeue_next(accept_change_hints=True)
+    claimed = _present(restarted.dequeue_next(accept_change_hints=True))
     assert claimed.change_hints == original.change_hints
     assert restarted.release_processing(original.id)
-    assert restarted.get_task(original.id).status == "queued_hints"
+    assert _present(restarted.get_task(original.id)).status == "queued_hints"
     restarted.dequeue_next(accept_change_hints=True)
     assert restarted.mark_interrupted() == 1
-    retried = restarted.retry(original.id)
+    retried = _present(restarted.retry(original.id))
     assert retried.change_hints == original.change_hints
     assert retried.attempt_count == 2
     assert retried.status == "queued_hints"
     assert restarted.cancel(original.id)
-    assert restarted.retry(original.id).status == "queued_hints"
+    assert _present(restarted.retry(original.id)).status == "queued_hints"
     restarted.dequeue_next(accept_change_hints=True)
     assert restarted.reap_orphaned("test-host", lambda _: False) == 1
-    assert restarted.retry(original.id).change_hints == original.change_hints
+    assert _present(restarted.retry(original.id)).change_hints == original.change_hints
     assert restarted.dequeue_next() is None
 
 
-def test_legacy_dequeue_retry_and_release_sql_remain_fenced(tmp_path):
+def test_legacy_dequeue_retry_and_release_sql_remain_fenced(tmp_path: Path) -> None:
     path = tmp_path / "tasks.db"
     store = TaskStore(path)
     hinted = _enqueue(store)
@@ -200,14 +218,14 @@ def test_legacy_dequeue_retry_and_release_sql_remain_fenced(tmp_path):
          "finished_at = NULL, attempt_count = attempt_count + 1 "
          "WHERE id = ? AND status IN ('failed', 'cancelled', 'interrupted')", (hinted.id,))
     assert _sql(path, selector) == []
-    assert store.get_task(hinted.id).status == "queued_hints"
-    assert store.get_task(hinted.id).change_hints == hinted.change_hints
+    assert _present(store.get_task(hinted.id)).status == "queued_hints"
+    assert _present(store.get_task(hinted.id)).change_hints == hinted.change_hints
     store.update_status(hinted.id, "queued")
     assert _sql(path, selector) == []
-    assert store.dequeue_next(accept_change_hints=True).id == hinted.id
+    assert _present(store.dequeue_next(accept_change_hints=True)).id == hinted.id
 
 
-def test_retry_with_existing_trailing_row_loses_neither_payload(tmp_path):
+def test_retry_with_existing_trailing_row_loses_neither_payload(tmp_path: Path) -> None:
     store = TaskStore(tmp_path / "tasks.db")
     first = _enqueue(store)
     store.dequeue_next(accept_change_hints=True)
@@ -217,23 +235,30 @@ def test_retry_with_existing_trailing_row_loses_neither_payload(tmp_path):
     _enqueue(store, _hints(item_ids=("c",)))
     queued = store.get_queue()
     assert {task.id for task in queued} == {first.id, trailing.id}
-    assert set().union(*(task.change_hints.item_ids for task in queued)) == {"a", "b", "c"}
+    retained: set[str] = set()
+    for task in queued:
+        assert isinstance(task.change_hints, ChangeHints)
+        retained.update(task.change_hints.item_ids)
+    assert retained == {"a", "b", "c"}
 
 
 @pytest.mark.parametrize("payload", [
     "", "{", "null", "{}", _hints(source="git:other").to_json(),
 ])
-def test_corruption_is_visible_before_claim_union_or_retry_mutates(tmp_path, payload):
+def test_corruption_is_visible_before_claim_union_or_retry_mutates(
+    tmp_path: Path, payload: str,
+) -> None:
     path = tmp_path / "tasks.db"
     store = TaskStore(path)
     task = _enqueue(store)
     _sql(path, "UPDATE tasks SET change_hints = ? WHERE id = ?", (payload, task.id))
     before = _sql(path, "SELECT * FROM tasks")
-    for operation in [
+    operations: list[Callable[[], object]] = [
         lambda: store.get_task(task.id), store.get_queue,
         lambda: store.dequeue_next(accept_change_hints=True),
         lambda: _enqueue(store),
-    ]:
+    ]
+    for operation in operations:
         with pytest.raises(ValueError):
             operation()
         assert _sql(path, "SELECT * FROM tasks") == before
@@ -244,25 +269,26 @@ def test_corruption_is_visible_before_claim_union_or_retry_mutates(tmp_path, pay
     assert _sql(path, "SELECT * FROM tasks") == before_retry
 
 
-def test_bad_enqueue_arguments_do_not_mutate_queue(tmp_path):
+def test_bad_enqueue_arguments_do_not_mutate_queue(tmp_path: Path) -> None:
     path = tmp_path / "tasks.db"
     store = TaskStore(path)
     _enqueue(store)
     before = _sql(path, "SELECT * FROM tasks")
-    for kwargs in [
+    arguments: list[dict[str, Any]] = [
         {"source": "git:other", "change_hints": _hints()},
         {"source": "git:sample", "full": True, "change_hints": _hints()},
         {"source": "git:sample", "change_hints": _hints().to_dict()},
-    ]:
+    ]
+    for kwargs in arguments:
         with pytest.raises(ValueError):
             store.enqueue(**kwargs)
         assert _sql(path, "SELECT * FROM tasks") == before
     with pytest.raises(ValueError):
-        store.dequeue_next(accept_change_hints="yes")
+        store.dequeue_next(accept_change_hints="yes")  # type: ignore[arg-type]
     assert _sql(path, "SELECT * FROM tasks") == before
 
 
-def test_migration_keeps_legacy_rows_and_defaults(tmp_path):
+def test_migration_keeps_legacy_rows_and_defaults(tmp_path: Path) -> None:
     path = tmp_path / "tasks.db"
     with sqlite3.connect(path) as conn:
         conn.execute("PRAGMA journal_mode=WAL")
@@ -271,17 +297,20 @@ def test_migration_keeps_legacy_rows_and_defaults(tmp_path):
             "INSERT INTO tasks (id, source, created_at, updated_at) VALUES ('old', 'git:plain', 1, 1)"
         )
     store = TaskStore(path)
-    old = store.get_task("old")
+    old = _present(store.get_task("old"))
     assert old.change_hints is None
     assert old.status == "queued"
     assert "change_hints" not in old.to_dict()
-    assert store.dequeue_next().id == old.id
+    assert _present(store.dequeue_next()).id == old.id
     assert store.enqueue("git:new").change_hints is None
     _enqueue(store)
     assert TaskStore(path).get_pending_count() == 2
 
 
-def test_task_record_preserves_positional_constructor(tmp_path):
+def test_task_record_preserves_positional_constructor(tmp_path: Path) -> None:
     task = TaskStore(tmp_path / "tasks.db").enqueue("git:plain")
-    values = [getattr(task, name) for name in task.__dataclass_fields__ if name != "change_hints"]
+    values = [
+        getattr(task, name) for name, value in task.__dataclass_fields__.items()
+        if not value.kw_only
+    ]
     assert TaskRecord(*values) == task

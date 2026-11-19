@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from agent_index.indexing.component_manifest import ComponentVersion
 from agent_index.sources.base import FileEntry
 from agent_index.sources.delta import DeletedFile as DeletedFile
 
@@ -51,6 +52,7 @@ class CrawlManifest:
     stored_family: str | None = None
     accounting_family: str | None = None
     poll_refresh: PollRefresh | None = None
+    component_versions: list[ComponentVersion] | None = None
 
     @property
     def is_empty(self) -> bool:

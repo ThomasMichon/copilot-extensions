@@ -8,20 +8,25 @@ import json
 import re
 import subprocess
 import sys
+from collections.abc import Mapping
+from pathlib import Path
+from typing import Any, cast
 
 from . import config, output, reconcile, update_acquisition, update_events, update_options, update_runtime, update_runtime_plan
 
 TARGET_CONTRACT = 1
 
 
-def _target_manifest(payload):
+def _target_manifest(payload: Path | None) -> dict[str, Any]:
+    if payload is None:
+        raise ValueError("Plugin payload is unavailable")
     manifest = json.loads((payload / "plugin.json").read_text("utf-8"))
     if not isinstance(manifest, dict):
         raise ValueError("Plugin manifest must be an object")
     return manifest
 
 
-def _target_scope(payload, *, manifest=None):
+def _target_scope(payload: Path | None, *, manifest: dict[str, Any] | None = None) -> str:
     manifest = _target_manifest(payload) if manifest is None else manifest
     scope = manifest.get("runtimeScope", "none")
     if not isinstance(scope, str) or scope not in reconcile.VALID_SCOPES:
@@ -29,7 +34,7 @@ def _target_scope(payload, *, manifest=None):
     return scope
 
 
-def isolated_engine_step(step):
+def isolated_engine_step(step: update_runtime_plan.RuntimeUpdateStep) -> update_runtime_plan.RuntimeUpdateStep:
     # The actual execution source may be a separately prepared payload.
     for platform, extension in (("posix", "sh"), ("windows", "ps1")):
         if step.source is not None and step.source.install_source is not None:
@@ -48,11 +53,13 @@ def isolated_engine_step(step):
     })
 
 
-def target_plan(name, target, *, check_footprint=True):
+def target_plan(
+    name: str, target: update_runtime._RegisteredPluginTarget, *, check_footprint: bool = True,
+) -> update_runtime_plan.RuntimeUpdateStep:
     payload = reconcile.core_installed_payload_dir(name)
     if payload is not None:
         _target_scope(payload)
-    platform = config.detect_platform()
+    platform: str = vars(config)["detect_platform"]()
     if name == reconcile.SELF_PLUGIN:
         payload = reconcile.core_installed_payload_dir(name)
         if payload is None:
@@ -63,6 +70,8 @@ def target_plan(name, target, *, check_footprint=True):
         return isolated_engine_step(step)
     engine = reconcile.core_installed_payload_dir(reconcile.SELF_PLUGIN)
     if engine is not None and name in update_options._module_dirs(engine) and _target_scope(payload) != "none":
+        if payload is None:
+            raise ValueError("Plugin payload is unavailable")
         step = update_runtime_plan.plan_module(
             name, payload, platform, force=False, gate_context=target.context,
             check_footprint=check_footprint,
@@ -74,7 +83,9 @@ def target_plan(name, target, *, check_footprint=True):
     )
 
 
-def _target(name, targets):
+def _target(
+    name: str, targets: Mapping[str, update_runtime._RegisteredPluginTarget],
+) -> update_runtime._RegisteredPluginTarget | None:
     if name == reconcile.SELF_PLUGIN and reconcile.core_installed_payload_dir(name) is not None:
         return update_runtime._RegisteredPluginTarget(
             update_runtime._invocation_update_context(), update_runtime._PluginActivation.ACTIVE,
@@ -86,20 +97,21 @@ def _target(name, targets):
     return target
 
 
-def inventory():
+def inventory() -> dict[str, Any]:
     from .project_update_controller import delegation_capability
+    from .update_driver_cli import TOOLCHAIN_REQUEST_CONTEXT
     from .update_runtime_source import SOURCES_CONTRACT, SOURCES_SCHEMA
     from .update_runtime_target import TARGET_CONTRACT, TARGET_SCHEMA
 
     targets = update_runtime._registered_plugin_targets()
     names = set(targets) | {name for name, _ in reconcile.discover_core_payload_dirs()}
     names.add(reconcile.SELF_PLUGIN)
-    rows = []
-    application_profiles = {}
+    rows: list[dict[str, Any]] = []
+    application_profiles: dict[str, dict[str, Any]] = {}
     for name in sorted(names):
         target = targets.get(name)
         payload = reconcile.core_installed_payload_dir(name)
-        row = {
+        row: dict[str, Any] = {
             "id": name, "title": name, "enabled": target.activation.value if target else "unknown",
             "installed": payload is not None, "payload": "missing", "selected": "unknown",
             "running": "unknown", "source": f"{name}@{reconcile.MARKETPLACE}",
@@ -159,7 +171,8 @@ def inventory():
     return {
         "contract": TARGET_CONTRACT, "entries": rows,
         "execution_source": str(config.install_dir().resolve()),
-        "project_controller_delegation": delegation_capability(),
+        "toolchain_request_context": dict(TOOLCHAIN_REQUEST_CONTEXT),
+        "project_controller_delegation": cast(Any, delegation_capability)(),
         "runtime_sources": {
             "schema": SOURCES_SCHEMA, "version": SOURCES_CONTRACT,
             "prepared_install_source": 1,
@@ -169,7 +182,7 @@ def inventory():
     }
 
 
-def print_inventory():
+def print_inventory() -> int:
     try:
         with contextlib.redirect_stdout(sys.stderr):
             result = inventory()
@@ -197,7 +210,7 @@ def update_target(name: str) -> int:
         before = target_plan(name, target)
         if before.blocked or (not before.eligible and before.status != "payload-only"):
             raise ValueError(before.status)
-        if not update_runtime._refresh_marketplace(reconcile.MARKETPLACE, cwd=target.context):
+        if not cast(Any, update_runtime._refresh_marketplace)(reconcile.MARKETPLACE, cwd=target.context):
             raise ValueError("Selected marketplace refresh failed; resolve its reported source/authentication failure and retry")
         status = (
             update_acquisition.acquire(
@@ -205,7 +218,7 @@ def update_target(name: str) -> int:
                 cwd=target.context, engine=True,
             )
             if name == reconcile.SELF_PLUGIN else
-            update_runtime._update_one_plugin_payload(name, reconcile.MARKETPLACE, cwd=target.context)
+            cast(Any, update_runtime._update_one_plugin_payload)(name, reconcile.MARKETPLACE, cwd=target.context)
         )
         update_events.record("payload_refresh", f"{name}@{reconcile.MARKETPLACE}", status)
         if not status.startswith("OK"):

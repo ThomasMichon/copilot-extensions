@@ -134,9 +134,8 @@ class AgentProcess:
                     pass
         # Reap the direct child handle.
         try:
-            async with asyncio.timeout(5):
-                await self.proc.wait()
-        except (TimeoutError, ProcessLookupError):
+            await asyncio.wait_for(self.proc.wait(), 5)
+        except (asyncio.TimeoutError, TimeoutError, ProcessLookupError):
             try:
                 self.proc.kill()
             except ProcessLookupError:
@@ -177,7 +176,7 @@ def _wrap_batch_for_windows(
 
 async def _resolve_worktree(
     target: SpawnTarget, env: dict[str, str],
-) -> dict:
+) -> dict[str, Any]:
     """Run ``agent-worktrees resolve --json`` to get a launch plan.
 
     The owner boundary selects its own completed runtime and installation
@@ -216,7 +215,7 @@ async def _resolve_worktree(
         if target.caller_owner_ref:
             new_extra.extend(["--owner-ref", target.caller_owner_ref])
 
-    async def _run(extra: list[str]):
+    async def _run(extra: list[str]) -> tuple[int, bytes, bytes]:
         argv = base_args + extra
         log.info("Resolving worktree: %s", " ".join(argv))
         p = await asyncio.create_subprocess_exec(
@@ -237,6 +236,8 @@ async def _resolve_worktree(
                     chunk, parse_phase=name == "stderr",
                 ),
             )
+        if p.returncode is None:  # communicate() has always reaped the child
+            raise RuntimeError("Worktree resolve exited without a status")
         return p.returncode, out, err
 
     # The shared compatibility policy never discards supplied caller metadata.
@@ -261,7 +262,7 @@ async def _resolve_worktree(
         )
 
     try:
-        plan = json.loads(stdout.decode())
+        plan: dict[str, Any] = json.loads(stdout.decode())
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise RuntimeError(
             f"Worktree resolve returned invalid JSON: {exc}"
@@ -270,7 +271,7 @@ async def _resolve_worktree(
     return plan
 
 
-def _extract_json_object(text: str) -> dict | None:
+def _extract_json_object(text: str) -> dict[str, Any] | None:
     """Parse the first top-level JSON object from possibly-noisy text.
 
     A remote shell may prepend MOTD/banner lines before the binstub's JSON,
@@ -353,7 +354,7 @@ def _looks_unprovisioned_project(project: str | None, stderr: str, exit_code: in
 
 async def _resolve_worktree_remote(
     manager: Any, target: SpawnTarget, *, timeout: float = 120.0,
-) -> dict:
+) -> dict[str, Any]:
     """Resolve the remote worktree plan over SSH to learn its id + work_dir.
 
     Mirrors :func:`_resolve_worktree` (the local path) for SSH targets: runs
@@ -396,7 +397,7 @@ async def _resolve_worktree_remote(
         if target.caller_owner_ref:
             new_extra.extend(["--owner-ref", target.caller_owner_ref])
 
-    async def _run(extra: list[str]):
+    async def _run(extra: list[str]) -> Any:
         cmd = " ".join(shlex.quote(a) for a in base_args + extra)
         log.info("Resolving remote worktree on %s: %s", target.host, cmd)
         from .startup_progress import current, preparation_output
@@ -561,7 +562,7 @@ async def resolve_local_launch(
             from .privileged_plugins import require_local_receiver
 
             require_local_receiver(target)
-        prepared_context = {}
+        prepared_context: dict[str, Any] = {}
         target.prepared_plugins = None
         replacement = await prepare_local_plugins(target, work_dir, env, prepared_context=prepared_context)
         target.prepared_plugins = prepared_context
@@ -800,7 +801,7 @@ def _unguarded_remote_cmd(target: SpawnTarget, session_id: str = "") -> str:
     return " && ".join(parts)
 
 
-def _effective_auth_hooks(hooks: list[dict]) -> list[dict]:
+def _effective_auth_hooks(hooks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Return auth hooks with the credential-relay port resolved to the live one.
 
     The daemon's actually-bound relay port (``get_live_relay_port``) takes
@@ -822,7 +823,7 @@ def _effective_auth_hooks(hooks: list[dict]) -> list[dict]:
     Non-relay hooks pass through untouched.
     """
     live = get_live_relay_port()
-    result: list[dict] = []
+    result: list[dict[str, Any]] = []
     saw_relay = False
     for hook in hooks:
         if hook.get("name") == RELAY_HOOK_NAME:
@@ -1134,6 +1135,23 @@ def _is_agent_containers_target(target: SpawnTarget) -> bool:
     return venue.get("provider") == _AGENT_CONTAINERS_PROVIDER
 
 
+_CONTAINERS_POLICY_CONTEXT_ENV = "AGENT_CONTAINERS_EXEC_REPOSITORY_POLICY_CONTEXT"
+
+
+def _declares_driver_exec_policy(target: SpawnTarget) -> bool:
+    """Whether a driver-exec venue declares the portable receiving policy."""
+    venue = target.venue if isinstance(target.venue, dict) else {}
+    declaration = venue.get("portable_receiving_policy")
+    if venue.get("transport") != "driver-exec" or declaration is None:
+        return False
+    if (
+        not isinstance(declaration, dict)
+        or type(declaration.get("version")) is not int or declaration["version"] != 1
+    ):
+        raise RuntimeError("Unsupported container portable receiving policy declaration")
+    return True
+
+
 async def spawn_raw(
     target: SpawnTarget,
     *,
@@ -1186,6 +1204,13 @@ async def spawn_raw(
         # install resolves to. `agent-containers exec`'s own CLI reads this
         # var (see AGENT_CONTAINERS_EXEC_COPILOT_ARGS in its resolver.py).
         env["AGENT_CONTAINERS_EXEC_COPILOT_ARGS"] = json.dumps(target.copilot_args)
+    env.pop(_CONTAINERS_POLICY_CONTEXT_ENV, None)
+    if _is_agent_containers_target(target) and _declares_driver_exec_policy(target):
+        # A driver-exec member has no Session Host to run the portable
+        # receiver, so its exec wrapper runs it, bound to this installation.
+        from .portable_policy import selected_context
+
+        env[_CONTAINERS_POLICY_CONTEXT_ENV] = await asyncio.to_thread(selected_context)
     args = _wrap_batch_for_windows(spawn_command, env)
     log.info("Spawning command agent: %s", " ".join(args))
 

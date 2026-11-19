@@ -311,6 +311,291 @@ is performed.
 `test_repository_feed_waiter_storage.py` exercises actual SQLite storage,
 original-request conflicts, detached baselines, full binding partition,
 unarmed/armed local-recovery exclusion and callback HTTP refusal without task
-or outbox changes. Actual typed feed transport, capability-before-preparation,
-native feed completion/expiry, wake-before-ACK recovery and coordinator
-enrollment remain subsequent implementation and validation exits.
+or outbox changes.
+
+### Explicit finite-task preparation
+
+`agent_dispatch.repository_feed_preparation.create_repository_feed_preparer`
+adds an opt-in in-process preparation adapter. Supply the separately installed
+PR-service SDK, trusted complete `binding`, canonical harness `lane`, explicit
+HTTPS `repository_target`, reviewer recipe `land` policy and the embedding's
+active-route/drain `checkpoint`. The target maps that service repository to
+the native reviewer recipe; obtain the mapping from configuration, not a feed
+item. Non-default ports and IPv6 literals remain unsupported because the
+existing recipe target canonicalizer does not distinguish them.
+
+```python
+preparer = create_repository_feed_preparer(
+    queue, binding=configured_binding, lane="review-harness",
+    repository_target="https://forge.example/owner/repository",
+    land="author", checkpoint=owner_checkpoint,
+)
+waiter = await preparer.prepare(
+    task_id, delegation=original_intent, worker_id=worker_id,
+    resume_worktree=resume_worktree, host=host, reason="waiting for new activity",
+)
+```
+
+Default imports do not import the optional SDK. Construction starts no service,
+and preparation makes no subscription, ACK, task creation or wake. Its native
+owner must expose `repository_feed_preparation_protocol` equal to
+`agent-dispatch.repository-feed-preparation/v1`; an older storage-only owner
+refuses before service IO. This is an in-process contract, not new support in
+the callback HTTP protocol.
+
+Preparation freezes the original intent and observes the retained task basis,
+then uses the bound asynchronous private-Unix client to negotiate the running
+repository/consumer and read one reviewer-action page with `limit=1`. These are
+cache-only reads, not action selection or freshness/coverage qualification.
+The configured original baseline remains unchanged, including an unknown one.
+The same native reviewer recipe supplies the stable dedup key; there is no
+event-specific task key or absent-association creation path.
+
+After service IO and the current owner checkpoint, the existing
+`prepare_run_waiter` transaction rechecks the exact association, finite recipe,
+owner/session, task generation and steering revision. Holds, pending operator
+forms, execution-admission closure and assignment-relationship protection remain
+effective under that write lock. The original deadline is rechecked after lock
+acquisition, not renewed after negotiation. Only then can that transaction
+suspend and retain the original waiter. Repeating an unchanged preparation
+reconciles its original generation; changed or retired custody is not replaced
+by a fresh request. A suspended task permits reconciliation of that same live,
+owner-matching waiter only, not a new preparation. In particular, an event-note
+wake that supersedes the waiter during negotiation must retain its generation
+and pending wake; preparation cannot invalidate it by creating another waiter.
+A started task also cannot suspend while its current owner wake is pending,
+delivering or has unresolved send custody. These outbox checks occur under the
+same lock; a new event note need not change the steering revision to remain
+protected. A confirmed delivered wake does not permanently block later waits.
+
+There is at most one preparation in flight per adapter and two finite service
+operations per call. The original monotonic deadline bounds the SDK operations;
+network IO does not hold a queue transaction. The native queue's existing short
+synchronous reads/write transaction are retained; no executor, per-task thread,
+timer, poller, credential loader or default factory is introduced. Cancellation
+before the synchronous commit leaves the task unchanged.
+
+`test_repository_feed_preparation.py` exercises actual SDK/private-Unix/cache/
+SQLite composition, unsupported native/service selection, task/form/hold/
+generation races, execution and relationship guards, original deadlines,
+cancellation and lost-local-result reconciliation. These source integration
+controls do not qualify installed reader transition or consumer activation.
+Subscription recovery, useful activity selection, native feed completion/
+expiry, wake-before-ACK and shared coordinator cadence/drain enrollment remain
+subsequent implementation and validation exits.
+
+### Retained admission and subscription attempts
+
+Native preparation retains its original `FeedWaiterAdmission` in nullable
+`run_waiters.feed_admission_json`, in the same suspension transaction. This
+versioned record holds the original task/lane/recipe-dedup/owner/session/
+generation and steering revision. It also retains the revision expected after
+the owner's intentional suspension. Suspension itself changes that revision;
+later preparation retries reuse the original record rather than replacing it
+with a snapshot of a subsequently changed task. It contains no copied task,
+credential, service receipt or separate request journal.
+
+The in-process `repository_feed_attempt_protocol` is
+`agent-dispatch.repository-feed-attempt/v1`. A consumer must require that
+executing support before attempting this variant. Calling the existing
+`replay_waiter_progress(waiter, attempt=True)` on a feed row atomically checks
+the retained basis, current owner/session/generation/steering, finite recipe
+and live dedup association, holds/forms, execution and relationship admission,
+native resume requests (including headless steering or pool lane recovery),
+current ordinary wakes, waiter wakes/successors and original deadline. Only
+then does it record possible transmission. Repeating an attempted registration
+refuses: recover the original request through provider inspection, never
+replay subscription creation because a response was lost.
+
+Service IO remains outside SQLite. Recording a recovered registration receipt
+does not require an unchanged task: an uncertain remote effect still belongs
+to its original native row. Arming that receipt rechecks the same custody,
+wake and deadline guards and requires its retained attempt/registration.
+It rechecks admission immediately before the existing transaction commits;
+crossing the original deadline during the tentative transition rolls it back.
+Nonfinite clocks cannot admit a feed attempt or arm. The task is re-read under
+that same write lock rather than trusting its earlier checked snapshot.
+A changed task can therefore retain a cancellation/reconciliation obligation
+without becoming active or waking. These library guards do not implement
+subscription transmission, cancellation, expiry completion or ACK.
+
+The optional registrar additionally requires the native in-process
+`repository_feed_receipt_protocol` equal to
+`agent-dispatch.repository-feed-receipt/v1` before preparation or service IO.
+The existing waiter row's nullable `replay_registration_expires_at` retains
+the actual validated subscription expiry, not a copy of the native deadline.
+Recording it uses the same progress transaction as the original registration
+ID and preserves late results after task admission changes. The value is
+immutable for that receipt; conflicts refuse without overwriting prior custody.
+No separate receipt table or request journal is added.
+
+Feed arming requires known receipt expiry and checks it both under the original
+write lock and before commit. The provider's shorter expiry, including its
+integer cutoff, cannot be extended by a fractional native deadline.
+Historical rows retain null expiry across schema adoption and remain readable,
+but cannot arm until their original receipt is recovered through the selected
+owner. A registrar paired with a native owner lacking the receipt capability
+refuses before suspension; no package-version guess or registration replay
+supplies missing support.
+Callback and watch-replay rows keep their existing null metadata and behavior.
+This does not arm the registrar or qualify historical runtime transition,
+remote settlement, wake delivery, ACK or consumer activation.
+
+Existing callback and watch-replay rows retain null admission and unchanged
+behavior. Historical feed rows without an admission record remain readable
+and outside PID recovery, but cannot attempt or arm through the new guarded
+path. No migration invents their original steering basis. Malformed or unknown
+non-null admission refuses on read without rewriting it. The added nullable
+column leaves prior projected fields unchanged; this is not a promise that
+arbitrary older readers enforce it, operational adoption or a qualified
+rollback. The lifecycle owner must preserve reconciliation custody.
+`test_repository_feed_attempts.py` exercises reopen, strict retained records,
+native task/wake/closure races, original deadlines and late receipt retention.
+
+### Explicit original-request registration recovery
+
+`agent_dispatch.repository_feed_registration.RepositoryFeedRegistrar` extends
+the same preparation adapter for an explicitly selected embedding and injected
+bound asynchronous PR-service client. Its in-process protocol is
+`agent-dispatch.repository-feed-registration/v1`. It is not selected by the
+coordinator factory, callback route, CLI or default startup.
+
+Its `prepare` requires the executing native attempt protocol above
+and the service's `repository-request-recovery/v1` capability before suspension.
+The ordinary preparation-only adapter remains compatible and inert. Calling
+`await registrar.reconcile_registration(task_id, preparation_id)` then makes
+one registration or original-request inspection exchange. A missing original
+baseline refuses creation; no new baseline or request identity is allocated.
+The registrar rejects missing baselines, timeouts above the provider's 86,400
+second TTL limit, out-of-range provider cursors/cutoffs and an already elapsed
+creation cutoff before preparing or suspending a native task. The inert
+preparation-only adapter retains its broader storage contract.
+The selected queue must additionally declare
+`repository_feed_registration_protocol` equal to the registrar's protocol.
+Only that capable owner receives the optional `creation_cutoff` on its existing
+preparation operation. It verifies the immutable rounded cutoff under the same
+suspension write lock, both after acquisition and immediately before commit.
+Crossing the cutoff rolls back task suspension and waiter creation, without
+rewriting the original deadline. Older preparation-only callers send no new
+argument and retain their original lifetime and commit behavior.
+
+The original request freezes `after` from the retained baseline cursor, TTL
+from the original timeout rounded up to seconds, and `not_after` from the
+original deadline rounded down to seconds. The provider therefore cannot
+accept or retain a registration beyond that finite deadline. The native
+attempt transaction commits before possible transmission. Every later call,
+including after a lost reply or process restart, uses `inspect-request` for
+the original identity rather than another `subscribe`.
+
+The returned receipt must match the configured consumer, full repository
+identity, original request and immutable intent, with expiry no later than its
+cutoff. Its registration is retained through the existing progress owner, even
+after a task changes. This leaf does not arm a native waiter: a provider's
+`status: active` is a service receipt state, not native activation or permission
+to wake. Unknown responses retain the attempted identity; no exception is
+treated as proof of nonacceptance.
+
+Each explicit call has a thirty-second monotonic IO bound, shortened by an
+already selected client deadline. Inspection can reconcile after the original
+acceptance deadline; it never renews it. The bound client rechecks executing
+recovery support at the effect/inspection boundary as well as the adapter's
+preflight. This is at most three HTTP exchanges per call, outside SQLite,
+not another scheduled cycle or acquisition loop.
+
+An absent receipt, including absence after cutoff, remains `unresolved` here.
+Cancelled/expired receipts are retained but cannot arm or complete the native
+waiter. Registration reconciliation does not cancel subscriptions; the explicit
+retired-registration operation below is separate. Neither operation settles
+native arming/expiry, selects useful activity, wakes a task, ACKs delivery or
+supplies a full consumer. Those operations still require the existing owner's
+separately qualified completion/settlement path; do not activate this adapter as
+a standalone waiter loop.
+Before a later consumer can arm a recovered receipt, its actual expiry must be
+checked by the native arm transaction under its write lock and immediately
+before commit, as well as the existing task/wake/original-deadline guards.
+A pre-IO or pre-lock receipt check is not that qualification.
+
+`test_repository_feed_registration.py` composes actual native SQLite waiters
+with real repository receipt storage and a real private-Unix SDK/ingress case.
+It covers reopen, lost committed replies, absent requests without creation
+replay, unsupported selection before suspension, changed-task late receipts,
+foreign intent, original cutoff, unknown baseline, cancellation and expiry.
+No case starts a production consumer or asserts a task wake/ACK occurred.
+
+### Explicit retired-registration cancellation
+
+The executing registrar optionally exposes `cancellation_protocol` equal to
+`agent-dispatch.repository-feed-cancellation/v1` and
+`await registrar.cancel_registration(task_id, preparation_id)`.
+This is an opt-in in-process operation, not a callback/CLI route, new factory
+selection or requirement on existing registration-only callers.
+Missing support leaves cancellation unavailable; package versions are not
+capability evidence.
+
+Cancellation requires an already retired original native waiter, its complete
+configured binding and a known original registration ID. A live waiter refuses
+before service IO: this operation does not retire or expire it.
+An uncertain registration with no retained ID must first use original-request
+inspection through `reconcile_registration`; no replacement is created.
+Known historical registration IDs remain cancellable without inventing missing
+admission or expiry metadata. An already settled row needs no service request.
+
+The operation negotiates the same executing recovery/receipt support, rechecks
+active-route/drain authority and reloads the same retired registration before
+transmitting the existing scoped `cancel` request. It uses at most three HTTP
+exchanges with the bound client, outside native transactions, within thirty
+monotonic seconds or the shorter caller deadline. Invalid or elapsed caller
+deadlines refuse before service IO. Registration reconciliation retains that
+same finite deadline rule.
+
+Only a matching cancellation response reports `cancelled`; uncertain replies,
+coroutine cancellation and invalid responses retain the same native registration
+and unsettled custody. Existing original-request inspection can observe the
+result after reopening. Repeating explicit cancellation targets only that
+original idempotent registration; neither the request ID nor the waiter is
+replaced.
+
+A cancellation response is not a native settlement or event ACK. The operation
+does not set `replay_settled`, change task/wake state, consume delivery, or forget
+an already-delivered unacknowledged event. The provider retains that delivery
+through its existing storage owner. Wake-before-ACK, remote settlement and
+coordinator lifecycle integration remain separate acceptance.
+
+`test_repository_feed_cancellation.py` composes actual native expiry/SQLite and
+repository receipt storage. It covers original versus foreign scope, missing
+receipts, lost committed replies, repeated cancellation, pending delivery,
+old nullable metadata, drain and deadline refusal, and concurrent operation
+ownership without selecting a consumer.
+
+### Original native deadline recovery
+
+The executing queue exposes `repository_feed_expiry_protocol` equal to
+`agent-dispatch.repository-feed-expiry/v1` for the optional in-process
+`expire_repository_feed_waiter(waiter)` operation. It is not a timer, callback
+event, factory selection or service request. The embedding must retain its
+current active-owner/drain checkpoint and existing bounded cadence.
+
+At the original retained deadline, this owner can retire a preparing or active
+feed waiter and enqueue its timeout notification through the existing native
+wake table in one SQLite transaction. It rechecks original task/admission,
+recipe/dedup association, owner/session/generation/steering, holds/forms,
+execution/relationship protection, native resume requests and existing
+wakes/successors. Invalid clocks or a deadline that has not elapsed refuse.
+A different native transition's wake is not replaced.
+
+Concurrent calls, reopen and a lost committed result return the original
+timeout wake instead of adding another. Interrupted pre-commit work rolls back
+both retirement and outbox insertion. The native task stays suspended under
+its existing owner; ordinary wake delivery and its independent admission remain
+with their existing owner. This operation does not deliver a wake itself.
+
+`event_id` stays null: repository subscription expiry is not a watch/v2 timeout
+event. Original attempted/registration metadata remains intact and
+`replay_settled` remains false. Remote cancellation, original-request inspection
+and delivery settlement remain separate; this timeout cannot authorize a
+service ACK or forget a possibly accepted registration.
+
+`test_repository_feed_expiry.py` covers actual SQLite preparation/active states,
+original-deadline refusal, hold/form/owner/instruction races, an operator wake,
+pre-commit rollback, lost-result reopening and concurrent one-wake publication.
+No default recovery loop, callback protocol or consumer is activated.

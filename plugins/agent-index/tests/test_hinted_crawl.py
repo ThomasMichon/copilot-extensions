@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 
 import httpx
 import pytest
 from test_consumer_runtime import Client
-from test_github_hints import SOURCE, connector, hints, issue
+from test_github_hints import SOURCE, connector as _connector, hints as _hints, issue as _issue
 
 from agent_index.index_config import IndexConfig, ModelProfile
 from agent_index.indexing import engine, worker
@@ -24,8 +26,12 @@ from agent_index.sources.base import FileEntry
 from agent_index.store.multi_model_store import MultiModelStore
 from agent_index.store.source_layout import LAYOUT
 
+connector = cast(Any, _connector)
+hints = cast(Any, _hints)
+issue = cast(Any, _issue)
 
-def forbidden(*args, **kwargs):
+
+def forbidden(*args: object, **kwargs: object) -> Any:
     pytest.fail("hinted round attempted storage, lifecycle or whole-corpus fallback")
 
 
@@ -33,17 +39,19 @@ def forbidden(*args, **kwargs):
     "full", "wrong-source", "alias", "unconfigured", "duplicate-config", "unsupported",
     "module-only", "account", "family", "wrong-type", "unsupported-poll-refresh",
 ])
-def test_preflight_refuses_before_storage_or_clients(tmp_path, monkeypatch, case):
+def test_preflight_refuses_before_storage_or_clients(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: str,
+) -> None:
     config = IndexConfig(data_dir=tmp_path / "untouched")
     spec = engine.SourceSpec(SOURCE, type="github")
-    selected = SOURCE
+    selected: str | None = SOURCE
     full = False
-    envelope = hints()
+    envelope: Any = hints()
 
-    def discover(*args, **kwargs):
+    def discover(*args: object, **kwargs: object) -> SourceDelta:
         return SourceDelta()
 
-    discover.change_hints_versions = (1,)
+    setattr(discover, "change_hints_versions", (1,))
     provider = SimpleNamespace(
         source_name=SOURCE, hint_scope=(SOURCE, "123"), discover_hints=discover,
         recovery_identity=("fixture",),
@@ -82,13 +90,15 @@ def test_preflight_refuses_before_storage_or_clients(tmp_path, monkeypatch, case
         engine.run_reindex(
             source=selected, full=full, config=config, source_specs=specs, change_hints=envelope,
         )
-    assert not config.data_dir.exists()
+    assert {path.name for path in config.data_dir.iterdir()} == {".source-writer-v1.lock"}
 
 
-def test_cancelled_run_never_constructs_connector_or_opens_storage(tmp_path, monkeypatch):
+def test_cancelled_run_never_constructs_connector_or_opens_storage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_index.indexing.runner import IndexingCancelled
 
-    def cancelled():
+    def cancelled() -> None:
         raise IndexingCancelled("cancel")
 
     config = IndexConfig(data_dir=tmp_path / "untouched")
@@ -96,9 +106,9 @@ def test_cancelled_run_never_constructs_connector_or_opens_storage(tmp_path, mon
     with pytest.raises(IndexingCancelled):
         engine.run_reindex(
             source=SOURCE, config=config, source_specs=[engine.SourceSpec(SOURCE)],
-            progress_cb=SimpleNamespace(check_cancelled=cancelled), change_hints=hints(),
+            progress_cb=cast(Any, SimpleNamespace(check_cancelled=cancelled)), change_hints=hints(),
         )
-    assert not config.data_dir.exists()
+    assert {path.name for path in config.data_dir.iterdir()} == {".source-writer-v1.lock"}
 
 
 @pytest.mark.parametrize("delta", [
@@ -106,11 +116,11 @@ def test_cancelled_run_never_constructs_connector_or_opens_storage(tmp_path, mon
     SourceDelta(upserts=[FileEntry("one.md", "wrong family", "markdown", "other")]),
     {"invalid": "result"},
 ])
-def test_hinted_delta_refusal_preserves_checkpoint(tmp_path, delta):
-    def discover(*args, **kwargs):
+def test_hinted_delta_refusal_preserves_checkpoint(tmp_path: Path, delta: Any) -> None:
+    def discover(*args: object, **kwargs: object) -> Any:
         return delta
 
-    discover.change_hints_versions = (1,)
+    setattr(discover, "change_hints_versions", (1,))
     provider = SimpleNamespace(
         source_name=SOURCE, hint_scope=(SOURCE, "123"), discover_hints=discover,
         recovery_identity=("fixture",), list_paths=forbidden, discover_delta=forbidden,
@@ -119,7 +129,7 @@ def test_hinted_delta_refusal_preserves_checkpoint(tmp_path, delta):
     state.sources[SOURCE].acquisition_scope = recovery_scope(SOURCE, provider)
     with pytest.raises(ValueError):
         engine._crawl_source(
-            SOURCE, config=None, state=state, path_index=PathIndex(tmp_path / "paths.db"),
+            SOURCE, config=cast(Any, None), state=state, path_index=PathIndex(tmp_path / "paths.db"),
             full=False, connector=provider, change_hints=hints(),
         )
     assert state.sources[SOURCE].last_commit == "prior"
@@ -127,8 +137,8 @@ def test_hinted_delta_refusal_preserves_checkpoint(tmp_path, delta):
 
 @pytest.mark.parametrize("corpus_size", [100, 10_000, 100_000])
 def test_scoped_envelope_reaches_connector_without_unchanged_path_reads(
-    tmp_path, monkeypatch, corpus_size,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, corpus_size: int,
+) -> None:
     paths = PathIndex(tmp_path / "paths.db")
     paths.mark_indexed_batch([
         (SOURCE + ":issues", f"issues/{i}.md", "old", 1) for i in range(corpus_size)
@@ -140,14 +150,14 @@ def test_scoped_envelope_reaches_connector_without_unchanged_path_reads(
         metadata_revisions=(MetadataRevision("1", "revision"),),
     )
 
-    def discover(value, prior, *, cancel_check):
+    def discover(value: Any, prior: str | None, *, cancel_check: Any) -> SourceDelta:
         observed.append((value, prior))
         return SourceDelta(
             upserts=[FileEntry("issues/1.md", "changed", "markdown", SOURCE + ":issues")],
             commit=prior,
         )
 
-    discover.change_hints_versions = (1,)
+    setattr(discover, "change_hints_versions", (1,))
     provider = SimpleNamespace(
         source_name=SOURCE, hint_scope=(SOURCE, "123"), discover_hints=discover,
         recovery_identity=("fixture",), list_paths=forbidden, discover_delta=forbidden,
@@ -155,7 +165,7 @@ def test_scoped_envelope_reaches_connector_without_unchanged_path_reads(
     state = IndexState(sources={SOURCE: SourceState(last_commit="poll")})
     state.sources[SOURCE].acquisition_scope = recovery_scope(SOURCE, provider)
     result = engine._crawl_source(
-        SOURCE, config=None, state=state, path_index=paths, full=False,
+        SOURCE, config=cast(Any, None), state=state, path_index=paths, full=False,
         connector=provider, change_hints=envelope,
     )
     assert observed == [(envelope, "poll")]
@@ -165,16 +175,16 @@ def test_scoped_envelope_reaches_connector_without_unchanged_path_reads(
 
 
 @pytest.fixture(params=[False, True], ids=["legacy", "source-aware"])
-def native(request, tmp_path, monkeypatch):
+def native(request: pytest.FixtureRequest, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
     monkeypatch.setenv("AGENT_INDEX_STORE_LAYOUT", LAYOUT if request.param else "")
     config = IndexConfig(
         data_dir=tmp_path / "native", cluster_enabled=False,
         model_profiles={"a": ModelProfile("a", "fixture", dim=2)},
     )
     calls = []
-    item_updates = {}
+    item_updates: dict[str, Any] = {}
 
-    def handler(req):
+    def handler(req: httpx.Request) -> httpx.Response:
         calls.append(req)
         if req.url.path == "/user":
             return httpx.Response(200, json={"id": 123})
@@ -186,7 +196,7 @@ def native(request, tmp_path, monkeypatch):
     provider = connector(handler)
     constructions = []
 
-    def construct(*args, **kwargs):
+    def construct(*args: Any, **kwargs: Any) -> Any:
         constructions.append((args, kwargs))
         return provider
 
@@ -197,38 +207,42 @@ def native(request, tmp_path, monkeypatch):
     monkeypatch.setattr(provider, "current_commit", forbidden)
     monkeypatch.setattr(PathIndex, "get_paths_by_family", forbidden)
     monkeypatch.setattr(engine, "_connector_kwargs", lambda _: {})
-    events = []
+    events: list[str] = []
     clients = []
-    callbacks = []
+    callbacks: list[Any] = []
 
     class OwnedClient(Client):
-        def embed_texts(self, texts):
+        def embed_texts(self, texts: Any) -> Any:
             if callbacks:
                 callbacks.pop(0)()
             return super().embed_texts(texts)
 
-    def create(profile):
+    def create(profile: ModelProfile) -> Any:
         client = OwnedClient(profile.model_id, events)
         clients.append(client)
         return client
 
+    def ensure(*args: Any) -> bool:
+        events.append("ensure")
+        return True
+
     runtime = EmbeddingRuntime(
-        create, lambda *a: events.append("ensure") or True,
+        create, ensure,
         lambda *a: events.append("stop"),
     )
     spec = engine.SourceSpec(SOURCE, type="github")
 
-    def run(**kwargs):
+    def run(**kwargs: Any) -> Any:
         return engine.run_reindex(
             config=config, source_specs=[spec], embedding_runtime=runtime, **kwargs,
         )
 
-    run.change_hints_versions = (1,)
-    run.item_updates = item_updates
+    setattr(run, "change_hints_versions", (1,))
+    setattr(run, "item_updates", item_updates)
     return config, run, calls, clients, callbacks, events, constructions
 
 
-def test_actual_engine_noop_retains_polling_cursor_and_vectors(native):
+def test_actual_engine_noop_retains_polling_cursor_and_vectors(native: Any) -> None:
     config, run, calls, clients, _, events, constructions = native
     assert execution_versions(engine.run_reindex) == [1]
     first = run(source=SOURCE, change_hints=hints())
@@ -241,7 +255,8 @@ def test_actual_engine_noop_retains_polling_cursor_and_vectors(native):
     state.completed_family_cursors[SOURCE] = "prior-poll"
     state.save(config.state_file)
     db = MultiModelStore(config.lance_dir)
-    table = db.content_store._get_or_create_table()
+    content = cast(Any, db.content_store)
+    table = content._get_or_create_table()
     version = table.version
     second = run(source=SOURCE, change_hints=hints())
     assert second["chunks_total"] == 0
@@ -249,7 +264,7 @@ def test_actual_engine_noop_retains_polling_cursor_and_vectors(native):
     assert second["work_counts"]["files_reused"] == 1
     assert second["work_counts"]["content_rows_upserted"] == 0
     assert second["work_counts"]["models"] == {}
-    assert db.content_store._get_or_create_table().version == version
+    assert content._get_or_create_table().version == version
     assert not clients[-1].texts
     assert events.count("ensure") == events.count("stop") == 1
     assert IndexState.load(config.state_file).sources[SOURCE].last_commit == "prior-poll"
@@ -257,10 +272,10 @@ def test_actual_engine_noop_retains_polling_cursor_and_vectors(native):
     assert len(calls) == 5  # One account probe; two item/comment requests each round.
     run.item_updates["title"] = "Changed title"
     assert run(source=SOURCE, change_hints=hints())["chunks_total"] > 0
-    assert db.content_store._get_or_create_table().version > version
+    assert content._get_or_create_table().version > version
 
 
-def _worker_fixture(native, monkeypatch):
+def _worker_fixture(native: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
     config, run, *_ = native
     store = TaskStore(config.data_dir / "tasks.db")
     monkeypatch.setattr(worker, "_install_signal_handlers", lambda _: None)
@@ -268,14 +283,16 @@ def _worker_fixture(native, monkeypatch):
     return config, run, store
 
 
-def test_worker_duplicate_union_and_active_trailing_burst_use_real_connector(native, monkeypatch):
+def test_worker_duplicate_union_and_active_trailing_burst_use_real_connector(
+    native: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     config, run, store = _worker_fixture(native, monkeypatch)
     task = store.enqueue(SOURCE, change_hints=hints(item_ids=("1",)))
     assert store.enqueue(SOURCE, change_hints=hints(item_ids=("2",))).id == task.id
     store.dequeue_next(accept_change_hints=True)
     trailing = []
 
-    def burst():
+    def burst() -> None:
         trailing.append(store.enqueue(SOURCE, change_hints=hints(item_ids=("3",))))
         assert store.enqueue(SOURCE, change_hints=hints(item_ids=("3",))).id == trailing[0].id
 
@@ -294,12 +311,14 @@ def test_worker_duplicate_union_and_active_trailing_burst_use_real_connector(nat
     assert fetched == [f"/repos/acme/widgets/issues/{i}" for i in (1, 2, 3)]
 
 
-def test_worker_failure_restart_replays_pending_then_reacquires_exact_hints(native, monkeypatch):
+def test_worker_failure_restart_replays_pending_then_reacquires_exact_hints(
+    native: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     config, run, store = _worker_fixture(native, monkeypatch)
     task = store.enqueue(SOURCE, change_hints=hints())
     store.dequeue_next(accept_change_hints=True)
 
-    def fail():
+    def fail() -> None:
         raise RuntimeError("interrupted embed")
 
     native[4].append(fail)
@@ -308,9 +327,11 @@ def test_worker_failure_restart_replays_pending_then_reacquires_exact_hints(nati
     assert store.get_task(task.id).change_hints == hints()
     assert SOURCE not in IndexState.load(config.state_file).sources
     restarted = TaskStore(config.data_dir / "tasks.db")
-    assert restarted.retry(task.id).change_hints == hints()
+    retried = restarted.retry(task.id)
+    assert retried is not None and retried.change_hints == hints()
     restarted.dequeue_next(accept_change_hints=True)
     assert worker.run_worker(task.id, config=config, indexer=run) == 0
-    assert restarted.get_task(task.id).status == "complete"
+    completed = restarted.get_task(task.id)
+    assert completed is not None and completed.status == "complete"
     assert IndexState.load(config.state_file).sources[SOURCE].last_commit is None
     assert len(native[2]) == 5  # Failed acquisition and fresh retry, not history.

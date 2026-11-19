@@ -257,7 +257,7 @@ Managed live mux projects remain enrolled in that scheduled roster computation
 even without a Picker, list request or runtime demand. Passive roster reads do
 not enroll runtime demand or request refreshes. Path lookup uses one per-project index
 and refuses ambiguous paths; current CONVO descriptors retain their computed
-conversation turn count, while advisory counts stay suppressed.
+conversation turn count, while advisory roster counts stay suppressed.
 Path identity follows the segment cache's normalized real-path rule, including
 trailing separators and symlink aliases.
 
@@ -269,9 +269,26 @@ Every content observation rechecks lifecycle admission and governance; pending
 priority ends the batch rather than waiting under the shared lock. A stored
 empty project remains a known POSIX cache owner, avoiding repeated path scans
 without weakening cleanup fences.
-Presentation reads only completed fresh content bytes and never substitutes
-`ACTIVE` for DIRTY, WIP or CONVO; unavailable content remains pending rather
-than triggering Git work in the projection path.
+Presentation prefers completed fresh content bytes and never substitutes
+`ACTIVE` for DIRTY, WIP or CONVO. When an identified active roster row outlives
+the fresh content entry, the same cache owner can retain its last completed
+segment with an explicit `(stale)` marker. The marker applies to the whole
+retained string, including any historical counts. This presentation-only copy
+is bound to the project, normalized checkout path, worktree ID and creation
+nonce. Recreating the same ID at the same path with a different nonce refuses
+the predecessor's copy. The roster path must match the managed checkout path.
+Identity is captured from the actual rendered record together with its returned
+segment, not from an earlier alias lookup. Missing, mismatched or multiple
+renderer observations cannot populate this copy; ordinary fresh output is
+unchanged.
+An otherwise usable renderer record without a worktree ID cannot retain it.
+The copy survives ordinary expiry, invalidation and an in-flight observation,
+but never supplies
+fresh-cache, hook or action evidence. Missing or unsupported roster subjects,
+retained cleanup and a retiring owner cannot use it.
+No completed matching content still means pending; projection never triggers
+Git work to fill that gap. The content TTL, invalidation and refresh cadence
+remain unchanged.
 Registered standalone TMux paths also enter a separate content pass after the
 scheduled served-session projection, even when no adopted project or tracking
 record exists. This pass uses the same content cache and restores each

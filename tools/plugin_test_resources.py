@@ -11,10 +11,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-if TYPE_CHECKING or __package__:
+if TYPE_CHECKING:
+    from cache_directory_paths import ordinary_cache_root
+elif __package__:
     from .cache_directory_paths import ordinary_cache_root
 else:
     from cache_directory_paths import ordinary_cache_root
+
+ENVIRONMENT_LAYOUT = "venvs-retirement-v1"
 
 
 def _validate_fallback_root(info: os.stat_result, uid: int) -> None:
@@ -40,7 +44,7 @@ def scratch_root(repo: Path, *, create: bool = True) -> Path:
         raise ValueError("test scratch must be outside the source checkout")
     if create:
         scratch.mkdir(mode=0o700, parents=True, exist_ok=True)
-    if configured is None and os.name != "nt" and scratch.exists():
+    if configured is None and os.name != "nt" and scratch.exists() and hasattr(os, "getuid"):
         _validate_fallback_root(scratch.stat(), os.getuid())
     return scratch
 
@@ -80,6 +84,10 @@ def record_owner(path: Path, repo: Path, *, retention: str) -> None:
 
 def venv_root(repo: Path) -> Path:
     return ordinary_cache_root(resource_root(repo) / "venvs" / sys.platform)
+
+
+def retirement_venv_root(repo: Path) -> Path:
+    return ordinary_cache_root(resource_root(repo) / ENVIRONMENT_LAYOUT / sys.platform)
 
 
 def runs_root(repo: Path) -> Path:

@@ -79,7 +79,8 @@ using this shared session remain explicitly unclassified until their own
 request owners opt in; this is not provider-wide semantic accounting.
 
 The built-in Azure DevOps connector classifies WIQL/saved-query execution and
-PR listings as `identity_page`, full work-item batches as `item_body`, ID/date,
+PR listings as `identity_page`, full work-item batches and point PR-description
+reads as `item_body`, ID/date,
 repository and account probes as `metadata`, and work-item comments/PR threads
 as `comment_page`. Continuations and failed responses retain their purpose.
 PR listings also return descriptions, even during ID-only path discovery:
@@ -122,14 +123,18 @@ ignore the optional mapping; no new invocation or required capability is added.
 Azure DevOps uses the same counters under its `ado:<org>/<project>:workitems`
 and `:pulls` child sources. WIQL/saved-query `workItems` objects and relation
 `target` objects count as identity records before union/deduplication. PR-list
-objects likewise count before deduplication and timestamp filtering. Work-item
-full-batch objects count once as bodies when their `fields` contain at least one
+objects likewise count before deduplication. Timestamp-based discovery with PR
+queries refuses before acquisition; that failure is not a successful no-op round.
+Work-item full-batch objects count once as bodies when their `fields` contain at least one
 string/null `System.Description`, `Microsoft.VSTS.TCM.ReproSteps` or
 `Microsoft.VSTS.Common.AcceptanceCriteria`; ID/date metadata probes do not count.
 PR descriptions use the string/null `description` field. Work-item comments
 use `text`, and comments nested in PR threads use `content`. Missing/nontext
 fields do not count as bodies. Multiple body fields in one work item still
 count as one record, not one body per field.
+Reacquiring a nonempty selected PR description counts the point response as another
+body, not another listing identity. The preview remains a returned body record;
+neither count alone certifies completeness or successful identity validation.
 
 These are returned records, including duplicates, subsequently filtered bodies
 and parsed comment objects on a page later refused for malformed members.

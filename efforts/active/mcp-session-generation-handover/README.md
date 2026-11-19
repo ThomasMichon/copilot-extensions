@@ -345,6 +345,28 @@ named tracked objective before the whole effort is Done.
 
 ### Resident configuration-context correction
 
+- [x] **POSIX producer correction #10799:** deliver the existing #10810
+  proposal against current Dev, verify its promoted release and qualify the
+  installed configured consumer with delivered context. The
+  [constructor qualification](journal/2026/11.18-posix-configuration-owner-retention.md)
+  covers fresh helper production and immutable completed-slot refusal; it
+  does not close installed acceptance or session reattachment.
+  - [x] **Reviewed source merged:** #10810 landed at
+    `07ce51bae2c366c7cae4cfb92a1ccb9053dc7cf0` after current-head Copilot approval,
+    required CI and all 15 native acceptance jobs passed. The bounded sender
+    prerequisite retains the production 100 ms allowance, ten-second child
+    deadline and real-clock cold-process assertions.
+  - [x] **Released source verified:** promotion `44492821176` succeeded;
+    Main `a27efe171308807aeff849ae9a13460299eea151` releases MCP
+    `0.2.301-dev1`. Both corrected production files match the reviewed merge
+    byte-for-byte.
+  - [x] **Bounded installed configured consumers:** two POSIX installations
+    select the released runtime, retain constructor-produced helpers and
+    complete their unchanged configured MCP launch, initialization, tool
+    discovery and real read-only status call. Native process-path witnesses
+    identify the incoming physical runtime; both consumers exit normally on
+    EOF. Post-updater readiness and observed pre-existing client preservation
+    pass. Broader sharing and original-session reattachment remain separate.
 - [x] **Source merged:** #10951 correction landed through #10969 at
   `4cecd3fe3f677041e0beb0118397b2deb18b3227`: transport the caller's configuration
   root and bridge binding to the resident consumer, independently resolve the
@@ -833,6 +855,7 @@ migration already works.
 
 ## Journal
 
+- [2026-11-18 - Installed Windows update attempt and refusal diagnostics](journal/2026/11.18-installed-update-attempt.md)
 - [2026-11-18 - Installed Windows native-client baseline](journal/2026/11.18-installed-windows-baseline.md)
 - [2026-11-18 - Settled update refusal and bounded Windows adoption](journal/2026/11.18-settled-update-refusal.md)
 - [2026-11-10 - Explicit originating-owner CLI handoff](journal/2026/11.10-explicit-owner-cli.md)

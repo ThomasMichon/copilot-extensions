@@ -320,6 +320,14 @@ test("post-tool notification sees a stalled drain without network or false consu
   assert.equal(f.calls.length, before);
   assert.equal(f.sends.length, 0);
   assert.equal(f.calls.some((call) => call.route.endsWith("/messages/ack")), false);
+  f.timers.find((timer) => timer.ms === 1_000).fn();
+  await settle();
+  const observation = f.calls.find((call) => call.route.endsWith("/events")).body.events[0];
+  assert.equal(observation.type, "bridge.delivery_observation");
+  assert.deepEqual(JSON.parse(JSON.stringify(observation.data)), {
+    stage: "hook_notice", source: "pending-input-set-v1", session_id: "native-a",
+    pending_count: 1, incomplete: false, delivery_path: "legacy",
+  });
 });
 
 for (const selected of [undefined, "1"]) {
@@ -335,12 +343,21 @@ for (const selected of [undefined, "1"]) {
     assert.equal(hook({ ...input, parentToolCallId: "parent" }, invocation), undefined);
     assert.equal(hook({ ...input, sessionId: "child" }, invocation), undefined);
     assert.equal(hook(input, { sessionId: "foreign" }), undefined);
+    if (selected) {
+      assert.match(hook(input, invocation).additionalContext, /1 pending/);
+      f.timers.find((timer) => timer.ms === 1_000).fn();
+      await settle();
+      const diagnostic = f.calls.find((call) => call.route.endsWith("/events")).body.events[0].data;
+      const enrolled = f.calls.find((call) => call.route.endsWith("/enroll")).body.consumer;
+      assert.equal(diagnostic.consumer_incarnation, enrolled.incarnation);
+      assert.equal(diagnostic.delivery_path, "retained");
+    }
     release("sdk-message-a");
     await settle();
     assert.equal(hook(input, invocation), undefined);
     f.timers.find((timer) => timer.ms === 1_000).fn();
     await settle();
-    assert.equal(f.calls.some((call) => call.route.endsWith("/events")), false);
+    assert.equal(f.calls.some((call) => call.route.endsWith("/events")), Boolean(selected));
     assert.equal(f.calls.some((call) => call.body?.outcome === "consumed"), false);
     assert.equal(f.sends.length, 1);
   });

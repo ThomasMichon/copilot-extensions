@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from agent_index.indexing.component_manifest import require_unordered_application, validate_components
 from agent_index.indexing.embedding_batch import routed_model_chunks
 from agent_index.indexing.embedding_coverage import EmbeddingCoverage, input_hash
 from agent_index.indexing.file_batches import FileBatch, file_batches
@@ -28,6 +29,30 @@ if TYPE_CHECKING:
     from agent_index.store.multi_model_store import MultiModelStore
 
 
+def publish_prepared_manifest(
+    *, manifest: CrawlManifest, full: bool, application: Callable[..., tuple[int, int, int]],
+    store: MultiModelStore, prepared: PreparedApplication,
+) -> tuple[int, int, int]:
+    require_unordered_application(manifest)
+    from agent_index.store.ingestion_index import prepare_ingestion_indices
+
+    domain = store._source_domain
+    with domain.operation(store.content_store.db) if domain is not None else nullcontext():
+        prepared.require_current_checkpoints()
+        if prepared.batch_count == 0 and not manifest.deletions:
+            return application(manifest=manifest, full=full, prepared=prepared)
+        planned_rows = (
+            sum(len(batch.chunks) for batch in prepared.batches()) if domain is not None else 0
+        )
+        if domain is not None:
+            prepare_ingestion_indices(store, max_rows=0, reserve_segment=planned_rows > 0)
+        with domain.write(store.content_store.db) if domain is not None else nullcontext():
+            result = application(manifest=manifest, full=full, prepared=prepared)
+            if domain is not None:
+                prepare_ingestion_indices(store, max_rows=planned_rows)
+            return result
+
+
 class PreparedApplication:
     """Cached inputs/results, never a store checkpoint or recovery authority."""
 
@@ -38,25 +63,44 @@ class PreparedApplication:
         before_embed: Callable[[], None] | None = None,
         before_model_embed: Callable[[str], None] | None = None,
         progress_cb: ProgressCallback | None = None,
+        component_selection: frozenset[tuple[str, str]] | None = None,
     ) -> None:
+        if component_selection is None:
+            require_unordered_application(manifest)
+        else:
+            validate_components(manifest)
+            if (
+                manifest.component_versions is None or full
+                or not isinstance(component_selection, frozenset)
+                or not component_selection <= {(entry.source, entry.path) for entry in manifest.upserts}
+            ):
+                raise ValueError("Component preparation requires selected acquired upserts")
+        files = [
+            entry for entry in manifest.upserts
+            if component_selection is None or (entry.source, entry.path) in component_selection
+        ]
         profiles = dict(config.model_profiles)
         if any(model not in profiles for model in clients):
             raise ValueError("Prepared application requires every embedding client's model profile")
         payload = PendingCrawls(paths).read_payload(manifest.source, scope)
         if payload is None:
             raise PendingCrawlConflict("Prepared application requires its pending crawl")
-        self.journal = PreparedJournal(paths, manifest.source, scope, payload)
+        self.journal = PreparedJournal(
+            paths, manifest.source, scope, payload, manifest=manifest, full=full,
+        )
         self.profiles = profiles
         self.progress_cb = progress_cb
-        self.identities = [(entry.source, entry.path) for entry in manifest.upserts]
+        self.identities = [(entry.source, entry.path) for entry in files]
         self.checkpoints = paths.get_entries(self.identities)
         self.batch_count = 0
         self.journal.reset_batches()
         coverage = EmbeddingCoverage(paths)
         for batch in file_batches(
-            manifest.upserts, path_index=paths, model_profiles=profiles,
-            stream_batch_size=config.stream_batch_size, force=full,
-            resume_since=resume_since, chunker_revision=getattr(config, "chunker_revision", "1"),
+            files, path_index=paths, model_profiles=profiles,
+            stream_batch_size=config.stream_batch_size,
+            force=full or component_selection is not None,
+            resume_since=resume_since if component_selection is None else None,
+            chunker_revision=getattr(config, "chunker_revision", "1"),
             progress_cb=progress_cb, resume_index=self.checkpoints,
         ):
             for offset in range(0, len(batch.chunks), config.stream_batch_size):

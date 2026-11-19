@@ -7,24 +7,63 @@ import json
 import os
 import sys
 from contextlib import contextmanager
+from collections.abc import Iterable, Iterator, Mapping
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, cast
 
 from . import config as cfg
-from . import update_cli
+from . import update_cli, update_options
+
+if TYPE_CHECKING:
+    from update_driver import Request
 
 _CONTEXT_KEYS = (
     "AGENT_HOME", "AGENT_WORKTREES_UPDATE_CONTEXT", "AGENT_WORKTREES_PAYLOAD_ROOT",
     "COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT", "WORKTREE_MANAGER_ROOT",
     "WORKTREE_MANAGER_ENGINE_ARGV", "WORKTREE_MANAGER_ENGINE_CMD", "CE_UPDATE_AUTH",
 )
-RUNTIME_BACKEND_INTENT_CAPABILITY = update_cli.update_options.RUNTIME_BACKEND_INTENT_CAPABILITY
+_TOOLCHAIN_REQUEST_KEY = "COPILOT_EXTENSIONS_TOOLCHAIN_REQUEST"
+_TOOLCHAIN_CONTEXT_KEYS = (
+    "COPILOT_EXTENSIONS_TOOLCHAIN_CONFIG",
+    "UV_DEFAULT_INDEX", "UV_INDEX_URL", "UV_INDEX", "UV_EXTRA_INDEX_URL",
+    "UV_FIND_LINKS", "UV_CONFIG_FILE", "UV_NO_CONFIG", "UV_NO_INDEX", "UV_INSECURE_HOST",
+    "UV_PYTHON_INSTALL_MIRROR", "UV_INSTALLER_GITHUB_BASE_URL",
+    "UV_INSTALLER_GHE_BASE_URL", "UV_DOWNLOAD_URL", "INSTALLER_DOWNLOAD_URL",
+    "PIP_INDEX_URL", "PIP_EXTRA_INDEX_URL", "PIP_FIND_LINKS", "PIP_CONFIG_FILE",
+    "PIP_NO_INDEX", "PIP_TRUSTED_HOST",
+    "NPM_CONFIG_REGISTRY", "NPM_CONFIG_USERCONFIG", "NPM_CONFIG_GLOBALCONFIG",
+    "HOME", "USERPROFILE", "APPDATA", "PROGRAMDATA",
+    "XDG_CONFIG_HOME", "XDG_CONFIG_DIRS", "VIRTUAL_ENV",
+)
+_NPM_CONTEXT_ALIASES = {
+    "COPILOT_EXTENSIONS_NPM_REGISTRY": "npm_config_registry",
+    "COPILOT_EXTENSIONS_NPM_USERCONFIG": "npm_config_userconfig",
+    "COPILOT_EXTENSIONS_NPM_GLOBALCONFIG": "npm_config_globalconfig",
+}
+_SUPPORTED_CONTEXT_KEYS = (*_CONTEXT_KEYS, *_TOOLCHAIN_CONTEXT_KEYS, _TOOLCHAIN_REQUEST_KEY, *_NPM_CONTEXT_ALIASES)
+TOOLCHAIN_REQUEST_CONTEXT = {
+    "schema": "copilot-extensions.toolchain-request-context", "version": 1,
+}
+RUNTIME_BACKEND_INTENT_CAPABILITY = update_options.RUNTIME_BACKEND_INTENT_CAPABILITY
 
 
 def _context() -> tuple[tuple[str, str], ...]:
     return tuple((key, os.environ[key]) for key in _CONTEXT_KEYS if key in os.environ)
 
 
-def _current_authority(driver, **kwargs):
+def _execution_context_keys(values: Mapping[str, str]) -> tuple[str, ...]:
+    feature = values.keys() - set(_CONTEXT_KEYS)
+    if values.keys() - set(_SUPPORTED_CONTEXT_KEYS):
+        raise ValueError("update request contains unsupported execution context")
+    if feature and (
+        values.get(_TOOLCHAIN_REQUEST_KEY) != "1"
+        or not values.get("COPILOT_EXTENSIONS_TOOLCHAIN_CONFIG")
+    ):
+        raise ValueError("update request requires toolchain request context v1")
+    return _SUPPORTED_CONTEXT_KEYS if feature else _CONTEXT_KEYS
+
+
+def _current_authority(driver: Any, **kwargs: Any) -> Any:
     inspect = getattr(driver, "current_authority", None)
     if not callable(inspect):
         raise driver.StateError("selected update driver lacks authority support")
@@ -39,6 +78,11 @@ def _invocation_cwd() -> Path:
 
 def _request_context(*, controller: bool = False, cwd: Path | None = None) -> tuple[tuple[str, str], ...]:
     context = dict(_context())
+    if os.environ.get(_TOOLCHAIN_REQUEST_KEY):
+        context.update(
+            (key, os.environ[key]) for key in _SUPPORTED_CONTEXT_KEYS if key in os.environ
+        )
+        _execution_context_keys(context)
     if context.get("AGENT_HOME", "").strip():
         context["AGENT_HOME"] = str(cfg._home())
     selected = update_cli._invocation_update_context()
@@ -75,23 +119,29 @@ def _request_context(*, controller: bool = False, cwd: Path | None = None) -> tu
 
 
 @contextmanager
-def _execution_context(context):
+def _execution_context(
+    context: Mapping[str, str] | Iterable[tuple[str, str]],
+) -> Iterator[None]:
     values = dict(context)
-    if values.keys() - set(_CONTEXT_KEYS):
-        raise ValueError("update request contains unsupported execution context")
-    previous = dict(_context())
+    keys = _execution_context_keys(values)
+    if values.get(_TOOLCHAIN_REQUEST_KEY) == "1" and os.name != "nt":
+        keys = (*keys, *_NPM_CONTEXT_ALIASES.values())
+        for encoded, original in _NPM_CONTEXT_ALIASES.items():
+            if encoded in values:
+                values[original] = values[encoded]
+    previous = {key: os.environ[key] for key in keys if key in os.environ}
     try:
-        for key in _CONTEXT_KEYS:
+        for key in keys:
             os.environ.pop(key, None)
         os.environ.update(values)
         yield
     finally:
-        for key in _CONTEXT_KEYS:
+        for key in keys:
             os.environ.pop(key, None)
         os.environ.update(previous)
 
 
-def _report(request, as_json: bool = False) -> None:
+def _report(request: Any, as_json: bool = False) -> None:
     data = {
         "request_id": request.id, "state": request.state, "exit_code": request.exit_code,
         "error": request.error, "log_path": str(request.log_path),
@@ -103,7 +153,7 @@ def _report(request, as_json: bool = False) -> None:
     flags = getattr(getattr(request, "spec", None), "argv", ())
     phase = next((
         flags[index + 1] for index, flag in enumerate(flags[:-1])
-        if flag == "--phase" and flags[index + 1] in update_cli.update_options.UPDATE_PHASES
+        if flag == "--phase" and flags[index + 1] in update_options.UPDATE_PHASES
     ), None)
     if phase:
         data.update(
@@ -132,7 +182,7 @@ def cmd_update_request(args: argparse.Namespace) -> int:
     import update_driver as driver
 
     controller = os.environ.pop("AGENT_WORKTREES_INTERNAL_PROJECT_CONTROLLER", "") == "1"
-    update_cli.update_options.validate_auth_flags(args)
+    update_options.validate_auth_flags(args)
     if getattr(args, "inventory", False):
         from .installation_updates import print_inventory
 
@@ -202,7 +252,7 @@ def cmd_update_request(args: argparse.Namespace) -> int:
         custody = driver.borrowed_custody()
         if custody is not None:
             with custody:
-                request = driver.status(custody.request_id, root=custody.root)
+                request = cast("Request", driver.status(custody.request_id, root=custody.root))
                 if request.state != "running" or request.spec.backend not in {
                     "manager", "engine", "source-recovery",
                 }:
@@ -285,7 +335,8 @@ def cmd_update_request(args: argparse.Namespace) -> int:
         )
         request = driver.enqueue(
             spec, runner=driver.TrustedRunner(
-                argv, str(cwd), env=tuple(environment.items()), context_keys=_CONTEXT_KEYS,
+                argv, str(cwd), env=tuple(environment.items()),
+                context_keys=_execution_context_keys(dict(spec.context)),
             ),
         )
         print(f"Update request {request.id}; log: {request.log_path}", file=sys.stderr)

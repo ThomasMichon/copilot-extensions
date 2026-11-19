@@ -1,0 +1,9 @@
+{
+  "comment": "Add platform-isolated Linux health-job enrollment and journaled native pair recovery",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}

@@ -3,7 +3,31 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
-- [2026-11-17 - Fleet receiving refinements and remote configuration scope](journal/2026/11.17-fleet-refinements-and-remote-scope.md)
+- [2026-11-19 - Non-live cause reconciliation and current identity accounting](journal/2026/11.19-non-live-cause-reconciliation-and-identity-accounting.md)
+
+- [2026-11-19 - Current qualification and retained ownership](journal/2026/11.19-current-qualification-and-retained-ownership.md)
+
+- [2026-11-19 - Native readiness and retained Vault boundaries](journal/2026/11.19-native-readiness-and-vault-boundaries.md)
+
+- [2026-11-19 - Managed metadata and finite source completions](journal/2026/11.19-managed-metadata-and-finite-source-completions.md)
+
+- [2026-11-19 - Original-reviewer completion and retained presentation acceptance](journal/2026/11.19-original-reviewer-and-presentation-acceptance.md)
+
+- [2026-11-19 - Cache source acceptance and actual delivery boundaries](journal/2026/11.19-cache-source-acceptance-and-delivery-boundaries.md)
+
+- [2026-11-19 - Qualified inflow source completion and retained acceptance](journal/2026/11.19-qualified-inflow-source-completions.md)
+
+- [2026-11-19 - Keeper continuation proposal and accepted finite receiving](journal/2026/11.19-keeper-continuation-and-liveness-receipts.md)
+
+- [2026-11-18 - Finite liveness, reaper and publisher receiving](journal/2026/11.18-liveness-reaper-and-publication-receiving.md)
+
+- [2026-11-18 - Complete finite terminal, offline-job and fixture receiving](journal/2026/11.18-terminal-and-offline-receiving.md)
+
+- [2026-11-18 - Selected-PR receiving and finite source closeout](journal/2026/11.18-selected-pr-receiving-and-source-closeout.md)
+
+- [2026-11-18 - Finite lifecycle receiving and corrective closeout](journal/2026/11.18-lifecycle-receiving-and-corrective-closeout.md)
+
+- [2026-11-17 - Fleet/delivery receiving, remote scope and corrected tracker dispositions](journal/2026/11.17-fleet-refinements-and-remote-scope.md)
 
 - [2026-11-17 - Finite lifecycle receiving and accepted timeout tracking](journal/2026/11.17-lifecycle-receiving-and-timeout-retirement.md)
 

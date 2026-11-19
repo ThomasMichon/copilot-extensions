@@ -57,6 +57,17 @@ also owns explicit whole-table-budgeted scalar consolidation when ordinary
 ingestion reaches its segment ceiling. It does not migrate legacy stores or
 run corpus-sized maintenance automatically.
 
+An additional opt-in [raw file-point observation](file-projection.md) binds the
+configured domain/model mapping, caps same-path candidates before source
+filtering and retains complete raw content/vector rows under the same exclusion.
+It prepares no index and certifies neither ordered application nor deletion.
+
+The opt-in [native component ledger](component-ledger.md) retains scoped ordering,
+tombstones and raw point observations under that same writer. Its independent
+table identity/version binding detects lost history even after an unrelated
+participating write. It supplies evidence machinery, not a component executor
+or an applied-content certificate.
+
 An in-process connector may opt into `DeltaSourceConnector.discover_delta()`,
 returning a version-1 `SourceDelta` with changed `FileEntry` values, explicit
 `DeletedFile` tombstones, its target checkpoint and complete-acquisition status.
@@ -92,7 +103,7 @@ refuse it rather than interpreting partial acquisition as a complete manifest.
 Finish pending work before rollback or switching to hints, full reconciliation
 or a connector without paged support. An explicit caller-authorized
 `indexing.paged_crawl.discard_acquisition` repair may instead abandon only an
-**unapplied v2 or v4** acquisition. It requires the original actual connector,
+**unapplied v2, v4 or v5** acquisition. It requires the original actual connector,
 configuration scope, path database and exact observed payload; the owning
 journal compares those under its existing SQLite transaction before removing
 the row. Concurrent progress or promotion to a complete v1 manifest refuses
@@ -160,18 +171,168 @@ GitHub snapshot. GitHub full acquisition and durable
 recovery within one item's comment pages remain separate adapter work; they are
 not supplied by this bounded polling contract.
 
+The pure `sources.azure_devops_query_scope.restrict_wiql_to_candidates` helper
+constructs candidate-restricted flat WIQL for later adapter integration. It
+parses bracketed reference names, simple single-quoted/numeric literals,
+comparisons, `IN`/`NOT IN`, `AND`/`OR`, grouping and optional ordering, then
+intersects the entire predicate with 1-100 positive int32 IDs. Source query
+strings remain unchanged. Other syntax, macros, history/link queries, escaped
+quotes and backslashes refuse instead of becoming unrestricted selection.
+Input/output queries have a 32,000-character limit; token and nesting budgets
+bound parsing. This helper performs no network calls, field-type validation or
+change-coverage qualification. It is not wired into acquisition or advertised
+as hint/page support. Its selection controls execute the SQL-compatible subset
+against synthetic SQLite rows, not a live Azure DevOps parser.
+
+`AzureDevOpsConnector.work_item_eligibility(id)` is a separate read-only
+membership operation, not a discovery capability. With no configured work-item
+queries it returns `None` without I/O. Otherwise it accepts one positive int32
+candidate and at most sixteen configured queries, requests fresh account and
+saved-definition bodies, qualifies every member against the flat literal
+grammar, and executes each singleton-restricted query. A union member cannot be
+silently skipped, including after another member matches. Saved definitions must
+match the requested ID, be flat and not be folders, deleted or invalid queries.
+Unsupported definitions, provider errors, bodyless responses, continuation and
+unexpected identities refuse the operation. Documented omitted/null empty
+work-item collections remain valid with an explicit flat result type.
+
+The maximum is 33 logical requests: one account, sixteen saved definitions and
+sixteen selections; the shared client's four retries bound this to 165 attempts
+under its default policy. Cancellation is checked between requests and after
+responses, not during the client's retry/backoff loop. Singleton predicates
+allow at most one matching identity without interpreting `$top` or short pages
+as completeness. The immutable result retains membership, endpoint/project/
+account scope and a binding of the configured specifications and actual saved
+definitions used. It changes no query specification, path inventory, journal or
+cursor. Ineligibility is **not** physical-deletion or complete-reconciliation
+authority. Synthetic transport controls qualify request construction, refusal,
+bindings and counts; live field/parser semantics and complete event/polling/
+repair coverage remain separate gates before adapter enablement.
+
+`sources.azure_devops_work_item.acquire_work_item` is a stateless helper for
+one previously qualified candidate and one positive int32 item revision.
+It rechecks the full current selection binding before body acquisition and
+afterwards, requires two matching fresh item bodies at that revision, and
+reuses the connector's renderer and acquisition counters. Empty configuration
+or bound negative membership returns `None`, never a tombstone. Unavailable
+responses, identity/revision changes, partial comments and exhausted budgets
+raise instead of returning a truncated entry or falling back to legacy discovery.
+
+The fixed ceiling is two eligibility checks, two body reads and four comment
+pages: 72 logical requests / 360 shared-client attempts with at most four retries
+per request. Larger retry configurations refuse before I/O. Comment requests use
+the documented `7.1-preview.4` API with `$top=100`, ascending order and deleted
+records included; deleted text is not rendered. Counts, unique item/comment
+identities and versions, stable total counts, bounded noncycling continuation
+tokens and terminal record coverage are validated. At most 400 comments and
+2 MiB of serialized decoded body/comment responses are accepted, with a separate
+2 MiB rendered-content cap. These checks occur **after** HTTP buffering and JSON
+decoding; they do not bound wire bytes, peak native memory, parsing time or
+provider-directed backoff. Cancellation is checked between logical requests.
+
+The result carries observed item/comment versions and selection evidence, not
+an atomic snapshot, polling checkpoint or complete discussion-change coverage.
+The [comments API](https://learn.microsoft.com/en-us/rest/api/azure/devops/wit/comments/get-comments?view=azure-devops-rest-7.1)
+documents pagination but no snapshot fence. Matching item reads cannot prove
+that comment edits/deletes did not race traversal. This helper therefore emits
+neither `SourceDelta` nor `AcquisitionPage` and is not wired into discovery;
+adapter composition and target-coverage qualification remain separate work.
+
 Azure DevOps retains operator-supplied WIQL and saved queries verbatim. Its
-legacy timestamp discovery first requests only `System.Id` and
+work-item-only timestamp discovery first requests only `System.Id` and
 `System.ChangedDate` in batches of at most 200 query-selected identities, then
 hydrates full bodies and comments only for identities in the overlap window.
+Nonempty change markers must parse as timestamps and support the configured
+overlap; invalid, non-finite or out-of-range values refuse before incremental
+provider acquisition, rather than losing the cutoff and acquiring full bodies.
+UTC/offset ISO timestamps, naive timestamps treated as UTC and epoch seconds
+remain supported. `None` and empty markers retain explicit full-discovery
+compatibility; refusal never repairs or replaces a checkpoint.
 Missing, duplicate, unexpected or invalid metadata refuses acquisition rather
-than silently dropping work. Explicit full discovery still fetches every
-selected body; ID-only listing remains unchanged. This reduces body transfer,
-not the number of selected identities: ordinary discovery still scans all
-query-selected IDs and timestamps. Azure DevOps does not yet implement the
+than silently dropping work. With PR queries configured, a nonempty timestamp
+instead refuses before any acquisition: the PR-list API's `minTime` filters
+creation/closure, not later description or comment changes. The connector does
+not silently replace this unsupported update feed with a full scan.
+Explicit full discovery still fetches every selected body; ID-only listing
+remains unchanged. The legacy engine receives no complete project cursor from
+`current_commit()`, so its ordinary acquisition still takes the legacy full
+path, not the work-item timestamp optimization. Even that optimization reduces
+body transfer, not the number of query-selected identities and timestamps.
+Every full-body work-item batch requests `errorPolicy=fail` and must return
+exactly one integer-ID record with a fields object per requested identity.
+Missing, duplicate, unexpected or malformed rows refuse the entire acquisition
+before that batch's comments are read. Parsed records remain counted even on
+refusal; a partial body inventory cannot become full-crawl deletion evidence.
+Query results must contain a recognized collection or a documented `queryType`
+(`flat`, `oneHop`, or `tree`). The provider's
+[`WorkItems`](https://learn.microsoft.com/en-us/dotnet/api/microsoft.teamfoundation.workitemtracking.webapi.models.workitemqueryresult.workitems)
+and
+[`WorkItemRelations`](https://learn.microsoft.com/en-us/dotnet/api/microsoft.teamfoundation.workitemtracking.webapi.models.workitemqueryresult.workitemrelations)
+collections use `EmitDefaultValue=false`, while
+[`QueryType`](https://learn.microsoft.com/en-us/dotnet/api/microsoft.teamfoundation.workitemtracking.webapi.models.workitemqueryresult.querytype)
+does not: omitted/null default collections under a recognized query type remain
+valid empty results. Explicit collection-only responses remain supported.
+Malformed collections or selected references refuse acquisition; relation
+targets may be null. PR lists and thread lists require an explicit `value`
+array or the supported legacy bare array, with object records. An unrecognized
+object, including `{}` or a count without a value array, cannot certify an empty
+inventory. Parsed observations are recorded before validation and deduplication;
+they are not completeness evidence.
+PR inventories use the documented
+[`$skip`/`$top` pagination](https://learn.microsoft.com/en-us/rest/api/azure/devops/git/pull-requests/get-pull-requests-by-project?view=azure-devops-rest-7.1),
+not continuation headers. Each query retains its filters, advances the offset
+by the raw page length and stops only at an explicit empty page. Short pages
+can reflect a server-side cap and do not certify exhaustion. A positive integer
+`page_size` is required
+before network acquisition. Oversized pages and later nonempty pages containing
+no new query-selected identities refuse acquisition. Each query remains buffered
+until traversal completes, with cross-query identity deduplication afterward.
+Cancellation is checked before each page. Requests are unconditional because
+the shared HTTP validator cache does not retain response bodies; an unexpected
+304 refuses rather than returning an empty or partial inventory. Parsed-page
+observations and request counters remain intact on later failure.
+Saved-query selection results and PR review-thread bodies also request complete
+bodies without conditional validators. Repeated reads must retain selected
+identities and complete comments; an unexpected bodyless response refuses
+through the same response validation rather than certifying an empty source.
+Direct HTTP conditional-read support remains available outside these owners.
+The shared HTTP header-token helper remains available for APIs that use it,
+including repeat/cycle refusal and opaque-token preservation. Neither traversal
+budgets or persists its accumulated response memory. Mutable offsets do not
+provide concurrent-edit stability or immutable snapshot membership.
+Azure DevOps does not yet implement the
 shared paged acquisition journal, durable query progress, immutable full
 snapshots or authoritative tombstones. This legacy optimization does not
 qualify those delta-bounded or recovery gates.
+
+The PR-list API documents descriptions truncated up to 400 symbols, without
+a completeness flag or a specified Unicode truncation rule. The connector
+therefore does not infer completeness from preview length. After query eligibility
+and duplicate filtering, it point-reads every selected nonempty description
+through the configured project endpoint,
+requires the same PR/repository identity and a string/null/omitted description, and
+replaces the selected description. Empty descriptions need no extra read when
+the listing supplies a usable repository target.
+An unavailable or invalid detail response refuses acquisition rather than
+indexing a preview; the original query metadata and comment path remain intact.
+Nontext listing/detail descriptions refuse acquisition. Null or omitted
+descriptions mean empty text: the provider's `GitPullRequest.Description`
+serializer uses `EmitDefaultValue=false`, including after a description is cleared.
+Cancellation is checked again after the
+detail read, before requesting comments. Point-description reads are unconditional:
+the shared HTTP session caches validators, not the response bodies needed here.
+This adds no history enumeration, cursor capability or reconciliation authority.
+
+Selected PRs require positive integer identities before deduplication, including
+identity-only path inventories. Repository fields can be omitted/null under
+`GitPullRequest` serialization defaults; when the listing has no usable target,
+document acquisition uses the same project PR point-read to recover it. Missing
+or mismatched detail identities, unresolved targets and malformed repository
+shapes refuse acquisition rather than certify empty reviews. Thread comments
+accept omitted/null/empty collections and omitted/null text as provider defaults;
+non-array collections, non-object rows and nontext content refuse the document.
+The initial threads-404 compatibility remains. Parsed observations are recorded
+before these validations and do not certify source completeness.
 
 Work-item comments follow the comments API's JSON-body continuation tokens
 on the same selected work-item path, without following a supplied `nextPage`
@@ -768,7 +929,7 @@ The service binds `AGENT_INDEX_HOST` (default `127.0.0.1`) and
 | `GET /similar` | nearest neighbours for an indexed chunk |
 | `GET /clusters` | near-duplicate cluster artifact |
 | `POST /reindex` | enqueue background indexing unless draining/deps missing |
-| `POST /reindex/hints` | strictly validate and durably union version-1 acquisition hints |
+| `POST /reindex/hints` | strictly validate and durably union v1 acquisition hints or parked v2 point claims |
 | `POST /drain`, `/undrain` | zdd cutover drain gates; namespaced calls require the exact instance token |
 | `POST /promote` | instance- and transaction-owned pre-route passive promotion |
 | `POST /shutdown` | ownership-attested service shutdown used by CLI/cutover |
@@ -926,7 +1087,7 @@ dequeue preserves full-first ordering and FIFO within each tier.
 
 This is a **receiver-first expansion**. `dequeue_next()` retains legacy
 selection; only an explicit `dequeue_next(accept_change_hints=True)` may claim
-parked work. The runner opts in only when the exact engine callable selected in
+parked **v1** work. The runner opts in only when the exact engine callable selected in
 this runtime advertises v1 support. It rechecks before launch; the worker checks
 its own selected callable again before execution. A capability loss returns a
 claimed hinted task to `queued_hints`, without calling the engine or advancing
@@ -955,11 +1116,11 @@ and worker preserve the envelope; the capable engine retains responsibility
 for source/account admission, acquisition, checkpoints and all index mutations.
 
 `GET /health` adds `indexing_contract` with stable identity
-`agent-index.change-hints`, `intake_versions: [1]`, and separately computed
+`agent-index.change-hints`, `intake_versions: [1, 2]`, and separately computed
 `execution_versions` (`[]` unless the selected callable advertises v1).
 Advertising durable intake is not a claim that hinted execution is available.
 `POST /reindex/hints` accepts only `source`, optional `full: false`, and required
-`change_hints` containing the complete v1 envelope. It refuses unknown fields,
+`change_hints` containing a complete v1 or point-only v2 envelope. It refuses unknown fields,
 versions, duplicate JSON keys, mismatched scopes and oversized bodies before
 queue effects. Ordinary runner/dependency/drain availability checks still apply.
 Accepted responses include the stored task and its complete unioned payload.
@@ -988,13 +1149,187 @@ using postponed concrete annotations rather than newer `typing` exports.
 Deploy receivers before producers, and enable hinted execution only with a
 qualified capable engine. The shared engine now advertises v1 execution and
 preflights one exact configured source, the actual connector's
-`discover_hints` callable capability, and its explicit
+selected hinted-discovery callable capability, and its explicit
 `hint_scope == (canonical_family, account_id)` before opening stores or embedding
 clients. Aliases, synthesized sources and unsupported connectors are refused;
 there is no source-only polling fallback. The same connector supplies recovery
 identity and acquisition. Hinted failures propagate to a failed retryable task,
 not terminal partial success. Acquired manifests retain existing replay and
 store-before-checkpoint ordering.
+
+#### Point-only v2 intake (execution unsupported)
+
+`indexing.point_hints.PointChangeHints` is a separate immutable v2 envelope.
+Its exact source/family/account plus `PointBinding` form the union boundary.
+The binding retains effective nonsecret `endpoint`, `query_scope` (the exact
+query union), `query_context` (its definition/context), and the explicit
+`point-components` representation/version 1. Adapters own canonicalization
+and later eligibility/coverage validation; intake does not qualify those facts.
+Targets are `WorkItemRevisionTarget(item_id, revision, event_ids=())` or
+`CommentVersionTarget(item_id, comment_id, version, event_ids=())`, with positive
+integer versions and per-target event correlations. Distinct target versions,
+parents and correlations survive union. Broad v1 fields and unknown kinds are
+rejected. The original `ChangeHints` decoder, CLI and client remain v1-only.
+
+V2 intake retains claims as `queued_hints_v2` in the same task rows, with an
+immutable `change_hints_version` discriminator and additive `point_change_hints`
+payload column. The old `change_hints` column remains null for v2 so older
+unfiltered history readers can still decode their v1 payloads. New records and queued unions
+are bounded to 1,024 distinct targets and 1 MiB of serialized hint bytes; the
+HTTP request's existing 1 MiB/five-second read bound also applies. A refused
+union returns HTTP 409 without changing the existing row or notifying a worker.
+No target is dropped to fit a budget.
+
+The existing boolean dequeue opt-in still means **v1 only**. Version-aware
+selection excludes v2 before decoding or claiming; a v2 row cannot starve
+unrelated v1/plain work. Persisted triggers park old retry/release/status writes
+back into the version's own queue state and reject worker registration,
+processing, complete or partial status for v2. These fences survive a v1 runtime
+reopening the database. A legacy direct worker cannot register itself and invoke
+source-only indexing for a point row. An old decoder specifically inspecting v2
+JSON refuses it; old task readers see the unfamiliar status and no v1 payload,
+not reinterpreted targets. Retry/cancellation and a current
+decoder preserve the complete claim across reopen. No exact-build pin is kept.
+
+`TaskStore.pin_point_claim(task_id, expected_hints=...)` can explicitly freeze
+the **entire** observed v2 envelope while leaving the task parked. Under the
+existing SQLite writer transaction it compares every typed target, correlation
+and binding before assigning an opaque `point_claim_id`. A stale/partial
+snapshot refuses without changing the queue. Repeating the same pin returns
+the retained identity; retries retain it as well. This is a queue-snapshot
+identity, not a build pin or proof of acquisition/application.
+
+New arrivals union only into unpinned rows, so deliveries after the pin create
+or extend trailing work, even if they repeat an already pinned target. A
+separate durable trigger rejects changes to a pinned task's identity, full
+flag, source, hint version, complete payload or pin; an older runtime replacing
+the original hints trigger cannot remove this protection. Every write targeting
+those protected columns refuses, including unchanged duplicate/subset unions:
+an old writer must not report a post-pin delivery accepted by the frozen row.
+Legacy plain/v1 rows and their positional `TaskRecord` constructor remain unchanged.
+No runner or HTTP/CLI producer calls this Python-only pin operation.
+
+The standalone Python helper
+`sources.azure_devops_points.acquire_named_point(connector, claim=..., target=..., expected=...)`
+can read one exact work-item revision or comment version from such a claim.
+`expected` is the existing singleton `WorkItemEligibility` observation. The
+claim must select canonical family `<connector.source_name>:workitem-components`,
+the effective account and endpoint, `point-components` v1, the sorted JSON
+configured work-item query union as `query_scope`, and the eligibility
+definition/context digest as `query_context`. Candidate, account, endpoint
+and query bindings are checked before I/O, then the existing full query-union
+eligibility owner runs before and after the single named-version read.
+
+Work-item bodies use Revisions Get (`7.1`) at the exact revision and reuse the
+existing fields renderer without comments, under `workitems/<item>/body.md`.
+An associated `commentVersionRef` neither expands the claim nor fetches or covers
+discussion. Named comments use Comments Versions Get (`7.1-preview.1`) at
+`workitems/<item>/comments/<comment>/versions/<version>`. That model has no parent
+field, so the helper checks the **actual response request** against its exact
+parent-bound request; a redirected or substituted request refuses. Comment ID,
+version, complete text or explicit boolean deletion state must match. A deleted
+version produces only `workitems/<item>/comments/<comment>.md` deletion input and
+its ordering record, never a work-item or legacy-family tombstone. Permission
+denial, missing items, query exit, mismatched versions and partial bodies refuse.
+
+The result is a `NamedPointObservation`: complete retained claim and selected
+target, query observation, component ordering input and either an entry or a
+point deletion. It is not a `SourceDelta`, acquisition page, durable applied
+record or whole-claim completion. Rendered entries report acquired provider
+version and `named-target-only` coverage, not an applied-version certificate.
+Default discovery, the combined renderer's identity and every execution fence
+remain unchanged; no callable advertises v2 acquisition/execution.
+
+The helper permits at most 67 logical requests / 335 shared HTTP attempts:
+two eligibility checks, each bounded to sixteen queries, and one version read.
+It checks cancellation between requests and refuses an excessive shared retry
+configuration. Accepted serialized decoded response and rendered content/metadata
+are each capped at 2 MiB after HTTP/JSON decoding; this is not a transport-byte,
+peak-memory or elapsed-time bound. Stage counts retain actual component-family
+body records even when subsequent decoding qualification refuses them. Live
+provider/workload qualification and durable per-target pending/application
+composition remain separate requirements.
+
+There is **no v2 execution capability**, even if a selected callable has v1
+support. No runner selects point work, no engine/connector is invoked for it,
+and intake does not enable a producer or source. Ordered component application,
+deletion-version evidence, read isolation and native recovery must be implemented
+and qualified before a future owner expands v2 claiming/execution. Existing
+combined documents, polling checkpoints, default readers and v1 work remain
+unchanged. Rollback preserves v2 rows; use a compatible current decoder for
+point inspection/retry, not a legacy source-only execution fallback.
+
+#### Component recovery carrier (application unsupported)
+
+`CrawlManifest.component_versions` optionally retains a strict
+`ComponentVersion(source, path, version, semantics)` for every upsert and
+deletion. Positive provider versions are local to the same scoped component;
+`semantics` identifies its representation/rendering contract, not an embedding
+profile. Missing, duplicate or extra identities refuse the manifest. This is
+acquired ordering input, not evidence that a version or deletion was applied.
+`FileEntry`, `DeletedFile` and legacy manifests retain their existing wire shape.
+
+The existing `PendingCrawls` owner stores this carrier in an incremental-only
+v8 envelope, under its existing opaque recovery scope. A qualified caller must
+bind the effective account/endpoint/query/representation to that scope; the
+carrier does not establish those provider facts. Older decoders reject v8;
+current decoders reject ordered
+metadata in legacy envelopes. Component carriers cannot certify polling refresh
+or full reconciliation. Reopen, exact-parent CAS and explicit scope checks retain
+the evidence without translating it into legacy work.
+
+Ordinary recovery and direct prepared/application entrypoints refuse these
+manifests before publication, embedding or store mutation. The pending owner also refuses
+v8-to-legacy or changed-v8 replacement and premature completion in the same
+SQLite transaction that would change the parent; refusal retains the original
+payload. An identical v8 retry is accepted without rewriting the retained row.
+
+An explicit Python caller can capture `PendingPointClaim.from_task(pinned_task)`
+and pass it to `PendingCrawls.save(..., point_claim=claim)`. This stores a strict
+incremental-only **v9** envelope containing the whole immutable queue snapshot:
+task ID, `point_claim_id`, all typed targets and their complete account, endpoint,
+query and representation binding. Source and canonical component family must
+match the acquired manifest; polling refresh is forbidden. This retains intended
+work, not proof that the manifest acquired every target or that the task is
+still eligible. Manifest component versions alone cannot establish that coverage.
+
+Only `decode_point_pending` and an explicitly claim-bound
+`PreparedJournal(..., point_claim=claim)` read this envelope. Prepared cache
+creation compares the entire claim and manifest, then rechecks the exact
+source/scope/payload under the existing writer transaction; reuse stays bound to
+that parent's durable incarnation. An optional subordinate cache field is not
+the compatibility boundary. Ordinary decoders, recovery and application refuse
+v9 rather than stripping the claim. Durable pending-table triggers also refuse
+updates, deletion and replacement of a v9 parent by older journal writers,
+including SQLite replacement inserts with the same source. Existing plain and
+v8 journal operations retain their contracts.
+
+V9 completion and discard remain unsupported. Cancellation does not make the
+retained claim successful, and later queue arrivals remain trailing work.
+Future whole-claim completion must recheck the queue owner and bind per-target
+outcomes before retiring the exact pending parent, without advancing polling
+state. No runner, producer or native application selects this new envelope.
+
+`ComponentContent.covered_by` is a pure ordering comparison, not stored evidence.
+It compares matching source/path identities, considers lower versions covered,
+and requires equal-version fingerprints, deletion state and rendering semantics
+to match. A newer version is not covered. The caller must supply a qualified
+canonical fingerprint and retained applied record. The opt-in
+[native ledger](component-ledger.md) retains ordering/raw-point observations.
+Its explicit [native application](component-ledger.md#explicit-native-application)
+qualifies pending-parent, raw-point, fingerprint, routed-model and path evidence,
+then applies selected points under the existing writer without polling or claim
+completion. Its explicit
+[sealed publication continuation](component-ledger.md#sealed-native-publication-suffix)
+can reconcile ordering/path suffixes only after the native phase is fully
+qualified and durably sealed under those same owners.
+
+There is no advertised component execution capability or producer. Automatic
+partial-effect/backup reconciliation, whole-claim completion and explicit read
+isolation remain required before recovery refusal or the v2 queue fences can be
+expanded. Ordinary reopening still refuses dirty/uncertain state; an unknown
+mid-native effect cannot be recovered from cached bytes or surviving rows.
+These helpers do not change legacy callers or default readers.
 
 An in-process connector opts in by advertising `change_hints_versions = (1,)`
 on its actual `discover_hints(hints, last_commit, *, cancel_check=None)` callable.
@@ -1003,6 +1338,44 @@ exactly, including `None`: targeted events do not prove coverage of intervening
 poll changes. An unchanged or changed polling cursor is not inferred from event
 IDs. Existing unadvertised workers still park hinted tasks after rollback.
 External CLI providers do not yet support hinted acquisition.
+
+For bounded in-process work, a connector can instead expose
+`discover_hints_page(hints, last_commit, cursor, *, cancel_check=None)`.
+The actual callable must advertise both `change_hints_versions = (1,)` and
+`acquisition_page_versions = (1,)`. It returns `AcquisitionPage` units, preserving
+`last_commit` on **every** page. Units must bound nested item/comment work too;
+an unbounded document acquisition wrapped in a page is not this contract.
+Only a terminal cursor completes the claimed hints, never polling coverage.
+
+The collector selects negotiated hinted pages before the legacy single-delta
+callable. With no negotiated page capability, existing nonpaged hinted callers
+retain their original contract; once paged work is pending, losing that
+capability refuses rather than downgrading. The same `pending_crawls` owner uses
+an incomplete v5 envelope containing the immutable full hint union (including
+events, ref ranges and metadata revisions), refresh-retention policy, base
+checkpoint, opaque cursor and generation. Recovery scope still binds the
+effective connector/account. A changed binding refuses before requesting
+another unit. The existing 128-unit invocation and 65,536-byte cursor limits,
+CAS, family exclusion, cancellation and explicit-discard rules apply. Older
+readers reject incomplete v5 state; finish or explicitly discard it before
+rollback. Ordinary v2 pages, full v4 snapshots and nonpaged hints are unchanged.
+
+Terminal acquisition hands its completed manifest to the existing replay owner,
+preserving store-before-checkpoint ordering. For a connector already requiring poll refresh,
+candidate generations are retained atomically with terminal promotion in the
+current refresh owner. Partial hinted pages certify no refresh coverage,
+and completion does not clear candidates or advance the polling cursor.
+This shared seam does not enable any additional built-in connector.
+
+Hinted progress retains per-generation cursor digests, including across restart,
+so multi-step cycles refuse without replacing the last accepted unit. Terminal
+hinted work uses a ready v6 envelope retaining its immutable claim identity.
+After an embedding or state-publication failure, matching claimed hints replay
+that ready manifest without reacquiring remote units. Different claims and
+legacy nonpaged requests retain their acquisition behavior. Completion clears
+only the exact observed payload; ready v6 work is mandatory replay and never
+eligible for acquisition discard. Finish its replay before rollback to an older
+reader. This is retained ready work, not a ledger of every completed hint claim.
 
 Git implements ref-range hints with immutable full hexadecimal commit identities.
 It requires the exact configured source and an explicit nonsecret `hint_account`;

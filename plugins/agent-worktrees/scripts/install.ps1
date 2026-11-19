@@ -3206,8 +3206,35 @@ function Deploy-PythonRuntime {
             '--result', $resultPath, '--expected-source-identity', $sourcePin) + $modeArgs
         $detail = Invoke-Hidden -FilePath $base -ArgList $arguments -StreamErrorOutput
         if ($detail) { Write-Host $detail }
-        if ($LASTEXITCODE -eq 2) { exit 2 }
-        if ($LASTEXITCODE -ne 0) { throw "Python runtime lifecycle failed (exit $LASTEXITCODE)." }
+        $runtimeExitCode = $LASTEXITCODE
+        if ($runtimeExitCode -eq 2) { exit 2 }
+        if ($runtimeExitCode -ne 0) {
+            $failureDetail = ''
+            if ($runtimeExitCode -eq 1) {
+                try {
+                    $failedJson = Get-Content -LiteralPath $resultPath -Raw -Encoding UTF8 -ErrorAction Stop
+                    if (-not $failedJson.TrimStart().StartsWith('{')) {
+                        throw 'Lifecycle refusal result must be a JSON object'
+                    }
+                    $failedResult = $failedJson | ConvertFrom-Json -ErrorAction Stop
+                    $refusal = $failedResult.installation_refused
+                    $fields = @($refusal.PSObject.Properties.Name)
+                    if (@($failedResult.PSObject.Properties.Name) -ccontains 'runtime_version' -and
+                        $failedResult.runtime_version -is [string] -and $failedResult.runtime_version -and
+                        $fields.Count -eq 4 -and @($fields | Where-Object {
+                            $_ -cnotin @('version','settled','publication_committed','error')
+                        }).Count -eq 0 -and
+                        ($refusal.version -is [int] -or $refusal.version -is [long]) -and $refusal.version -eq 1 -and
+                        $refusal.settled -is [bool] -and $refusal.settled -eq $true -and
+                        $refusal.publication_committed -is [bool] -and
+                        $refusal.error -is [string] -and -not [string]::IsNullOrWhiteSpace($refusal.error)) {
+                        $committed = $refusal.publication_committed.ToString().ToLowerInvariant()
+                        $failureDetail = " $($refusal.error) (publication_committed=$committed)."
+                    }
+                } catch { }
+            }
+            throw "Python runtime lifecycle failed (exit $runtimeExitCode).$failureDetail"
+        }
         $result = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
         if (-not $result.runtime_version -or -not $result.runtime_python) {
             throw 'Python runtime lifecycle returned an incomplete result.'

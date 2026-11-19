@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify owned producer sibling allocation identity across native dispositions.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

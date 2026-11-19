@@ -176,6 +176,8 @@ Retain only the prior compact terminal summary, not old conversation bodies.
   No new remote retirement operation or automatic cleanup worker is implied;
   retained-reader transition and broader feedback/write, provider and
   installed gates remain separate.
+  The [retained terminal-reader transition proposal](retained-terminal-reader-transition.md)
+  supplies the next bounded host-level adoption leaf; review precedes behavior.
 
 Each runtime leaf needs normal review and focused supervised validation.
 Source acceptance is not installed adoption, live provider qualification,

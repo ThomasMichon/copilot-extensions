@@ -31,6 +31,268 @@ if ($args.Count -eq 1 -and $args[0] -ceq '--describe-source-inputs') {
     exit 0
 }
 
+if ($args.Count -eq 1 -and $args[0] -ceq '--describe-toolchain-config') {
+    [Console]::Out.WriteLine('{"schema":"copilot-extensions.toolchain-config","version":1,"capabilities":["native-file","python-index","python-install-mirror","uv-install-mirror","npm-registry","request-context-v1"]}')
+    exit 0
+}
+
+# This grammar intentionally needs neither Python, uv, Node nor a TOML module.
+$ToolchainConfig = $env:COPILOT_EXTENSIONS_TOOLCHAIN_CONFIG
+if ($args.Count -and $args[0] -ceq '--toolchain-config') {
+    if ($args.Count -lt 2 -or [string]::IsNullOrWhiteSpace($args[1])) {
+        throw '--toolchain-config requires an absolute file.'
+    }
+    if ($ToolchainConfig -and [IO.Path]::GetFullPath($ToolchainConfig) -cne [IO.Path]::GetFullPath($args[1])) {
+        throw 'Explicit toolchain configuration conflicts with the environment selection.'
+    }
+    $ToolchainConfig = $args[1]
+    $args = @($args | Select-Object -Skip 2)
+}
+if ($args -contains '--toolchain-config') { throw '--toolchain-config must occur once, before other arguments.' }
+$ToolchainRoot = if ($env:WORKTREE_MANAGER_ROOT) { $env:WORKTREE_MANAGER_ROOT } else {
+    Join-Path $env:USERPROFILE '.worktree-manager'
+}
+if (-not $ToolchainConfig) {
+    foreach ($candidate in @(
+        (Join-Path (Get-Location).Path '.copilot-extensions\toolchain.conf'),
+        (Join-Path $ToolchainRoot 'toolchain.conf')
+    )) {
+        if (Test-Path -LiteralPath $candidate) { $ToolchainConfig = $candidate; break }
+    }
+}
+$ToolchainValues = @{}
+$ToolchainEnvironment = [Collections.Generic.Dictionary[string,string]]::new([StringComparer]::Ordinal)
+if ($ToolchainConfig) {
+    if (-not [IO.Path]::IsPathRooted($ToolchainConfig)) { throw 'Toolchain configuration must be absolute.' }
+    $file = Get-Item -LiteralPath $ToolchainConfig -Force
+    if ($file.PSIsContainer -or $file.Length -gt 16384 -or
+        ($file.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw 'Toolchain configuration must be a small ordinary file.'
+    }
+    foreach ($byte in [IO.File]::ReadAllBytes($file.FullName)) {
+        if ($byte -gt 126 -or ($byte -lt 32 -and $byte -notin @(9, 10, 13))) {
+            throw 'Toolchain configuration must be plain ASCII text.'
+        }
+    }
+    foreach ($line in [IO.File]::ReadAllLines($file.FullName)) {
+        if ($line -match '^\s*(#.*)?$') { continue }
+        if ($line -cnotmatch '^([a-z_]+)=([^\s]+)$') { throw 'Malformed toolchain configuration.' }
+        $key, $value = $Matches[1], $Matches[2]
+        if ($key -cnotin @('schema', 'python_index_url', 'python_install_mirror', 'uv_install_mirror', 'npm_registry') -or
+            $ToolchainValues.ContainsKey($key)) { throw 'Unknown or duplicate toolchain configuration key.' }
+        if (($key -ceq 'schema' -and $value -cne '1') -or
+            ($key -cne 'schema' -and ($value.Length -gt 2048 -or
+                $value -cnotmatch '^https://[A-Za-z0-9.-]+(?::[0-9]+)?(?:/[A-Za-z0-9._~:/+-]*)?$'))) {
+            throw 'Unsupported toolchain schema or source URL.'
+        }
+        $ToolchainValues[$key] = $value
+    }
+    if ($ToolchainValues['schema'] -cne '1' -or $ToolchainValues.Count -lt 2) {
+        throw 'Toolchain configuration requires schema=1 and a source.'
+    }
+    $mapping = @{
+        python_index_url = @('UV_DEFAULT_INDEX', 'PIP_INDEX_URL', 'UV_INDEX_URL')
+        python_install_mirror = @('UV_PYTHON_INSTALL_MIRROR')
+        uv_install_mirror = @('UV_INSTALLER_GITHUB_BASE_URL')
+        npm_registry = @('npm_config_registry', 'NPM_CONFIG_REGISTRY')
+    }
+    foreach ($key in $mapping.Keys) {
+        if (-not $ToolchainValues.ContainsKey($key)) { continue }
+        foreach ($name in $mapping[$key]) {
+            $current = [Environment]::GetEnvironmentVariable($name)
+            if ($current -and $current.TrimEnd('/') -cne $ToolchainValues[$key].TrimEnd('/')) {
+                throw "$name conflicts with toolchain configuration."
+            }
+            if ($name -cne 'UV_INDEX_URL') { $ToolchainEnvironment[$name] = $ToolchainValues[$key] }
+        }
+    }
+    if ($ToolchainValues.ContainsKey('python_index_url')) {
+        if ($env:PIP_CONFIG_FILE -in @('NUL', '/dev/null')) {
+            throw 'PIP_CONFIG_FILE disables native configuration.'
+        }
+        foreach ($name in @(
+            'UV_INDEX', 'UV_EXTRA_INDEX_URL', 'UV_FIND_LINKS',
+            'UV_INSECURE_HOST', 'UV_NO_INDEX', 'PIP_EXTRA_INDEX_URL',
+            'PIP_FIND_LINKS', 'PIP_TRUSTED_HOST', 'PIP_NO_INDEX'
+        )) {
+            if ([Environment]::GetEnvironmentVariable($name)) { throw "$name requires explicit source reconciliation." }
+        }
+    }
+    if ($ToolchainValues.ContainsKey('python_index_url') -or $ToolchainValues.ContainsKey('python_install_mirror')) {
+        foreach ($name in @('UV_CONFIG_FILE', 'UV_NO_CONFIG')) {
+            if ([Environment]::GetEnvironmentVariable($name)) { throw "$name requires explicit source reconciliation." }
+        }
+    }
+    if ($ToolchainValues.ContainsKey('uv_install_mirror')) {
+        foreach ($name in @('UV_DOWNLOAD_URL', 'INSTALLER_DOWNLOAD_URL', 'UV_INSTALLER_GHE_BASE_URL')) {
+            if ([Environment]::GetEnvironmentVariable($name)) { throw "$name requires explicit source reconciliation." }
+        }
+    }
+    $toolchainWindows = [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT
+    $toolchainDarwin = [bool](Get-Variable -Name IsMacOS -ValueOnly -ErrorAction SilentlyContinue)
+    $appdata = if ($toolchainWindows) {
+        if ($env:APPDATA) { $env:APPDATA } else { Join-Path $env:USERPROFILE 'AppData\Roaming' }
+    } else {
+        if ($env:XDG_CONFIG_HOME) { $env:XDG_CONFIG_HOME } else { Join-Path $env:HOME '.config' }
+    }
+    $nativeConfigs = @()
+    if ($ToolchainValues.ContainsKey('python_index_url')) {
+        if ($toolchainWindows) {
+            $bases = @($env:PROGRAMDATA)
+            if (-not $env:PIP_CONFIG_FILE) { $bases += @($env:USERPROFILE, $appdata) }
+            foreach ($base in $bases) {
+                if ($base) { $nativeConfigs += ,@((Join-Path $base 'pip\pip.ini'), 'pip') }
+            }
+        } elseif ($toolchainDarwin) {
+            $nativeConfigs += ,@('/Library/Application Support/pip/pip.conf', 'pip')
+            if (-not $env:PIP_CONFIG_FILE) {
+                $pipDirectory = Join-Path $env:HOME 'Library/Application Support/pip'
+                if (-not (Test-Path -LiteralPath $pipDirectory -PathType Container)) {
+                    $pipDirectory = Join-Path $env:HOME '.config/pip'
+                }
+                $nativeConfigs += ,@((Join-Path $env:HOME '.pip/pip.conf'), 'pip')
+                $nativeConfigs += ,@((Join-Path $pipDirectory 'pip.conf'), 'pip')
+            }
+        } else {
+            $nativeConfigs += ,@('/etc/pip.conf', 'pip')
+            if (-not $env:PIP_CONFIG_FILE) {
+                $nativeConfigs += ,@((Join-Path $env:HOME '.pip/pip.conf'), 'pip')
+                $nativeConfigs += ,@((Join-Path $appdata 'pip/pip.conf'), 'pip')
+            }
+            $xdgDirs = if ($env:XDG_CONFIG_DIRS) { $env:XDG_CONFIG_DIRS } else { '/etc/xdg' }
+            foreach ($base in ($xdgDirs -split ':')) {
+                $nativeConfigs += ,@((Join-Path $base 'pip/pip.conf'), 'pip')
+            }
+        }
+        if ($env:VIRTUAL_ENV) {
+            $site = if ($toolchainWindows) { 'pip.ini' } else { 'pip.conf' }
+            $nativeConfigs += ,@((Join-Path $env:VIRTUAL_ENV $site), 'pip')
+        }
+        if ($env:PIP_CONFIG_FILE) {
+            if (-not (Test-Path -LiteralPath $env:PIP_CONFIG_FILE -PathType Leaf)) {
+                throw 'Explicit pip configuration is unavailable.'
+            }
+            $nativeConfigs += ,@($env:PIP_CONFIG_FILE, 'pip')
+        }
+    }
+    if ($ToolchainValues.ContainsKey('python_index_url') -or $ToolchainValues.ContainsKey('python_install_mirror')) {
+        $nativeConfigs += ,@((Join-Path $appdata 'uv\uv.toml'), 'uv')
+        $systemCandidates = if ($toolchainWindows) {
+            if ($env:PROGRAMDATA) { Join-Path $env:PROGRAMDATA 'uv\uv.toml' }
+        } else {
+            $uvSystemDirs = if ($env:XDG_CONFIG_DIRS) { $env:XDG_CONFIG_DIRS } else { '/etc/xdg' }
+            if ($uvSystemDirs) {
+                foreach ($base in ($uvSystemDirs -split ':')) {
+                    if ($base) { Join-Path $base 'uv/uv.toml' }
+                }
+            }
+            '/etc/uv/uv.toml'
+        }
+        foreach ($candidate in $systemCandidates) {
+            if (Test-Path -LiteralPath $candidate) {
+                $nativeConfigs += ,@($candidate, 'uv')
+                break
+            }
+        }
+    }
+    if ($ToolchainValues.ContainsKey('npm_registry')) {
+        foreach ($suffix in @('USERCONFIG', 'GLOBALCONFIG')) {
+            $upper = [Environment]::GetEnvironmentVariable("NPM_CONFIG_$suffix")
+            $lower = [Environment]::GetEnvironmentVariable("npm_config_$($suffix.ToLowerInvariant())")
+            if ($upper -and $lower -and
+                $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($upper) -cne
+                $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($lower)) {
+                throw 'npm configuration-file selections conflict.'
+            }
+        }
+        $npmUser = if ($env:NPM_CONFIG_USERCONFIG) { $env:NPM_CONFIG_USERCONFIG } else {
+            if ($env:npm_config_userconfig) { $env:npm_config_userconfig } else {
+                $npmHome = if ($env:USERPROFILE) { $env:USERPROFILE } else { $env:HOME }
+                Join-Path $npmHome '.npmrc'
+            }
+        }
+        $nativeConfigs += ,@($npmUser, 'npm')
+        $npmGlobal = if ($env:NPM_CONFIG_GLOBALCONFIG) { $env:NPM_CONFIG_GLOBALCONFIG } else {
+            $env:npm_config_globalconfig
+        }
+        if ($npmGlobal) { $nativeConfigs += ,@($npmGlobal, 'npm') }
+    }
+    foreach ($entry in $nativeConfigs) {
+        $path, $kind = $entry
+        if (-not (Test-Path -LiteralPath $path)) { continue }
+        $item = Get-Item -LiteralPath $path -Force
+        if ($item.PSIsContainer -or $item.Length -gt 1048576 -or
+            ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            throw 'Native tool configuration is not a bounded ordinary file.'
+        }
+        $indexCount = 0
+        $defaultCount = 0
+        foreach ($line in [IO.File]::ReadAllLines($item.FullName)) {
+            if ($line -match '^\s*(#|;|$)') { continue }
+            if ($kind -eq 'pip') {
+                if ($line -match '^\s*(?:extra[-_]index[-_]url|find[-_]links|trusted[-_]host|no[-_]index)\s*[:=]') {
+                    throw 'Additional pip source selectors require reconciliation.'
+                }
+                if ($line -match '^\s*index[-_]url\s*[:=]\s*(.*?)\s*$' -and
+                    $Matches[1].TrimEnd('/') -cne $ToolchainValues['python_index_url'].TrimEnd('/')) {
+                    throw 'Existing pip index conflicts with toolchain configuration.'
+                }
+            } elseif ($kind -eq 'uv') {
+                if (-not $ToolchainValues.ContainsKey('python_index_url') -and
+                    $line -notmatch '^\s*["'']?python-install-mirror["'']?\s*[=.]') { continue }
+                if (-not $ToolchainValues.ContainsKey('python_install_mirror') -and
+                    $line -match '^\s*["'']?python-install-mirror["'']?\s*[=.]') { continue }
+                if ($line -match '^\s*["'']?pip["'']?\s*[=.]' -and
+                    $line -match 'index|find-links|insecure-host') {
+                    throw 'Inline or dotted uv pip sources require reconciliation.'
+                }
+                if ($line -match '^\s*["'']?explicit["'']?\s*[=.]' -and
+                    $line -notmatch '^\s*["'']?explicit["'']?\s*=\s*false\s*(?:#.*)?$') {
+                    throw 'Explicit-only uv indexes require reconciliation.'
+                }
+                if ($line -match '^\s*["'']?(?:extra-index-url|find-links|no-index|no-default-index|allow-insecure-host|index)["'']?\s*=') {
+                    throw 'Legacy or additional uv sources require reconciliation.'
+                }
+                if ($line -match '^\s*\[\[\s*["'']?index["'']?\s*\]\]\s*(?:#.*)?$') { $indexCount++ }
+                if ($line -match '^\s*["'']?default["'']?\s*=\s*true\s*(?:#.*)?$') { $defaultCount++ }
+                if ($line -match '^\s*["'']?(url|index-url|python-install-mirror)["'']?\s*=\s*["'']([^"'']+)["'']\s*(?:#.*)?$') {
+                    $field = if ($Matches[1] -eq 'python-install-mirror') { 'python_install_mirror' } else { 'python_index_url' }
+                    if ($ToolchainValues.ContainsKey($field) -and
+                        $Matches[2].TrimEnd('/') -cne $ToolchainValues[$field].TrimEnd('/')) {
+                        throw 'Existing uv source conflicts with toolchain configuration.'
+                    }
+                } elseif ($line -match '^\s*["'']?(url|index|index-url|python-install-mirror)["'']?\s*[=.]') {
+                    throw 'Unsupported uv source syntax requires reconciliation.'
+                }
+            } else {
+                if ($line -match '^\s*[^=]+:registry\s*=') { throw 'Scoped npm registries require explicit reconciliation.' }
+                if ($line -match '^\s*registry\s*=\s*(.*?)\s*$' -and
+                    $Matches[1].TrimEnd('/') -cne $ToolchainValues['npm_registry'].TrimEnd('/')) {
+                    throw 'Existing npm registry conflicts with toolchain configuration.'
+                }
+            }
+        }
+        if ($kind -eq 'uv' -and $ToolchainValues.ContainsKey('python_index_url') -and
+            ($indexCount -gt 1 -or $indexCount -ne $defaultCount)) {
+            throw 'Existing uv indexes require explicit reconciliation.'
+        }
+    }
+    $ToolchainConfig = $file.FullName
+    foreach ($name in @(
+        'PIP_CONFIG_FILE', 'NPM_CONFIG_USERCONFIG', 'npm_config_userconfig',
+        'NPM_CONFIG_GLOBALCONFIG', 'npm_config_globalconfig'
+    )) {
+        $value = [Environment]::GetEnvironmentVariable($name)
+        if ($value) {
+            $ToolchainEnvironment[$name] = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($value)
+        }
+    }
+    foreach ($name in $ToolchainEnvironment.Keys) {
+        [Environment]::SetEnvironmentVariable($name, $ToolchainEnvironment[$name], 'Process')
+    }
+    $env:COPILOT_EXTENSIONS_TOOLCHAIN_CONFIG = $ToolchainConfig
+}
+
 $BootstrapSourceAnchor = $env:WORKTREE_MANAGER_SOURCE_ANCHOR
 if (-not $BootstrapSourceAnchor) { $BootstrapSourceAnchor = (Get-Location).Path }
 if (-not [IO.Path]::IsPathRooted($BootstrapSourceAnchor) -or
@@ -577,6 +839,14 @@ try {
             throw 'Selected Manager source does not support qualified UV handoff. Select a newer source; installation was not started.'
         }
         $installerArgs += @('--bootstrap-uv', $Uv)
+    }
+    if ($ToolchainConfig) {
+        foreach ($capability in @('toolchain-config', 'toolchain-context')) {
+            if (-not (Select-String -LiteralPath (Join-Path $PWD 'scripts\runtime_install.py') `
+                -CaseSensitive -Quiet -Pattern "^# copilot-extensions:${capability}=1$")) {
+                throw 'Selected Manager source does not support toolchain configuration; installation was not started.'
+            }
+        }
     }
     $Python = if ($SystemPythonRequested) { $SystemPython } else { Find-BootstrapPython $Uv }
     $env:COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON = $Python

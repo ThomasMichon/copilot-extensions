@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import json
+from typing import TYPE_CHECKING, Any, cast
 
 from .producers.evaluator import Reject
 from .queue_common import CompletionOutcome, _task_transition_spec
 from .queue_execution_handoff import require_execution_admission
 from .queue_records import SpawnState, Status, TaskError
+
+if TYPE_CHECKING:
+    from .queue import TaskQueue
 
 
 class QueueSubmissionRejectionMixin:
@@ -18,24 +22,32 @@ class QueueSubmissionRejectionMixin:
         task_id: str,
         *,
         reason: str,
-        feedback: dict | None = None,
+        feedback: dict[str, Any] | None = None,
         expected_generation: int,
         expected_owner_session_id: str | None,
         expected_completed_by: str | None,
         expected_updated_at: float,
         now: float | None = None,
     ) -> CompletionOutcome:
+        queue = cast("TaskQueue", self)
         decision = Reject(reason, feedback)
         if not expected_completed_by or not expected_owner_session_id:
             raise TaskError("submission rejection requires the exact submitting owner/session")
-        ts = self._now(now)
+        ts = queue._now(now)
         allowed, to = _task_transition_spec("reject_submission")
         key = f"reject:{expected_generation}:{expected_updated_at!r}"
-        with self._connect() as conn:
+        with queue._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            task = self._fetch(conn, task_id)
+            task = queue._fetch(conn, task_id)
             if task is None:
                 raise TaskError(f"no such task {task_id!r}")
+            from .review_closeout_rejection import record
+
+            disputed = record(queue, conn, task, decision, key, ts, generation=expected_generation,
+                              native=expected_owner_session_id, worker=expected_completed_by, updated_at=expected_updated_at)
+            if disputed is not None:
+                conn.commit()
+                return disputed
             prior = conn.execute(
                 "SELECT ts, fields FROM task_steer WHERE task_id = ? AND idempotency_key = ?",
                 (task_id, key),
@@ -115,15 +127,15 @@ class QueueSubmissionRejectionMixin:
                 " result = NULL, result_ref = NULL, completed_by = NULL,"
                 " awaiting_steer = 0, card_draft = NULL, resume_requested = 0,"
                 " monitor_kind = NULL, monitor_not_before = NULL WHERE id = ?",
-                (to, expected_completed_by, ts, ts + self.lease_seconds, ts, ts, task_id),
+                (to, expected_completed_by, ts, ts + queue.lease_seconds, ts, ts, task_id),
             )
-            self._audit(
+            queue._audit(
                 conn, task_id, ts=ts, from_status=task.status, to_status=to,
                 worker="evaluator", note=f"submission rejected: {decision.reason}",
             )
-            recovered = self._fetch(conn, task_id)
+            recovered = queue._fetch(conn, task_id)
             assert recovered is not None
-            self._enqueue_wake(
+            queue._enqueue_wake(
                 conn, recovered, ts=ts,
                 message=(
                     f"Task {task_id}'s completion claim was rejected: {decision.reason}\n"
@@ -133,9 +145,9 @@ class QueueSubmissionRejectionMixin:
                     "when the whole goal is satisfied."
                 ),
             )
-            recovered = self._fetch(conn, task_id)
+            recovered = queue._fetch(conn, task_id)
             assert recovered is not None
             conn.execute("COMMIT")
-        self._notify_wake()
-        self._notify_owned_transition()
+        queue._notify_wake()
+        queue._notify_owned_transition()
         return CompletionOutcome(recovered, "task.rejected")

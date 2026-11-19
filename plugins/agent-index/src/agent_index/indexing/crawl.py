@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from agent_index.indexing.manifest import CrawlManifest, CrawlStats, DeletedFile
 from agent_index.sources.delta import SourceDelta
@@ -27,6 +27,7 @@ def collect_source_changes(
     connector: SourceConnector | None = None,
     source_scope: str | None = None,
     change_hints: ChangeHints | None = None,
+    require_paged_acquisition: bool = False,
 ) -> CrawlManifest:
     """Prefer explicit deltas; retain full reconciliation for legacy providers."""
     from agent_index.sources import get_connector
@@ -34,6 +35,12 @@ def collect_source_changes(
 
     if connector is None:
         connector = get_connector(source_name, **(connector_kwargs or {}))
+    from agent_index.indexing.acquisition_requirement import require_connector_pages
+
+    require_connector_pages(
+        connector, source=source_name, full=full, change_hints=change_hints,
+        required=require_paged_acquisition,
+    )
     canonical = connector.source_name if source_aware else None
     if source_aware and (not isinstance(canonical, str) or not canonical):
         raise RuntimeError("connector has no canonical stored family")
@@ -52,6 +59,9 @@ def collect_source_changes(
     discover_delta = getattr(connector, "discover_delta", None)
     discover_page = getattr(connector, "discover_delta_page", None)
     discover_snapshot = getattr(connector, "discover_snapshot_page", None)
+    from agent_index.indexing.hinted_crawl import hint_page_discovery
+
+    discover_hint_page = hint_page_discovery(connector) if change_hints is not None else None
     journal = PendingCrawls(path_index)
     refresh = journal.refresh_candidates(source_name, scope, connector.source_name)
     if refresh is not None and change_hints is None and not full:
@@ -81,7 +91,7 @@ def collect_source_changes(
             for version in snapshot_versions
         )
     )
-    if pending is not None and not (pages_selected or snapshots_selected):
+    if pending is not None and not (pages_selected or snapshots_selected or discover_hint_page):
         raise ValueError("Complete pending paged acquisition before changing acquisition mode")
     if snapshots_selected and callable(discover_snapshot):
         from agent_index.indexing.snapshot_crawl import acquire_snapshot
@@ -90,6 +100,7 @@ def collect_source_changes(
             source_name, family=connector.source_name, stored_family=canonical,
             scope=scope, last_commit=last_commit, journal=journal, discover=discover_snapshot,
             refresh=refresh, cancel_check=cancel_check,
+            require_paged_acquisition=require_paged_acquisition,
         )
     if pages_selected and callable(discover_page):
         if refresh is not None:
@@ -100,14 +111,25 @@ def collect_source_changes(
             source_name, family=connector.source_name, stored_family=canonical,
             scope=scope, last_commit=last_commit, journal=journal, discover=discover_page,
             cancel_check=cancel_check,
+            require_paged_acquisition=require_paged_acquisition,
         )
     if change_hints is not None:
         from agent_index.indexing.change_hints_contract import validate_scope
-        from agent_index.indexing.hinted_crawl import require_hint_connector
+        from agent_index.indexing.hinted_crawl import HintDiscovery, require_hint_connector
 
         validate_scope(source_name, full, change_hints)
         discover = require_hint_connector(connector, change_hints)
-        delta = discover(change_hints, last_commit, cancel_check=cancel_check)
+        if discover_hint_page is not None:
+            from functools import partial
+            from agent_index.indexing.paged_crawl import acquire_pages
+
+            return acquire_pages(
+                source_name, family=connector.source_name, stored_family=canonical,
+                scope=scope, last_commit=last_commit, journal=journal,
+                discover=partial(discover_hint_page, change_hints), hints=change_hints,
+                track_refresh=track_refresh, cancel_check=cancel_check,
+            )
+        delta = cast(HintDiscovery, discover)(change_hints, last_commit, cancel_check=cancel_check)
         if not isinstance(delta, SourceDelta) or delta.commit != last_commit:
             raise ValueError("Hinted acquisition must preserve the polling cursor")
     elif not full and callable(discover_delta) and getattr(connector, "delta_available", True):

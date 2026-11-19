@@ -18,6 +18,11 @@ from urllib.parse import quote
 import httpx
 
 from agent_index.config import install_dir
+from agent_index.sources.azure_devops_eligibility import WorkItemEligibility, qualify_work_item
+from agent_index.sources.azure_devops_responses import collection_values as _values
+from agent_index.sources.azure_devops_responses import pull_comments as _pull_comments
+from agent_index.sources.azure_devops_responses import pull_repository_id as _pull_repository_id
+from agent_index.sources.azure_devops_responses import work_item_ids as _work_item_ids_from_result
 from agent_index.sources.base import FileEntry, nonsecret_target
 from agent_index.sources.good_citizen_http import GoodCitizenSession
 
@@ -59,6 +64,8 @@ class AzureDevOpsConnector:
         batch_size: int = _DEFAULT_BATCH_SIZE,
         page_size: int = _DEFAULT_PAGE_SIZE,
     ) -> None:
+        if type(page_size) is not int or page_size <= 0:
+            raise ValueError("Azure DevOps page_size must be a positive integer")
         self._source = source
         self.org, self.project = self._parse_source(source)
         self.api_base = (api_base or os.environ.get("AGENT_INDEX_ADO_BASE") or _DEFAULT_API_BASE)
@@ -116,7 +123,7 @@ class AzureDevOpsConnector:
         """Discover work items and pull requests from operator-supplied query specs."""
         return [
             *self._discover_work_items(since=None, cancel_check=cancel_check),
-            *self._discover_pull_requests(since=None, cancel_check=cancel_check),
+            *self._discover_pull_requests(cancel_check=cancel_check),
         ]
 
     def discover_changed(
@@ -124,13 +131,19 @@ class AzureDevOpsConnector:
         last_commit: str | None,
         cancel_check: Callable[[], None] | None = None,
     ) -> list[FileEntry]:
-        """Discover work items and pull requests changed since a timestamp marker."""
+        """Discover timestamp changes for work-item-only configurations."""
         if not last_commit:
             return self.discover(cancel_check=cancel_check)
+        if self._pull_request_queries:
+            raise ValueError(
+                "Azure DevOps PR timestamp discovery is unsupported: creation/closure "
+                "time does not cover edits or comments; schedule explicit full "
+                "discovery separately",
+            )
         since = self._marker_with_overlap(last_commit)
         return [
             *self._discover_work_items(since=since, cancel_check=cancel_check),
-            *self._discover_pull_requests(since=since, cancel_check=cancel_check),
+            *self._discover_pull_requests(cancel_check=cancel_check),
         ]
 
     def list_paths(
@@ -145,7 +158,7 @@ class AzureDevOpsConnector:
             work_items.add(f"workitems/{work_item_id}.md")
 
         pulls: set[str] = set()
-        for pull_request in self._iter_pull_requests(since=None):
+        for pull_request in self._iter_pull_requests(cancel_check):
             if cancel_check:
                 cancel_check()
             pull_request_id = pull_request.get("pullRequestId")
@@ -158,8 +171,21 @@ class AzureDevOpsConnector:
         }
 
     def current_commit(self) -> str | None:
-        """Azure DevOps work tracking state is timestamp-tracked, not git-SHA tracked."""
+        """Legacy full acquisition does not provide a complete project cursor."""
         return None
+
+    def work_item_eligibility(
+        self, item_id: int, *, cancel_check: Callable[[], None] | None = None,
+    ) -> WorkItemEligibility | None:
+        """Read bounded query membership, without deletion authority or progress changes."""
+        return qualify_work_item(
+            self._http, item_id=item_id, queries=self._work_item_queries,
+            project_path=self._project_path, org_path=self._org_path,
+            source=self._workitems_source,
+            scope=(nonsecret_target(str(self._http.client.base_url).rstrip("/")),
+                   self.org, self.project),
+            cancel_check=cancel_check,
+        )
 
     @property
     def _workitems_source(self) -> str:
@@ -190,16 +216,27 @@ class AzureDevOpsConnector:
             result = self._http.post_json(
                 self._project_path("_apis", "wit", "workitemsbatch"),
                 params={"api-version": _DEFAULT_API_VERSION},
-                json={"ids": chunk, "$expand": "all"},
+                json={"ids": chunk, "$expand": "all", "errorPolicy": "fail"},
                 purpose="item_body",
             )
             self._observe_records(result.data, kind="workitems")
-            for item in _values(result.data):
-                if isinstance(item, dict):
-                    if since_dt and not self._work_item_in_window(item, since_dt):
-                        continue
-                    comments = self._work_item_comments(item.get("id"), cancel_check=cancel_check)
-                    entries.append(self._work_item_entry(item, comments))
+            items = _values(result.data, context="work-item body batch")
+            expected, seen = set(chunk), set()
+            for item in items:
+                item_id = item.get("id") if isinstance(item, dict) else None
+                if (
+                    type(item_id) is not int or item_id not in expected or item_id in seen
+                    or not isinstance(item.get("fields"), dict)
+                ):
+                    raise ValueError("Azure DevOps work-item body batch has invalid records")
+                seen.add(item_id)
+            if seen != expected:
+                raise ValueError("Azure DevOps work-item body batch is incomplete")
+            for item in items:
+                if since_dt and not self._work_item_in_window(item, since_dt):
+                    continue
+                comments = self._work_item_comments(item["id"], cancel_check=cancel_check)
+                entries.append(self._work_item_entry(item, comments))
         return entries
 
     def _work_item_ids_in_window(self, ids: list[int], since: datetime) -> list[int]:
@@ -216,7 +253,7 @@ class AzureDevOpsConnector:
         expected = set(ids)
         seen: set[int] = set()
         changed: set[int] = set()
-        for item in _values(result.data):
+        for item in _values(result.data, context="work-item metadata batch"):
             item_id = item.get("id") if isinstance(item, dict) else None
             if type(item_id) is not int or item_id not in expected or item_id in seen:
                 raise ValueError("Azure DevOps work-item metadata has invalid identities")
@@ -251,12 +288,14 @@ class AzureDevOpsConnector:
 
     def _observe_records(
         self, records: Any, *,
-        kind: Literal["query", "workitems", "pulls", "workitem_comments", "pull_comments"],
+        kind: Literal["query", "workitems", "pulls", "pull_detail", "workitem_comments", "pull_comments"],
     ) -> None:
         from agent_index.indexing.work_counts import observe_acquisition
 
         if kind in {"workitems", "pulls", "pull_comments"} and isinstance(records, dict):
             records = records.get("value")
+        elif kind == "pull_detail":
+            records = [records] if isinstance(records, dict) else None
         if not isinstance(records, list):
             return
         if kind == "pull_comments":
@@ -264,7 +303,7 @@ class AzureDevOpsConnector:
                 comment for thread in records if isinstance(thread, dict)
                 and isinstance(thread.get("comments"), list) for comment in thread["comments"]
             ]
-        is_pull = kind in {"pulls", "pull_comments"}
+        is_pull = kind in {"pulls", "pull_detail", "pull_comments"}
         counts = observe_acquisition(self._pulls_source if is_pull else self._workitems_source)
         if counts is None:
             return
@@ -285,7 +324,7 @@ class AzureDevOpsConnector:
                     )
                 )
             else:
-                key = {"pulls": "description", "workitem_comments": "text",
+                key = {"pulls": "description", "pull_detail": "description", "workitem_comments": "text",
                        "pull_comments": "content"}[kind]
                 body = key in record and (record[key] is None or isinstance(record[key], str))
             if body:
@@ -308,6 +347,7 @@ class AzureDevOpsConnector:
         return self._http.get_json(
             self._project_path("_apis", "wit", "wiql", saved_query_id),
             params={"api-version": _DEFAULT_API_VERSION},
+            etag=False,
             purpose="identity_page",
         )
 
@@ -356,26 +396,68 @@ class AzureDevOpsConnector:
     def _discover_pull_requests(
         self,
         *,
-        since: str | None,
         cancel_check: Callable[[], None] | None,
     ) -> list[FileEntry]:
         entries: list[FileEntry] = []
-        since_dt = _parse_datetime(since) if since else None
         seen_ids: set[Any] = set()
-        for pull_request in self._iter_pull_requests(since=since):
+        for pull_request in self._iter_pull_requests(cancel_check):
             if cancel_check:
                 cancel_check()
             pull_request_id = pull_request.get("pullRequestId")
             if pull_request_id in seen_ids:
                 continue
             seen_ids.add(pull_request_id)
-            if since_dt and not self._pull_request_in_window(pull_request, since_dt):
-                continue
+            pull_request = self._complete_pull_description(pull_request)
+            if cancel_check:
+                cancel_check()
             comments = self._pull_request_comments(pull_request)
             entries.append(self._pull_request_entry(pull_request, comments))
         return entries
 
-    def _iter_pull_requests(self, *, since: str | None) -> Iterable[dict[str, Any]]:
+    def _complete_pull_description(self, pull_request: dict[str, Any]) -> dict[str, Any]:
+        description = pull_request.get("description")
+        if description is not None and not isinstance(description, str):
+            raise ValueError("Azure DevOps pull-request listing has no valid description")
+        selected_repository_id = _pull_repository_id(pull_request)
+        if not description and selected_repository_id:
+            return pull_request
+        # Listing previews have no completeness flag or specified Unicode truncation rule.
+        result = self._http.get_json(
+            self._project_path("_apis", "git", "pullrequests", str(pull_request["pullRequestId"])),
+            params={"api-version": _DEFAULT_API_VERSION},
+            etag=False,
+            purpose="item_body",
+        )
+        details = result.data
+        self._observe_records(details, kind="pull_detail")
+        if (
+            not isinstance(details, dict)
+            or type(details.get("pullRequestId")) is not int
+            or details["pullRequestId"] != pull_request["pullRequestId"]
+        ):
+            raise ValueError("Azure DevOps pull-request details have mismatched identity")
+        actual_repository_id = _pull_repository_id(details)
+        if (
+            not actual_repository_id
+            or (
+                selected_repository_id is not None
+                and selected_repository_id.casefold() != actual_repository_id.casefold()
+            )
+        ):
+            raise ValueError("Azure DevOps pull-request details have mismatched repository")
+        description = details.get("description")
+        if description is not None and not isinstance(description, str):
+            raise ValueError("Azure DevOps pull-request details have no valid description")
+        return pull_request | {
+            "description": description,
+            "repository": (
+                pull_request["repository"] if selected_repository_id else details["repository"]
+            ),
+        }
+
+    def _iter_pull_requests(
+        self, cancel_check: Callable[[], None] | None = None,
+    ) -> Iterable[dict[str, Any]]:
         if not self._pull_request_queries:
             self._log_no_pull_request_queries()
             return
@@ -383,21 +465,36 @@ class AzureDevOpsConnector:
         seen_ids: set[Any] = set()
         for query in self._pull_request_queries:
             params = self._pull_request_params(query)
-            if since:
-                params["searchCriteria.minTime"] = since
-
-            for result in self._http.paginate_continuation(
-                self._project_path("_apis", "git", "pullrequests"),
-                params=params,
-                purpose="identity_page",
-                on_page=lambda page: self._observe_records(page.data, kind="pulls"),
-            ):
-                for item in _values(result.data):
-                    if not isinstance(item, dict):
-                        continue
+            selected: dict[int, dict[str, Any]] = {}
+            offset = 0
+            while True:
+                if cancel_check:
+                    cancel_check()
+                result = self._http.get_json(
+                    self._project_path("_apis", "git", "pullrequests"),
+                    params=params | {"$skip": offset},
+                    etag=False,
+                    purpose="identity_page",
+                )
+                if result.not_modified:
+                    raise ValueError("Azure DevOps PR pagination requires a response body")
+                self._observe_records(result.data, kind="pulls")
+                items = _values(result.data)
+                previous_count = len(selected)
+                for item in items:
                     pull_request_id = item.get("pullRequestId")
-                    if pull_request_id in seen_ids:
-                        continue
+                    if type(pull_request_id) is not int or pull_request_id <= 0:
+                        raise ValueError("Azure DevOps pull-request listing has invalid identity")
+                    selected.setdefault(pull_request_id, item)
+                if len(items) > self._page_size or (
+                    items and offset and len(selected) == previous_count
+                ):
+                    raise ValueError("Azure DevOps PR pagination made no reliable progress")
+                if not items:
+                    break
+                offset += len(items)
+            for pull_request_id, item in selected.items():
+                if pull_request_id not in seen_ids:
                     seen_ids.add(pull_request_id)
                     yield item
 
@@ -469,11 +566,10 @@ class AzureDevOpsConnector:
         return self._authenticated_user_id
 
     def _pull_request_comments(self, pull_request: dict[str, Any]) -> list[dict[str, Any]]:
-        repository = pull_request.get("repository") or {}
-        repository_id = repository.get("id")
+        repository_id = _pull_repository_id(pull_request)
         pull_request_id = pull_request.get("pullRequestId")
         if not repository_id or pull_request_id is None:
-            return []
+            raise ValueError("Azure DevOps pull request has no review target")
         try:
             result = self._http.get_json(
                 self._project_path(
@@ -486,6 +582,7 @@ class AzureDevOpsConnector:
                     "threads",
                 ),
                 params={"api-version": _DEFAULT_API_VERSION},
+                etag=False,
                 purpose="comment_page",
             )
         except httpx.HTTPStatusError as exc:
@@ -493,14 +590,7 @@ class AzureDevOpsConnector:
                 return []
             raise
         self._observe_records(result.data, kind="pull_comments")
-        comments: list[dict[str, Any]] = []
-        for thread in _values(result.data):
-            if not isinstance(thread, dict):
-                continue
-            for comment in thread.get("comments", []):
-                if isinstance(comment, dict):
-                    comments.append(comment)
-        return comments
+        return _pull_comments(result.data)
 
     def _work_item_entry(
         self,
@@ -622,15 +712,14 @@ class AzureDevOpsConnector:
     def _marker_with_overlap(self, marker: str) -> str:
         dt = _parse_datetime(marker)
         if dt is None:
-            return self._format_marker(marker)
-        overlapped = dt - timedelta(seconds=self._overlap_seconds)
+            raise ValueError("Azure DevOps change marker must be a valid timestamp")
+        try:
+            overlapped = dt - timedelta(seconds=self._overlap_seconds)
+        except OverflowError as exc:
+            raise ValueError(
+                "Azure DevOps change marker overlap is outside the supported timestamp range",
+            ) from exc
         return overlapped.isoformat(timespec="seconds").replace("+00:00", "Z")
-
-    def _format_marker(self, marker: str) -> str:
-        dt = _parse_datetime(marker)
-        if dt is None:
-            return marker
-        return dt.isoformat(timespec="seconds").replace("+00:00", "Z")
 
     def _project_path(self, *parts: str) -> str:
         quoted = [quote(self.org, safe=""), quote(self.project, safe="")]
@@ -680,17 +769,6 @@ class AzureDevOpsConnector:
             "User-Agent": "agent-index",
             "Authorization": f"Basic {token}",
         }
-
-    @staticmethod
-    def _pull_request_in_window(pull_request: dict[str, Any], since: datetime) -> bool:
-        for field in ("closedDate", "creationDate"):
-            value = pull_request.get(field)
-            if not value:
-                continue
-            parsed = _parse_datetime(value)
-            if parsed and parsed >= since:
-                return True
-        return False
 
     @staticmethod
     def _work_item_in_window(item: dict[str, Any], since: datetime) -> bool:
@@ -836,29 +914,6 @@ def _pull_request_query_from_env() -> dict[str, Any] | None:
     return query
 
 
-def _work_item_ids_from_result(data: Any) -> list[int]:
-    ids: list[int] = []
-    for item in data.get("workItems", []) if isinstance(data, dict) else []:
-        if isinstance(item, dict) and item.get("id") is not None:
-            ids.append(int(item["id"]))
-    relations = data.get("workItemRelations", []) if isinstance(data, dict) else []
-    for relation in relations:
-        target = relation.get("target") if isinstance(relation, dict) else None
-        if isinstance(target, dict) and target.get("id") is not None:
-            ids.append(int(target["id"]))
-    return ids
-
-
-def _values(data: Any) -> list[Any]:
-    if isinstance(data, list):
-        return data
-    if isinstance(data, dict):
-        value = data.get("value")
-        if isinstance(value, list):
-            return value
-    return []
-
-
 def _chunks(values: list[int], size: int) -> Iterable[list[int]]:
     for index in range(0, len(values), max(size, 1)):
         yield values[index : index + size]
@@ -885,16 +940,16 @@ def _parse_datetime(value: str | None) -> datetime | None:
         return None
     try:
         return datetime.fromtimestamp(float(value), tz=UTC)
-    except ValueError:
+    except (ValueError, OverflowError, OSError):
         pass
     try:
         normalized = value.replace("Z", "+00:00")
         parsed = datetime.fromisoformat(normalized)
-    except ValueError:
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=UTC)
+        return parsed.astimezone(UTC)
+    except (ValueError, OverflowError):
         return None
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=UTC)
-    return parsed.astimezone(UTC)
 
 
 def _plain(value: Any) -> str:

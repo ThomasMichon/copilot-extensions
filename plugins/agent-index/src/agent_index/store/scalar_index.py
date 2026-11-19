@@ -11,8 +11,7 @@ from typing import TYPE_CHECKING, Any, Protocol, cast
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
 
-    from .content_store import ContentStore
-    from .vector_table import VectorTable
+    from .source_layout import SourceDomain
 
 log = logging.getLogger(__name__)
 MAX_SEGMENTS = 32
@@ -38,6 +37,19 @@ class ScalarTable(Protocol):
         self, column: str, *, index_type: str, name: str, replace: bool,
     ) -> object: ...
     def checkout_latest(self) -> None: ...
+
+
+class ScalarIndexOwner(Protocol):
+    @property
+    def _source_domain(self) -> SourceDomain | None: ...
+
+    @property
+    def _db(self) -> Any: ...
+
+    @property
+    def _table_name(self) -> str: ...
+
+    def _get_or_create_table(self) -> Any: ...
 
 
 class ScalarIndexPreparationRequired(RuntimeError):
@@ -98,7 +110,7 @@ def require_budget(
 
 
 def prepare_index(
-    owner: ContentStore | VectorTable, *, column: str, max_rows: int,
+    owner: ScalarIndexOwner, *, column: str, max_rows: int,
     max_segments: int = MAX_SEGMENTS,
 ) -> ScalarIndexState:
     """Prepare a column B-tree without implicit consolidation or data compaction."""
@@ -169,7 +181,7 @@ def consolidation_rows(state: ScalarIndexState, dataset: ScalarDataset, *, max_r
 
 
 def consolidate_index(
-    owner: ContentStore | VectorTable, *, column: str, max_rows: int,
+    owner: ScalarIndexOwner, *, column: str, max_rows: int,
 ) -> ScalarIndexState:
     """Explicitly merge one named B-tree under its existing source-domain owner."""
     if type(max_rows) is not int or max_rows < 0:

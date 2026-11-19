@@ -164,6 +164,112 @@ capability advertisement, transport, wake/ACK implementation or enrollment.
 Compatible reader/lifecycle transition, typed client selection and actual
 consumer recovery remain part of the serial acceptance below.
 
+The [explicit expected-consumer SDK client](../../../services/pr/LOCAL.md#explicit-expected-consumer-client)
+supplies the next local selection prerequisite. It checks the complete
+configured repository/consumer against running support and carries the consumer
+expectation to the existing operation's admission boundary. It does not prepare
+a native task, add a Dispatch import/dependency or activate a feed consumer.
+The native adapter, historical-reader transition and recovery exits stay open.
+
+The [asynchronous bound request client](../../../services/pr/LOCAL.md#asynchronous-bound-requests)
+adds finite native asyncio Unix exchanges for a future shared-loop embedding.
+It preserves the same expected-selection and consumer assertion, the original
+caller-owned payload and monotonic deadline, cancellation and uncertain-effect
+custody without an executor thread. It neither prepares a native waiter nor
+selects the coordinator factory. Native admission, historical-reader transition,
+effect-before-ACK recovery and operational enrollment remain separate exits.
+
+The [explicit native preparation adapter](../../../plugins/agent-dispatch/docs/delegated-service-replay.md#explicit-finite-task-preparation)
+now composes that async client with the existing waiter transaction for a
+retained finite reviewer task. It negotiates executing native/service support
+before suspension, then atomically rechecks recipe/dedup association, current
+owner/session/generation/steering, holds, forms, execution/relationship guards
+and original deadline. It does not subscribe, select useful activity, wake,
+ACK or enable a coordinator factory. Those recovery and adoption exits below
+remain open.
+
+## Provider-first original-request recovery
+
+The preparation adapter does not yet transmit a subscription. The existing
+repository API can reconcile `subscribe` by its original `request_id` while
+the receipt remains retained, but `inspect` and `cancel` require the service's
+`registration_id`. An expired, fully acknowledged receipt can be collected.
+Blindly repeating `subscribe` after that collection can create a registration
+again. Neither an HTTP timeout nor a missing local result proves rejection.
+
+Expand that provider before adding native registration attempts:
+
+- Advertise optional `request_recovery` support, with protocol
+  `agent-pull-requests.repository-request-recovery/v1`, through the running
+  repository capability response. Existing callers retain their current
+  operations and semantics. Unsupported peers must not receive the new form.
+- Add `inspect-request`, a cache-only operation taking the original
+  `request_id` under the same admitted consumer and repository binding.
+  Return the original registration/intent/status when retained, or explicit
+  `not_found`, and the provider's current time. Inspection never registers,
+  renews, advances delivery, trims receipts or calls a forge. A foreign
+  consumer/target cannot recover another scope's registration.
+- Add optional integer Unix-seconds `not_after` to `subscribe`, retaining it
+  as part of the immutable original request. Under the existing writer
+  transaction, a new registration is refused when provider time is at or
+  beyond that cutoff; its expiry is the earlier of the cutoff and the
+  existing TTL-based expiry. Reconciliation of a retained request still
+  returns its original registration after the cutoff, without renewal.
+- Preserve request, delivery, ACK and cancellation receipts through the
+  existing bounded registration owner. Expand its strict reader first;
+  legacy records retain their exact shape and behavior. Older strict readers
+  that cannot interpret the added intent refuse before changing state.
+  This source expansion is not operational reader adoption or transparent
+  rollback qualification.
+
+The later native consumer freezes the cutoff from its original finite
+deadline, never from reconnect time. It negotiates support before suspension
+and rechecks native ownership/forms/holds/wakes and the retained preparation
+basis before each service effect. It does not replace a failed new invocation
+with a legacy invocation. A lost subscribe response is recovered through
+`inspect-request`, not another create attempt.
+
+The bounded registration/inspection leaf retains service receipts without
+arming a native waiter. An active provider receipt is not native activation.
+Later arming must recheck the actual receipt expiry under the native arm
+transaction's write lock and immediately before commit, preserving original
+deadline, task, hold/form, generation and wake guards. The registration leaf
+does not close that later arming/completion or wake-before-ACK obligation.
+
+Cancellation of an unknown registration keeps the native reconciliation
+obligation. If inspection finds it, use the existing scoped cancellation
+operation and reconcile an uncertain cancellation through inspection. If
+inspection is absent before the cutoff, creation may still arrive: absence
+is not settlement. Retain the original request until a provider observation
+at or beyond its cutoff excludes future acceptance; any accepted registration
+has also expired by then. Already-delivered unsettled events remain protected
+by the existing receipt retention. No cancellation tombstone, second journal,
+replacement request or indefinite registration history is required.
+
+The explicit retired-registration cancellation leaf uses the registrar's
+optional `agent-dispatch.repository-feed-cancellation/v1` in-process support and the existing
+scoped `cancel` operation. It requires a known original registration and an
+already retired native waiter, rechecks the configured owner, and leaves
+uncertain replies recoverable through original-request inspection.
+It preserves delivered/unacknowledged events and native task/wake state;
+`cancelled` does not mean `replay_settled` or ACK. Full remote settlement,
+useful-activity completion and coordinator enrollment remain separate.
+The [native operation contract](../../../plugins/agent-dispatch/docs/delegated-service-replay.md#explicit-retired-registration-cancellation)
+defines its finite call and compatibility boundary.
+
+The cutoff is a cooperative immutable-request guarantee, not permission to
+reuse collected request IDs with later cutoffs or changed intent. Provider
+clock rollback, unavailable inspection or an unverified scope remains
+reconciliation, not proof of settlement.
+
+Provider validation must cover lost committed subscribe responses, reopen,
+cancel/expiry, a delayed invocation crossing its cutoff under the actual
+transaction owner, exact cutoff refusal, TTL capping, scoped absence, changed
+intent, receipt collection followed by a late replay, and delivered/unacked
+retention. Exercise the existing local ingress with both legacy and new
+request forms. No native consumer or default factory is enabled by that
+provider expansion; wake-before-ACK and coordinator/drain proof remain later.
+
 ## Serial plan and validation
 
 - [x] Review this owner/contract refinement before new protocol or storage code
@@ -172,9 +278,14 @@ consumer recovery remain part of the serial acceptance below.
   serializer and restart, preserving legacy/scoped-watch rows and unsupported
   reader behavior and exclusion from local PID/preparing recovery. No parallel
   request journal, stranded binding or automatic adoption.
-- [ ] Add the typed local feed client/adapter and inert preparation through
+- [x] Add the typed local feed client/adapter and inert preparation through
   existing owners. Preserve exact configured identity and refuse unsupported
-  service/native combinations before task suspension.
+  service/native combinations before task suspension (#13325). Historical
+  reader adoption and registration/delivery are not closed by this source leaf.
+- [x] Expand and qualify the provider's original-request inspection and
+  deadline-bound acceptance before native registration. Preserve old forms,
+  strict storage refusal, bounded receipt retention and late/unknown custody
+  (#13330). Installed reader adoption and native consumer delivery remain open.
 - [ ] Exercise actual cache/client/native-queue composition: original request
   recovery, materially new activity, unchanged views, unknown baseline,
   stale/partial coverage, own echo, author actions, forms and generation races.

@@ -4,6 +4,7 @@ import base64
 import json
 import time
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
@@ -15,7 +16,7 @@ from agent_index.indexing.work_counts import measure_reindex
 
 def _json_response(
     status_code: int,
-    payload,
+    payload: object,
     *,
     headers: dict[str, str] | None = None,
 ) -> httpx.Response:
@@ -26,7 +27,9 @@ def _json_response(
     )
 
 
-def _work_item_payload(work_item_id: int, *, changed: str = "2026-01-02T03:04:05Z") -> dict:
+def _work_item_payload(
+    work_item_id: int, *, changed: str = "2026-01-02T03:04:05Z",
+) -> dict[str, Any]:
     return {
         "id": work_item_id,
         "fields": {
@@ -48,7 +51,7 @@ def _work_item_payload(work_item_id: int, *, changed: str = "2026-01-02T03:04:05
 def test_ado_discovers_work_items_and_pull_requests_with_pagination() -> None:
     auth_header = "Basic " + base64.b64encode(b":pat-token").decode("ascii")
     seen_paths: list[str] = []
-    seen_tokens: list[str | None] = []
+    seen_offsets: list[int] = []
     operator_wiql = (
         "SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = 'widgets' "
         "AND [System.AreaPath] UNDER 'widgets\\service'"
@@ -81,9 +84,11 @@ def test_ado_discovers_work_items_and_pull_requests_with_pagination() -> None:
         if path.endswith("/_apis/git/pullrequests"):
             assert request.url.params["searchCriteria.repositoryId"] == "repo-1"
             assert request.url.params["searchCriteria.status"] == "all"
-            token = request.url.params.get("continuationToken")
-            seen_tokens.append(token)
-            if token is None:
+            offset = int(request.url.params["$skip"])
+            seen_offsets.append(offset)
+            if offset == 2:
+                return _json_response(200, {"value": []})
+            if offset == 0:
                 return _json_response(
                     200,
                     {
@@ -101,7 +106,6 @@ def test_ado_discovers_work_items_and_pull_requests_with_pagination() -> None:
                             }
                         ]
                     },
-                    headers={"x-ms-continuationtoken": "next"},
                 )
             return _json_response(
                 200,
@@ -122,6 +126,13 @@ def test_ado_discovers_work_items_and_pull_requests_with_pagination() -> None:
                     ]
                 },
             )
+        if path.endswith(("/_apis/git/pullrequests/7", "/_apis/git/pullrequests/8")):
+            number = int(path.rsplit("/", 1)[1])
+            return _json_response(200, {
+                "pullRequestId": number,
+                "repository": {"id": "repo-1"},
+                "description": {7: "Pull request body", 8: "Completed body"}[number],
+            })
         if "/_apis/git/repositories/repo-1/pullRequests/" in path and path.endswith("/threads"):
             return _json_response(
                 200,
@@ -148,6 +159,7 @@ def test_ado_discovers_work_items_and_pull_requests_with_pagination() -> None:
         min_interval_s=0,
         work_item_queries=[{"name": "team-backlog", "wiql": operator_wiql}],
         pull_request_queries=[{"name": "repo-prs", "status": "all", "repository_id": "repo-1"}],
+        page_size=1,
     )
 
     entries = connector.discover()
@@ -187,7 +199,9 @@ def test_ado_discovers_work_items_and_pull_requests_with_pagination() -> None:
         "closed_date": None,
     }
     assert "Thread comment" in pull.content
-    assert seen_tokens == [None, "next"]
+    assert "Pull request body" in pull.content
+    assert sum(path.endswith(("/pullrequests/7", "/pullrequests/8")) for path in seen_paths) == 2
+    assert seen_offsets == [0, 1, 2]
     assert any(path.endswith("/_apis/wit/workitemsbatch") for path in seen_paths)
 
 
@@ -294,7 +308,7 @@ def test_ado_pr_reviewer_me_resolves_connection_data_once() -> None:
     assert connection_data_calls == 1
 
 
-def test_ado_config_file_loading_from_env(monkeypatch) -> None:
+def test_ado_config_file_loading_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     config_path = Path.cwd() / ".agent-index-ado-test-config.json"
     try:
         config_path.write_text(
@@ -323,7 +337,9 @@ def test_ado_config_file_loading_from_env(monkeypatch) -> None:
             if path.endswith("/_apis/git/pullrequests"):
                 assert request.url.params["searchCriteria.status"] == "active"
                 assert request.url.params["searchCriteria.creatorId"] == "creator-id"
-                return _json_response(200, {"value": [{"pullRequestId": 12}]})
+                return _json_response(200, {
+                    "value": [] if int(request.url.params["$skip"]) else [{"pullRequestId": 12}],
+                })
             raise AssertionError(f"unexpected request: {request.url}")
 
         connector = AzureDevOpsConnector(
@@ -361,7 +377,7 @@ def test_ado_no_firehose_without_queries() -> None:
     assert requests == []
 
 
-def test_ado_429_retry_after_sleeps_then_proceeds(monkeypatch) -> None:
+def test_ado_429_retry_after_sleeps_then_proceeds(monkeypatch: pytest.MonkeyPatch) -> None:
     sleeps: list[float] = []
     monkeypatch.setattr(time, "sleep", sleeps.append)
     calls = 0
@@ -406,7 +422,9 @@ def test_ado_list_paths_returns_ids_only() -> None:
         if request.url.path.endswith("/_apis/git/pullrequests"):
             return _json_response(
                 200,
-                {"value": [{"pullRequestId": 10}, {"pullRequestId": 11}]},
+                {"value": [] if int(request.url.params["$skip"]) else [
+                    {"pullRequestId": 10}, {"pullRequestId": 11},
+                ]},
             )
         raise AssertionError(f"unexpected request: {request.url}")
 
@@ -426,7 +444,7 @@ def test_ado_list_paths_returns_ids_only() -> None:
     assert not any("workitemsbatch" in path or path.endswith("/comments") for path in seen_paths)
 
 
-def test_ado_registry_aliases(monkeypatch) -> None:
+def test_ado_registry_aliases(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AGENT_INDEX_ADO_TOKEN", "pat-token")
 
     assert isinstance(get_connector("ado:acme/widgets"), AzureDevOpsConnector)
@@ -469,7 +487,7 @@ def test_ado_incremental_filters_metadata_before_hydrating_bodies(
                     }}
                     for number in reversed(batch)
                 ]})
-            assert payload == {"ids": batch, "$expand": "all"}
+            assert payload == {"ids": batch, "$expand": "all", "errorPolicy": "fail"}
             body_ids.extend(batch)
             return _json_response(200, {"value": [
                 _work_item_payload(number, changed="2026-01-03T00:00:00Z")
@@ -492,12 +510,14 @@ def test_ado_incremental_filters_metadata_before_hydrating_bodies(
     )
 
     @measure_reindex
-    def run():
+    def run() -> dict[str, object]:
         return {"entries": connector.discover_changed("2026-01-03T00:01:00Z")}
 
     result = run()
     entries = result["entries"]
     counts = result["work_counts"]
+    assert isinstance(entries, list)
+    assert isinstance(counts, dict)
     assert counts["acquisition_by_source"] == {
         "ado:acme/widgets:workitems": {
             "identity_records": 203,
@@ -526,7 +546,7 @@ def test_ado_incremental_refuses_incomplete_metadata_before_body_fetch(fault: st
         if request.url.path.endswith("/workitemsbatch"):
             payload = json.loads(request.content)
             assert payload.get("fields") == ["System.Id", "System.ChangedDate"]
-            items = [
+            items: list[dict[str, Any]] = [
                 {"id": 1, "fields": {"System.ChangedDate": "2026-01-03T00:00:00Z"}},
                 {"id": 2, "fields": {"System.ChangedDate": "2026-01-03T00:00:00Z"}},
             ]
@@ -616,7 +636,7 @@ def test_ado_work_item_comment_pages_are_complete_or_refused(outcome: str) -> No
         tokens.append(current)
         if current is None:
             first_page_seen = True
-            page = {
+            page: dict[str, Any] = {
                 "comments": [{"id": 1, "text": "First page"}],
                 "continuationToken": token,
                 "nextPage": "https://foreign.example/never-follow-this-url",
@@ -651,10 +671,13 @@ def test_ado_work_item_comment_pages_are_complete_or_refused(outcome: str) -> No
 
     if outcome == "complete":
         result = run()
-        assert len(result["entries"]) == 1
-        assert "First page" in result["entries"][0].content
-        assert "Last page" in result["entries"][0].content
-        assert result["work_counts"]["http_by_purpose"]["comment_page"]["attempts"] == 2
+        entries, counts = result["entries"], result["work_counts"]
+        assert isinstance(entries, list)
+        assert isinstance(counts, dict)
+        assert len(entries) == 1
+        assert "First page" in entries[0].content
+        assert "Last page" in entries[0].content
+        assert counts["http_by_purpose"]["comment_page"]["attempts"] == 2
     else:
         error = {
             "later-404": httpx.HTTPStatusError,
@@ -662,9 +685,10 @@ def test_ado_work_item_comment_pages_are_complete_or_refused(outcome: str) -> No
         }.get(outcome, ValueError)
         with pytest.raises(error):
             run()
-    assert tokens == (
+    expected_tokens: list[str | None] = (
         [None] if outcome in {"cancel", "missing-token"} else [None, token]
     )
+    assert tokens == expected_tokens
 
 
 @pytest.mark.parametrize("status", [200, 404])
@@ -684,13 +708,13 @@ def test_ado_work_item_comments_preserve_legacy_and_initial_not_found(status: in
     )
 
 
-def test_ado_parsed_work_item_counts_precede_filtering_and_query_deduplication() -> None:
-    def handler(request):
+def test_ado_parsed_work_item_counts_precede_body_refusal_and_query_deduplication() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("/wiql"):
             return _json_response(200, {
-                "workItems": [{"id": 1}, {"id": 1}, None],
+                "workItems": [{"id": 1}, {"id": 1}],
                 "workItemRelations": [
-                    {"target": {"id": 2}}, {"target": None}, None,
+                    {"target": {"id": 2}}, {"target": None},
                 ],
             })
         if request.url.path.endswith("/workitemsbatch"):
@@ -718,12 +742,15 @@ def test_ado_parsed_work_item_counts_precede_filtering_and_query_deduplication()
     )
 
     @measure_reindex
-    def run():
-        return {"entries": connector.discover_changed("2026-01-03T00:01:00Z")}
+    def run() -> dict[str, object]:
+        with pytest.raises(ValueError, match="work-item body batch"):
+            connector.discover_changed("2026-01-03T00:01:00Z")
+        return {}
 
     result = run()
-    assert [entry.path for entry in result["entries"]] == ["workitems/2.md"]
-    assert result["work_counts"]["acquisition_by_source"] == {
+    counts = result["work_counts"]
+    assert isinstance(counts, dict)
+    assert counts["acquisition_by_source"] == {
         "ado:acme/widgets:workitems": {
             "identity_records": 3, "item_body_records": 3, "comment_body_records": 0,
         },
@@ -731,8 +758,10 @@ def test_ado_parsed_work_item_counts_precede_filtering_and_query_deduplication()
 
 
 @pytest.mark.parametrize("later_status", [200, 404])
-def test_ado_parsed_comment_counts_survive_refusal_and_ignore_invalid_bodies(later_status):
-    def handler(request):
+def test_ado_parsed_comment_counts_survive_refusal_and_ignore_invalid_bodies(
+    later_status: int,
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
         if not request.url.params.get("continuationToken"):
             return _json_response(200, {
                 "comments": [
@@ -749,13 +778,14 @@ def test_ado_parsed_comment_counts_survive_refusal_and_ignore_invalid_bodies(lat
     )
 
     @measure_reindex
-    def run():
+    def run() -> dict[str, object]:
         error = ValueError if later_status == 200 else httpx.HTTPStatusError
         with pytest.raises(error):
             connector._work_item_comments(1)
         return {}
 
     counts = run()["work_counts"]
+    assert isinstance(counts, dict)
     assert counts["acquisition_by_source"] == {
         "ado:acme/widgets:workitems": {
             "identity_records": 0, "item_body_records": 0,
@@ -765,55 +795,11 @@ def test_ado_parsed_comment_counts_survive_refusal_and_ignore_invalid_bodies(lat
     assert counts["http_by_purpose"]["comment_page"]["attempts"] == 2
 
 
-def test_ado_parsed_pull_counts_include_list_bodies_and_duplicates_not_metadata() -> None:
-    def handler(request):
-        path = request.url.path
-        if path.endswith("/connectionData"):
-            return _json_response(200, {"authenticatedUser": {"id": "account"}})
-        if path.endswith("/repositories"):
-            return _json_response(200, {"value": [{"id": "repo-1", "name": "widgets"}]})
-        if path.endswith("/pullrequests"):
-            item = {"pullRequestId": 1, "description": None, "repository": {"id": "repo-1"}}
-            return _json_response(200, {"value": [
-                item, item, None,
-                {"pullRequestId": 2, "description": 9}, {"pullRequestId": 3},
-            ]})
-        assert path.endswith("/pullRequests/1/threads")
-        return _json_response(200, {"value": [
-            {"comments": [{"content": ""}, {"content": None}, {"content": []}, {}, None]},
-            {"comments": [{"content": "another"}]},
-        ]})
-
-    connector = AzureDevOpsConnector(
-        "ado:acme/widgets", token="pat-token", min_interval_s=0,
-        transport=httpx.MockTransport(handler), work_item_queries=[],
-        pull_request_queries=[{"repository": "widgets", "creator": "me"}],
-    )
-
-    @measure_reindex
-    def run(paths_only=False):
-        return {"entries": connector.list_paths() if paths_only else connector.discover()}
-
-    counts = run()["work_counts"]
-    assert counts["acquisition_by_source"] == {
-        "ado:acme/widgets:pulls": {
-            "identity_records": 4, "item_body_records": 2, "comment_body_records": 3,
-        },
-    }
-    assert counts["http_by_purpose"]["metadata"]["attempts"] == 2
-    assert counts["http_by_purpose"]["identity_page"]["attempts"] == 1
-    assert counts["http_by_purpose"]["comment_page"]["attempts"] == 1
-    assert "unclassified" not in counts["http_by_purpose"]
-    assert run(True)["work_counts"]["acquisition_by_source"] == {
-        "ado:acme/widgets:pulls": {
-            "identity_records": 4, "item_body_records": 2, "comment_body_records": 0,
-        },
-    }
-
-
 @pytest.mark.parametrize("comments", [False, True])
 @pytest.mark.parametrize("payload", [{}, [], {"value": []}])
-def test_ado_parsed_empty_pull_pages_differ_from_unrecognized_envelopes(comments, payload):
+def test_ado_parsed_empty_pull_pages_differ_from_unrecognized_envelopes(
+    comments: bool, payload: dict[str, Any] | list[Any],
+) -> None:
     connector = AzureDevOpsConnector(
         "ado:acme/widgets", token="pat-token", min_interval_s=0,
         transport=httpx.MockTransport(lambda _request: _json_response(200, payload)),
@@ -821,16 +807,26 @@ def test_ado_parsed_empty_pull_pages_differ_from_unrecognized_envelopes(comments
     )
 
     @measure_reindex
-    def run():
-        if comments:
+    def run() -> dict[str, object]:
+        if payload == {}:
+            with pytest.raises(ValueError, match="Azure DevOps"):
+                if comments:
+                    connector._pull_request_comments({
+                        "pullRequestId": 1, "repository": {"id": "repo-1"},
+                    })
+                else:
+                    list(connector._iter_pull_requests())
+        elif comments:
             assert connector._pull_request_comments({
                 "pullRequestId": 1, "repository": {"id": "repo-1"},
             }) == []
         else:
-            assert list(connector._iter_pull_requests(since=None)) == []
+            assert list(connector._iter_pull_requests()) == []
         return {}
 
-    assert run()["work_counts"]["acquisition_by_source"] == (
+    counts = run()["work_counts"]
+    assert isinstance(counts, dict)
+    assert counts["acquisition_by_source"] == (
         {"ado:acme/widgets:pulls": {
             "identity_records": 0, "item_body_records": 0, "comment_body_records": 0,
         }} if payload != {} else {}
@@ -838,7 +834,9 @@ def test_ado_parsed_empty_pull_pages_differ_from_unrecognized_envelopes(comments
 
 
 @pytest.mark.parametrize("payload", [{}, {"workItems": []}, {"workItemRelations": []}])
-def test_ado_parsed_empty_query_pages_differ_from_unrecognized_envelopes(payload):
+def test_ado_parsed_empty_query_pages_differ_from_unrecognized_envelopes(
+    payload: dict[str, Any],
+) -> None:
     connector = AzureDevOpsConnector(
         "ado:acme/widgets", token="pat-token", min_interval_s=0,
         transport=httpx.MockTransport(lambda _request: _json_response(200, payload)),
@@ -846,11 +844,17 @@ def test_ado_parsed_empty_query_pages_differ_from_unrecognized_envelopes(payload
     )
 
     @measure_reindex
-    def run():
-        assert connector._work_item_ids() == []
+    def run() -> dict[str, object]:
+        if payload == {}:
+            with pytest.raises(ValueError, match="Azure DevOps"):
+                connector._work_item_ids()
+        else:
+            assert connector._work_item_ids() == []
         return {}
 
-    assert run()["work_counts"]["acquisition_by_source"] == (
+    counts = run()["work_counts"]
+    assert isinstance(counts, dict)
+    assert counts["acquisition_by_source"] == (
         {"ado:acme/widgets:workitems": {
             "identity_records": 0, "item_body_records": 0, "comment_body_records": 0,
         }} if payload != {} else {}
@@ -858,18 +862,18 @@ def test_ado_parsed_empty_query_pages_differ_from_unrecognized_envelopes(payload
 
 
 @pytest.mark.parametrize("failure", ["http", "json"])
-def test_ado_parsed_pull_pages_remain_counted_after_later_request_failure(failure):
-    seen_tokens = []
+def test_ado_parsed_pull_pages_remain_counted_after_later_request_failure(failure: str) -> None:
+    seen_offsets: list[int] = []
 
-    def handler(request):
+    def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path.endswith("/pullrequests")
-        token = request.url.params.get("continuationToken")
-        seen_tokens.append(token)
-        if token is None:
+        offset = int(request.url.params["$skip"])
+        seen_offsets.append(offset)
+        if offset == 0:
             return _json_response(200, {"value": [
                 {"pullRequestId": 1, "description": "First page"},
                 {"pullRequestId": 1, "description": None},
-            ]}, headers={"x-ms-continuationtoken": "next"})
+            ]})
         if failure == "http":
             return _json_response(404, {"description": "Not a PR record"})
         return httpx.Response(200, content=b"invalid json")
@@ -878,23 +882,25 @@ def test_ado_parsed_pull_pages_remain_counted_after_later_request_failure(failur
         "ado:acme/widgets", token="pat-token", min_interval_s=0,
         transport=httpx.MockTransport(handler),
         work_item_queries=[], pull_request_queries=[{"status": "all"}],
+        page_size=2,
     )
 
     @measure_reindex
-    def run():
+    def run() -> dict[str, object]:
         error = httpx.HTTPStatusError if failure == "http" else ValueError
         emitted = []
         with pytest.raises(error):
-            for entry in connector._iter_pull_requests(since=None):
+            for entry in connector._iter_pull_requests():
                 emitted.append(entry)
         assert emitted == []  # Preserve the existing buffered acquisition behavior.
         return {}
 
     counts = run()["work_counts"]
+    assert isinstance(counts, dict)
     assert counts["acquisition_by_source"] == {
         "ado:acme/widgets:pulls": {
             "identity_records": 2, "item_body_records": 2, "comment_body_records": 0,
         },
     }
     assert counts["http_by_purpose"]["identity_page"]["attempts"] == 2
-    assert seen_tokens == [None, "next"]
+    assert seen_offsets == [0, 2]

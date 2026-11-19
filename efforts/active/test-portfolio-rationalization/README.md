@@ -55,6 +55,34 @@ release gates, or count unexecuted native coverage as passing.
 
 ## Coordination
 
+The finite #13294 Windows-native unit-collector attribution family enters
+the existing Phase 4 tools/shared-library wave through Phase 7
+migration-intake deduplication and domain-Plan review. Preserve the existing
+collector, runtime-loader, source-admission/audit, fixture, runner, native,
+release and resource custodians, OPEN #1303 and all incumbent obligations.
+This does not appoint an implementer, transfer a claim/resource, authorize
+execution or require a generic ACK. Empty assignees do not release custody.
+
+Normal review must actually deliver the complete P13294/V13294/G13294
+Plan, local and actual global Validation, Coordination, dated Journal and
+intake route before a separate source-specific tracking judgment. Permitted
+current receiving/source/custody readback must preserve genuine intervening
+holds and any actual physical-OPEN condition. Keep #13294 OPEN during this
+proposal; technical native acceptance remains unchecked after any separately
+qualified administrative consolidation. No unrelated whole-portfolio,
+every-host or new native execution prerequisite is added to that judgment.
+
+The finite #13278 offline-job continuation enters the existing Phase 4
+payload/harness/tools wave through Phase 7 migration-intake and domain-Plan
+review. Retain the current #13278 claimant and actual generic clean-room,
+scenario, runner, native and resource custodians; the primary maintainer is
+not appointed implementation executor. Keep #5921, #5922 and existing
+enrollment/allocator contracts independent. Preserve every incumbent state,
+claim, hold and unit-only required-CI boundary. Normal reviewed complete
+receiving delivery and current permitted source/receiver/custody readback
+precede a separate tracking judgment; no generic ACK, execution enrollment,
+claim expiry or resource release is introduced.
+
 The six finite native-timeout families #6662/#6663/#6690/#6900/#9442/#9815
 below continue through the SAME primary maintainer, Phase 4 Dispatch/
 Worktrees/Manager/Bridge fixture waves, Phase 5 owning-runner accounting and
@@ -310,6 +338,30 @@ Plan/local AND actual global Validation, Coordination and dated Journal
 delivery precede a separate source judgment; no implementation appointment,
 claim expiry, resource release or generic ACK follows.
 
+The finite #13300 receiving-ledger/reporter/prune-pair fixture family and
+#13334 hosted-Windows standalone fixture/build-tooling family continue through
+this SAME Active ROOT's primary maintainer, existing Phase 4 Worktrees and
+payload/harness/tools waves, and Phase 7 migration-intake/domain review.
+Preserve incumbent Plan, Validation, checked states, history, OPEN #1303 and
+actual source, fixture, runner, platform, cleanup, release and resource
+custodians. No implementation appointment, source/resource transfer, claim
+release or generic acknowledgment requirement is introduced.
+
+Before separate administrative source judgments, normal review must actually
+merge the complete direct Plan, local Validation, actual level-two global
+Validation, Coordination and dated Journal additions, together with the
+proposed intake routing. Read back the permitted current receiving/source
+records and actual ownership/holds. Planning is not fixture correction,
+Windows acceptance, deployment or a passing packet.
+
+Required CI remains positively admitted unit-only. Preserve current containment,
+tier/effect, process/time/storage/resource limits and separately authorized
+execution boundaries, including this ROOT's hosted-Windows hold. Existing
+historical Windows results grant no new execution. Unavailable native capacity
+remains an honest technical evidence gap, not an added tracker-consolidation
+barrier. Neither family requires unrelated whole-portfolio, full #10968,
+every-host or rollout completion.
+
 ## Context
 
 The [weighted native fixture/runner cohort](../backlog-reconciliation/semantic-theme-results.md#native-fixturerunner-cohort)
@@ -450,6 +502,108 @@ suites first.
   observable features per process launch.
 - [ ] Keep each plugin's contract map, inventory, and TESTING coverage summary
   current as its wave lands.
+
+#### Finite Windows-native unit-collector attribution from #13294
+
+- [ ] **P13294-1:** Retain the original explicit positively admitted
+  Windows-native unit collection abort, before selected watch-storage tests
+  execute, on BOTH CPython 3.11.9 AND 3.14.7. Preserve the reported chain:
+  tools/promotion_unit_tests/test_source_witness.py imports
+  tools/runtime_source_lock.py; libs/installer-engine/installer_engine.py
+  imports libs/versioned-runtime/versioned_runtime_source.py; its _runtime()
+  loads the co-located primitive through an extended-length Windows path;
+  tools/promotion_unit_effects.py canonicalizes the open-audit bytecode
+  path before importlib.util.source_from_cache rejects the bottom-level
+  __pycache__ association. Surfaced paths differ between versions. This
+  association boundary is suspected, not a fully diagnosed root cause.
+- [ ] **P13294-2:** Through the actual owning boundary, diagnose and correct
+  supported Windows source/bytecode attribution while retaining
+  unadmitted-source, unattributable-bytecode, mutation and actor refusals.
+  Preserve byte-identical admitted Git source, including LF bytes; do not
+  rewrite admission hashes for checkout-specific CRLF, waive the effect
+  guard or count a collection abort as test evidence. Preserve the original
+  source-lineage observation including
+  ed3f4a3629cc17bbd60c39f97418f7665b002934 without asserting a fresh
+  reproduction or current causal diagnosis.
+- [ ] **P13294-3:** Add focused native AND actor-free regression controls
+  at the owning boundary. Retain the original reproduction shape:
+  `python tools\run-promotion-unit-tests.py --source-sha <full-current-head>
+  --output-dir <new-test-owned-output> --windows-native`
+  with repository-declared pytest/coverage dependencies and byte-identical
+  admitted sources. This optional full Windows-native qualification is
+  separate from required Linux unit/PR CI; neither gate is waived.
+
+##### Local Validation
+
+- [ ] **V13294-1:** In the existing separately authorized bounded native
+  lane, qualify BOTH exact CPython versions against the actual extended-path
+  loader/open-audit/cache-association consumer and original reproduction
+  shape. Record exact admitted source and selected scope, collection outcome
+  and actual selected-test outcomes separately. Demonstrate progress past
+  the original attribution abort without replacing it with a different
+  selection; any unavailable or unexecuted case remains explicit non-proof.
+- [ ] **V13294-2:** Exercise focused actor-free positive attribution and
+  refusal controls for unadmitted source, unattributable bytecode, mutation
+  and actors, alongside the focused native controls at the actual boundary.
+  Preserve byte-identical LF admission, original effects, containment,
+  process/time/storage/resource limits and owning cleanup. #13295's 155-case
+  native storage packet and #13320's 358-case native/28-case actor-free
+  packets are distinct successes, not this collector's qualification.
+  Planning grants no import, collection, test, source/bytecode mutation,
+  native execution, dependency acquisition or resource authority.
+
+#### Finite bounded offline-job continuation from #13278
+
+Credit the inert immutable planner (#13281), opt-in Linux lifecycle owner
+(#13304) and explicit private workspace (#13312). Their synthetic/helper
+evidence does not establish native Docker enforcement, package/scenario
+qualification or caller-loss survival.
+
+- [ ] **P13278-1:** Retain the opt-in host-driven offline-job contract:
+  cached immutable image with no pull/build/auth fallback; invoking ordinary
+  UID/GID; network none; dropped capabilities; no-new-privileges; read-only
+  root; explicit narrow read-only inputs; no host-home, socket or broad-mount
+  exposure. Preserve existing scenario/devcontainer defaults.
+- [ ] **P13278-2:** Retain fresh-name/collision refusal, exact physical-ID
+  create-and-record BEFORE start, existing cgroup admission, private control
+  and client configuration outside payload binds, and finite CPU/memory/PID/
+  lifetime bounds. Declare host-driver overhead separately while fitting it
+  and container limits within the caller's aggregate budget and cleanup
+  reserve. Preserve partial/unknown outcomes without prerequisite
+  reconstruction or uncertain replay; stop only the exact owned ID and
+  perform independent postflight.
+- [ ] **P13278-3:** Retain stopped-container, output, results and explicit
+  private-workspace custody. Workspace is separate from results/cache and
+  supports two fresh jobs constructing then inspecting a runtime at a stable
+  container path after independent cleanup. The caller retains authorization,
+  reuse decisions and independent postflight; no automatic create, chmod,
+  adoption or removal, and no inferred removal consent.
+- [ ] **P13278-4:** Keep package-specific constructors, inputs and assertions
+  in consuming scenarios. Continue through the existing generic clean-room
+  owner without a new installed plugin, runtime manager, daemon, fleet or
+  mandatory CI matrix.
+
+##### Local Validation
+
+- [ ] **V13278-1:** Preserve meaningful inert argument/resource, forbidden
+  broad-mount/socket, immutable-image/no-fallback and collision controls;
+  include ordinary identity, mount separation and aggregate-budget/cleanup-
+  reserve refusals without substituting them for native enforcement.
+- [ ] **V13278-2:** Preserve wrong-ID/changed-observation refusal, failure/
+  expiry and unknown-no-replay controls, exact-ID stop AND independent
+  postflight, retained container/output ownership, workspace overlap/custody
+  and actual physical mount-observation controls. No automatic workspace
+  create/chmod/adopt/remove or container removal follows.
+- [ ] **V13278-3:** Complete the separately authorized bounded native
+  scenario and current native/scenario qualification through the existing
+  owner. Retain owner-held exact source/image/container identities, effective
+  kernel isolation and resource limits, aggregate host overhead/cleanup reserve,
+  actual caller-loss/lifetime and stop/postflight outcomes, and the two-fresh-
+  job stable-workspace construction/inspection boundary with caller-owned
+  package assertions. Keep unavailable or unexecuted coverage explicit;
+  synthetic controls and clock/POSIX helpers are not this proof. This
+  unchecked obligation supplies no execution or resource authorization and
+  requires no public execution receipt or private environment inventory.
 
 #### Finite clean-room verdict completeness retained from #5921
 
@@ -807,6 +961,112 @@ investigator; #6131 / PR #6135's watch-generation repair remains independent.
   owning cleanup and independent #6131/#6135 credit. Documentary intake
   runs no installer, workflow or test and grants no retry or rollout.
 
+#### Finite receiving-ledger fixture qualification from #13300
+
+- [ ] **P13300-1:** Migrate the original Worktrees receiving-ledger fixture
+  inputs, including synthetic tracking_dir selections without corresponding
+  project_dir mappings. Reconcile assertions with the actual execution reporter
+  rather than persisted machine names, including the renamed-machine push
+  reporting/attribution contract.
+- [ ] **P13300-2:** Preserve source/PR checks, stale-record rejection,
+  project/execution-space separation, meaningful branch-disclosure negatives
+  and actual cleanup assertions. Correct fixtures and expectations without
+  weakening production guards or enlarging existing deadlines.
+- [ ] **P13300-3:** Retain the original unchanged twelve-file comparison packet
+  AND independent authority negatives, plus all four later prune/pair selectors
+  below. #13164's different session-command selection and #10968's retained-
+  resource implementation/native custody remain separate.
+
+Exact twelve-file packet, under `plugins/agent-worktrees/tests/`:
+
+```text
+test_finalize_rollback.py
+test_finalize_pr.py
+test_finalize_precondition.py
+test_finalize_open_pr_gate.py
+test_finalize_landing.py
+test_finalize_creation_gating.py
+test_finalized_checkout.py
+test_claims_cmd.py
+test_claims_reconcile_at_rest.py
+test_record_machine_identity.py
+test_push_changes.py
+test_seal_identity.py
+```
+
+Additional exact selectors, in `plugins/agent-worktrees/tests/test_prune.py`:
+
+```text
+TestReconcileAndPersistBestEffort::test_heals_pr_state_to_disk
+TestReconcileAndPersistBestEffort::test_preserves_concurrent_update_on_stale_base
+TestDefaultPairedSiblingFinal::test_sibling_finalized_true
+TestDefaultPairedSiblingFinal::test_sibling_not_finalized_false
+```
+
+##### Local Validation
+
+- [ ] **V13300-1:** Through the existing bounded plugin runner, qualify the
+  unchanged twelve-file selection using its repeated --test-file selections
+  and original explicit-tier admission, AND the independent authority
+  negatives. Demonstrate the intended receiving-ledger, reporter, renamed-
+  machine attribution and preserved negative/cleanup assertions.
+- [ ] **V13300-2:** Qualify all four exact prune/pair selectors against the
+  corrected receiving-ledger/pair inputs. Preserve stale-base concurrent-update
+  and sibling-finality distinctions.
+- [ ] **V13300-3:** Retain the historical 417 passes / 31 failures on candidate
+  and unchanged baseline, and the later 256 passes / four failures with matching
+  baseline failures, as failed qualification, not passing evidence, a required-
+  CI exception or authority to relax guards/deadlines. Keep future packet
+  outcomes attributable to their actual selection and source.
+
+#### Finite hosted-Windows standalone fixture qualification from #13334
+
+- [ ] **P13334-1:** Qualify the two unreaped-tree fixtures through the actual
+  Windows containment path. Determine and correct the fixture/preparation
+  cause without promoting the proposed containment-routing explanation into
+  an established diagnosis.
+- [ ] **P13334-2:** Supply the declared wheel-build tooling, including the
+  missing setuptools, through its owning fixture/preparation boundary, and
+  qualify the three standalone-resource-hook preparation cases.
+- [ ] **P13334-3:** Preserve sandbox retention when descendants remain unreaped,
+  lease-release behavior and actual cleanup assertions. Keep original
+  containment, process, time and resource limits; no production-guard weakening
+  or deadline enlargement is authorized.
+
+Exact five failing selectors, in `tools/test_run_standalone_tests.py`:
+
+```text
+test_unreaped_standalone_tree_retains_sandbox_and_releases_lease[controller-held]
+test_unreaped_standalone_tree_retains_sandbox_and_releases_lease[teardown-error]
+test_retained_preparation_builds_actual_standalone_resource_hooks[fleet-manager-fleet_manager]
+test_retained_preparation_builds_actual_standalone_resource_hooks[services/index-agent_index_service]
+test_retained_preparation_builds_actual_standalone_resource_hooks[services/pr-agent_pull_requests_service]
+```
+
+The qualified original reports five failures and one passing control without
+naming the passing selector. Its identity remains unknown. Preserve that
+limitation; do not invent a selector or claim identical-packet acceptance from
+a different selection. Any changed controlled selection must be named as changed.
+
+##### Local Validation
+
+- [ ] **V13334-1:** At the original bounded hosted-Windows containment boundary,
+  qualify both unreaped-tree cases and demonstrate their expected still-owned
+  evidence, sandbox preservation, lease release and cleanup assertions.
+- [ ] **V13334-2:** With declared build tooling available, qualify all three
+  named actual standalone-resource-hook preparation cases. Preserve the
+  original finite packet, including the baseline control's sixth passing
+  selection; do not silently substitute another packet.
+- [ ] **V13334-3:** Preserve the reported candidate
+  c36391958e1e036e0b8bb02836e4094b7d618ce3 and baseline
+  4687fa4dbea21256711ef3363adfe23386a4a2e3 bindings from the qualified
+  descriptions: the [candidate run](https://github.com/ThomasMichon/copilot-extensions/actions/runs/44433976025)
+  and [baseline control](https://github.com/ThomasMichon/copilot-extensions/actions/runs/44436205626)
+  remain failed. Workflow controller head_sha does not independently bind the
+  tested candidate. Linux success, focused retirement/discovery controls,
+  unit admission and merged #13314 do not qualify this Windows packet or waive
+  required CI.
+
 ### Phase 5 — Tiered developer and review workflows
 
 - [ ] Expose explicit commands for guards, hermetic units, contained components,
@@ -884,11 +1144,32 @@ investigator; #6131 / PR #6135's watch-generation repair remains independent.
   disposition.
 - [ ] Place each accepted public tracker item in exactly one existing phase,
   extending this plan before implementation when necessary.
+- [x] **I13294:** Record deduplicated acceptance of the complete
+  P13294/V13294/G13294 family through existing migration-intake and
+  domain review into Phase 4 only. Existing #13294 supplies its tracker;
+  check this administrative row only after actual reviewed complete
+  receiving/intake delivery and permitted current readback. Technical
+  acceptance, source-specific tracking judgment and actual custody remain
+  separate; no new tracker or implementation appointment follows.
+- [x] **I13278:** Record deduplicated acceptance of the finite P13278/
+  V13278/G13278 Phase 4 lane through the existing migration-intake and
+  domain-review process, preserving the continuing source claimant and
+  actual resource custody. This administrative intake is not technical
+  completion or execution authorization.
 - [ ] Use synthetic fixtures and reproducible public test cases.
 - [x] **I7643:** Route the separate P7643/V7643/G7643 Phase 5 family through
   this existing migration-intake deduplication/ownership and domain-review
   process. Preserve its independent source status and existing cleanup
   owner; this does not add #7643 to F4 or #10225, run a test or release custody.
+
+- [x] **I13300:** Route the complete P13300/V13300/G13300 family through
+  existing migration-intake deduplication/ownership review into Phase 4 only.
+  Existing #13300 supplies its tracker; mark this administrative row complete
+  only after actual reviewed intake delivery/readback.
+- [x] **I13334:** Route the complete P13334/V13334/G13334 family through the
+  same gate into Phase 4 only, retaining the original Windows evidence tier
+  and existing tracker. Mark this administrative row complete only after
+  actual reviewed intake delivery/readback.
 
 ### Bug sweep — linked open bugs (2026-09-24)
 
@@ -2026,6 +2307,25 @@ Phase 7 intake; this is not #7643's already-attributed external mapping.
 
 ## Validation Plan
 
+- [ ] **G13294:** Resolve every P13294/V13294 and continuing Coordination
+  clause at the original finite Windows-native collector boundary:
+  BOTH CPython 3.11.9 AND 3.14.7, actual extended-path loader/open-audit/
+  source-cache attribution, focused native AND actor-free controls and
+  preserved source/bytecode/mutation/actor refusals. Keep the suspected
+  cause, original failed collection, byte-identical LF admission, distinct
+  passing selections and unavailable outcomes honest. Optional Windows
+  qualification does not replace required Linux CI. Documentary intake is
+  not repair, executed evidence or source/resource release; retain existing
+  hosted-Windows quiescence and separately authorized execution boundaries.
+
+- [ ] **G13278:** Resolve every P13278/V13278 clause at its original finite
+  offline-job/scenario scope, preserving all three delivered source credits,
+  unchanged defaults, no-fallback isolation/resource rules, exact-ID and
+  unknown-outcome safety, retained workspace/container/output custody and
+  separately authorized native acceptance. Planned intake is neither native
+  proof nor resource release; unrelated portfolio completion is not an added
+  finite-source retirement prerequisite.
+
 - [ ] **N6662-G:** Resolve EVERY N6662 Plan/local Validation and the six-family
   Coordination clauses at the original 15-second Dispatch completion consumer:
   retained result/staging/cleanup assertions, credited #6665 diagnostics and
@@ -2308,6 +2608,21 @@ every-host or release prerequisite is added to a finite family.
   process, broad-delete, every-host or unrelated full-portfolio action or
   acceptance bar is added.
 
+- [ ] **G13300:** Resolve every P13300/V13300 and continuing Coordination
+  clause for the complete original twelve-file packet AND independent
+  authority negatives AND four exact prune/pair selectors. Preserve receiving-
+  ledger, execution-reporter, renamed-machine attribution, stale-record/
+  project-space/branch-disclosure/cleanup contracts, production guards,
+  unchanged deadlines and historical failed outcomes. Administrative receiving
+  is not technical completion or an added native/full-parent requirement.
+- [ ] **G13334:** Resolve every P13334/V13334 and continuing Coordination
+  clause at the original finite hosted-Windows standalone boundary: both
+  unreaped-tree cases, three build-tooling/resource-hook cases and original
+  packet/control context. Preserve retained-sandbox/lease-release/cleanup
+  assertions, declared build tooling, unconfirmed-cause status, unchanged
+  bounds and failed-packet history. No Linux, focused-retirement, unit-CI or
+  source-merge proxy; no CI waiver or unrelated whole-parent/rollout gate.
+
 ## Proposal
 
 Approve the vision, framework, and phased campaign as the repository's
@@ -2316,6 +2631,82 @@ with another unbounded full-suite run. Portfolio reductions follow only after
 the inventory and evidence gates are available.
 
 ## Journal
+
+### 2026-11-19 UTC - Finite Windows collector receiving accepted
+
+#13395 delivered the complete P13294/V13294/G13294 domain Plan, local
+and actual global Validation, Coordination and Phase 7 intake after review
+explicitly covering complete domain acceptance, deduplication and ownership.
+Permitted current receiving/source/custody readback supports administrative
+I13294; all six technical rows remain unchecked. The separate #13294
+redundant-tracking retirement is audited at explanation 7002336101, not a
+collector repair, native pass, implementation appointment or claim release.
+The [campaign record](../backlog-reconciliation/journal/2026/11.18-terminal-and-offline-receiving.md)
+retains actual merge/review, current readback and separate source evidence.
+Both CPython versions, native AND actor-free controls, byte-identical LF
+admission, all refusals, existing custodians and execution holds remain.
+
+### 2026-11-19 UTC - Proposed finite Windows collector receiving
+
+Propose complete P13294/V13294/G13294 Phase 4 receiving through existing
+Phase 7 migration-intake and domain-Plan review. The original exact
+CPython 3.11.9 AND 3.14.7 extended-path loader/open-audit/cache-association
+abort, suspected-not-proved cause, byte-identical LF admission and all
+source/bytecode/mutation/actor refusals remain. #13295/#13320 explicitly
+leave this collector unchanged; their different successful selections
+remain credited only at their actual scopes.
+
+All six technical rows and administrative I13294 remain unchecked.
+Normal review, actual complete receiving/intake delivery and permitted
+current source/receiver/custody readback precede any separate tracking
+judgment. #13294 stays OPEN now. Preserve every incumbent obligation,
+checked state, owner, hold and historical result. No implementation,
+execution, admission change, source/bytecode mutation, technical completion,
+claim expiry or resource release occurred.
+
+### 2026-11-19 UTC - Reviewed finite domain and intake acceptance recorded
+
+#13384 merged the complete P13278/V13278/G13278, P13300/V13300/G13300 and
+P13334/V13334/G13334 Phase 4 domain amendments, their local and actual
+global Validation, continuing Coordination, dated Journal and all three
+migration-intake registrations. Review explicitly covered the complete
+domain plans, deduplication ownership and intake routes. Approval 5970281763
+on head 9775b5fa73b642d52962ae0d5e8d43b3c324936c preceded merge
+680fd7c05fc4b14a45faec65617996bfd40bfa2b; current receiving readback confirms
+the delivered clauses and preserved incumbent requirements/check states.
+
+Record I13278/I13300/I13334 as administrative acceptance of those single
+Phase 4 placements. These are the only three checked additions; all
+twenty-two new technical portfolio rows remain unchecked. The append-only
+migration ledger records the current routed statuses without rewriting the
+earlier conditional proposal. Existing source trackers remain OPEN pending
+separate source-specific judgments. No technical completion, implementation
+appointment, execution authorization or claim/resource release follows.
+
+### 2026-11-19 UTC - Proposed finite fixture qualification receiving
+
+Propose complete P13300/V13300/G13300 and P13334/V13334/G13334 Phase 4
+families through existing Phase 7 intake, recorded by I13300/I13334 only
+after reviewed intake is accepted. #13314's retained-finalization and
+retirement controls do not fulfill these exact fixture/Windows selections.
+All sixteen new rows remain unchecked; incumbent states, actual source,
+fixture, runner, platform and cleanup custodians, budgets and historical
+failed evidence remain unchanged. Current source/receiver/custody readback
+and separate judgments follow actual reviewed domain/intake delivery.
+No implementation, new execution, resource release or disposition follows.
+
+### 2026-11-19 UTC - Proposed finite offline-job receiving
+
+Propose complete P13278/V13278/G13278 Phase 4 receiving through the existing
+Phase 7 intake, recorded by I13278 only after reviewed intake is accepted.
+Credit #13281/#13304/#13312 and their inert planner, Linux owner and explicit
+workspace foundations. Synthetic controls and clock/POSIX-helper evidence
+remain distinct from unfinished native/scenario and caller-loss acceptance.
+All nine new rows remain unchecked; incumbent states, actual claimant,
+independent clean-room lanes and container/output/workspace custody remain
+unchanged. Normal review, actual receiving delivery, recorded intake and
+current permitted readback precede a separate source judgment. This proposal
+authorizes no execution, implementation assignment, cleanup or disposition.
 
 ### 2026-11-13 - Proposed completion of inherited #4217 allocator intake
 

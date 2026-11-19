@@ -1,0 +1,9 @@
+{
+  "comment": "Add opt-in contained disposable producer commands with the existing allocation and cleanup owners.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

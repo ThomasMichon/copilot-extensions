@@ -19,8 +19,10 @@ from single_instance_lease import AlreadyRunningError as AlreadyRunningError
 from cache_directory_paths import ordinary_cache_root
 from native_test_paths import native_test_path
 from plugin_test_cache import clear_cache_contents as clear_cache_contents
-from plugin_test_resources import resource_path
+from plugin_test_cache import preparation_generation
+from plugin_test_resources import ENVIRONMENT_LAYOUT, resource_path
 from plugin_test_selection import resolve_plugin_root
+from standalone_consumers import STANDALONE_CONSUMERS
 
 SCHEMA = "copilot-extensions.test-environment-retirement"
 MARKER = ".retired-environment.json"
@@ -70,16 +72,28 @@ def _metadata(path: Path) -> dict[str, object]:
 def _environment(source: Path, target: str, platform: str) -> Path:
     if platform != sys.platform:
         raise ValueError("Retirement requires the environment's native platform")
-    if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,63}", target):
+    standalone = target in STANDALONE_CONSUMERS
+    if not standalone and not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,63}", target):
         raise ValueError("Invalid test target")
     source = source.resolve(strict=True)
-    if not resolve_plugin_root(source, target).is_dir():
+    support = _metadata(source / "tools" / "test-environment-capabilities.json")
+    retirement = support.get("retirement")
+    if support != {
+        "schema": "copilot-extensions.test-environment-preparation", "version": 1,
+        "retirement": {"version": 1, "layout": ENVIRONMENT_LAYOUT},
+    } or (
+        type(support.get("version")) is not int or not isinstance(retirement, dict)
+        or type(retirement.get("version")) is not int
+    ):
+        raise ValueError("Selected source does not support terminal test-environment retirement")
+    project = source / target if standalone else resolve_plugin_root(source, target)
+    if not project.is_dir():
         raise ValueError("Test target does not belong to the selected source")
     root = ordinary_cache_root(resource_path(source))
     owner = _metadata(root / "scratch-owner.json")
     if owner.get("source_checkout") != str(source):
         raise ValueError("Retained cache belongs to another source")
-    environment = ordinary_cache_root(root / "venvs" / platform / target)
+    environment = ordinary_cache_root(root / ENVIRONMENT_LAYOUT / platform / target)
     if not native_test_path(environment).is_dir():
         raise ValueError("Selected environment does not exist")
     return environment
@@ -114,7 +128,7 @@ def _observe(source: Path, target: str, platform: str, environment: Path) -> Pre
         )) or value.get("state") not in {"retiring", "retired"}:
             raise ValueError("Retirement marker does not describe this environment")
     generation = hashlib.sha256(json.dumps(
-        [info.st_mtime_ns, sorted(rows)], separators=(",", ":"),
+        [info.st_mtime_ns, sorted(rows), preparation_generation(environment)], separators=(",", ":"),
     ).encode()).hexdigest()
     return Preview(
         SCHEMA, 1, str(source), source_info.st_dev, source_info.st_ino, target, platform, str(environment),
