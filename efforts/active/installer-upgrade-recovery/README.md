@@ -201,12 +201,13 @@ authorize production updates, recovery mutations or new access.
   native run `42297364665` and containing release #11182 fulfill this bounded
   source request; #11083 is closed as completed.
 - [ ] Qualify the optional complete prepared-Source/application input through
-  the incoming inspection entry. The existing composition control is not real
-  prepared-application consumer evidence. Preserve cold/historical-seed
-  performance, caller adoption and installed recovery as separate outcomes.
-  Actual Windows qualification fails in the existing installed-content verifier;
-  [the contributor-owned #10570 boundary](https://github.com/ThomasMichon/copilot-extensions/pull/10570#issuecomment-6961180893)
-  retains correction/coordination. Do not patch or supersede that open contribution.
+  the incoming inspection entry. Windows first/repeat consumer evidence now
+  passes after #13155 at source `4687fa4dbea21256711ef3363adfe23386a4a2e3`,
+  with original per-call limits and product-state/input preservation. Keep
+  unperformed prepared-consumer platforms, failed cold preparation,
+  historical-seed performance, caller adoption and installed recovery explicit;
+  this item is not whole-parent completion. #10570 retains its separate
+  contributor-owned consumer work and is not superseded by this qualification.
 
 ### Whole installer and resident-companion lifecycle - #5820
 
@@ -441,6 +442,45 @@ is proposed. Select each concrete unit only after current owner and source
 reconciliation; the matrix is not a blanket reservation of those components.
 
 ## Journal
+
+### 2026-11-19 - Corrected prepared inspection passes on Windows
+
+The separate shared-verifier correction #13155 is merged as
+`ac1a6347203d810e9c668c9fc530309a82927853`; the earlier #10570 reproduction
+no longer constitutes a wait for that contributor's implementation. Its
+independently authored work remains untouched.
+
+The canonical application preparer at Dev
+`4687fa4dbea21256711ef3363adfe23386a4a2e3` and Main seed
+`c9e2c3e68b45431c345128f15b695b2e7087831c` produces a complete Worktrees
+Source/profile/application in a targeted-timer warm control within the unchanged
+600-second budget. Composition takes 263.344 seconds, artifact construction
+88.594 seconds and profile preparation 102.094 seconds. The earlier uninstrumented
+cold attempt exhausts 600 seconds and remains failed. Its last metadata query
+has only 0.516 seconds remaining; a separate retained-toolchain query succeeds
+in 1.203 seconds. A global-profiler diagnostic also fails and is not treated as
+an uninstrumented timing result. Its exact failed composition worktree is
+settled through the existing cleanup owner, without discarding retained evidence.
+
+The actual prepared snapshot's inspection entry then passes first and repeat
+on Windows/Python 3.11 in 149.407 and 137.718 seconds, each within its unchanged
+180-second bound. Both return contract version 1, the registered alias and its
+canonical disabled exposure despite a contradictory legacy setting. The broken
+predecessor, malformed old manifest, registration/binding files and complete
+prepared Source/profile/application retain their bytes, file identities and
+modification times; temporary inspection controls are removed.
+
+Desktop PowerShell's `StartupProfileData-NonInteractive` is reported separately
+as an OS host cache, matching the existing
+[`test_selected_context_resolution._snapshot`](../../../plugins/agent-worktrees/tests/test_selected_context_resolution.py)
+boundary. No product file or prepared input is excluded. An earlier strict
+whole-profile fixture reports that added cache even though both reader calls
+succeed; that failed fixture remains recorded, not relabeled.
+
+This is actual prepared-consumer Windows evidence, not Linux qualification,
+cold-preparation performance, live installation, serving readiness or rollout.
+No new runtime implementation or contributor-branch edit is made. Remaining
+Plan/Validation items and original resource/effect limits stay open.
 
 ### 2026-11-17 - Prepared incoming inspection exposes wheel-data verification failure
 
