@@ -76,3 +76,8 @@ The [validation matrix](validation.md) defines the missing count-based gates.
 Before implementation, add fixtures that independently count provider requests,
 historical enumeration, fetched documents, chunking, embeddings, writes,
 checkpoint work and maintenance generations.
+
+The [Azure DevOps acquisition proposal](azure-devops-acquisition.md) adds current
+provider documentation and a bounded implementation sequence for that adapter.
+The historical amplification finding above remains open: response and pagination
+repairs alone do not supply a complete query-membership change feed.

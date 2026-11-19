@@ -49,6 +49,11 @@ storage calls are constant-time without measuring their implementation.
 
 ## Validation layering
 
+The [Azure DevOps proposal's acceptance controls](azure-devops-acquisition.md#safety-and-compatibility-acceptance)
+specialize hosted acquisition for operator query membership, exact events,
+work-item/PR coverage gaps and shared resumable progress. They are additional
+unresolved obligations, not passing results or replacements for this matrix.
+
 Small unit fixtures assert work counts, queue transitions and protocol
 compatibility in required CI. Scale, native lifecycle, packaged-source and
 consumer-composition checks use existing bounded opt-in lanes. Do not create
