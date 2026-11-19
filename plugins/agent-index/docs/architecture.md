@@ -1209,6 +1209,47 @@ an old writer must not report a post-pin delivery accepted by the frozen row.
 Legacy plain/v1 rows and their positional `TaskRecord` constructor remain unchanged.
 No runner or HTTP/CLI producer calls this Python-only pin operation.
 
+The standalone Python helper
+`sources.azure_devops_points.acquire_named_point(connector, claim=..., target=..., expected=...)`
+can read one exact work-item revision or comment version from such a claim.
+`expected` is the existing singleton `WorkItemEligibility` observation. The
+claim must select canonical family `<connector.source_name>:workitem-components`,
+the effective account and endpoint, `point-components` v1, the sorted JSON
+configured work-item query union as `query_scope`, and the eligibility
+definition/context digest as `query_context`. Candidate, account, endpoint
+and query bindings are checked before I/O, then the existing full query-union
+eligibility owner runs before and after the single named-version read.
+
+Work-item bodies use Revisions Get (`7.1`) at the exact revision and reuse the
+existing fields renderer without comments, under `workitems/<item>/body.md`.
+An associated `commentVersionRef` neither expands the claim nor fetches or covers
+discussion. Named comments use Comments Versions Get (`7.1-preview.1`) at
+`workitems/<item>/comments/<comment>/versions/<version>`. That model has no parent
+field, so the helper checks the **actual response request** against its exact
+parent-bound request; a redirected or substituted request refuses. Comment ID,
+version, complete text or explicit boolean deletion state must match. A deleted
+version produces only `workitems/<item>/comments/<comment>.md` deletion input and
+its ordering record, never a work-item or legacy-family tombstone. Permission
+denial, missing items, query exit, mismatched versions and partial bodies refuse.
+
+The result is a `NamedPointObservation`: complete retained claim and selected
+target, query observation, component ordering input and either an entry or a
+point deletion. It is not a `SourceDelta`, acquisition page, durable applied
+record or whole-claim completion. Rendered entries report acquired provider
+version and `named-target-only` coverage, not an applied-version certificate.
+Default discovery, the combined renderer's identity and every execution fence
+remain unchanged; no callable advertises v2 acquisition/execution.
+
+The helper permits at most 67 logical requests / 335 shared HTTP attempts:
+two eligibility checks, each bounded to sixteen queries, and one version read.
+It checks cancellation between requests and refuses an excessive shared retry
+configuration. Accepted serialized decoded response and rendered content/metadata
+are each capped at 2 MiB after HTTP/JSON decoding; this is not a transport-byte,
+peak-memory or elapsed-time bound. Stage counts retain actual component-family
+body records even when subsequent decoding qualification refuses them. Live
+provider/workload qualification and durable per-target pending/application
+composition remain separate requirements.
+
 There is **no v2 execution capability**, even if a selected callable has v1
 support. No runner selects point work, no engine/connector is invoked for it,
 and intake does not enable a producer or source. Ordered component application,

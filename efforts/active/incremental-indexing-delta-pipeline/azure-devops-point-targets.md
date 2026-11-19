@@ -92,10 +92,14 @@ through the existing `agent-index.change-hints` contract, retaining v1:
   [parked whole-envelope pin](../../../plugins/agent-index/docs/architecture.md#point-only-v2-intake-execution-unsupported).
   It isolates trailing arrivals and retains an immutable claim identity across
   retry, but supplies no target coverage or completion receipt. Binding this
-  identity and the entire typed target set to a pending acquisition/application,
-  qualifying every target's durable outcome, and acknowledging only that exact
-  claim remain prerequisites; the v2 execution and terminal-success fences stay
-  closed.
+  identity and the entire typed target set is available through the explicit v9
+  pending/prepared carrier, which retains intent rather than target coverage.
+  The disconnected named-point reader can qualify one exact item revision or
+  comment version using the existing query/account owner and documented point
+  APIs; it returns an observation, not an acquisition page or applied record.
+  Retaining and qualifying every target's durable acquisition/application outcome
+  and acknowledging only that exact current claim remain prerequisites; the v2
+  execution and terminal-success fences stay closed.
 
 The existing owners are `indexing/change_hints.py` and
 `change_hints_contract.py` for intake/negotiation, `task_store.py` and
