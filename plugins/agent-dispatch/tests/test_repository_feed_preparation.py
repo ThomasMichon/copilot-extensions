@@ -226,6 +226,7 @@ def test_confirmed_delivered_owner_wake_does_not_permanently_block_another_wait(
     {"owner_session_id": "successor"}, {"generation": 2}, {"owner": "other"},
     {"status": "queued"}, {"card": '{"summary":"new instruction"}'},
     {"dedup_key": "different"}, {"source": "other"}, {"origin_ref": "goal-driven"},
+    {"resume_requested": 1},
 ])
 def test_atomic_task_admission_rejects_changes_during_service_negotiation(
     tmp_path: Path, change: dict[str, Any],
@@ -242,7 +243,7 @@ def test_atomic_task_admission_rejects_changes_during_service_negotiation(
         changed.append(queue.get(task_id))
 
     client.during = race
-    with pytest.raises(TaskError, match="associated finite|changed|hold or operator"):
+    with pytest.raises(TaskError, match="associated finite|changed|hold or operator|resume request"):
         asyncio.run(prepare(preparer, task_id, spec))
     assert queue.get(task_id) == changed[0]
     assert not queue.list_pending_run_waiters()

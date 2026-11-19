@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, replace
 import sqlite3
 from typing import Any
 
@@ -13,6 +13,7 @@ from .queue_records import Status, TaskError
 from .queue_task_relationships import require_relationship
 
 PREPARATION_PROTOCOL = "agent-dispatch.repository-feed-preparation/v1"
+ADMISSION_PROTOCOL = "agent-dispatch.repository-feed-admission/v1"
 
 
 @dataclass(frozen=True)
@@ -26,6 +27,7 @@ class FeedWaiterAdmission:
     owner_session_id: str
     task_generation: int
     steering_revision: str
+    suspended_steering_revision: str
 
     @classmethod
     def observe(cls, task: Task, *, lane: str, dedup_key: str) -> FeedWaiterAdmission:
@@ -34,7 +36,29 @@ class FeedWaiterAdmission:
         return cls(
             task.id, lane, dedup_key, task.owner, task.owner_session_id,
             task.generation, task.steering_revision,
+            replace(task, status=Status.SUSPENDED).steering_revision,
         )
+
+    def record(self) -> dict[str, Any]:
+        return {"protocol": ADMISSION_PROTOCOL, **asdict(self)}
+
+    @classmethod
+    def from_record(cls, value: object) -> FeedWaiterAdmission:
+        fields = {
+            "task_id", "lane", "dedup_key", "worker_id", "owner_session_id",
+            "task_generation", "steering_revision",
+            "suspended_steering_revision",
+        }
+        if (
+            not isinstance(value, dict) or set(value) != fields | {"protocol"}
+            or value.get("protocol") != ADMISSION_PROTOCOL
+            or type(value.get("task_generation")) is not int
+            or value["task_generation"] < 0
+            or any(not isinstance(value.get(key), str) or not value[key].strip()
+                   for key in fields - {"task_generation"})
+        ):
+            raise TaskError("unsupported or invalid retained repository-feed admission")
+        return cls(**{key: value[key] for key in fields})
 
 
 def require_feed_preparation(
@@ -56,12 +80,17 @@ def require_feed_preparation(
         task.owner != expected.worker_id or worker_id != expected.worker_id
         or task.owner_session_id != expected.owner_session_id
         or task.generation != expected.task_generation
-        or task.steering_revision != expected.steering_revision
+        or task.steering_revision != (
+            expected.suspended_steering_revision if task.status == Status.SUSPENDED
+            else expected.steering_revision
+        )
         or task.status not in (Status.STARTED, Status.SUSPENDED)
     ):
         raise TaskError("repository-feed task changed during preparation")
     if task.hold_reason is not None or task.awaiting_steer:
         raise TaskError("repository-feed preparation cannot override a hold or operator form")
+    if task.resume_requested:
+        raise TaskError("repository-feed preparation cannot override a native resume request")
     if task.status == Status.STARTED and conn.execute(
         "SELECT 1 FROM wake_outbox WHERE task_id=? AND id=? AND owner=?"
         " AND owner_session_id=? AND generation=? AND pool_recovery_revision IS NULL"

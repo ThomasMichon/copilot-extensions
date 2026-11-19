@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import secrets
 import sqlite3
+from collections.abc import Callable
 
 from .identity import canonicalize_remote
 from .queue_common import LEGACY_REPO, _COLUMNS
@@ -23,7 +24,9 @@ from .queue_records import SpawnState, Status
 from .queue_value_migrations import apply_status_value_migrations
 
 
-def run_queue_schema_migrations(conn: sqlite3.Connection, *, now_fn) -> None:
+def run_queue_schema_migrations(
+    conn: sqlite3.Connection, *, now_fn: Callable[[float | None], float],
+) -> None:
     """Create/migrate every table this queue owns against ``conn``.
 
     ``now_fn`` is ``TaskQueue._now`` (a timestamp callable), needed only by
@@ -268,6 +271,7 @@ def run_queue_schema_migrations(conn: sqlite3.Connection, *, now_fn) -> None:
     for name, declaration in (
         ("kind", "TEXT NOT NULL DEFAULT 'process'"),
         ("delegation_json", "TEXT"),
+        ("feed_admission_json", "TEXT"),
         ("event_id", "TEXT"),
         ("replay_scope", "TEXT"),
         ("replay_request_id", "TEXT"),
