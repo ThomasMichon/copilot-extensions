@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import pytest
+from collections.abc import Callable
+from typing import cast
 
 from agent_dispatch import pool_decline_observation, queue_submission_advancement, review_closeout_submission
 from agent_dispatch.queue_records import TaskError
@@ -9,6 +11,9 @@ from tests import test_task_relevance_closeout_transport as transport
 from tests import test_task_relevance_closeout_readiness as readiness
 from tests.test_task_relevance_closeout_readiness import Ready as Ready
 from tests.test_task_relevance_binding import Assignment
+from tests import test_task_relevance_binding as bindings
+from tests.test_assignment_relationships import start_managed
+from tests.test_task_relevance import report
 
 managed_assignment = transport.managed_assignment
 @pytest.fixture
@@ -51,14 +56,14 @@ def test_original_proposal_or_legacy_preparation_can_finish(
     assignment: Assignment, monkeypatch: pytest.MonkeyPatch, legacy_prepare: bool,
 ) -> None:
     queue, _, workspace, task = assignment
-    readiness.start_managed(queue, workspace, task)
+    cast(Callable[..., object], start_managed)(queue, workspace, task)
     if not legacy_prepare:
         def unavailable(*_: object) -> None:
             raise TaskError("workspace not ready yet")
         monkeypatch.setattr(queue_submission_advancement, "observe_owner_state", unavailable)
         with pytest.raises(TaskError, match="not ready yet"):
             queue.complete(task.id, workspace.worker_id, result={"review": "original"}, result_ref="evidence")
-    readiness.report(queue, task.id, scope=readiness.bindings._scope(queue, task.id))
+    cast(Callable[..., object], report)(queue, task.id, scope=bindings._scope(queue, task.id))
     from agent_dispatch import submission_readiness_observation
     monkeypatch.setattr(submission_readiness_observation, "observe", lambda *_: {"ready": True})
     if legacy_prepare:
@@ -66,7 +71,8 @@ def test_original_proposal_or_legacy_preparation_can_finish(
             legacy.setattr(review_closeout_submission, "prepare", lambda *_: None)
             readiness.prepare(queue, workspace, task)
         assert queue.submission_preparation(task.id) is None
-        assert queue.task_relationship(task.id)["state"] == "closed"
+        relationship = queue.task_relationship(task.id)
+        assert relationship is not None and relationship["state"] == "closed"
     readiness.prepare(queue, workspace, task)
     monkeypatch.setattr(pool_decline_observation, "observe", lambda *_: {
         "status": "finalized", "creation_nonce": workspace.creation_nonce,
