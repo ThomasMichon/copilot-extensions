@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -216,15 +217,15 @@ def test_point_vectors_refuse_unprepared_or_colliding_table_bindings_before_effe
         domain.effect("fixture-canonical-seed")
         store.content_store._get_or_create_table().add([{**content_record(item), "indexed_at": 0.0}])
     prepare_ingestion_indices(store, max_rows=1, point_scope=scope)
-    if binding in ("collision", "missing-vector"):
+    if binding == "missing-vector":
         store.register_model(ModelProfile(
-            "late", "fixture", dim=2,
-            table_name=config.content_table if binding == "collision" else "unprepared_vectors",
+            "late", "fixture", dim=2, table_name="unprepared_vectors",
         ))
         owner = store.get_vector_table("late")
     else:
         owner = VectorTable(
-            store.content_store.db, table_name=profile.table_name,
+            store.content_store.db,
+            table_name=config.content_table if binding == "collision" else profile.table_name,
             dim=3 if binding == "wrong-vector-schema" else 2, source_domain=domain,
             content_table=(
                 "unprepared_content" if binding == "missing-content"
@@ -241,6 +242,103 @@ def test_point_vectors_refuse_unprepared_or_colliding_table_bindings_before_effe
             with pytest.raises(SourceLayoutError, match="(?:distinct prepared|schema is incompatible)"):
                 owner.upsert(chunks, vectors, bounded_input=True, point_scope=scope)
             assert snapshot(config.data_dir) == before
+
+
+@pytest.mark.parametrize("target", ["content", "model"])
+def test_point_model_registration_refuses_table_alias_before_returning_a_handle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, target: str,
+) -> None:
+    monkeypatch.setenv("AGENT_INDEX_STORE_LAYOUT", LAYOUT)
+    profile = ModelProfile("small", "fixture", dim=2)
+    config = IndexConfig(data_dir=tmp_path / "point", model_profiles={"small": profile})
+    store = initialize_source_store(config, point_scope=claim().scope)
+    before = snapshot(config.data_dir)
+    with pytest.raises(SourceLayoutError, match="distinct"):
+        store.register_model(ModelProfile(
+            "alias", "another-engine", dim=2,
+            table_name=config.content_table if target == "content" else profile.table_name,
+        ))
+    assert store.model_ids == ["small"]
+    with pytest.raises(KeyError):
+        store.get_vector_table("alias")
+    assert snapshot(config.data_dir) == before
+
+
+@pytest.mark.parametrize("unprepared", ["missing-index", "tail"])
+def test_point_vector_deletes_require_prepared_index_and_one_canonical_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, unprepared: str,
+) -> None:
+    from agent_index.store import source_projection
+
+    monkeypatch.setenv("AGENT_INDEX_STORE_LAYOUT", LAYOUT)
+    profile = ModelProfile("small", "fixture", dim=2)
+    config = IndexConfig(data_dir=tmp_path / "point", model_profiles={"small": profile})
+    scope = claim().scope
+    store = initialize_source_store(config, point_scope=scope)
+    domain = store._source_domain
+    assert domain is not None
+    items = [
+        Chunk(str(i), f"{i}.md", "text", "markdown", 1, 1, scope[1]) for i in range(20)
+    ]
+    table = store.get_vector_table("small")._get_or_create_table()
+    rows = [
+        {"chunk_id": item.chunk_id, "vector": [1.0, 0.0], "indexed_at": 0.0,
+         "source": item.source, "language": item.language} for item in items
+    ]
+    with domain._write(store.content_store.db, point_scope=scope):
+        domain.effect("fixture-canonical-and-vector-seed")
+        store.content_store._get_or_create_table().add([
+            {**content_record(item), "indexed_at": 0.0} for item in items
+        ])
+        table.add(rows)
+    prepare_ingestion_indices(store, max_rows=len(items), point_scope=scope)
+    with domain._write(store.content_store.db, point_scope=scope):
+        domain.effect("fixture-vector-index-gap")
+        if unprepared == "missing-index":
+            table.drop_index("chunk_id_idx")
+        else:
+            table.add(rows[:1])
+    with domain._write(store.content_store.db, point_scope=scope):
+        before = snapshot(config.data_dir)
+        with pytest.raises(ScalarIndexPreparationRequired):
+            store.upsert_vectors(
+                "small", items[:1], np.ones((1, 2), dtype=np.float32),
+                bounded_input=True, point_scope=scope,
+            )
+        assert snapshot(config.data_dir) == before
+    prepare_ingestion_indices(store, max_rows=len(items) + 1, point_scope=scope)
+    calls: list[int] = []
+    plans: list[str] = []
+    projection = source_projection.projection_records
+    delete = type(table).delete
+
+    def counted(*args: Any, **kwargs: Any) -> Any:
+        calls.append(1)
+        return projection(*args, **kwargs)
+
+    def indexed_delete(self: Any, predicate: str) -> Any:
+        if self.name == profile.table_name:
+            plan = self.search().where(predicate).select(["chunk_id"]).limit(3).analyze_plan()
+            assert "ScalarIndexQuery" in plan, plan
+            assert sum(int(n) for n in re.findall(r"\brows_scanned=(\d+)", plan)) <= 2, plan
+            plans.append(plan)
+        return delete(self, predicate)
+
+    monkeypatch.setattr(source_projection, "projection_records", counted)
+    monkeypatch.setattr(type(table), "delete", indexed_delete)
+    with domain._write(store.content_store.db, point_scope=scope):
+        assert store.upsert_vectors(
+            "small", items[:1], np.ones((1, 2), dtype=np.float32),
+            bounded_input=True, point_scope=scope,
+        ) == 1
+        before = snapshot(config.data_dir)
+        with pytest.raises(ScalarIndexPreparationRequired):
+            store.upsert_vectors(
+                "small", items[:1], np.ones((1, 2), dtype=np.float32),
+                bounded_input=True, point_scope=scope,
+            )
+        assert snapshot(config.data_dir) == before
+    assert len(plans) == 1 and calls == [1]
 
 
 def test_cold_point_binding_reopens_without_enabling_default_stores(

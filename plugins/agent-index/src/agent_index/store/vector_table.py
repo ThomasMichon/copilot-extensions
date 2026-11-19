@@ -128,11 +128,11 @@ class VectorTable:
         with domain.read(self._db, point_scope=point_scope):
             if not chunks:
                 return 0
-            projection_records(
-                self._db, self._content_table, chunks, bounded_content=content,
-                require_current_input=bounded_input,
-                point_scope=point_scope,
-            )
+            if point_scope is None:
+                projection_records(
+                    self._db, self._content_table, chunks, bounded_content=content,
+                    require_current_input=bounded_input,
+                )
         refusal: ChunkIdIndexPreparationRequired | SourceLayoutError
         writer = domain.write(self._db) if point_scope is None else domain._write(
             self._db, point_scope=point_scope,
@@ -152,6 +152,7 @@ class VectorTable:
 
     def _require_point_binding(self) -> None:
         from .content_store import _CONTENT_SCHEMA
+        from .scalar_index import ScalarIndexPreparationRequired, inspect_index, require_budget
 
         domain = self._source_domain
         assert domain is not None
@@ -166,6 +167,10 @@ class VectorTable:
         if (not self._db.open_table(self._content_table).schema.equals(_CONTENT_SCHEMA)
                 or not self._db.open_table(self._table_name).schema.equals(self._schema)):
             raise SourceLayoutError("Point vector content or model schema is incompatible")
+        state, _ = inspect_index(self._db.open_table(self._table_name), column="chunk_id")
+        if not state.prepared:
+            raise ScalarIndexPreparationRequired("Point vectors require a prepared chunk-ID index")
+        require_budget(state, 0)
 
     @source_write
     def _upsert(self, chunks: list[Chunk], vectors: np.ndarray[Any, Any]) -> int:

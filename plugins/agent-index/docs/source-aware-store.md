@@ -90,7 +90,13 @@ chunk-ID index before reusing the existing vector mutation path. They never
 acquire outer point-writer ownership, prepare indices or mutate canonical
 content. Both the vector and active-writer connections must resolve to the
 selected domain; content/vector tables must already be prepared, have distinct
-names and match their expected schemas. An interrupted vector effect retains the existing dirty recovery
+names and match their expected schemas. Point model registration also refuses
+aliases of canonical content or another model's table before returning a handle.
+The vector chunk-ID index must have no uncovered physical rows and stay within
+the existing segment budget; later writes need explicit budgeted tail preparation.
+Selected writes qualify canonical input once under their already-owned writer;
+ordinary unscoped writes retain their separate preflight and writer recheck.
+An interrupted vector effect retains the existing dirty recovery
 boundary. Default vector writes and reads remain refused; selected reads still
 require their explicit prepared-index path.
 

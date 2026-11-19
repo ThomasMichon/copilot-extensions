@@ -49,6 +49,7 @@ from agent_index.store.result_filters import (
 )
 from agent_index.store.source_layout import (
     PointScope,
+    SourceLayoutError,
     source_fts_read as _source_fts_read,
     source_read as _source_read,
     source_write as _source_write,
@@ -129,6 +130,14 @@ class MultiModelStore(_ItemRepresentationMixin):
 
         Returns the VectorTable instance for direct access if needed.
         """
+        if (self._source_domain is not None
+                and self._source_domain.receipt()["protocol"] == 2
+                and profile.table_name in {
+                    self._content._table_name,
+                    *(owner.table_name for model, owner in self._vector_tables.items()
+                      if model != profile.model_id),
+                }):
+            raise SourceLayoutError("Point models require distinct content and vector tables")
         if profile.model_id in self._vector_tables:
             return self._vector_tables[profile.model_id]
 
