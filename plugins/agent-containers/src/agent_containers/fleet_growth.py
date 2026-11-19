@@ -24,6 +24,7 @@ import json
 import logging
 import os
 import platform
+import threading
 import time
 import uuid
 from collections.abc import Callable, Iterator
@@ -33,18 +34,22 @@ from typing import Any, TypeVar
 
 from ssh_manager.locks import pid_alive
 
+from . import lifecycle as lifecycle_mod
 from .config import ContainersConfig
 from .lifecycle import DockerContainerInfo
 from .private_state import atomic_write_json, ensure_private_dir, private_file_lock
 
 log = logging.getLogger("agent-containers")
 
-# Long enough to wait out another borrow's devcontainer build (whose own
-# timeout is 30 minutes) instead of failing while it is still provisioning.
+# How long a racing borrow waits for another borrow's growth before it refuses.
 GROWTH_LOCK_TIMEOUT = 1800.0
 
-# A marker outlives a crashed grower only until this age (or its local pid dies).
-MARKER_TTL = GROWTH_LOCK_TIMEOUT + 600.0
+# The grower heartbeats its marker for as long as provisioning runs. A crashed
+# grower's marker lapses when its local pid dies or its heartbeat goes stale.
+MARKER_HEARTBEAT_INTERVAL = 30.0
+MARKER_HEARTBEAT_TTL = 300.0
+# A partial member whose cleanup failed stays hidden for this long.
+QUARANTINE_TTL = 24 * 3600.0
 _MARKERS = "fleet-growth.json"
 INSTANCE_LABEL = "agent-containers.instance"
 
@@ -90,7 +95,10 @@ def growth_lock(state_dir: Path, fleet_name: str) -> Iterator[None]:
 
 
 def _marker_live(marker: dict[str, Any]) -> bool:
-    if time.time() - float(marker.get("started_at", 0)) >= MARKER_TTL:
+    now = time.time()
+    if marker.get("quarantine"):
+        return now - float(marker.get("started_at", 0)) < QUARANTINE_TTL
+    if now - float(marker.get("heartbeat_at", 0)) >= MARKER_HEARTBEAT_TTL:
         return False
     return marker.get("host") != platform.node() or pid_alive(int(marker.get("pid", 0)))
 
@@ -128,7 +136,8 @@ def admissible(
     A member is hidden when it carries the in-progress target name (as its
     name or instance label), or when it belongs to the growing fleet but did
     not exist when that growth started -- covering a devcontainer's temporary
-    pre-rename name. ``token`` exempts the caller's own growth.
+    pre-rename name. A quarantined partial member stays hidden by identity.
+    ``token`` exempts the caller's own growth.
     """
     markers = [m for key, m in _read_markers(state_dir).items() if key != token]
     if not markers:
@@ -136,10 +145,12 @@ def admissible(
 
     def provisioning(member: DockerContainerInfo) -> bool:
         return any(
-            member.name == m.get("target")
-            or member.labels.get(INSTANCE_LABEL) == m.get("target")
-            or (member.fleet == m.get("fleet")
-                and member.container_id not in m.get("known_ids", ()))
+            member.container_id in m["quarantine"] if m.get("quarantine") else (
+                member.name == m.get("target")
+                or member.labels.get(INSTANCE_LABEL) == m.get("target")
+                or (member.fleet == m.get("fleet")
+                    and member.container_id not in m.get("known_ids", ()))
+            )
             for m in markers
         )
 
@@ -147,8 +158,82 @@ def admissible(
 
 
 def is_provisioning(state_dir: Path, name: str) -> bool:
-    """True when ``name`` is the target of a live on-demand growth."""
-    return any(m.get("target") == name for m in _read_markers(state_dir).values())
+    """True when ``name`` is being grown, or is a quarantined partial member."""
+    return any(
+        m.get("target") == name or name in m.get("names", ())
+        for m in _read_markers(state_dir).values()
+    )
+
+
+@contextmanager
+def _heartbeat(state_dir: Path, lease_lock: LeaseLock, token: str) -> Iterator[None]:
+    """Keep ``token``'s marker live for as long as provisioning runs."""
+    stop = threading.Event()
+
+    def beat() -> None:
+        while not stop.wait(MARKER_HEARTBEAT_INTERVAL):
+            try:
+                with lease_lock():
+                    markers = _read_markers(state_dir)
+                    if token in markers:
+                        markers[token]["heartbeat_at"] = time.time()
+                        _write_markers(state_dir, markers)
+            except (OSError, RuntimeError):
+                log.exception("Could not heartbeat the fleet growth marker")
+
+    thread = threading.Thread(target=beat, daemon=True)
+    thread.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        thread.join(timeout=5)
+
+
+def _settle_failed_growth(
+    config: ContainersConfig, fleet_name: str, state_dir: Path, lease_lock: LeaseLock,
+    token: str,
+) -> None:
+    """Remove a partial member a failed growth left behind, or quarantine it.
+
+    Only the exact new instance(s) carrying this growth's target name or
+    instance label are touched. If removal fails they stay hidden from borrow
+    and session admission (``QUARANTINE_TTL``) instead of becoming leasable.
+    """
+    from . import fleet as fleet_mod
+
+    with lease_lock():
+        marker = _read_markers(state_dir).get(token)
+    if marker is None:
+        return
+    target, known = marker["target"], set(marker.get("known_ids", ()))
+    leftover: list[DockerContainerInfo] = []
+    try:
+        partial = [
+            m for m in fleet_mod._fleet_members(config, fleet_name)
+            if m.container_id not in known
+            and (m.name == target or m.labels.get(INSTANCE_LABEL) == target)
+        ]
+    except Exception:  # noqa: BLE001 -- unknown inventory: keep the barrier
+        log.exception("Could not list fleet '%s' after a failed growth", fleet_name)
+        return
+    for member in partial:
+        try:
+            lifecycle_mod.remove_container(member.container_id, force=True)
+            log.info("Removed partial on-demand member '%s'", member.name)
+        except Exception:  # noqa: BLE001 -- quarantine whatever cannot be removed
+            log.exception("Could not remove partial on-demand member '%s'", member.name)
+            leftover.append(member)
+    with lease_lock():
+        markers = _read_markers(state_dir)
+        markers.pop(token, None)
+        if leftover:
+            markers[token] = {
+                "fleet": fleet_name, "quarantine": [m.container_id for m in leftover],
+                "names": sorted({m.name for m in leftover} | {target}),
+                "started_at": time.time(),
+            }
+        _write_markers(state_dir, markers)
 
 
 def provision_one(
@@ -176,7 +261,8 @@ def provision_one(
         markers[token] = {
             "fleet": fleet_name, "target": target,
             "known_ids": [c.container_id for c in existing],
-            "pid": os.getpid(), "host": platform.node(), "started_at": time.time(),
+            "pid": os.getpid(), "host": platform.node(),
+            "started_at": time.time(), "heartbeat_at": time.time(),
         }
         _write_markers(state_dir, markers)
     log.info(
@@ -184,13 +270,13 @@ def provision_one(
         fleet_name, target, current, current + 1, spec.max_size,
     )
     try:
-        result = fleet_mod.reconcile_up(config, fleet_name, count=current + 1)
+        with _heartbeat(state_dir, lease_lock, token):
+            result = fleet_mod.reconcile_up(config, fleet_name, count=current + 1)
         if not result.created:
             reasons = "; ".join(f"{k}: {v}" for k, v in result.deferred.items())
             raise RuntimeError(reasons or "provisioning created no member")
     except BaseException:
-        with lease_lock():
-            clear_marker(state_dir, token)
+        _settle_failed_growth(config, fleet_name, state_dir, lease_lock, token)
         raise
     return result.created[0], token
 

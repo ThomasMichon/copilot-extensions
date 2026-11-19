@@ -33,6 +33,8 @@ class FakeProvisioner:
     delay: float = 0.0
     # Runs while a new member is visible under its temporary pre-rename name.
     during: Callable[[], None] | None = None
+    # Fail after the member exists, like a failed post-create setup step.
+    fail_after_create: str | None = None
 
     def reconcile_up(
         self, config: ContainersConfig, fleet_name: str, count: int | None = None,
@@ -53,6 +55,8 @@ class FakeProvisioner:
             self.members.append(member)
             if self.during is not None:
                 self.during()
+            if self.fail_after_create:
+                raise RuntimeError(self.fail_after_create)
             member.name = name  # like the devcontainer path's final rename
             created.append(name)
         return FleetOperationResult(created=created)
@@ -169,6 +173,67 @@ def test_member_being_provisioned_is_hidden_until_the_grower_leases_it(
     assert fleet_growth._read_markers(fake.state_dir) == {}
     with lease_mod.session_admission("example-2"):
         pass
+
+
+def test_marker_stays_live_past_its_heartbeat_ttl_during_a_long_build(
+    fake: FakeProvisioner, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(fleet_growth, "MARKER_HEARTBEAT_INTERVAL", 0.02)
+    monkeypatch.setattr(fleet_growth, "MARKER_HEARTBEAT_TTL", 0.2)
+    config = _config(max_size=2)
+    lease_mod.borrow(config, "a", fleet="example")
+
+    def during() -> None:
+        time.sleep(0.6)  # three heartbeat TTLs of an active build
+        with pytest.raises(RuntimeError, match="All fleet containers"):
+            lease_mod.borrow(config, "intruder", fleet="example", grow=False)
+
+    fake.during = during
+    assert lease_mod.borrow(config, "b", fleet="example").container == "example-2"
+
+
+def _removing(fake: FakeProvisioner, fail: bool) -> Callable[..., None]:
+    def remove(name: str, force: bool = False) -> None:
+        if fail:
+            raise RuntimeError("example-driver remove failed")
+        fake.members[:] = [m for m in fake.members if m.container_id != name]
+    return remove
+
+
+def test_failed_growth_removes_the_partial_member(
+    fake: FakeProvisioner, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(fleet_growth.lifecycle_mod, "remove_container", _removing(fake, False))
+    fake.fail_after_create = "dotfiles setup failed"
+    config = _config(max_size=2)
+    lease_mod.borrow(config, "a", fleet="example")
+
+    with pytest.raises(RuntimeError, match="dotfiles setup failed"):
+        lease_mod.borrow(config, "b", fleet="example")
+
+    assert [m.name for m in fake.members] == ["example-1"]
+    assert fleet_growth._read_markers(fake.state_dir) == {}
+    assert [lease.effort for lease in lease_mod.list_leases()] == ["a"]
+
+
+def test_partial_member_is_quarantined_when_removal_fails(
+    fake: FakeProvisioner, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(fleet_growth.lifecycle_mod, "remove_container", _removing(fake, True))
+    fake.fail_after_create = "dotfiles setup failed"
+    config = _config(max_size=3)
+    lease_mod.borrow(config, "a", fleet="example")
+    with pytest.raises(RuntimeError, match="dotfiles setup failed"):
+        lease_mod.borrow(config, "b", fleet="example")
+    assert [m.name for m in fake.members] == ["example-1", "tmp-2"]
+
+    with pytest.raises(RuntimeError, match="All fleet containers"):
+        lease_mod.borrow(config, "c", fleet="example", grow=False)
+    for name in ("tmp-2", "example-2"):
+        with pytest.raises(lease_mod.ProviderAdmissionError, match="still being provisioned"):
+            with lease_mod.session_admission(name):
+                pass
+    assert [lease.effort for lease in lease_mod.list_leases()] == ["a"]
 
 
 def test_provisioning_failure_leaves_no_lease_and_reports_the_error(

@@ -151,8 +151,12 @@ capacity check, provisioning and the lease, so concurrent borrows never exceed
 provisioning marker (`fleet-growth.json` in the state directory) hides the
 member being built, including a devcontainer's temporary pre-rename name, from
 other borrows and refuses session admission to it until the grower leases it
-in the same lease-lock hold that clears the marker; a crashed grower's marker
-expires with its process or after the growth timeout. At the
+in the same lease-lock hold that clears the marker. The grower heartbeats the
+marker for as long as provisioning runs; a crashed grower's marker lapses when
+its process dies or its heartbeat goes stale. If provisioning fails after
+creating the member, that exact instance is removed; if removal also fails it
+stays quarantined (hidden from borrow and session admission) for 24 hours so
+an operator can `remove` it. At the
 bound, or when provisioning fails, `borrow` returns the usual refusal with the
 reason appended and writes no lease. `borrow --container` never grows, and
 `borrow --no-grow` opts out per call. Grown members are ordinary warm members

@@ -494,7 +494,8 @@ unchanged.
   and the lease, so racing borrows never overshoot `max_size`; the lease lock
   is not held while provisioning. Until the grower leases it, the member being
   built (including a devcontainer's temporary pre-rename name) is hidden from
-  other borrows and refused session admission. A provisioning failure writes no lease and
+  other borrows and refused session admission; a member left by a failed
+  provisioning is removed (or quarantined if removal fails). A provisioning failure writes no lease and
   returns the usual "all leased" refusal with the error appended. Growth
   applies to `--fleet`-scoped borrows (or the only configured fleet) and
   never to `--container`; `borrow --no-grow` opts out per call. Grown members
