@@ -7,27 +7,44 @@ import json
 import uuid
 from contextlib import closing
 from dataclasses import fields
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 from agent_index.chunking.base import Chunk
 from agent_index.indexing.file_batches import FileBatch
-from agent_index.indexing.pending_crawl import PendingCrawlConflict
+from agent_index.indexing.pending_crawl import PendingCrawlConflict, PendingCrawls
 
 if TYPE_CHECKING:
     import sqlite3
     from collections.abc import Iterator
 
+    from agent_index.indexing.manifest import CrawlManifest
     from agent_index.indexing.path_index import PathIndex
 
 
 class PreparedJournal:
     """No cursor or ownership of its own; the parent journal retires these rows."""
 
-    def __init__(self, paths: PathIndex, source: str, scope: str, payload: str) -> None:
+    def __init__(
+        self, paths: PathIndex, source: str, scope: str, payload: str, *,
+        manifest: CrawlManifest | None = None, full: bool | None = None,
+    ) -> None:
+        if (manifest is None) != (full is None) or full is not None and type(full) is not bool:
+            raise ValueError("Prepared manifest and boolean full mode must be supplied together")
+        acquired = PendingCrawls.decode_pending(payload, source)
+        if acquired is None:
+            raise ValueError("Prepared application requires a completed pending crawl")
+        if manifest is not None and acquired != (manifest, full):
+            raise PendingCrawlConflict("Prepared manifest does not match its acquired pending crawl")
         self.paths, self.source, self.scope, self.payload = paths, source, scope, payload
         with closing(paths._connect()) as conn, conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT scope, payload FROM pending_crawls WHERE source = ?", (source,),
+            ).fetchone()
+            if row is None or (row["scope"], row["payload"]) != (scope, payload):
+                raise PendingCrawlConflict("Prepared application no longer matches its pending crawl")
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS prepared_crawl_rows "
                 "(source TEXT NOT NULL, kind TEXT NOT NULL, key TEXT NOT NULL, "
@@ -50,12 +67,6 @@ class PreparedJournal:
                 "DELETE FROM prepared_crawl_rows WHERE source = old.source; "
                 "DELETE FROM prepared_crawl_parents WHERE source = old.source; END",
             )
-            conn.execute("BEGIN IMMEDIATE")
-            row = conn.execute(
-                "SELECT scope, payload FROM pending_crawls WHERE source = ?", (source,),
-            ).fetchone()
-            if row is None or (row["scope"], row["payload"]) != (scope, payload):
-                raise PendingCrawlConflict("Prepared application no longer matches its pending crawl")
             conn.execute(
                 "INSERT OR IGNORE INTO prepared_crawl_parents VALUES (?, ?, ?)",
                 (source, scope, uuid.uuid4().hex),
@@ -134,7 +145,7 @@ class PreparedJournal:
                  for source, path, fingerprint, size in data["checkpoints"]],
             )
 
-    def vectors(self, keys: list[str], dim: int) -> dict[str, np.ndarray]:
+    def vectors(self, keys: list[str], dim: int) -> dict[str, np.ndarray[Any, Any]]:
         result = {}
         for key, payload in self.get("vector", keys).items():
             if len(payload) != dim * 4:
@@ -145,7 +156,7 @@ class PreparedJournal:
             result[key] = vector
         return result
 
-    def put_vectors(self, keys: list[str], vectors: np.ndarray, dim: int) -> None:
+    def put_vectors(self, keys: list[str], vectors: np.ndarray[Any, Any], dim: int) -> None:
         vectors = np.asarray(vectors, dtype="<f4")
         if vectors.shape != (len(keys), dim) or not np.isfinite(vectors).all():
             raise ValueError("Embedding response has an incompatible shape or nonfinite values")

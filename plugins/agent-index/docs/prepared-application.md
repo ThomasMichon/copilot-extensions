@@ -23,14 +23,23 @@ that corpus build as a delta. Readers do not prepare indices.
 
 Prepared chunks, file fingerprints and vectors live in `prepared_crawl_rows`,
 a subordinate table in the existing path-index SQLite database. Construction
-compares the parent pending row's exact source, account scope and acquired
-payload once, then binds a compact cache incarnation in `prepared_crawl_parents`.
+decodes the completed acquisition through the shared pending-journal codec.
+Application callers also supply their manifest and full-rebuild mode; both must
+match that decoded acquisition, including component versions when present.
+The journal then compares the parent row's exact source, account scope and
+payload under SQLite writer exclusion, **before** creating any prepared tables,
+triggers or rows. That same transaction binds a compact cache incarnation in
+`prepared_crawl_parents`.
 Each cache access checks that incarnation, not the full acquired content.
 Parent retirement or replacement invalidates the incarnation and cached rows
 in the same SQLite transaction, including when a journal-capable older caller
 clears the manifest. Returning to identical manifest bytes cannot revive an old
 binding. Neither table has a cursor, source lease, completion marker or repair
 authority.
+
+The journal can bind a completed component envelope for subordinate cache work.
+This does not enable ordered component application or completion: the existing
+engine, prepared-application and pending-completion boundaries still refuse it.
 
 Vectors are keyed by model/table, canonical chunk ID and raw embedding-input
 identity, including the model revision and preprocessing policy. Stored float32
@@ -119,7 +128,8 @@ whole-source memory, physical I/O, writer duration or full-reconciliation time.
 The existing final GC, FTS and cluster owners remain outside this source writer.
 
 `tests/test_delta_recovery.py`, `tests/test_prepared_application.py`,
-`tests/test_prepared_journal.py` and
+`tests/test_prepared_journal.py`,
+`tests/test_prepared_parent_binding.py` and
 `tests/test_work_counts.py` exercise native layouts, retained preparation,
 publication failures, vector validation, scope/checkpoint changes and
 one-generation multi-batch application.
