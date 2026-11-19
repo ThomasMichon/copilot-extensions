@@ -179,6 +179,21 @@ exactly one integer-ID record with a fields object per requested identity.
 Missing, duplicate, unexpected or malformed rows refuse the entire acquisition
 before that batch's comments are read. Parsed records remain counted even on
 refusal; a partial body inventory cannot become full-crawl deletion evidence.
+Query results must contain a recognized collection or a documented `queryType`
+(`flat`, `oneHop`, or `tree`). The provider's
+[`WorkItems`](https://learn.microsoft.com/en-us/dotnet/api/microsoft.teamfoundation.workitemtracking.webapi.models.workitemqueryresult.workitems)
+and
+[`WorkItemRelations`](https://learn.microsoft.com/en-us/dotnet/api/microsoft.teamfoundation.workitemtracking.webapi.models.workitemqueryresult.workitemrelations)
+collections use `EmitDefaultValue=false`, while
+[`QueryType`](https://learn.microsoft.com/en-us/dotnet/api/microsoft.teamfoundation.workitemtracking.webapi.models.workitemqueryresult.querytype)
+does not: omitted/null default collections under a recognized query type remain
+valid empty results. Explicit collection-only responses remain supported.
+Malformed collections or selected references refuse acquisition; relation
+targets may be null. PR lists and thread lists require an explicit `value`
+array or the supported legacy bare array, with object records. An unrecognized
+object, including `{}` or a count without a value array, cannot certify an empty
+inventory. Parsed observations are recorded before validation and deduplication;
+they are not completeness evidence.
 Azure DevOps does not yet implement the
 shared paged acquisition journal, durable query progress, immutable full
 snapshots or authoritative tombstones. This legacy optimization does not

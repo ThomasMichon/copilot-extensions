@@ -175,7 +175,6 @@ def test_pull_counts_retain_parsed_work_on_invalid_body_and_id_only_paths() -> N
                     "value": [
                         item,
                         item,
-                        None,
                         {"pullRequestId": 2, "description": 9},
                         {"pullRequestId": 3},
                     ]
