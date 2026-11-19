@@ -9,12 +9,7 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager, closing, nullcontext
 from dataclasses import asdict, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol, cast
-
-if TYPE_CHECKING:
-    from agent_index.engine.client import EngineClient
-    from agent_index.index_config import IndexConfig
-    from agent_index.store.multi_model_store import MultiModelStore
+from typing import Any, Protocol, cast
 
 from agent_index.indexing.change_hints import ChangeHints
 from agent_index.indexing.component_manifest import (
@@ -185,6 +180,12 @@ class PendingCrawls(PollRefreshJournal):
                 row is not None and (row["scope"] != scope or row["payload"] != expected)
             ):
                 raise PendingCrawlConflict("Pending acquisition changed before progress publication")
+            if (
+                row is not None
+                and json.loads(row["payload"]).get("version") == 8
+                and data.get("version") != 8
+            ):
+                raise ValueError("Component pending work cannot be downgraded")
             if row is None:
                 conn.execute(
                     "INSERT INTO pending_crawls (source, scope, payload) VALUES (?, ?, ?)",
@@ -379,18 +380,6 @@ class PendingCrawls(PollRefreshJournal):
                     raise PendingCrawlConflict("Pending crawl changed before completion")
                 self.cover_refresh(conn, manifest, scope)
             conn.execute("DELETE FROM pending_crawls WHERE source = ?", (source,))
-
-    def apply_components(
-        self, source: str, *, scope: str, expected_payload: str,
-        store: MultiModelStore, config: IndexConfig, clients: dict[str, EngineClient],
-    ) -> tuple[int, int, int]:
-        """Qualify ordered publication without enabling recovery or claim completion."""
-        from agent_index.indexing.component_application import apply_components
-
-        return apply_components(
-            self, source=source, scope=scope, expected_payload=expected_payload,
-            store=store, config=config, clients=clients,
-        )
 
 
 def recover_source(

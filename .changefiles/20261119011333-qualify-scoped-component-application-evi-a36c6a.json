@@ -1,5 +1,5 @@
 {
-  "comment": "Qualify scoped component application evidence under the existing pending owner without enabling claim execution.",
+  "comment": "Define component content ordering and preserve ordered pending work against legacy downgrade or premature completion; store application remains unsupported.",
   "changes": [
     {
       "plugin": "agent-index",

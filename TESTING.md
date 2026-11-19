@@ -7493,15 +7493,11 @@ and pre-application refusal without importing stores, opening SQLite or starting
 an actor. The plugin's
 `tests/test_component_manifest.py` separately covers native SQLite reopen/CAS,
 legacy-envelope compatibility, preserved polling state and refusal at actual
-recovery/prepared/application entrypoints. The opt-in native
-`tests/test_component_application.py` composes the explicit pending receiver
-with real prepared publication, content/vector stores and the path database.
-It covers newer/duplicate/older application, retained deletion order, complete
-manifest preflight, scope/domain/corruption refusal and injected interruptions
-before vector publication and evidence commit. Unresolved attempts remain
-unacknowledged, including after reopening the journal. This is not process-death
-reconciliation, claim/checkpoint completion, producer admission or component
-read isolation.
+recovery/prepared/application entrypoints. It also checks transactional refusal
+of v8-to-legacy replacement and premature completion, reopens the retained
+parent and proves ordinary recovery still refuses without callbacks or
+checkpoint changes. Neither lane qualifies ordered store application, durable
+applied-version/deletion evidence, backup recovery or component read isolation.
 
 The exclusive attachment-export consumer packet executes the real export
 entrypoint, health-selected command transport, extension registry, provider

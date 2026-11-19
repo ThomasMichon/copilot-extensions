@@ -1189,7 +1189,7 @@ combined documents, polling checkpoints, default readers and v1 work remain
 unchanged. Rollback preserves v2 rows; use a compatible current decoder for
 point inspection/retry, not a legacy source-only execution fallback.
 
-#### Component recovery carrier and receiver-side application
+#### Component recovery carrier (application unsupported)
 
 `CrawlManifest.component_versions` optionally retains a strict
 `ComponentVersion(source, path, version, semantics)` for every upsert and
@@ -1208,36 +1208,23 @@ metadata in legacy envelopes. Component carriers cannot certify polling refresh
 or full reconciliation. Reopen, exact-parent CAS and explicit scope checks retain
 the evidence without translating it into legacy work.
 
-Ordinary recovery and direct prepared/application entrypoints still refuse
-these manifests before publication, embedding or store mutation. The explicit
-`PendingCrawls.apply_components` receiver qualifies application separately; no
-connector, queue executor or source configuration selects it.
+Recovery and direct prepared/application entrypoints refuse these manifests
+before publication, embedding or store mutation. The pending owner also refuses
+v8-to-legacy replacement and premature completion in the same SQLite transaction
+that would change the parent; refusal retains the original payload.
 
-The receiver compares every scoped component before effects. Newer versions
-use the existing prepared publication and engine; duplicates and lower versions
-perform no embedding or replacement. Equal versions require identical canonical
-`FileEntry` bytes/metadata and rendering semantics, including deletion state.
-The existing path database retains versioned `applied_components` records,
-bound to recovery scope, chunker/model policy and native store domain. A changed
-embedding policy cannot silently reuse provider-version coverage; policy-update
-composition remains unqualified. Target-scoped strict reads
-compare their canonical content/vector snapshots before accepting coverage;
-missing, changed or incompatible evidence refuses rather than repairing rows.
-Deletion retains its provider version while removing only the named component.
+`ComponentContent.covered_by` is a pure ordering comparison, not stored evidence.
+It compares matching source/path identities, considers lower versions covered,
+and requires equal-version fingerprints, deletion state and rendering semantics
+to match. A newer version is not covered. The caller must supply a qualified
+canonical fingerprint and retained applied record; neither exists in runtime
+application yet.
 
-An application-attempt row retains the exact v8 parent before native writes.
-Only a clean source-aware publication followed by an atomic evidence commit
-retires that attempt. Interrupted native writes remain closed by the existing
-store owner; an interrupted evidence commit retains an unresolved attempt even
-when the store is clean. Neither case permits automatic replay or a clean-state
-reset. Pending replacement/deletion is blocked while an attempt is unresolved.
-Owner-assisted reconciliation remains unimplemented.
-
-This receiver does not advance polling/source checkpoints, complete a claim,
-retire its pending acquisition or enable component readers. Ordinary pending
-clear also refuses v8. Whole-claim/checkpoint composition, crash reconciliation
-and explicit read isolation remain required before recovery refusal or the v2
-queue fences can be expanded. Legacy callers and stored rows are unchanged.
+There is no ordered application capability, applied-version/deletion ledger or
+producer yet. Monotonic application, equal-version content checks, crash/backup
+reconciliation and explicit read isolation remain required before recovery
+refusal or the v2 queue fences can be expanded. Legacy callers and stored rows
+are unchanged.
 
 An in-process connector opts in by advertising `change_hints_versions = (1,)`
 on its actual `discover_hints(hints, last_commit, *, cancel_check=None)` callable.
