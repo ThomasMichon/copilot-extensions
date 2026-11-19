@@ -105,7 +105,7 @@ async def test_prepared_merge_preserves_a_waiting_reader(tmp_db: Database, final
         prepared = InheritedRefresh.read(tmp_db, row, None)
         assert prepared is not None
         mgr._rehydrate(merge=True, session_id=sid)
-        assert session.status == SessionStatus.STARTING and reader.latest_id == 1
+        assert session.status.value == "starting" and reader.latest_id == 1
         mgr._rehydrate(merge=True, session_id=sid, prepared=prepared)
         await asyncio.wait_for(waiter, 1.0)
         assert mgr.get_session(sid) is session and session.event_log is reader
@@ -144,7 +144,10 @@ async def test_prepared_merge_does_not_replace_local_work(tmp_db: Database, busy
     if busy == "client":
         session.client = Mock()
     elif busy == "prompt":
-        session._prompt_task = asyncio.create_task(unblock.wait())
+        async def pending_prompt() -> None:
+            await unblock.wait()
+
+        session._prompt_task = asyncio.create_task(pending_prompt())
     elif busy == "lifecycle":
         await session._lifecycle_lock.acquire()
     try:
