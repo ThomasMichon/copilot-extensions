@@ -3958,3 +3958,252 @@ are refreshed, and all 821 hashes pass admission. The library README documents
 standalone helper discovery. This source/real-child correction does not claim
 new full installed Manager, mixed-runtime baseline, Bash or release qualification.
 Its new published head still requires passing CI and actual re-review.
+
+### November 17: source correction merged; resume remaining acceptance
+
+Exact source `297d39114839e2e9884babc29b02b269d3dac532` receives genuine
+Copilot approval `5936343344` with no active review issues. Complete thread
+pagination confirms zero unresolved threads. CI `44059828122` passes guards,
+both strict gates, exact-input units and the required PR summary before the
+managed `pr-self-merge` operation. Provider readback confirms #12013 merged
+at `6c008aa84a1ddede8690390501754170c3386aec` at 10:02:20 UTC.
+The role-scoped review exception is used only after that approval and green CI;
+no failed check, change request, hold or conflict is bypassed.
+
+The parent README is reread after merge. Its bounded source-correction item
+is complete; the larger installed-Manager, authentic-baseline, falsifying-result
+and mandatory frozen-candidate items remain open. Continue through the existing
+#11377/#3336/#7529 seams without a competing writer or a new full capture
+unless the retained completion order permits it. The failed Windows and Index
+instance records, all prior cleanup holds and unperformed Bash evidence stay
+with their existing owners. No resource is finalized, released or relabelled
+by this source merge, and no operator installation or Main activation occurs.
+
+### November 17: natural candidate exposes the descriptor wheel-layout gap
+
+The existing controller's automatic run `44063395428` selects Dev
+`73c8cab85c2937448d5489a93f5ee2008193d349`, two commits after #12013's merge,
+against Main/control `0f5814068f903dbdc0e59a5d812fdecedf928f6e`. It freezes
+candidate `8f90be5410d3fe6626a2b7dde804ded31a3c9fba`. This is a read of an
+already completed natural run, not a new dispatch, capture or retry.
+
+Source units pass. Three independent candidate lanes fail, and the promoter
+correctly refuses to publish or merge:
+
+- Artifact build job `133971995241` rejects
+  `agent_bridge-0.9.474.dev1.data/data/share/copilot-extensions/agent_bridge/readiness-isolation.json`
+  as a wheel payload differing from candidate source.
+- Installed TTY job `133971995227` reports consumer exit `4294967295` before
+  the keyboard-driven quit dialog. This is the existing TTY contract, not
+  successful full Manager Create/Open/Resume qualification.
+- Windows Resume job `133971995767` reports a launcher that did not complete
+  pane acknowledgement. No rerun or unperformed native coverage is inferred.
+
+The installed-suite slice introduced the descriptor's static
+`tool.setuptools.data-files` declaration. The current wheel validator maps
+non-dist-info members only to `src/<name>` or an explicitly injected runtime
+resource, and separately rejects `data-files`. The standard wheel
+`.data/data/...` descriptor therefore lies outside its admitted source layout.
+This identifies a missing producer/consumer contract; it does not authorize
+ignoring archive members, weakening source binding or deleting the descriptor.
+
+The [existing artifact owner on #7529](https://github.com/ThomasMichon/copilot-extensions/issues/7529#issuecomment-6945430325)
+has the exact candidate, failure and a request to coordinate a narrow
+source-bound mapping correction and focused positives/negatives. No matching
+open descriptor-fix PR is found in the targeted search. Responsibility for
+the introduced declaration remains here; the shared artifact-validator and
+controller custody is not silently taken over. No shared helper is edited,
+no candidate is retried and no failure is waived by this observation.
+
+### November 17: bounded descriptor-mapping correction approved
+
+After the concrete candidate failure and the #7529 overlap request, the
+operator selects `authorize-narrow-fix`: this session may implement the narrow
+artifact source-mapping correction and focused tests. The question explicitly
+retains controller ownership, independent native-test failures, deferred
+capture and cleanup holds. It grants no candidate retry, broader data-file
+admission, Main activation or rollout authority.
+
+### November 18: descriptor mapping qualified locally
+
+The matching descriptor first fails at the same source-binding boundary as
+the natural candidate. The correction admits only its exact static
+`share/copilot-extensions/<normalized-distribution>` declaration, rooted in
+that wheel's own `.data/data/` directory. Every descriptor still passes the
+existing candidate containment, file/link, digest and complete-member checks.
+Other data-file layouts remain refused. The existing runtime-resource helper
+owns the mapping; its other consumers and build-input declarations are unchanged.
+
+Eleven actor-free positive/refusal cases join the canonical packet. Actual
+rooted collection, canonical admission, all source hashes and the release-helper
+closure pass. Every previous node/source/coverage target remains: 5,266 nodes,
+822 sources and the same 341 coverage targets and 300-second packet budget.
+This is not a claim that the complete packet has executed locally.
+
+The changed three physical Python files pass whole-file strict checks for
+both declared Linux and Windows Python 3.10 targets, without project admission
+or checker exemptions. Their existing dynamic JSON/tool-module boundaries
+remain explicit. A typing edit initially changes the build-error import's
+closure; the real export consumer exposes the missing isolated module.
+Restore the original producer-bound exception identity rather than changing
+the fixture or its dependency closure.
+
+All 335 selected descriptor, wheel-source, artifact and build-admission cases
+subsequently pass in bounded groups: 137 related controls, 178 remaining
+artifact cases, eight materialized roundtrips and three distinct four-case
+composed-output groups. The initial combined run hits its 180-second limit
+and is not relabelled as a pass. Each residual retains that same limit; this
+is not a single 180-second full-suite result.
+
+A fresh private copy of the actual Bridge source builds a real wheel with
+seasoned setuptools `84.2.1`, wheel `0.48.0` and packaging `26.3`. Full wheel
+inspection and candidate-source binding pass for its real descriptor member;
+changing only the candidate descriptor's bytes then produces the required
+source-mismatch refusal. The copied source and build belong to the contained
+consumer and settle normally. No operator runtime is installed or modified.
+
+Documentation impact updates the artifact source-binding contract in
+`docs/pipelines.md`. Required current-source CI, review and ordinary Dev merge
+remain before delivery. The earlier failed candidate, independent TTY/Resume
+failures, authentic older baseline, full installed Manager lifecycle, mandatory
+frozen-candidate enforcement and all cleanup/activation holds remain open.
+
+### November 18: adopt the existing merged artifact correction
+
+Fresh Dev reconciliation discovers #13086 already merged on November 17 at
+12:30:55 UTC, commit `965684d48c51dddfb279c337fe8a591ecc1b29be`. Its actual
+`data_file_sources` producer/consumer mapping admits the descriptor through a
+broader reviewed static-share contract, with containment, source-hash closure,
+byte/member equivalence and unsafe-layout controls. It also completes the
+shared validator's strict typing. That implementation supersedes the local
+descriptor-only candidate qualified above; the local candidate is not published.
+
+The operator explicitly selects `adopt-merged-fix-retain-evidence`: remove
+only the duplicate validator/helper edits, new test and manifest additions
+and narrower pipeline-document paragraph, while retaining the canonical Root
+journals and qualification evidence. The first managed sync conflicts and
+auto-aborts without changing the branch. Reconciliation then replays only the
+genuinely new post-#12013 journal work onto pinned Dev
+`f353f7758cdfc5c9ab7388861ce306caf58e4e25`. Approved functional conflicts take
+those exact upstream files; unrelated upstream changes and the journal hunks
+remain intact. The original qualified local candidate remains recoverable.
+
+No competing PR is opened and no journal-only PR is needed. The 5,266-node
+manifest and 335-case observations above describe that retained local candidate,
+not new source delivery or a replacement for current Dev's admitted inventory.
+Adopting source does not establish trusted-controller selection, a successful
+later candidate, native Manager acceptance, release or runtime rollout. All
+independent failures and existing custody remain with their current owners.
+
+### November 18: existing release owner publishes the correction
+
+Read-only provenance closes the bounded source-release question without
+starting a run. Main `5163a31ce167f74df563e3b8bae14eaba4b9d555` records Dev
+`f2516d375206cbad6adf0b91d6eacc47a5bcf922`, which contains #13086. The actual
+Main blobs for `promotion_python_artifacts.py` and `artifact_source_build.py`
+equal that Dev input's blobs, respectively
+`73025a410ce629f7ec9b527567603bc49dbf63a1` and
+`49caad89e7b64836a80251e493b4e5b783b0354f`.
+
+Promotion #13302 merges at 21:33:27 UTC. Its owning run `44397683514`, attempt
+one, completes successfully; thirteen executing jobs pass and only the failure
+watchdog skips. This includes artifact build `135139722679`, attestation
+`135143162187`, exact-source/candidate unit evidence, publication/readback and
+actual merge. Existing native Resume `135139722411` and installed TTY
+`135139722508` pass as their own narrower contracts. They do not prove the
+optional whole-suite matrix or the parent's authentic older baseline.
+
+The top-level run spans 21:04:44-21:34:46, including its initial queue, so this
+observation does not close an under-thirty-minute full-flow gate. The Main
+movement before construction is another generated promotion (#13296), not a
+concurrent control-repair canary. Neither fact is promoted into broader proof.
+The later natural run `44402536862` is observed only at its gate/freeze stage;
+no watch, retry, dispatch or result claim is attached to it.
+
+The existing manual `manager-suite` portfolio still has distinct normal,
+repair and fresh Windows jobs, each with its unchanged sixty-minute limit.
+No manual instance exists at pinned Main `5163a31ce1` in the exact-head query.
+This identifies an available qualification route, not permission to dispatch
+it, enlarge its limits or substitute its optional result for a required gate.
+All deferred-capture, controller-adoption, runtime-update and cleanup boundaries
+remain intact.
+
+### November 19: authorized suite run fails at the cold runner entry
+
+The operator explicitly authorizes one existing `manager-suite` portfolio
+after fresh checkpoint verification and deduplication: normal, repair and
+fresh on isolated Windows jobs, retaining each original sixty-minute limit.
+Bridge capture deferral and deployment/cleanup holds are unchanged.
+
+Fresh released Main is `c9e2c3e68b45431c345128f15b695b2e7087831c`, with the
+existing matrix and source checkout verified from that immutable definition.
+The exact-head manual-run inventory is empty. GitHub rejects the raw SHA as
+a dispatch ref with HTTP 422; a subsequent exact-head query still finds no
+run. The existing annotated tag
+`promote-dev-fa4f807abde8a513eccc7cc6b62cab5e6646e371` peels through tag object
+`119628f0cb062b0453e54a2d2a857c5a8f289a07` to that exact Main commit.
+No branch or tag is created, and no ignored `source_sha` input is treated as
+checkout proof.
+
+One supported tag dispatch creates run `44430369826`, attempt one; provider
+readback confirms the exact source SHA. All three jobs fail before preparation:
+fresh `135245910234`, normal `135245910258` and repair `135245910303`.
+Each reports `ModuleNotFoundError: No module named 'agent_procutil'` at
+`tools/run-manager-suite-acceptance.py:19`. The run produces zero acceptance
+artifacts. This is a runner bootstrap failure, not Manager lifecycle,
+installed-readiness or settlement qualification. The one-run authorization is
+consumed; no retry or further native portfolio is launched.
+
+Fresh Dev `4687fa4dbea21256711ef3363adfe23386a4a2e3` has the same import order.
+The targeted overlap check finds open #12708, whose current head
+`94d68a28d24caa70fb2b8ccd1e782c6959720167` already bootstraps the repository
+process library through `plugin_test_containment` before the Procutil imports.
+That PR modifies the same runner and its tests for a separately retained
+authentic-source consumer. No competing patch or PR is authored here.
+
+[Exact failure feedback on #12708](https://github.com/ThomasMichon/copilot-extensions/pull/12708#issuecomment-6996150129)
+asks its authoring agent to preserve that bootstrap while retaining the
+separately owned fresh fixture and typed report, or agree an explicit
+bootstrap-only handoff. This does not make the entire authentic-source PR
+a parent prerequisite. Its older/native custody, this suite result and all
+remaining baseline/frozen-candidate obligations remain distinct.
+
+The exact #12013 diff confirms the entry regression: it moves
+`no_window_kwargs` from `plugin_test_containment` to a direct Procutil import,
+losing the former module's source-library bootstrap. A contained real child
+using `-E -S -B`, a hostile cwd and `--help` reproduces the same missing-module
+failure with no native acceptance actors. `-E -S` retains the legitimate
+script directory while excluding ambient Python environment and site packages;
+`-I` would remove that script directory and test a different caller contract.
+
+The existing authoring worktree is resolved read-only from its public source
+marker. A direct coordination message is admitted, not confirmed consumed;
+bounded receipt inspection is unsupported, so no answer or handoff is inferred.
+Public feedback has no response at the last bounded read. No shared runner or
+test file has been edited here, no competing PR exists, and the original source
+agent's PR and native custody remain intact.
+
+### November 19: accept the narrow bootstrap handoff and restore cold entry
+
+The operator authorizes a bootstrap-only priority correction, without another
+native run. The existing author then explicitly agrees the same narrow handoff
+in #12708 comment `7005272566`, retaining that PR, #7028/#7758 and the legacy
+original-owner acceptance. Acceptance `7019730740` is posted before any shared
+runner or test edit. Fresh Dev still lacks the restoration.
+
+The source change only restores the canonical process-library bootstrap before
+the direct Procutil imports. The fresh fixture, typed report, invocation modes,
+workflow, native boundaries and every timeout remain unchanged. A real child
+uses `-E -S -B`, a hostile cwd and ignored hostile `PYTHONPATH`; the new
+`--help` regression first fails with the observed import error, then succeeds.
+All 44 existing/new runner controls pass in 2.97 seconds under the unchanged
+contained limit, and focused Ruff passes. One imported adapter's optional
+timeout marker warns in this local interpreter; the actual cold child retains
+its explicit thirty-second subprocess timeout.
+
+The two changed files are outside the positively admitted actor-free packet;
+the real subprocess test is not relabelled as an actor-free unit or forced
+into that profile. No manifest membership, coverage target or budget changes.
+Whole-file typing, source review, required CI and managed merge remain before
+delivery. The failed hosted run stays failed and no further native attempt
+is authorized by this source-only handoff.

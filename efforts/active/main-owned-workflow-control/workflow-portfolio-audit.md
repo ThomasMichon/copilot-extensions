@@ -5,6 +5,65 @@ Standing intent: [workflow orchestration vision](../../../visions/main-owned-wor
 [test portfolio](../../../visions/test-portfolio/README.md) and
 [release pipeline](../../../visions/release-pipeline/README.md).
 
+## November 17 source-PR edit: repeated execution, not a reuse hit
+
+The merge-first order is complete with #12013; resume the Root's event/helper
+closure without starting another installed/native capture. A body-only
+evidence update at `09:38:17Z` is followed four seconds later by CI
+`44057400685`, while the existing CI `44056500810` is still running.
+Both are successful attempt-one `pull_request` executions. The run API does
+not expose the activity subtype; the body update is the observed initiating
+operation, not a reconstructed event payload.
+
+The actual unit checkout in both logs is merge `ab3fe4d475`, from head
+`e47e5f6f44f6b18695e6a2197f1a4bdb701ee1d8` and base
+`6ba99aefb7efab66e35a8eb571eab129cfa02245`. Every published context-fingerprint
+category matches: source/recipe/manifest identity, sealed environment,
+runtime/interpreter and installed distribution bytes. Today's empty
+closed-run PR associations are not substituted for event-time association
+proof.
+
+| Second-run job | Actual interval, UTC | Allocated duration |
+|---|---|---|
+| Guards and lint | 09:43:32-09:48:50 | 318 seconds |
+| Eligible units with coverage | 09:43:32-09:46:52 | 200 seconds |
+| Required PR aggregate | 09:48:53-09:48:57 | 4 seconds |
+
+This adds 522 seconds, or 8 minutes 42 seconds, of job allocation. It is not
+controlled billing, review-throughput or throttling evidence. The first
+execution produces a context-qualified fresh artifact. The second explicitly
+reports `mode=executed`, `reason=provider-lookup-budget-exhausted`, then uploads
+fresh unqualified evidence. It does not reuse the first execution. The
+particular lookup/verification stage that exhausted the original eight-second
+deadline remains unknown; do not extend that deadline or weaken proof from
+this observation.
+
+Source `ci.yml` admits `pull_request.edited`; the source guard and unit
+selectors inspect the base/head diff, not event `changes`. The concurrency
+rule cancels only synchronize, so an edit can queue another execution.
+The trusted metadata handler remains a distinct, legitimate body/source-
+attribution consumer. Do not retire its metadata checks as source duplicates.
+
+The existing CI owner has a
+[bounded overlap/interface request on #3336](https://github.com/ThomasMichon/copilot-extensions/issues/3336#issuecomment-6945270081).
+No shared workflow/helper edit, rerun, dispatch, budget change or release
+action accompanies this finding. Removing `edited` outright would lose
+base-retarget validation. Merely skipping jobs would preserve unnecessary
+workflow invocations. A true invocation reduction must first retain that
+base-change coverage through an accepted existing event consumer.
+Until that seam is agreed, source evidence-description updates belong in
+issue comments rather than repeated PR-body edits.
+
+After adopting Dev `f353f7758c`, the source-CI workflow still admits every
+`edited` event; its source/unit selectors still use the base/head diff.
+The existing trusted metadata workflow has no retarget-to-source-CI dispatch
+interface. A producer-side no-op hypothesis is separately ruled out:
+Worktrees' GitHub metadata provider compares the freshly read field with the
+desired value and confirms unchanged fields without PATCHing them. Its
+existing composed-description retry control also requires no additional writes.
+Do not rewrite that already-idempotent provider or infer that the observed
+changed evidence body was an unchanged-body write.
+
 ## October 23 repeated PR qualification: exact-input reuse boundary
 
 Query the already captured October 22-23 population, not another rolling
