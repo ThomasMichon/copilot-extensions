@@ -504,11 +504,12 @@ not another scheduled cycle or acquisition loop.
 
 An absent receipt, including absence after cutoff, remains `unresolved` here.
 Cancelled/expired receipts are retained but cannot arm or complete the native
-waiter. This registration leaf does not cancel subscriptions, settle native
-arming/expiry, select useful activity, wake a task, ACK delivery or supply a full
-consumer. Those operations still require the existing owner's separately
-qualified completion/settlement path; do not activate this adapter as a
-standalone waiter loop.
+waiter. Registration reconciliation does not cancel subscriptions; the explicit
+retired-registration operation below is separate. Neither operation settles
+native arming/expiry, selects useful activity, wakes a task, ACKs delivery or
+supplies a full consumer. Those operations still require the existing owner's
+separately qualified completion/settlement path; do not activate this adapter as
+a standalone waiter loop.
 Before a later consumer can arm a recovered receipt, its actual expiry must be
 checked by the native arm transaction under its write lock and immediately
 before commit, as well as the existing task/wake/original-deadline guards.
@@ -520,6 +521,51 @@ It covers reopen, lost committed replies, absent requests without creation
 replay, unsupported selection before suspension, changed-task late receipts,
 foreign intent, original cutoff, unknown baseline, cancellation and expiry.
 No case starts a production consumer or asserts a task wake/ACK occurred.
+
+### Explicit retired-registration cancellation
+
+The executing registrar optionally exposes `cancellation_protocol` equal to
+`agent-dispatch.repository-feed-cancellation/v1` and
+`await registrar.cancel_registration(task_id, preparation_id)`.
+This is an opt-in in-process operation, not a callback/CLI route, new factory
+selection or requirement on existing registration-only callers.
+Missing support leaves cancellation unavailable; package versions are not
+capability evidence.
+
+Cancellation requires an already retired original native waiter, its complete
+configured binding and a known original registration ID. A live waiter refuses
+before service IO: this operation does not retire or expire it.
+An uncertain registration with no retained ID must first use original-request
+inspection through `reconcile_registration`; no replacement is created.
+Known historical registration IDs remain cancellable without inventing missing
+admission or expiry metadata. An already settled row needs no service request.
+
+The operation negotiates the same executing recovery/receipt support, rechecks
+active-route/drain authority and reloads the same retired registration before
+transmitting the existing scoped `cancel` request. It uses at most three HTTP
+exchanges with the bound client, outside native transactions, within thirty
+monotonic seconds or the shorter caller deadline. Invalid or elapsed caller
+deadlines refuse before service IO. Registration reconciliation retains that
+same finite deadline rule.
+
+Only a matching cancellation response reports `cancelled`; uncertain replies,
+coroutine cancellation and invalid responses retain the same native registration
+and unsettled custody. Existing original-request inspection can observe the
+result after reopening. Repeating explicit cancellation targets only that
+original idempotent registration; neither the request ID nor the waiter is
+replaced.
+
+A cancellation response is not a native settlement or event ACK. The operation
+does not set `replay_settled`, change task/wake state, consume delivery, or forget
+an already-delivered unacknowledged event. The provider retains that delivery
+through its existing storage owner. Wake-before-ACK, remote settlement and
+coordinator lifecycle integration remain separate acceptance.
+
+`test_repository_feed_cancellation.py` composes actual native expiry/SQLite and
+repository receipt storage. It covers original versus foreign scope, missing
+receipts, lost committed replies, repeated cancellation, pending delivery,
+old nullable metadata, drain and deadline refusal, and concurrent operation
+ownership without selecting a consumer.
 
 ### Original native deadline recovery
 

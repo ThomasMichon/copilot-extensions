@@ -362,5 +362,28 @@ def test_actual_async_unix_registration_and_original_inspection(
             assert all(call["body"].get("expected_consumer") == "consumer"
                        for call in host.calls if call["operation"] != "capabilities")
             assert host.store.path.read_bytes() == before and not queue.list_run_waiter_wakes(task_id)
+            waiter = queue.find_delegated_preparation(task_id, spec["preparation_id"])
+            assert waiter is not None
+            queue.expire_repository_feed_waiter(waiter, now=spec["feed"]["deadline_at"])
+            wakes = queue.list_run_waiter_wakes(task_id)
+            before_cancel = len(host.calls)
+            cancelled = await registrar.cancel_registration(task_id, spec["preparation_id"])
+            assert cancelled == {
+                "status": "cancelled", "registration_id": first["registration_id"],
+            }
+            cancel_calls = [call["operation"] for call in host.calls[before_cancel:]]
+            assert cancel_calls[-1] == "cancel" and len(cancel_calls) <= 3
+            assert all(operation == "capabilities" for operation in cancel_calls[:-1])
+            before_inspect = len(host.calls)
+            inspected = await registrar.reconcile_registration(task_id, spec["preparation_id"])
+            assert inspected["status"] == "cancelled" and inspected["waiter_state"] == "retired"
+            inspect_calls = [call["operation"] for call in host.calls[before_inspect:]]
+            assert inspect_calls[-1] == "inspect-request" and len(inspect_calls) <= 3
+            assert all(operation == "capabilities" for operation in inspect_calls[:-1])
+            assert all(call["body"].get("expected_consumer") == "consumer"
+                       for call in host.calls if call["operation"] != "capabilities")
+            retained = queue.find_delegated_preparation(task_id, spec["preparation_id"])
+            assert retained is not None and not retained["replay_settled"]
+            assert queue.list_run_waiter_wakes(task_id) == wakes
 
     asyncio.run(scenario())

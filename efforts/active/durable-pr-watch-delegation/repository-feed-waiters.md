@@ -246,6 +246,17 @@ has also expired by then. Already-delivered unsettled events remain protected
 by the existing receipt retention. No cancellation tombstone, second journal,
 replacement request or indefinite registration history is required.
 
+The explicit retired-registration cancellation leaf uses the registrar's
+optional `agent-dispatch.repository-feed-cancellation/v1` in-process support and the existing
+scoped `cancel` operation. It requires a known original registration and an
+already retired native waiter, rechecks the configured owner, and leaves
+uncertain replies recoverable through original-request inspection.
+It preserves delivered/unacknowledged events and native task/wake state;
+`cancelled` does not mean `replay_settled` or ACK. Full remote settlement,
+useful-activity completion and coordinator enrollment remain separate.
+The [native operation contract](../../../plugins/agent-dispatch/docs/delegated-service-replay.md#explicit-retired-registration-cancellation)
+defines its finite call and compatibility boundary.
+
 The cutoff is a cooperative immutable-request guarantee, not permission to
 reuse collected request IDs with later cutoffs or changed intent. Provider
 clock rollback, unavailable inspection or an unverified scope remains
