@@ -989,8 +989,9 @@ class _SessionCoreMixin(_SessionDrainGateMixin):
             return None
         return matches[0] if matches else None
 
-    def get_session(self, session_id: str) -> Session | None:
-        return self._sessions.get(self._resolve_ref(session_id) or session_id)
+    def get_session(self, session_id: str, *, exact: bool = False) -> Session | None:
+        key = session_id if exact else (self._resolve_ref(session_id) or session_id)
+        return self._sessions.get(key)
 
     def list_sessions(self, status: str | None = None) -> list[Session]:
         sessions = list(self._sessions.values())

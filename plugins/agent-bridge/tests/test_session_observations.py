@@ -29,7 +29,6 @@ from agent_bridge.session_observation_contract import (
     validate_frame,
 )
 from agent_bridge.session_observations import admit, frame
-from agent_bridge.transport import SpawnTarget
 
 
 def request(
@@ -64,7 +63,7 @@ def source(tmp_db, session_manager):
     log = EventLog(db=tmp_db, session_id="session-1", worktree_id="worktree-1")
     session = SimpleNamespace(
         session_id="session-1",
-        target=SpawnTarget(
+        target=SimpleNamespace(
             project="demo",
             worktree_id="worktree-1",
             type="local",

@@ -91,9 +91,8 @@ def admit(state: Any, request: ReadRequest) -> KnownSource:
     if mgr is None:
         raise ObservationError("source-unavailable", "session manager is not ready")
     generation = text(getattr(mgr, "_generation_id", None), "hosting generation")
-    # get_session is an in-memory lookup, but also accepts ACP aliases: reject
-    # that alias rather than making it a new observation admission.
-    session = mgr.get_session(selection.session_id)
+    # A native alias is not a new observation admission.
+    session = mgr.get_session(selection.session_id, exact=True)
     if session is not None and session.session_id == selection.session_id:
         worktree = session.target.worktree_id
         project = session.target.project
