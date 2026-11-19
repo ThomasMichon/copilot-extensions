@@ -410,6 +410,16 @@ the non-public approval conversation.
 
 ## Plan
 
+The [cold-fixture and guard-map receiving unit](journal/2026/11.19-cold-fixture-and-guard-map-receiving.md)
+proposes complete direct #9970 Phase 4 and #10031/#10032 Phase 3
+test-portfolio families through existing Phase 7 intake/domain review.
+It records actual #13515 delivery and the separately verified #9056/#9568
+redundant-tracking retirements, without technical or custody credit.
+Twelve complete current metadata records and eleven unchanged admitted
+whole originals support three proposed routes and nine retained ownership,
+scope or source-admission gaps. No new disposition follows from the proposal;
+all incumbent campaign Plan/Validation states remain.
+
 The [read-only and bounded-Windows receiving unit](journal/2026/11.19-read-only-and-bounded-windows-receiving.md)
 proposes complete direct #9056 Bridge-acquisition and #9568 Phase 5
 test-portfolio receiving, with the latter's existing Phase 7 intake route.
@@ -4920,6 +4930,16 @@ closure credit, resource release or parent checkbox change follows.
   normal publication flow.
 
 ## Validation Plan
+
+The [three-family receiving proposal](journal/2026/11.19-cold-fixture-and-guard-map-receiving.md)
+directly retains all #9970 cold/pending/bounded-publication conditions
+and the independent #10031 initial-startup/cutover and #10032 UNC/POSIX
+native acceptance in the actual portfolio Plan, local/global Validation
+and Phase 7 route. All eighteen technical rows remain unchecked.
+Normal review must accept the complete domain/deduplication/ownership
+contract; current permitted whole readback and separate source-specific
+judgments remain. No automatic source retirement, execution, extra receipt
+gate, deadline inflation or source/resource release is inferred.
 
 The [two-source receiving proposal](journal/2026/11.19-read-only-and-bounded-windows-receiving.md)
 retains six direct #9056 Plan/global Validation pairs and four #9568
