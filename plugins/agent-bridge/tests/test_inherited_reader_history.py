@@ -39,8 +39,8 @@ async def test_existing_reader_retries_on_changed_history_or_session(
     before = reader.snapshot_history()
     get_events = tmp_db.get_events
 
-    def finish_write(key: str, *, after: int = 0) -> list[dict[str, Any]]:
-        rows = get_events(key, after=after)
+    def finish_write(key: str, *, after: int = 0, session_flush: bool = False) -> list[dict[str, Any]]:
+        rows = get_events(key, after=after, session_flush=session_flush)
         if change == "append":
             writer.append("agent_message", {"text": "PROGRESS: build=done"}, timestamp=3.0)
         elif change == "rebuild":
@@ -329,8 +329,12 @@ def test_defer_prepared_merge_while_another_writer_is_active(tmp_db: Database) -
     assert not session.awaiting_maintenance_refresh
 
 
-def test_dequeued_event_is_not_a_settled_write(tmp_db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("same_session", [True, False])
+def test_dequeued_event_fences_only_its_session(
+    tmp_db: Database, monkeypatch: pytest.MonkeyPatch, same_session: bool,
+) -> None:
     sid = "worker"
+    tmp_db.create_session("other", "other", None, ".", "local", "running", 1.0)
     tmp_db.create_session(sid, sid, None, ".", "local", "running", 1.0)
     tmp_db.append_event(sid, 1, "agent_message", {"text": "first"}, 2.0)
     mgr = _passive_manager(tmp_db)
@@ -352,14 +356,22 @@ def test_dequeued_event_is_not_a_settled_write(tmp_db: Database, monkeypatch: py
 
     with monkeypatch.context() as patch:
         patch.setattr(tmp_db, "_write_event_batch", held)
-        tmp_db.append_event(sid, 2, "turn_complete", {"stop_reason": "done"}, 3.0)
+        tmp_db.append_event(sid if same_session else "other", 2 if same_session else 1,
+                            "turn_complete", {"stop_reason": "done"}, 3.0)
         try:
             assert dequeued.wait(2)
+            if not same_session:
+                prepared = InheritedRefresh.read(tmp_db, row, None, target=RefreshTarget.capture(session))
+                assert prepared is not None
             mgr._rehydrate(merge=True, session_id=sid, prepared=prepared)
-            assert session.awaiting_maintenance_refresh and reader.latest_id == 1
+            assert session.awaiting_maintenance_refresh == same_session and reader.latest_id == 1
         finally:
             release.set()
             tmp_db.flush()
+    if not same_session:
+        assert tmp_db.get_events("other")[0]["event_type"] == "turn_complete"
+        assert reader.append("agent_message", {"text": "next"}).id == 2
+        return
     retry = InheritedRefresh.read(tmp_db, row, None, target=RefreshTarget.capture(session))
     assert retry is not None
     mgr._rehydrate(merge=True, session_id=sid, prepared=retry)

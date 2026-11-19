@@ -76,19 +76,12 @@ class InheritedRefresh:
             yield False
             return
         try:
-            queue = db._event_write_q
-            if not queue.mutex.acquire(blocking=False):
-                yield False
-                return
-            try:
-                # Dequeue does not mean committed: task_done follows the batch write.
-                if queue.unfinished_tasks:
+            with db._event_write_q.if_settled(self.target.session.session_id) as settled:
+                if not settled:
                     yield False
                     return
                 with self._if_durable_current(db) as current:
                     yield current
-            finally:
-                queue.mutex.release()
         finally:
             db._write_lock.release()
 
@@ -129,7 +122,7 @@ class InheritedRefresh:
 
         sid = row["id"]
         events = [SseEvent(e["event_id"], e["event_type"], e["data"], e["timestamp"])
-                  for e in db.get_events(sid, after=0)]
+                  for e in db.get_events(sid, after=0, session_flush=True)]
         head = events[-1].id if events else 0
         if any(event.id != expected for expected, event in enumerate(events, 1)):
             return None
@@ -146,7 +139,7 @@ class InheritedRefresh:
             if event.event == "agent_message":
                 progress.update(_parse_progress_markers(event.data.get("text", "")))
         # An append or rebuild can commit without changing the session row.
-        db.flush()
+        db.flush(session_id=sid)
         state = db.execute_read(_CURRENT, (sid,))
         if not state:
             return None

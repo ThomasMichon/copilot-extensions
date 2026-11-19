@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 from .owner_membership_signal import MembershipSignal, commit as commit_membership
+from .event_write_queue import EventWriteQueue
 
 log = logging.getLogger("agent-bridge")
 
@@ -347,7 +348,7 @@ class _CoreMixin:
         self._membership_signal = MembershipSignal()
         self._membership_bind_lock = threading.Lock()
         self._local = threading.local()
-        self._event_write_q: queue.Queue[_EventWriteItem | object] = queue.Queue()
+        self._event_write_q = EventWriteQueue()
         self._writer_state_lock = threading.Lock()
         self._writer_thread: threading.Thread | None = None
         self._writer_error: BaseException | None = None
@@ -476,8 +477,8 @@ class _CoreMixin:
             raise RuntimeError("event writer thread did not stop")
         self._raise_writer_error()
 
-    def flush(self) -> None:
-        """Block until every previously queued event has been committed."""
+    def flush(self, *, session_id: str | None = None) -> None:
+        """Block until previously queued writes settle, optionally for one session."""
         if self._read_only:
             if self._event_write_q.unfinished_tasks:
                 raise PermissionError("Read-only database has unexpected queued writes")
@@ -485,7 +486,10 @@ class _CoreMixin:
         if threading.current_thread() is self._writer_thread:
             return
         self.start_writer()
-        self._event_write_q.join()
+        if session_id is None:
+            self._event_write_q.join()
+        else:
+            self._event_write_q.wait_for_session(session_id)
         self._raise_writer_error()
 
     def close(self) -> None:
@@ -579,8 +583,7 @@ class _CoreMixin:
             self._record_writer_error(exc)
             log.exception("Failed to persist %d queued event(s)", len(batch))
         finally:
-            for _ in batch:
-                self._event_write_q.task_done()
+            self._event_write_q.finish_batch(batch)
 
     def _write_event_batch(self, batch: list[_EventWriteItem]) -> None:
         conn = self._get_conn()
