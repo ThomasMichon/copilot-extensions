@@ -109,10 +109,11 @@ entry is clean; interruption inside it retains the existing dirty latch.
 `publish()` returns applied/covered point counts. It **does not** save a polling
 cursor, retire the pending manifest or acknowledge a queued claim. An already
 committed native application can reopen and qualify as covered while that exact
-parent remains retained. A dirty/incoherent native state refuses reopening;
-prepared vectors never clear uncertainty. Automatic partial-effect reconciliation,
-mixed checkpoint/native restore qualification, whole-claim completion and explicit
-reader isolation remain unfinished under
+parent remains retained. A dirty/incoherent native state refuses ordinary
+reopening; prepared vectors never clear uncertainty. The explicit sealed
+publication suffix below is narrower than arbitrary partial-effect
+reconciliation. Mixed checkpoint/native restore qualification, whole-claim
+completion and explicit reader isolation remain unfinished under
 [#13386](https://github.com/ThomasMichon/copilot-extensions/issues/13386).
 The ordinary engine, recovery and pending-completion entrypoints still refuse
 components. No v2 execution declaration, connector, producer, service/CLI form,
@@ -126,6 +127,44 @@ consolidation. `tests/test_component_application.py` exercises native ordering,
 replacement/deletion, routed coverage, unrelated-row preservation, preparation
 replay, publication races and interruption refusals in its explicitly selected
 native lane; it is not an unconditional required unit matrix.
+
+### Sealed native publication suffix
+
+After qualifying all selected native content, routed vectors, cleanup and
+indices, application retains immutable publication intent in the existing
+`PreparedJournal`. The exact acquired-parent incarnation owns and retires it.
+Intent binds scope, policy, point cap, every selected/covered point, prior and
+target ordering observations, invalidated path checkpoints and intended final
+hashes/counts. It has no lease, cursor, claim or retirement protocol of its own.
+
+The owning source writer seals that intent's digest together with every native
+table's physical identity and version in its existing dirty receipt. Any later
+native effect revokes the seal **before** mutation; successful ordering/index/
+binding publication renews it before writing the corresponding path checkpoint.
+The uncertainty latch stays set, including for an empty native phase, so older
+participating validators still refuse it. A successful outer write removes the
+seal with the normal clean publication.
+
+`indexing.component_publication.reconcile_component_publication(...)` is an
+explicit in-process continuation for this sealed suffix. It requires the same
+manifest, parent incarnation, scope, family, policy, native/path/model owners
+and point cap. Under the existing writer/FTS exclusion, it verifies the complete
+physical seal, then revalidates every retained raw point and routed vector
+receipt, exact prior-or-target ledger record and prior-or-completed path state
+before repairing any suffix. Completed checkpoints retain their timestamps.
+It invokes no embedding engine and does not replay native content/vector data.
+The recovered outer commit conservatively replaces logical coverage metadata;
+it cannot reconstruct the interrupted writer's fine-grained bucket witnesses.
+
+Missing/corrupt intent, changed native tables, incomplete coverage, contradictory
+checkpoints and replaced parents refuse without clearing the latch. A crash
+inside native data or ordering/index/binding mutation also refuses when no
+current seal survives. Reconciliation does not infer a lost member from
+surviving rows, restore a table version, bless a general dirty store or qualify
+mixed backups. It returns application/coverage counts only: the pending claim
+and ordinary polling state remain retained, and all v2 execution fences remain.
+Native controls include abrupt process exit, repeated suffix interruption,
+mixed applied/pending/covered points, deletion, and owner/evidence drift refusal.
 
 A coherent, quiescent synthetic copy of the complete native directory preserves
 the evidence at another path without an inode/path identity requirement.

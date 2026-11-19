@@ -40,6 +40,24 @@ def acquired_parent(tmp_path: Path) -> tuple[PathIndex, PendingCrawls, CrawlMani
     return paths, pending, manifest, payload
 
 
+def test_immutable_publication_cannot_replace_intent_or_outlive_its_parent(
+    acquired_parent: tuple[PathIndex, PendingCrawls, CrawlManifest, str],
+) -> None:
+    paths, _pending, manifest, payload = acquired_parent
+    prepared = PreparedJournal(
+        paths, manifest.source, "account", payload, manifest=manifest, full=False,
+    )
+    prepared.put_immutable("publication", "attempt", b"retained intent")
+    prepared.put_immutable("publication", "attempt", b"retained intent")
+    with pytest.raises(PendingCrawlConflict, match="intent changed"):
+        prepared.put_immutable("publication", "attempt", b"other intent")
+    assert prepared.get("publication", ["attempt"]) == {"attempt": b"retained intent"}
+    with closing(paths._connect()) as conn, conn:
+        conn.execute("DELETE FROM pending_crawls")
+    with pytest.raises(PendingCrawlConflict, match="no longer matches"):
+        prepared.put_immutable("publication", "attempt", b"retained intent")
+
+
 @pytest.mark.parametrize(
     "mismatch", ["content", "version", "source", "mode", "scope", "payload", "missing"],
 )

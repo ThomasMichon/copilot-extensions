@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import shutil
+import subprocess
+import sys
 from contextlib import closing
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -16,6 +19,7 @@ from agent_index.engine.client import EngineClient
 from agent_index.index_config import IndexConfig, ModelProfile
 from agent_index.indexing.component_application import PreparedComponentApplication
 from agent_index.indexing.component_manifest import ComponentVersion
+from agent_index.indexing.component_publication import reconcile_component_publication
 from agent_index.indexing.manifest import CrawlManifest
 from agent_index.indexing.path_index import PathIndex
 from agent_index.indexing.pending_crawl import PendingCrawlConflict, PendingCrawls
@@ -26,7 +30,7 @@ from agent_index.store.ingestion_index import prepare_ingestion_indices
 from agent_index.store.multi_model_store import MultiModelStore
 from agent_index.store.scalar_index import ScalarIndexPreparationRequired
 from agent_index.store.source_layout import (
-    LAYOUT, SourceDomain, SourceLayoutError, initialize_source_store,
+    LAYOUT, SourceDomain, SourceLayoutError, initialize_source_store, validate_source_store,
 )
 from agent_index.sources.base import FileEntry
 from agent_index.sources.delta import DeletedFile
@@ -286,6 +290,268 @@ def test_interrupted_writer_preserves_parent_and_refuses_uncertain_reopen(
         f.prepare(manifest)
     assert PendingCrawls(f.paths).read_payload("selected", SCOPE) == parent
     assert f.config.state_file.read_bytes() == state
+
+
+def reconcile(f: Fixture, manifest: CrawlManifest) -> tuple[int, int]:
+    return reconcile_component_publication(
+        manifest, scope=SCOPE, family=FAMILY, max_rows=8,
+        config=f.config, paths=f.paths, store=f.store,
+    )
+
+
+@pytest.mark.parametrize("stage", ["ordering", "checkpoint", "clean"])
+@pytest.mark.parametrize("deleted", [False, True])
+def test_sealed_native_publication_reconciles_suffix_without_embedding_or_claim_completion(
+    application: Fixture, monkeypatch: pytest.MonkeyPatch, stage: str, deleted: bool,
+) -> None:
+    f = application
+    f.prepare(f.retain(1)).publish()
+    f.retire_fixture_parent()
+    manifest = f.retain(2, "Replacement fields.", deleted=deleted)
+    prepared = f.prepare(manifest)
+    parent = PendingCrawls(f.paths).read_payload("selected", SCOPE)
+    poll = f.config.state_file.read_bytes()
+
+    def interrupt(*_args: Any, **_kwargs: Any) -> None:
+        raise RuntimeError("fixture sealed interruption")
+
+    with monkeypatch.context() as patch:
+        if stage == "ordering":
+            patch.setattr(prepared.ledger, "put", interrupt)
+        elif stage == "checkpoint":
+            patch.setattr(f.paths, "remove" if deleted else "mark_indexed_batch", interrupt)
+        else:
+            save = f.domain.save
+
+            def refuse_clean(value: dict[str, Any]) -> None:
+                if value["state"] == "clean":
+                    interrupt()
+                save(value)
+
+            patch.setattr(f.domain, "save", refuse_clean)
+        with pytest.raises(RuntimeError, match="sealed interruption"):
+            prepared.publish()
+    receipt = f.domain.receipt()
+    assert receipt["state"] == "dirty" and receipt["reconciliation"]
+    with pytest.raises(SourceLayoutError, match="owning reconciliation"):
+        validate_source_store(f.store)
+    f.reopen()
+    f.calls.clear()
+    assert reconcile(f, manifest) == (1, 0)
+    assert f.calls == []
+    assert f.domain.receipt()["state"] == "clean"
+    assert "reconciliation" not in f.domain.receipt()
+    assert f.domain.receipt()["logical_projection"]["epoch"] != (
+        receipt["logical_projection"]["epoch"]
+    )
+    evidence = ComponentLedger(f.config, f.store).get(FAMILY, PATH)
+    assert evidence is not None and evidence.content.component.version == 2
+    assert evidence.content.deleted == deleted
+    assert (f.paths.get_entry(FAMILY, PATH) is None) == deleted
+    assert PendingCrawls(f.paths).read_payload("selected", SCOPE) == parent
+    assert f.config.state_file.read_bytes() == poll
+    assert f.prepare(manifest).publish() == (0, 1)
+    assert f.calls == []
+    with pytest.raises(ValueError, match="completion is not supported"):
+        PendingCrawls(f.paths).clear("selected")
+
+
+@pytest.mark.parametrize(
+    "drift", ["native", "coverage", "checkpoint", "count", "parent", "intent", "policy", "table-identity"],
+)
+def test_sealed_reconciliation_refuses_changed_native_and_pending_owners(
+    application: Fixture, monkeypatch: pytest.MonkeyPatch, drift: str,
+) -> None:
+    f = application
+    manifest = f.retain(1)
+    prepared = f.prepare(manifest)
+
+    def interrupt(*_args: Any, **_kwargs: Any) -> None:
+        raise RuntimeError("fixture checkpoint interruption")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(f.paths, "mark_indexed_batch", interrupt)
+        with pytest.raises(RuntimeError, match="checkpoint interruption"):
+            prepared.publish()
+    if drift == "native":
+        table = f.store.content_store.db.open_table(f.config.content_table)
+        table.add(table.search().limit(1).to_list())
+    elif drift == "coverage":
+        with closing(f.paths._connect()) as conn, conn:
+            conn.execute("DELETE FROM embedding_coverage")
+    elif drift == "checkpoint":
+        f.paths.mark_indexed(FAMILY, PATH, content_hash="foreign", chunk_count=7)
+    elif drift == "count":
+        f.paths.mark_indexed(
+            FAMILY, PATH, content_hash=prepared.contents[(FAMILY, PATH)].fingerprint, chunk_count=7,
+        )
+    elif drift == "parent":
+        f.retire_fixture_parent()
+        f.retain(1)
+    elif drift == "intent":
+        prepared.prepared.journal.put("component-publication-v1", [("publication", b"{}")])
+    elif drift == "policy":
+        f.config.model_profiles["first"] = replace(f.config.model_profiles["first"], revision="next")
+    else:
+        original = f.config.lance_dir / "canonical.lance"
+        copied = f.config.lance_dir / "copied-canonical.lance"
+        shutil.copytree(original, copied)
+        original.rename(f.config.lance_dir / "retained-canonical.lance")
+        copied.rename(original)
+    before = f.domain.receipt()
+    checkpoints = f.paths.get_all_entries()
+    with pytest.raises((SourceLayoutError, PendingCrawlConflict, ValueError)):
+        reconcile(f, manifest)
+    assert f.domain.receipt() == before
+    assert f.paths.get_all_entries() == checkpoints
+
+
+def test_mid_native_interruption_has_no_reconciliation_authority(
+    application: Fixture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    f = application
+    manifest = f.retain(1)
+    prepared = f.prepare(manifest)
+
+    def interrupt(*_args: Any, **_kwargs: Any) -> None:
+        raise RuntimeError("fixture vector interruption")
+
+    monkeypatch.setattr(f.store, "upsert_vectors", interrupt)
+    with pytest.raises(RuntimeError, match="vector interruption"):
+        prepared.publish()
+    before = f.domain.receipt()
+    assert before["state"] == "dirty" and "reconciliation" not in before
+    with pytest.raises(SourceLayoutError, match="intent is missing"):
+        reconcile(f, manifest)
+    assert f.domain.receipt() == before
+
+
+def test_interrupted_ordering_effect_revokes_earlier_native_seal(
+    application: Fixture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    f = application
+    manifest = f.retain(1)
+    prepared = f.prepare(manifest)
+
+    def interrupt(*_args: Any, **_kwargs: Any) -> None:
+        raise RuntimeError("fixture interrupted native ledger binding")
+
+    monkeypatch.setattr(prepared.ledger, "_bind", interrupt)
+    with pytest.raises(RuntimeError, match="native ledger binding"):
+        prepared.publish()
+    before = f.domain.receipt()
+    assert before["state"] == "dirty" and "reconciliation" not in before
+    with pytest.raises(SourceLayoutError, match="seal is missing or changed"):
+        reconcile(f, manifest)
+    assert f.domain.receipt() == before
+
+
+def test_empty_native_phase_seal_retains_legacy_uncertainty_refusal(
+    application: Fixture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    f = application
+    manifest = f.retain(1, deleted=True)
+    prepared = f.prepare(manifest)
+
+    def interrupt(*_args: Any, **_kwargs: Any) -> None:
+        raise RuntimeError("fixture before first ordering effect")
+
+    monkeypatch.setattr(prepared.ledger, "put", interrupt)
+    with pytest.raises(RuntimeError, match="first ordering effect"):
+        prepared.publish()
+    assert f.domain.receipt()["uncertain_effect"] is True
+    assert reconcile(f, manifest) == (1, 0)
+    evidence = ComponentLedger(f.config, f.store).get(FAMILY, PATH)
+    assert evidence is not None and evidence.content.deleted
+
+
+def test_reconciliation_finishes_mixed_completed_and_pending_point_suffixes(
+    application: Fixture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    f = application
+    names = ["a.txt", "b.txt", "c.txt"]
+    initial = CrawlManifest(
+        "selected", accounting_family=FAMILY,
+        upserts=[FileEntry(path, f"Original {path}.", "text", FAMILY) for path in names],
+        component_versions=[ComponentVersion(FAMILY, path, 1, "fields-v1") for path in names],
+    )
+    PendingCrawls(f.paths).save(initial, scope=SCOPE, full=False)
+    assert f.prepare(initial).publish() == (3, 0)
+    original = ComponentLedger(f.config, f.store).get(FAMILY, "c.txt")
+    unchanged_checkpoint = f.paths.get_checkpoint_rows([(FAMILY, "c.txt")])
+    f.retire_fixture_parent()
+    manifest = CrawlManifest(
+        "selected", accounting_family=FAMILY,
+        upserts=[
+            FileEntry("a.txt", "Replacement a.txt.", "text", FAMILY),
+            FileEntry("c.txt", "Original c.txt.", "text", FAMILY),
+        ],
+        deletions=[DeletedFile(FAMILY, "b.txt")],
+        component_versions=[
+            ComponentVersion(FAMILY, path, 1 if path == "c.txt" else 2, "fields-v1")
+            for path in names
+        ],
+    )
+    PendingCrawls(f.paths).save(manifest, scope=SCOPE, full=False)
+    prepared = f.prepare(manifest)
+    mark = f.paths.mark_indexed_batch
+
+    def interrupt_after_checkpoint(entries: list[tuple[str, str, str | None, int]]) -> None:
+        mark(entries)
+        raise RuntimeError("fixture after first checkpoint")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(f.paths, "mark_indexed_batch", interrupt_after_checkpoint)
+        with pytest.raises(RuntimeError, match="after first checkpoint"):
+            prepared.publish()
+    completed = f.paths.get_checkpoint_rows([(FAMILY, "a.txt")])
+    f.reopen()
+    f.calls.clear()
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            f.paths, "remove", Mock(side_effect=RuntimeError("fixture second checkpoint")),
+        )
+        with pytest.raises(RuntimeError, match="second checkpoint"):
+            reconcile(f, manifest)
+    assert reconcile(f, manifest) == (2, 1)
+    assert f.calls == []
+    assert f.paths.get_checkpoint_rows([(FAMILY, "a.txt")]) == completed
+    assert f.paths.get_entry(FAMILY, "b.txt") is None
+    assert ComponentLedger(f.config, f.store).get(FAMILY, "c.txt") == original
+    assert f.paths.get_checkpoint_rows([(FAMILY, "c.txt")]) == unchanged_checkpoint
+    assert f.prepare(manifest).publish() == (0, 3)
+
+
+def test_process_exit_after_native_seal_releases_exclusion_and_reconciles(
+    application: Fixture,
+) -> None:
+    f = application
+    child = subprocess.run(
+        [sys.executable, "-c", """
+import os
+import runpy
+import sys
+from pathlib import Path
+import pytest
+
+module = runpy.run_path(sys.argv[1])
+fixture = module["application"].__wrapped__(Path(sys.argv[2]), pytest.MonkeyPatch())
+prepared = fixture.prepare(fixture.retain(1))
+fixture.paths.mark_indexed_batch = lambda *_args, **_kwargs: os._exit(47)
+prepared.publish()
+""", __file__, str(f.config.data_dir.parent)],
+        capture_output=True, text=True, timeout=20,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert child.returncode == 47, child.stdout + child.stderr
+    f.reopen()
+    retained = PendingCrawls(f.paths).load("selected", SCOPE)
+    assert retained is not None
+    manifest, full = retained
+    assert not full and f.domain.receipt()["state"] == "dirty"
+    assert reconcile(f, manifest) == (1, 0)
+    assert f.calls == []
+    assert f.prepare(manifest).publish() == (0, 1)
 
 
 @pytest.mark.parametrize("missing", ["coverage", "checkpoint"])

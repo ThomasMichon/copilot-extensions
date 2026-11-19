@@ -4,8 +4,10 @@ Back: [acquisition proposal](azure-devops-acquisition.md#composition-decision-an
 and [canonical effort](README.md), Phase 3. Owner:
 [#13386](https://github.com/ThomasMichon/copilot-extensions/issues/13386).
 This is an **agent-recommended contract**. Shared typed-target intake now retains
-parked v2 claims with v1-only queue selection; component execution, application
-and read isolation remain unimplemented. The shared
+parked v2 claims with v1-only queue selection; component execution and read
+isolation remain unsupported. Explicit
+[native application and sealed-suffix reconciliation](../../../plugins/agent-index/docs/component-ledger.md#explicit-native-application)
+do not enable either boundary. The shared
 [component recovery carrier](../../../plugins/agent-index/docs/architecture.md#component-recovery-carrier-application-unsupported)
 retains per-mutation ordering inputs and refuses changed replacement, premature
 completion and application. Pure version/content comparison supplies no durable

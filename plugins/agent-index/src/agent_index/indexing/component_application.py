@@ -45,6 +45,24 @@ def _policy(config: IndexConfig) -> str:
     return "component-application-v1:" + hashlib.sha256(json.dumps(value).encode()).hexdigest()
 
 
+def _component_contents(
+    manifest: CrawlManifest, config: IndexConfig,
+) -> dict[Point, ComponentContent]:
+    entries = {(entry.source, entry.path): entry for entry in manifest.upserts}
+    assert manifest.component_versions is not None
+    return {
+        (version.source, version.path): ComponentContent(
+            version,
+            file_fingerprint(
+                entries[(version.source, version.path)], config.model_profiles,
+                chunker_revision=config.chunker_revision,
+            ) if (version.source, version.path) in entries else "component-deleted-v1",
+            (version.source, version.path) not in entries,
+        )
+        for version in manifest.component_versions
+    }
+
+
 def _qualified_chunks(
     projection: RawFileProjection, config: IndexConfig, store: MultiModelStore,
     coverage: EmbeddingCoverage,
@@ -106,22 +124,12 @@ class PreparedComponentApplication:
         self.coverage = EmbeddingCoverage(paths)
         self.progress_cb = progress_cb
         entries = {(entry.source, entry.path): entry for entry in manifest.upserts}
-        self.contents = {
-            (version.source, version.path): ComponentContent(
-                version,
-                file_fingerprint(
-                    entries[(version.source, version.path)], config.model_profiles,
-                    chunker_revision=config.chunker_revision,
-                ) if (version.source, version.path) in entries else "component-deleted-v1",
-                (version.source, version.path) not in entries,
-            )
-            for version in manifest.component_versions
-        }
+        self.contents = _component_contents(manifest, config)
         self.previous: dict[Point, ComponentEvidence | None] = {}
         self.projections: dict[Point, RawFileProjection] = {}
         self.selected: set[Point] = set()
         with self.domain.operation(store.content_store.db):
-            self.checkpoints = paths.get_entries(list(self.contents))
+            self.checkpoints = paths.get_checkpoint_rows(list(self.contents))
             for point, content in self.contents.items():
                 previous = self.ledger.get(*point)
                 projection = self._capture(point, previous)
@@ -186,7 +194,7 @@ class PreparedComponentApplication:
             # Reconstructing validates the current configured native model/table owners.
             ComponentLedger(self.config, self.store)
             self.prepared.require_current_checkpoints()
-            if self.paths.get_entries(list(self.contents)) != self.checkpoints:
+            if self.paths.get_checkpoint_rows(list(self.contents)) != self.checkpoints:
                 raise PendingCrawlConflict("Component checkpoints changed during preparation")
             for point in self.contents:
                 if (
@@ -225,6 +233,7 @@ class PreparedComponentApplication:
                 prepare_ingestion_indices(self.store, max_rows=planned_rows)
                 if self.progress_cb:
                     self.progress_cb.check_cancelled()
+                targets = {}
                 for point in sorted(self.selected):
                     projection = self._capture(point, self.previous[point])
                     actual = _qualified_chunks(projection, self.config, self.store, self.coverage)
@@ -233,16 +242,15 @@ class PreparedComponentApplication:
                         key=lambda row: row["chunk_id"],
                     ):
                         raise SourceLayoutError("Component application did not store its prepared input")
-                    self.ledger.put(
-                        ComponentEvidence(
-                            self.contents[point], self.scope, self.policy, projection,
-                        ),
-                        expected=self.previous[point], max_rows=self.max_rows,
+                    targets[point] = ComponentEvidence(
+                        self.contents[point], self.scope, self.policy, projection,
                     )
-                    if self.contents[point].deleted:
-                        self.paths.remove(*point)
-                    else:
-                        self.paths.mark_indexed_batch([self.checkpoint_rows[point]])
+                from .component_publication import retain_component_publication
+
+                publication = retain_component_publication(self, targets)
+                result = publication.finish(
+                    self.config, self.store, self.ledger, max_rows=self.max_rows,
+                )
                 if self.progress_cb:
                     self.progress_cb.check_cancelled()
-            return len(self.selected), len(self.contents) - len(self.selected)
+            return result
