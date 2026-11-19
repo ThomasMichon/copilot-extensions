@@ -35,17 +35,21 @@ def deliver_execution_wake(
         if task is None:
             raise TaskError("wake task is missing")
         provenance = CoordinatorExecutionProvenance(queue, task, incarnation or "").prepare()
-    admission = queue.admit_execution_wake(wake, provenance=provenance)
+    if records is None:
+        admission = queue.admit_execution_wake(wake, provenance=provenance)
+    else:
+        if wake_table(wake) != "wake_outbox":
+            raise TaskError("independent records require an ordinary wake")
+        admission = queue.admit_execution_wake(
+            wake, provenance=provenance, before_commit=lambda conn, task, identity:
+            records.retain(conn, task, wake.id, identity),
+        )
     if not admission.send_required:
         return True
     accepted = False
     outcome: SendOutcome = "unknown"
     detail = "coordinator wake transport did not establish acceptance or absence"
     try:
-        if records is not None:
-            if wake_table(wake) != "wake_outbox":
-                raise TaskError("independent records require an ordinary wake")
-            records.retain(queue, wake.task_id, wake.id, admission.identity)
         accepted = deliver()
         if accepted:
             outcome = "sent"

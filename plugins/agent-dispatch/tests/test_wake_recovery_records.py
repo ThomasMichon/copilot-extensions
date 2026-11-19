@@ -1,10 +1,13 @@
 import json
+import sqlite3
+from contextlib import closing
 from pathlib import Path
 import subprocess
 
 import pytest
 
 from agent_dispatch.coordinator_execution_wakes import deliver_execution_wake
+from agent_dispatch.bridge_command_delivery import NativePromptNotSent
 from agent_dispatch.queue import TaskQueue
 from agent_dispatch.queue_records import TaskError
 from agent_dispatch.wake_recovery_records import WakeRecoveryRecords
@@ -66,3 +69,39 @@ def test_observe_original_after_queue_loss(
     assert restored.inspect(task_id, wake.id)["receipt"] == provider
     assert restored.inspect(task_id, wake.id)["outcome"] == "sent"
     assert len(calls) == 2 and sent == [wake.id] and not Path(queue.db_path).exists()
+
+
+def test_recording_failure_and_typed_retry_keep_real_admission_eligible(
+    hosted: tuple[TaskQueue, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    queue, task_id = hosted
+    queue.resume(task_id, OWNER, wake_requested=True, wake_message="original")
+    task = queue.get(task_id)
+    assert task is not None
+    _qualify(queue, task, monkeypatch)
+    wake = queue.claim_due_wake()
+    assert wake is not None and wake.delivery_token is not None
+    records = WakeRecoveryRecords.create(tmp_path / "records")
+    with closing(sqlite3.connect(records.path)) as db:
+        db.execute("CREATE TRIGGER refused BEFORE INSERT ON ordinary_wake_v1 BEGIN SELECT RAISE(FAIL,'full'); END")
+    with pytest.raises(sqlite3.IntegrityError, match="full"):
+        deliver_execution_wake(queue, wake, "application-a", lambda: pytest.fail("no send"), records=records)
+    assert queue.list_wakes(task_id)[0].execution_send_state is None
+    with closing(sqlite3.connect(records.path)) as db:
+        db.execute("DROP TRIGGER refused")
+    with queue._connect() as conn:
+        for i in range(101):
+            conn.execute("INSERT INTO task_events(task_id,ts,note,task_relationship) VALUES(?,?,?,?)",
+                         (task_id, i, "historical relationship", "{}"))
+
+    def refused() -> bool:
+        raise NativePromptNotSent(BRIDGE, NATIVE, wake.id)
+
+    with pytest.raises(NativePromptNotSent):
+        deliver_execution_wake(queue, wake, "application-a", refused, records=records)
+    retry = queue.finish_wake(wake.id, wake.delivery_token, delivered=False, retry_base=0.01)
+    fresh = queue.claim_due_wake(now=retry.not_before + 0.001)
+    assert fresh is not None and fresh.delivery_token != wake.delivery_token
+    assert deliver_execution_wake(queue, fresh, "application-a", lambda: True, records=records)
+    with closing(sqlite3.connect(records.path)) as db:
+        assert db.execute("SELECT COUNT(DISTINCT admission) FROM ordinary_wake_v1").fetchone() == (2,)

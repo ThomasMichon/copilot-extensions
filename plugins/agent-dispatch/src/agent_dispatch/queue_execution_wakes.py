@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, replace
 from typing import Any
 
@@ -298,6 +299,7 @@ class QueueExecutionWakesMixin:
         *,
         provenance: tuple[ExecutionScopeBinding, str] | None,
         now: float | None = None,
+        before_commit: Callable[[sqlite3.Connection, Task, str], None] | None = None,
     ) -> WakeSendAdmission:
         """Only fresh admission permits transport; settled acceptance permits cleanup."""
         table = wake_table(wake)
@@ -371,6 +373,8 @@ class QueueExecutionWakesMixin:
                 if not local_recovery and not local_closeout:
                     if previous_send is not None:
                         raise TaskError("retained wake retry cannot drop its original send accounting")
+                    if before_commit is not None:
+                        raise TaskError("independent retention requires a qualified send")
                     return WakeSendAdmission(None, True)
                 fields = {
                     "protocol": "task_relevance_closeout/v1" if local_closeout else "pool_recovery_wake/v1",
@@ -391,6 +395,8 @@ class QueueExecutionWakesMixin:
                     f"UPDATE {table} SET execution_send=?, execution_send_state='pending',"
                     " execution_send_detail='' WHERE id=?", (identity, wake.id),
                 )
+                if before_commit is not None:
+                    before_commit(conn, task, identity)
                 conn.commit()
                 return WakeSendAdmission(identity, True)
             binding, runtime_id = provenance
@@ -425,6 +431,8 @@ class QueueExecutionWakesMixin:
                 " execution_send_state = 'pending', execution_send_detail = '' WHERE id = ?",
                 (key, identity, wake.id),
             )
+            if before_commit is not None:
+                before_commit(conn, task, identity)
             conn.commit()
         return WakeSendAdmission(identity, True)
 

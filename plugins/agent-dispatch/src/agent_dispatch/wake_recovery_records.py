@@ -8,9 +8,8 @@ import sqlite3
 from typing import Any
 
 from .bridge_command_delivery import native_prompt_receipt, steering_prompt
-from .queue import TaskQueue
+from .queue import Task, TaskQueue
 from .queue_records import TaskError
-from .queue_task_recovery import _captured
 from .wake_recovery_target import reconciliation_plan
 
 
@@ -25,8 +24,8 @@ class WakeRecoveryRecords:
         directory.mkdir(mode=0o700)
         obj = cls(directory / "wake.records")
         with closing(sqlite3.connect(obj.path)) as db:
-            db.execute("CREATE TABLE ordinary_wake_v1(task TEXT, wake TEXT, evidence TEXT NOT NULL, "
-                       "outcome TEXT NOT NULL, receipt TEXT, PRIMARY KEY(task,wake))")
+            db.execute("CREATE TABLE ordinary_wake_v1(task TEXT, wake TEXT, admission TEXT NOT NULL, "
+                       "evidence TEXT NOT NULL, outcome TEXT NOT NULL, receipt TEXT, PRIMARY KEY(task,wake,admission))")
         return obj
 
     def _open(self, mode: str) -> sqlite3.Connection:
@@ -35,32 +34,40 @@ class WakeRecoveryRecords:
         db.execute("PRAGMA synchronous=FULL")
         return db
 
-    def retain(self, queue: TaskQueue, task_id: str, wake_id: str, admission: str | None) -> None:
-        """Must complete before calling the sender. A historical attempt cannot be reused."""
-        with queue._connect() as conn:
-            conn.execute("BEGIN")
-            captured = _captured(queue, conn, task_id)
-            wake, target = reconciliation_plan(captured, "wake_outbox", wake_id)
-            task = queue._fetch(conn, task_id)
-            if (task is None or not admission or admission != wake["execution_send"]
-                    or wake["execution_send_state"] != "pending" or task.owner != wake["owner"]
-                    or task.owner_session_id != wake["owner_session_id"] or task.generation != wake["generation"]):
-                raise TaskError("cannot retain mismatched original wake custody")
-            steer = conn.execute(
-                "SELECT acceptance FROM task_steer WHERE task_id=? AND wake_operation_id=?",
-                (task_id, wake_id),
-            ).fetchall()
-            evidence = {
-                "task_id": task_id, "status": task.status, "owner": task.owner,
-                "owner_session_id": task.owner_session_id, "generation": task.generation,
-                "lease_expires_at": task.lease_expires_at, "wake_id": wake_id,
-                "admission": admission, "target": target,
-                "prompt": steering_prompt(task_id, wake["message"]),
-                "steer_acceptances": [json.loads(row[0]) for row in steer],
-            }
+    def retain(self, conn: sqlite3.Connection, task: Task, wake_id: str, admission: str) -> None:
+        """Failure rolls back queue admission before transport. No unrelated history scan."""
+        task_id = task.id
+        row = conn.execute("SELECT * FROM wake_outbox WHERE task_id=? AND id=?", (task_id, wake_id)).fetchone()
+        reservation = conn.execute("SELECT * FROM spawn_reservations WHERE task_id=? "
+                                   "ORDER BY attempt DESC LIMIT 1", (task_id,)).fetchone()
+        if row is None or reservation is None:
+            raise TaskError("original ordinary wake or reservation unavailable")
+        captured = {"task": {"id": task_id}, "wake_outbox": [dict(row)], "reservations": [dict(reservation)]}
+        wake, target = reconciliation_plan(captured, "wake_outbox", wake_id)
+        if (admission != wake["execution_send"] or wake["execution_send_state"] != "pending"
+                or task.owner != wake["owner"] or task.owner_session_id != wake["owner_session_id"]
+                or task.generation != wake["generation"]):
+            raise TaskError("cannot retain mismatched original wake custody")
+        steer = conn.execute(
+            "SELECT acceptance FROM task_steer WHERE task_id=? AND wake_operation_id=?",
+            (task_id, wake_id),
+        ).fetchall()
+        evidence = {
+            "task_id": task_id, "status": task.status, "owner": task.owner,
+            "owner_session_id": task.owner_session_id, "generation": task.generation,
+            "lease_expires_at": task.lease_expires_at, "wake_id": wake_id,
+            "admission": admission, "target": target,
+            "prompt": steering_prompt(task_id, wake["message"]),
+            "steer_acceptances": [json.loads(row[0]) for row in steer],
+        }
         with closing(self._open("rw")) as db:
-            db.execute("INSERT INTO ordinary_wake_v1 VALUES(?,?,?,'unknown',NULL)",
-                       (task_id, wake_id, json.dumps(evidence, allow_nan=False)))
+            encoded = json.dumps(evidence, allow_nan=False, sort_keys=True)
+            db.execute("INSERT OR IGNORE INTO ordinary_wake_v1 VALUES(?,?,?,?,'unknown',NULL)",
+                       (task_id, wake_id, admission, encoded))
+            found = db.execute("SELECT evidence,outcome FROM ordinary_wake_v1 WHERE task=? AND wake=? AND admission=?",
+                               (task_id, wake_id, admission)).fetchone()
+            if found != (encoded, "unknown"):
+                raise TaskError("existing original attempt differs")
             db.commit()
 
     def retain_settlement(self, queue: TaskQueue, task_id: str, wake_id: str, admission: str) -> None:
@@ -71,15 +78,15 @@ class WakeRecoveryRecords:
                 raise TaskError("queue has not settled the original wake as sent")
         with closing(self._open("rw")) as db:
             db.execute("BEGIN IMMEDIATE")
-            evidence, _outcome, _receipt = self._row(db, task_id, wake_id)
-            if evidence["admission"] != admission:
+            if db.execute("UPDATE ordinary_wake_v1 SET outcome='sent' WHERE task=? AND wake=? AND admission=?",
+                          (task_id, wake_id, admission)).rowcount != 1:
                 raise TaskError("wrong wake admission")
-            db.execute("UPDATE ordinary_wake_v1 SET outcome='sent' WHERE task=? AND wake=?", (task_id, wake_id))
             db.commit()
 
     @staticmethod
     def _row(db: sqlite3.Connection, task_id: str, wake_id: str) -> tuple[dict[str, Any], str, Any]:
-        row = db.execute("SELECT evidence,outcome,receipt FROM ordinary_wake_v1 WHERE task=? AND wake=?",
+        row = db.execute("SELECT evidence,outcome,receipt FROM ordinary_wake_v1 WHERE task=? AND wake=? "
+                         "ORDER BY rowid DESC LIMIT 1",
                          (task_id, wake_id)).fetchone()
         if row is None:
             raise TaskError("no retained ordinary wake")
@@ -108,6 +115,6 @@ class WakeRecoveryRecords:
             current, _, prior = self._row(db, task_id, wake_id)
             if current != evidence or (prior is not None and prior != receipt):
                 raise TaskError("original wake evidence changed")
-            db.execute("UPDATE ordinary_wake_v1 SET outcome='sent',receipt=? WHERE task=? AND wake=?",
-                       (json.dumps(receipt), task_id, wake_id))
+            db.execute("UPDATE ordinary_wake_v1 SET outcome='sent',receipt=? WHERE task=? AND wake=? AND admission=?",
+                       (json.dumps(receipt), task_id, wake_id, evidence["admission"]))
             db.commit()
