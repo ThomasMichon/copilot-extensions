@@ -1,7 +1,7 @@
 # Adopter Bootstrap Toolchain Configuration
 
 Parent: [Source-Managed Runtime Installs](README.md).
-Coordination: #13409, within #7028. Status: provider released; installed-reuse refinement proposed.
+Coordination: #13409, within #7028. Status: provider released; installed-reuse refinement reviewed.
 
 ## Goal
 
@@ -57,7 +57,7 @@ orchestration, #4876/#7529 artifact/feed qualification, #7758 finite execution
 and all existing application/source/credential owners. This slice changes no
 live registration, maintenance policy, source pin or deployment permission.
 
-## Installed configuration-only reuse - proposed refinement
+## Installed configuration-only reuse - reviewed refinement
 
 A healthy installed Manager must be able to reapply the same selected
 configuration without requiring its original bootstrap or acquisition payload.
@@ -105,7 +105,8 @@ Adopter migration waits for reviewed implementation and release availability.
   standard installation entry after compatible support is released.
 - [ ] Complete focused source, native first-consumer and required CI/review
   evidence; retain the parent's broader install/update and rollout gates.
-- [ ] Review this installed configuration-only refinement before implementation.
+- [x] Review this installed configuration-only refinement before implementation.
+  Accepted in #13480; implementation/release and adopter qualification remain open.
 - [ ] Implement and release the additive installed setup mode and safe help
   declaration, then qualify conditional adopter reuse without acquisition files.
 
@@ -135,6 +136,11 @@ Adopter migration waits for reviewed implementation and release availability.
   without speculative effects. Keep the existing native reuse phase intact.
 
 ## Journal
+
+2026-11-19: The installed configuration-only refinement merged in #13480 after
+current-head Copilot approval and required CI. It preserves the native
+acquisition-free reuse obligation and does not claim implementation, release,
+application readiness or installed adoption.
 
 2026-11-19: The contract merged in #13412 after clean Copilot approval and required
 CI. No runtime behavior or installation was qualified. Implement the native
