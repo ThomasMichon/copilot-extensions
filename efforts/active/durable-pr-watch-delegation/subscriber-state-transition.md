@@ -56,6 +56,28 @@ The directory barrier therefore needs two distinct proofs:
   cannot survive that boundary. A service restart, PID scan, elapsed time,
   sign-out or same-kernel container restart is not equivalent.
 
+**POSIX sealing must never expose an absent historical lock pathname.**
+Pre-create and durably identify the barrier directory at the retained path,
+then atomically exchange it with the original lock file while holding that
+file's existing native lease. For example, Linux `RENAME_EXCHANGE` provides
+the required namespace operation; the actual filesystem and platform
+implementation must be qualified. Before the exchange both delayed and cold
+historical callers address the same original inode. Afterward cold callers
+encounter the directory while delayed descriptors still address that one
+retained inode. Controller exit on either side cannot create two independent
+historical lock inodes. Never substitute rename-then-mkdir, unlink/create,
+or an advisory transaction that historical callers do not honor. Unavailable
+atomic exchange refuses sealing before moving the legacy lock; existing
+no-replace publication helpers are not exchange implementations.
+
+Windows retains its separate no-delete-sharing proof: the original file
+cannot be moved while a historical descriptor is open. A cold caller that
+creates a replacement file in the later directory-installation gap prevents
+sealing, but cannot contend on a second retained inode because the successful
+first move proved there were no retained historical handles. Transition-aware
+callers must not open that retained inode as a recovery lease in this Windows
+prepared/raced phase. Only a qualified barrier permits the new lease.
+
 Use the already-declared `agent-update-driver` dependency's
 `update_driver.boot.kernel_boot_identity` and `valid_boot_identity`, not a new
 shell probe, environment override, updater operation or daemon. Compare
@@ -79,7 +101,8 @@ configuration or caller-selected paths:
 | Purpose | Proposed location under the existing state root |
 |---|---|
 | Historical admission barrier | `agent-pull-requests-watch.lock` as an ordinary directory |
-| Retained original lease inode | `watch-state-transition.legacy.lock` |
+| Retained original lease inode | `watch-state-transition.legacy.lock`; on POSIX this initially holds the staged barrier directory and is exchanged atomically with the historical path |
+| Windows staged barrier | `watch-state-transition.barrier` before its no-replace installation |
 | New native writer lease | `agent-pull-requests-watch.lock/writer.lock` |
 | Phase journal | `watch-state-transition.json` |
 | Isolated shared per-version authority | `watch-state/subscriptions.json` |
@@ -101,7 +124,7 @@ writer drained.
 | Phase | Sole subscription authority | Admission and permitted work |
 |---|---|---|
 | No transition | Existing legacy file | Preserve ordinary legacy operation and the delivered present-only receiver behavior. No automatic migration merely because a new release is installed. |
-| Prepared | Legacy file | The existing owner validates scope, captures custody and stages the barrier/journal. No new state format, route or callback effects follow from preparation. |
+| Prepared | Legacy file | The existing owner validates scope, captures custody and stages the barrier/journal. POSIX keeps the original lease held through atomic exchange; it never creates a missing-name window. No new state format, route or callback effects follow from preparation. |
 | Sealed legacy | Legacy file | Cold historical opens refuse at the directory. On POSIX, the original inode remains the one legacy writer lease until boot qualification; new writers do not switch to the new inode early. New context writes remain disabled. |
 | Import ready | Final legacy file | Require qualified Windows sealing or a subsequent POSIX boot; acquire the new native writer lease and re-read/strictly validate the final legacy state. No prior staged snapshot is authoritative. |
 | Active | Isolated per-version file | After durable candidate publication and journal commit, compatible owners use only the shared per-version authority under the new lease. Normal registry activation follows existing lifecycle authorization. |
@@ -144,7 +167,8 @@ through the existing platform persistence policy.
 | Interrupted boundary | Required recovery |
 |---|---|
 | Preparation before any move | Keep legacy authority. Reconcile only the known preparation through the existing owner; do not reset state. |
-| Legacy inode moved, barrier not installed | A recreated historical file or unknown open custody blocks completion. Preserve both known retained and raced paths; never unlink the latter or claim exclusion from holding only the former. |
+| Controller exits around POSIX sealing | The atomic exchange leaves either the original lock at the historical name or the directory there with the same original inode retained. Recover actual recorded identities, not a phase guess. A move-without-barrier state is invalid and must never be produced by this backend. |
+| Windows legacy inode moved, barrier not installed | A recreated historical file or unknown custody blocks completion. Preserve known retained and raced paths; never unlink the latter, open the retained inode as a second recovery lease, or claim exclusion from holding only the former. |
 | Barrier installed, sealed-phase acknowledgement missing | Revalidate exact barrier identity. Without durable evidence that it preceded the recorded boot, record a fresh sealed epoch and require a subsequent POSIX boot; do not infer timing from file age or a preparation stamp. |
 | Sealed legacy, same or unavailable boot | Continue only the legacy authority and original-inode lease rules. Refuse isolated activation; installing/selecting a compatible runtime may still finish. |
 | Candidate published, `Active` not committed | Candidate is staging only. Revalidate the final legacy source under custody; reconcile/rebuild staging through the owner, with no callbacks or duplicate registry. |
@@ -177,6 +201,12 @@ is removed. Rollback of code is not downgrade of retained state.
 4. In contained native Windows/Linux fixtures, run the actual supported
    historical lease/startup families, including delayed open, competing
    creation, abrupt controller exit, same-boot refusal and ordinary recovery.
+   On POSIX, schedule both a pre-opened delayed historical caller and a cold
+   caller while terminating the sealing controller immediately before and
+   after the atomic exchange. Prove no missing historical name, at most one
+   successful historical writer, byte preservation and no concurrent registry
+   mutation. An unsupported exchange must leave the original lock untouched;
+   never exercise a rename/mkdir fallback as if it were the guarded path.
    Assert byte preservation, one writer and zero premature effects. A fake
    boot identity does not qualify a real reboot.
 5. Qualify an actual kernel-boot-crossing lane separately when a disposable

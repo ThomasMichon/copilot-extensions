@@ -432,6 +432,12 @@ changes still belong to the legacy authority. The implementation must retain
 the original inode/lease custody and recover this phase without splitting
 writers; simply sealing the pathname and dropping that custody is not a
 complete transition.
+The physical seal itself must preserve historical admission without a
+missing-name gap: on POSIX, atomically exchange a staged directory and the
+original leased file. Moving the file and only then creating the directory
+can split delayed and cold callers across different lock inodes before any
+recovery runs. That sequence is explicitly prohibited and has a dedicated
+two-caller/controller-exit qualification obligation in the concrete proposal.
 
 After physical admission is qualified, the existing owner must validate the
 final complete legacy snapshot, durably publish the per-version authority,
