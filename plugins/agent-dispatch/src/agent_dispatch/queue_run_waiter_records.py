@@ -7,6 +7,7 @@ import sqlite3
 from typing import Any, cast
 
 from .queue_feed_preparation import FeedWaiterAdmission
+from .queue_feed_receipts import receipt_expiry
 from .queue_records import TaskError
 
 
@@ -55,6 +56,9 @@ def run_waiter_from_row(row: sqlite3.Row) -> dict[str, Any]:
         "feed_admission": admission,
         "event_id": row["event_id"],
         "replay_registration_id": row["replay_registration_id"],
+        "replay_registration_expires_at": receipt_expiry(
+            delegation, row["replay_registration_id"], row["replay_registration_expires_at"],
+        ),
         "replay_attempted": bool(row["replay_attempted"]),
         "replay_settled": bool(row["replay_settled"]),
         "id": row["id"],
