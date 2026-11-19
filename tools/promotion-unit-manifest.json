@@ -6664,7 +6664,7 @@
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_reconcile.py": "4f1c997e52273455055d02b7909246fa89a24f0f0405592ee42d58b26657cd8f",
         "tools/promotion_unit_tests/test_retained_generation_publication.py": "cd03a7745495f57158f8597588edb57637b85f567c4841910fb0c1b741a8ba3d",
         "tools/promotion_unit_tests/test_runtime_gc_paths.py": "ab9f5bb39327ba54c28b9501a4762c17d7544c6bd7e47f156103671034882337",
-        "tools/plugin_test_resources.py": "2e218eb151e06f61648cd643d396808f01168b935383d7ceceae6191430928b7",
+        "tools/plugin_test_resources.py": "4998366552b4528e4fad50be0dc66895c7b32c3524de2eac065329b906650bad",
         "libs/agent-procutil/src/agent_procutil/python_cache_store.py": "340811dcb14019e220afe37decca40198842062c543ed66efe089ebb8ec83c2c",
         "libs/agent-procutil/src/agent_procutil/python_cache_catalog.py": "f89182be381ddcc27e3025e25e4e874af4a0caf8f09724035b6b0fefcc7d2715",
         "libs/agent-procutil/src/agent_procutil/python_cache_collect.py": "02c4457d04f65f395ed583aa81bc2d35abc657b79cd2449c3c23b37d5bc4e471",

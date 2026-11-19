@@ -51,7 +51,7 @@ from plugin_test_cache import (
     clear_cache_contents, declared_test_requirements, dependency_fingerprint, has_dev_extra,
     ordinary_cache_root, retained_build_resources, source_resolution_arguments,
 )
-from plugin_test_resources import record_owner, run_prefix, runs_root, venv_root
+from plugin_test_resources import record_owner, retirement_venv_root, run_prefix, runs_root, venv_root
 # Preserve the runner's existing public map as an explicit re-export.
 from plugin_test_selection import EXTERNAL_TEST_ROOTS as EXTERNAL_TEST_ROOTS
 from plugin_test_selection import SOURCE_ONLY_TEST_TARGETS
@@ -79,6 +79,7 @@ from plugin_test_owned_scratch import (
 REPO = Path(__file__).resolve().parents[1]
 PLUGINS = REPO / "plugins"
 VENV_ROOT: Path | None = None
+RETIREMENT_READY = False
 PORTFOLIO_PLUGIN = "pytest_portfolio_guard"
 RUNNER_DEPENDENCIES = ("pytest-timeout>=2.3,<3",)
 EXTERNAL_TEST_DEPENDENCIES = {
@@ -267,7 +268,9 @@ def changed_plugins(base: str) -> list[str]:
 
 
 def _venv_root() -> Path:
-    return VENV_ROOT if VENV_ROOT is not None else venv_root(REPO)
+    if VENV_ROOT is not None:
+        return VENV_ROOT
+    return retirement_venv_root(REPO) if RETIREMENT_READY else venv_root(REPO)
 
 
 def _venv_python(name: str) -> Path:
@@ -748,9 +751,10 @@ def run_plugin(
 
 
 def main(argv: list[str] | None = None) -> int:
-    global OWNED_SCRATCH_OWNER
+    global OWNED_SCRATCH_OWNER, RETIREMENT_READY
     ap = build_argument_parser(add_cli_argument)
     args = ap.parse_args(argv)
+    RETIREMENT_READY = args.retirement_ready
     OWNED_SCRATCH_OWNER = args.owned_scratch_owner
     if args.junit_dir is not None and (args.prepare_only or args.list_only):
         ap.error("--junit-dir requires test collection or execution")

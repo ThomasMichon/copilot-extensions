@@ -126,6 +126,10 @@ prerequisites for one contribution.
 
 For explicit retirement of a source-bound test environment, see
 [Retained test environments and source lifetime](docs/retained-test-environments.md).
+Select `--retirement-ready` on plugin or standalone preparation and execution
+to use the separate retirement-aware cache. Existing defaults and legacy caches
+do not migrate; older preparers cannot select this namespace through their
+existing path helper.
 An idle prepared environment can still depend on its checkout. Retirement uses
 the runner's existing lease, keeps its directory identity and blocks later
 preparation; it does not authorize checkout deletion or retire sibling caches.

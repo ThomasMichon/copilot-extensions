@@ -15,6 +15,10 @@ def build_argument_parser(
     ap.add_argument("--changed", action="store_true", help="plugins changed vs --base")
     ap.add_argument("--base", default="origin/main", help="diff base for --changed")
     ap.add_argument("--reinstall", action="store_true", help="rebuild the venv(s)")
+    ap.add_argument(
+        "--retirement-ready", action="store_true",
+        help="use a separate retirement-aware managed cache; never migrate legacy environments",
+    )
     add_owned_scratch_argument(ap)
     ap.add_argument("-k", dest="kexpr", default=None, help="pytest -k filter")
     ap.add_argument(

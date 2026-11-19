@@ -19,7 +19,7 @@ from single_instance_lease import AlreadyRunningError as AlreadyRunningError
 from cache_directory_paths import ordinary_cache_root
 from native_test_paths import native_test_path
 from plugin_test_cache import clear_cache_contents as clear_cache_contents
-from plugin_test_resources import resource_path
+from plugin_test_resources import ENVIRONMENT_LAYOUT, resource_path
 from plugin_test_selection import resolve_plugin_root
 
 SCHEMA = "copilot-extensions.test-environment-retirement"
@@ -73,13 +73,23 @@ def _environment(source: Path, target: str, platform: str) -> Path:
     if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,63}", target):
         raise ValueError("Invalid test target")
     source = source.resolve(strict=True)
+    support = _metadata(source / "tools" / "test-environment-capabilities.json")
+    retirement = support.get("retirement")
+    if support != {
+        "schema": "copilot-extensions.test-environment-preparation", "version": 1,
+        "retirement": {"version": 1, "layout": ENVIRONMENT_LAYOUT},
+    } or (
+        type(support.get("version")) is not int or not isinstance(retirement, dict)
+        or type(retirement.get("version")) is not int
+    ):
+        raise ValueError("Selected source does not support terminal test-environment retirement")
     if not resolve_plugin_root(source, target).is_dir():
         raise ValueError("Test target does not belong to the selected source")
     root = ordinary_cache_root(resource_path(source))
     owner = _metadata(root / "scratch-owner.json")
     if owner.get("source_checkout") != str(source):
         raise ValueError("Retained cache belongs to another source")
-    environment = ordinary_cache_root(root / "venvs" / platform / target)
+    environment = ordinary_cache_root(root / ENVIRONMENT_LAYOUT / platform / target)
     if not native_test_path(environment).is_dir():
         raise ValueError("Selected environment does not exist")
     return environment

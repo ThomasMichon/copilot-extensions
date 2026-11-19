@@ -28,6 +28,22 @@ second command. On other platforms use their path separator. The optional
 `--platform` must name the current native Python platform; this tool does not
 retire another operating system's environment.
 
+Create a retirement-aware environment by explicitly selecting
+`--retirement-ready` on `tools/run-plugin-tests.py` or
+`tools/run-standalone-tests.py`. Both preparation and later execution must
+select that same flag. Existing defaults, callers and caches remain unchanged.
+
+Only a source checkout that declares the retirement preparation contract in
+`tools/test-environment-capabilities.json` can be selected. Retirement-aware
+preparers explicitly select a separate `venvs-retirement-v1` cache namespace.
+Pre-feature preparers, including an old caller importing the current
+`venv_root` helper, and their already-loaded waiters still select the old `venvs`
+namespace, not the environment being retired. This is a new allocation
+namespace, not a migration or permission to delete old caches. An older source
+checkout, missing declaration or incompatible contract refuses before effects.
+Legacy environments still require their owner's explicit process drain and
+disposition; this tool does not report them as safe.
+
 Apply recomputes the selected source/cache binding and checks both directory
 identities and the preview's cache generation under the lease. A busy environment returns
 exit code 3 without changing its contents. A replaced, stale, linked,
@@ -35,7 +51,7 @@ unqualified or unreadable selection refuses before removal.
 
 Retirement first writes a terminal marker, then removes only the selected
 environment's contents. It preserves the directory inode and marker. Normal
-runner preparation, including `--reinstall`, refuses a retired environment.
+plugin and standalone preparation, including `--reinstall`, refuses a retired environment.
 This prevents an admitted waiter from recreating usable imports while source
 cleanup proceeds. Use a new managed source checkout for later work.
 Use ordinary `--reinstall`, not terminal retirement, when an active checkout

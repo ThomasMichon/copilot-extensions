@@ -36,7 +36,7 @@ from standalone_consumers import (
 from seasoned_uv import run_uv_install
 from plugin_test_cache import ordinary_cache_root
 from plugin_test_retirement import require_active
-from plugin_test_resources import record_owner, run_prefix, runs_root, venv_root
+from plugin_test_resources import record_owner, retirement_venv_root, run_prefix, runs_root, venv_root
 
 REPO = Path(__file__).resolve().parent.parent
 COMPONENT_ALIASES = {
@@ -134,8 +134,8 @@ def cleanup_sandbox(temporary: tempfile.TemporaryDirectory[str]) -> None:
             time.sleep(0.25)
 
 
-def default_python(component: str) -> Path:
-    root = venv_root(REPO) / component
+def default_python(component: str, *, retirement_ready: bool = False) -> Path:
+    root = (retirement_venv_root(REPO) if retirement_ready else venv_root(REPO)) / component
     return root / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
 
 
@@ -325,6 +325,10 @@ def main(argv: list[str] | None = None) -> int:
         help="actual environment used by a nonstandard --python launcher (never probed)",
     )
     parser.add_argument("--prepare", action="store_true", help="provision declared test dependencies")
+    parser.add_argument(
+        "--retirement-ready", action="store_true",
+        help="use a separate retirement-aware managed cache; never migrate legacy environments",
+    )
     parser.add_argument("--smoke", action="store_true", help="run controller contracts without real deployment cycles")
     parser.add_argument(
         "--chat-suite", choices=("acceptance", "full"),
@@ -372,10 +376,15 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--environment-root requires --python")
     if args.environment_root and args.prepare:
         parser.error("--environment-root cannot be used with --prepare")
+    if args.retirement_ready and (args.python or args.environment_root):
+        parser.error("--retirement-ready requires the managed interpreter")
     # Resolving bin/python itself follows a POSIX venv symlink to the base
     # interpreter and bypasses the venv. Resolve only its containing directory.
     try:
-        default = default_python(args.component)
+        default = (
+            default_python(args.component, retirement_ready=True)
+            if args.retirement_ready else default_python(args.component)
+        )
     except (OSError, ValueError) as exc:
         print(f"standalone tests: {exc}", file=sys.stderr)
         return 1
@@ -451,7 +460,9 @@ def main(argv: list[str] | None = None) -> int:
             sandbox = Path(temporary.name)
             record_owner(sandbox, REPO, retention="disposable after verified process cleanup")
             env = isolated_environment(os.environ, sandbox)
-            env["COPILOT_EXTENSIONS_TEST_VENV_ROOT"] = str(venv_root(REPO))
+            env["COPILOT_EXTENSIONS_TEST_VENV_ROOT"] = str(
+                retirement_venv_root(REPO) if args.retirement_ready else venv_root(REPO),
+            )
             env.pop("AGENT_CHAT_TEST_SUITE", None)
             if chat_suite:
                 env["AGENT_CHAT_TEST_SUITE"] = chat_suite

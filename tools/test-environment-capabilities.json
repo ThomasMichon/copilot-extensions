@@ -1,0 +1,8 @@
+{
+  "schema": "copilot-extensions.test-environment-preparation",
+  "version": 1,
+  "retirement": {
+    "version": 1,
+    "layout": "venvs-retirement-v1"
+  }
+}

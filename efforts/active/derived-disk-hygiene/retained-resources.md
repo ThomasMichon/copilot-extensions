@@ -201,6 +201,12 @@ owner. It reuses the runner's environment-identity lease and preserves the
 leased directory. A terminal marker blocks preparation and `--reinstall`, so
 an admitted waiter cannot recreate source-dependent imports after retirement.
 Partial or interrupted work keeps that fence and requires a fresh preview.
+Mixed-version review tightened the boundary: both preparers explicitly select
+`--retirement-ready` to allocate and use the new cache namespace. The existing
+`venv_root` helper retains its legacy path, including when an older caller
+imports the current helper. A selected-source capability declaration is required.
+Legacy caches are not migrated or retired by this tool; their owners retain
+their process-drain and disposition obligations.
 Success applies only to the selected environment; sibling caches and other
 source consumers remain independent gates.
 
