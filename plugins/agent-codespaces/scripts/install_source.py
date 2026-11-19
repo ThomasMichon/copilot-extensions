@@ -36,7 +36,7 @@ APPLICATION_INSTALL_CONTRACT = {
     "schema": "copilot-extensions.prepared-application-install",
     "version": 1,
 }
-APPLICATION_INSTALL_CAPABILITIES = ("callback-timeouts/v1",)
+APPLICATION_INSTALL_CAPABILITIES = ("callback-timeouts/v1", "global-bin/v1")
 
 
 class _ApplicationDeclarationConflict(_engine_module.ContentRepairRequired):
@@ -303,6 +303,7 @@ def _wheel_selection(payload: Path, version: str, inputs: WheelInstallInputs) ->
             engine._construction_hash(engine._source_files(packages), extras, local), inputs,
         ),
         "extras": list(extras), "local_packages": list(local),
+        "roots": list(profile["roots"]),
     }
 
 
@@ -349,6 +350,9 @@ def native_current(root: Path, payload: Path, component: str) -> bool:
         )
         receipt = inputs.receipt()
         name = engine._package_name(payload)
+        from installer_provider_roots import check_construction
+
+        check_construction(root, receipt, core=name)
         profile_wheels = receipt["binding"]["wheels"]
         if (
             name not in receipt["distributions"]
@@ -440,7 +444,7 @@ def install_application(
     snapshot: Path, component: str, payload: Path, root: Path, *,
     uv: Path, base_python: Path, health_module: str,
     expected_version: str, expected_hash: str, arguments: tuple[str, ...] = (),
-    repair: bool = False,
+    repair: bool = False, global_bin: Path | None = None,
 ) -> dict[str, str]:
     """Compose existing construction and application owners for a prepared source.
 
@@ -464,8 +468,14 @@ def install_application(
     if "application" not in preview.project:
         raise ValueError("application installation requires a prepared application project")
     declaration = _read(_member(snapshot, preview.project["application"]) / "application.json")
-    from runtime_application_install import _validate_application, application_install_timeout
+    from runtime_application_install import (
+        _validate_application, application_install_timeout,
+        publication_directory, require_publication_selection,
+    )
 
+    if global_bin is not None:
+        publication_directory(global_bin, root=root)
+        require_publication_selection(_member(snapshot, preview.project["application"]) / "install.py")
     _validate_application(declaration)
     install_timeout = application_install_timeout(declaration)
     retention_options: dict[str, float] = {}
@@ -489,6 +499,8 @@ def install_application(
             raise ValueError("application declaration differs from its retained Source/profile")
         if declaration.get("name") == "worktree-manager":
             raise ValueError("Manager installation requires its existing native lifecycle")
+        if global_bin is not None:
+            require_publication_selection(application / "install.py")
         version = expected_version + (".repair." + uuid.uuid4().hex if repair else "")
         if not repair:
             try:
@@ -499,6 +511,8 @@ def install_application(
                 version = current
 
         def validate(slot: Path) -> None:
+            if global_bin is not None:
+                require_publication_selection(slot / "install.py")
             try:
                 installed = _read(slot / "application.json")
             except (FileNotFoundError, ValueError, UnicodeError) as error:
@@ -567,7 +581,7 @@ def install_application(
             ):
                 from runtime_application_install import _publication_current
 
-                if _publication_current(candidate.slot, declaration):
+                if _publication_current(candidate.slot, declaration, global_bin=global_bin):
                     inputs.verify()
                     validate(candidate.slot)
                     return {"state": "installed", "slot": str(candidate.slot)}
@@ -578,7 +592,11 @@ def install_application(
             python = candidate.slot / ".venv" / (
                 "Scripts/python.exe" if os.name == "nt" else "bin/python"
             )
-            command = [str(candidate.slot / "install.py"), "--", *arguments]
+            command = [
+                str(candidate.slot / "install.py"),
+                *(["--global-bin", str(global_bin)] if global_bin is not None else []),
+                "--", *arguments,
+            ]
             cwd = candidate.slot
             if os.name == "nt":
                 # CreateProcess rejects long cwd values, including native spelling.
@@ -706,8 +724,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--expected-payload-hash")
     parser.add_argument("--repair", action="store_true")
     parser.add_argument("--nested-environment", action="store_true")
+    parser.add_argument("--global-bin", type=Path)
     parser.add_argument("arguments", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
+    if args.global_bin is not None and not args.install_application:
+        parser.error("--global-bin requires --install-application")
     if args.health_callable is not None and not args.native_session:
         parser.error("--health-callable requires --native-session")
     if args.arguments and (
@@ -776,6 +797,7 @@ def main(argv: list[str] | None = None) -> int:
             uv=args.uv, base_python=args.base_python, health_module=args.health_module,
             expected_version=args.expected_runtime_version, expected_hash=args.expected_payload_hash,
             arguments=tuple(args.arguments[1:]), repair=args.repair,
+            **({"global_bin": args.global_bin} if args.global_bin is not None else {}),
         )
         print(json.dumps(result, sort_keys=True))
         return 0

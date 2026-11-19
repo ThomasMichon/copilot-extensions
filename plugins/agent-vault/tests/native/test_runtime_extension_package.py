@@ -56,8 +56,11 @@ sys.path.insert(0, str(payload / "scripts"))
 import installer_engine as engine
 import install_source
 import runtime_profile
+import installer_provider_roots
 from agent_procutil import no_window_kwargs
 root = home / ".agent-vault"
+installer_provider_roots.persist(root, ["example-vault-provider"])
+desire = (root / installer_provider_roots.FILE).read_bytes()
 with install_source.wheel_inputs(profile, wheels) as inputs:
     admitted = install_source.wheel_selection(payload, "agent-vault", inputs)
     selected = runtime_profile.wheel_selection(root, payload, admitted, "ssh")
@@ -91,6 +94,7 @@ with install_source.wheel_inputs(profile, wheels) as inputs:
             assert not (root / "deploy-manifest.json").exists()
             assert not (home / ".local" / "bin").exists()
     assert observations == [{"installed_provider": True, "unlock_invoked": False}] * 2
+assert (root / installer_provider_roots.FILE).read_bytes() == desire
 print(json.dumps({"constructed": True, "reused": True, "activated": False}))
 '''
 
@@ -150,3 +154,20 @@ def test_closed_native_profile_installs_an_independent_provider_without_activati
         env, home,
     )
     assert json.loads(result.stdout) == {"constructed": True, "reused": True, "activated": False}
+    root = home / ".agent-vault"
+    desire = root / "runtime-provider-roots.json"
+    retained = desire.read_bytes()
+    roots = tuple(json.loads(retained)["roots"])
+    core = payload / "src" / "agent_vault" / "__init__.py"
+    core.write_text(core.read_text(encoding="utf-8") + "\nRECONSTRUCTION_FIXTURE = True\n", encoding="utf-8")
+    profile, wheels, base_python, selected_uv = _closed_wheels(
+        payload, env, home, "ssh", additional_roots=roots,
+    )
+    result = _run(
+        [sys.executable, "-I", "-B", "-c", CONSTRUCT, payload, home, profile, wheels,
+         selected_uv, base_python, probe_file],
+        env, home,
+    )
+    assert json.loads(result.stdout) == {"constructed": True, "reused": True, "activated": False}
+    assert desire.read_bytes() == retained
+    assert len(list((root / "versions").iterdir())) == 2

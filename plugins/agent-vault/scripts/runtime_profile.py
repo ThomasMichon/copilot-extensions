@@ -128,8 +128,10 @@ def wheel_selection(
     root: Path, payload: Path, admitted: dict[str, Any], requested: str | None = None,
 ) -> dict[str, Any]:
     from runtime_source_target import check_target
+    import installer_provider_roots as providers
 
     selected = selection(root, payload, requested)
+    roots = providers.select(root, admitted.get("roots", []), core="agent-vault")
     if (
         selected["source_identity"] is not None or admitted.get("identity") != {}
         or admitted.get("extras") != list(PROFILES[selected["profile"]])
@@ -145,13 +147,19 @@ def wheel_selection(
     selected["runtime_version"] = admitted["runtime_version"]
     check_target(root, selected)
     module, callback = dependency_health(selected["profile"])
-    return {**selected, "health_module": module, "health_callable": callback}
+    return {
+        **selected, "health_module": module, "health_callable": callback,
+        "provider_roots": roots,
+    }
 
 
 def construction_session(root: Path, payload: Path, version: str, expected_hash: str) -> int:
     import installer_engine as engine
     from runtime_source_target import record_profile
     from versioned_runtime_construction import retain_helpers
+    import installer_provider_roots as providers
+
+    providers.require_inputs(root, closed_wheels=False)
 
     selected = selection(root, payload)
     if version != selected["runtime_version"] or expected_hash != fingerprint(
@@ -224,8 +232,25 @@ def main(argv: list[str] | None = None) -> int:
     session = commands.add_parser("construction-session", allow_abbrev=False)
     session.add_argument("version")
     session.add_argument("--payload-hash", required=True)
+    providers_command = commands.add_parser("providers", allow_abbrev=False)
+    providers_command.add_argument("--roots")
+    providers_command.add_argument("--persist", action="store_true")
     args = parser.parse_args(argv)
     payload = SCRIPTS.parent
+    if args.command == "providers":
+        import installer_provider_roots as providers
+
+        roots = providers.read(args.root) or []
+        if args.roots is not None:
+            roots = providers.normalize(json.loads(args.roots, object_pairs_hook=_unique_object))
+            if roots != providers.normalize(roots, core="agent-vault"):
+                raise ValueError("Vault provider roots must not include the owning core")
+            if args.persist:
+                providers.persist(args.root, roots)
+        elif args.persist:
+            raise ValueError("Persisting Vault provider roots requires an explicit roots list")
+        print(json.dumps({"roots": roots}, sort_keys=True))
+        return 0
     if args.command == "select-wheels":
         admitted = json.loads(args.selection, object_pairs_hook=_unique_object)
         if not isinstance(admitted, dict):
@@ -233,6 +258,10 @@ def main(argv: list[str] | None = None) -> int:
         result = wheel_selection(args.root, payload, admitted, args.profile)
         if args.persist and (args.profile is not None or os.path.lexists(args.root / PROFILE_FILE)):
             persist_profile(args.root, result["profile"])
+        if args.persist:
+            import installer_provider_roots as providers
+
+            providers.select(args.root, admitted.get("roots", []), core="agent-vault", write=True)
         print(json.dumps(result, sort_keys=True))
         return 0
     if args.command == "select":

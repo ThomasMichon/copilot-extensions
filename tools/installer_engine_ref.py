@@ -49,6 +49,7 @@ PYTHON_FILES = (
     "installer_packaging_seed.py",
     "installer_source_build.py",
     "installer_source_wheel_cache.py",
+    "installer_provider_roots.py",
 )
 PYTHON_ADOPTERS = (
     "agent-worktrees", "agent-vault", "agent-pull-requests", "agent-ssh",

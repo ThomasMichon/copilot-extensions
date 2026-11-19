@@ -801,6 +801,12 @@ def _candidate(
         installed = {name for name, _version, _filename, _digest in wheel_inputs.distributions}
         if not selected_packages <= installed or (included - selected_packages) & installed:
             raise ValueError("Inspected wheels differ from the selected local dependency graph")
+    from installer_provider_roots import check_construction
+
+    check_construction(
+        root, wheel_inputs.receipt() if wheel_inputs is not None else None,
+        core=_package_name(plugin),
+    )
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
     (root / ".installer-inputs").mkdir(parents=True, exist_ok=True)
     with _source_phase("source-selection", child_timeout, {}) as progress:
@@ -860,6 +866,10 @@ def _candidate(
                 _assert_source_pin(plugin, expected_source_identity)
                 if dev_owner is not None:
                     _check_dev_owner(root, dev_owner)
+                check_construction(
+                    root, wheel_inputs.receipt() if wheel_inputs is not None else None,
+                    core=_package_name(plugin),
+                )
                 yield ReadyCandidate(
                     slot, inputs.payload_hash, True, descriptor, inputs.plugin, inputs.extras,
                     inputs.local_packages,
@@ -994,6 +1004,10 @@ def _candidate(
             _assert_source_pin(plugin, expected_source_identity)
             if dev_owner is not None:
                 _check_dev_owner(root, dev_owner)
+            check_construction(
+                root, wheel_inputs.receipt() if wheel_inputs is not None else None,
+                core=_package_name(plugin),
+            )
             yield ReadyCandidate(
                 slot, inputs.payload_hash, reused, retention_descriptor, inputs.plugin, inputs.extras,
                 inputs.local_packages,

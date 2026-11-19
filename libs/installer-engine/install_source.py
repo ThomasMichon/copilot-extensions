@@ -303,6 +303,7 @@ def _wheel_selection(payload: Path, version: str, inputs: WheelInstallInputs) ->
             engine._construction_hash(engine._source_files(packages), extras, local), inputs,
         ),
         "extras": list(extras), "local_packages": list(local),
+        "roots": list(profile["roots"]),
     }
 
 
@@ -349,6 +350,9 @@ def native_current(root: Path, payload: Path, component: str) -> bool:
         )
         receipt = inputs.receipt()
         name = engine._package_name(payload)
+        from installer_provider_roots import check_construction
+
+        check_construction(root, receipt, core=name)
         profile_wheels = receipt["binding"]["wheels"]
         if (
             name not in receipt["distributions"]
