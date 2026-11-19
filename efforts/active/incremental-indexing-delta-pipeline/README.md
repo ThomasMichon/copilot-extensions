@@ -139,7 +139,9 @@ After the reviewed proposal, the operator admitted execution:
 - [x] Make local Git use commit-range changes and tombstones without enumerating
   all tracked paths and commit history on each ordinary round.
 - [ ] Bound hosted issue/PR acquisition and timestamp overlap replay by cursor
-  and identity. Provider limitations must remain explicit.
+  and identity. Provider limitations must remain explicit; the
+  [Azure DevOps proposal](azure-devops-acquisition.md) stages query-qualified
+  exact identities before broader polling and repair coverage (#13363).
 - [ ] Persist acquisition progress so retry/restart does not restart a
   corpus-wide listing.
 - [ ] Move authoritative full enumeration into separately budgeted, resumable
