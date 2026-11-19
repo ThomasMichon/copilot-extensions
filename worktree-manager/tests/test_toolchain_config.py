@@ -174,8 +174,6 @@ def test_toolchain_config_powershell_relative_paths_follow_provider_location(
         XDG_CONFIG_DIRS=str(home / "system"), WORKTREE_MANAGER_ROOT=str(home / "manager"),
     )
     env[selector] = "selected.ini"
-    if os.name != "nt":
-        env.pop("USERPROFILE")
     result = subprocess.run(
         [shell, "-NoProfile", "-NonInteractive", "-Command", program],
         cwd=other, env=env, capture_output=True, text=True, timeout=20,
@@ -258,7 +256,7 @@ def test_toolchain_config_conflicts_do_not_partially_write(
 
 @pytest.mark.parametrize("kind", ["ps1", "sh"])
 @pytest.mark.parametrize("invalid", [
-    "", "unknown", "pip", "pip-colon", "uv", "uv-pip", "uv-system", "uv-system-default",
+    "", "empty-option", "unknown", "pip", "pip-colon", "uv", "uv-pip", "uv-system", "uv-system-default",
     "uv-inline", "uv-dotted", "npm", "environment", "npm-upper-environment", "npm-config-aliases",
     "mirror-only", "mirror-configfile", "mirror-noconfig",
 ])
@@ -350,7 +348,7 @@ def test_toolchain_config_native_entry_precedes_first_prerequisite(
         target.write_text(content, encoding="utf-8")
     if kind == "ps1":
         escaped = str(bootstrap).replace("'", "''")
-        selected = str(config).replace("'", "''")
+        selected = "" if invalid == "empty-option" else str(config).replace("'", "''")
         text = (
             "function Get-Command { param($Name); "
             "if ($Name -like 'uv*') { "
@@ -368,7 +366,7 @@ def test_toolchain_config_native_entry_precedes_first_prerequisite(
         tools.mkdir()
         curl = tools / "curl"
         curl.write_text(
-            "#!/bin/sh\nprintf '%s|%s|%s|%s|%s\\n' \"$UV_DEFAULT_INDEX\" \"$PIP_INDEX_URL\" "
+            "#!/bin/sh\nprintf 'FIRST_CONSUMER|%s|%s|%s|%s|%s\\n' \"$UV_DEFAULT_INDEX\" \"$PIP_INDEX_URL\" "
             "\"$npm_config_registry\" \"$UV_PYTHON_INSTALL_MIRROR\" "
             "\"$UV_INSTALLER_GITHUB_BASE_URL\" >&2\nexit 91\n", encoding="ascii",
         )
@@ -377,7 +375,8 @@ def test_toolchain_config_native_entry_precedes_first_prerequisite(
             entry for entry in os.get_exec_path()
             if not any((Path(entry) / name).is_file() for name in ("uv", "uv.exe"))
         )
-        command = [shell, str(bootstrap), "--toolchain-config", str(config), "--version"]
+        command = [shell, str(bootstrap), "--toolchain-config",
+                   "" if invalid == "empty-option" else str(config), "--version"]
     result = subprocess.run(
         command, env=env, cwd=home, capture_output=True, text=True, timeout=20,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
@@ -426,9 +425,8 @@ def test_toolchain_config_real_native_tool_reads_persisted_defaults(
         monkeypatch.setenv("PIP_CONFIG_FILE", str(explicit))
     tc.apply_configuration(config, home=tmp_path)
     # A new terminal has no bootstrap-injected index/registry variables.
-    env = dict(os.environ)
-    for key in ("UV_DEFAULT_INDEX", "PIP_INDEX_URL", "npm_config_registry", "UV_PYTHON_INSTALL_MIRROR"):
-        env.pop(key, None)
+    injected = {"UV_DEFAULT_INDEX", "PIP_INDEX_URL", "NPM_CONFIG_REGISTRY", "UV_PYTHON_INSTALL_MIRROR"}
+    env = {key: value for key, value in os.environ.items() if key.upper() not in injected}
     env["UV_CACHE_DIR"] = str(tmp_path / "uv-cache")
     env["npm_config_cache"] = str(tmp_path / "npm-cache")
     env["npm_config_update_notifier"] = "false"

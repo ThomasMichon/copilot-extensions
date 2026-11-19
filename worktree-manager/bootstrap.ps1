@@ -39,7 +39,9 @@ if ($args.Count -eq 1 -and $args[0] -ceq '--describe-toolchain-config') {
 # This grammar intentionally needs neither Python, uv, Node nor a TOML module.
 $ToolchainConfig = $env:COPILOT_EXTENSIONS_TOOLCHAIN_CONFIG
 if ($args.Count -and $args[0] -ceq '--toolchain-config') {
-    if ($args.Count -lt 2) { throw '--toolchain-config requires an absolute file.' }
+    if ($args.Count -lt 2 -or [string]::IsNullOrWhiteSpace($args[1])) {
+        throw '--toolchain-config requires an absolute file.'
+    }
     if ($ToolchainConfig -and [IO.Path]::GetFullPath($ToolchainConfig) -cne [IO.Path]::GetFullPath($args[1])) {
         throw 'Explicit toolchain configuration conflicts with the environment selection.'
     }

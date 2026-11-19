@@ -33,7 +33,9 @@ fi
 
 toolchain_config="${COPILOT_EXTENSIONS_TOOLCHAIN_CONFIG:-}"
 if [ "${1-}" = --toolchain-config ]; then
-    [ "$#" -ge 2 ] || { printf '%s\n' '--toolchain-config requires an absolute file.' >&2; exit 2; }
+    if [ "$#" -lt 2 ] || [ -z "${2-}" ]; then
+        printf '%s\n' '--toolchain-config requires an absolute file.' >&2; exit 2
+    fi
     if [ -n "$toolchain_config" ] && [ "$toolchain_config" != "$2" ]; then
         printf '%s\n' 'Explicit toolchain configuration conflicts with the environment selection.' >&2
         exit 2

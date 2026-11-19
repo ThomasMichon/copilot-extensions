@@ -43,6 +43,8 @@ Selection order:
 4. `toolchain.conf` in the selected `WORKTREE_MANAGER_ROOT`, if retained.
 
 An explicit argument conflicting with the environment selection is refused.
+An empty explicit argument is also refused before prerequisite commands; it
+does not opt back into public defaults.
 There is no parent-directory walk, repository clone, remote config fetch or
 execution of adopter code. With no selected file, existing public bootstrap
 behavior is unchanged. Normal `worktree-manager setup` uses the environment,
