@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify remaining direct native point-domain reader refusal",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}
