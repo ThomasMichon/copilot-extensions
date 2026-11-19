@@ -116,7 +116,7 @@ class AzureDevOpsConnector:
         """Discover work items and pull requests from operator-supplied query specs."""
         return [
             *self._discover_work_items(since=None, cancel_check=cancel_check),
-            *self._discover_pull_requests(since=None, cancel_check=cancel_check),
+            *self._discover_pull_requests(cancel_check=cancel_check),
         ]
 
     def discover_changed(
@@ -124,13 +124,19 @@ class AzureDevOpsConnector:
         last_commit: str | None,
         cancel_check: Callable[[], None] | None = None,
     ) -> list[FileEntry]:
-        """Discover work items and pull requests changed since a timestamp marker."""
+        """Discover timestamp changes for work-item-only configurations."""
         if not last_commit:
             return self.discover(cancel_check=cancel_check)
+        if self._pull_request_queries:
+            raise ValueError(
+                "Azure DevOps PR timestamp discovery is unsupported: creation/closure "
+                "time does not cover edits or comments; schedule explicit full "
+                "discovery separately",
+            )
         since = self._marker_with_overlap(last_commit)
         return [
             *self._discover_work_items(since=since, cancel_check=cancel_check),
-            *self._discover_pull_requests(since=since, cancel_check=cancel_check),
+            *self._discover_pull_requests(cancel_check=cancel_check),
         ]
 
     def list_paths(
@@ -145,7 +151,7 @@ class AzureDevOpsConnector:
             work_items.add(f"workitems/{work_item_id}.md")
 
         pulls: set[str] = set()
-        for pull_request in self._iter_pull_requests(since=None):
+        for pull_request in self._iter_pull_requests():
             if cancel_check:
                 cancel_check()
             pull_request_id = pull_request.get("pullRequestId")
@@ -158,7 +164,7 @@ class AzureDevOpsConnector:
         }
 
     def current_commit(self) -> str | None:
-        """Azure DevOps work tracking state is timestamp-tracked, not git-SHA tracked."""
+        """Legacy full acquisition does not provide a complete project cursor."""
         return None
 
     @property
@@ -358,21 +364,17 @@ class AzureDevOpsConnector:
     def _discover_pull_requests(
         self,
         *,
-        since: str | None,
         cancel_check: Callable[[], None] | None,
     ) -> list[FileEntry]:
         entries: list[FileEntry] = []
-        since_dt = _parse_datetime(since) if since else None
         seen_ids: set[Any] = set()
-        for pull_request in self._iter_pull_requests(since=since):
+        for pull_request in self._iter_pull_requests():
             if cancel_check:
                 cancel_check()
             pull_request_id = pull_request.get("pullRequestId")
             if pull_request_id in seen_ids:
                 continue
             seen_ids.add(pull_request_id)
-            if since_dt and not self._pull_request_in_window(pull_request, since_dt):
-                continue
             pull_request = self._complete_pull_description(pull_request)
             if cancel_check:
                 cancel_check()
@@ -414,7 +416,7 @@ class AzureDevOpsConnector:
             raise ValueError("Azure DevOps pull-request details have no valid description")
         return pull_request | {"description": description}
 
-    def _iter_pull_requests(self, *, since: str | None) -> Iterable[dict[str, Any]]:
+    def _iter_pull_requests(self) -> Iterable[dict[str, Any]]:
         if not self._pull_request_queries:
             self._log_no_pull_request_queries()
             return
@@ -422,9 +424,6 @@ class AzureDevOpsConnector:
         seen_ids: set[Any] = set()
         for query in self._pull_request_queries:
             params = self._pull_request_params(query)
-            if since:
-                params["searchCriteria.minTime"] = since
-
             for result in self._http.paginate_continuation(
                 self._project_path("_apis", "git", "pullrequests"),
                 params=params,
@@ -719,17 +718,6 @@ class AzureDevOpsConnector:
             "User-Agent": "agent-index",
             "Authorization": f"Basic {token}",
         }
-
-    @staticmethod
-    def _pull_request_in_window(pull_request: dict[str, Any], since: datetime) -> bool:
-        for field in ("closedDate", "creationDate"):
-            value = pull_request.get(field)
-            if not value:
-                continue
-            parsed = _parse_datetime(value)
-            if parsed and parsed >= since:
-                return True
-        return False
 
     @staticmethod
     def _work_item_in_window(item: dict[str, Any], since: datetime) -> bool:

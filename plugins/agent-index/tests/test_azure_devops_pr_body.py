@@ -78,9 +78,9 @@ def test_selected_pull_description_is_complete_or_refused(outcome: str) -> None:
         if outcome in {"wrong-id", "wrong-repo", "invalid-body", "unavailable"}:
             error = httpx.HTTPStatusError if outcome == "unavailable" else ValueError
             with pytest.raises(error):
-                connector.discover_changed("2026-01-02T00:00:00Z")
+                connector.discover()
         else:
-            entries = connector.discover_changed("2026-01-02T00:00:00Z")
+            entries = connector.discover()
             assert len(entries) == 1
             assert entries[0].source == "ado:acme/widgets:pulls"
             assert entries[0].path == "pulls/7.md"
@@ -335,7 +335,7 @@ def test_repeated_description_reads_do_not_request_bodyless_304() -> None:
     assert all("If-None-Match" not in request.headers for request in detail_requests)
 
 
-def test_description_reads_follow_window_and_duplicate_filtering() -> None:
+def test_description_reads_follow_duplicate_filtering() -> None:
     selected = {
         "pullRequestId": 7,
         "title": "Listed title",
@@ -351,8 +351,7 @@ def test_description_reads_follow_window_and_duplicate_filtering() -> None:
         path = request.url.path
         requests.append(path)
         if path.endswith("/pullrequests"):
-            stale = selected | {"pullRequestId": 8, "creationDate": "2026-01-01T00:00:00Z"}
-            return httpx.Response(200, json={"value": [selected, selected, stale]})
+            return httpx.Response(200, json={"value": [selected, selected]})
         if path.endswith("/pullrequests/7"):
             return httpx.Response(
                 200,
@@ -377,7 +376,7 @@ def test_description_reads_follow_window_and_duplicate_filtering() -> None:
         pull_request_queries=[{"repository_id": "repo-1"}],
     )
     try:
-        entries = connector.discover_changed("2026-01-02T00:00:00Z")
+        entries = connector.discover()
         assert [entry.path for entry in entries] == ["pulls/7.md"]
         assert "Complete description tail" in entries[0].content
         assert entries[0].content.startswith("# Listed title\n")
