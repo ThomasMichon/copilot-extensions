@@ -131,16 +131,35 @@ pending payload, target rows and parent incarnation remain unchanged. The
 default journal constructor still requires its supplied manifest to match the
 original pending manifest, even after this explicit binding.
 
-Binding does not invoke preparation or native application. The existing
-`PreparedApplication` and `PreparedComponentApplication` constructors do not
-consume this explicit point binding yet. No application, task acknowledgement,
-pending retirement, cursor advance, executor admission or capability
-advertisement follows from retention, composition or binding. Application and
+Binding alone does not invoke preparation or native application.
+`PreparedApplication` can explicitly consume the candidate by supplying both
+`point_claim` and `component_selection`, with `full=False`. It validates the
+selected domain against the whole claim's typed scope, then uses
+`for_point_application()` to recompose and bind every exact target before
+resetting batches or calling an embedding client. Selection narrows chunking,
+not the complete candidate or claim. Missing observations, changed claims,
+scope/family mismatches, candidate changes and dirty domains refuse before
+changing existing preparation.
+
+Point preparation uses the same subordinate journal, batch plan, checkpoint
+snapshot and exact vector cache. Its existing coverage/vector readers receive
+the explicit scope; reusable native vectors still need matching receipts and
+actual indexed bytes. Those qualification reads do not write coverage or
+repair indices. Chunking and embedding remain outside native writer exclusion.
+Restart can reuse completed model pairs without changing canonical rows, file
+checkpoints, source state, pending work or the parked queue claim.
+Default preparation still refuses point envelopes, and
+`PreparedComponentApplication` does not yet compose point-domain publication.
+No native application, task acknowledgement, pending retirement, cursor advance,
+executor admission or capability advertisement follows from preparation. Application and
 completion still need their own owner-qualified transition and per-target
 applied/higher-covered proof. Ordinary recovery is not that transition.
 `tests/test_prepared_points.py` covers restart, exact-target completeness,
 conflicts and stale parents; `tests/test_azure_devops_points.py` connects the
 named-version HTTP mock reader to this retention path and proves body reuse.
+`tests/test_point_prepared_application.py` qualifies actual native point-domain
+preparation, interrupted-pair reuse, input refusals, coverage-qualified native
+vector reuse and unchanged publication/completion boundaries.
 
 ## Failure and compatibility boundaries
 
