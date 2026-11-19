@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import hashlib
 import time
+from typing import Any
 
 import pytest
 
@@ -14,7 +15,7 @@ from agent_bridge.loop_governance import LoopGovernance
 from agent_bridge.runtime_custody import RuntimeCustodyError, RuntimeInstallation
 from agent_bridge.plugin_readiness import PluginReadinessRequest, PluginReadinessResult, startup_input_digest
 from test_live_inbox_runtime import (
-    PREFIX, attempt, enroll, installation as installation, poll,
+    PREFIX, Serving, attempt, current, enroll, installation as installation, poll,
     request as consumer_request, serving as serving,
 )
 
@@ -25,7 +26,7 @@ PAYLOAD = {
 }
 
 
-def test_ordinary_send_uses_current_enrollment_and_never_legacy_ack(serving) -> None:
+def test_ordinary_send_uses_current_enrollment_and_never_legacy_ack(serving: Serving) -> None:
     app, client, db, consumer = serving
     body = enroll(client, consumer)
     reply = client.post(MESSAGES, json=PAYLOAD)
@@ -43,7 +44,7 @@ def test_ordinary_send_uses_current_enrollment_and_never_legacy_ack(serving) -> 
     assert client.post(PREFIX + "/begin", json=attempt(body, row)).json() == {"begin": False}
 
 
-def test_never_enrolled_target_stays_legacy_without_epoch_initialization(serving) -> None:
+def test_never_enrolled_target_stays_legacy_without_epoch_initialization(serving: Serving) -> None:
     _, client, db, consumer = serving
     reply = client.post(MESSAGES, json=PAYLOAD)
     assert reply.status_code == 200, reply.text
@@ -52,7 +53,7 @@ def test_never_enrolled_target_stays_legacy_without_epoch_initialization(serving
     assert row["runtime_custody_json"] is None
 
 
-def test_unrelated_legacy_target_does_not_inherit_another_consumers_enrollment(serving) -> None:
+def test_unrelated_legacy_target_does_not_inherit_another_consumers_enrollment(serving: Serving) -> None:
     _, client, db, consumer = serving
     enroll(client, consumer)
     assert client.post("/api/v1/live-sessions", json={"session_id": "legacy-b"}).status_code == 200
@@ -62,7 +63,7 @@ def test_unrelated_legacy_target_does_not_inherit_another_consumers_enrollment(s
     assert row["body"] == PAYLOAD["body"] and row["runtime_custody_json"] is None
 
 
-def test_lost_admission_reply_reopens_original_key_after_closure_and_registration_cleanup(serving) -> None:
+def test_lost_admission_reply_reopens_original_key_after_closure_and_registration_cleanup(serving: Serving) -> None:
     app, client, db, consumer = serving
     enroll(client, consumer)
     first = client.post(MESSAGES, json=PAYLOAD)
@@ -95,7 +96,9 @@ def test_lost_admission_reply_reopens_original_key_after_closure_and_registratio
 
 @pytest.mark.parametrize("cleanup", ["deregister", "purge"])
 @pytest.mark.parametrize("stage", ["admitted", "offered", "sending"])
-def test_original_key_recovers_after_native_renames_and_alias_cleanup(serving, cleanup, stage) -> None:
+def test_original_key_recovers_after_native_renames_and_alias_cleanup(
+    serving: Serving, cleanup: str, stage: str,
+) -> None:
     app, client, db, consumer = serving
     now = time.time()
     assert db.create_cli_mode_reservation("worktree-a", now=now)
@@ -172,7 +175,7 @@ def test_original_key_recovers_after_native_renames_and_alias_cleanup(serving, c
     "pid", "expiry", "installation", "readonly",
 ])
 def test_selected_retained_target_refuses_without_legacy_downgrade(
-    serving, monkeypatch: pytest.MonkeyPatch, problem: str,
+    serving: Serving, monkeypatch: pytest.MonkeyPatch, problem: str,
 ) -> None:
     app, client, db, consumer = serving
     enroll(client, consumer)
@@ -221,7 +224,9 @@ def test_selected_retained_target_refuses_without_legacy_downgrade(
     {"delivery": "interrupt"}, {"kind": "startup:prompt:1"}, {"kind": "control:set-mode"},
     {"idempotency_key": None}, {"idempotency_key": " "},
 ])
-def test_unsupported_message_effects_never_enter_the_enrolled_queue(serving, changes: dict) -> None:
+def test_unsupported_message_effects_never_enter_the_enrolled_queue(
+    serving: Serving, changes: dict[str, Any],
+) -> None:
     _, client, db, consumer = serving
     enroll(client, consumer)
     reply = client.post(MESSAGES, json={**PAYLOAD, **changes})
@@ -229,7 +234,7 @@ def test_unsupported_message_effects_never_enter_the_enrolled_queue(serving, cha
     assert db.execute_read("SELECT * FROM live_messages") == []
 
 
-def test_legacy_control_admission_and_enrollment_have_one_serial_order(serving) -> None:
+def test_legacy_control_admission_and_enrollment_have_one_serial_order(serving: Serving) -> None:
     _, client, db, consumer = serving
     mid, reason = db.enqueue_live_message_if_fresh(
         consumer.session_id, sender="sender", body="mode", kind="control:set-mode", now=time.time(),
@@ -238,10 +243,17 @@ def test_legacy_control_admission_and_enrollment_have_one_serial_order(serving) 
     observation = client.post(PREFIX + "/negotiate", json=consumer_request(consumer))
     body = {**consumer_request(consumer), **observation.json()}
     reply = client.post(PREFIX + "/enroll", json=body)
-    assert reply.status_code == 409 and "Pending legacy controls" in reply.text
-    assert db.execute_read("SELECT * FROM bridge_inbox_consumers") == []
-    assert db.withdraw_live_control(consumer.session_id, mid, time.time())
-    assert client.post(PREFIX + "/enroll", json=body).status_code == 200
+    assert reply.status_code == 200, reply.text
+    rejected = client.post(PREFIX + "/poll", json=current(body))
+    assert rejected.status_code == 200 and rejected.json()["messages"] == []
+    receipt = db.live_message_receipt(consumer.session_id, mid)
+    assert receipt is not None and receipt["stage"] == "rejected"
+    assert receipt["disposition"]["code"] == "unsupported_reader"
+    assert receipt["sdk_accepted_at"] is None and receipt["consumed_at"] is None
+    stored, = db.execute_read("SELECT * FROM live_messages")
+    assert stored["id"] == mid and stored["body"] == "mode"
+    assert stored["handoff_started_at"] is None
+    assert not db.withdraw_live_control(consumer.session_id, mid, time.time())
     new_mid, reason = db.enqueue_live_message_if_fresh(
         consumer.session_id, sender="sender", body="new mode", kind="control:set-mode", now=time.time(),
     )
@@ -249,7 +261,7 @@ def test_legacy_control_admission_and_enrollment_have_one_serial_order(serving) 
     assert len(db.execute_read("SELECT * FROM live_messages")) == 1
 
 
-def test_startup_without_native_readiness_times_out_without_admitting_a_prompt(serving) -> None:
+def test_startup_without_native_readiness_times_out_without_admitting_a_prompt(serving: Serving) -> None:
     _, client, db, consumer = serving
     enroll(client, consumer)
     reply = client.post(MESSAGES, json={**PAYLOAD, "plugin_readiness": {
@@ -266,7 +278,9 @@ def test_startup_without_native_readiness_times_out_without_admitting_a_prompt(s
 
 @pytest.mark.parametrize("changed", ["none", "body", "sender", "operation", "not-ready", "control"])
 @pytest.mark.parametrize("native_sdk", [False, True])
-def test_retained_startup_admission_requires_its_original_ready_input(serving, changed, native_sdk):
+def test_retained_startup_admission_requires_its_original_ready_input(
+    serving: Serving, changed: str, native_sdk: bool,
+) -> None:
     app, client, db, consumer = serving
     if native_sdk:
         from test_live_inbox_runtime import native_enroll
@@ -300,7 +314,7 @@ def test_retained_startup_admission_requires_its_original_ready_input(serving, c
     db.ack_live_messages(
         consumer.session_id, [control], time.time(), controls=True, outcome=outcome.model_dump_json(),
     )
-    options = {
+    options: dict[str, Any] = {
         **PAYLOAD, "kind": f"startup:prompt:{control}", "expected_session_id": consumer.session_id,
         "now": time.time(), "enrolled_inbox": True,
         "runtime_admission": app.state.live_inbox_runtime._admission,
@@ -322,7 +336,7 @@ def test_retained_startup_admission_requires_its_original_ready_input(serving, c
         assert db.execute_read("SELECT * FROM live_messages WHERE kind NOT LIKE 'control:%'") == []
 
 
-def test_new_frontend_retains_original_admission_on_retry_and_selects_new_one_for_new_work(serving) -> None:
+def test_new_frontend_retains_original_admission_on_retry_and_selects_new_one_for_new_work(serving: Serving) -> None:
     app, client, db, consumer = serving
     enroll(client, consumer)
     first = client.post(MESSAGES, json=PAYLOAD)
