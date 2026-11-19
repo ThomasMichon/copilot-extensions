@@ -846,6 +846,7 @@ def test_cohort_native_workflow_selects_lifecycle_and_settles_preparation(
 
     def run(command: list[str], **options: Any) -> SimpleNamespace:
         assert "--ephemeral-native-ssh-setup" in command
+        assert command[command.index("--timeout") + 1] == ("300" if os.name == "nt" else "180")
         assert options["env"]["COPILOT_EXTENSIONS_SSH_SETUP_COHORT"].endswith("cohort.json")
         calls.append("lifecycle")
         return SimpleNamespace(returncode=0)
@@ -856,7 +857,8 @@ def test_cohort_native_workflow_selects_lifecycle_and_settles_preparation(
             exec(compile(code, "<native-cohort-workflow>", "exec"), {})
     else:
         exec(compile(code, "<native-cohort-workflow>", "exec"), {})
-    assert calls == ["prepare", ("source", ["--source-commit", "a" * 40], {"wall_seconds": 180}), "release", *(
+    preparation_seconds = 240 if os.name == "nt" and not preparation_only else 180
+    assert calls == ["prepare", ("source", ["--source-commit", "a" * 40], {"wall_seconds": preparation_seconds}), "release", *(
         ["lifecycle"] if not preparation_only and prebuild_code == 0 else []
     ), "cleanup"]
 
