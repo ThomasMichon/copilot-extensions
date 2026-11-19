@@ -178,6 +178,43 @@ def test_unavailable_guard_does_not_suppress_independent_deny(failure: str) -> N
     assert "private diagnostic" not in str(result)
 
 
+@pytest.mark.parametrize("failure", ["missing", "raises"])
+def test_maximum_native_batch_keeps_denial_with_bounded_recovery(failure: str) -> None:
+    def sibling(name: str) -> ModuleType | None:
+        if name in {"tool_call_forms.py", "hook_pre_policy.py"}:
+            return load(name)
+        failed = name in {"statelessness_guard.py", "cross_repo_guard.py"}
+        if failed and failure == "missing":
+            return None
+        module = ModuleType(name)
+
+        def decide(payload: dict[str, Any], **kwargs: Any) -> dict[str, str] | None:
+            if failed:
+                raise OSError("private diagnostic")
+            if name == "anchor_write_guard.py" and payload["toolName"] == "edit":
+                return {"permissionDecision": "deny", "permissionDecisionReason": "protected"}
+            return None
+
+        module.decide = decide  # type: ignore[attr-defined]
+        return module
+
+    calls = [{"name": "view"} for _ in range(127)] + [{"name": "edit"}]
+    result = decide_pre(
+        event(toolCalls=calls), load_sibling=sibling,
+        merge=load("hook_client.py")._merge_pre_decisions, deadline=time.time() + 0.5,
+    )
+    assert result["permissionDecision"] == "deny"
+    assert result["permissionDecisionReason"] == "protected"
+    frame = {
+        "version": 1, "hook_generation": "fixture",
+        "hook_capabilities": ["native-tool-policy-v1"], "result": result,
+    }
+    assert len(json.dumps(frame).encode("utf-8")) + 1 <= 65536
+    for name in ("statelessness_guard.py", "cross_repo_guard.py"):
+        assert result["additionalContext"].count(f"Boundary: {name} ") == 1
+    assert "private diagnostic" not in result["additionalContext"]
+
+
 @pytest.mark.parametrize("payload", [
     event(toolCalls=[]),
     event(toolCalls=[{"name": "edit", "cwd": "other"}]),

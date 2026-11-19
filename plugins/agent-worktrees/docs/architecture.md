@@ -3795,6 +3795,11 @@ requests additionally require current prepared installation-context admission;
 they never validate a cold cell by starting the Python SDK or substitute the
 legacy root.
 
+When `sessionId` is absent, transport resolves it from the caller's
+`COPILOT_AGENT_SESSION_ID` before resident admission. Explicit payload values,
+including null, are preserved. Missing caller environment becomes an explicit
+null, never a fallback to the resident's session identity.
+
 Native frames do not establish the caller's GitHub account/host authority or a
 caller-owned external-observation scope. The original supersede guard still
 classifies close attempts and honors the forwarded switches, but its identity
@@ -3803,6 +3808,10 @@ starting `gh`. No raw subprocess, timed-out observation descendant or
 compatibility worker is created on this path. Independent denials remain in
 force; unavailable is not permission. Standalone observation ownership is
 unchanged.
+Repeated recovery context is deduplicated per boundary within one request;
+confirmed decisions and their reasons are retained. The maximum-batch control
+keeps a late denial inside the existing response-frame bound even when earlier
+guards are repeatedly unavailable.
 
 The transport has one 500 ms allocation/connect/write/read budget. Pre-tool
 requests retain the existing 2 MiB newline-frame bound; post requests and typed

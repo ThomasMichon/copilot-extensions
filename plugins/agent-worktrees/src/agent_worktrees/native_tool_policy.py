@@ -85,18 +85,26 @@ def decide_pre(
     except Exception:
         return unavailable("native tool batch is invalid")
     combined: dict[str, Any] = {}
+    recovery_boundaries: set[str] = set()
+
+    def recover(boundary: str) -> dict[str, Any]:
+        if boundary in recovery_boundaries:
+            return {}
+        recovery_boundaries.add(boundary)
+        return unavailable(boundary)
+
     monotonic_deadline = time.monotonic() + max(0.0, deadline - time.time())
     for event in events:
         tool = event.get("toolName") or event.get("tool_name")
         if not isinstance(tool, str) or not tool:
-            return merge(combined, unavailable("native tool name is invalid"))
+            return merge(combined, recover("native tool name is invalid"))
         for name in (
             "statelessness_guard.py", "cross_repo_guard.py",
             "anchor_write_guard.py", "pr_supersede_guard.py",
         ):
             module = load_sibling(name)
             if module is None or not callable(getattr(module, "decide", None)):
-                combined = merge(combined, unavailable(f"{name} unavailable"))
+                combined = merge(combined, recover(f"{name} unavailable"))
                 continue
             try:
                 kwargs: dict[str, Any] = {"deadline": monotonic_deadline} if name in {
@@ -114,9 +122,9 @@ def decide_pre(
                 if not policy.valid_decision(decision):
                     raise ValueError("invalid guard response")
             except _CallerObservationUnavailable:
-                decision = unavailable("caller-scoped PR observation is unavailable in native hooks")
+                decision = recover("caller-scoped PR observation is unavailable in native hooks")
             except Exception:
-                decision = unavailable(f"{name} evaluation failed")
+                decision = recover(f"{name} evaluation failed")
             if decision:
                 combined = merge(combined, decision)
                 if combined.get("permissionDecision") == "deny":

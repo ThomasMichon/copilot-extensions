@@ -70,6 +70,11 @@ protection controls. Their disposable residents use original admission and
 guards, setup stamps membership outside entry, and native entries must not
 start Python or perform executable discovery. Missing-resident behavior remains
 in the separate cold transport controls.
+The same native selection checks caller/resident session mismatch, explicit
+session preservation and absent caller identity through real managed admission.
+The unit packet also exercises a 128-call batch with repeated missing/raising
+guards and a final denial, requiring one recovery message per boundary and a
+response inside 64 KiB without dropping the decision or reason.
 
 The focused Worktrees credential-isolation regression is
 `tests/test_git_credential_isolation.py`, selected through the canonical

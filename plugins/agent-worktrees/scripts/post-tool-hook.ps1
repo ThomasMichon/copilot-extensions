@@ -70,6 +70,14 @@ function Invoke-ResidentPostTool {
         ($payload -isnot [pscustomobject] -and $payload -isnot [Collections.IDictionary])) {
         return $null
     }
+    $hasSession = if ($payload -is [Collections.IDictionary]) {
+        $payload.ContainsKey('sessionId')
+    } else { $null -ne $payload.PSObject.Properties['sessionId'] }
+    if (-not $hasSession) {
+        $session = [Environment]::GetEnvironmentVariable('COPILOT_AGENT_SESSION_ID')
+        if ($payload -is [Collections.IDictionary]) { $payload['sessionId'] = $session }
+        else { $payload | Add-Member -NotePropertyName 'sessionId' -NotePropertyValue $session }
+    }
     if ($Kind -ceq 'postToolUse') {
         # Accounting and target invalidation consume the invocation, never its output.
         foreach ($key in @('toolResult', 'tool_result')) {
