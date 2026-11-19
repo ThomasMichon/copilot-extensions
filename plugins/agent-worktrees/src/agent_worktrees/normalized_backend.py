@@ -43,9 +43,14 @@ def launch(command: list[str]) -> int:
         if os.name != "nt":
             os.execvp(command[0], command)
         # headless-guard: allow an interactive backend to inherit its caller's pane
-        process = subprocess.Popen(
-            command, **({} if _interactive_console() else no_window_kwargs()),
-        )
+        if _interactive_console():
+            process = subprocess.Popen(command)
+        else:
+            # A hidden console would otherwise replace redirected stdio (e.g. --acp --stdio pipes).
+            process = subprocess.Popen(
+                command, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr,
+                **no_window_kwargs(),
+            )
         while True:
             try:
                 return process.wait()

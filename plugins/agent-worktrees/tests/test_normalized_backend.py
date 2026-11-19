@@ -79,6 +79,26 @@ def test_unselected_modes_keep_the_original_native_command(monkeypatch, argument
     assert observed == [command]
 
 
+@pytest.mark.skipif(os.name != "nt", reason="the hidden-console stdio handoff is Windows-only")
+@pytest.mark.parametrize("interactive", [False, True])
+def test_windows_direct_backend_keeps_caller_stdio_only_when_hidden(monkeypatch, interactive):
+    monkeypatch.setattr(backend, "_interactive_console", lambda: interactive)
+    observed = []
+    monkeypatch.setattr(
+        backend.subprocess, "Popen",
+        lambda argv, **kwargs: observed.append(kwargs) or SimpleNamespace(wait=lambda: 0),
+    )
+    assert backend.launch(["copilot", "--acp", "--stdio"]) == 0
+    (kwargs,) = observed
+    if interactive:
+        assert kwargs == {}
+    else:
+        assert kwargs["stdin"] is backend.sys.stdin
+        assert kwargs["stdout"] is backend.sys.stdout
+        assert kwargs["stderr"] is backend.sys.stderr
+        assert kwargs["creationflags"]
+
+
 def test_repository_refusal_precedes_any_recordless_core_preparation(monkeypatch):
     def refuse(_cwd):
         raise ValueError("repository hosting disabled")
