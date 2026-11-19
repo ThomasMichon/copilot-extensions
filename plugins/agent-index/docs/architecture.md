@@ -198,6 +198,35 @@ authority. Synthetic transport controls qualify request construction, refusal,
 bindings and counts; live field/parser semantics and complete event/polling/
 repair coverage remain separate gates before adapter enablement.
 
+`sources.azure_devops_work_item.acquire_work_item` is a stateless helper for
+one previously qualified candidate and one positive int32 item revision.
+It rechecks the full current selection binding before body acquisition and
+afterwards, requires two matching fresh item bodies at that revision, and
+reuses the connector's renderer and acquisition counters. Empty configuration
+or bound negative membership returns `None`, never a tombstone. Unavailable
+responses, identity/revision changes, partial comments and exhausted budgets
+raise instead of returning a truncated entry or falling back to legacy discovery.
+
+The fixed ceiling is two eligibility checks, two body reads and four comment
+pages: 72 logical requests / 360 shared-client attempts with at most four retries
+per request. Larger retry configurations refuse before I/O. Comment requests use
+the documented `7.1-preview.4` API with `$top=100`, ascending order and deleted
+records included; deleted text is not rendered. Counts, unique item/comment
+identities and versions, stable total counts, bounded noncycling continuation
+tokens and terminal record coverage are validated. At most 400 comments and
+2 MiB of serialized decoded body/comment responses are accepted, with a separate
+2 MiB rendered-content cap. These checks occur **after** HTTP buffering and JSON
+decoding; they do not bound wire bytes, peak native memory, parsing time or
+provider-directed backoff. Cancellation is checked between logical requests.
+
+The result carries observed item/comment versions and selection evidence, not
+an atomic snapshot, polling checkpoint or complete discussion-change coverage.
+The [comments API](https://learn.microsoft.com/en-us/rest/api/azure/devops/wit/comments/get-comments?view=azure-devops-rest-7.1)
+documents pagination but no snapshot fence. Matching item reads cannot prove
+that comment edits/deletes did not race traversal. This helper therefore emits
+neither `SourceDelta` nor `AcquisitionPage` and is not wired into discovery;
+adapter composition and target-coverage qualification remain separate work.
+
 Azure DevOps retains operator-supplied WIQL and saved queries verbatim. Its
 work-item-only timestamp discovery first requests only `System.Id` and
 `System.ChangedDate` in batches of at most 200 query-selected identities, then
