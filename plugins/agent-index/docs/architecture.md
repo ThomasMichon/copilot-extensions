@@ -62,6 +62,12 @@ configured domain/model mapping, caps same-path candidates before source
 filtering and retains complete raw content/vector rows under the same exclusion.
 It prepares no index and certifies neither ordered application nor deletion.
 
+The opt-in [native component ledger](component-ledger.md) retains scoped ordering,
+tombstones and raw point observations under that same writer. Its independent
+table identity/version binding detects lost history even after an unrelated
+participating write. It supplies evidence machinery, not a component executor
+or an applied-content certificate.
+
 An in-process connector may opt into `DeltaSourceConnector.discover_delta()`,
 returning a version-1 `SourceDelta` with changed `FileEntry` values, explicit
 `DeletedFile` tombstones, its target checkpoint and complete-acquisition status.
@@ -1223,8 +1229,9 @@ payload. An identical v8 retry is accepted without rewriting the retained row.
 It compares matching source/path identities, considers lower versions covered,
 and requires equal-version fingerprints, deletion state and rendering semantics
 to match. A newer version is not covered. The caller must supply a qualified
-canonical fingerprint and retained applied record; neither exists in runtime
-application yet.
+canonical fingerprint and retained applied record. The opt-in
+[native ledger](component-ledger.md) retains ordering/raw-point observations,
+but qualification and runtime application do not yet supply that applied record.
 
 There is no ordered application capability, applied-version/deletion ledger or
 producer yet. Monotonic application, equal-version content checks, crash/backup
