@@ -136,7 +136,7 @@ def test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop(
         json.dumps([url, "harness-a"], separators=(",", ":")).encode(),
     ).hexdigest())
     from repository_ssh_cohort_fixture import (
-        manager_activation_diagnostic, manager_stack_diagnostic, native_setup_environment,
+        engine_cost_diagnostic, manager_activation_diagnostic, manager_stack_diagnostic, native_setup_environment,
         original_engine_owner, source_application_command,
     )
 
@@ -170,8 +170,9 @@ def test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop(
             "--payload-root", str(command_owner), "--source-payload-root", str(command_owner),
             "--plugin-id", "agent-worktrees", "--legacy-root", str(home / ".agent-worktrees"),
             "--project-root", str(harness), "--run-lifecycle", "--",
-            *arguments,
+            *engine_cost_diagnostic(arguments),
         ], cwd=harness, env=installation, timeout=90)
+        progress(installed.stderr)
         assert installed.returncode == 0, installed.stdout + installed.stderr
         engine_root = home / ".agent-worktrees"
         slot = engine_root / "versions" / (engine_root / "current-version").read_text().strip()

@@ -425,6 +425,32 @@ def test_manager_stack_diagnostic_preserves_script_entry_and_emits_stack(tmp_pat
     assert "run_path" in result.stderr
 
 
+@pytest.mark.parametrize("exit_code", [0, 23])
+def test_engine_cost_diagnostic_preserves_script_arguments_output_and_refusal(
+    tmp_path: Path, exit_code: int,
+) -> None:
+    from repository_ssh_cohort_fixture import engine_cost_diagnostic
+
+    script = tmp_path / "install_source.py"
+    script.write_text(
+        "import json,sys\n"
+        "print(json.dumps({'argv':sys.argv,'path':sys.path[0],'name':__name__}),flush=True)\n"
+        "print('actual receiver stderr',file=sys.stderr,flush=True)\n"
+        f"raise SystemExit({exit_code})\n",
+        encoding="utf-8",
+    )
+    arguments = ["--install-source", "source", "--install-application", "--root", "runtime"]
+    result = run(engine_cost_diagnostic([
+        sys.executable, "-I", "-B", str(script), *arguments,
+    ]), cwd=tmp_path, timeout=5)
+    assert result.returncode == exit_code, result.stdout + result.stderr
+    assert json.loads(result.stdout) == {
+        "argv": [str(script), *arguments], "path": str(tmp_path.resolve()), "name": "__main__",
+    }
+    assert result.stderr.startswith("actual receiver stderr\nEngine receiver cumulative cost:\n")
+    assert "install_source.py" in result.stderr and "cumulative" in result.stderr
+
+
 def test_manager_activation_diagnostic_bounds_the_actual_startup_log(tmp_path: Path) -> None:
     from repository_ssh_cohort_fixture import manager_activation_diagnostic
 
@@ -548,7 +574,7 @@ def test_native_manager_launcher_uses_fixture_root_despite_runner_override(
 def test_original_engine_owner_runs_its_declared_lifecycle_in_private_home(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from repository_ssh_cohort_fixture import original_engine_owner
+    from repository_ssh_cohort_fixture import engine_cost_diagnostic, original_engine_owner
 
     monkeypatch.syspath_prepend(str(PROJECT.parent / "tools"))
     home, project = tmp_path / "home", tmp_path / "project"
@@ -566,12 +592,8 @@ def test_original_engine_owner_runs_its_declared_lifecycle_in_private_home(
     )
     initialized = run(["git", "init", "-q", str(project)], env=environment)
     assert initialized.returncode == 0, initialized.stderr
-    result = run([
-        sys.executable, "-I", "-B", str(owner / "scripts" / "command_binding.py"),
-        "--payload-root", str(owner), "--source-payload-root", str(owner),
-        "--plugin-id", "agent-worktrees", "--legacy-root", str(home / ".agent-worktrees"),
-        "--project-root", str(project), "--run-lifecycle", "--",
-        sys.executable, "-I", "-B", "-c",
+    receiver = tmp_path / "owned_receiver.py"
+    receiver.write_text(
         "import json,os,sys;from pathlib import Path;"
         "owner=Path(os.environ['COPILOT_PLUGIN_STAGED_FROM']);"
         "sys.path.insert(0,str(owner/'scripts'));import command_binding as binding;"
@@ -581,9 +603,18 @@ def test_original_engine_owner_runs_its_declared_lifecycle_in_private_home(
         "legacy_root=Path.home()/'.agent-worktrees',"
         "project_root=Path(os.environ['COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT']));"
         "assert result['status']=='published',result;print('owned-fixture')",
+        encoding="utf-8",
+    )
+    result = run([
+        sys.executable, "-I", "-B", str(owner / "scripts" / "command_binding.py"),
+        "--payload-root", str(owner), "--source-payload-root", str(owner),
+        "--plugin-id", "agent-worktrees", "--legacy-root", str(home / ".agent-worktrees"),
+        "--project-root", str(project), "--run-lifecycle", "--",
+        *engine_cost_diagnostic([sys.executable, "-I", "-B", str(receiver)]),
     ], cwd=project, env=environment, timeout=60)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "owned-fixture" in result.stdout
+    assert "Engine receiver cumulative cost:" in result.stderr
     manifest = json.loads((home / ".agent-worktrees" / "deploy-manifest.json").read_text())
     assert manifest["commandLifecycle"]["state"] == "complete"
     assert Path(manifest["commandBinding"]["payloadRoot"]) == owner

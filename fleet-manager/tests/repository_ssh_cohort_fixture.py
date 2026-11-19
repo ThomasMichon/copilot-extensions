@@ -121,6 +121,26 @@ def manager_stack_diagnostic(command: list[str], *, dump_after: float = 40) -> l
     return [*command[:3], "-c", script, str(dump_after), *command[3:]]
 
 
+def engine_cost_diagnostic(command: list[str]) -> list[str]:
+    assert command[:3] == [sys.executable, "-I", "-B"]
+    script = (
+        "import cProfile,pstats,runpy,sys\n"
+        "from pathlib import Path\n"
+        "sys.argv.pop(0)\n"
+        "sys.path.insert(0,str(Path(sys.argv[0]).resolve().parent))\n"
+        "profile=cProfile.Profile()\n"
+        "try:\n"
+        " profile.enable()\n"
+        " runpy.run_path(sys.argv[0],run_name='__main__')\n"
+        "finally:\n"
+        " profile.disable()\n"
+        " print('Engine receiver cumulative cost:',file=sys.stderr,flush=True)\n"
+        " pstats.Stats(profile,stream=sys.stderr).strip_dirs().sort_stats('cumulative').print_stats(30)\n"
+        " sys.stderr.flush()\n"
+    )
+    return [*command[:3], "-c", script, *command[3:]]
+
+
 def manager_activation_diagnostic(root: Path) -> str:
     log = root / "mux-daemon-passive.log"
     if log.is_symlink():
