@@ -288,7 +288,7 @@ def _tls(network: dict[str, str], *, environment: dict[str, str], deadline: floa
         for store in ("CA", "ROOT"):
             for certificate, encoding, trust in ssl.enum_certificates(store):
                 if encoding == "x509_asn" and (
-                    trust is True or (isinstance(trust, set) and ssl.Purpose.SERVER_AUTH.oid in trust)
+                    trust is True or (isinstance(trust, (set, frozenset)) and ssl.Purpose.SERVER_AUTH.oid in trust)
                 ):
                     context.load_verify_locations(cadata=ssl.DER_cert_to_PEM_cert(certificate))
     else:
