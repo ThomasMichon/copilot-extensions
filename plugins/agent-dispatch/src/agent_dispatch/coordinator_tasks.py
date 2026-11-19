@@ -13,7 +13,7 @@ import uuid
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 
 from . import telemetry
-from .emission_trace import record as trace_emission
+from . import emission_trace
 from .assignment_workspace import AssignmentWorkspace
 from .coordinator_auth import _make_control_auth
 from .coordinator_categories import CategorySelection, register_category_routes
@@ -117,6 +117,7 @@ def register_task_routes(
     resolve_owner_session_id: Callable[[str | None], str | None],
     fencing_guard: FencingGuard | None = None,
 ) -> None:
+    emission_trace.start()
     register_task_grant_route(app, queue, control_token, fencing_guard, bus)
     from .coordinator_task_recovery import register_task_recovery_routes
     register_task_recovery_routes(app, queue, bus, control_token=control_token)
@@ -287,8 +288,8 @@ def register_task_routes(
             raise HTTPException(status_code=409, detail=exc.detail()) from exc
         except TaskError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        if body.origin_ref and body.dedup_key:
-            trace_emission("dispatch.create_result", body.origin_ref, row=data, task_id=task["id"], outcome=outcome.disposition)
+        if body.origin_ref:
+            emission_trace.record("dispatch.create_result", body.origin_ref, row=data, task_id=task["id"], outcome=outcome.disposition)
         if outcome.event_type is not None:
             _emit(outcome.event_type, task)
         return task

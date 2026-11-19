@@ -25,7 +25,7 @@ from typing import Any, TypedDict, TypeVar, cast
 from agent_procutil import no_window_kwargs
 
 from ..client import DispatchClient
-from ..emission_trace import record as trace_emission
+from .. import emission_trace
 from ..repository_resources import (
     RepositoryResourceSnapshot, resolve_execution_resources, resolve_resource_argument, validate_resource_arguments,
 )
@@ -239,7 +239,8 @@ def _author_tasks(
     runner: Callable[..., Any] = subprocess.run,
 ) -> list[dict[str, Any]]:
     rows = _task_specs(stdout)
-    trace_emission("emitter.source_read", spec["id"], count=len(rows))
+    emission_trace.start()
+    emission_trace.record("emitter.source_read", spec["id"], count=len(rows))
     grant = None
     if rows and spec.get("managed_producer") is not None:
         from .emitter_managed import load_grant
@@ -255,7 +256,7 @@ def _author_tasks(
         fields.setdefault(
             "require_verification", bool(spec.get("require_verification", False))
         )
-        trace_emission("emitter.candidate", spec["id"], row=fields)
+        emission_trace.record("emitter.candidate", spec["id"], row=fields)
         try:
             if grant is None:
                 matched = client.create(title, **fields)
@@ -264,10 +265,10 @@ def _author_tasks(
 
                 matched = create_or_observe(client, title, fields, grant)
         except Exception:
-            trace_emission("emitter.task_result", spec["id"], row=fields, outcome="unconfirmed")
+            emission_trace.record("emitter.task_result", spec["id"], row=fields, outcome="unconfirmed")
             raise
         created.append(matched)
-        trace_emission("emitter.task_result", spec["id"], row=fields, task_id=matched.get("id"), outcome="observed")
+        emission_trace.record("emitter.task_result", spec["id"], row=fields, task_id=matched.get("id"), outcome="observed")
     return created
 
 

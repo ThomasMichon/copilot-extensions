@@ -2,12 +2,44 @@
 
 from __future__ import annotations
 
+import atexit
 import hashlib
 import json
+import os
 import re
-import sys
+import threading
 import time
 from typing import Any
+from process_telemetry.buffer import BufferedSink
+
+
+def _write(event: dict[str, Any]) -> None:
+    os.write(2, (json.dumps(event, separators=(",", ":")) + "\n").encode("ascii"))
+
+
+_writer = BufferedSink(_write)
+_init_lock = threading.Lock()
+_started = False
+
+
+def _close() -> None:
+    # Short-lived tick processes get a finite off-path opportunity to drain.
+    deadline = time.monotonic() + 0.15
+    while time.monotonic() < deadline:
+        counts = _writer.stats()
+        if counts["delivered"] + counts["sink_failed"] >= counts["accepted"]:
+            break
+        time.sleep(0.005)
+    _writer.close()
+
+
+def start() -> None:
+    global _started
+    with _init_lock:
+        if not _started:
+            _writer.start()
+            atexit.register(_close)
+            _started = True
 
 
 def _fingerprint(value: str) -> str:
@@ -42,7 +74,4 @@ def record(stage: str, origin: str, *, row: dict[str, Any] | None = None,
                     event["observed_head"] = head
     if isinstance(task_id, str) and re.fullmatch("[a-f0-9]{32}", task_id):
         event["task_id"] = task_id
-    try:
-        print(json.dumps(event, separators=(",", ":")), file=sys.stderr, flush=True)
-    except (OSError, ValueError):
-        pass  # A closed diagnostics pipe cannot change a queue operation's outcome.
+    _writer(event)
