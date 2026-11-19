@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import sqlite3
+import threading
 from collections.abc import AsyncGenerator
 from contextlib import aclosing, closing
 from pathlib import Path
@@ -269,3 +270,41 @@ def test_defer_prepared_merge_while_another_writer_is_active(tmp_db: Database) -
         writer.rollback()
     mgr._rehydrate(merge=True, session_id=sid, prepared=prepared)
     assert not session.awaiting_maintenance_refresh
+
+
+def test_dequeued_event_is_not_a_settled_write(tmp_db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
+    sid = "worker"
+    tmp_db.create_session(sid, sid, None, ".", "local", "running", 1.0)
+    tmp_db.append_event(sid, 1, "agent_message", {"text": "first"}, 2.0)
+    mgr = _passive_manager(tmp_db)
+    session = mgr.get_session(sid)
+    assert session is not None and session.event_log is not None
+    reader = session.event_log
+    session.awaiting_maintenance_refresh = True
+    row = tmp_db.get_session(sid)
+    assert row is not None
+    prepared = InheritedRefresh.read(tmp_db, row, None, target=RefreshTarget.capture(session))
+    assert prepared is not None
+    dequeued, release = threading.Event(), threading.Event()
+    write = tmp_db._write_event_batch
+
+    def held(batch: list[tuple[str, int, str, str, float]]) -> None:
+        dequeued.set()
+        assert release.wait(5)
+        write(batch)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(tmp_db, "_write_event_batch", held)
+        tmp_db.append_event(sid, 2, "turn_complete", {"stop_reason": "done"}, 3.0)
+        try:
+            assert dequeued.wait(2)
+            mgr._rehydrate(merge=True, session_id=sid, prepared=prepared)
+            assert session.awaiting_maintenance_refresh and reader.latest_id == 1
+        finally:
+            release.set()
+            tmp_db.flush()
+    retry = InheritedRefresh.read(tmp_db, row, None, target=RefreshTarget.capture(session))
+    assert retry is not None
+    mgr._rehydrate(merge=True, session_id=sid, prepared=retry)
+    assert not session.awaiting_maintenance_refresh and reader.get_events(1)[0].event == "turn_complete"
+    assert reader.append("agent_message", {"text": "next"}).id == 3

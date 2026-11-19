@@ -67,39 +67,60 @@ class InheritedRefresh:
 
     @contextmanager
     def if_current(self, db: Database) -> Iterator[bool]:
-        """Exclude durable writers through publication, or defer immediately on contention."""
+        """Exclude this database owner's pending admissions as well as SQLite commits.
+
+        A different frontend's in-memory queue is private to that frontend:
+        its caller must establish retirement before admitting this refresh.
+        """
         if self.row is None or self.target is None or db.read_only or not db._write_lock.acquire(blocking=False):
             yield False
             return
         try:
-            conn = db._get_conn()
-            if conn.in_transaction:
+            queue = db._event_write_q
+            if not queue.mutex.acquire(blocking=False):
                 yield False
                 return
-            timeout = int(conn.execute("PRAGMA busy_timeout").fetchone()[0])
-            conn.execute("PRAGMA busy_timeout=0")
             try:
-                try:
-                    conn.execute("BEGIN IMMEDIATE")
-                except sqlite3.OperationalError as exc:
-                    if "locked" not in str(exc).lower():
-                        raise
+                # Dequeue does not mean committed: task_done follows the batch write.
+                if queue.unfinished_tasks:
                     yield False
                     return
-                try:
-                    record = conn.execute(_CURRENT, (self.row["id"],)).fetchone()
-                    if record is None:
-                        yield False
-                        return
-                    current = dict(record)
-                    position = current.pop("history_origin"), current.pop("history_head"), current.pop("history_turns")
-                    yield current == self.row and position == (self.origin, self.head, self.turns)
-                finally:
-                    conn.rollback()
+                with self._if_durable_current(db) as current:
+                    yield current
             finally:
-                conn.execute(f"PRAGMA busy_timeout={timeout}")
+                queue.mutex.release()
         finally:
             db._write_lock.release()
+
+    @contextmanager
+    def _if_durable_current(self, db: Database) -> Iterator[bool]:
+        assert self.row is not None
+        conn = db._get_conn()
+        if conn.in_transaction:
+            yield False
+            return
+        timeout = int(conn.execute("PRAGMA busy_timeout").fetchone()[0])
+        conn.execute("PRAGMA busy_timeout=0")
+        try:
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+            except sqlite3.OperationalError as exc:
+                if "locked" not in str(exc).lower():
+                    raise
+                yield False
+                return
+            try:
+                record = conn.execute(_CURRENT, (self.row["id"],)).fetchone()
+                if record is None:
+                    yield False
+                    return
+                current = dict(record)
+                position = current.pop("history_origin"), current.pop("history_head"), current.pop("history_turns")
+                yield current == self.row and position == (self.origin, self.head, self.turns)
+            finally:
+                conn.rollback()
+        finally:
+            conn.execute(f"PRAGMA busy_timeout={timeout}")
 
     @classmethod
     def read(cls, db: Database, row: dict[str, Any], host: HostRecord | None,
