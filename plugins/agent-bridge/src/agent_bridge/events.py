@@ -78,6 +78,7 @@ class EventLog:
         self._next_id = 1
         self._waiters: list[tuple[asyncio.AbstractEventLoop, asyncio.Event]] = []
         self._observation_revision = 0
+        self.source_unavailable = False
         self._tool_statistics: ToolStartCounter | None
         self._reset_tool_statistics()
         #: Set when this log was merged into another: (target log, old id -> new id).
@@ -165,6 +166,22 @@ class EventLog:
     def refresh_position(self) -> tuple[str | None, int, int]:
         with self._lock:
             return self._refresh_position()
+
+    def retire_missing_source(self, expected: tuple[str | None, int, int]) -> bool:
+        if not self._lock.acquire(blocking=False):
+            return False
+        try:
+            if expected != self._refresh_position():
+                return False
+            self.source_unavailable = True
+            self._observation_revision += 1
+            waiters = list(self._waiters)
+        finally:
+            self._lock.release()
+        for loop, waiter in waiters:
+            if not loop.is_closed():
+                loop.call_soon_threadsafe(waiter.set)
+        return True
 
     def refresh_subscribed_history(
         self, hydrated: EventLog, *, expected: tuple[str | None, int, int] | None = None,
@@ -593,6 +610,8 @@ class EventLog:
         waiter = asyncio.Event()
         registration = (loop, waiter)
         with self._lock:
+            if self.source_unavailable:
+                return []
             events = [event for event in self._events if event.id > after]
             if events:
                 return events

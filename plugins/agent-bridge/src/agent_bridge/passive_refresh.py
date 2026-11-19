@@ -72,7 +72,7 @@ class InheritedRefresh:
         A different frontend's in-memory queue is private to that frontend:
         its caller must establish retirement before admitting this refresh.
         """
-        if self.row is None or self.target is None or db.read_only or not db._write_lock.acquire(blocking=False):
+        if self.target is None or db.read_only or not db._write_lock.acquire(blocking=False):
             yield False
             return
         try:
@@ -94,7 +94,7 @@ class InheritedRefresh:
 
     @contextmanager
     def _if_durable_current(self, db: Database) -> Iterator[bool]:
-        assert self.row is not None
+        assert self.target is not None
         conn = db._get_conn()
         if conn.in_transaction:
             yield False
@@ -110,9 +110,9 @@ class InheritedRefresh:
                 yield False
                 return
             try:
-                record = conn.execute(_CURRENT, (self.row["id"],)).fetchone()
-                if record is None:
-                    yield False
+                record = conn.execute(_CURRENT, (self.target.session.session_id,)).fetchone()
+                if record is None or self.row is None:
+                    yield record is None and self.row is None and self.host is None
                     return
                 current = dict(record)
                 position = current.pop("history_origin"), current.pop("history_head"), current.pop("history_turns")

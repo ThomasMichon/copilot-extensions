@@ -680,9 +680,7 @@ class _SessionCoreMixin(_SessionDrainGateMixin):
         if prepared is not None:
             if not merge or session_id is None:
                 raise ValueError("Prepared refresh requires a single-session merge")
-            if prepared.row is None:
-                return
-            if prepared.row["id"] != session_id or prepared.history is None:
+            if prepared.row is not None and (prepared.row["id"] != session_id or prepared.history is None):
                 raise ValueError("Expected complete metadata for the inherited session")
             pending = self._sessions.get(session_id)
             if (pending is None or not pending.awaiting_maintenance_refresh or pending.event_log is None
@@ -691,10 +689,13 @@ class _SessionCoreMixin(_SessionDrainGateMixin):
             if prepared.target is None or not prepared.target.matches(pending):
                 return
             with prepared.if_current(self._db) as current:
-                if current:
+                if current and prepared.row is None:
+                    if pending.event_log.retire_missing_source(prepared.target.cursor):
+                        self._sessions.pop(session_id)
+                elif current and prepared.row is not None:
                     self._restore_rows([prepared.row], merge=True, read_only=True, prepared=prepared)
             return
-        elif session_id is None:
+        if session_id is None:
             rows = self._db.list_sessions()
         else:
             row = self._db.get_session(session_id)
@@ -862,10 +863,6 @@ class _SessionCoreMixin(_SessionDrainGateMixin):
         if read_only:
             return
 
-        # Startup GC: prune aged terminal/disconnected sessions and compact
-        # the DB so a long-lived daemon's sessions.db doesn't grow without
-        # bound (a single big dispatch can otherwise leave tens of GB of
-        # freelist pages -- see RetentionConfig).
         try:
             self.gc(reason="startup")
         except Exception:

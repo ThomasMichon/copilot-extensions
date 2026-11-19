@@ -17,6 +17,7 @@ from agent_bridge.db import Database
 from agent_bridge.events import EventLog
 from agent_bridge.passive_refresh import InheritedRefresh, RefreshTarget
 from agent_bridge.routes.session_observations import observations
+from agent_bridge.routes.sessions import _sse_event_stream
 from agent_bridge.session_manager import SessionManager
 from agent_bridge.session_observation_contract import ReadRequest, decode, read_position, validate_frame
 from agent_bridge.session_status import SessionStatus
@@ -82,6 +83,42 @@ def test_missing_history_cannot_advance_reader(tmp_db: Database) -> None:
 def _passive_manager(db: Database) -> SessionManager:
     (Path(db.db_path).parent / "hosts").mkdir()
     return SessionManager(db, read_only_rehydrate=True)
+
+
+@pytest.mark.asyncio
+async def test_real_predecessor_end_reports_missing_source_to_attached_reader(tmp_db: Database) -> None:
+    sid = "worker"
+    tmp_db.create_session(sid, sid, None, ".", "local", "stopped", 1.0,
+                          target_json='{"type":"local","cwd":".","worktree_id":"tree"}')
+    writer = EventLog(db=tmp_db, session_id=sid)
+    writer.append("agent_message", {"text": "first"})
+    predecessor = _passive_manager(tmp_db)
+    successor = SessionManager(tmp_db, read_only_rehydrate=True)
+    inherited = successor.get_session(sid)
+    assert inherited is not None and inherited.event_log is not None
+    inherited.awaiting_maintenance_refresh = True
+    req = Mock()
+    req.app.state.uvicorn_server = None
+    req.app.state.session_manager = successor
+    req.app.state.db = tmp_db
+    req.is_disconnected = AsyncMock(return_value=False)
+    read = ReadRequest.parse(sid, [("contract_version", "1"), ("worktree_id", "tree"),
+                                   ("follow", "true")], history=False)
+    async with aclosing(cast(AsyncGenerator[bytes, None], observations(req, read))) as stream:
+        first = decode((await anext(stream)).split(b"data: ", 1)[1].strip())
+        assert first["kind"] == "snapshot" and inherited.subscriber_count == 1
+        raw = _sse_event_stream(inherited, 0, server=None, is_disconnected=None, mgr=successor)
+        async with aclosing(cast(AsyncGenerator[str, None], raw)) as events:
+            assert "id: 1\n" in await anext(events)
+            await predecessor.end_session(sid)
+            assert tmp_db.get_session(sid) is None and not tmp_db.get_events(sid)
+            missing = InheritedRefresh(None, None, target=RefreshTarget.capture(inherited))
+            successor._rehydrate(merge=True, session_id=sid, prepared=missing)
+            assert successor.get_session(sid) is None
+            assert "source_unavailable" in await asyncio.wait_for(anext(events), 1)
+        result = decode((await asyncio.wait_for(anext(stream), 1)).split(b"data: ", 1)[1].strip())
+        assert result["code"] == "source-unavailable" and result["availability"] == "unavailable"
+    assert inherited.subscriber_count == 0
 
 
 @pytest.mark.asyncio
