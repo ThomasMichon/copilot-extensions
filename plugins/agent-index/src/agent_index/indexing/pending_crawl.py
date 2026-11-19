@@ -9,8 +9,9 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager, closing, nullcontext
 from dataclasses import asdict, replace
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol, cast
 
+from agent_index.indexing.change_hints import ChangeHints
 from agent_index.indexing.manifest import CrawlManifest, CrawlStats, PollRefresh
 from agent_index.indexing.poll_refresh import PollRefreshJournal, validate_refresh
 from agent_index.indexing.path_index import PathIndex
@@ -37,7 +38,10 @@ def recovery_scope(config_scope: str, connector: SourceConnector) -> str:
     if identity is None:
         if any(
             callable(getattr(connector, name, None))
-            for name in ("discover_delta", "discover_hints", "discover_delta_page", "discover_snapshot_page")
+            for name in (
+                "discover_delta", "discover_hints", "discover_hints_page",
+                "discover_delta_page", "discover_snapshot_page",
+            )
         ):
             raise ValueError("Delta connector must declare its effective recovery_identity")
         identity = (connector.source_name,)
@@ -149,12 +153,17 @@ class PendingCrawls(PollRefreshJournal):
             return None
         if row["scope"] != scope:
             raise ValueError("Pending crawl belongs to a different source/account configuration")
-        return row["payload"]
+        return cast(str, row["payload"])
 
     def compare_and_save(
         self, source: str, *, scope: str, payload: str, expected: str | None, family: str,
     ) -> None:
         """Publish acquisition progress under the same family exclusion and journal key."""
+        data = json.loads(payload)
+        completed = (
+            self.decode_manifest(data["manifest"], source)
+            if isinstance(data, dict) and data.get("version") in (3, 6) else None
+        )
         with closing(self._paths._connect()) as conn, conn:
             conn.execute("BEGIN IMMEDIATE")
             self._assert_family_available(conn, source, family)
@@ -174,26 +183,35 @@ class PendingCrawls(PollRefreshJournal):
                 conn.execute(
                     "UPDATE pending_crawls SET payload = ? WHERE source = ?", (payload, source),
                 )
+            if completed is not None:
+                self.retain_refresh(conn, completed, scope)
 
     def load(self, source: str, scope: str) -> tuple[CrawlManifest, bool] | None:
         payload = self.read_payload(source, scope)
         if payload is None:
             return None
+        return self.decode_pending(payload, source)
+
+    @classmethod
+    def decode_pending(cls, payload: str, source: str) -> tuple[CrawlManifest, bool] | None:
+        """Decode one observed payload without rereading a possibly newer generation."""
         data = json.loads(payload)
-        if isinstance(data, dict) and data.get("version") in (2, 4):
+        if isinstance(data, dict) and data.get("version") in (2, 4, 5, 6):
             from agent_index.indexing.paged_crawl import decode_acquisition
             from agent_index.indexing.snapshot_crawl import decode_snapshot
 
             if data["version"] == 4:
                 decode_snapshot(payload, source)
             else:
-                decode_acquisition(payload, source)
+                progress = decode_acquisition(payload, source)
+                if data["version"] == 6:
+                    return progress.manifest, False
             return None
         if not isinstance(data, dict) or set(data) != {"version", "full", "manifest"}:
             raise ValueError("Invalid pending crawl envelope")
         if type(data["version"]) is not int or data["version"] not in (1, 3) or type(data["full"]) is not bool:
             raise ValueError("Unsupported pending crawl version or mode")
-        manifest = self.decode_manifest(data["manifest"], source)
+        manifest = cls.decode_manifest(data["manifest"], source)
         if (data["version"] == 3) != (manifest.poll_refresh is not None):
             raise ValueError("Pending polling refresh requires the expanded journal version")
         return manifest, data["full"]
@@ -213,6 +231,8 @@ class PendingCrawls(PollRefreshJournal):
             if row is None or row["scope"] != scope or row["payload"] != expected_payload:
                 raise PendingCrawlConflict("Pending acquisition changed before explicit discard")
             data = json.loads(row["payload"])
+            if isinstance(data, dict) and data.get("version") == 6:
+                raise ValueError("Completed hinted acquisition requires mandatory replay")
             progress = (
                 decode_snapshot(row["payload"], source)
                 if isinstance(data, dict) and data.get("version") == 4
@@ -282,13 +302,16 @@ class PendingCrawls(PollRefreshJournal):
             self.retain_refresh(conn, manifest, scope)
 
     @staticmethod
-    def manifest_data(manifest: CrawlManifest) -> dict:
+    def manifest_data(manifest: CrawlManifest) -> dict[str, Any]:
         data = asdict(manifest)
         if manifest.poll_refresh is None:
             data.pop("poll_refresh")
         return data
 
-    def clear(self, source: str, *, manifest: CrawlManifest | None = None, scope: str | None = None) -> None:
+    def clear(
+        self, source: str, *, manifest: CrawlManifest | None = None,
+        scope: str | None = None, expected_payload: str | None = None,
+    ) -> None:
         with closing(self._paths._connect()) as conn, conn:
             conn.execute("BEGIN IMMEDIATE")
             if manifest is not None:
@@ -301,6 +324,7 @@ class PendingCrawls(PollRefreshJournal):
                 data = json.loads(row["payload"])
                 if (
                     row["scope"] != scope
+                    or expected_payload is not None and row["payload"] != expected_payload
                     or self.decode_manifest(data["manifest"], source) != manifest
                 ):
                     raise PendingCrawlConflict("Pending crawl changed before completion")
@@ -314,6 +338,7 @@ def recover_source(
     family: str | None = None,
     publication: Callable[[], AbstractContextManager[None]] | None = None,
     prepare: PrepareManifest | None = None,
+    change_hints: ChangeHints | None = None,
 ) -> tuple[int, int, int]:
     """Publish pinned work and its scope before admitting another scoped acquisition."""
     journal = PendingCrawls(paths)
@@ -352,23 +377,38 @@ def recover_source(
             raise
         return result
 
-    def publish(manifest: CrawlManifest, *, full: bool, clear: bool) -> tuple[int, int, int]:
+    def publish(
+        manifest: CrawlManifest, *, full: bool, clear: bool, expected_payload: str | None = None,
+    ) -> tuple[int, int, int]:
         application = prepare(manifest=manifest, full=full) if prepare is not None else apply
         with publication() if publication is not None else nullcontext():
             result = apply_and_save(manifest, full=full, application=application)
             if clear:
-                journal.clear(source, manifest=manifest, scope=scope)
+                journal.clear(
+                    source, manifest=manifest, scope=scope, expected_payload=expected_payload,
+                )
             return result
 
-    pending = journal.load(source, scope)
+    pending_raw = journal.read_payload(source, scope)
+    pending = journal.decode_pending(pending_raw, source) if pending_raw is not None else None
     if pending is not None:
         manifest, pending_full = pending
-        totals = publish(manifest, full=pending_full, clear=True)
+        data = json.loads(pending_raw or "")
+        completed_hints = None
+        if data["version"] == 6:
+            completed_hints = ChangeHints.from_dict(data["hints"])
+            prior = state.sources.get(source)
+            if data["base_commit"] != (prior.last_commit if prior is not None else None):
+                raise ValueError("Completed hinted acquisition belongs to a different checkpoint")
+        totals = publish(manifest, full=pending_full, clear=True, expected_payload=pending_raw)
+        if not full and completed_hints is not None and completed_hints == change_hints:
+            return totals
 
     state.require_acquisition_scope(source, scope, full=full)
     state.require_family_cursor(source, family or source, full=full)
     manifest = acquire()
-    acquired = journal.load(source, scope)
+    acquired_raw = journal.read_payload(source, scope)
+    acquired = journal.decode_pending(acquired_raw, source) if acquired_raw is not None else None
     if acquired is not None and acquired != (manifest, full):
         raise PendingCrawlConflict("Acquired manifest does not match pending publication")
     if acquired is None and (not manifest.is_empty or manifest.poll_refresh is not None):
@@ -376,5 +416,6 @@ def recover_source(
     current = publish(
         manifest, full=full,
         clear=acquired is not None or not manifest.is_empty or manifest.poll_refresh is not None,
+        expected_payload=acquired_raw,
     )
     return totals[0] + current[0], totals[1] + current[1], totals[2] + current[2]

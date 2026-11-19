@@ -11,7 +11,7 @@ from agent_index.indexing.change_hints_contract import execution_versions, valid
 if TYPE_CHECKING:
     from agent_index.indexing.engine import SourceSpec
     from agent_index.sources.base import SourceConnector
-    from agent_index.sources.delta import SourceDelta
+    from agent_index.sources.delta import AcquisitionPage, SourceDelta
 
 
 class HintDiscovery(Protocol):
@@ -21,9 +21,29 @@ class HintDiscovery(Protocol):
     ) -> SourceDelta: ...
 
 
-def require_hint_connector(connector: SourceConnector, hints: ChangeHints) -> HintDiscovery:
+class HintPageDiscovery(Protocol):
+    def __call__(
+        self, hints: ChangeHints, last_commit: str | None, cursor: str | None,
+        *, cancel_check: Callable[[], None] | None = None,
+    ) -> AcquisitionPage: ...
+
+
+def hint_page_discovery(connector: SourceConnector) -> HintPageDiscovery | None:
+    """Negotiate both hint semantics and complete acquisition units on the callable."""
+    discover = getattr(connector, "discover_hints_page", None)
+    versions = getattr(discover, "acquisition_page_versions", ())
+    if execution_versions(discover) and isinstance(versions, (tuple, list, set, frozenset)) and any(
+        type(version) is int and version == 1 for version in versions
+    ):
+        return discover
+    return None
+
+
+def require_hint_connector(
+    connector: SourceConnector, hints: ChangeHints,
+) -> HintDiscovery | HintPageDiscovery:
     """Require the selected acquisition callable and its explicit effective scope."""
-    discover = getattr(connector, "discover_hints", None)
+    discover = hint_page_discovery(connector) or getattr(connector, "discover_hints", None)
     if not callable(discover) or not execution_versions(discover):
         raise ValueError("Selected connector does not support change-hints v1")
     if getattr(connector, "hint_poll_refresh", False):
