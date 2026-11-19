@@ -1,6 +1,7 @@
 """Adopter data is preflighted before tool execution or native config writes."""
 from __future__ import annotations
 
+from collections.abc import Iterator
 import os
 from pathlib import Path
 import shutil
@@ -18,7 +19,7 @@ UV_MIRROR = "https://downloads.example.invalid/uv/"
 
 
 @pytest.fixture(autouse=True)
-def restore_process_environment():
+def restore_process_environment() -> Iterator[None]:
     before = dict(os.environ)
     yield
     os.environ.clear()
@@ -276,7 +277,7 @@ def test_toolchain_config_real_native_tool_reads_persisted_defaults(
     env["UV_CACHE_DIR"] = str(tmp_path / "uv-cache")
     env["npm_config_cache"] = str(tmp_path / "npm-cache")
     env["npm_config_update_notifier"] = "false"
-    base_python = sys._base_executable
+    base_python = str(getattr(sys, "_base_executable", sys.executable))
     expected = INDEX
     if tool.startswith("pip"):
         command = [base_python, "-m", "pip", "config", "list"]
@@ -385,6 +386,7 @@ def test_toolchain_config_standard_setup_applies_before_prerequisite_owner(
     from types import SimpleNamespace
 
     from worktree_manager import setup_cli
+    from worktree_manager.prereqs import PrereqStatus
 
     pip, _, _ = _native_fixture(monkeypatch, tmp_path)
     selected = tmp_path / "toolchain.conf"
@@ -392,7 +394,7 @@ def test_toolchain_config_standard_setup_applies_before_prerequisite_owner(
     monkeypatch.setenv(tc.CONFIGURATION_ENV, str(selected))
     monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(tmp_path / "manager"))
 
-    def detect():
+    def detect() -> list[PrereqStatus]:
         assert os.environ["UV_DEFAULT_INDEX"] == INDEX
         assert os.environ["PIP_INDEX_URL"] == INDEX
         assert INDEX in pip.read_text(encoding="utf-8")
@@ -406,6 +408,19 @@ def test_toolchain_config_standard_setup_applies_before_prerequisite_owner(
         lambda **_: SimpleNamespace(ran=False, reason="already-installed"),
     )
     assert setup_cli.cmd_setup(["--apply"], banner="fixture") == 0
+
+
+@pytest.mark.parametrize(("code", "expected"), [(2, 2), (None, 0), ("parse-error", 1)])
+def test_toolchain_config_setup_preserves_parser_exit_status(
+    monkeypatch: pytest.MonkeyPatch, code: int | str | None, expected: int,
+) -> None:
+    from worktree_manager import setup_cli
+
+    def exit_parser(*_args: object, **_kwargs: object) -> None:
+        raise SystemExit(code)
+
+    monkeypatch.setattr(setup_cli.repository_bootstrap, "parse", exit_parser)
+    assert setup_cli.cmd_setup([], banner="fixture") == expected
 
 
 def test_toolchain_config_darwin_pip_paths_follow_native_directory(

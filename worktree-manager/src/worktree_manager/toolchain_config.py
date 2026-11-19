@@ -7,8 +7,12 @@ from pathlib import Path
 import re
 import sys
 import tempfile
-import tomllib
 from collections.abc import Mapping
+
+if sys.version_info >= (3, 11):
+    import tomllib
+else:
+    import tomli as tomllib
 
 CONFIGURATION_ENV = "COPILOT_EXTENSIONS_TOOLCHAIN_CONFIG"
 FIELDS = {
