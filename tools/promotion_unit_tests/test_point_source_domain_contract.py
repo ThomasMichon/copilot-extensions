@@ -7,6 +7,7 @@ import io
 import json
 import sys
 from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any
@@ -91,7 +92,9 @@ def test_point_receipt_requires_complete_exact_scope_and_new_protocol(
     assert layout.SourceDomain(selected.path).receipt()["future_metadata"] == {"kept": True}
 
 
-def test_point_selection_and_receipt_save_never_admit_legacy_operations(api: SimpleNamespace) -> None:
+def test_point_selection_and_receipt_save_never_admit_legacy_operations(
+    api: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     layout, claim = api.layout, api.claim
     selected = layout.SourceDomain(Path("unused-point-domain"), point_scope=claim.scope)
     for scope in ((), (*claim.scope[:3], {}), ("all", *claim.scope[1:]), ("", *claim.scope[1:])):
@@ -100,12 +103,48 @@ def test_point_selection_and_receipt_save_never_admit_legacy_operations(api: Sim
     for operation in (selected.read, selected.operation, selected.write):
         with pytest.raises(layout.SourceLayoutError, match="not admitted"), operation(object()):
             pytest.fail("unqualified point operation entered")
+    legacy = layout.SourceDomain(Path("unused-legacy-domain"))
+    for operation in (legacy.read, legacy.operation):
+        with pytest.raises(layout.SourceLayoutError, match="scope"), operation(
+            object(), point_scope=claim.scope,
+        ):
+            pytest.fail("point selection entered a legacy domain")
     for changed in (
         {**api.receipt, "protocol": 1},
         {**api.receipt, "point_scope": {**api.receipt["point_scope"], "account_id": "other"}},
     ):
         with pytest.raises(layout.SourceLayoutError):
             selected.save(changed)
+    raw = json.dumps(api.receipt).encode()
+    monkeypatch.setattr(layout, "_open_receipt", lambda _path: io.BytesIO(raw))
+    monkeypatch.setattr(layout, "_versions", lambda _db: {})
+    guards: list[str] = []
+
+    @contextmanager
+    def exclusion() -> Iterator[None]:
+        guards.append("enter")
+        try:
+            yield
+        finally:
+            guards.append("exit")
+
+    monkeypatch.setattr(selected, "exclusion", exclusion)
+    for operation in (selected.operation, selected.read):
+        with operation(object(), point_scope=claim.scope):
+            for default in (selected.operation, selected.read, selected.write):
+                with pytest.raises(layout.SourceLayoutError, match="not admitted"), default(object()):
+                    pytest.fail("explicit selection leaked to a default operation")
+            with pytest.raises(layout.SourceLayoutError, match="scope"), operation(
+                object(), point_scope=("other", *claim.scope[1:]),
+            ):
+                pytest.fail("scope widened inside selected exclusion")
+            raw = json.dumps({**api.receipt, "state": "dirty"}).encode()
+        with pytest.raises(layout.SourceLayoutError, match="incomplete"), operation(
+            object(), point_scope=claim.scope,
+        ):
+            pytest.fail("dirty point projection returned")
+        raw = json.dumps(api.receipt).encode()
+    assert guards.count("enter") == guards.count("exit") == 4
 
 
 def test_nested_default_reads_recheck_receipt_before_returning_legacy_results(

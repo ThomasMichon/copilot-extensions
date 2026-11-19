@@ -12,17 +12,18 @@ import logging
 import time
 from contextlib import nullcontext
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from importlib import import_module
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
-import pyarrow as pa
 
-from .source_layout import SourceLayoutError, source_read, source_write
+from .source_layout import PointScope, SourceDomain, SourceLayoutError, source_read, source_write
 
 if TYPE_CHECKING:
     from agent_index.chunking.base import Chunk
 
 logger = logging.getLogger(__name__)
+pa = import_module("pyarrow")
 
 
 @dataclass(frozen=True)
@@ -42,8 +43,8 @@ class VectorTable:
         dim: Embedding dimension for this model.
     """
 
-    def __init__(self, db, *, table_name: str, dim: int = 768,
-                 source_domain=None, content_table: str = "chunks") -> None:
+    def __init__(self, db: Any, *, table_name: str, dim: int = 768,
+                 source_domain: SourceDomain | None = None, content_table: str = "chunks") -> None:
         self._db = db
         self._table_name = table_name
         self._dim = dim
@@ -67,7 +68,7 @@ class VectorTable:
     def table_name(self) -> str:
         return self._table_name
 
-    def _get_or_create_table(self):
+    def _get_or_create_table(self) -> Any:
         if self._table is not None:
             if self._source_domain is not None:
                 self._table.checkout_latest()
@@ -86,7 +87,7 @@ class VectorTable:
     # -- write ---------------------------------------------------------------
 
     def upsert(
-        self, chunks: list[Chunk], vectors: np.ndarray, *,
+        self, chunks: list[Chunk], vectors: np.ndarray[Any, Any], *,
         bounded_provenance: bool = False, bounded_input: bool = False,
     ) -> int:
         """Insert or update vectors by chunk_id.
@@ -101,7 +102,7 @@ class VectorTable:
         """
         if not (bounded_provenance or bounded_input):
             return self._upsert(chunks, vectors)
-        from .chunk_id_index import ChunkIdIndexPreparationRequired
+        from .scalar_index import ScalarIndexPreparationRequired as ChunkIdIndexPreparationRequired
         from .content_store import ContentStore
         from .source_projection import projection_records
 
@@ -135,18 +136,18 @@ class VectorTable:
         raise refusal
 
     @source_write
-    def _upsert(self, chunks: list[Chunk], vectors: np.ndarray) -> int:
+    def _upsert(self, chunks: list[Chunk], vectors: np.ndarray[Any, Any]) -> int:
         self._validate(chunks, vectors)
         return self._write_vectors(chunks, vectors)
 
     def _write_vectors(
-        self, chunks: list[Chunk], vectors: np.ndarray,
+        self, chunks: list[Chunk], vectors: np.ndarray[Any, Any],
         *, canonical: dict[str, dict[str, object]] | None = None,
     ) -> int:
         table = self._get_or_create_table()
         now = time.time()
 
-        records = [
+        records: list[dict[str, Any]] = [
             {
                 "chunk_id": chunk.chunk_id,
                 "vector": vec.tolist(),
@@ -210,7 +211,7 @@ class VectorTable:
                     "Deleted %d stale vectors from %s",
                     removed, self._table_name,
                 )
-            return removed
+            return cast(int, removed)
         except Exception:
             if self._source_domain is not None:
                 raise
@@ -221,7 +222,7 @@ class VectorTable:
     @source_read
     def search(
         self,
-        vector: np.ndarray,
+        vector: np.ndarray[Any, Any],
         *,
         limit: int = 10,
         chunk_ids: list[str] | None = None,
@@ -261,7 +262,7 @@ class VectorTable:
         ]
 
     @source_read
-    def get_vector(self, chunk_id: str) -> np.ndarray | None:
+    def get_vector(self, chunk_id: str) -> np.ndarray[Any, Any] | None:
         """Return the stored embedding for *chunk_id*, or None if absent.
 
         Used by similarity ("find similar") flows that compare an already
@@ -291,20 +292,39 @@ class VectorTable:
     @source_read
     def get_vectors(
         self, chunk_ids: list[str], *, strict: bool = False, bounded: bool = False,
-    ) -> dict[str, np.ndarray]:
+    ) -> dict[str, np.ndarray[Any, Any]]:
         """Batch-read stored embeddings for *chunk_ids* present in this table.
 
         Returns ``{chunk_id: vector}`` for the ids that exist here; ids absent
         from this table (e.g. chunks routed to the other model) are simply
         omitted, which is how item pooling stays inside one embedding space.
         """
+        return self._get_vectors(chunk_ids, strict=strict, bounded=bounded)
+
+    def get_point_vectors(
+        self, chunk_ids: list[str], *, point_scope: PointScope,
+    ) -> dict[str, np.ndarray[Any, Any]]:
+        """Read explicitly selected component vectors through prepared point indices."""
+        if self._source_domain is None or point_scope is None:
+            raise SourceLayoutError("Point vectors require a selected source domain")
+        with self._source_domain.read(self._db, point_scope=point_scope):
+            return self._get_vectors(
+                chunk_ids, strict=True, bounded=True, point_scope=point_scope,
+            )
+
+    def _get_vectors(
+        self, chunk_ids: list[str], *, strict: bool, bounded: bool,
+        point_scope: PointScope | None = None,
+    ) -> dict[str, np.ndarray[Any, Any]]:
         if not chunk_ids:
             return {}
         strict = strict or bounded
         if bounded:
             from .chunk_id_index import indexed_chunk_rows
 
-            rows = indexed_chunk_rows(self, chunk_ids, columns=["chunk_id", "vector"])
+            rows = indexed_chunk_rows(
+                self, chunk_ids, columns=["chunk_id", "vector"], point_scope=point_scope,
+            )
         else:
             table = self._get_or_create_table()
             id_list = ", ".join(f"'{cid}'" for cid in chunk_ids)
@@ -321,7 +341,7 @@ class VectorTable:
                     raise
                 logger.warning("Vector batch read failed", exc_info=True)
                 return {}
-        out: dict[str, np.ndarray] = {}
+        out: dict[str, np.ndarray[Any, Any]] = {}
         for r in rows:
             vec = r.get("vector")
             if vec is None:
@@ -396,13 +416,13 @@ class VectorTable:
         """Number of vectors in this table."""
         table = self._get_or_create_table()
         try:
-            return table.count_rows()
+            return cast(int, table.count_rows())
         except Exception:
             return 0
 
     # -- validation ----------------------------------------------------------
 
-    def _validate(self, chunks: list[Chunk], vectors: np.ndarray) -> None:
+    def _validate(self, chunks: list[Chunk], vectors: np.ndarray[Any, Any]) -> None:
         if len(chunks) != vectors.shape[0]:
             raise ValueError(
                 f"Chunk count ({len(chunks)}) != vector rows ({vectors.shape[0]})"

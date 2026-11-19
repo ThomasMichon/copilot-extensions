@@ -174,6 +174,12 @@ class SourceDomain:
         if self._point_scope is not None:
             raise SourceLayoutError("point-domain reads and application are not admitted")
 
+    def _require_read_access(self, point_scope: PointScope | None) -> None:
+        if point_scope is None:
+            self._require_legacy_access()
+        elif self._point_scope is None or _point_scope_json(point_scope) != self._point_scope:
+            raise SourceLayoutError("point read scope differs from its selected domain")
+
     @property
     def writing(self) -> bool:
         return bool(getattr(self._local, "depth", 0))
@@ -208,9 +214,9 @@ class SourceDomain:
             self._mutex.release()
 
     @contextmanager
-    def operation(self, db: Any) -> Iterator[None]:
+    def operation(self, db: Any, *, point_scope: PointScope | None = None) -> Iterator[None]:
         """Hold existing exclusion across independently committed reads/writes."""
-        self._require_legacy_access()
+        self._require_read_access(point_scope)
         if self.writing or getattr(self._local, "operation", False):
             self.receipt()
             yield
@@ -291,8 +297,8 @@ class SourceDomain:
             temporary.unlink(missing_ok=True)
 
     @contextmanager
-    def read(self, db: Any) -> Iterator[None]:
-        self._require_legacy_access()
+    def read(self, db: Any, *, point_scope: PointScope | None = None) -> Iterator[None]:
+        self._require_read_access(point_scope)
         if self.writing or getattr(self._local, "reading", False):
             self.receipt()
             yield

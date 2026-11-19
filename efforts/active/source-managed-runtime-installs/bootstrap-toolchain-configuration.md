@@ -1,7 +1,7 @@
 # Adopter Bootstrap Toolchain Configuration
 
 Parent: [Source-Managed Runtime Installs](README.md).
-Coordination: #13409, within #7028. Status: reviewed contract; implementation open.
+Coordination: #13409, within #7028. Status: provider released; installed-reuse refinement proposed.
 
 ## Goal
 
@@ -57,6 +57,41 @@ orchestration, #4876/#7529 artifact/feed qualification, #7758 finite execution
 and all existing application/source/credential owners. This slice changes no
 live registration, maintenance policy, source pin or deployment permission.
 
+## Installed configuration-only reuse - proposed refinement
+
+A healthy installed Manager must be able to reapply the same selected
+configuration without requiring its original bootstrap or acquisition payload.
+Reusing retained defaults alone is insufficient: native configuration may have
+been removed or changed since installation. Ordinary `setup --apply` can also
+provision prerequisites/core, so it is not an equivalent configuration-only
+operation.
+
+Add `worktree-manager setup --toolchain-only`, with the existing `--apply`
+opt-in, to call the same configuration owner and return before prerequisite
+discovery, acquisition, core installation or repository setup. Without
+`--apply`, it only validates the selection. No selection is a successful no-op.
+Reject combining this mode with repository options or `register` before any
+configuration effect. Keep ordinary setup and strict unknown-option rejection
+unchanged.
+
+Version 1 of `copilot-extensions.toolchain-config-only` uses the existing
+`setup --help` discovery surface: a standalone `toolchain-config-only=1` line
+advertises these semantics from the exact selected Manager. Help must return
+before configuration reads or provisioning. An older Manager's ordinary help
+remains safe but does not establish support. Callers must inspect that exact
+receiver without launcher self-provisioning before emitting the new option,
+and must not infer support from a bootstrap, package version or another Manager.
+Missing/unsupported support directs compatible setup/recovery; never invoke
+new effectful syntax speculatively or silently omit mandatory configuration.
+Fresh/upgrade installation retains the standard compatible native bootstrap.
+
+This closes the existing finite configurator and repeated-configuration intent;
+it adds no installer, daemon, runtime-replacement veto or new configuration
+authority. Existing native writer locks, conflicts, URL/channel limits,
+credential ownership and dependency-age policy remain unchanged. Configuration
+success is not evidence that any application or engine is ready or selected.
+Adopter migration waits for reviewed implementation and release availability.
+
 ## Plan
 
 - [x] Review and merge this bounded contract before implementation. Accepted in #13412.
@@ -70,6 +105,9 @@ live registration, maintenance policy, source pin or deployment permission.
   standard installation entry after compatible support is released.
 - [ ] Complete focused source, native first-consumer and required CI/review
   evidence; retain the parent's broader install/update and rollout gates.
+- [ ] Review this installed configuration-only refinement before implementation.
+- [ ] Implement and release the additive installed setup mode and safe help
+  declaration, then qualify conditional adopter reuse without acquisition files.
 
 ## Validation Plan
 
@@ -88,6 +126,13 @@ live registration, maintenance policy, source pin or deployment permission.
 - [ ] Existing no-configuration bootstrap, standard setup and retained source/
   application contracts still pass. Source merge, release availability and
   authorized installed adoption remain distinct evidence.
+- [ ] The actual CLI's configuration-only help is read-only even with malformed
+  selected data. Plan/apply, no selection and conflicts exercise the real
+  configuration owner; no prerequisite/core/repository owner is reached.
+- [ ] Existing installed reuse works with bootstrap/acquisition files unavailable,
+  including Windows PowerShell 7, while retaining aliases, knowledge and unrelated
+  registrations. Older/mismatched receivers refuse mandatory configuration
+  without speculative effects. Keep the existing native reuse phase intact.
 
 ## Journal
 

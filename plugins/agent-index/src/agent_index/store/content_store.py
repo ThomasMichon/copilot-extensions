@@ -32,6 +32,7 @@ from agent_index.store.content_snapshot import _ContentSnapshotMixin
 from agent_index.store.lance_connection import connect_content_store
 from agent_index.store.repo_filter import _like_pattern, _sql_str, path_glob_sql, repo_filter_sql
 from agent_index.store.source_layout import (
+    PointScope,
     SourceLayoutError,
     domain_for,
     source_fts_read,
@@ -123,8 +124,9 @@ class ContentStore(_ContentFtsWorkerMixin, _ContentItemReadsMixin, _ContentSnaps
         db_path: str | Path,
         *,
         table_name: str = "chunks",
+        point_scope: PointScope | None = None,
     ) -> None:
-        self._source_domain = domain_for(db_path)
+        self._source_domain = domain_for(db_path, point_scope=point_scope)
         self._db = connect_content_store(db_path, source_aware=self._source_domain is not None)
         self._db_path = str(self._db.uri)
         self._table_name = table_name
