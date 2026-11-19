@@ -106,6 +106,38 @@ qualification of a particular installed provider. Conversation-only follow-up
 causes, round-robin/Dispatch activation and observational
 provider comparison also remain separate exits.
 
+## Bounded read diagnostics
+
+The local foreground host enables the dedicated
+`agent_pull_requests.reviewer_reads` Python logger while reviewer actions are
+selected. It writes one JSON line per admitted `next-actions` read or existing
+SSE sample to the foreground owner's stderr. An embedding uses the same
+`hosting.run` lifetime, including shared-handler cleanup; the process supervisor
+owns capture and retention. There is no separate file, exporter, timer or poller.
+
+Records use schema `agent-pull-requests.reviewer-read`, version 1. They include
+the configured target, repository-key digest and requested reviewer; requested,
+projection and event cursors; inventory outcome/age; returned PR/head/base,
+action/reason and unavailable PR/reason summaries. At most 16 entries from
+each list are included, with counts and a truncation flag. An empty successful
+projection is distinct from stale/unavailable evidence and a failed read.
+Failed reads keep unavailable cursor/age fields null, not invented or
+re-queried. Request validation performed solely to construct an SSE selection
+does not emit a read record; transaction-lock retries produce one final record.
+
+`outcome: projected` means the admitted cache read completed, not that bytes
+reached a consumer, work was handled or a delivery was acknowledged. A later
+disconnect or response-budget refusal can still prevent delivery. Pre-admission
+refusals are not cache reads and do not produce this trace. Failed reads use a
+fixed diagnostic rather than exception text. Summaries omit request/response
+bodies, titles, review/comment content, principals, consumers, registrations,
+transport headers, endpoint URLs and all credential material. Logging failure
+does not change read eligibility, results or the original exception.
+
+Core source support, host stderr configuration, installed package selection and
+actual supervisor-captured records are separate evidence. Updating source alone
+does not establish that a running service emits these records.
+
 ## Local SSE subscriptions
 
 The same selected local ingress advertises `stream` protocol
