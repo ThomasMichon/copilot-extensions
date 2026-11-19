@@ -164,6 +164,12 @@ Azure DevOps retains operator-supplied WIQL and saved queries verbatim. Its
 work-item-only timestamp discovery first requests only `System.Id` and
 `System.ChangedDate` in batches of at most 200 query-selected identities, then
 hydrates full bodies and comments only for identities in the overlap window.
+Nonempty change markers must parse as timestamps and support the configured
+overlap; invalid, non-finite or out-of-range values refuse before incremental
+provider acquisition, rather than losing the cutoff and acquiring full bodies.
+UTC/offset ISO timestamps, naive timestamps treated as UTC and epoch seconds
+remain supported. `None` and empty markers retain explicit full-discovery
+compatibility; refusal never repairs or replaces a checkpoint.
 Missing, duplicate, unexpected or invalid metadata refuses acquisition rather
 than silently dropping work. With PR queries configured, a nonempty timestamp
 instead refuses before any acquisition: the PR-list API's `minTime` filters
@@ -194,6 +200,13 @@ array or the supported legacy bare array, with object records. An unrecognized
 object, including `{}` or a count without a value array, cannot certify an empty
 inventory. Parsed observations are recorded before validation and deduplication;
 they are not completeness evidence.
+PR header-token traversal requests complete bodies without conditional ETags:
+the shared HTTP validator cache does not retain those bodies. An unexpected
+304 refuses traversal rather than returning an empty or partial inventory.
+Repeated/cyclic tokens, including a supplied initial token, refuse before
+refetching that page. Query parameters, opaque token values, parsed-page
+observations and request counters remain intact. Distinct-token page counts
+and accumulated response memory are not budgeted or persisted by this helper.
 Azure DevOps does not yet implement the
 shared paged acquisition journal, durable query progress, immutable full
 snapshots or authoritative tombstones. This legacy optimization does not
