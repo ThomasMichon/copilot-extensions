@@ -237,6 +237,28 @@ def test_partial_member_is_quarantined_when_removal_fails(
     assert [lease.effort for lease in lease_mod.list_leases()] == ["a"]
 
 
+def test_unlistable_fleet_after_failure_keeps_the_whole_barrier(
+    fake: FakeProvisioner, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake.fail_after_create = "dotfiles setup failed"
+    config = _config(max_size=3)
+    lease_mod.borrow(config, "a", fleet="example")
+    listing = fleet_mod._fleet_members
+
+    def fail_after_build(config: ContainersConfig, name: str) -> list[DockerContainerInfo]:
+        if fake.calls:
+            raise RuntimeError("example-driver list unavailable")
+        return listing(config, name)
+
+    monkeypatch.setattr(fleet_mod, "_fleet_members", fail_after_build)
+    with pytest.raises(RuntimeError, match="dotfiles setup failed"):
+        lease_mod.borrow(config, "b", fleet="example")
+
+    with pytest.raises(RuntimeError, match="All fleet containers"):
+        lease_mod.borrow(config, "c", fleet="example", grow=False)
+    assert [lease.effort for lease in lease_mod.list_leases()] == ["a"]
+
+
 def test_provisioning_failure_leaves_no_lease_and_reports_the_error(
     fake: FakeProvisioner,
 ) -> None:

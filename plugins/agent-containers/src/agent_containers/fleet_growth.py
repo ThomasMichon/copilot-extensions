@@ -98,6 +98,8 @@ def _marker_live(marker: dict[str, Any]) -> bool:
     now = time.time()
     if marker.get("quarantine"):
         return now - float(marker.get("started_at", 0)) < QUARANTINE_TTL
+    if "quarantined_at" in marker:
+        return now - float(marker["quarantined_at"]) < QUARANTINE_TTL
     if now - float(marker.get("heartbeat_at", 0)) >= MARKER_HEARTBEAT_TTL:
         return False
     return marker.get("host") != platform.node() or pid_alive(int(marker.get("pid", 0)))
@@ -214,8 +216,12 @@ def _settle_failed_growth(
             if m.container_id not in known
             and (m.name == target or m.labels.get(INSTANCE_LABEL) == target)
         ]
-    except Exception:  # noqa: BLE001 -- unknown inventory: keep the barrier
+    except Exception:  # noqa: BLE001 -- unknown inventory: keep the whole barrier
         log.exception("Could not list fleet '%s' after a failed growth", fleet_name)
+        with lease_lock():
+            markers = _read_markers(state_dir)
+            markers[token] = {**marker, "quarantined_at": time.time()}
+            _write_markers(state_dir, markers)
         return
     for member in partial:
         try:
