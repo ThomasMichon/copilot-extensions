@@ -47,12 +47,45 @@ if TYPE_CHECKING:
 
 PLUGIN = Path(__file__).resolve().parents[1]
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-LEGACY_POWERSHELL_LOOKUP = (
-    "$py = $null; foreach ($candidate in @('python3','python','py')) { "
-    "$found = Get-Command $candidate -CommandType Application -All -ErrorAction SilentlyContinue "
-    "| Where-Object { $_.Source -notmatch '\\\\WindowsApps\\\\' } | Select-Object -First 1; "
-    "if ($found) { $py = $found; break } }; "
-)
+SKIPPED = "[copilot-extensions-maintainer] mention guard unavailable; skipped\n"
+
+
+def _hook(variant: str) -> str:
+    return cast(str, json.loads((PLUGIN / "hooks.json").read_text())["hooks"]["preToolUse"][0][variant])
+
+
+def _native_bash() -> str | None:
+    """Return a POSIX bash; on Windows only Git for Windows' bash, never WSL."""
+    if os.name != "nt":
+        return shutil.which("bash")
+    git = shutil.which("git")
+    if not git:
+        return None
+    for parent in Path(git).resolve().parents:
+        candidate = parent / "bin" / "bash.exe"
+        if candidate.is_file():
+            return str(candidate)
+    return None
+
+
+def _bash_path(path: Path) -> str:
+    if os.name != "nt":
+        return str(path)
+    text = str(path).replace("\\", "/")
+    return "/" + text[0].lower() + text[2:] if text[1:2] == ":" else text
+
+
+def _python_shims(directory: Path) -> Path:
+    """Put interpreter shims first on PATH; any launch leaves a marker file."""
+    directory.mkdir(parents=True, exist_ok=True)
+    marker = directory / "python-started"
+    for name in ("python", "python3", "py"):
+        script = directory / name
+        script.write_text(f"#!/bin/sh\necho {name} >> '{_bash_path(marker)}'\nexit 3\n", encoding="utf-8")
+        script.chmod(0o755)
+        (directory / f"{name}.cmd").write_text(
+            f"@echo {name}>>\"{marker}\"\r\n@exit /b 3\r\n", encoding="utf-8")
+    return marker
 
 
 def _load_guard() -> GuardModule:
@@ -728,81 +761,177 @@ def test_local_relevance_preserves_file_input_without_literal_mention(
     assert json.loads(capsys.readouterr().out)["permissionDecision"] == "deny"
 
 
-@pytest.mark.parametrize("case", [
-    "python_startup", "python_irrelevant", "python_relevant",
-    "shell_startup", "shell_irrelevant", "shell_relevant",
-    "shell_legacy-irrelevant", "shell_legacy-relevant",
-])
-def test_native_hook_process_counts_and_latency(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], case: str,
-) -> None:
-    """Observe real CLI boundaries without executing the proposed gh command."""
-    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True, creationflags=NO_WINDOW)
-    _enable_harness(tmp_path)
-    config = tmp_path / ".git" / "config"
-    with config.open("a", encoding="utf-8") as stream:
-        for index in range(24):
-            stream.write(
-                f'\n[remote "r{index}"]\n'
-                "url = https://github.com/ThomasMichon/copilot-extensions.git\n"
-            )
-    script = PLUGIN / "scripts" / "copilot-mention-guard.py"
-    audited = (
-        "import atexit,json,runpy,sys; calls: list[object]=[];"
-        "sys.addaudithook(lambda event,args: calls.append(args[1]) "
-        "if event=='subprocess.Popen' else None);"
-        "atexit.register(lambda: print(json.dumps(calls),file=sys.stderr));"
-        "runpy.run_path(sys.argv[1],run_name='__main__')"
-    )
-    env = {**os.environ, "COPILOT_PLUGIN_ROOT": str(PLUGIN), "COPILOT_PROJECT_DIR": str(tmp_path)}
-    cases = {
-        "irrelevant": "git status --short",
-        "relevant": "gh pr comment 1 --body-file -",
-    }
-    boundary, name = case.split("_")
-    if boundary == "shell":
-        shell = shutil.which("pwsh") or shutil.which("powershell")
-        if os.name != "nt" or not shell:
-            pytest.skip("Windows PowerShell hook measurement")
-        hook = json.loads((PLUGIN / "hooks.json").read_text())["hooks"]["preToolUse"][0]["powershell"]
-        if name.startswith("legacy-"):
-            name = name.removeprefix("legacy-")
-            hook = (
-                hook[:hook.index("$py = $null;")]
-                + LEGACY_POWERSHELL_LOOKUP
-                + hook[hook.index("if (-not $py)"): ]
-            )
-        argv = [shell, "-NoProfile", "-NonInteractive", "-Command",
-                "exit 0" if name == "startup" else hook]
+def _native_shell(variant: str) -> str:
+    if variant == "bash":
+        shell = _native_bash()
     else:
-        argv = [sys.executable, "-c", "pass" if name == "startup" else audited, str(script)]
-    payload = json.dumps({
-        "toolName": "powershell", "toolArgs": {"command": cases.get(name, "git status --short")},
-    })
+        shell = shutil.which("pwsh") or shutil.which("powershell")
+    if not shell:
+        pytest.skip(f"No native {variant} shell is available")
+    return shell
+
+
+def _guarded_workspace(root: Path, *, adopted: bool = True, remote: str | None = None) -> Path:
+    root.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True, timeout=10, creationflags=NO_WINDOW)
+    target = remote or _load_guard().target_repo_from_manifest(PLUGIN)
+    assert target
+    with (root / ".git" / "config").open("a", encoding="utf-8") as stream:
+        stream.write(f'\n[remote "origin"]\nurl = https://github.com/{target}.git\n')
+    if adopted:
+        _enable_harness(root)
+    (root / "pretool.json").write_text('{"active": false}', encoding="utf-8")
+    (root / "body.txt").write_text("hello @copilot please", encoding="utf-8")
+    (root / "clean.txt").write_text("hello copilot-extensions reviewers", encoding="utf-8")
+    (root / "body.json").write_text(json.dumps({"body": "@Copilot fix"}), encoding="utf-8")
+    (root / "broken.json").write_text("{nope", encoding="utf-8")
+    return root
+
+
+def _run_native(
+    variant: str, root: Path, event: dict[str, Any], shims: Path, *, plugin: Path = PLUGIN,
+) -> subprocess.CompletedProcess[str]:
+    shell = _native_shell(variant)
+    convert = _bash_path if variant == "bash" else str
+    payload = {**event, "cwd": convert(root)}
+    env = {
+        **os.environ,
+        "COPILOT_PLUGIN_ROOT": convert(plugin),
+        "PRETOOL_KILLSWITCH_STATE_FILE": convert(root / "pretool.json"),
+        "PATH": str(shims) + os.pathsep + os.environ.get("PATH", ""),
+    }
+    env.pop("COPILOT_EXTENSIONS_CONTEXT", None)
+    env.pop("COPILOT_PROJECT_DIR", None)
+    argv = [shell, "-c", _hook("bash")] if variant == "bash" else [
+        shell, "-NoProfile", "-NonInteractive", "-Command", _hook("powershell"),
+    ]
+    return subprocess.run(
+        argv, input=json.dumps(payload), cwd=root, env=env, capture_output=True,
+        text=True, encoding="utf-8", timeout=15, creationflags=NO_WINDOW,
+    )
+
+
+def _run_reference(root: Path, event: dict[str, Any]) -> subprocess.CompletedProcess[str]:
+    env = {
+        **os.environ,
+        "COPILOT_PLUGIN_ROOT": str(PLUGIN),
+        "PRETOOL_KILLSWITCH_STATE_FILE": str(root / "pretool.json"),
+    }
+    env.pop("COPILOT_EXTENSIONS_CONTEXT", None)
+    env.pop("COPILOT_PROJECT_DIR", None)
+    return subprocess.run(
+        [sys.executable, str(PLUGIN / "scripts" / "copilot-mention-guard.py"), "--wrapped"],
+        input=json.dumps({**event, "cwd": str(root)}), cwd=root, env=env, capture_output=True,
+        text=True, encoding="utf-8", timeout=15, creationflags=NO_WINDOW,
+    )
+
+
+_REFERENCE_CACHE: dict[int, str] = {}
+
+PARITY_EVENTS: list[tuple[str, str, dict[str, Any]]] = [
+    (workspace, tool, {"command": command})
+    for workspace, tool, command in [
+        ("adopted", "bash", 'gh pr comment 1 -R ThomasMichon/copilot-extensions --body "@copilot review"'),
+        ("adopted", "bash", 'gh pr comment 1 --body "Fixed the typo, please take another look."'),
+        ("adopted", "powershell", 'gh api repos/o/r/pulls/1/comments/2/replies -f body="@copilot please re-review"'),
+        ("adopted", "powershell", "gh api repos/o/r/pulls/1/comments"),
+        ("adopted", "bash", 'gh pr comment 42 --body "Reviewed against agent-worktrees@copilot-extensions v1.5."'),
+        ("adopted", "bash", "gh pr comment 1 --body-file body.txt"),
+        ("adopted", "bash", "gh pr comment 1 --body-file=clean.txt"),
+        ("adopted", "bash", "gh pr comment 1 --body-file -"),
+        ("adopted", "bash", "gh api repos/o/r/issues/1/comments --input body.json"),
+        ("adopted", "bash", "gh api repos/o/r/issues/1/comments --input broken.json"),
+        ("adopted", "bash", "gh api repos/o/r/issues/1/comments -F body=@missing.md"),
+        ("adopted", "bash", 'env GH_TOKEN=x command gh issue comment 1 --body "@Copilot"'),
+        ("adopted", "bash", 'echo "gh pr comment 1 --body @copilot"'),
+        ("adopted", "bash", 'git status --short && gh pr review 1 --comment -b "a; @copilot b"'),
+        ("adopted", "bash", 'gh pr comment 1 --body "line one\n@copilot line two"'),
+        ("adopted", "bash", 'gh pr comment 1 --body "$BODY"'),
+        ("adopted", "bash", 'gh pr edit 1 --body "@copilot-extensions and x@copilot"'),
+        ("adopted", "bash", 'gh pr edit 1 --body "@cop\u0131lot \u00e9\U0001f680"'),
+        ("adopted", "bash", "gh issue create --title x --body $'@copilot'"),
+        ("adopted", "powershell", "git status --short"),
+        ("adopted", "view", 'gh pr comment 1 --body "@copilot review"'),
+        ("unadopted", "bash", 'gh pr comment 1 --body "@copilot review"'),
+        ("foreign", "bash", 'gh pr comment 1 --body "@copilot review"'),
+    ]
+]
+
+
+@pytest.fixture(scope="module")
+def parity_workspaces(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
+    _REFERENCE_CACHE.clear()
+    base = tmp_path_factory.mktemp("native-parity")
+    return {
+        "adopted": _guarded_workspace(base / "adopted"),
+        "unadopted": _guarded_workspace(base / "unadopted", adopted=False),
+        "foreign": _guarded_workspace(base / "foreign", remote="example/elsewhere"),
+    }
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+@pytest.mark.parametrize("variant", ["powershell", "bash"])
+@pytest.mark.parametrize("case", range(len(PARITY_EVENTS)))
+def test_native_hook_matches_reference_guard_without_python(
+    tmp_path: Path, parity_workspaces: dict[str, Path], variant: str, case: int,
+) -> None:
+    workspace, tool, args = PARITY_EVENTS[case]
+    root = parity_workspaces[workspace]
+    marker = _python_shims(tmp_path / "shims")
+    # Alternate the toolArgs encoding so both forms stay covered without
+    # doubling the process count; the reference result is shared by variants.
+    event = {"toolName": tool, "toolArgs": json.dumps(args) if case % 2 else args}
+    # Both guards share a 1.5 s decision budget, so a loaded host can expire
+    # either one; retry a bounded number of times before failing.
+    for attempt in range(3):
+        if attempt or case not in _REFERENCE_CACHE:
+            reference = _run_reference(root, event)
+            assert reference.returncode == 0, reference.stderr
+            _REFERENCE_CACHE[case] = reference.stdout.strip()
+        actual = _run_native(variant, root, event, marker.parent)
+        assert actual.returncode == 0, actual.stderr
+        assert actual.stderr == ""
+        if actual.stdout.strip() == _REFERENCE_CACHE[case]:
+            break
+    assert actual.stdout.strip() == _REFERENCE_CACHE[case], args
+    assert not marker.exists(), "native mention-guard hook started a Python interpreter"
+
+
+@pytest.mark.parametrize("variant", ["powershell", "bash"])
+@pytest.mark.parametrize("name", ["irrelevant", "relevant"])
+def test_native_hook_latency_without_python(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], variant: str, name: str,
+) -> None:
+    """Observe the shipped hook at its real CLI boundary without running gh."""
+    root = _guarded_workspace(tmp_path / "workspace")
+    marker = _python_shims(tmp_path / "shims")
+    command = "gh pr comment 1 --body-file -" if name == "relevant" else "git status --short"
     elapsed = []
     for _ in range(3):
         started = time.monotonic()
-        result = subprocess.run(
-            argv, input=payload, cwd=tmp_path, env=env, capture_output=True,
-            text=True, timeout=8, creationflags=NO_WINDOW,
-        )
+        result = _run_native(variant, root, {"toolName": variant, "toolArgs": {"command": command}}, marker.parent)
         elapsed.append(time.monotonic() - started)
         assert result.returncode == 0, result.stderr
-        if boundary == "python" and name != "startup":
-            calls = json.loads(result.stderr)
-            expected = "git remote --verbose" if os.name == "nt" else ["git", "remote", "--verbose"]
-            assert calls == ([] if name == "irrelevant" else [expected])
         assert bool(result.stdout) == (name == "relevant")
+    assert not marker.exists(), "native mention-guard hook started a Python interpreter"
     metrics = {
-        "boundary": case,
+        "boundary": f"{variant}_{name}",
         "samples": len(elapsed),
         "median_seconds": round(statistics.median(elapsed), 4),
         "max_seconds": round(max(elapsed), 4),
     }
-    if boundary == "python" and name != "startup":
-        metrics["git_children"] = len(calls)
     with capsys.disabled():
         print("\nmention-guard native measurement: " + json.dumps(metrics, sort_keys=True))
+
+
+def test_registered_hooks_never_launch_python() -> None:
+    hook = json.loads((PLUGIN / "hooks.json").read_text())["hooks"]["preToolUse"][0]
+    for variant in ("bash", "powershell"):
+        assert not re.search(r"python|\bpy\b|\.py\b", hook[variant], re.IGNORECASE), variant
+    assert "copilot-mention-guard.sh" in hook["bash"]
+    assert "copilot-mention-guard.ps1" in hook["powershell"]
 
 
 @pytest.mark.portfolio_tier("T2")
@@ -841,11 +970,14 @@ def test_windows_wrapper_module_attribution(
     samples = []
     for variant, command in (("baseline", hook), ("candidate", candidate), ("baseline", hook)):
         assert command.endswith("exit 0")
-        observed = (
-            "$global:LASTEXITCODE=913; "
-            + command.removesuffix("exit 0").replace("exit 0", "throw 'test interpreter unavailable'")
-            + "if ($LASTEXITCODE -ne 0) { throw 'guard child did not complete' }; exit 0"
-        )
+        observed = command
+        if "copilot-mention-guard.py" in command:
+            # Python-era wrappers must prove their interpreter child completed.
+            observed = (
+                "$global:LASTEXITCODE=913; "
+                + command.removesuffix("exit 0").replace("exit 0", "throw 'test interpreter unavailable'")
+                + "if ($LASTEXITCODE -ne 0) { throw 'guard child did not complete' }; exit 0"
+            )
         started = time.monotonic()
         result = subprocess.run(
             [executable, "-NoProfile", "-NonInteractive", "-Command", observed],
@@ -924,13 +1056,13 @@ def test_windows_wrapper_preserves_policy_and_failure_contract(
         scripts = root / "scripts"
         scripts.mkdir(parents=True)
         if case == "child-failed":
-            (scripts / "copilot-mention-guard.py").write_text(
-                "print('partial-policy')\nraise SystemExit(3)\n", encoding="utf-8",
+            (scripts / "copilot-mention-guard.ps1").write_text(
+                "'partial-policy'\nthrow 'guard failed'\n", encoding="utf-8",
             )
         elif case in {"echo", "relative-echo"}:
-            (scripts / "copilot-mention-guard.py").write_text(
-                "import json,sys\nprint(json.dumps(json.load(sys.stdin),sort_keys=True))\n",
-                encoding="utf-8",
+            # The hook passes the decoded raw payload and the plugin root.
+            (scripts / "copilot-mention-guard.ps1").write_text(
+                "param($Raw, $Root)\n[Console]::Out.Write($Raw)\n", encoding="utf-8",
             )
     command = 'gh pr comment 1 --body "@copilot review"'
     if case == "uninspectable":
@@ -948,13 +1080,18 @@ def test_windows_wrapper_preserves_policy_and_failure_contract(
     }
     environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
     hook = json.loads((PLUGIN / "hooks.json").read_text())["hooks"]["preToolUse"][0]["powershell"]
-    result = subprocess.run(
-        [executable, "-NoProfile", "-NonInteractive", "-Command",
-         "function Join-Path { throw 'path cmdlet requested' }; "
-         "function Write-Output { throw 'output cmdlet requested' }; " + hook],
-        input=json.dumps(payload, indent=2), cwd=tmp_path, env=environment,
-        capture_output=True, text=True, timeout=10, creationflags=NO_WINDOW,
-    )
+    deny_expected = case in {"mention", "uninspectable", "malformed-stop"}
+    for attempt in range(3):
+        result = subprocess.run(
+            [executable, "-NoProfile", "-NonInteractive", "-Command",
+             "function Join-Path { throw 'path cmdlet requested' }; "
+             "function Write-Output { throw 'output cmdlet requested' }; " + hook],
+            input=json.dumps(payload, indent=2), cwd=tmp_path, env=environment,
+            capture_output=True, text=True, timeout=10, creationflags=NO_WINDOW,
+        )
+        # A loaded host can expire the 1.5 s decision budget mid-scan (allow).
+        if not deny_expected or result.stdout or attempt == 2:
+            break
     assert result.returncode == 0, result.stderr
     if case in {"missing-guard", "child-failed"}:
         assert result.stdout == ""
@@ -995,40 +1132,6 @@ raise SystemExit(guard["main"]())
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout)["permissionDecision"] == "deny"
     assert time.monotonic() - started < 6
-
-
-@pytest.mark.parametrize("names,expected", [
-    (["bin/python.cmd", "bin/python3.cmd"], "bin/python3.cmd"),
-    (["WindowsApps/python3.cmd", "bin/python3.cmd"], "bin/python3.cmd"),
-    (["WindowsApps/python3.cmd", "bin/python.cmd"], "bin/python.cmd"),
-    (["bin/py.cmd"], "bin/py.cmd"),
-    ([], None),
-])
-def test_powershell_lookup_preserves_selection_without_cmdlet_pipelines(
-    tmp_path: Path, names: list[str], expected: str | None,
-) -> None:
-    shell = shutil.which("pwsh") or shutil.which("powershell")
-    if os.name != "nt" or not shell:
-        pytest.skip("Windows application resolver contract")
-    for directory in ("WindowsApps", "bin"):
-        (tmp_path / directory).mkdir()
-    for name in names:
-        (tmp_path / name).write_text("@echo off\n", encoding="utf-8")
-    hook = json.loads((PLUGIN / "hooks.json").read_text())["hooks"]["preToolUse"][0]["powershell"]
-    lookup = hook[:hook.index("try { $result =")] + "if ($py) { Write-Output $py.Source }"
-    legacy = LEGACY_POWERSHELL_LOOKUP + "if (-not $py) { exit 0 }; Write-Output $py.Source"
-    env = {
-        **os.environ,
-        "PATH": os.pathsep.join(str(tmp_path / directory) for directory in ("WindowsApps", "bin")),
-        "COPILOT_PLUGIN_ROOT": str(PLUGIN),
-    }
-    for command in (legacy, lookup):
-        result = subprocess.run(
-            [shell, "-NoProfile", "-NonInteractive", "-Command", command],
-            env=env, capture_output=True, text=True, timeout=8, creationflags=NO_WINDOW,
-        )
-        assert result.returncode == 0, result.stderr
-        assert result.stdout.strip() == (str(tmp_path / expected) if expected else "")
 
 
 def test_hot_killswitch_restores_mention_guard(
@@ -1130,37 +1233,36 @@ def test_unexpected_guard_failure_is_a_successful_noop(
 def test_shipped_wrapper_fails_open_on_unavailable_guard(
     tmp_path: Path, failure: str, native_shell: str,
 ) -> None:
-    shell = shutil.which(native_shell)
+    shell = _native_bash() if native_shell == "bash" else shutil.which(native_shell)
     if shell is None:
         pytest.skip(f"{native_shell} is unavailable")
-    if os.name == "nt" and native_shell == "bash":
-        pytest.skip("Windows bash may select an unrelated WSL environment")
     payload = tmp_path / "payload"
     (payload / "scripts").mkdir(parents=True)
     if failure == "crash":
-        (payload / "scripts" / "copilot-mention-guard.py").write_text(
-            "import sys\nprint('invalid partial output')\nraise SystemExit(7)\n", encoding="utf-8")
+        (payload / "scripts" / "copilot-mention-guard.ps1").write_text(
+            "'invalid partial output'\nthrow 'guard crashed'\n", encoding="utf-8")
+        (payload / "scripts" / "copilot-mention-guard.sh").write_text(
+            "echo 'invalid partial output'\nexit 7\n", encoding="utf-8", newline="\n")
     if failure == "caught":
-        source = str(PLUGIN / "scripts" / "copilot-mention-guard.py")
-        (payload / "scripts" / "copilot-mention-guard.py").write_text(
-            "import runpy,sys\nns=runpy.run_path(" + repr(source) + ")\n"
-            + "def fail() -> None: raise RuntimeError('private exception details')\n"
-            + "ns['run_guard'].__globals__['main']=fail\n"
-            + "raise SystemExit(ns['run_guard'](**({'wrapped':True} if '--wrapped' in sys.argv else {})))\n", encoding="utf-8")
-    hook = json.loads((PLUGIN / "hooks.json").read_text())["hooks"]["preToolUse"][0]
-    command = hook["bash" if native_shell == "bash" else "powershell"]
+        (payload / "scripts" / "copilot-mention-guard.ps1").write_text(
+            "throw 'private exception details'\n", encoding="utf-8")
+        (payload / "scripts" / "copilot-mention-guard.sh").write_text(
+            "echo 'private exception details' >&2\nexit 1\n", encoding="utf-8", newline="\n")
+    command = _hook("bash" if native_shell == "bash" else "powershell")
     argv = [shell, "-c", command] if native_shell == "bash" else [
         shell, "-NoProfile", "-NonInteractive", "-Command", command,
     ]
-    env = {**os.environ, "COPILOT_PLUGIN_ROOT": str(payload),
-           "PATH": str(Path(sys.executable).parent) + os.pathsep + os.environ.get("PATH", "")}
-    result = subprocess.run(argv, input="{}", capture_output=True, text=True, env=env,
+    marker = _python_shims(tmp_path / "shims")
+    env = {**os.environ,
+           "COPILOT_PLUGIN_ROOT": _bash_path(payload) if native_shell == "bash" else str(payload),
+           "PATH": str(marker.parent) + os.pathsep + os.environ.get("PATH", "")}
+    event = json.dumps({"toolName": "bash", "toolArgs": {"command": "gh pr comment 1 --body x"}})
+    result = subprocess.run(argv, input=event, capture_output=True, text=True, env=env,
                             cwd=tmp_path, timeout=10, creationflags=NO_WINDOW)
     assert result.returncode == 0, result.stderr
     assert not result.stdout.strip()
-    assert "Traceback" not in result.stderr
-    assert "skipped" in result.stderr
-    assert "private exception details" not in result.stderr
+    assert result.stderr == SKIPPED
+    assert not marker.exists()
 
 
 def test_plugin_process_directory_is_not_session_adoption(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
