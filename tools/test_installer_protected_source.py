@@ -363,7 +363,10 @@ def test_mount_aliases_cannot_overlap_lexically_disjoint_roles(
     assert not (root / "versions").exists()
 
 
-@pytest.mark.parametrize("fault", [None, "foreign", "writable", "escape", "loop"])
+@pytest.mark.parametrize(
+    "fault",
+    [None, "foreign", "writable", "escape", "loop", "prefix", "prefix-chain"],
+)
 def test_os_interpreter_chain_checks_every_link_and_directory(
     policy: tuple[Path, dict[str, Any]],
     tmp_path: Path,
@@ -384,9 +387,17 @@ def test_os_interpreter_chain_checks_every_link_and_directory(
     link.symlink_to(
         link
         if fault == "loop"
-        else (Path(record["uv"]) if fault == "escape" else interpreter)
+        else (
+            Path(record["uv"])
+            if fault == "escape"
+            else prefix
+            if fault == "prefix-chain"
+            else interpreter
+        )
     )
-    (Path(record["root"]) / "retained-python").symlink_to(link)
+    (Path(record["root"]) / "retained-python").symlink_to(
+        prefix if fault == "prefix" else link,
+    )
     monkeypatch.setattr(sys, "base_prefix", str(prefix))
     if fault is None:
         assert _admit(policy).root == Path(record["root"])

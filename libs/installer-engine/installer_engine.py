@@ -57,6 +57,8 @@ from installer_source_build import (
     _construction_hash as _construction_hash,
     _wheel_construction_hash as _wheel_construction_hash)
 from installer_engine_health import (
+    application_staging_environment as _application_staging_environment,
+    application_uv_selection as application_uv_selection,
     HealthRepairRequired as HealthRepairRequired,
     _PREPARE_INSTALLED_CHECK,
     verify_installed_inputs as verify_installed_inputs,
@@ -507,15 +509,6 @@ def _verify_application_wheels(inputs: FrozenInputs, slot: Path) -> None:
     verify_application_wheels(inputs.wheel_inputs, slot)
 
 
-def application_uv_selection(application: Path) -> bool:
-    """Inspect explicit executable support in the selected POSIX application."""
-    entry = application / "install.sh"
-    _ordinary(entry)
-    prefix = b"#!/bin/sh\n# installer-uv-selection: absolute/v1\n"
-    with _open(entry) as stream:
-        return stream.read(len(prefix)) == prefix
-
-
 def _construct(
     inputs: FrozenInputs, slot: Path, uv: Path, base_python: Path,
     descriptor: int | None, timeout: float, *, refresh: bool = False, nested_environment: bool = False,
@@ -569,15 +562,7 @@ def _construct(
         if runtime.fingerprint_source(tuple(copied)) != before:
             raise RuntimeError("Application inputs changed while copying the slot project")
         _verify_application_wheels(inputs, slot)
-        exact_uv = os.name != "nt" and application_uv_selection(inputs.application)
-        environment = {
-            **os.environ,
-            **(
-                {"COPILOT_INSTALLER_UV": str(uv)} if exact_uv else
-                {"PATH": str(uv.parent) + os.pathsep + os.environ.get("PATH", "")}
-            ),
-            "UV_PYTHON": str(base_python), "UV_PYTHON_DOWNLOADS": "never", "UV_OFFLINE": "1",
-        }
+        environment = _application_staging_environment(inputs.application, uv, base_python)
         command = (
             [
                 str(Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0"
