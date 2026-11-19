@@ -12,6 +12,7 @@ from agent_pull_requests.generation_cache import CacheFull, CacheInvalid, Genera
 from single_instance_lease import SingleInstance
 
 from . import terminal
+from .terminal_policy import registration
 
 if TYPE_CHECKING:
     from .config import HostConfig
@@ -77,11 +78,12 @@ def adopt(config: HostConfig) -> None:
             raise ValueError("populated terminal state requires its original lifecycle transition")
         if document["conversations"]["records"]:
             raise ValueError("retained conversations require their original lifecycle transition")
-        if any(
-            record["outcome"] == "active" and record["deadline_at"] is None
-            for record in document["replay"]["records"]
-        ):
-            raise ValueError("terminal reader requires original finite delivery deadlines")
+        admitted = [vars(binding.scope) for binding in config.bindings]
+        for record in document["replay"]["records"]:
+            if record["scope"] not in admitted:
+                raise ValueError("retained replay scope is absent from the selected bindings")
+            if record["outcome"] == "active":
+                registration(record)
         if mapping is not None and (
             document.get("review_intent_version") != 2
             or document.get("review_comment_mapping_version") != 1

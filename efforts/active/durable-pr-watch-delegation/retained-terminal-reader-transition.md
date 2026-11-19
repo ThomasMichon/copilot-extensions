@@ -52,8 +52,14 @@ terminal-extension state. Refuse other volumes unchanged
 and retain their original reader; positive populated/recovery-compatible
 transition remains T3 work, not permission to settle or discard accepted work.
 Also require a bijection between full workspace scopes and account/repository
-targets, plus finite
-original deadlines on active watch registrations. Validate plain lease files
+targets, plus original consumer/account/repository reachability for every
+retained replay record. Active watches require finite original deadlines and
+terminal-compatible `merged`, `closed` or `head_changed` predicates. Other
+predicates refuse without disabling their original native observer; richer
+predicate preservation remains full T3 work. Apply that same policy to new
+registrations on the selected terminal host, without changing strict legacy
+watch capability/receipt shapes. Advertise the optional terminal admission
+profile through workspace capabilities. Validate plain lease files
 before PID writes and reject native callback state. Use bounded cache
 eligibility checks and the original monotonic budget, without scanning or
 repeatedly decoding retained generations.
@@ -70,6 +76,10 @@ The transition enables capable readers; it does not observe a provider,
 create a terminal observation, compact an operation, retire cache content,
 settle a delivery or send a write. In particular, adding terminal storage
 cannot manufacture authoritative terminal evidence for an existing generation.
+Target capture includes already frozen pending events, preserving their
+original IDs/deadlines under the same request budget. Public load/sync output
+projects only bounded workspace retirement metadata; cross-consumer delivery
+and operation custody remains internal even for high fan-out.
 
 ## Interrupted adoption and skew
 
@@ -103,9 +113,9 @@ probe followed by a legacy provisioning fallback.
 - [ ] Qualify a populated baseline volume, preserving original replay/cache and
   unknown-effect identities through transition and fresh-reader restart.
   The finite bootstrap path qualifies an existing empty workspace cache and
-  finite pending replay. Populated cache/active or compact operation volumes
+  terminal-compatible finite pending replay. Populated cache/active or compact operation volumes
   refuse unchanged, with original inspection preserved. Positive populated
-  generation and recovery compatibility remain with full T3.
+  generation, richer-predicate and recovery compatibility remain with full T3.
 - [x] Cover actual competing service/transition lease ownership, failed drain,
   operation expiry, unsupported core/layout/binding/capacity, partial adoption,
   uncertain replacement and explicit retry. Refusal before adoption must

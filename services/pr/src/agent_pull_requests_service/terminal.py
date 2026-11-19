@@ -70,11 +70,19 @@ def target(
     expires_at: int, checkpoint: Callable[[], None],
 ) -> ObservationTarget:
     checkpoint()
-    targets = store.observation_targets(expires_at=expires_at, checkpoint=checkpoint)
-    checkpoint()
-    return next(
-        (value for value in targets if (value.account, value.repo, value.number) == (
-            account, repo, number,
-        )),
-        ObservationTarget(account, repo, number, frozenset()),
+
+    def capture(document: dict[str, Any]) -> ObservationTarget:
+        from agent_pull_requests.terminal_retention import replay_epoch
+
+        selected = ObservationTarget(account, repo, number, frozenset(
+            record["registration_id"] for record in document["replay"]["records"]
+            if record["outcome"] == "active" and record["scope"]["account"] == account
+            and record["scope"]["repo"] == repo and record["number"] == number
+        ))
+        return ObservationTarget(
+            account, repo, number, selected.registration_ids, replay_epoch(document, selected),
+        )
+
+    return store._review_transaction(
+        capture, expires_at=expires_at, checkpoint=checkpoint, persist=False,
     )

@@ -67,7 +67,9 @@ def test_ambiguous_watch_workspace_bindings_refuse(configuration: Configuration,
 
 def test_legacy_registration_without_deadline_keeps_original_inspection(configuration: Configuration) -> None:
     path, _, config = retained(configuration)
-    store = config.store()
+    store = ReplayStore(
+        config.root, config.namespace, service_identity=config.store().service_identity,
+    )
     scope = config.bindings[0].scope
     identity = {"request_id": "original-unbounded", "issued_at": time.time()}
     receipt = store.execute(scope, "register", {

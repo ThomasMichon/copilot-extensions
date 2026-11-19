@@ -490,8 +490,13 @@ compact review operations, conversation records and populated terminal-extension
 their files alone would not preserve the original usable reader/recovery paths.
 Keep those volumes with their original owner pending a separately qualified
 transition. Selected workspace scopes and account/repository targets must form
-a one-to-one mapping in both directions, and active watch registrations must retain finite original
-delivery deadlines; the command never invents deadlines.
+a one-to-one mapping in both directions. Every retained replay scope must remain
+reachable through the selected consumer/account/repository bindings, including
+frozen pending events and completed receipts. Active watch registrations require
+finite original delivery deadlines and predicates supported by the terminal
+projection (`merged`, `closed`, `head_changed`); the command never invents
+deadlines or reinterprets richer predicates. A refused volume retains its
+original native review/checks watcher and usable pending/ACK reader.
 This separate command
 requires the terminal-reader selection and the same available service writer
 lease; a running or unconfirmed drain refuses without stopping the service.
@@ -528,6 +533,27 @@ watch registrations through the original ReplayStore using that request's
 expiry and budget-aware checkpoint. Accepted terminal notifications therefore
 retain their original delivery identity after reopen; a registration added
 after capture is not retroactively included.
+Capture includes frozen pending registrations, not just subscriptions awaiting
+another provider observation. Their original event IDs and deadlines remain
+in the internal retirement delivery ledger; acquisition does not replace them.
+
+The standalone terminal profile applies the same admission policy to **new**
+watch registrations, before any commit. Requests without an original finite
+deadline or with richer predicates receive an explicit invalid-request refusal;
+they never create an incompatible registration or fall back to another owner.
+The optional workspace capability response advertises
+`agent-pull-requests.terminal-watch-admission/v1` and its accepted predicates.
+Legacy watch/v1-v2 capability and receipt shapes remain unchanged, and finite
+legacy requests using those predicates keep their original semantics. Clients
+needing unbounded or richer watches must retain the baseline host until a
+predicate-preserving transition is qualified; this opt-in profile does not
+silently convert them. Removing terminal selection is not a storage downgrade.
+
+Public terminal load/sync results contain only the selected workspace's compact
+retirement cursor, drain status and no-effect marker. Cross-consumer request,
+registration and event IDs, full delivery inventories and operation custody
+remain internal. Thus high-fan-out retirement does not expand the public result
+beyond the existing 32 KiB Gateway response boundary.
 
 The fresh foreground-process fixture qualifies CLI discovery, native export,
 terminal fencing, retained restart, reopen and cursor resynchronization over

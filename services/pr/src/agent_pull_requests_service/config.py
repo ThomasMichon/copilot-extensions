@@ -25,6 +25,7 @@ from single_instance_lease import SingleInstance
 from .preparation import PreparationConfig
 from . import terminal
 from .reports import ReportConfig
+from .terminal_policy import TerminalReplayStore, TerminalWorkspaceOperations
 
 _LIMIT = 1024 * 1024
 
@@ -151,7 +152,9 @@ class WorkspaceConfig:
             for p, t, reader in self.readers if (p, t) == (principal, target)
         }
         return {
-            (principal, target): WorkspaceOperations(
+            (principal, target): (
+                TerminalWorkspaceOperations if (principal, target) in terminal_options else WorkspaceOperations
+            )(
                 store, cache, scope=dict(reader.scope), read_owner=reader,
                 binding_ref=reader.binding_ref, checkpoint=checkpoint,
                 max_work_seconds=seconds, conversations=True,
@@ -197,7 +200,7 @@ class HostConfig:
                 if _mapping_store() is None:
                     raise ValueError("selected comment mapping core unsupported")
                 mapping_options["terminal_comment_mapping"] = True
-            return ReplayStore(
+            return TerminalReplayStore(
                 self.root, self.namespace,
                 service_identity=ReplayServiceIdentity(self.fleet, self.gateway, self.slot),
                 terminal_retention=True, terminal_recovery=True, terminal_cache_retirement=True,
