@@ -1205,6 +1205,16 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The [managed-metadata and finite-source unit](journal/2026/11.19-managed-metadata-and-finite-source-completions.md)
+records six acknowledged, audited `COMPLETED` source requests and four retained
+contracts without closing their broader native, installation or resource programs.
+Literal sufficient alternatives, inert documentation and comparison paths
+retain their original altitude; incidental discovery references do not become
+fixes. The current hygiene receiver retains all six A-F tracks and its explicit
+parent-owner observation condition. The 14:34:14 UTC whole census is 900 open,
+171 above fixed 729.
+All incumbent Plan/Validation states and actual owner/source restrictions remain.
+
 The [repository-boundary and fixture outcomes](<journal/2026/11.09 repository-boundary-and-fixture-outcomes.md>)
 record four further audited tracking folds: three into new OPEN #11678
 and two additional regression rows in existing OPEN #11674. Their six and

@@ -87,6 +87,44 @@ application without tombstones enters no writer. Legacy unselected stores
 also use preparation, but have no source-domain generation or cross-table
 reader fence.
 
+## Retained named-target acquisition
+
+The explicit version-9 pending envelope binds a complete `PendingPointClaim`,
+including its parked task/pin, account, endpoint, query, representation and every
+typed target's version, parent and event correlations. `PreparedJournal` requires
+that same whole claim; ordinary loading, application and completion still refuse it.
+
+`PreparedPoints` retains individual adapter-qualified `PointAcquisition` outcomes
+in the existing immutable prepared rows. A caller supplies the observation's
+whole claim when retaining one exact target, its component version and exactly
+one complete `FileEntry` or explicit `DeletedFile`. The component and mutation
+must agree on path and canonical component family, and the component version
+must equal the named target version. This helper performs no network reads and
+does not establish fresh query eligibility. The adapter owns that qualification.
+Each retained row checks the parent's existing incarnation and integrity digest.
+Identical retries reuse the row; conflicting content cannot replace it.
+
+Reopening can retrieve each positively retained target without reacquiring its
+body. Manifest ordering records alone do not count as acquired target coverage.
+`compose()` refuses until **every exact target**, including older versions and
+separate correlations, has an observation. It enforces a one-to-one mapping
+between logical points and physical components, stable component semantics, and
+identical content/metadata/deletion for equal versions before selecting each
+component's newest acquired version. Boolean, integer and floating-point
+metadata values remain distinct. The separately versioned row codec refuses
+unknown/duplicate fields, nonfinite numbers and non-JSON metadata.
+
+The composed manifest is only a **candidate**: it does not replace the exact
+manifest already bound to the pending parent. It preserves that parent's poll
+marker without certifying a polling interval. No application, task
+acknowledgement, pending retirement, cursor advance, executor admission or
+capability advertisement follows from retention or composition. Application
+and completion still need their own owner-qualified transition and per-target
+applied/higher-covered proof. Ordinary recovery is not that transition.
+`tests/test_prepared_points.py` covers restart, exact-target completeness,
+conflicts and stale parents; `tests/test_azure_devops_points.py` connects the
+named-version HTTP mock reader to this retention path and proves body reuse.
+
 ## Failure and compatibility boundaries
 
 Preparation failure/cancellation leaves canonical content, vectors, file

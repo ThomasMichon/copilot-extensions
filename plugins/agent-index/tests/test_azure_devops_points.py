@@ -5,12 +5,18 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Iterator
 from dataclasses import replace
+from pathlib import Path
 from typing import Any, cast
 
 import httpx
 import pytest
 
 from agent_index.indexing.point_claim import PendingPointClaim
+from agent_index.indexing.manifest import CrawlManifest
+from agent_index.indexing.path_index import PathIndex
+from agent_index.indexing.pending_crawl import PendingCrawls
+from agent_index.indexing.prepared_journal import PreparedJournal
+from agent_index.indexing.prepared_points import PointAcquisition, PreparedPoints
 from agent_index.indexing.point_hints import (
     CommentVersionTarget, PointBinding, PointChangeHints, PointTarget, WorkItemRevisionTarget,
 )
@@ -103,6 +109,49 @@ def _claim(
         ),
         targets=(_ITEM, _COMMENT),
     ))
+
+
+def test_retained_named_reads_resume_without_repeating_provider_body_acquisition(
+    subject: tuple[Provider, AzureDevOpsConnector, WorkItemEligibility], tmp_path: Path,
+) -> None:
+    provider, connector, expected = subject
+    claim = _claim(connector, expected)
+    first = acquire_named_point(connector, claim=claim, target=_ITEM, expected=expected)
+    assert first.entry is not None
+    paths = PathIndex(tmp_path / "paths.db")
+    manifest = CrawlManifest(
+        source=claim.hints.source, accounting_family=claim.hints.canonical_family,
+        commit="unchanged-poll", upserts=[first.entry], component_versions=[first.component],
+    )
+    pending = PendingCrawls(paths)
+    pending.save(manifest, scope="account/endpoint/query", full=False, point_claim=claim)
+    payload = pending.read_payload(manifest.source, "account/endpoint/query")
+    assert payload is not None
+
+    def reopen() -> PreparedPoints:
+        return PreparedPoints(PreparedJournal(
+            PathIndex(tmp_path / "paths.db"), manifest.source, "account/endpoint/query", payload,
+            point_claim=claim,
+        ))
+
+    points = reopen()
+    points.retain(PointAcquisition(
+        first.target, first.component, first.entry, first.deletion,
+    ), claim=first.claim)
+    with pytest.raises(ValueError, match="incomplete"):
+        points.compose()
+    for target in claim.hints.targets:
+        points = reopen()
+        if points.read(target) is None:
+            observed = acquire_named_point(connector, claim=claim, target=target, expected=expected)
+            points.retain(PointAcquisition(
+                observed.target, observed.component, observed.entry, observed.deletion,
+            ), claim=observed.claim)
+    candidate = reopen().compose()
+    assert provider.body_reads == 2
+    assert len(candidate.upserts) == 2 and candidate.commit == "unchanged-poll"
+    assert candidate.poll_refresh is None
+    assert pending.read_payload(manifest.source, "account/endpoint/query") == payload
 
 
 @pytest.mark.parametrize("target", [_ITEM, _COMMENT])
