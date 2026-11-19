@@ -32,6 +32,33 @@ convenience.
 A routine question with no default is also a guidance finding: the worker
 should have decided, or asked with a default and a revisit time.
 
+## Goal-advancing option scope (relentless posture)
+
+Under relentless [drive posture](watchdog-checks.md#drive-posture), the
+charter's answer scope may also grant the **goal-advancing option** class.
+Without that recorded grant, the classes above stand: operator-only and
+unclear questions are never answered. With it, the monitor may answer a
+parked question by choosing an offered option, as follows:
+
+1. **Re-capture.** Immediately before answering, re-capture the same form and
+   the same request identifier or cursor. If the question, its options, the
+   head, a hold or an operator reply changed, reassess from the start.
+2. **Choose the goal-advancing option.** Pick the offered standing or
+   class-level option that advances the target's recorded root goal. Never
+   write free text that widens an offered option.
+3. **Exclusions.** Never pick an option that deploys, bypasses review or CI,
+   deletes, elevates, changes credentials, reboots, changes network or system
+   configuration, restarts all agents, or replays an operation with an
+   unknown outcome. When every advancing option hits an exclusion, report the
+   question to the operator instead.
+4. **Persist and record.** Record the pending answer, the request identifier
+   and the cited grant before answering; if persistence fails, do not answer.
+   Record the actual result after, as in the steps below.
+
+Permission and approval prompts stay operator-only, even under this scope.
+An unclear question qualifies only when an offered option clearly advances
+the root and avoids every exclusion; otherwise it stays operator-only.
+
 ## Answer within an answer scope
 
 Answering is an effect on another owner's session. It needs a recorded
