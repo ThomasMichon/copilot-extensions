@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     import numpy as np
@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from agent_index.index_config import ModelProfile
     from agent_index.indexing.path_index import PathIndex
     from agent_index.store.vector_table import VectorTable
+    from agent_index.store.source_layout import PointScope
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS embedding_coverage (
@@ -50,7 +51,7 @@ def input_hash(chunk: Chunk, profile: ModelProfile) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-def vector_hash(vector: np.ndarray) -> str:
+def vector_hash(vector: np.ndarray[Any, Any]) -> str:
     import numpy as np
 
     return hashlib.sha256(np.asarray(vector, dtype="<f4").tobytes()).hexdigest()
@@ -65,6 +66,7 @@ class EmbeddingCoverage:
     def missing(
         self, table: VectorTable, chunks: list[Chunk], profile: ModelProfile,
         *, bounded: bool = False,
+        point_scope: PointScope | None = None,
     ) -> list[Chunk]:
         """Select missing pairs; bounded reads require explicit index preparation."""
         receipts: dict[str, tuple[str, str]] = {}
@@ -86,13 +88,14 @@ class EmbeddingCoverage:
             if chunk.chunk_id in receipts
             and receipts[chunk.chunk_id][0] == input_hash(chunk, profile)
         ]
-        stored: dict[str, np.ndarray] = {}
+        stored: dict[str, np.ndarray[Any, Any]] = {}
         read_options = {"bounded": True} if bounded else {}
         for start in range(0, len(candidates), 200):
-            stored.update(table.get_vectors(
-                [chunk.chunk_id for chunk in candidates[start:start + 200]], strict=True,
-                **read_options,
-            ))
+            ids = [chunk.chunk_id for chunk in candidates[start:start + 200]]
+            stored.update(
+                table.get_vectors(ids, strict=True, **read_options)
+                if point_scope is None else table.get_point_vectors(ids, point_scope=point_scope)
+            )
         reusable = {
             cid for cid, vector in stored.items()
             if vector_hash(vector) == receipts[cid][1]
@@ -112,7 +115,7 @@ class EmbeddingCoverage:
 
     def record(
         self, table: VectorTable, chunks: list[Chunk], profile: ModelProfile,
-        vectors: np.ndarray,
+        vectors: np.ndarray[Any, Any],
         *, bounded: bool = False,
     ) -> None:
         """Publish receipts only after actual vectors pass the selected read policy."""
@@ -120,7 +123,7 @@ class EmbeddingCoverage:
             chunk.chunk_id: vector_hash(vector)
             for chunk, vector in zip(chunks, vectors, strict=True)
         }
-        actual: dict[str, np.ndarray] = {}
+        actual: dict[str, np.ndarray[Any, Any]] = {}
         read_options = {"bounded": True} if bounded else {}
         for start in range(0, len(chunks), 200):
             actual.update(table.get_vectors(

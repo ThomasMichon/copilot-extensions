@@ -23,7 +23,7 @@ from .scalar_index import (
     prepare_index,
     require_budget,
 )
-from .source_layout import SourceLayoutError
+from .source_layout import PointScope, SourceLayoutError
 
 if TYPE_CHECKING:
     from agent_index.index_config import IndexConfig
@@ -179,10 +179,14 @@ class ComponentLedger:
         }
         self._source_domain.save(value)
 
-    def get(self, source: str, path: str) -> ComponentEvidence | None:
+    def get(
+        self, source: str, path: str, *, point_scope: PointScope | None = None,
+    ) -> ComponentEvidence | None:
         """Read at most two indexed candidates; missing history never bootstraps itself."""
         key = _key(source, path)
-        with self._source_domain.operation(self._db):
+        with self._source_domain.operation(self._db, point_scope=point_scope):
+            if point_scope is not None and source != point_scope[1]:
+                raise SourceLayoutError("Component read is outside its selected family")
             table = self._bound_table()
             rows = table.search().where(f"point_key = '{key}'").limit(2).to_list()
             if not rows:

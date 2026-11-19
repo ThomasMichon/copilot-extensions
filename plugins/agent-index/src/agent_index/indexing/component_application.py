@@ -22,7 +22,7 @@ from agent_index.store.file_projection import (
 )
 from agent_index.store.ingestion_index import prepare_ingestion_indices
 from agent_index.store.scalar_index import MAX_SEGMENTS, ScalarIndexPreparationRequired, inspect_index
-from agent_index.store.source_layout import SourceLayoutError
+from agent_index.store.source_layout import PointScope, SourceLayoutError
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -67,6 +67,7 @@ def _component_contents(
 def _qualified_chunks(
     projection: RawFileProjection, config: IndexConfig, store: MultiModelStore,
     coverage: EmbeddingCoverage,
+    *, point_scope: PointScope | None = None,
 ) -> list[Chunk]:
     """Qualify canonical inputs and exact routed pairs, not just an old raw witness."""
     chunks = []
@@ -86,6 +87,7 @@ def _qualified_chunks(
         } or coverage.missing(
             store.get_vector_table(model.model_id), selected,
             config.model_profiles[model.model_id], bounded=True,
+            point_scope=point_scope,
         ):
             raise SourceLayoutError("Component routed vector coverage is incomplete")
     return chunks
@@ -103,26 +105,31 @@ class AppliedComponentSnapshot:
 def qualify_applied_component(
     ledger: ComponentLedger, paths: PathIndex, evidence: ComponentEvidence, *,
     scope: str, max_rows: int,
+    point_scope: PointScope | None = None,
 ) -> AppliedComponentSnapshot:
     """Qualify exact ordering, native, checkpoint and routed-coverage owners."""
     config, store = ledger._config, ledger._store
     if (type(max_rows) is not int or max_rows < 1
             or not isinstance(scope, str) or not scope.strip()
-            or Path(paths._db_path).resolve() != (config.data_dir / "path_index.db").resolve()):
+            or Path(paths._db_path).resolve() != (config.data_dir / "path_index.db").resolve()
+            or not Path(paths._db_path).is_file()):
         raise ValueError("Component qualification requires configured path/scope/point budget")
     content = evidence.content
     point = content.component.source, content.component.path
-    with ledger._source_domain.operation(store.content_store.db):
+    with ledger._source_domain.operation(store.content_store.db, point_scope=point_scope):
         if ((evidence.scope, evidence.policy) != (scope, _policy(config))
-                or ledger.get(*point) != evidence):
+                or ledger.get(*point, point_scope=point_scope) != evidence):
             raise SourceLayoutError("Component application evidence changed or is unqualified")
         projection = capture_file_projection(
             config, store, *point, max_rows=max_rows,
             retained_chunk_ids=evidence.projection.vector_chunk_ids,
+            point_scope=point_scope,
         )
         if projection != evidence.projection:
             raise SourceLayoutError("Component application native projection changed")
-        chunks = _qualified_chunks(projection, config, store, EmbeddingCoverage(paths))
+        chunks = _qualified_chunks(
+            projection, config, store, EmbeddingCoverage(paths), point_scope=point_scope,
+        )
         checkpoint = paths.get_checkpoint_rows([point]).get(point)
         if content.deleted:
             if chunks or any(model.rows != b"[]" for model in projection.models):

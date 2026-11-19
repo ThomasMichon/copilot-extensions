@@ -172,8 +172,15 @@ After the reviewed proposal, the operator admitted execution:
   [native application](../../../plugins/agent-index/docs/component-ledger.md#explicit-native-application)
   composes monotonic point writes with prepared/routed coverage and path
   checkpoints, retaining pending work and refusing uncertain state.
-  Representation, v2 execution, automatic partial-effect/restore reconciliation,
-  whole-claim completion and read isolation remain unimplemented.
+  Applied snapshots qualify the existing native/checkpoint/routed-coverage
+  owners, retaining optional typed acquisition identity without enriching
+  legacy records. A separate exact-scope point-domain binding and default
+  reader refusal are implemented, with an explicit
+  [named-component read](../../../plugins/agent-index/docs/component-ledger.md#selected-named-component-reads)
+  through the existing qualification owners. Search/cluster/presentation
+  compatibility remains unqualified. Point-domain application, v2 execution,
+  automatic partial-effect/restore reconciliation and whole-claim completion
+  remain unimplemented.
 - [ ] Persist acquisition progress so retry/restart does not restart a
   corpus-wide listing.
 - [ ] Move authoritative full enumeration into separately budgeted, resumable
