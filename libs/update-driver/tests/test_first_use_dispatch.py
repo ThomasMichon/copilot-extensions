@@ -205,6 +205,55 @@ def test_installed_fixture_provenance_uses_its_private_copilot_home(
     assert list(foreign.iterdir()) == []
 
 
+@pytest.mark.portfolio_tier("T2")
+def test_dispatch_faulthandler_observes_finite_finalizer_without_disabling_capture(
+    area: Path,
+) -> None:
+    suite = area / "controlled-pytest"
+    suite.mkdir()
+    target = suite / "test_controlled_finalizer.py"
+    target.write_text(
+        "from pathlib import Path\n"
+        "import time\n"
+        "import pytest\n"
+        "@pytest.fixture\n"
+        "def controlled_fixture_finalizer(request):\n"
+        "    yield\n"
+        "    assert request.config.getoption('capture') == 'fd'\n"
+        "    print('controlled finalizer remains captured')\n"
+        "    time.sleep(61)\n"
+        "    Path(__file__).with_suffix('.completed').write_text('completed')\n"
+        "def test_config_and_capture(request, controlled_fixture_finalizer):\n"
+        "    assert float(request.config.getini('faulthandler_timeout')) == 60.0\n"
+        "    assert request.config.getini('faulthandler_exit_on_timeout') is False\n"
+        "    assert request.config.getoption('capture') == 'fd'\n"
+        "    print('controlled body remains captured')\n",
+        encoding="utf-8",
+    )
+    environment = {
+        **os.environ,
+        "PYTEST_ADDOPTS": "-o faulthandler_timeout=60 -o faulthandler_exit_on_timeout=false",
+        "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "PYTHONDONTWRITEBYTECODE": "1",
+    }
+    try:
+        result = subprocess.run(
+            [sys.executable, "-B", "-m", "pytest", "-q", "--color=no",
+             "-p", "no:cacheprovider", "-o", "addopts=", "--confcutdir", str(suite), str(target)],
+            env=environment, cwd=suite, stdin=subprocess.DEVNULL,
+            capture_output=True, text=True, timeout=90, **no_window_kwargs(),
+        )
+    except subprocess.TimeoutExpired:
+        pytest.fail("controlled fixture finalizer did not finish")
+    if result.returncode != 0:
+        pytest.fail(f"controlled pytest exited with status {result.returncode}")
+    if "controlled_fixture_finalizer" not in result.stderr or "pytest_runtest_teardown" not in result.stderr:
+        pytest.fail("whole-protocol traceback did not observe the controlled fixture finalizer")
+    assert target.with_suffix(".completed").read_text() == "completed"
+    assert "1 passed" in result.stdout
+    assert "controlled body remains captured" not in result.stdout + result.stderr
+    assert "controlled finalizer remains captured" not in result.stdout + result.stderr
+
+
 @pytest.mark.parametrize("action", ["stamp", "provision"])
 @pytest.mark.parametrize("submitted_wsl", [None, "0", "1"])
 def test_dispatch_fixed_action_keeps_native_options_context_custody_and_result(

@@ -1224,6 +1224,7 @@ jobs:
     env:
       UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS: "1"
       UV_PYTHON: "3.12"
+      PYTEST_ADDOPTS: ${{ matrix.packet.name == 'cold-original' && '-o faulthandler_timeout=60 -o faulthandler_exit_on_timeout=false' || '' }}
     steps: *dispatch-recipe-steps
   bridge-commands-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-commands'

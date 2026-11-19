@@ -3116,6 +3116,39 @@ def test_codespaces_functional_profile_runs_assertions_despite_ambient_collect_o
             assert sentinel.read_text() == "executed"
 
 
+def test_standard_manual_packet_preserves_nonexiting_faulthandler_options(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    plugin = tmp_path / "update-driver"
+    tests = plugin / "tests"
+    tests.mkdir(parents=True)
+    target = tests / "test_diagnostic.py"
+    target.write_text("def test_controlled(): pass\n", encoding="utf-8")
+    options = "-o faulthandler_timeout=60 -o faulthandler_exit_on_timeout=false"
+    monkeypatch.setenv("PYTEST_ADDOPTS", options)
+    monkeypatch.setattr(runner, "_plugin_dir", lambda _name: plugin)
+    monkeypatch.setattr(runner, "_ensure_venv", lambda *a, **k: Path(sys.executable))
+    calls: list[list[str]] = []
+
+    def execute(command: list[str], **kwargs: Any) -> int:
+        calls.append(command)
+        assert kwargs["env"]["PYTEST_ADDOPTS"] == options
+        assert kwargs["env"]["COPILOT_EXTENSIONS_TEST_CONTAINED"] == "1"
+        assert "--timeout=900" in command
+        assert "-s" not in command and not any(arg.startswith("--capture") for arg in command)
+        assert kwargs["limits"].wall_seconds <= 900
+        return 0
+
+    monkeypatch.setattr(runner, "run_contained", execute)
+    assert runner.run_plugin(
+        "update-driver", "unused", reinstall=False, kexpr="controlled",
+        test_files=(str(Path("tests") / target.name),), test_profile="standard",
+        limits=containment.Limits(wall_seconds=1080), plugin_timeout=900,
+        test_timeout=900, max_files_per_subsuite=25,
+    ) == 0
+    assert len(calls) == 1
+
+
 def test_prepare_only_takes_environment_admission(monkeypatch: pytest.MonkeyPatch) -> None:
     # Like --guards/--collect-only, --prepare-only is NOT exempt: it can
     # rebuild/delete the SHARED on-disk venv a concurrent bare admitted

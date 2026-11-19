@@ -5649,6 +5649,12 @@ diagnostic-only markers distinguish fixture preparation, acknowledgement,
 foundation observation, caller closure, receipt waiting and body exit before
 owner teardown; they contain no arguments, paths or source logs and grant no
 qualification credit. All original assertions, custody and time limits remain.
+Only the existing Windows `cold-original` cell also supplies pytest's
+`faulthandler_timeout=60` with `faulthandler_exit_on_timeout=false`. The standard
+runner preserves these diagnostic options without disabling ordinary capture.
+The one-shot whole-protocol dump can expose a capture-restoration or finalizer
+stack; sixty seconds is an observation point, not a test deadline or process exit.
+Other cells receive no additional pytest options and all portfolio bounds remain.
 Bounded independent packets cover Python/native
 no-write refusals, exact `stamp`/`provision` action custody, source replacement,
 deferred real stamping, and actual cold construction after the original caller's

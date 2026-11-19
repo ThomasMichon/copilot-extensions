@@ -2277,6 +2277,13 @@ def test_dispatch_recipes_keep_literal_native_runners_and_bounded_packets(
     )
     assert job["runs-on"] == runner and job["timeout-minutes"] == 35
     assert job["env"][opt_in] == "1" and not job.get("continue-on-error")
+    expected_environment = {opt_in: "1", "UV_PYTHON": "3.12"}
+    if platform == "windows":
+        expected_environment["PYTEST_ADDOPTS"] = (
+            "${{ matrix.packet.name == 'cold-original' && "
+            "'-o faulthandler_timeout=60 -o faulthandler_exit_on_timeout=false' || '' }}"
+        )
+    assert job["env"] == expected_environment
     assert job["strategy"]["fail-fast"] is False
     assert set(job["strategy"]["matrix"]) == {"packet"}
     packets = job["strategy"]["matrix"]["packet"]
@@ -2319,7 +2326,9 @@ def test_dispatch_recipes_keep_literal_native_runners_and_bounded_packets(
     }
     checkout = next(step for step in job["steps"] if step.get("uses") == "actions/checkout@v4")
     assert checkout["with"]["persist-credentials"] is False
-    execution, = [step["run"] for step in job["steps"] if "run" in step]
+    execution_step, = [step for step in job["steps"] if "run" in step]
+    assert "env" not in execution_step
+    execution = execution_step["run"]
     assert execution.split() == [
         "python", "tools/run-plugin-tests.py", "update-driver",
         "--test-file", "tests/${{", "matrix.packet.file", "}}",
