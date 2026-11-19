@@ -55,6 +55,25 @@ release gates, or count unexecuted native coverage as passing.
 
 ## Coordination
 
+The proposed finite #9970 fixture family enters the Phase 4 Dispatch wave;
+the separate #10031 initial guard-map startup/cutover and #10032 native
+platform families enter the Phase 3 Worktrees pilot. All three use existing
+Phase 7 migration-intake deduplication and domain-Plan review. The primary
+maintainer retains portfolio responsibility; the original fixture, override/
+supervisor, hook/map producer/consumer, resident-lifecycle, deployment-reader,
+native, runner, release and resource owners keep their scopes. No implementer,
+native venue or resource is appointed. Preserve OPEN #1303, all existing
+claims/holds, unit-only required CI and hosted-Windows quiescence.
+
+Normal review must actually deliver every applicable P9970/V9970/G9970,
+P10031/V10031/G10031 and P10032/V10032/G10032 clause, continuing Coordination,
+dated Journal and the Phase 7 intake route. Ledger-only publication is not
+domain acceptance. Keep the three sources OPEN during the proposal; current
+permitted whole receiving/source/owner readback precedes separate tracking
+judgments. Planned consolidation neither completes native qualification nor
+reactivates the completed guard-map source effort or the independent full-
+harness program. No generic acknowledgement or extra receipt-PR gate is added.
+
 The proposed #9568 family enters Phase 5 only through the existing Phase 7
 migration-intake deduplication and domain-Plan review. The primary maintainer
 retains portfolio ownership; existing workflow/runner, fixture, source-audit,
@@ -1202,6 +1221,15 @@ an assertion that the historical source defect remains current._
   effort Done, and archive it.
 
 ### Phase 7 — Reconcile deferred backlog
+
+The proposed #9970 family has one primary placement in Phase 4's Dispatch
+wave. The separate #10031 and #10032 families each have one primary
+placement in Phase 3's Worktrees pilot. The matching append-only
+[`migration-intake` ledger](../migration-intake/ledger.md) records
+deduplication and the unchanged owners; this same planning unit supplies
+complete domain Plan, local/global Validation, Coordination and Journal
+for review. Existing source issues supply their trackers during the proposal.
+No new tracker, administrative checkbox or implementation appointment follows.
 
 - [ ] Accept test-portfolio candidates only through
   [`migration-intake`](../migration-intake/README.md)'s deduplication and
@@ -2372,7 +2400,152 @@ Phase 7 intake; this is not #7643's already-attributed external mapping.
   delivery, current ownership or retained OPEN condition means KEEP.
   A study, graph edge, child-only note or document merge is not a fix.
 
+### Finite cold-source override fixture from #9970
+
+Agent-recommended Phase 4 Dispatch-wave receiving through Phase 7.
+This is fixture determinism, not a production outage or a new runtime policy.
+
+- [ ] **P9970-1:** Retain the combined six-file observation of 486 passes
+  and one `CompanionIndeterminate: override discovery pending; no confirmed
+  veto snapshot` failure, followed by 48 unchanged isolated passes with
+  confirmed cleanup in both runs. Deterministically establish the initial
+  authoritative override/source observations before the bounded publication
+  assertion in
+  `test_declaration_publication_is_bounded_and_does_not_duplicate_pending_write`
+  in `test_supervisor_bounded_recovery.py`. Registry priming or an empty
+  override provider alone does not establish completed observation.
+- [ ] **P9970-2:** Preserve genuinely pending-discovery refusal, the
+  original pending-write/no-duplicate-write assertions, the existing
+  0.05-second reconciliation budget and 0.5-second cycle bound. Fixture
+  preparation must not perform the publication under test. Do not relax
+  production unknown-state handling or solve fixture timing by blanket
+  timeout increases.
+- [ ] **P9970-3:** Qualify the finite setup correction and its cold/pending
+  regression controls at the actual owning fixture/source boundary, with
+  attributable current-source results and cleanup. An isolated green,
+  reported merged test slice or source comparison is only scoped evidence;
+  no product-behavior change, test execution or runtime repair is activated
+  by this intake.
+
+#### Local Validation for #9970
+
+- [ ] **V9970-1:** Demonstrate deterministic authoritative initialization
+  before the first bounded assertion AND a genuinely pending observation
+  retaining the original refusal. Exercise the owning observation boundary,
+  not a fixture that publishes early or substitutes away discovery.
+- [ ] **V9970-2:** Preserve pending/no-duplicate-write checks and both
+  original bounds, recording source/attempt identity, actual assertion and
+  cleanup outcomes, skips and remaining unknowns. Keep production refusal
+  behavior and unit-only required CI unchanged; any separately needed
+  contained/native run retains its own admission and owner.
+
+### Finite initial guard-map startup and cutover from #10031
+
+Agent-recommended Phase 3 Worktrees-pilot receiving through Phase 7.
+The [completed guard-map source effort](../precomputed-hook-guard-map/README.md)
+retains its earned source and Windows installed-consumer credit; this is its
+distinct transferred large-caller qualification, not evidence that it failed.
+
+- [ ] **P10031-1:** Use the existing contained native runtime/service lane
+  to measure INITIAL prepared-caller acquisition/construction with
+  representative larger caller counts and acquisition failures. Record
+  construction and control-listener readiness timings, cutover serving
+  continuity, bounded cleanup, exact exercised counts, source/runtime
+  identities and actual platform limits. An already-running resident or
+  source/unit result does not qualify initial startup.
+- [ ] **P10031-2:** Test the existing lifecycle deadline without enlarging
+  it. Synchronous acquisition before listener start is an ordering
+  observation, not an established deadline failure. IF measured evidence
+  shows it misses the deadline, route the correction through the actual
+  resident-lifecycle owner. Keep acquisition failure diagnostics and retry
+  scope; no hook-time topology/CLI discovery fallback, new daemon or second
+  scheduler is permitted.
+- [ ] **P10031-3:** Retain producer-owned managed preparation/mutation/
+  explicit refresh, caller/installation isolation, atomic whole-map
+  publication, unavailable versus complete-empty facts and both lookup-only
+  consumers. Current directional configuration, modes, kill switches and
+  expiring grants stay authoritative. Missing/unavailable maps remain
+  fail-open at consumption with bounded event-time Git identity; no RPC/
+  topology acquisition, watcher, TTL or periodic recomputation is added.
+  The independent #3303 full-harness objective and #10032 platform lane
+  keep their own owners and acceptance, not a new whole-parent barrier.
+
+#### Local Validation for #10031
+
+- [ ] **V10031-1:** Witness real initial construction/listener readiness
+  and cutover continuity across the declared larger inventories and
+  acquisition-failure controls under unchanged lifecycle deadlines.
+  Preserve diagnostics, exact exercised counts/timings/platform limits and
+  bounded cleanup; unit tests or an already-serving resident are not native
+  startup proof.
+- [ ] **V10031-2:** Qualify any measured-necessary ordering correction
+  through the existing owner and retain fail-open consumption, both
+  consumers, isolation, atomic publication and all no-discovery/no-new-
+  scheduler controls. Distinguish source, released, installed and exercised
+  results; no native run, service action or rollout is authorized by intake.
+
+### Finite native guard-map platforms from #10032
+
+Agent-recommended Phase 3 Worktrees-pilot receiving through Phase 7;
+independent of #10031's large-caller startup/cutover lane.
+
+- [ ] **P10032-1:** Exercise actual admitted native UNC AND complete
+  non-Windows/POSIX venues through the existing native entry, producer,
+  native and resident consumers, deployment path and deployed-reader
+  dependency closure. Synthetic paths, a direct Python call, correct
+  deployed filenames or earlier ordinary Windows adoption do not execute
+  these unqualified platform lanes.
+- [ ] **P10032-2:** Cover applicable path normalization/casing, actual
+  symlink/nonregular-input behavior, concurrent atomic publication and
+  missing/unavailable maps. Record the actual platform and source/runtime/
+  selected/serving identity, capability skips and cleanup. Retain the
+  previously credited ordinary/linked/nested/bare Windows, registered-
+  junction alias, literal/global-option Git, read-access and missing-map
+  controls without recrediting them as UNC or full POSIX qualification.
+- [ ] **P10032-3:** Preserve caller/installation isolation, bounded local
+  event-time Git metadata, both lookup-only consumers, current controls,
+  managed producer boundaries, atomic facts and fail-open missing-map
+  behavior. There is no hook-time topology/CLI discovery, watcher, TTL or
+  periodic acquisition. Do not provision a shared network service, broaden
+  privileges, start a new daemon or substitute another platform's result
+  to manufacture a passing lane. Existing producer/consumer, deployment,
+  native and resource owners remain responsible.
+
+#### Local Validation for #10032
+
+- [ ] **V10032-1:** Record actual native-entry/producer/both-consumer/
+  deployed-reader results for UNC AND POSIX, retaining all original
+  normalization/casing, symlink/nonregular, concurrent publication and
+  absent/unavailable-map controls. Unavailable capability remains explicitly
+  unqualified rather than a passing substitute.
+- [ ] **V10032-2:** Bind each result to actual platform/source/runtime/
+  selected/serving identities, exact cleanup and applicable skips; retain
+  existing consumption/producer/isolation controls and original owners.
+  Keep the completed source effort Done and the separate startup and
+  full-harness objectives independently tracked. Intake activates no native
+  execution, network provisioning, privilege change or deployment.
+
 ## Validation Plan
+
+- [ ] **G9970:** Resolve every P9970/V9970 and continuing Coordination
+  clause at the finite original fixture boundary: authoritative initial
+  observation, genuinely pending refusal, pending/no-duplicate assertions,
+  original reconciliation/cycle bounds and truthful cleanup. Preserve the
+  historical intermittent evidence, production unknown handling, Phase 7
+  domain acceptance and required unit-only CI. Planned receiving is not a fix.
+- [ ] **G10031:** Resolve every P10031/V10031 and continuing Coordination
+  clause at INITIAL large-caller construction/listener/cutover, acquisition-
+  failure, diagnostic/retry and bounded-cleanup boundaries. Preserve the
+  original deadline, map/consumer safety, actual owners and independent
+  platform/full-harness duties. Scoped source/Windows credit and an already-
+  running resident do not supply the unexecuted native proof.
+- [ ] **G10032:** Resolve every P10032/V10032 and continuing Coordination
+  clause for actual UNC AND complete POSIX native entry/producer/both
+  consumers/deployed-reader closure, all original path/input/concurrency/
+  missing-map controls, identities, skips and cleanup. Preserve existing
+  owners, no-discovery/fail-open policy, Phase 7 acceptance, unit-only CI and
+  hosted-Windows quiescence. No source/resource release or execution grant
+  follows from documentary acceptance.
 
 - [ ] **G9568:** Resolve every P9568-1 through P9568-4, local V9568-1
   through V9568-4 and continuing Coordination condition: independently
@@ -2707,6 +2880,24 @@ with another unbounded full-suite run. Portfolio reductions follow only after
 the inventory and evidence gates are available.
 
 ## Journal
+
+### 2026-11-19 UTC - Proposed cold-fixture and guard-map qualification receiving
+
+The complete #9970 fixture contract is proposed for Phase 4's Dispatch
+wave; the separate #10031 initial-startup/cutover and #10032 UNC/POSIX
+contracts enter Phase 3's Worktrees pilot. All use existing Phase 7
+deduplication/domain review and the appended migration-intake ledger.
+The direct Plan, local and actual global Validation, Coordination and
+route are reviewed together; no ledger-only acceptance or new tracker is
+claimed. All eighteen technical rows remain unchecked.
+
+Complete current metadata and full collaborator rosters qualify the three
+unchanged whole originals. The completed guard-map ROOT is preserved,
+including its explicit transfer, earned source/Windows credit and actual
+owner boundaries. Keep sources OPEN during proposal, then make separate
+tracking judgments after reviewed complete delivery and permitted current
+receiving/source/custody readback. This is no implementation, test/native
+run, deadline increase, rollout, claimant appointment or resource release.
 
 ### 2026-11-19 UTC - Proposed bounded optional Windows scheduling receiving
 
