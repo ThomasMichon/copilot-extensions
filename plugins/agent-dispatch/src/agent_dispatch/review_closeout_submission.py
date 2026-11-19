@@ -41,11 +41,12 @@ def _proposal(state: dict[str, Any]) -> dict[str, Any]:
 
 
 def _same_proposal(conn: sqlite3.Connection, state: dict[str, Any], value: dict[str, Any]) -> bool:
+    if value.get("advancement") is not None:
+        return False
     expected = _proposal(state)
     request = value["request"]
     retained_lineage(conn, request)
-    return (value.get("advancement") is None
-            and all(_encoded(request.get(k)) == _encoded(v) for k, v in expected.items()
+    return (all(_encoded(request.get(k)) == _encoded(v) for k, v in expected.items()
                     if k not in {"request_id", "result", "result_ref"})
             and request.get("expected_status", state["status"]) == state["status"])
 
@@ -55,6 +56,8 @@ def prepare(queue: TaskQueue, conn: sqlite3.Connection, state: dict[str, Any]) -
     task = queue._fetch(conn, state["relationship"]["request"]["task_id"])
     if not eligible(task) or task is None:
         return
+    if task.awaiting_steer:
+        raise TaskError("resolve outstanding steering request before review closeout")
     proposal = _proposal(state)
     prior = _latest(conn, task.id)
     if prior is not None:

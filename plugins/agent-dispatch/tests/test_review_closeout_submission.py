@@ -66,18 +66,31 @@ def test_original_worker_submits_only_after_finalization_and_never_twice(finaliz
         assert len(queue.list_verification_requests(task.id)) == 1
 
 
-@pytest.mark.parametrize("scenario", ["pending-result", "legacy", "rejected"])
+def test_awaiting_steer_keeps_original_assignment(ready: Ready) -> None:
+    queue, owner, workspace, task, _ = ready
+    with queue._connect() as conn:
+        conn.execute("UPDATE tasks SET status='suspended',awaiting_steer=1 WHERE id=?", (task.id,))
+    relationship = queue.task_relationship(task.id)
+    with pytest.raises(TaskError, match="outstanding steering"):
+        readiness.prepare(queue, workspace, task)
+    assert queue.task_relationship(task.id) == relationship
+    assert queue.submission_preparation(task.id) is None
+    assert not any(operation == "close" for operation, _ in owner.calls)
+
+
+@pytest.mark.parametrize("scenario", ["pending-result", "legacy", "rejected", "twice-rejected"])
 def test_original_proposal_or_legacy_preparation_can_finish(
     assignment: Assignment, monkeypatch: pytest.MonkeyPatch, scenario: str,
 ) -> None:
     queue, _, workspace, task = assignment
     cast(Callable[..., object], start_managed)(queue, workspace, task)
-    if scenario == "rejected":
+    if scenario.endswith("rejected"):
         monkeypatch.setattr(queue_submission_advancement, "observe_owner_state", lambda *_: {})
-        original = queue.complete(task.id, workspace.worker_id, result={"review": "old"}, result_ref="evidence")
-        queue.reject_submission(task.id, reason="still open", feedback={"inspect": "new head"},
-                                expected_generation=original.generation, expected_owner_session_id=original.owner_session_id,
-                                expected_completed_by=original.completed_by, expected_updated_at=original.updated_at)
+        for revision in range(2 if scenario == "twice-rejected" else 1):
+            original = queue.complete(task.id, workspace.worker_id, result={"revision": revision}, result_ref="evidence")
+            queue.reject_submission(task.id, reason="still open", feedback={"revision": revision},
+                                    expected_generation=original.generation, expected_owner_session_id=original.owner_session_id,
+                                    expected_completed_by=original.completed_by, expected_updated_at=original.updated_at)
     if scenario == "pending-result":
         def unavailable(*_: object) -> None:
             raise TaskError("workspace not ready yet")
@@ -107,7 +120,9 @@ def test_original_proposal_or_legacy_preparation_can_finish(
         assert finished is not None and finished.status == "submitted"
         if scenario == "pending-result":
             assert finished.result == {"review": "original"} and finished.result_ref == "evidence"
-        if scenario == "rejected":
+        if scenario.endswith("rejected"):
             proposal = queue.submission_preparation(task.id)
-            assert proposal is not None and proposal["request"]["resubmission"]["feedback"] == {"inspect": "new head"}
+            assert proposal is not None and proposal["request"]["resubmission"]["feedback"] == {
+                "revision": 1 if scenario == "twice-rejected" else 0,
+            }
         assert queue.list_verification_requests(task.id)
