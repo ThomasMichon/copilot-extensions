@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import sqlite3
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
@@ -11,7 +13,7 @@ import pytest
 
 from agent_bridge.db import Database
 from agent_bridge.events import EventLog
-from agent_bridge.passive_refresh import InheritedRefresh
+from agent_bridge.passive_refresh import InheritedRefresh, RefreshTarget
 from agent_bridge.session_manager import SessionManager
 from agent_bridge.session_status import SessionStatus
 
@@ -102,7 +104,7 @@ async def test_prepared_merge_preserves_a_waiting_reader(tmp_db: Database, final
             tmp_db.update_session_status(sid, final_status.value, 4.0)
         row = tmp_db.get_session(sid)
         assert row is not None
-        prepared = InheritedRefresh.read(tmp_db, row, None)
+        prepared = InheritedRefresh.read(tmp_db, row, None, target=RefreshTarget.capture(session))
         assert prepared is not None
         mgr._rehydrate(merge=True, session_id=sid)
         assert session.status.value == "starting" and reader.latest_id == 1
@@ -138,7 +140,7 @@ async def test_prepared_merge_does_not_replace_local_work(tmp_db: Database, busy
     EventLog(db=tmp_db, session_id=sid).append("agent_message", {"text": "later"})
     row = tmp_db.get_session(sid)
     assert row is not None
-    prepared = InheritedRefresh.read(tmp_db, row, None)
+    prepared = InheritedRefresh.read(tmp_db, row, None, target=RefreshTarget.capture(session))
     assert prepared is not None
     unblock = asyncio.Event()
     if busy == "client":
@@ -160,3 +162,62 @@ async def test_prepared_merge_does_not_replace_local_work(tmp_db: Database, busy
         if session._prompt_task is not None:
             unblock.set()
             await session._prompt_task
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("change", ["local-stop", "predecessor-append"])
+async def test_do_not_install_history_superseded_after_preparation(tmp_db: Database, change: str) -> None:
+    sid = "worker"
+    tmp_db.create_session(sid, sid, None, ".", "local", "running", 1.0)
+    writer = EventLog(db=tmp_db, session_id=sid)
+    writer.append("agent_message", {"text": "first"})
+    mgr = _passive_manager(tmp_db)
+    session = mgr.get_session(sid)
+    assert session is not None and session.event_log is not None
+    reader = session.event_log
+    session.awaiting_maintenance_refresh = True
+    row = tmp_db.get_session(sid)
+    assert row is not None
+    prepared = InheritedRefresh.read(tmp_db, row, None, target=RefreshTarget.capture(session))
+    assert prepared is not None
+    if change == "local-stop":
+        await mgr.stop_session(sid)
+        assert not session.background_recovery_enabled and reader.latest_id > 1
+    else:
+        writer.append("agent_message", {"text": "last"})
+        tmp_db.flush()
+    before = reader.snapshot_history()
+    mgr._rehydrate(merge=True, session_id=sid, prepared=prepared)
+    if change == "local-stop":
+        assert session.status == SessionStatus.STOPPED and not session.background_recovery_enabled
+    assert reader.snapshot_history() == before and session.awaiting_maintenance_refresh
+    latest = tmp_db.get_session(sid)
+    assert latest is not None
+    retry = InheritedRefresh.read(tmp_db, latest, None, target=RefreshTarget.capture(session))
+    assert retry is not None
+    mgr._rehydrate(merge=True, session_id=sid, prepared=retry)
+    assert not session.awaiting_maintenance_refresh and session.event_log is reader
+    if change == "local-stop":
+        assert session.status == SessionStatus.STOPPED and reader.snapshot_history() == before
+    else:
+        assert reader.snapshot_history() == writer.snapshot_history()
+
+
+def test_defer_prepared_merge_while_another_writer_is_active(tmp_db: Database) -> None:
+    sid = "worker"
+    tmp_db.create_session(sid, sid, None, ".", "local", "running", 1.0)
+    mgr = _passive_manager(tmp_db)
+    session = mgr.get_session(sid)
+    assert session is not None
+    session.awaiting_maintenance_refresh = True
+    row = tmp_db.get_session(sid)
+    assert row is not None
+    prepared = InheritedRefresh.read(tmp_db, row, None, target=RefreshTarget.capture(session))
+    assert prepared is not None
+    with closing(sqlite3.connect(tmp_db.db_path)) as writer:
+        writer.execute("BEGIN IMMEDIATE")
+        mgr._rehydrate(merge=True, session_id=sid, prepared=prepared)
+        assert session.awaiting_maintenance_refresh
+        writer.rollback()
+    mgr._rehydrate(merge=True, session_id=sid, prepared=prepared)
+    assert not session.awaiting_maintenance_refresh

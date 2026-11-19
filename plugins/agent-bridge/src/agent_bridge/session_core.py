@@ -674,7 +674,7 @@ class _SessionCoreMixin(_SessionDrainGateMixin):
 
         A merge is read-only and refreshes unowned metadata in place. Never
         replace a live successor's client, event stream, locks or turn state.
-        A prepared merge consumes an admitted snapshot without reading the DB.
+        A prepared merge rechecks the durable position, not the event history.
         """
         read_only = read_only or merge
         if prepared is not None:
@@ -688,12 +688,22 @@ class _SessionCoreMixin(_SessionDrainGateMixin):
             if (pending is None or not pending.awaiting_maintenance_refresh or pending.event_log is None
                     or pending._retained_recovery_owner is not None or pending.metadata_in_use(include_readers=False)):
                 return
-            rows = [prepared.row]
+            if prepared.target is None or not prepared.target.matches(pending):
+                return
+            with prepared.if_current(self._db) as current:
+                if current:
+                    self._restore_rows([prepared.row], merge=True, read_only=True, prepared=prepared)
+            return
         elif session_id is None:
             rows = self._db.list_sessions()
         else:
             row = self._db.get_session(session_id)
             rows = [row] if row is not None else []
+        self._restore_rows(rows, merge=merge, read_only=read_only)
+
+    def _restore_rows(
+        self, rows: list[dict[str, Any]], *, merge: bool, read_only: bool, prepared: InheritedRefresh | None = None,
+    ) -> None:
         retained = self._db.gc_retained_relationship_session_ids() if prepared is None else set()
         now = time.time()
         for row in rows:
@@ -732,8 +742,9 @@ class _SessionCoreMixin(_SessionDrainGateMixin):
                 preserve_target=read_only,
             )
             if prepared is not None:
-                assert session.event_log is not None and prepared.history is not None
-                session.event_log.refresh_subscribed_history(prepared.history)
+                assert session.event_log is not None and prepared.history is not None and prepared.target is not None
+                if not session.event_log.refresh_subscribed_history(prepared.history, expected=prepared.target.cursor):
+                    return
             session.name = row["name"]
             session.target = target
             session.agent_name = row.get("agent_name")
