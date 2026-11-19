@@ -8,7 +8,8 @@ import sqlite3
 from typing import Any
 
 from .bridge_command_delivery import native_prompt_receipt, steering_prompt
-from .queue import Task, TaskQueue
+from .queue import TaskQueue
+from .queue_common import Task
 from .queue_records import TaskError
 from .wake_recovery_target import reconciliation_plan
 

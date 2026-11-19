@@ -6,7 +6,10 @@ import json
 import sqlite3
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, replace
-from typing import Any
+from typing import Any, TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from .queue import TaskQueue
 
 from .queue_common import RunWaiterWakeOperation, Task, WakeOperation
 from .queue_execution_custody import (
@@ -106,7 +109,7 @@ def wake_custody_clear_sql(outbox: str) -> str:
 
 
 def _require_no_owner_wake(
-    queue, conn: sqlite3.Connection, task, *, operation: str, protect_pending: bool,
+    queue: TaskQueue, conn: sqlite3.Connection, task: Task, *, operation: str, protect_pending: bool,
 ) -> None:
     """The existing outbox excludes retirement racing or following a native wake."""
     for table in TABLES:
@@ -135,11 +138,11 @@ def _require_no_owner_wake(
                 raise TaskError(f"current owner wake excludes physical {operation}")
 
 
-def require_no_wake_for_cooling(queue, conn: sqlite3.Connection, task) -> None:
+def require_no_wake_for_cooling(queue: TaskQueue, conn: sqlite3.Connection, task: Task) -> None:
     _require_no_owner_wake(queue, conn, task, operation="cooling", protect_pending=True)
 
 
-def require_no_wake_for_release(queue, conn: sqlite3.Connection, reservation) -> None:
+def require_no_wake_for_release(queue: TaskQueue, conn: sqlite3.Connection, reservation: sqlite3.Row) -> None:
     task = queue._fetch(conn, reservation["task_id"])
     if task is not None:
         _require_no_owner_wake(queue, conn, task, operation="release", protect_pending=False)
@@ -164,7 +167,7 @@ def unresolved_wake_send(
             ),
         ).fetchone()
         if row is not None:
-            return row
+            return cast(sqlite3.Row, row)
     return None
 
 
@@ -247,6 +250,11 @@ class ReservationWakeSnapshot:
 
 
 class QueueExecutionWakesMixin:
+    if TYPE_CHECKING:
+        def _connect(self) -> sqlite3.Connection: ...
+        def _now(self, now: float | None) -> float: ...
+        def _fetch(self, conn: sqlite3.Connection, task_id: str) -> Task | None: ...
+
     @staticmethod
     def _migrate_execution_wakes(conn: sqlite3.Connection) -> None:
         conn.execute("BEGIN IMMEDIATE")
@@ -327,9 +335,9 @@ class QueueExecutionWakesMixin:
                 return WakeSendAdmission(row["execution_send"], False)
             task = self._fetch(conn, wake.task_id)
             current = (
-                self._wake_is_current(task, WakeOperation._from_row(row), conn=conn)
+                cast("TaskQueue", self)._wake_is_current(task, WakeOperation._from_row(row), conn=conn)
                 if table == "wake_outbox"
-                else self._run_waiter_wake_is_current(conn, task, RunWaiterWakeOperation._from_row(row))
+                else cast("TaskQueue", self)._run_waiter_wake_is_current(conn, task, RunWaiterWakeOperation._from_row(row))
             )
             if not current or task is None:
                 raise TaskError("wake send task fence advanced")
@@ -357,18 +365,19 @@ class QueueExecutionWakesMixin:
                 conn, task.id, owner_wake=current_wake if table == "wake_outbox" else None,
             )
             from .queue_relevance_delivery import closeout_wake
-            local_closeout = table == "wake_outbox" and closeout_wake(conn, current_wake)
+            local_closeout = isinstance(current_wake, WakeOperation) and closeout_wake(conn, current_wake)
             local_recovery = isinstance(wake, WakeOperation) and wake.pool_recovery_revision is not None
-            if local_recovery:
+            assignment = None
+            if isinstance(wake, WakeOperation) and local_recovery:
                 from .queue_pool_recovery import recovery_assignment, recovery_wake
                 assignment = recovery_assignment(conn, task.id)
                 if (
-                    not recovery_wake(conn, task, wake.id)
+                    assignment is None or not recovery_wake(conn, task, wake.id)
                     or assignment["recovery_revision"] != wake.pool_recovery_revision
                 ):
                     raise TaskError("pool recovery send incarnation changed")
             if provenance is None:
-                if execution_scope_qualified(conn, task.repo, task.source):
+                if task.repo is not None and task.source is not None and execution_scope_qualified(conn, task.repo, task.source):
                     raise TaskError("qualified wake send requires coordinator provenance")
                 if not local_recovery and not local_closeout:
                     if previous_send is not None:
@@ -376,12 +385,14 @@ class QueueExecutionWakesMixin:
                     if before_commit is not None:
                         raise TaskError("independent retention requires a qualified send")
                     return WakeSendAdmission(None, True)
+                if not local_closeout and assignment is None:
+                    raise TaskError("local recovery wake has no assignment")
                 fields = {
                     "protocol": "task_relevance_closeout/v1" if local_closeout else "pool_recovery_wake/v1",
                     "reservation_key": (
                         reservation["key"] if reservation else None
-                    ) if local_closeout else assignment["reservation_key"],
-                    "recovery_revision": wake.pool_recovery_revision,
+                    ) if local_closeout else cast(sqlite3.Row, assignment)["reservation_key"],
+                    "recovery_revision": wake.pool_recovery_revision if isinstance(wake, WakeOperation) else None,
                     "outbox": table, "wake_id": wake.id, "delivery_token": wake.delivery_token,
                     "task_generation": task.generation, "owner_session_id": wake.owner_session_id,
                 }
@@ -401,13 +412,13 @@ class QueueExecutionWakesMixin:
                 return WakeSendAdmission(identity, True)
             binding, runtime_id = provenance
             key = _scope_key(binding.scope)
-            self._require_execution_scope(conn, binding.scope)
-            self._require_execution_producer(
+            cast("TaskQueue", self)._require_execution_scope(conn, binding.scope)
+            cast("TaskQueue", self)._require_execution_producer(
                 conn, binding.scope, binding.source, binding.producer_generation
             )
             if (task.repo, task.source) != (binding.scope.repository, binding.source):
                 raise TaskError("wake send belongs to another producer scope")
-            require_custody_scope(conn, key, task.repo, task.source)
+            require_custody_scope(conn, key, binding.scope.repository, binding.source)
             runtime = conn.execute(
                 "SELECT 1 FROM execution_runtime_enrollments"
                 " WHERE scope_key = ? AND runtime_id = ? AND repo = ? AND source = ?"
@@ -439,7 +450,7 @@ class QueueExecutionWakesMixin:
     def _retain_busy_retry(self, conn: sqlite3.Connection, task: Task, wake: Wake, row: sqlite3.Row) -> None:
         if row["execution_send"] is None:
             return
-        self._audit(
+        cast("TaskQueue", self)._audit(
             conn, task.id, ts=self._now(None), from_status=task.status,
             to_status=task.status, worker=wake.owner,
             note="wake known-not-sent retry: " + json.dumps({

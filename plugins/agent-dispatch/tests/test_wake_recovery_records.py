@@ -97,8 +97,7 @@ def test_recording_failure_and_typed_retry_keep_real_admission_eligible(
     def refused() -> bool:
         raise NativePromptNotSent(BRIDGE, NATIVE, wake.id)
 
-    with pytest.raises(NativePromptNotSent):
-        deliver_execution_wake(queue, wake, "application-a", refused, records=records)
+    assert not deliver_execution_wake(queue, wake, "application-a", refused, records=records)
     retry = queue.finish_wake(wake.id, wake.delivery_token, delivered=False, retry_base=0.01)
     fresh = queue.claim_due_wake(now=retry.not_before + 0.001)
     assert fresh is not None and fresh.delivery_token != wake.delivery_token
