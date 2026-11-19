@@ -153,9 +153,10 @@ After the reviewed proposal, the operator admitted execution:
   explicit pending-parent retention can resume each exact target and compose a
   whole-claim candidate only after every named version/correlation is retained.
   An explicit prepared-journal binding requalifies and retains that exact complete
-  application candidate without replacing the pending parent. Application
-  constructors do not consume it yet, and it establishes no durable
-  application/current-claim completion coverage.
+  application candidate without replacing the pending parent. Explicit
+  `PreparedApplication` consumption now requalifies that complete binding before
+  chunking/embedding and uses scoped native vector reads; point-domain native
+  publication and current-claim completion coverage remain open.
   A [retained component carrier](../../../plugins/agent-index/docs/architecture.md#component-recovery-carrier-application-unsupported)
   preserves ordering inputs behind pre-application refusal, including changed
   replacement and premature-completion refusal. Pure content/version comparison

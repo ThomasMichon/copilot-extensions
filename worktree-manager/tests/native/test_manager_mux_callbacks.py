@@ -7,27 +7,55 @@ import hashlib
 import json
 import os
 import shutil
+import subprocess
 import sys
 import time
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from pathlib import Path
+from typing import Any, NoReturn, cast
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from test_manager_runtime_install import SOURCE, _environment, _prepare_command, _promoted_payload, _run
+from test_manager_runtime_install import (
+    SOURCE,
+    _environment as _environment_untyped,
+    _prepare_command as _prepare_command_untyped,
+    _promoted_payload as _promoted_payload_untyped,
+    _run as _run_untyped,
+)
 from worktree_manager import mux_daemon, self_install as si
+from worktree_manager.self_install_payload import _copy_payload
 
 BASELINE = "32d48a3e5dccdbbf8b4a2d6f2d856fe2ddfdbe86"
+_Installed = dict[str, Any]
+_Command = Sequence[str | Path]
+_run = cast(
+    Callable[[_Command, dict[str, str], Path], subprocess.CompletedProcess[str]],
+    _run_untyped,
+)
+_prepare_command = cast(
+    Callable[[_Command, dict[str, str], Path], subprocess.CompletedProcess[str]],
+    _prepare_command_untyped,
+)
+_environment = cast(Callable[[Path], dict[str, str]], _environment_untyped)
+_promoted_payload = cast(
+    Callable[[Path], tuple[Path, dict[str, Any]]], _promoted_payload_untyped,
+)
 
 
-def _callback_boundary(directory, root, slot, env):
+def _callback_boundary(
+    directory: Path, root: Path, slot: Path, env: dict[str, str],
+) -> dict[str, bool | str] | None:
     if os.name != "nt":
         return None
     from agent_procutil import _daemon_instance_owner as owner
 
     parent_user, parent_owner = owner._current_sids(os.getpid())
     python = si._runtime_installer().runtime.slot_python(root, slot.name)
-    bash = Path(shutil.which("git")).parent.parent / "bin" / "bash.exe"
+    git = shutil.which("git")
+    assert git is not None
+    bash = Path(git).parent.parent / "bin" / "bash.exe"
     code = (
         "import hashlib,json,os,sys; from pathlib import Path; "
         "from agent_procutil import _daemon_instance_owner as owner; "
@@ -65,7 +93,7 @@ def _callback_boundary(directory, root, slot, env):
     return result
 
 
-def prepare(directory):
+def prepare(directory: Path) -> _Installed:
     directory.mkdir(exist_ok=True)
     env = _environment(directory)
     root = directory / "root with spaces"
@@ -80,12 +108,14 @@ def prepare(directory):
     assert result.returncode == 0, result.stdout + result.stderr
     assert si.current_version(root) != "1.0.0"
     assert not (root / "versions" / "1.0.0").exists()
-    slot = si.version_slot(si.current_version(root), root)
+    version = si.current_version(root)
+    assert version is not None
+    slot = si.version_slot(version, root)
     original, returned = directory / "original-copy", slot / "payload"
-    si._copy_payload(payload, original)
+    _copy_payload(payload, original)
     engine = si._runtime_installer().engine
 
-    def contents(project):
+    def contents(project: Path) -> dict[str, str]:
         return {
             path.relative_to(project).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
             for path in engine._source_files(engine._package_roots(project))
@@ -104,8 +134,10 @@ def prepare(directory):
 
 
 @pytest.fixture
-def installed():
-    record = json.loads(Path(os.environ["MANAGER_RUNTIME_ACCEPTANCE_DATA"]).read_text())
+def installed() -> Iterator[_Installed]:
+    record = cast(
+        _Installed, json.loads(Path(os.environ["MANAGER_RUNTIME_ACCEPTANCE_DATA"]).read_text()),
+    )
     root = Path(record["root"])
     selectors = {root / name: (root / name).read_bytes() for name in ("current-version", "last-known-good")}
     try:
@@ -115,7 +147,9 @@ def installed():
             path.write_bytes(content)
 
 
-def _script(slot, name, env, directory, *, payload=None):
+def _script(
+    slot: Path, name: str, env: dict[str, str], directory: Path, *, payload: Path | None = None,
+) -> str:
     if os.environ.get("MANAGER_CALLBACK_BASELINE") == "1":
         result = _run(["git", "-C", SOURCE.parent, "show", f"{BASELINE}:worktree-manager/bin/{name}"], env, directory)
         assert result.returncode == 0, result.stderr
@@ -123,7 +157,9 @@ def _script(slot, name, env, directory, *, payload=None):
     return ((payload or slot / "payload") / "bin" / name).read_text(encoding="utf-8")
 
 
-def _await_mapping(root, project, worktree, *, removed):
+def _await_mapping(
+    root: Path, project: str, worktree: str, *, removed: bool,
+) -> Mapping[str, object]:
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline:
         entry = mux_daemon.get_mapping(project, worktree, root=root)
@@ -140,8 +176,8 @@ def _await_mapping(root, project, worktree, *, removed):
 
 @pytest.mark.parametrize("selector_state", ["missing", "blank", "whitespace"])
 def test_missing_selector_is_planned_then_reuses_healthy_constructed_slot(
-    installed, monkeypatch, selector_state,
-):
+    installed: _Installed, monkeypatch: pytest.MonkeyPatch, selector_state: str,
+) -> None:
     directory, root, slot = (Path(installed[key]) for key in ("directory", "root", "slot"))
     env = _environment(directory)
     for name in ("HOME", "USERPROFILE", "AGENT_WORKTREES_CONTROL_PLANE_PROVIDERS_DIR"):
@@ -149,15 +185,19 @@ def test_missing_selector_is_planned_then_reuses_healthy_constructed_slot(
     monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(root))
     payload = slot / "payload"
     version = si.payload_version(payload)
+    assert version is not None
     assert si.needs_install(version, root) is False
     files = [slot / ".install-complete.json", slot / ".runtime-input-origins.json",
              slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")]
     before = {path: (path.stat().st_ino, path.read_bytes()) for path in files}
     bin_dir = Path(env["HOME"]) / ".local" / "bin"
+    launch: list[str | Path]
     if os.name == "nt":
         launch = [os.environ["COMSPEC"], "/d", "/c", bin_dir / "worktree-manager.cmd", "--version"]
     else:
-        launch = [shutil.which("bash"), bin_dir / "worktree-manager", "--version"]
+        bash = shutil.which("bash")
+        assert bash is not None
+        launch = [bash, bin_dir / "worktree-manager", "--version"]
     launch_env = dict(env, WORKTREE_MANAGER_ROOT=str(root), UV_OFFLINE="1",
                       PATH="" if os.name == "nt" else "/usr/bin:/bin")
     marker = root / "current-version"
@@ -177,13 +217,14 @@ def test_missing_selector_is_planned_then_reuses_healthy_constructed_slot(
     assert {path: path.read_bytes() if path.exists() else None for path in selectors} == selectors
     adapter = si._runtime_installer()
 
-    def unexpected_construction(*args, **kwargs):
+    def unexpected_construction(*args: object, **kwargs: object) -> NoReturn:
         pytest.fail("healthy constructed slot must be reused, not rebuilt: "
                     + json.dumps(installed["source-roundtrip"], sort_keys=True))
 
     monkeypatch.setattr(adapter.engine, "_construct", unexpected_construction)
     result = si.self_install(payload, root=root, dry_run=False)
     assert result.action == "installed", result
+    assert result.slot is not None
     assert Path(result.slot) == slot
     assert marker.read_text().strip() == slot.name
     assert last_good.read_text().strip() == slot.name
@@ -195,15 +236,15 @@ def test_missing_selector_is_planned_then_reuses_healthy_constructed_slot(
 
 
 def test_stage_only_proves_installed_passive_readiness_without_publication_or_rebuild(
-    installed, monkeypatch,
-):
+    installed: _Installed, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     directory, root, slot = (Path(installed[key]) for key in ("directory", "root", "slot"))
     env = _environment(directory)
     for name in ("HOME", "USERPROFILE", "AGENT_WORKTREES_CONTROL_PLANE_PROVIDERS_DIR"):
         monkeypatch.setenv(name, env[name])
     monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(root))
     adapter = si._runtime_installer()
-    def files():
+    def files() -> list[Path]:
         return [
             root / "current-version", root / "last-known-good",
             slot / ".install-complete.json", slot / ".runtime-input-origins.json",
@@ -216,7 +257,7 @@ def test_stage_only_proves_installed_passive_readiness_without_publication_or_re
     routing = root / "mux-daemon-routing"
     routing_before = {path: path.read_bytes() for path in routing.rglob("*") if path.is_file()}
 
-    def forbidden(*args, **kwargs):
+    def forbidden(*args: object, **kwargs: object) -> NoReturn:
         pytest.fail("staging rebuilt source, published commands or activated a runtime")
 
     monkeypatch.setattr(adapter.engine, "_construct", forbidden)
@@ -227,12 +268,15 @@ def test_stage_only_proves_installed_passive_readiness_without_publication_or_re
     monkeypatch.setattr(si, "_complete_candidate", forbidden)
     result = si.self_install(slot / "payload", root=root, dry_run=False, stage_only=True)
     assert result.action == "staged", result.reason
+    assert result.slot is not None
     assert Path(result.slot) == slot
     assert {path: (path.stat().st_ino, path.stat().st_mtime_ns, path.read_bytes()) for path in files()} == before
     assert {path: path.read_bytes() for path in routing.rglob("*") if path.is_file()} == routing_before
 
 
-def exercise_retained_callbacks(installed, tmp_path, monkeypatch, shell):
+def exercise_retained_callbacks(
+    installed: _Installed, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shell: str,
+) -> None:
     directory, root, slot = (Path(installed[key]) for key in ("directory", "root", "slot"))
     payload = Path(installed.get("payload", slot / "payload"))
     env = _environment(directory)
@@ -253,7 +297,14 @@ def exercise_retained_callbacks(installed, tmp_path, monkeypatch, shell):
         pane = _script(slot, f"pane-wrapper.{shell}", env, directory, payload=payload)
         bin_path = payload / "bin"
         if shell == "sh":
-            bash = Path(shutil.which("git")).parent.parent / "bin" / "bash.exe" if os.name == "nt" else shutil.which("bash")
+            git = shutil.which("git")
+            if os.name == "nt":
+                assert git is not None
+                bash = str(Path(git).parent.parent / "bin" / "bash.exe")
+            else:
+                found_bash = shutil.which("bash")
+                assert found_bash is not None
+                bash = found_bash
             env["PATH"] = "/usr/bin:/bin"
             mux_bin = tmp_path / "mux-bin"
             mux_bin.mkdir()
@@ -287,9 +338,10 @@ def exercise_retained_callbacks(installed, tmp_path, monkeypatch, shell):
                 f"AW_MANAGER_ROOT=''; AW_PROJECT={project}; AW_WT={worktree}; AW_MUX_SESSION={session}; callback"
             )
             # Bind the extracted function's script context, like PSScriptRoot below.
-            invoke = lambda code, name: _run([
-                bash, "-c", code.replace("${BASH_SOURCE[0]}", "$0"), (bin_path / name).as_posix(),
-            ], env, directory)
+            def invoke(code: str, name: str) -> subprocess.CompletedProcess[str]:
+                return _run([
+                    bash, "-c", code.replace("${BASH_SOURCE[0]}", "$0"), (bin_path / name).as_posix(),
+                ], env, directory)
             assert _run([bash, "-c", "! command -v uv"], env, directory).returncode == 0
             registered = invoke(register, "launch-session.sh")
             assert registered.returncode == 0, registered.stderr
@@ -299,13 +351,20 @@ def exercise_retained_callbacks(installed, tmp_path, monkeypatch, shell):
             powershell = shutil.which("pwsh")
             assert powershell
             env["PATH"] = str(Path(os.environ["SystemRoot"]) / "System32")
-            function = launch.split("function Invoke-ManagedMuxRegister {", 1)[1].split(
-                "\n# Deliver a worktree", 1,
-            )[0]
-            # Extracted functions acquire the harness file's automatic root;
-            # bind that one context value to the real retained script location.
-            function = function.replace(
-                "$PSScriptRoot", "'" + str(bin_path).replace("'", "''") + "'",
+            launch_source = tmp_path / "retained-launch.ps1"
+            launch_source.write_text(launch, encoding="utf-8")
+            function = (
+                "$tokens=$null; $parseErrors=$null\n"
+                "$ast=[Management.Automation.Language.Parser]::ParseFile("
+                f"'{str(launch_source).replace(chr(39), chr(39)*2)}',"
+                "[ref]$tokens,[ref]$parseErrors)\n"
+                "if ($parseErrors.Count) { throw 'retained launcher parse failed' }\n"
+                "$definitions=@($ast.FindAll({ param($node) "
+                "$node -is [Management.Automation.Language.FunctionDefinitionAst] -and "
+                "$node.Name -eq 'Invoke-ManagedMuxRegister' }, $true))\n"
+                "if ($definitions.Count -ne 1) { throw 'retained register function is ambiguous' }\n"
+                "Invoke-Expression ($definitions[0].Extent.Text.Replace("
+                "'$PSScriptRoot', '$script:CallbackBinRoot'))\n"
             )
             root_boundary = "\nif ($awManagerRoot) {" in pane
             start = (
@@ -317,13 +376,18 @@ def exercise_retained_callbacks(installed, tmp_path, monkeypatch, shell):
                 removal = removal.rstrip().rsplit("\n}", 1)[0]
             header = (
                 f"$PSScriptRoot='{str(bin_path).replace(chr(39), chr(39)*2)}'\n"
+                f"$script:CallbackBinRoot='{str(bin_path).replace(chr(39), chr(39)*2)}'\n"
                 "function Write-SetupLog { param($message,$level); throw $message }\n"
                 "function psmux { 'fixture:1' }\n"
+                "function Get-AwMuxObservation { param([string]$Session)\n"
+                f"if ($Session -ne '{session}') {{ throw 'unexpected fixture session' }}\n"
+                "[pscustomobject]@{status='present';incarnation='fixture:1';panes=@()}\n"
+                "}\n"
             )
             script = tmp_path / "callback.ps1"
             script.write_text(
                 header + "if (Get-Command uv -ErrorAction SilentlyContinue) { throw 'uv must be absent' }\n"
-                + "function Invoke-ManagedMuxRegister {" + function
+                + function
                 + f"\n$script:LaunchProject='{project}'; $plan=@{{worktree_id='{worktree}'}};"
                 + f"$script:AwPsmuxBin='psmux'; Invoke-ManagedMuxRegister '{session}' '{directory}'",
                 encoding="utf-8",
@@ -345,7 +409,9 @@ def exercise_retained_callbacks(installed, tmp_path, monkeypatch, shell):
 
 
 @pytest.mark.parametrize("shell", ["ps1", "sh"] if os.name == "nt" else ["sh"])
-def test_actual_retained_register_and_remove_without_uv(installed, tmp_path, monkeypatch, shell):
+def test_actual_retained_register_and_remove_without_uv(
+    installed: _Installed, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shell: str,
+) -> None:
     exercise_retained_callbacks(installed, tmp_path, monkeypatch, shell)
 
 

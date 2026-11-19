@@ -15,7 +15,7 @@
 # block in ~/.tmux.conf (read by tmux at server startup, so it survives server
 # restarts) AND applies the same settings to any already-running server. The
 # block is the ONLY thing it manages in that file -- the rest is left untouched,
-# and deleting the marked block (or passing nothing) removes the settings.
+# and deleting the marked block removes the persisted settings.
 # Re-running is idempotent. Pass --no-persist to only tune the running server.
 #
 # The per-session status bar + behaviors are applied automatically by the
