@@ -28,13 +28,17 @@ class WorkItemEligibility:
 def _fresh_object(result: ApiResult) -> dict[str, Any]:
     if result.not_modified or not isinstance(result.data, dict):
         raise ValueError("Azure DevOps eligibility requires a fresh object response")
+    return result.data
+
+
+def _refuse_continuation(result: ApiResult) -> None:
     if result.headers.get("x-ms-continuationtoken") or result.data.get("continuationToken"):
         raise ValueError("Azure DevOps eligibility refuses continued results")
-    return result.data
 
 
 def _definition(result: ApiResult, saved_id: str) -> dict[str, Any]:
     data = _fresh_object(result)
+    _refuse_continuation(result)
     if (
         not isinstance(data.get("id"), str)
         or data["id"].casefold() != saved_id.casefold()
@@ -71,6 +75,7 @@ def _selected(result: ApiResult, item_id: int, source: str) -> bool:
         records = []
     if isinstance(records, list) and (counts := observe_acquisition(source)) is not None:
         counts.identity_records += sum(isinstance(record, dict) for record in records)
+    _refuse_continuation(result)
     if (
         data.get("queryType") != "flat"
         or data.get("workItemRelations") not in (None, [])
@@ -128,14 +133,14 @@ def qualify_work_item(
         ):
             raise ValueError("Azure DevOps eligibility requires a bounded saved-query ID")
     check()
-    account_data = _fresh_object(
-        http.get_json(
-            org_path("_apis", "connectionData"),
-            params={"api-version": _API_VERSION},
-            etag=False,
-            purpose="metadata",
-        )
+    account_result = http.get_json(
+        org_path("_apis", "connectionData"),
+        params={"api-version": _API_VERSION},
+        etag=False,
+        purpose="metadata",
     )
+    account_data = _fresh_object(account_result)
+    _refuse_continuation(account_result)
     check()
     user = account_data.get("authenticatedUser")
     user_id = user.get("id") if isinstance(user, dict) else None

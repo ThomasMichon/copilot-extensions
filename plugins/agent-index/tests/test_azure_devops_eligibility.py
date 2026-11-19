@@ -309,3 +309,32 @@ def test_retry_budget_refuses_instead_of_returning_membership(
     assert counts["http_by_purpose"]["metadata"]["attempts"] == 5
     assert counts["http_by_purpose"]["metadata"]["retries"] == 4
     assert "identity_page" not in counts["http_by_purpose"]
+
+
+@pytest.mark.parametrize("token_form", ["header", "body"])
+def test_continued_selection_counts_parsed_records_before_refusal(token_form: str) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return _account()
+        body: dict[str, Any] = {"queryType": "flat", "workItems": [{"id": 7}]}
+        headers = {}
+        if token_form == "header":
+            headers["x-ms-continuationtoken"] = "more"
+        else:
+            body["continuationToken"] = "more"
+        return httpx.Response(200, json=body, headers=headers)
+
+    with _connector([{"wiql": _QUERY}], handler) as connector:
+
+        @measure_reindex
+        def run() -> dict[str, Any]:
+            with pytest.raises(ValueError, match="continued results"):
+                connector.work_item_eligibility(7)
+            return {}
+
+        counts = cast(dict[str, Any], run()["work_counts"])
+    assert counts["acquisition_by_source"]["ado:acme/widgets:workitems"] == {
+        "identity_records": 1,
+        "item_body_records": 0,
+        "comment_body_records": 0,
+    }
