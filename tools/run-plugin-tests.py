@@ -607,7 +607,7 @@ def run_plugin(
     with (sandbox_scope as raw_sandbox, finish_owned_run(
         OWNED_SCRATCH_OWNER, sandbox_scope, lambda: 0 if skipped_guards else returncode,
         plugin_started + plugin_timeout, time.monotonic,
-    ), _group_cleanup_worker(cast(_TestSandbox | OwnedTestSandbox, sandbox_scope)) as (cleanup_pool, cleanups)):
+    ), _group_cleanup_worker(sandbox_scope) as (cleanup_pool, cleanups)):
         sandbox = Path(raw_sandbox)
         record_owner(sandbox, REPO, retention="disposable after verified process cleanup")
         basetemp = sandbox / "t"

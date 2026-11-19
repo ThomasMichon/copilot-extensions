@@ -10,15 +10,17 @@ import sys
 import threading
 from collections.abc import Mapping
 from pathlib import Path
+from types import ModuleType
+from typing import Any
 
 from . import registry_paths
 
 
 _NOTIFICATION_LOCK = threading.Lock()
-_NOTIFICATION = None
+_NOTIFICATION: threading.Thread | None = None
 
 
-def _notify(message: str):
+def _notify(message: str) -> None:
     """At most one pending raw write; a stopped reader cannot hold the caller."""
     global _NOTIFICATION
     sink = sys.stderr
@@ -32,7 +34,7 @@ def _notify(message: str):
         with _NOTIFICATION_LOCK:
             if _NOTIFICATION is not None and _NOTIFICATION.is_alive():
                 return
-            def write():
+            def write() -> None:
                 descriptor = None
                 try:
                     descriptor = os.dup(sink.fileno())
@@ -57,7 +59,7 @@ def _notify(message: str):
         pass
 
 
-def _helper():
+def _helper() -> ModuleType:
     bootstrap = Path(sys.prefix) / ".runtime-bootstrap"
     path = (
         bootstrap / "installer_diagnostics.py" if bootstrap.is_dir()
@@ -82,11 +84,11 @@ def _helper():
 class Launch:
     """Diagnostics never replace the existing process owner or its native result."""
 
-    def __init__(self, environment: Mapping[str, str]):
+    def __init__(self, environment: Mapping[str, str]) -> None:
         self.environment = dict(environment)
-        self.reference = {"status": "missing", "installer_entry": "unknown",
+        self.reference: dict[str, Any] = {"status": "missing", "installer_entry": "unknown",
                           "missing_diagnostics": True}
-        self.helper = None
+        self.helper: ModuleType | None = None
         self.warned = False
         try:
             helper = _helper()
@@ -98,13 +100,13 @@ class Launch:
             # This boundary contains only optional diagnostics, never the installer.
             self._warn()
 
-    def _warn(self):
+    def _warn(self) -> None:
         if self.warned:
             return
         self.warned = True
         _notify("WARNING: Installer diagnostics unavailable; continuing with missing diagnostics.")
 
-    def finish(self, outcome: str = "interrupted", *, native_exit: int | None = None) -> dict:
+    def finish(self, outcome: str = "interrupted", *, native_exit: int | None = None) -> dict[str, Any]:
         if self.helper is not None:
             try:
                 self.reference = self.helper.complete_launch(

@@ -5,9 +5,15 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import stat
+from typing import TYPE_CHECKING, Any, Callable, cast
+
+if TYPE_CHECKING:
+    import ctypes
+
+PathInput = str | os.PathLike[str]
 
 
-def ordinary(path):
+def ordinary(path: PathInput) -> None:
     path = Path(path)
     for item in (path, *path.parents):
         if not os.path.lexists(item):
@@ -17,7 +23,7 @@ def ordinary(path):
             raise ValueError("diagnostic paths must not contain links or reparse points")
 
 
-def _native(path):
+def _native(path: PathInput) -> str:
     value = os.path.abspath(path)
     if value.startswith("\\\\?\\"):
         return value
@@ -25,22 +31,23 @@ def _native(path):
 
 
 class WindowsPrivacy:
-    def __init__(self):
-        import ctypes as c
+    def __init__(self) -> None:
+        import ctypes
         from ctypes import wintypes as w
 
+        c: Any = ctypes
         self.c, self.w = c, w
         self.kernel = c.WinDLL("kernel32", use_last_error=True)
         self.security = c.WinDLL("advapi32", use_last_error=True)
 
-        class Attributes(c.Structure):
+        class Attributes(ctypes.Structure):
             _fields_ = [("length", w.DWORD), ("descriptor", w.LPVOID), ("inherit", w.BOOL)]
 
-        class AclInfo(c.Structure):
+        class AclInfo(ctypes.Structure):
             _fields_ = [("count", w.DWORD), ("used", w.DWORD), ("free", w.DWORD)]
 
         self.Attributes, self.AclInfo = Attributes, AclInfo
-        signatures = (
+        signatures: tuple[tuple[Any, str, list[Any], Any], ...] = (
             (self.kernel, "GetCurrentProcess", [], w.HANDLE),
             (self.kernel, "CloseHandle", [w.HANDLE], w.BOOL),
             (self.kernel, "LocalFree", [w.LPVOID], w.LPVOID),
@@ -79,17 +86,17 @@ class WindowsPrivacy:
         finally:
             self.kernel.CloseHandle(token)
 
-    def sid(self, pointer):
+    def sid(self, pointer: int | ctypes.c_void_p | None) -> str | None:
         c, w = self.c, self.w
         text = w.LPWSTR()
         if not self.security.ConvertSidToStringSidW(pointer, c.byref(text)):
             raise c.WinError(c.get_last_error())
         try:
-            return text.value
+            return cast(str | None, text.value)
         finally:
             self.kernel.LocalFree(c.cast(text, w.LPVOID))
 
-    def descriptor(self):
+    def descriptor(self) -> ctypes.c_void_p:
         c, w = self.c, self.w
         descriptor = w.LPVOID()
         sddl = f"O:{self.account}D:P(A;OICI;FA;;;{self.account})"
@@ -97,9 +104,9 @@ class WindowsPrivacy:
             sddl, 1, c.byref(descriptor), None,
         ):
             raise c.WinError(c.get_last_error())
-        return descriptor
+        return cast("ctypes.c_void_p", descriptor)
 
-    def validate(self, handle, directory):
+    def validate(self, handle: int, directory: bool) -> None:
         c, w = self.c, self.w
         owner, dacl, descriptor = w.LPVOID(), w.LPVOID(), w.LPVOID()
         code = self.security.GetSecurityInfo(
@@ -133,7 +140,7 @@ class WindowsPrivacy:
         finally:
             self.kernel.LocalFree(descriptor)
 
-    def mkdir(self, path):
+    def mkdir(self, path: PathInput) -> None:
         c = self.c
         descriptor = self.descriptor()
         try:
@@ -151,7 +158,7 @@ class WindowsPrivacy:
         finally:
             self.kernel.CloseHandle(handle)
 
-    def open(self, path, create):
+    def open(self, path: PathInput, create: bool) -> int:
         import msvcrt
 
         c = self.c
@@ -169,24 +176,25 @@ class WindowsPrivacy:
             raise c.WinError(c.get_last_error())
         try:
             self.validate(handle, False)
-            fd = msvcrt.open_osfhandle(handle, (os.O_RDWR if create else os.O_RDONLY) | os.O_BINARY)
+            open_osfhandle = cast(Callable[[int, int], int], getattr(msvcrt, "open_osfhandle"))
+            fd = open_osfhandle(handle, (os.O_RDWR if create else os.O_RDONLY) | getattr(os, "O_BINARY"))
         except BaseException:
             self.kernel.CloseHandle(handle)
             raise
         return fd
 
 
-_windows = None
+_windows: WindowsPrivacy | None = None
 
 
-def windows():
+def windows() -> WindowsPrivacy:
     global _windows
     if _windows is None:
         _windows = WindowsPrivacy()
     return _windows
 
 
-def private_directory(path, create=False):
+def private_directory(path: PathInput, create: bool = False) -> Path:
     path = Path(path)
     ordinary(path)
     if os.name == "nt":
@@ -198,13 +206,13 @@ def private_directory(path, create=False):
     value = path.lstat()
     if not stat.S_ISDIR(value.st_mode):
         raise PermissionError("diagnostics require an ordinary directory")
-    if os.name != "nt" and (value.st_uid != os.getuid() or value.st_mode & 0o077):
+    if os.name != "nt" and (value.st_uid != cast(Callable[[], int], getattr(os, "getuid"))() or value.st_mode & 0o077):
         raise PermissionError("diagnostics require a user-owned 0700 directory")
     ordinary(path)
     return path
 
 
-def open_file(path, create=False):
+def open_file(path: PathInput, create: bool = False) -> int:
     path = Path(path)
     ordinary(path)
     before = path.lstat() if not create else None
@@ -221,7 +229,7 @@ def open_file(path, create=False):
                 or (value.st_dev, value.st_ino) != (named.st_dev, named.st_ino)
                 or (before is not None and (before.st_dev, before.st_ino) != (value.st_dev, value.st_ino))):
             raise PermissionError("diagnostic file identity is not ordinary and exclusive")
-        if os.name != "nt" and (value.st_uid != os.getuid() or value.st_mode & 0o077):
+        if os.name != "nt" and (value.st_uid != cast(Callable[[], int], getattr(os, "getuid"))() or value.st_mode & 0o077):
             raise PermissionError("diagnostic files require user-only access")
         return fd
     except BaseException:

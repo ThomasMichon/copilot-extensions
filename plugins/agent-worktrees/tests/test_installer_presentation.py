@@ -8,7 +8,7 @@ from pathlib import Path
 import shutil
 import sys
 import time
-
+from typing import BinaryIO, cast
 import pytest
 
 from test_installer_diagnostics import (
@@ -18,7 +18,7 @@ from test_installer_diagnostics import (
 
 @pytest.mark.parametrize("host", POWERSHELLS)
 @pytest.mark.parametrize("blocked,expected", [("stdout", 37), ("stderr", 0), ("both", 124)])
-def test_native_unread_parent_preserves_capture_deadline_and_modes(tmp_path, host, blocked, expected):
+def test_native_unread_parent_preserves_capture_deadline_and_modes(tmp_path: Path, host: str, blocked: str, expected: int) -> None:
     child, fixture, phase = (tmp_path / name for name in ("unread-child.py", "unread.ps1", "unread.json"))
     volume = 100000 if expected == 124 else 300000
     child.write_text(
@@ -91,7 +91,7 @@ exit $rc
     environment.pop("COPILOT_EXTENSIONS_DIAGNOSTICS_ATTEMPT", None)
     environment.pop("COPILOT_EXTENSIONS_DIAGNOSTICS_WRITER", None)
     capture = NativeCapture(
-        [shutil.which(host), "-NoProfile", "-NonInteractive", "-File", str(fixture)],
+        [cast(str, shutil.which(host)), "-NoProfile", "-NonInteractive", "-File", str(fixture)],
         environment, tmp_path / "stdout", tmp_path / "stderr")
     process, started = capture.process, time.monotonic()
     blocked_indices = {0, 1} if blocked == "both" else {0 if blocked == "stdout" else 1}
@@ -99,9 +99,9 @@ exit $rc
         while not phase.exists() and process.poll() is None and time.monotonic() - started < 20:
             for index, (source, target) in enumerate(zip((process.stdout, process.stderr), capture.files)):
                 if index not in blocked_indices:
-                    available = min(_available(source.fileno()), 8192)
+                    available = min(_available(cast(BinaryIO, source).fileno()), 8192)
                     if available:
-                        target.write(os.read(source.fileno(), available))
+                        target.write(os.read(cast(BinaryIO, source).fileno(), available))
                         target.flush()
             time.sleep(.01)
         if not phase.exists():
@@ -155,7 +155,7 @@ exit $rc
 
 
 @pytest.mark.parametrize("host", POWERSHELLS)
-def test_native_presentation_preserves_legacy_encoding_bytes(tmp_path, host):
+def test_native_presentation_preserves_legacy_encoding_bytes(tmp_path: Path, host: str) -> None:
     child = tmp_path / "legacy-child.py"
     child.write_text(
         "import os\nos.write(1,b'legacy caf\\xe9\\n')\n"
@@ -195,7 +195,7 @@ exit $rc
 
 
 @pytest.mark.parametrize("host", POWERSHELLS)
-def test_native_capture_reuses_current_buffer_before_reading_raw_backlog(tmp_path, host):
+def test_native_capture_reuses_current_buffer_before_reading_raw_backlog(tmp_path: Path, host: str) -> None:
     child = tmp_path / "buffer-child.py"
     payload = b"current-buffer\n" * 100
     child.write_text(f"import os\nos.write(1,{payload!r})\nos._exit(37)\n", encoding="utf-8")
@@ -232,7 +232,7 @@ exit $rc
 
 
 @pytest.mark.parametrize("host", POWERSHELLS)
-def test_native_replay_preserves_order_and_recorded_cutoff(tmp_path, host):
+def test_native_replay_preserves_order_and_recorded_cutoff(tmp_path: Path, host: str) -> None:
     report = str(tmp_path / "replay.json").replace("'", "''")
     result = ps_run(tmp_path, host, f"""
 Initialize-InstallerDiagnostics 'agent-worktrees'
@@ -268,7 +268,7 @@ exit 0
 
 
 @pytest.mark.parametrize("host", POWERSHELLS)
-def test_native_midstream_append_failure_preserves_known_prefix(tmp_path, host):
+def test_native_midstream_append_failure_preserves_known_prefix(tmp_path: Path, host: str) -> None:
     child = tmp_path / "tail-child.py"
     tail = b"must-not-overtake-recorded-prefix\n"
     child.write_text(f"import os\nos.write(1,{tail!r})\nos._exit(37)\n", encoding="utf-8")
@@ -307,7 +307,7 @@ exit $rc
 
 
 @pytest.mark.parametrize("host", POWERSHELLS)
-def test_native_replay_uses_remaining_deadline_without_changing_success(tmp_path, host):
+def test_native_replay_uses_remaining_deadline_without_changing_success(tmp_path: Path, host: str) -> None:
     child, fixture, phase = (tmp_path / name for name in ("deadline-child.py", "deadline.ps1", "deadline.json"))
     child.write_text("import os\nos.write(1,b'p')\nos._exit(0)\n", encoding="utf-8")
     helper, initializer, python, script, report = [
@@ -357,14 +357,14 @@ exit $rc
     environment.pop("COPILOT_EXTENSIONS_DIAGNOSTICS_ATTEMPT", None)
     environment.pop("COPILOT_EXTENSIONS_DIAGNOSTICS_WRITER", None)
     capture = NativeCapture(
-        [shutil.which(host), "-NoProfile", "-NonInteractive", "-File", str(fixture)],
+        [cast(str, shutil.which(host)), "-NoProfile", "-NonInteractive", "-File", str(fixture)],
         environment, tmp_path / "stdout", tmp_path / "stderr")
     process, started = capture.process, time.monotonic()
     try:
         while not phase.exists() and process.poll() is None and time.monotonic() - started < 20:
-            available = min(_available(process.stderr.fileno()), 8192)
+            available = min(_available(cast(BinaryIO, process.stderr).fileno()), 8192)
             if available:
-                capture.files[1].write(os.read(process.stderr.fileno(), available))
+                capture.files[1].write(os.read(cast(BinaryIO, process.stderr).fileno(), available))
                 capture.files[1].flush()
             time.sleep(.01)
         assert phase.exists(), "replay restarted a budget while parent remained unread"
@@ -381,7 +381,7 @@ exit $rc
 
 
 @pytest.mark.parametrize("host", POWERSHELLS)
-def test_native_final_snapshot_is_not_resampled_for_retained_descendant(tmp_path, host):
+def test_native_final_snapshot_is_not_resampled_for_retained_descendant(tmp_path: Path, host: str) -> None:
     child, descendant, release, done = (tmp_path / name for name in (
         "snapshot-root.py", "snapshot-descendant.py", "release-snapshot", "snapshot-done"))
     descendant.write_text("""
@@ -445,7 +445,7 @@ exit $rc
 
 @pytest.mark.parametrize("host", POWERSHELLS)
 @pytest.mark.parametrize("kind", ["initialization", "write"])
-def test_native_presentation_failure_is_durably_explicit(tmp_path, host, kind):
+def test_native_presentation_failure_is_durably_explicit(tmp_path: Path, host: str, kind: str) -> None:
     readonly = tmp_path / "readonly-input"
     readonly.write_bytes(b"synthetic ordinary file")
     path = str(readonly).replace("'", "''")
@@ -508,7 +508,7 @@ exit 37
 
 
 @pytest.mark.parametrize("host", POWERSHELLS)
-def test_storage_warning_before_human_initializer_rebinds_requested_utf8(tmp_path, host):
+def test_storage_warning_before_human_initializer_rebinds_requested_utf8(tmp_path: Path, host: str) -> None:
     (tmp_path / ".copilot-extensions").write_text("occupied", encoding="utf-8")
     initializer = str(SCRIPTS / "installer-human-output.ps1").replace("'", "''")
     entry = (SCRIPTS / "install.ps1").read_text()
@@ -532,7 +532,7 @@ exit 37
 
 
 @pytest.mark.parametrize("host", POWERSHELLS)
-def test_next_capture_recovers_after_previous_presentation_cutoff(tmp_path, host):
+def test_next_capture_recovers_after_previous_presentation_cutoff(tmp_path: Path, host: str) -> None:
     child = tmp_path / "next-child.py"
     payload = "next child café 😃\n".encode("utf-8")
     child.write_text(f"import os\nos.write(1,{payload!r})\nos._exit(37)\n", encoding="utf-8")

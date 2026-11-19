@@ -1474,3 +1474,38 @@ Authored direct per-source Plan, actual global Validation and continuing custody
 - Source publication, current-head CI/review and complete native qualification
   remain outstanding. The draft, larger-consumer limits and rollout holds remain;
   this does not complete the parent effort.
+
+### 2026-11-18 - Port to the current source and process owners
+
+- Replayed the complete source history onto development commit
+  `2040fa05a513739183c160b9ff45e3c36ece4983`, retaining current Source/profile
+  validation, closed-wheel inputs, native input-verifier custody and settlement,
+  and existing source/cleanup deadlines. Historical native results still belong
+  only to their recorded heads.
+- Durable Windows guardian capture now uses the existing `SyncProcessOutput`
+  readers with optional borrowed regular-file archive descriptors. Chunks reach
+  private raw files before the bounded delivery queue, not only after cleanup.
+  Pipe sinks and write failures report missing diagnostics without replacing
+  process results or introducing another pipe owner.
+- Extracted source-retention helpers into their existing canonical source-build
+  owner. Extracted diagnostic entry/association into a packaged bootstrap
+  helper and provenance into the existing install driver. Source ceilings were
+  not increased. Canonical synchronization and the 13-plugin install contract
+  pass; synchronized legacy copies required typing-only qualification repairs.
+- Local focused diagnostics pass 166 controls with five platform skips. Nineteen
+  focused retention, capture and frozen-bootstrap controls pass, including both
+  real-UV capture-off/on construction cases. Receipt-judgment mutation controls
+  pass all 13 cases after following the actual resource-wrapper chain.
+- A complete local guardian selection passed 52 cases with one platform skip
+  and one transient readiness-file read refusal. Its one isolated retry passed
+  without source, permission or deadline changes. This remains a recorded
+  qualification observation, not an inferred filesystem cause or blanket pass.
+- Whole-file strict checking passes all 197 changed physical Python files in
+  18 projects on Linux and Windows, without waiving existing whole-file errors.
+  Cleanup, portable-import and receipt controls pass 77 cases. The generator
+  selection passed 173 cases with two platform skips, then exposed six fixture
+  closures missing a newly declared canonical bootstrap asset. Including all
+  declared native extras repairs those six materialization cases; the
+  nested-support fixture also verifies every copied extra.
+- Fresh published-head CI, independent review and complete hosted native
+  acceptance are still owed. The PR remains draft and rollout remains held.

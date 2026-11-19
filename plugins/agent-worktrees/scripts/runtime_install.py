@@ -3,64 +3,6 @@
 from __future__ import annotations
 
 
-def _load_diagnostics():
-    from contextlib import nullcontext
-    import os
-    import sys
-    import threading
-
-    try:
-        import installer_diagnostics
-
-        return installer_diagnostics
-    except Exception:
-        # Only the optional import is isolated; implementation failures still escape.
-        os.environ["COPILOT_EXTENSIONS_DIAGNOSTICS_MISSING"] = "1"
-        sink = sys.stderr
-
-        def notify():
-            descriptor = None
-            try:
-                descriptor = os.dup(sink.fileno())
-                os.write(descriptor, b"WARNING: installer diagnostics unavailable; "
-                         b"continuing with missing diagnostics.\n")
-            except (OSError, ValueError, AttributeError):
-                pass
-            finally:
-                if descriptor is not None:
-                    os.close(descriptor)
-
-        try:
-            thread = threading.Thread(target=notify, name="installer-missing-diagnostics", daemon=True)
-            thread.start()
-            thread.join(.05)
-        except RuntimeError:
-            pass
-
-        class MissingDiagnostics:
-            @staticmethod
-            def writer(**kwargs):
-                return nullcontext()
-
-            @staticmethod
-            def capture():
-                return nullcontext({})
-
-            @staticmethod
-            def phase(name):
-                pass
-
-            @staticmethod
-            def associate_installed(installation):
-                pass
-
-            @staticmethod
-            def warn():
-                pass
-
-        return MissingDiagnostics()
-
-
 if __name__ == "__main__":
     # Enter diagnostics before implementation imports and argparse can fail.
     # Re-enter this same trusted source in-process, not through another child.
@@ -68,21 +10,9 @@ if __name__ == "__main__":
     from pathlib import Path
 
     sys.path.insert(0, str(Path(__file__).resolve().parent))
-    _entry_diagnostics = _load_diagnostics()
+    from runtime_install_diagnostics import run_entry
 
-    with _entry_diagnostics.writer(announce=True):
-        import runpy
-
-        if hasattr(_entry_diagnostics, "ordinary"):
-            _entry_diagnostics.ordinary(Path(__file__))
-        _implementation = runpy.run_path(
-            __file__, run_name="__installer_source__",
-            init_globals={"_entry_diagnostics": _entry_diagnostics},
-        )
-        try:
-            raise SystemExit(_implementation["main"]())
-        finally:
-            _implementation["verification"].close_clients()
+    run_entry(Path(__file__))
 
 import argparse
 import hashlib
@@ -90,7 +20,6 @@ import importlib.util
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -115,6 +44,7 @@ import versioned_runtime_source as _runtime_source
 runtime_source = _runtime_source
 import runtime_install_publication as helper_publication
 import runtime_install_driver as install_driver
+import runtime_install_diagnostics as diagnostic_entry
 import runtime_input_verifier as verification
 from runtime_install_profiles import runtime_profile_policy
 from runtime_install_governance import Governance, InstallationRefused
@@ -125,7 +55,7 @@ __all__ = [
 ]
 
 
-diagnostics = globals().get("_entry_diagnostics") or _load_diagnostics()
+diagnostics = globals().get("_entry_diagnostics") or diagnostic_entry.load_diagnostics()
 
 
 def helper_publication_plan(path: Path, digest: str, *, prepare_only: bool = False) -> dict[str, Any]:
@@ -441,85 +371,20 @@ def _settle_monitor(
 def _source_provenance(
     payload: Path, version: str, source_identity: runtime_source.SourceIdentity | None = None,
 ) -> dict[str, str]:
-    provenance = {"version": version, "source": payload.as_posix()}
-    for field, arguments in (
-        ("commit", ["rev-parse", "HEAD"]),
-        ("branch", ["rev-parse", "--abbrev-ref", "HEAD"]),
-    ):
-        if source_identity is not None:
-            provenance[field] = source_identity.source_commit if field == "commit" else "unknown"
-            continue
-        if shutil.which("git") is None:
-            provenance[field] = "unknown"
-            continue
-        result = subprocess.run(
-            ["git", "-C", str(payload), *arguments],
-            capture_output=True, text=True, timeout=30,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
-        )
-        if result.returncode != 0:
-            if "not a git repository" not in result.stderr:
-                raise InstallationRefused(f"Source provenance lookup failed: {result.stderr}")
-            provenance[field] = "unknown"
-        else:
-            provenance[field] = result.stdout.strip()
-    kind = "marketplace" if "/.copilot/installed-plugins/" in payload.as_posix() else "local"
-    dirty = None
-    if source_identity is None and kind == "local" and provenance["commit"] != "unknown":
-        status = subprocess.run(
-            ["git", "-C", str(payload), "status", "--porcelain", "--", str(payload)],
-            capture_output=True, text=True, timeout=30, check=True,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
-        )
-        dirty = bool(status.stdout.strip())
-    if source_identity is not None:
-        provenance["commit"] = source_identity.source_commit
-    provenance["deployment_source"] = json.dumps({
-        "kind": kind, "path": payload.as_posix(), "repo": "copilot-extensions",
-        "plugin": "agent-worktrees", "version": version,
-        "commit": provenance["commit"] if kind == "local" else None,
-        "branch": provenance["branch"] if kind == "local" else None, "dirty": dirty,
-        **runtime_source.manifest_fields(source_identity),
-    })
-    return provenance
+    return install_driver.source_provenance(
+        payload, version, source_identity, runtime_source=runtime_source, refusal=InstallationRefused,
+    )
 
 
 def _installed_identity(slot: Path) -> dict[str, Any]:
     return install_driver.installed_identity(slot, runtime, InstallationRefused)
 
 
-def _associate_diagnostics(governance: Governance, slot: Path, identity: dict, manifest: bytes) -> None:
-    """Called only inside existing publication and retained-slot custody."""
-    try:
-        from agent_worktrees import runtime_deployment as deployment
-
-        governance.recheck()
-        if (
-            slot.parent != governance.root / "versions"
-            or runtime.current_version(governance.root) != slot.name
-            or deployment.read_manifest(governance.root) != manifest
-        ):
-            raise InstallationRefused("Diagnostic association requires the validated publication")
-        published = json.loads(manifest)
-        if (
-            published["service"] != "agent-worktrees"
-            or published["runtime_slot"] != slot.name
-            or Path(published["venv"]) != slot
-            or published["source"]["version"] != identity["package_version"]
-            or published["runtime_generation"] != identity["build_info"].get("runtime_generation")
-            or published["payload_hash"] != runtime.read_marker(
-                governance.root, slot.name,
-            )["payload_hash"]
-        ):
-            raise InstallationRefused("Diagnostic association differs from installed identity")
-        diagnostics.associate_installed({
-            "runtime_root": str(governance.root), "runtime_slot": slot.name,
-            "package_version": identity["package_version"],
-            "runtime_generation": identity["build_info"].get("runtime_generation"),
-            "deployment_manifest_sha256": hashlib.sha256(manifest).hexdigest(),
-        })
-    except (OSError, ValueError, RuntimeError, KeyError, TypeError):
-        diagnostics.warn()
+def _associate_diagnostics(governance: Governance, slot: Path, identity: dict[str, Any], manifest: bytes) -> None:
+    diagnostic_entry.associate(
+        governance, slot, identity, manifest,
+        runtime=runtime, diagnostics=diagnostics, refusal=InstallationRefused,
+    )
 
 
 @install_driver.owned

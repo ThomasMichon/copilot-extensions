@@ -76,7 +76,7 @@ DIAGNOSTICS_FILES = ("installer-diagnostics.ps1", "installer-diagnostics.sh",
                      "installer_diagnostics.py", "installer_diagnostics_files.py")
 
 
-def diagnostics_pairs(repo: Path):
+def diagnostics_pairs(repo: Path) -> list[tuple[Path, Path]]:
     adopters = tuple(name for name in DIAGNOSTICS_ADOPTERS
                      if os.path.lexists(repo / "plugins" / name))
     pairs = [

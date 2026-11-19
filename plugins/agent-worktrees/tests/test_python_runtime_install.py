@@ -18,14 +18,14 @@ from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, ExitStack, contextmanager, nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from typing import TYPE_CHECKING, Any, NoReturn, Protocol, TypeVar, TypedDict, cast
 from unittest.mock import Mock
 
 import pytest
 from agent_procutil import no_window_kwargs
 from update_driver import core
-
+DiagnosticPublication = tuple[SimpleNamespace, Path, dict[str, Any], bytes, Path, list[str]]
 
 @overload
 def _status(request_id: str, *, root: Path) -> core.Request: ...
@@ -313,7 +313,7 @@ def test_direct_installation_refuses_before_governance_or_construction(
 
 
 @pytest.fixture
-def diagnostic_publication(driver, tmp_path, monkeypatch):
+def diagnostic_publication(driver: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[DiagnosticPublication]:
     from types import SimpleNamespace
     from agent_worktrees import runtime_deployment as deployment
 
@@ -328,14 +328,14 @@ def diagnostic_publication(driver, tmp_path, monkeypatch):
     manifest = deployment.manifest_bytes(identity, slot, "previous")
     (root / "current-version").write_text(slot.name + "\n")
     deployment.publish(root, manifest)
-    checked = []
+    checked: list[str] = []
     governance = SimpleNamespace(root=root, recheck=lambda: checked.append("governance"))
     with driver.diagnostics.writer():
         directory = driver.diagnostics.context()
         yield governance, slot, identity, manifest, directory, checked
 
 
-def test_diagnostics_associate_only_installed_publication(driver, diagnostic_publication):
+def test_diagnostics_associate_only_installed_publication(driver: ModuleType, diagnostic_publication: DiagnosticPublication) -> None:
     governance, slot, identity, manifest, directory, checked = diagnostic_publication
     driver._associate_diagnostics(governance, slot, identity, manifest)
     record = json.loads((directory / "installation.json").read_text())
@@ -357,11 +357,11 @@ def test_diagnostics_associate_only_installed_publication(driver, diagnostic_pub
 
 @pytest.mark.parametrize("damage", ["governance", "selected", "manifest", "identity", "log", "marker"])
 def test_unverified_installation_remains_unattributed(
-    driver, diagnostic_publication, monkeypatch, damage,
-):
+    driver: ModuleType, diagnostic_publication: DiagnosticPublication, monkeypatch: pytest.MonkeyPatch, damage: str,
+) -> None:
     governance, slot, identity, manifest, directory, _checked = diagnostic_publication
     if damage == "governance":
-        def changed():
+        def changed() -> NoReturn:
             raise driver.InstallationRefused("changed owner")
         governance.recheck = changed
     elif damage == "selected":
@@ -377,7 +377,7 @@ def test_unverified_installation_remains_unattributed(
     elif damage == "log":
         original = driver.diagnostics.files().open_file
 
-        def refused(path, *args, **kwargs):
+        def refused(path: Path, *args: Any, **kwargs: Any) -> Any:
             if path.suffix == ".log":
                 raise PermissionError("log path ownership changed")
             return original(path, *args, **kwargs)
@@ -1455,7 +1455,7 @@ def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
     authority: list[str] = []
     associations = []
 
-    def associate(record):
+    def associate(record: dict[str, Any]) -> None:
         assert authority == ["enter", "leave", "enter"]
         for retained in ("1.0.0", "2.0.0"):
             with pytest.raises(driver.runtime.RetentionTimeout):

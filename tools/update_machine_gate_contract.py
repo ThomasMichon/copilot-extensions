@@ -15,8 +15,10 @@ import sys
 import tempfile
 import time
 from contextlib import ExitStack, nullcontext
+from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
+from typing import Any, cast
 from unittest.mock import patch
 
 
@@ -29,17 +31,17 @@ def _expect(condition: bool, message: str) -> None:
         raise ContractViolation(message)
 
 
-def _function(path: Path, name: str, namespace: dict) -> object:
+def _function(path: Path, name: str, namespace: dict[str, Any]) -> Callable[..., Any]:
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    definitions = [
+    definitions: list[ast.stmt] = [
         node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == name
     ]
     _expect(len(definitions) == 1, f"{path.name}: expected one {name} definition")
     exec(compile(ast.Module(body=definitions, type_ignores=[]), str(path), "exec"), namespace)
-    return namespace[name]
+    return cast(Callable[..., Any], namespace[name])
 
 
-def _module(path: Path, name: str) -> ModuleType:
+def _module(path: Path, name: str) -> Any:
     spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
         raise ContractViolation(f"cannot load {path.name}")
@@ -62,10 +64,10 @@ def check_monitor_outcome(source: Path) -> list[str]:
 def _check_monitor_outcome(source: Path) -> None:
     environ: dict[str, str] = {}
     environment = SimpleNamespace(environ=environ, getenv=environ.get)
-    state: dict = {}
-    calls = []
+    state: dict[str, Any] = {}
+    calls: list[bool] = []
 
-    def activate(*, monitor_was_live):
+    def activate(*, monitor_was_live: bool) -> Any:
         calls.append(monitor_was_live)
         if state.get("error"):
             raise RuntimeError("fixture transition failure")
@@ -128,13 +130,13 @@ def _check_receipt_judgment(source: Path) -> None:
     package_name = "_install_receipt_contract"
     package = ModuleType(package_name)
     package.__path__ = []
-    reconcile = ModuleType(f"{package_name}.reconcile")
-    update_driver = ModuleType("update_driver")
+    reconcile: Any = ModuleType(f"{package_name}.reconcile")
+    update_driver: Any = ModuleType("update_driver")
     update_driver.participant_environment = dict
-    state = {}
+    state: dict[str, Any] = {}
     root = Path("receipt-contract-runtime")
 
-    def deployed(name, *, root):
+    def deployed(name: str, *, root: Path) -> Any:
         _expect(name == "agent-example" and root == Path("receipt-contract-runtime"),
                 "receipt callback used the wrong runtime")
         return state["deployed"]
@@ -153,7 +155,7 @@ def _check_receipt_judgment(source: Path) -> None:
         if any(isinstance(target, ast.Name) and target.id == "_WATCHDOG_EXIT" for target in targets):
             watchdogs.append(node.value)
     _expect(len(watchdogs) == 1, "installer watchdog exit is missing or ambiguous")
-    watchdog = ast.literal_eval(watchdogs[0])
+    watchdog = ast.literal_eval(cast(ast.expr, watchdogs[0]))
     _expect(type(watchdog) is int and watchdog == 124, "installer watchdog exit changed")
     with patch.dict(sys.modules, {
         package_name: package, reconcile.__name__: reconcile, update_driver.__name__: update_driver,
@@ -163,26 +165,26 @@ def _check_receipt_judgment(source: Path) -> None:
         })
         calls = []
 
-        def spawn(argv, cwd, env, capture, **_kwargs):
+        def spawn(argv: list[str], cwd: Path | None, env: dict[str, str], capture: bool, **_kwargs: Any) -> Any:
             _expect(argv == ["installer"] and capture, "targeted installer used the wrong child")
             calls.append(argv)
             return SimpleNamespace(returncode=state["rc"]), None
 
         class Capture:
-            def __init__(self, *_args, **_kwargs):
+            def __init__(self, *_args: Any, **_kwargs: Any) -> None:
                 pass
 
-            def wait(self, timeout, **_kwargs):
+            def wait(self, timeout: float, **_kwargs: Any) -> None:
                 if state["expired"]:
                     raise subprocess.TimeoutExpired("installer", timeout)
 
-            def deliver(self):
+            def deliver(self) -> None:
                 pass
 
-        def unowned(*_args, **_kwargs):
+        def unowned(*_args: Any, **_kwargs: Any) -> None:
             raise ContractViolation("targeted installer bypassed the receipt owner")
 
-        def result(status, rc, version, complete, duration):
+        def result(status: str, rc: int | None, version: str | None, complete: bool, duration: float) -> SimpleNamespace:
             return SimpleNamespace(
                 status=status, rc=rc, receipt_version=version, receipt_complete=complete, duration_s=duration,
             )
@@ -195,6 +197,7 @@ def _check_receipt_judgment(source: Path) -> None:
             "contained_test_mode": lambda: True, "_judge": judge,
         }
         _function(source / "installer_run.py", "_run_installer", runner_namespace)
+        _function(source / "installer_run.py", "_run_with_resources", runner_namespace)
         owned = _function(source / "installer_run.py", "run_installer", runner_namespace)
         process = SimpleNamespace(run=unowned, SubprocessError=subprocess.SubprocessError)
         output = SimpleNamespace(
@@ -210,7 +213,7 @@ def _check_receipt_judgment(source: Path) -> None:
         execute = _function(source / "update_runtime.py", "_execute_runtime_step", {
             "__package__": package_name, "update_runtime_plan": SimpleNamespace(RuntimeUpdateStep=object),
             "functools": functools, "_run_human_installer": adapter, "output": output,
-            "subprocess": process,
+            "subprocess": process, "cast": cast, "_DiagnosticOptions": dict,
         })
         step = SimpleNamespace(
             status="", name="agent-example", source=None, runtime_root=root, project_root=None,
@@ -253,11 +256,11 @@ def _check_machine_gate(source: Path) -> None:
     package_name = "_install_machine_gate_contract"
     package = ModuleType(package_name)
     package.__path__ = []
-    config = ModuleType(f"{package_name}.config")
-    identity = ModuleType(f"{package_name}.machine_identity")
-    reconcile = ModuleType(f"{package_name}.reconcile")
-    runtime = ModuleType(f"{package_name}.update_runtime")
-    application = ModuleType(f"{package_name}.update_runtime_application")
+    config: Any = ModuleType(f"{package_name}.config")
+    identity: Any = ModuleType(f"{package_name}.machine_identity")
+    reconcile: Any = ModuleType(f"{package_name}.reconcile")
+    runtime: Any = ModuleType(f"{package_name}.update_runtime")
+    application: Any = ModuleType(f"{package_name}.update_runtime_application")
     modules = {
         module.__name__: module
         for module in (package, config, identity, reconcile, runtime, application)
@@ -291,7 +294,7 @@ def _check_machine_gate(source: Path) -> None:
         namespace = {
             "__package__": package_name,
             "update_runtime_plan": planner,
-            "functools": functools,
+            "functools": functools, "cast": cast, "_DiagnosticOptions": dict,
         }
         execute = _function(source / "update_runtime.py", "_execute_runtime_step", namespace)
         name = "agent-example"
@@ -300,7 +303,7 @@ def _check_machine_gate(source: Path) -> None:
         reconcile.runtime_deployed_version = lambda *args, **kwargs: "1"
         reconcile._versions_equal = lambda first, second: first == second
         reconcile._zero_downtime_update = lambda path: False
-        scenarios = (
+        scenarios: tuple[tuple[str, str, dict[str, set[str]], bool, str | None, bool], ...] = (
             ("excluded", "machine-gated", {name: {"other"}}, True, None, False),
             ("omitted", "machine-gated", {}, True, None, False),
             ("allowed", "machine-gated", {name: {"local"}}, True, None, True),
@@ -326,21 +329,28 @@ def _check_machine_gate(source: Path) -> None:
 
 
 def _check_case(
-    case, planner, config, reconcile, namespace, execute, policy, kind, platform,
-    force, explicit_context, payload, anchor, context, name, scope, allowed,
-    present, failure, admitted,
+    case: str, planner: Any, config: Any, reconcile: Any, namespace: dict[str, Any],
+    execute: Callable[..., Any], policy: Callable[..., Any], kind: str, platform: str,
+    force: bool, explicit_context: bool, payload: Path, anchor: Path, context: Path,
+    name: str, scope: str, allowed: dict[str, set[str]],
+    present: bool, failure: str | None, admitted: bool,
 ) -> None:
-    detected, gate_reads, presence_reads, consulted, prepared, invoked = [], [], [], [], [], []
-    selected_config = []
+    detected: list[Path] = []
+    gate_reads: list[Path] = []
+    presence_reads: list[Path] = []
+    consulted: list[Any] = []
+    prepared: list[Any] = []
+    invoked: list[Any] = []
+    selected_config: list[SimpleNamespace] = []
 
-    def load_config():
+    def load_config() -> SimpleNamespace:
         if failure == "anchor":
             raise ValueError("synthetic anchor resolution failure")
         config = SimpleNamespace(configured_machine="local", default_repo=SimpleNamespace(anchor=anchor))
         selected_config.append(config)
         return config
 
-    def detect_machine(repo, *, value=None, config=None):
+    def detect_machine(repo: Path, *, value: str | None = None, config: Any = None) -> str:
         detected.append(repo)
         _expect(value == "local", f"{case}: configured machine identity was not supplied")
         _expect(config is selected_config[0], f"{case}: target configuration was not supplied")
@@ -348,23 +358,23 @@ def _check_case(
             raise ValueError("synthetic machine detection failure")
         return "local"
 
-    def runtime_allowed(*args, **kwargs):
+    def runtime_allowed(*args: Any, **kwargs: Any) -> Any:
         consulted.append((args, kwargs))
         return policy(*args, **kwargs)
 
-    def load_gate(repo):
+    def load_gate(repo: Path) -> dict[str, set[str]]:
         gate_reads.append(repo)
         return allowed
 
-    def gate_present(repo):
+    def gate_present(repo: Path) -> bool:
         presence_reads.append(repo)
         return present
 
-    def environment(*args):
+    def environment(*args: Any) -> tuple[dict[str, str], Path]:
         prepared.append(args)
         return {}, payload
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: Any) -> SimpleNamespace:
         invoked.append((argv, kwargs))
         return SimpleNamespace(status="OK")
 

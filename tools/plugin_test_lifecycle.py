@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping, Sequence
 import os
 from pathlib import Path
 import stat
@@ -117,7 +117,7 @@ def _native_scope_environment(environment: dict[str, str]) -> dict[str, str]:
 
     if caller_unit() is None:
         return environment
-    uid = os.getuid()
+    uid = cast(Callable[[], int], getattr(os, "getuid"))()
     bus = Path(f"/run/user/{uid}/bus")
     try:
         info = bus.lstat()
@@ -130,7 +130,7 @@ def _native_scope_environment(environment: dict[str, str]) -> dict[str, str]:
 
 
 def run_contained(
-    owner: Any, command: list[str], *, cwd: Path, env: dict[str, str], sandbox: Path,
+    owner: Any, command: Sequence[str], *, cwd: Path, env: Mapping[str, str], sandbox: Path,
     limits: Any, daemon_purpose: str, daemon_lease: Any, qualification: Any,
     native_application: bool,
 ) -> int:

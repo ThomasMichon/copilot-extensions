@@ -99,14 +99,14 @@ def _package(root: Path, name: str, sources: str = "") -> Path:
     ("construct", "construct-runtime"),
 ])
 def test_progress_names_the_last_entered_stage_without_changing_failure(
-    engine, tmp_path, monkeypatch, stage, expected,
-):
+    engine: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stage: str, expected: str,
+) -> None:
     plugin = _package(tmp_path / "plugin", "example")
     root = tmp_path / "runtime"
-    phases = []
+    phases: list[str] = []
     primary = OSError("synthetic stage failure")
 
-    def fail(*args, **kwargs):
+    def fail(*args: Any, **kwargs: Any) -> NoReturn:
         raise primary
 
     if stage == "fingerprint":
@@ -153,14 +153,14 @@ def test_child_failure_preserves_unicode_diagnostic_and_original_error(engine: M
 
 @pytest.mark.parametrize("enabled", [False, True])
 def test_child_diagnostics_use_only_opted_in_frozen_plugin_helper(
-    engine, monkeypatch, tmp_path, enabled,
-):
+    engine: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, enabled: bool,
+) -> None:
     plugin = tmp_path / "frozen-plugin"
     inputs = engine.FrozenInputs(plugin, (plugin,), "fixture", diagnostics=enabled)
     monkeypatch.setattr(engine, "_procutil", lambda _inputs: None)
     calls = []
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         calls.append(kwargs)
         return subprocess.CompletedProcess(argv, 0, "native output", "")
 
@@ -222,8 +222,8 @@ def test_candidate_failure_survives_retained_cleanup(
 
 @pytest.mark.parametrize("enabled", [False, True])
 def test_closed_wheel_retention_preserves_profile_and_diagnostic_opt_in(
-    engine, monkeypatch, tmp_path, enabled,
-):
+    engine: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, enabled: bool,
+) -> None:
     from types import SimpleNamespace
 
     plugin = tmp_path / "original"
@@ -240,15 +240,15 @@ def test_closed_wheel_retention_preserves_profile_and_diagnostic_opt_in(
     monkeypatch.setattr(engine, "freeze_inputs", lambda *args, **kwargs: frozen)
     monkeypatch.setattr(engine, "_source_files", lambda packages, **kwargs: ())
 
-    def profile(files, extras, selection, **kwargs):
+    def profile(files: tuple[object, ...], extras: tuple[str, ...], selection: tuple[str, ...], **kwargs: Any) -> str:
         assert files == () and extras == ("role",) and selection == ("example",)
         return "profile"
 
-    def wheel_hash(source_hash, selected):
+    def wheel_hash(source_hash: str, selected: SimpleNamespace) -> str:
         assert source_hash == "profile" and selected is wheels
         return "admitted"
 
-    def retain(uv, snapshot, *, python):
+    def retain(uv: Path, snapshot: object, *, python: Path) -> AbstractContextManager[object]:
         assert snapshot is wheels.snapshot and python == tmp_path / "python"
         return nullcontext(transaction)
 
@@ -832,15 +832,15 @@ def test_retained_inputs_validate_both_digests_from_one_source_read(
         )
 
     calls = dict.fromkeys(files, 0)
-    read_bytes = Path.read_bytes
-
-    def count_read(path: Path) -> bytes:
-        if path in calls:
-            calls[path] += 1
-        return read_bytes(path)
+    open_source = Path.open
+    def count_read(path: Path, mode: str = "r", *args: Any, **kwargs: Any) -> Any:
+        for source in calls:
+            if "r" in mode and "b" in mode and path.samefile(source):
+                calls[source] += 1
+        return open_source(path, mode, *args, **kwargs)
 
     monkeypatch.setattr(engine, "retain_uv_install", retain)
-    monkeypatch.setattr(Path, "read_bytes", count_read)
+    monkeypatch.setattr(Path, "open", count_read)
     if change is None:
         with engine._retained_inputs(inputs, Path(sys.executable), Path(sys.executable), refresh=False):
             pass
@@ -1796,8 +1796,8 @@ def test_numbered_construction_uses_real_uv_and_remains_frozen_after_source_chan
         specification = importlib.util.spec_from_file_location(
             "real_uv_capture_fixture", scripts / "installer_diagnostics.py",
         )
-        diagnostics = importlib.util.module_from_spec(specification)
-        specification.loader.exec_module(diagnostics)
+        diagnostics = importlib.util.module_from_spec(cast(importlib.machinery.ModuleSpec, specification))
+        cast(Any, specification).loader.exec_module(diagnostics)
         monkeypatch.setenv("USERPROFILE", str(tmp_path))
         monkeypatch.setenv("HOME", str(tmp_path))
         environment = diagnostics.reserve_launch(os.environ)

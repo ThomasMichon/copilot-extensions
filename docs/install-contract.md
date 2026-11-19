@@ -4387,11 +4387,13 @@ change a deadline or alter construction/cutover ownership.
 Worktrees also opts its retained Windows construction children into durable
 capture through the existing guardian. The helper comes from the admitted
 frozen plugin's packaged diagnostic closure, never ambient module discovery.
-Concurrent byte drainers preserve both original child streams and write private
-regular-file spools while the child runs. Completion still requires the root
-and both pipes within the original deadline: a descendant retaining a pipe
-still times out, while one closing its pipes does not extend successful root
-completion. This is not a new whole-Job natural-exit requirement.
+The existing `SyncProcessOutput` pipe readers preserve both original child
+streams and write borrowed private regular-file descriptors before queueing
+each chunk. There is no second pipe reader or deferred-until-cleanup archive.
+Non-regular archive sinks are refused without changing the native result.
+Ordinary non-streaming completion retains its root-and-pipe-EOF wait; streaming
+execution retains its existing direct-child completion and owned output
+settlement. This is not a new whole-Job natural-exit requirement.
 The original strict Job owner terminates and verifies every owned writer before
 the final bounded drain and sanitized snapshot, including after caller death.
 The guardian's JSON completion protocol is not an archived child stream.

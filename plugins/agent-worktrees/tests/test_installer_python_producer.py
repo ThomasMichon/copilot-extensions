@@ -1,5 +1,5 @@
 """Real isolated Python producers; no construction, service or network calls."""
-
+from __future__ import annotations
 import json
 import os
 from pathlib import Path
@@ -7,7 +7,7 @@ import shutil
 import subprocess
 import sys
 import time
-
+from typing import Any, BinaryIO, cast
 import pytest
 from update_telemetry.human import _available
 
@@ -17,7 +17,7 @@ from test_installer_diagnostics import diagnostic_context as _diagnostic_context
 diagnostic_context = _diagnostic_context
 
 
-def invoke(tmp_path, program=None, *, entry=None, absent=False, inherited=False):
+def invoke(tmp_path: Path, program: str | None = None, *, entry: Path | None = None, absent: bool = False, inherited: bool = False) -> subprocess.CompletedProcess[bytes]:
     environment = native_environment(USERPROFILE=str(tmp_path), HOME=str(tmp_path))
     if not inherited:
         for name in ("ATTEMPT", "WRITER", "DIRECTORY", "MISSING"):
@@ -33,7 +33,7 @@ def invoke(tmp_path, program=None, *, entry=None, absent=False, inherited=False)
                        "sys.argv = [target, '--unknown-diagnostic-fixture-option']; "
                        "runpy.run_path(target, run_name='__main__')")
         else:
-            prefix += program
+            prefix += cast(str, program)
         argv = [sys.executable, "-I", "-B", "-X", "utf8", "-c", prefix, str(SCRIPTS)]
         if entry is not None:
             argv.append(str(entry))
@@ -44,7 +44,7 @@ def invoke(tmp_path, program=None, *, entry=None, absent=False, inherited=False)
     )
 
 
-def evidence(tmp_path):
+def evidence(tmp_path: Path) -> tuple[Path, dict[str, Any], str, list[dict[str, Any]]]:
     root = tmp_path / ".copilot-extensions" / "installer-diagnostics"
     attempts = list(root.iterdir())
     assert len(attempts) == 1
@@ -56,7 +56,7 @@ def evidence(tmp_path):
 
 
 @pytest.mark.parametrize("absent", [False, True])
-def test_real_entry_early_parser_failure_is_durable(tmp_path, absent):
+def test_real_entry_early_parser_failure_is_durable(tmp_path: Path, absent: bool) -> None:
     result = invoke(tmp_path, entry=SCRIPTS / "runtime_install.py", absent=absent)
     assert result.returncode == 2
     directory, receipt, text, completed = evidence(tmp_path)
@@ -75,7 +75,7 @@ def test_real_entry_early_parser_failure_is_durable(tmp_path, absent):
 @pytest.mark.parametrize("damage", ["missing", "syntax", "import", "runtime"])
 @pytest.mark.parametrize("entrypoint", [True, False])
 @pytest.mark.parametrize("option,code", [("--help", 0), ("--unknown-diagnostic-fixture-option", 2)])
-def test_unavailable_helper_does_not_replace_parser_result(tmp_path, damage, entrypoint, option, code):
+def test_unavailable_helper_does_not_replace_parser_result(tmp_path: Path, damage: str, entrypoint: bool, option: str, code: int) -> None:
     scripts = tmp_path / "scripts"
     shutil.copytree(SCRIPTS, scripts)
     helper = scripts / "installer_diagnostics.py"
@@ -112,10 +112,11 @@ def test_unavailable_helper_does_not_replace_parser_result(tmp_path, damage, ent
     assert b"Traceback" not in result.stderr
 
 
-def test_missing_helper_preserves_implementation_import_failure(tmp_path):
+def test_missing_helper_preserves_implementation_import_failure(tmp_path: Path) -> None:
     scripts = tmp_path / "scripts"
     scripts.mkdir()
     shutil.copyfile(SCRIPTS / "runtime_install.py", scripts / "runtime_install.py")
+    shutil.copyfile(SCRIPTS / "runtime_install_diagnostics.py", scripts / "runtime_install_diagnostics.py")
     (scripts / "installer_engine.py").write_text(
         "raise RuntimeError('native implementation import failure')\n", encoding="utf-8",
     )
@@ -126,7 +127,7 @@ def test_missing_helper_preserves_implementation_import_failure(tmp_path):
     assert b"No module named 'installer_diagnostics'" not in result.stderr
 
 
-def test_missing_helper_warning_cannot_hold_entrypoint(tmp_path):
+def test_missing_helper_warning_cannot_hold_entrypoint(tmp_path: Path) -> None:
     scripts = tmp_path / "scripts"
     shutil.copytree(SCRIPTS, scripts)
     (scripts / "installer_diagnostics.py").unlink()
@@ -155,7 +156,7 @@ runpy.run_path(sys.argv[0],run_name='__main__')
 
 
 @pytest.mark.parametrize("missing", [False, True])
-def test_available_helper_notices_cannot_hold_entry_on_unread_stderr(tmp_path, missing):
+def test_available_helper_notices_cannot_hold_entry_on_unread_stderr(tmp_path: Path, missing: bool) -> None:
     release = tmp_path / "release"
     program = """
 import json,os,sys,threading,time
@@ -190,14 +191,14 @@ with diagnostics.writer(announce=True):
     )
     try:
         deadline = time.monotonic() + 10
-        while not _available(process.stderr.fileno()) and process.poll() is None:
+        while not _available(cast(BinaryIO, process.stderr).fileno()) and process.poll() is None:
             assert time.monotonic() < deadline, "fixture did not fill stderr"
             time.sleep(.01)
         assert process.poll() is None
         release.touch()
         process.wait(timeout=10)  # Keep the parent presentation pipe full and unread.
         assert process.returncode == 23
-        reference = json.loads(process.stdout.read())
+        reference = json.loads(cast(BinaryIO, process.stdout).read())
         assert reference["missing_diagnostics"] is missing
         directory, _, text, completed = evidence(tmp_path)
         assert reference["directory"] == str(directory)
@@ -208,11 +209,11 @@ with diagnostics.writer(announce=True):
         if process.poll() is None:
             process.terminate()
             process.wait(timeout=5)
-        process.stdout.close()
-        process.stderr.close()
+        cast(BinaryIO, process.stdout).close()
+        cast(BinaryIO, process.stderr).close()
 
 
-def test_uncaught_python_exception_preserves_class_and_useful_text(tmp_path):
+def test_uncaught_python_exception_preserves_class_and_useful_text(tmp_path: Path) -> None:
     result = invoke(tmp_path, """
 with diagnostics.writer():
     print("building isolated fixture", flush=True)
@@ -227,7 +228,7 @@ with diagnostics.writer():
 
 
 @pytest.mark.parametrize("absent", [False, True])
-def test_phase_and_exact_reference_survive_protocol_and_abrupt_exit(tmp_path, absent):
+def test_phase_and_exact_reference_survive_protocol_and_abrupt_exit(tmp_path: Path, absent: bool) -> None:
     result = invoke(tmp_path, """
 import os
 with diagnostics.writer(announce=True):
@@ -246,7 +247,7 @@ with diagnostics.writer(announce=True):
         assert b"Installer phase: retain-uv-inputs" in result.stderr
 
 
-def test_native_child_error_does_not_dump_command_or_authority(tmp_path):
+def test_native_child_error_does_not_dump_command_or_authority(tmp_path: Path) -> None:
     result = invoke(tmp_path, """
 import subprocess
 with diagnostics.writer():
@@ -266,7 +267,7 @@ with diagnostics.writer():
     assert completed[0]["native_exit"] == 23
 
 
-def test_binary_split_credentials_unicode_large_records_and_protocol_stdout(tmp_path):
+def test_binary_split_credentials_unicode_large_records_and_protocol_stdout(tmp_path: Path) -> None:
     result = invoke(tmp_path, """
 import json
 with diagnostics.writer() as producer:
@@ -301,7 +302,7 @@ with diagnostics.writer() as producer:
     assert completed[0]["exit"] == 17
 
 
-def test_binary_evidence_survives_absent_python_streams(tmp_path):
+def test_binary_evidence_survives_absent_python_streams(tmp_path: Path) -> None:
     result = invoke(tmp_path, """
 with diagnostics.writer():
     sys.stderr.buffer.write("useful absent-stream error café\\n".encode("utf-8"))
@@ -313,7 +314,7 @@ with diagnostics.writer():
     assert completed[0]["exit"] == 0
 
 
-def _overlong_header(prefix, newline):
+def _overlong_header(prefix: str, newline: str) -> tuple[str, str]:
     scheme = "bea" + "rer"
     credential = "synthetic-large-header-value"
     message = prefix + " " + scheme + (" " * 73728) + newline
@@ -324,7 +325,7 @@ def _overlong_header(prefix, newline):
 
 @pytest.mark.parametrize("prefix", ["Authorization:", "http.extraheader=Authorization:"])
 @pytest.mark.parametrize("newline", ["\n", "\r\n"])
-def test_overlong_header_continuation_remains_private(tmp_path, prefix, newline):
+def test_overlong_header_continuation_remains_private(tmp_path: Path, prefix: str, newline: str) -> None:
     _, credential = _overlong_header(prefix, newline)
     result = invoke(tmp_path, f"""
 scheme = "bea" + "rer"
@@ -346,7 +347,7 @@ with diagnostics.writer():
 
 @pytest.mark.parametrize("prefix", ["Authorization:", "http.extraheader=Authorization:"])
 @pytest.mark.parametrize("newline", ["\n", "\r\n"])
-def test_overlong_header_snapshot_remains_private(diagnostic_context, prefix, newline):
+def test_overlong_header_snapshot_remains_private(diagnostic_context: tuple[Any, Path], prefix: str, newline: str) -> None:
     import io
 
     diagnostics, directory = diagnostic_context
@@ -364,7 +365,7 @@ def test_overlong_header_snapshot_remains_private(diagnostic_context, prefix, ne
 
 
 @pytest.mark.parametrize("channel", ["stdout", "stderr"])
-def test_reconfigured_binary_stream_keeps_archive_encoding(tmp_path, channel):
+def test_reconfigured_binary_stream_keeps_archive_encoding(tmp_path: Path, channel: str) -> None:
     result = invoke(tmp_path, f"""
 getattr(sys, {channel!r}).reconfigure(encoding="latin-1")
 with diagnostics.writer():
@@ -380,7 +381,7 @@ with diagnostics.writer():
     assert "useful café after reconfigure" in text
 
 
-def test_abrupt_python_entry_retains_sanitized_progress_without_success(tmp_path):
+def test_abrupt_python_entry_retains_sanitized_progress_without_success(tmp_path: Path) -> None:
     result = invoke(tmp_path, """
 import os
 with diagnostics.writer():
@@ -394,7 +395,7 @@ with diagnostics.writer():
     assert not (directory / "completed.json").exists()
 
 
-def test_flushed_incomplete_record_survives_abrupt_exit_privately(tmp_path):
+def test_flushed_incomplete_record_survives_abrupt_exit_privately(tmp_path: Path) -> None:
     result = invoke(tmp_path, """
 import os
 with diagnostics.writer():
@@ -424,7 +425,7 @@ with diagnostics.writer():
 
 
 @pytest.mark.parametrize("kind", ["header", "extraheader", "oversized", "short-token", "url"])
-def test_partial_flush_never_archives_interrupted_credentials(tmp_path, kind):
+def test_partial_flush_never_archives_interrupted_credentials(tmp_path: Path, kind: str) -> None:
     result = invoke(tmp_path, """
 import os
 with diagnostics.writer():
@@ -463,7 +464,7 @@ with diagnostics.writer():
     assert recovered["raw_retained"] and recovered["quiescence"] == "not-asserted"
 
 
-def test_binary_flush_retains_incomplete_encoding_state_and_exact_protocol(tmp_path):
+def test_binary_flush_retains_incomplete_encoding_state_and_exact_protocol(tmp_path: Path) -> None:
     result = invoke(tmp_path, """
 import os
 with diagnostics.writer() as producer:
@@ -489,7 +490,7 @@ with diagnostics.writer() as producer:
     assert completed == [] and raw.exists()
 
 
-def test_later_torn_checkpoint_preserves_prior_flushed_snapshot(tmp_path):
+def test_later_torn_checkpoint_preserves_prior_flushed_snapshot(tmp_path: Path) -> None:
     result = invoke(tmp_path, """
 import os
 with diagnostics.writer() as producer:
@@ -515,7 +516,7 @@ with diagnostics.writer() as producer:
     assert raw.read_bytes() == before
 
 
-def test_active_writer_recovery_does_not_claim_quiescence(diagnostic_context):
+def test_active_writer_recovery_does_not_claim_quiescence(diagnostic_context: tuple[Any, Path]) -> None:
     diagnostics, directory = diagnostic_context
     with diagnostics.writer() as producer:
         sys.stderr.write("active recoverable progress token")
@@ -528,12 +529,12 @@ def test_active_writer_recovery_does_not_claim_quiescence(diagnostic_context):
     assert (directory / f"{producer.identifier}.producer.pending").exists()
 
 
-def test_checkpoint_storage_failure_preserves_primary_result(diagnostic_context, monkeypatch):
+def test_checkpoint_storage_failure_preserves_primary_result(diagnostic_context: tuple[Any, Path], monkeypatch: pytest.MonkeyPatch) -> None:
     diagnostics, directory = diagnostic_context
     with diagnostics.writer() as producer:
         original = diagnostics.files().open_file
 
-        def fail_checkpoint(path, create=False):
+        def fail_checkpoint(path: Path, create: bool = False) -> Any:
             if str(path).endswith(".producer.pending"):
                 raise OSError("synthetic checkpoint storage failure")
             return original(path, create)
@@ -547,7 +548,7 @@ def test_checkpoint_storage_failure_preserves_primary_result(diagnostic_context,
 
 
 @pytest.mark.parametrize("record", [b'{"writer":"another-writer"}\n', b'{"invalid":\n'])
-def test_unknown_checkpoint_is_not_silently_reconciled(diagnostic_context, record):
+def test_unknown_checkpoint_is_not_silently_reconciled(diagnostic_context: tuple[Any, Path], record: bytes) -> None:
     diagnostics, directory = diagnostic_context
     with diagnostics.writer() as producer:
         sys.stderr.write("private pending value")
@@ -563,7 +564,7 @@ def test_unknown_checkpoint_is_not_silently_reconciled(diagnostic_context, recor
         assert not (directory / "completed.json").exists()
 
 
-def test_child_fileno_is_original_transport_not_archive(tmp_path):
+def test_child_fileno_is_original_transport_not_archive(tmp_path: Path) -> None:
     result = invoke(tmp_path, """
 import subprocess
 with diagnostics.writer():
@@ -582,7 +583,7 @@ with diagnostics.writer():
     assert "child-direct-fd" not in text
 
 
-def test_native_correlation_and_receipt_are_unchanged(diagnostic_context, monkeypatch):
+def test_native_correlation_and_receipt_are_unchanged(diagnostic_context: tuple[Any, Path], monkeypatch: pytest.MonkeyPatch) -> None:
     diagnostics, directory = diagnostic_context
     monkeypatch.setenv("COPILOT_EXTENSIONS_DIAGNOSTICS_WRITER", "b" * 32)
     previous = (directory / "attempt.json").read_bytes()
@@ -597,7 +598,7 @@ def test_native_correlation_and_receipt_are_unchanged(diagnostic_context, monkey
 
 
 @pytest.mark.parametrize("host", POWERSHELLS)
-def test_real_native_attempt_is_inherited_by_python_entry(tmp_path, host):
+def test_real_native_attempt_is_inherited_by_python_entry(tmp_path: Path, host: str) -> None:
     child = tmp_path / "correlated.py"
     child.write_text(
         "import sys\nsys.path.insert(0, " + repr(str(SCRIPTS)) + ")\n"
@@ -640,7 +641,7 @@ exit $rc
 @pytest.mark.parametrize("field,value", [
     ("plugin", "another-plugin"), ("schema", "another-schema"), ("attempt", "c" * 32),
 ])
-def test_invalid_inherited_identity_is_not_adopted(diagnostic_context, field, value):
+def test_invalid_inherited_identity_is_not_adopted(diagnostic_context: tuple[Any, Path], field: str, value: str) -> None:
     diagnostics, directory = diagnostic_context
     path = directory / "attempt.json"
     document = json.loads(path.read_text())
@@ -652,7 +653,7 @@ def test_invalid_inherited_identity_is_not_adopted(diagnostic_context, field, va
     assert diagnostics.reference()["missing_diagnostics"]
 
 
-def test_logging_failure_preserves_primary_exception(diagnostic_context):
+def test_logging_failure_preserves_primary_exception(diagnostic_context: tuple[Any, Path]) -> None:
     diagnostics, directory = diagnostic_context
     primary = RuntimeError("primary failure remains")
     with pytest.raises(RuntimeError) as caught:
@@ -667,7 +668,7 @@ def test_logging_failure_preserves_primary_exception(diagnostic_context):
     assert (directory / "missing-diagnostics.json").exists()
 
 
-def test_existing_nonprivate_directory_is_not_repaired_or_used(tmp_path):
+def test_existing_nonprivate_directory_is_not_repaired_or_used(tmp_path: Path) -> None:
     root = tmp_path / ".copilot-extensions" / "installer-diagnostics"
     root.mkdir(parents=True)
     if os.name != "nt":
@@ -679,7 +680,7 @@ def test_existing_nonprivate_directory_is_not_repaired_or_used(tmp_path):
     assert not list(root.iterdir())
 
 
-def test_hardlinked_diagnostic_file_is_refused(diagnostic_context):
+def test_hardlinked_diagnostic_file_is_refused(diagnostic_context: tuple[Any, Path]) -> None:
     diagnostics, directory = diagnostic_context
     original, alias = directory / "original", directory / "alias"
     fd = diagnostics.files().open_file(original, create=True)
@@ -689,7 +690,7 @@ def test_hardlinked_diagnostic_file_is_refused(diagnostic_context):
         diagnostics.files().open_file(alias)
 
 
-def test_linked_inherited_attempt_is_refused(diagnostic_context, tmp_path):
+def test_linked_inherited_attempt_is_refused(diagnostic_context: tuple[Any, Path], tmp_path: Path) -> None:
     diagnostics, directory = diagnostic_context
     target = tmp_path / "retained-attempt"
     directory.rename(target)
@@ -700,7 +701,7 @@ def test_linked_inherited_attempt_is_refused(diagnostic_context, tmp_path):
             raise
         result = subprocess.run(
             [os.environ["COMSPEC"], "/d", "/c", "mklink", "/J", str(directory), str(target)],
-            capture_output=True, timeout=10, creationflags=subprocess.CREATE_NO_WINDOW,
+            capture_output=True, timeout=10, creationflags=cast(Any, subprocess).CREATE_NO_WINDOW,
         )
         assert result.returncode == 0, result.stderr
     with diagnostics.writer() as producer:
@@ -708,7 +709,7 @@ def test_linked_inherited_attempt_is_refused(diagnostic_context, tmp_path):
     assert not list(target.glob("*.start.json"))
 
 
-def test_python_retention_preserves_incomplete_and_pending_writers(diagnostic_context):
+def test_python_retention_preserves_incomplete_and_pending_writers(diagnostic_context: tuple[Any, Path]) -> None:
     diagnostics, active = diagnostic_context
     root = active.parent
     for name in ("b" * 32, "c" * 32, "d" * 32):
@@ -731,7 +732,7 @@ def test_python_retention_preserves_incomplete_and_pending_writers(diagnostic_co
 
 
 @pytest.mark.parametrize("code,expected", [(None, 0), (19, 19), ("useful exit failure", 1)])
-def test_system_exit_records_actual_requested_result(diagnostic_context, code, expected):
+def test_system_exit_records_actual_requested_result(diagnostic_context: tuple[Any, Path], code: int | str | None, expected: int) -> None:
     diagnostics, directory = diagnostic_context
     with pytest.raises(SystemExit) as caught:
         with diagnostics.writer():
@@ -743,10 +744,10 @@ def test_system_exit_records_actual_requested_result(diagnostic_context, code, e
         assert code in next(directory.glob("*.log")).read_text()
 
 
-def test_frozen_bootstrap_carries_private_helper_and_records_import_failure(tmp_path):
+def test_frozen_bootstrap_carries_private_helper_and_records_import_failure(tmp_path: Path) -> None:
     import agent_worktrees.runtime_candidate as candidate
 
-    required = {"installer_diagnostics.py", "installer_diagnostics_redact.py", "installer_diagnostics_files.py"}
+    required = {"installer_diagnostics.py", "installer_diagnostics_redact.py", "installer_diagnostics_files.py", "runtime_install_diagnostics.py"}
     assert required <= set(candidate._LIFECYCLE_FILES)
     frozen = tmp_path / ".runtime-bootstrap"
     frozen.mkdir()
@@ -761,7 +762,7 @@ def test_frozen_bootstrap_carries_private_helper_and_records_import_failure(tmp_
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows TokenUser/DACL control")
 @pytest.mark.parametrize("leaf", [False, True])
-def test_foreign_read_ace_is_refused_even_without_public_write(diagnostic_context, leaf):
+def test_foreign_read_ace_is_refused_even_without_public_write(diagnostic_context: tuple[Any, Path], leaf: bool) -> None:
     import ctypes as c
 
     diagnostics, directory = diagnostic_context

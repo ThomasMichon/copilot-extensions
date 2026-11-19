@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from importlib.abc import Loader
+from importlib.machinery import ModuleSpec
 import importlib.util
 import codecs
 import io
@@ -16,17 +18,23 @@ import sys
 import subprocess
 import threading
 from datetime import datetime, timedelta, timezone
+from typing import Any, BinaryIO, Callable, Iterable, Iterator, Mapping, Protocol, TextIO, cast
 
 
-_FILES = None
+class _FileAccess(Protocol):
+    def open_file(self, path: Path, create: bool = False) -> int: ...
+    def private_directory(self, path: Path, create: bool = False) -> Path: ...
+
+
+_FILES: _FileAccess | None = None
 _WARNED = False
-_ACTIVE = None
+_ACTIVE: Producer | None = None
 _CHECKPOINT_BOUND = 4 * 1024 * 1024
 _NOTICE_LOCK = threading.Lock()
-_NOTICE = None
+_NOTICE: threading.Thread | None = None
 
 
-def notice(message):
+def notice(message: str) -> None:
     """Optional presentation never holds producer entry or a buffered stdio lock."""
     global _NOTICE
     sink = getattr(sys.stderr, "_installer_original", sys.stderr)
@@ -41,7 +49,7 @@ def notice(message):
             if _NOTICE is not None and _NOTICE.is_alive():
                 return
 
-            def write():
+            def write() -> None:
                 descriptor = None
                 try:
                     descriptor = os.dup(sink.fileno())
@@ -63,19 +71,19 @@ def notice(message):
         pass
 
 
-def files():
+def files() -> _FileAccess:
     global _FILES
     if _FILES is None:
         path = Path(__file__).with_name("installer_diagnostics_files.py")
         ordinary(path)
-        spec = importlib.util.spec_from_file_location("_installer_diagnostics_files", path)
+        spec = cast(ModuleSpec, importlib.util.spec_from_file_location("_installer_diagnostics_files", path))
         module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        _FILES = module
+        cast(Loader, spec.loader).exec_module(module)
+        _FILES = cast(_FileAccess, module)
     return _FILES
 
 
-def warn():
+def warn() -> None:
     global _WARNED
     os.environ["COPILOT_EXTENSIONS_DIAGNOSTICS_MISSING"] = "1"
     try:
@@ -89,7 +97,7 @@ def warn():
     notice("WARNING: installer diagnostics unavailable; continuing with missing diagnostics.")
 
 
-def ordinary(path: Path):
+def ordinary(path: Path) -> None:
     for item in (path, *path.parents):
         if not os.path.lexists(item):
             continue
@@ -98,7 +106,7 @@ def ordinary(path: Path):
             raise ValueError("diagnostic paths must not contain links or reparse points")
 
 
-def diagnostic_root(environment=None):
+def diagnostic_root(environment: Mapping[str, str] | None = None) -> Path:
     environment = os.environ if environment is None else environment
     raw = environment.get("USERPROFILE" if os.name == "nt" else "HOME")
     if not raw or not Path(raw).is_absolute():
@@ -109,9 +117,9 @@ def diagnostic_root(environment=None):
     return root
 
 
-def _read_record(path):
-    def unique(pairs):
-        value = {}
+def _read_record(path: Path) -> dict[str, Any]:
+    def unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        value: dict[str, Any] = {}
         for key, item in pairs:
             if key in value:
                 raise ValueError("duplicate diagnostic metadata key")
@@ -129,7 +137,7 @@ def _read_record(path):
     return value
 
 
-def context(environment=None):
+def context(environment: Mapping[str, str] | None = None) -> Path:
     environment = os.environ if environment is None else environment
     root = diagnostic_root(environment)
     attempt = environment.get("COPILOT_EXTENSIONS_DIAGNOSTICS_ATTEMPT", "")
@@ -146,18 +154,18 @@ def context(environment=None):
     return directory
 
 
-def _redactor():
+def _redactor() -> Callable[[str], str]:
     # Canonical source is packaged beside this standalone helper, not imported
     # through ambient PYTHONPATH or another installed runtime.
     path = Path(__file__).with_name("installer_diagnostics_redact.py")
     ordinary(path)
-    spec = importlib.util.spec_from_file_location("_installer_diagnostics_redact", path)
+    spec = cast(ModuleSpec, importlib.util.spec_from_file_location("_installer_diagnostics_redact", path))
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module.redact
+    cast(Loader, spec.loader).exec_module(module)
+    return cast(Callable[[str], str], module.redact)
 
 
-def reference():
+def reference() -> dict[str, Any]:
     try:
         directory = context()
         return {"attempt": directory.name, "directory": str(directory),
@@ -167,7 +175,7 @@ def reference():
         return {"missing_diagnostics": True}
 
 
-def _record(path, document):
+def _record(path: Path, document: Mapping[str, Any]) -> None:
     fd = files().open_file(path, create=True)
     with os.fdopen(fd, "w", encoding="utf-8") as handle:
         json.dump(document, handle)
@@ -175,7 +183,7 @@ def _record(path, document):
         os.fsync(handle.fileno())
 
 
-def reserve_launch(environment):
+def reserve_launch(environment: Mapping[str, str]) -> dict[str, str]:
     """Reserve correlation, not evidence that an installer executed."""
     environment = dict(environment)
     root = diagnostic_root(environment)
@@ -199,10 +207,10 @@ def reserve_launch(environment):
     return environment
 
 
-def launch_reference(environment):
+def launch_reference(environment: Mapping[str, str]) -> dict[str, Any]:
     """Read only bounded producer evidence; launch metadata is not entry proof."""
     directory = context(environment)
-    result = {
+    result: dict[str, Any] = {
         "attempt": directory.name, "directory": str(directory),
         "attribution": "UNATTRIBUTED", "installer_entry": "missing",
         "status": "missing", "missing_diagnostics": True,
@@ -241,7 +249,7 @@ def launch_reference(environment):
     return result
 
 
-def _validate_association(record, directory):
+def _validate_association(record: Mapping[str, Any], directory: Path) -> None:
     if set(record) != {
         "schema", "attempt", "log_directory", "runtime_root", "runtime_slot",
         "package_version", "runtime_generation", "deployment_manifest_sha256",
@@ -263,7 +271,7 @@ def _validate_association(record, directory):
         raise ValueError("invalid installer diagnostic installation association")
 
 
-def associate_installed(installation):
+def associate_installed(installation: Mapping[str, Any]) -> None:
     """Record the lifecycle owner's validated publication, never authorize it."""
     directory = context()
     identifier = os.environ.get("COPILOT_EXTENSIONS_DIAGNOSTICS_WRITER", "")
@@ -286,7 +294,7 @@ def associate_installed(installation):
         _record(path, record)
 
 
-def phase(name):
+def phase(name: str) -> None:
     """Fixed phase labels survive missing presentation without exposing inputs."""
     if re.fullmatch("[a-z][a-z0-9-]{0,63}", name) is None:
         raise ValueError("invalid installer diagnostic phase")
@@ -296,7 +304,9 @@ def phase(name):
     notice(text)
 
 
-def complete_launch(environment, outcome, native_exit=None):
+def complete_launch(
+    environment: Mapping[str, str], outcome: str, native_exit: int | None = None,
+) -> dict[str, Any]:
     """Persist the caller's outcome without completing any inherited writer."""
     directory = context(environment)
     if outcome not in {"returned", "interrupted", "timeout", "spawn-failed"}:
@@ -311,7 +321,7 @@ def complete_launch(environment, outcome, native_exit=None):
     return result
 
 
-def _initialize():
+def _initialize() -> tuple[Path, bool]:
     if os.environ.get("COPILOT_EXTENSIONS_DIAGNOSTICS_ATTEMPT"):
         return context(), False
     root = diagnostic_root()
@@ -331,7 +341,7 @@ def _initialize():
     return directory, True
 
 
-def _prune(root, active):
+def _prune(root: Path, active: Path) -> None:
     for directory in root.iterdir():
         if directory == active or re.fullmatch("[a-f0-9]{32}", directory.name) is None:
             continue
@@ -372,10 +382,10 @@ class Lines:
         + r"|\b" + "ba" + "sic" + r")\s*$", re.I,
     )
 
-    def __init__(self, emit):
+    def __init__(self, emit: Callable[[str], object]) -> None:
         self.emit, self.pending, self.credential, self.dropping = emit, "", "", False
 
-    def line(self, line):
+    def line(self, line: str) -> None:
         if self.credential:
             line, self.credential = self.credential + "\n" + line, ""
         if len(line) > 65536:
@@ -386,7 +396,7 @@ class Lines:
         else:
             self.emit(line)
 
-    def feed(self, text):
+    def feed(self, text: str) -> None:
         for offset in range(0, len(text), 8192):
             self.pending += text[offset:offset + 8192]
             while "\n" in self.pending:
@@ -403,7 +413,7 @@ class Lines:
                 self.credential = "Authorization:" if continuation else ""
                 self.dropping = True
 
-    def finish(self):
+    def finish(self) -> None:
         if self.pending and not self.dropping:
             self.line(self.pending)
         if self.credential:
@@ -412,19 +422,23 @@ class Lines:
 
 
 class Producer:
-    def __init__(self, directory, identifier):
+    def __init__(self, directory: Path, identifier: str) -> None:
         self.failed = False
         self.directory, self.identifier = directory, identifier
-        self.checkpoints, self.sequence, self.closed = None, 0, False
-        self.binary = {}
+        self.checkpoints: BinaryIO | None = None
+        self.sequence, self.closed = 0, False
+        self.binary: dict[str, BinaryTee] = {}
         self.redact = _redactor()
         self.lock = threading.RLock()
         self.output = os.fdopen(files().open_file(directory / f"{identifier}.log", create=True),
                                 "w", encoding="utf-8", errors="replace", buffering=1)
-        self.lines = {name: Lines(lambda line, channel=name: self.emit(channel, line))
-                      for name in ("stdout", "stderr", "error")}
+        self.lines: dict[str, Lines] = {}
+        for name in ("stdout", "stderr", "error"):
+            def emit(line: str, channel: str = name) -> None:
+                self.emit(channel, line)
+            self.lines[name] = Lines(emit)
 
-    def emit(self, channel, text):
+    def emit(self, channel: str, text: str) -> None:
         if not self.failed:
             try:
                 self.output.write(f"[{channel}] {_safe(self.redact, text)}\n")
@@ -433,19 +447,19 @@ class Producer:
                 self.failed = True
                 warn()
 
-    def feed(self, channel, text):
+    def feed(self, channel: str, text: str) -> None:
         with self.lock:
             if not self.failed and not self.closed:
                 self.lines[channel].feed(text)
 
-    def checkpoint(self):
+    def checkpoint(self) -> None:
         """Persist raw logical state on explicit flush, not completion evidence."""
         with self.lock:
             if self.failed or self.closed:
                 return
-            channels = {name: {"pending": line.pending, "credential": line.credential,
+            channels: dict[str, dict[str, Any]] = {name: {"pending": line.pending, "credential": line.credential,
                                "dropping": line.dropping} for name, line in self.lines.items()}
-            binary = {}
+            binary: dict[str, dict[str, Any]] = {}
             for name, stream in self.binary.items():
                 pending, flag = stream.decoder.getstate()
                 binary[name] = {"encoding": stream.encoding, "pending": pending.hex(), "flag": flag}
@@ -482,7 +496,7 @@ class Producer:
                 self.failed = True
                 warn()
 
-    def finish(self):
+    def finish(self) -> None:
         with self.lock:
             for lines in self.lines.values():
                 lines.finish()
@@ -503,7 +517,9 @@ class Producer:
 
 
 class BinaryTee:
-    def __init__(self, original, producer, channel, text_original):
+    def __init__(
+        self, original: BinaryIO | None, producer: Producer, channel: str, text_original: TextIO | None,
+    ) -> None:
         self._installer_original = original
         self._installer_text_original = text_original
         self.producer, self.channel = producer, channel
@@ -511,9 +527,9 @@ class BinaryTee:
         self.decoder = codecs.getincrementaldecoder(self.encoding)(errors="replace")
         producer.binary[channel] = self
 
-    def write(self, data):
+    def write(self, data: bytes | bytearray | memoryview) -> int:
         if not isinstance(data, (bytes, bytearray, memoryview)):
-            return self._installer_original.write(data)
+            return cast(BinaryIO, self._installer_original).write(data)
         with self.producer.lock:
             encoding = getattr(self._installer_text_original, "encoding", None) or "utf-8"
             if encoding != self.encoding:
@@ -523,82 +539,82 @@ class BinaryTee:
             self.producer.feed(self.channel, self.decoder.decode(bytes(data)))
         return self._installer_original.write(data) if self._installer_original is not None else len(data)
 
-    def writelines(self, lines):
+    def writelines(self, lines: Iterable[bytes | bytearray | memoryview]) -> None:
         for line in lines:
             self.write(line)
 
-    def finish(self):
+    def finish(self) -> None:
         self.producer.feed(self.channel, self.decoder.decode(b"", final=True))
 
-    def flush(self):
+    def flush(self) -> None:
         self.producer.checkpoint()
         if self._installer_original is not None:
             return self._installer_original.flush()
 
-    def fileno(self):
+    def fileno(self) -> int:
         if self._installer_original is None:
             import io
             raise io.UnsupportedOperation("original stream has no descriptor")
         return self._installer_original.fileno()
 
-    def isatty(self):
+    def isatty(self) -> bool:
         return self._installer_original.isatty() if self._installer_original is not None else False
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str) -> object:
         return getattr(self._installer_original, name)
 
 
 class TextTee:
-    def __init__(self, original, producer, channel):
+    def __init__(self, original: TextIO | None, producer: Producer, channel: str) -> None:
         self._installer_original = original
         self.producer, self.channel = producer, channel
         buffer = getattr(original, "buffer", None)
         self._buffer = BinaryTee(buffer, producer, channel, original)
 
     @property
-    def buffer(self):
+    def buffer(self) -> BinaryTee:
         if self._installer_original is not None and not hasattr(self._installer_original, "buffer"):
             raise AttributeError("original stream has no binary buffer")
         return self._buffer
 
-    def write(self, text):
+    def write(self, text: str) -> int:
         if not isinstance(text, str):
-            return self._installer_original.write(text)
+            return cast(TextIO, self._installer_original).write(text)
         self.producer.feed(self.channel, text)
         return self._installer_original.write(text) if self._installer_original is not None else len(text)
 
-    def flush(self):
+    def flush(self) -> None:
         self.producer.checkpoint()
         if self._installer_original is not None:
             return self._installer_original.flush()
 
-    def writelines(self, lines):
+    def writelines(self, lines: Iterable[str]) -> None:
         for line in lines:
             self.write(line)
 
-    def fileno(self):
+    def fileno(self) -> int:
         if self._installer_original is None:
             import io
             raise io.UnsupportedOperation("original stream has no descriptor")
         return self._installer_original.fileno()
 
-    def isatty(self):
+    def isatty(self) -> bool:
         return self._installer_original.isatty() if self._installer_original is not None else False
 
     @property
-    def encoding(self):
+    def encoding(self) -> str:
         return self._installer_original.encoding if self._installer_original is not None else "utf-8"
 
     @property
-    def errors(self):
+    def errors(self) -> str | None:
         return self._installer_original.errors if self._installer_original is not None else "replace"
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str) -> object:
         return getattr(self._installer_original, name)
 
 
 @contextmanager
-def writer(*, announce=False):
+def writer(*, announce: bool = False) -> Iterator[Producer | None]:
     """Record this Python producer in-process without changing subprocess stdio."""
     global _ACTIVE
     if _ACTIVE is not None:
@@ -609,7 +625,7 @@ def writer(*, announce=False):
     previous = {name: os.environ.get(name) for name in names}
     directory, identifier, producer, owner = None, secrets.token_hex(16), None, False
     original = sys.stdout, sys.stderr
-    tees = ()
+    tees: tuple[TextTee, ...] = ()
     try:
         directory, owner = _initialize()
         parent = previous[names[1]] or ""
@@ -627,8 +643,9 @@ def writer(*, announce=False):
     if producer is not None:
         _ACTIVE = producer
         tees = TextTee(original[0], producer, "stdout"), TextTee(original[1], producer, "stderr")
-        sys.stdout, sys.stderr = tees
-    outcome, failure = 0, None
+        sys.stdout, sys.stderr = cast(tuple[TextIO, TextIO], tees)
+    outcome = 0
+    failure: dict[str, Any] | None = None
     try:
         yield producer
     except BaseException as error:
@@ -674,7 +691,7 @@ def writer(*, announce=False):
                 os.environ[name] = value
 
 
-def _safe(redact, text):
+def _safe(redact: Callable[[str], str], text: str) -> str:
     text = re.sub(r"(?i)(error:\s*unrecognized arguments:).*", r"\1 [arguments omitted]", text)
     text = re.sub(r"(?i)(error:\s*argument\s+[^:]+:).*", r"\1 [value omitted]", text)
     if any(marker in text for marker in (
@@ -696,7 +713,9 @@ def _safe(redact, text):
     return redact(text)
 
 
-def _partial_preview(state, binary, redact):
+def _partial_preview(
+    state: Mapping[str, Any], binary: Mapping[str, Any] | None, redact: Callable[[str], str],
+) -> str:
     if state["dropping"]:
         return "[oversized incomplete record; credential context retained]"
     text = state["credential"]
@@ -715,7 +734,7 @@ def _partial_preview(state, binary, redact):
     return text
 
 
-def _validate_checkpoint(record, identifier):
+def _validate_checkpoint(record: Mapping[str, Any], identifier: str) -> None:
     if (set(record) != {"schema", "writer", "sequence", "channels", "binary"}
             or record["schema"] != "copilot-extensions.installer-diagnostics.producer-checkpoint"
             or record["writer"] != identifier or type(record["sequence"]) is not int
@@ -739,7 +758,7 @@ def _validate_checkpoint(record, identifier):
             raise ValueError("invalid producer binary state")
 
 
-def recover_producer_checkpoint(environment, identifier):
+def recover_producer_checkpoint(environment: Mapping[str, str], identifier: str) -> dict[str, Any]:
     """Recover a fixed private snapshot; never assert quiescence or retire raw."""
     if re.fullmatch("[a-f0-9]{32}", identifier) is None:
         raise ValueError("invalid producer writer")
@@ -763,8 +782,8 @@ def recover_producer_checkpoint(environment, identifier):
     if len(payload) > _CHECKPOINT_BOUND:
         raise ValueError("producer checkpoint exceeds its record bound")
 
-    def unique(pairs):
-        result = {}
+    def unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
         for key, value in pairs:
             if key in result:
                 raise ValueError("duplicate checkpoint key")
@@ -791,7 +810,7 @@ def recover_producer_checkpoint(environment, identifier):
     }
 
 
-def archive_snapshot(path, destination, redact):
+def archive_snapshot(path: Path, destination: TextIO, redact: Callable[[str], str]) -> None:
     """Bounded logical records from a fixed byte count, with split credentials."""
     ordinary(path)
     with os.fdopen(files().open_file(path), "rb") as handle:
@@ -810,13 +829,13 @@ def archive_snapshot(path, destination, redact):
 
 
 @contextmanager
-def capture():
+def capture() -> Iterator[dict[str, BinaryIO]]:
     """Explicit regular-file destinations; no pipes and no descendant EOF wait.
 
     Raw private spools and their pending marker intentionally survive even
     successful direct-child exit: that is not proof all inherited writers ended.
     """
-    streams = []
+    streams: list[BinaryIO] = []
     directory = None
     writer = secrets.token_hex(16)
     try:
@@ -848,11 +867,11 @@ def capture():
         if streams:
             try:
                 # Snapshot lengths, not EOF: retained descendants may append.
-                path = directory / f"{writer}.log"
+                path = cast(Path, directory) / f"{writer}.log"
                 with os.fdopen(files().open_file(path, create=True), "w", encoding="utf-8") as handle:
                     for channel in ("stdout", "stderr"):
                         handle.write(f"[{channel}]\n")
-                        archive_snapshot(directory / f"{writer}.{channel}.raw", handle, redact)
+                        archive_snapshot(cast(Path, directory) / f"{writer}.{channel}.raw", handle, redact)
                     handle.flush()
                     os.fsync(handle.fileno())
             except (OSError, ValueError, TypeError):

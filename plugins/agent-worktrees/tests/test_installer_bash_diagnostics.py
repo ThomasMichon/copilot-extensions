@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
-
+from typing import cast
 import pytest
 
 from test_installer_diagnostics import SCRIPTS, load_diagnostics, native_bash, native_environment
@@ -17,7 +17,7 @@ pytestmark = pytest.mark.skipif(native_bash() is None, reason="native Bash unava
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX reservation parser; Windows delegates to PowerShell")
 @pytest.mark.parametrize("formatting", ["canonical", "multiline", "wrong-plugin"])
-def test_python_reserved_attempt_enters_native_bash_without_bootstrap_python(tmp_path, formatting):
+def test_python_reserved_attempt_enters_native_bash_without_bootstrap_python(tmp_path: Path, formatting: str) -> None:
     diagnostics = load_diagnostics()
     environment = diagnostics.reserve_launch(native_environment(
         HOME=str(tmp_path), USERPROFILE=str(tmp_path),
@@ -32,7 +32,7 @@ def test_python_reserved_attempt_enters_native_bash_without_bootstrap_python(tmp
             json.dumps(record, indent=2).replace('": ', '"\n:\t') + "\n", encoding="utf-8",
         )
     result = subprocess.run(
-        [native_bash(), "-c", """
+        [cast(str, native_bash()), "-c", """
 set -euo pipefail
 source "$1"
 installer_diagnostics_init agent-worktrees
@@ -58,8 +58,8 @@ exit 37
 
 @pytest.mark.parametrize("native_exit,release_failure", [(0, False), (37, False), (0, True), (37, True)])
 def test_actual_installer_exit_trap_composes_release_and_native_writer_completion(
-    tmp_path, native_exit, release_failure,
-):
+    tmp_path: Path, native_exit: int, release_failure: bool,
+) -> None:
     source = (SCRIPTS / "install.sh").read_text(encoding="utf-8")
     function = re.search(r"^_installer_exit\(\) \{\n.*?^\}", source, re.MULTILINE | re.DOTALL)
     assert function, "the actual installer must own one composed exit function"
@@ -84,7 +84,7 @@ _release_versioned_slot_lease() {
 }
 """ + function.group() + "\n" + "\n".join(traps) + f"\nprintf '{{\"native\":{native_exit}}}'\nexit {native_exit}\n"
     result = subprocess.run(
-        [native_bash(), "-c", program, "bash", (SCRIPTS / "installer-diagnostics.sh").as_posix(),
+        [cast(str, native_bash()), "-c", program, "bash", (SCRIPTS / "installer-diagnostics.sh").as_posix(),
          release.as_posix(), "23" if release_failure else "0"],
         env=environment, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=15,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),

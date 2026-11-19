@@ -1,5 +1,5 @@
 """Offline native-entry and durable-capture controls; never install a runtime."""
-
+from __future__ import annotations
 import importlib.util
 import io
 import json
@@ -9,24 +9,24 @@ import shutil
 import subprocess
 import sys
 import time
-
+from typing import Any, BinaryIO, cast
 import pytest
-from update_telemetry.human import _available
+from update_telemetry.human import _available as _available
 
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 POWERSHELLS = [host for host in ("powershell.exe", "pwsh") if os.name == "nt" and shutil.which(host)]
 
 
-def native_environment(*, host=None, **values):
+def native_environment(*, host: str | None = None, **values: str) -> dict[str, str]:
     environment = {key: value for key, value in os.environ.items() if key.upper() != "PSMODULEPATH"}
     environment.update(values)
     if host:
-        environment["PSModulePath"] = str(Path(shutil.which(host)).parent / "Modules")
+        environment["PSModulePath"] = str(Path(cast(str, shutil.which(host))).parent / "Modules")
     return environment
 
 
-def constructed_review_records():
+def constructed_review_records() -> tuple[list[str], str]:
     credential = "synthetic-review-token"
     records = []
     for prefix in ("Authorization:", "http.extraheader=", "http.extraheader=Authorization:"):
@@ -40,8 +40,8 @@ def constructed_review_records():
     return records, credential
 
 
-def load_diagnostics():
-    spec = importlib.util.spec_from_file_location("diagnostics_test_helper", SCRIPTS / "installer_diagnostics.py")
+def load_diagnostics() -> Any:
+    spec: Any = importlib.util.spec_from_file_location("diagnostics_test_helper", SCRIPTS / "installer_diagnostics.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -50,7 +50,7 @@ def load_diagnostics():
 class NativeCapture:
     """Drain both fixture pipes without joining a descendant's inherited EOF."""
 
-    def __init__(self, argv, environment, stdout, stderr):
+    def __init__(self, argv: list[str], environment: dict[str, str], stdout: Path, stderr: Path) -> None:
         self.argv = argv
         self.files = [stdout.open("wb"), stderr.open("wb")]
         try:
@@ -64,20 +64,20 @@ class NativeCapture:
                 stream.close()
             raise
 
-    def drain(self, final=False):
+    def drain(self, final: bool = False) -> None:
         for source, target in zip((self.process.stdout, self.process.stderr), self.files):
-            remaining = _available(source.fileno())
+            remaining = _available(cast(BinaryIO, source).fileno())
             if not final:
                 remaining = min(remaining, 8192)
             while remaining:
-                data = os.read(source.fileno(), min(remaining, 8192))
+                data = os.read(cast(BinaryIO, source).fileno(), min(remaining, 8192))
                 if not data:
                     break
                 target.write(data)
                 target.flush()
                 remaining -= len(data)
 
-    def wait(self, seconds):
+    def wait(self, seconds: float) -> int | None:
         deadline = time.monotonic() + seconds
         while self.process.poll() is None:
             self.drain()
@@ -87,13 +87,13 @@ class NativeCapture:
         self.drain(final=True)
         return self.process.returncode
 
-    def close(self):
+    def close(self) -> None:
         for stream in (self.process.stdout, self.process.stderr, *self.files):
-            stream.close()
+            cast(BinaryIO, stream).close()
 
 
 @pytest.fixture
-def diagnostic_context(tmp_path, monkeypatch):
+def diagnostic_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Any, Path]:
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.setenv("HOME", str(tmp_path))
     attempt = "a" * 32
@@ -111,7 +111,7 @@ def diagnostic_context(tmp_path, monkeypatch):
     return diagnostics, directory
 
 
-def ps_run(tmp_path, host, body, *, env=None):
+def ps_run(tmp_path: Path, host: str, body: str, *, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     fixture = tmp_path / "fixture.ps1"
     fixture.write_text(
         "$ErrorActionPreference = 'Stop'\n"
@@ -124,7 +124,7 @@ def ps_run(tmp_path, host, body, *, env=None):
     for name in ("COPILOT_EXTENSIONS_DIAGNOSTICS_ATTEMPT", "COPILOT_EXTENSIONS_DIAGNOSTICS_WRITER"):
         environment.pop(name, None)
     environment.update(env or {})
-    argv = [shutil.which(host), "-NoProfile", "-NonInteractive", "-File", str(fixture)]
+    argv = [cast(str, shutil.which(host)), "-NoProfile", "-NonInteractive", "-File", str(fixture)]
     stdout, stderr = tmp_path / "fixture.stdout", tmp_path / "fixture.stderr"
     capture = NativeCapture(argv, environment, stdout, stderr)
     process = capture.process
@@ -144,7 +144,7 @@ def ps_run(tmp_path, host, body, *, env=None):
     finally:
         capture.close()
     # The fixture itself must not join EOF from native descendants either.
-    def snapshot(path):
+    def snapshot(path: Path) -> str:
         with path.open("rb") as stream:
             return stream.read(os.fstat(stream.fileno()).st_size).decode("utf-8", errors="replace")
 
@@ -152,7 +152,7 @@ def ps_run(tmp_path, host, body, *, env=None):
 
 
 @pytest.mark.parametrize("host", POWERSHELLS)
-def test_native_entry_private_and_clean_stdout(tmp_path, host):
+def test_native_entry_private_and_clean_stdout(tmp_path: Path, host: str) -> None:
     result = ps_run(tmp_path, host, """
 Initialize-InstallerDiagnostics 'agent-worktrees'
 Write-InstallerDiagnostic 'useful native failure'
@@ -170,7 +170,7 @@ exit 17
 
 
 @pytest.mark.parametrize("host", POWERSHELLS)
-def test_native_logging_failure_continues(tmp_path, host):
+def test_native_logging_failure_continues(tmp_path: Path, host: str) -> None:
     (tmp_path / ".copilot-extensions").write_text("occupied")
     result = ps_run(tmp_path, host, """
 Initialize-InstallerDiagnostics 'agent-worktrees'
@@ -184,14 +184,14 @@ exit 23
 
 @pytest.mark.parametrize("host", POWERSHELLS)
 @pytest.mark.parametrize("discard_streams", [False, True])
-def test_real_entry_admission_refusal_retains_error(tmp_path, host, discard_streams):
+def test_real_entry_admission_refusal_retains_error(tmp_path: Path, host: str, discard_streams: bool) -> None:
     environment = native_environment(host=host, USERPROFILE=str(tmp_path))
     environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
     environment.pop("COPILOT_EXTENSIONS_COMMAND_LIFECYCLE", None)
     environment.pop("COPILOT_EXTENSIONS_DIAGNOSTICS_ATTEMPT", None)
-    destinations = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL} if discard_streams else {}
+    destinations: dict[str, Any] = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL} if discard_streams else {}
     result = subprocess.run(
-        [shutil.which(host), "-NoProfile", "-NonInteractive", "-File", str(SCRIPTS / "install.ps1"),
+        [cast(str, shutil.which(host)), "-NoProfile", "-NonInteractive", "-File", str(SCRIPTS / "install.ps1"),
          "install", "-BootstrapPython", str(tmp_path / "missing-python.exe")],
         env=environment, stdin=subprocess.DEVNULL, **destinations,
         timeout=20, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
@@ -202,7 +202,7 @@ def test_real_entry_admission_refusal_retains_error(tmp_path, host, discard_stre
 
 
 @pytest.mark.parametrize("host", POWERSHELLS)
-def test_native_redaction_and_unicode(tmp_path, host):
+def test_native_redaction_and_unicode(tmp_path: Path, host: str) -> None:
     secret = "synthetic-private-credential"
     result = ps_run(tmp_path, host, """
 Initialize-InstallerDiagnostics 'agent-worktrees'
@@ -217,7 +217,7 @@ Complete-InstallerDiagnostics 3
     assert "café" in text
 
 
-def test_review_header_continuations_python_file_bytes(diagnostic_context):
+def test_review_header_continuations_python_file_bytes(diagnostic_context: tuple[Any, Path]) -> None:
     diagnostics, directory = diagnostic_context
     records, credential = constructed_review_records()
     raw = directory / "constructed.raw"
@@ -232,7 +232,7 @@ def test_review_header_continuations_python_file_bytes(diagnostic_context):
 
 
 @pytest.mark.parametrize("host", POWERSHELLS)
-def test_review_header_continuations_powershell_file_bytes(tmp_path, host):
+def test_review_header_continuations_powershell_file_bytes(tmp_path: Path, host: str) -> None:
     records, credential = constructed_review_records()
     payload = tmp_path / "constructed.json"
     payload.write_text(json.dumps(records, ensure_ascii=False), encoding="utf-8")
@@ -252,7 +252,7 @@ Complete-InstallerDiagnostics 0
 
 
 @pytest.mark.parametrize("host", POWERSHELLS)
-def test_native_staged_capture_and_writer_correlation(tmp_path, host):
+def test_native_staged_capture_and_writer_correlation(tmp_path: Path, host: str) -> None:
     child = tmp_path / "child.ps1"
     phases = tmp_path / "child-phases"
     helper = str(SCRIPTS / "installer-diagnostics.ps1").replace("'", "''")
@@ -301,7 +301,7 @@ Record-Phase 'completed'
 exit 29
 """, encoding="utf-8-sig")
     escaped = str(child).replace("'", "''")
-    executable = shutil.which(host).replace("'", "''")
+    executable = cast(str, shutil.which(host)).replace("'", "''")
     result = ps_run(tmp_path, host, f"""
 Initialize-InstallerDiagnostics 'agent-worktrees'
 $capture = New-InstallerDiagnosticCapture -Piped
@@ -358,7 +358,7 @@ exit $rc
 
 
 @pytest.mark.parametrize("host", POWERSHELLS)
-def test_native_pipe_drain_does_not_wait_for_descendant(tmp_path, host):
+def test_native_pipe_drain_does_not_wait_for_descendant(tmp_path: Path, host: str) -> None:
     child = tmp_path / "pipe-child.py"
     done = tmp_path / "descendant-finished"
     child.write_text("""
@@ -406,7 +406,7 @@ exit $process.ExitCode
 
 @pytest.mark.parametrize("host", POWERSHELLS)
 @pytest.mark.parametrize("mode", ["capture", "archive-failure", "raw-failure", "unavailable"])
-def test_review_presentation_is_live_exact_and_independent_of_storage(tmp_path, host, mode):
+def test_review_presentation_is_live_exact_and_independent_of_storage(tmp_path: Path, host: str, mode: str) -> None:
     child = tmp_path / "presentation-child.py"
     release = tmp_path / "release-child"
     finished = tmp_path / "child-finished"
@@ -475,7 +475,7 @@ exit $rc
     stdout, stderr = tmp_path / "stdout", tmp_path / "stderr"
     started = time.monotonic()
     capture = NativeCapture(
-        [shutil.which(host), "-NoProfile", "-NonInteractive", "-File", str(fixture)],
+        [cast(str, shutil.which(host)), "-NoProfile", "-NonInteractive", "-File", str(fixture)],
         environment, stdout, stderr,
     )
     process = capture.process
@@ -521,7 +521,7 @@ exit $rc
 
 
 @pytest.mark.parametrize("host", POWERSHELLS)
-def test_completed_retention_never_prunes_incomplete(tmp_path, host):
+def test_completed_retention_never_prunes_incomplete(tmp_path: Path, host: str) -> None:
     result = ps_run(tmp_path, host, """
 Initialize-InstallerDiagnostics 'agent-worktrees'
 $root = Split-Path $env:COPILOT_EXTENSIONS_DIAGNOSTICS_DIRECTORY
@@ -547,7 +547,7 @@ Remove-CompletedInstallerDiagnostics $root
     assert len(list(root.iterdir())) == 3
 
 
-def test_capture_regular_files_both_streams_and_native_exit(diagnostic_context):
+def test_capture_regular_files_both_streams_and_native_exit(diagnostic_context: tuple[Any, Path]) -> None:
     diagnostics, directory = diagnostic_context
     with diagnostics.capture() as destinations:
         result = subprocess.run(
@@ -562,7 +562,7 @@ def test_capture_regular_files_both_streams_and_native_exit(diagnostic_context):
     assert list(directory.glob("*.log"))
 
 
-def test_capture_does_not_wait_for_retained_descriptor(diagnostic_context):
+def test_capture_does_not_wait_for_retained_descriptor(diagnostic_context: tuple[Any, Path]) -> None:
     diagnostics, directory = diagnostic_context
     descendant = None
     try:
@@ -582,7 +582,7 @@ def test_capture_does_not_wait_for_retained_descriptor(diagnostic_context):
             descendant.wait(timeout=5)
 
 
-def test_snapshot_redacts_split_credentials_unicode_json(diagnostic_context):
+def test_snapshot_redacts_split_credentials_unicode_json(diagnostic_context: tuple[Any, Path]) -> None:
     diagnostics, directory = diagnostic_context
     text = "bea" + "rer\nsynthetic-private-credential\ncafé\n"
     with diagnostics.capture() as streams:
@@ -594,7 +594,7 @@ def test_snapshot_redacts_split_credentials_unicode_json(diagnostic_context):
     assert '{"result":false}' in archive
 
 
-def test_storage_failure_is_advisory(monkeypatch, capsys):
+def test_storage_failure_is_advisory(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     diagnostics = load_diagnostics()
     monkeypatch.delenv("COPILOT_EXTENSIONS_DIAGNOSTICS_ATTEMPT", raising=False)
     with diagnostics.capture() as destinations:
@@ -603,7 +603,7 @@ def test_storage_failure_is_advisory(monkeypatch, capsys):
     assert "missing diagnostics" in capsys.readouterr().err
 
 
-def test_capture_unavailable_keeps_discoverable_missing_status(diagnostic_context, monkeypatch):
+def test_capture_unavailable_keeps_discoverable_missing_status(diagnostic_context: tuple[Any, Path], monkeypatch: pytest.MonkeyPatch) -> None:
     diagnostics, directory = diagnostic_context
     monkeypatch.setattr(diagnostics, "_redactor", lambda: (_ for _ in ()).throw(OSError("unavailable")))
     with diagnostics.capture() as destinations:
@@ -613,30 +613,30 @@ def test_capture_unavailable_keeps_discoverable_missing_status(diagnostic_contex
 
 @pytest.mark.parametrize("native_failure", [False, True])
 def test_capture_close_failure_preserves_native_outcome(
-    diagnostic_context, monkeypatch, native_failure,
-):
+    diagnostic_context: tuple[Any, Path], monkeypatch: pytest.MonkeyPatch, native_failure: bool,
+) -> None:
     diagnostics, directory = diagnostic_context
     fdopen = diagnostics.os.fdopen
 
     class FailedClose:
-        def __init__(self, stream):
+        def __init__(self, stream: Any) -> None:
             self.stream = stream
 
-        def close(self):
+        def close(self) -> None:
             self.stream.close()
             raise OSError("capture close unavailable")
 
-        def __getattr__(self, name):
+        def __getattr__(self, name: str) -> Any:
             return getattr(self.stream, name)
 
-    def open_stream(fd, mode="r", *args, **kwargs):
+    def open_stream(fd: int, mode: str = "r", *args: Any, **kwargs: Any) -> Any:
         stream = fdopen(fd, mode, *args, **kwargs)
         return FailedClose(stream) if mode == "wb" else stream
 
     monkeypatch.setattr(diagnostics.os, "fdopen", open_stream)
     primary = RuntimeError("native failure")
 
-    def run():
+    def run() -> int:
         with diagnostics.capture() as destinations:
             destinations["stdout"].write(b"native output\n")
             if native_failure:
@@ -653,7 +653,7 @@ def test_capture_close_failure_preserves_native_outcome(
     assert "native output" in next(directory.glob("*.log")).read_text()
 
 
-def test_link_refusal(diagnostic_context, tmp_path):
+def test_link_refusal(diagnostic_context: tuple[Any, Path], tmp_path: Path) -> None:
     diagnostics, directory = diagnostic_context
     target = tmp_path / "foreign"
     target.mkdir()
@@ -666,7 +666,7 @@ def test_link_refusal(diagnostic_context, tmp_path):
         result = subprocess.run(
             [os.environ["COMSPEC"], "/d", "/c", "mklink", "/J", str(link), str(target)],
             capture_output=True, timeout=10,
-            creationflags=subprocess.CREATE_NO_WINDOW,
+            creationflags=cast(Any, subprocess).CREATE_NO_WINDOW,
         )
         assert result.returncode == 0, result.stderr
     with pytest.raises(ValueError, match="links"):
@@ -674,7 +674,7 @@ def test_link_refusal(diagnostic_context, tmp_path):
     assert not list(target.iterdir())
 
 
-def test_retained_writer_identity_and_outcome(diagnostic_context):
+def test_retained_writer_identity_and_outcome(diagnostic_context: tuple[Any, Path]) -> None:
     diagnostics, directory = diagnostic_context
     with pytest.raises(SystemExit) as exit_info:
         with diagnostics.writer():
@@ -685,7 +685,7 @@ def test_retained_writer_identity_and_outcome(diagnostic_context):
     assert json.loads(next(directory.glob("*.completed.json")).read_text())["exit"] == 31
 
 
-def test_witness_text_not_archived(diagnostic_context):
+def test_witness_text_not_archived(diagnostic_context: tuple[Any, Path]) -> None:
     diagnostics, directory = diagnostic_context
     with diagnostics.capture() as streams:
         streams["stderr"].write(b"UPDATE_DRIVER_WITNESS=synthetic-private-value\nuseful failure\n")
@@ -695,7 +695,7 @@ def test_witness_text_not_archived(diagnostic_context):
     assert "useful failure" in text
 
 
-def test_timeout_keeps_primary_exception_and_written_diagnostics(diagnostic_context):
+def test_timeout_keeps_primary_exception_and_written_diagnostics(diagnostic_context: tuple[Any, Path]) -> None:
     diagnostics, directory = diagnostic_context
     with pytest.raises(subprocess.TimeoutExpired):
         with diagnostics.capture() as streams:
@@ -709,7 +709,7 @@ def test_timeout_keeps_primary_exception_and_written_diagnostics(diagnostic_cont
     assert list(directory.glob("*.pending"))
 
 
-def test_abrupt_exit_keeps_private_unprocessed_capture(diagnostic_context):
+def test_abrupt_exit_keeps_private_unprocessed_capture(diagnostic_context: tuple[Any, Path]) -> None:
     _, directory = diagnostic_context
     program = """
 import importlib.util, os, sys
@@ -732,7 +732,7 @@ with module.capture() as streams:
     assert not (directory / "completed.json").exists()
 
 
-def test_snapshot_bounds_oversized_records(diagnostic_context):
+def test_snapshot_bounds_oversized_records(diagnostic_context: tuple[Any, Path]) -> None:
     diagnostics, directory = diagnostic_context
     path = directory / "large.raw"
     with os.fdopen(diagnostics.files().open_file(path, create=True), "wb") as stream:
@@ -742,7 +742,7 @@ def test_snapshot_bounds_oversized_records(diagnostic_context):
     assert archive.getvalue() == "[oversized diagnostic record omitted]\nuseful error\n"
 
 
-def native_bash():
+def native_bash() -> str | None:
     if os.name != "nt":
         return shutil.which("bash")
     git = shutil.which("git")
@@ -751,11 +751,11 @@ def native_bash():
 
 
 @pytest.mark.skipif(native_bash() is None, reason="native Bash/Git Bash unavailable; WSL is not inferred")
-def test_bash_native_cold_redaction_and_exit(tmp_path):
+def test_bash_native_cold_redaction_and_exit(tmp_path: Path) -> None:
     environment = native_environment(host="powershell.exe" if os.name == "nt" else None, HOME=tmp_path.as_posix())
     environment.pop("COPILOT_EXTENSIONS_DIAGNOSTICS_ATTEMPT", None)
     result = subprocess.run(
-        [native_bash(), "-c", """
+        [cast(str, native_bash()), "-c", """
 set -euo pipefail
 source "$1"
 installer_diagnostics_init agent-worktrees
@@ -780,7 +780,7 @@ exit 27
 
 
 @pytest.mark.skipif(native_bash() is None, reason="native Bash/Git Bash unavailable")
-def test_review_header_continuations_bash_file_bytes(tmp_path):
+def test_review_header_continuations_bash_file_bytes(tmp_path: Path) -> None:
     records, credential = constructed_review_records()
     payload = tmp_path / "constructed.records"
     payload.write_bytes("".join(records).encode("utf-8"))
@@ -788,7 +788,7 @@ def test_review_header_continuations_bash_file_bytes(tmp_path):
     environment = native_environment(host="powershell.exe" if os.name == "nt" else None, HOME=tmp_path.as_posix())
     environment.pop("COPILOT_EXTENSIONS_DIAGNOSTICS_ATTEMPT", None)
     result = subprocess.run(
-        [native_bash(), "-c", """
+        [cast(str, native_bash()), "-c", """
 set -euo pipefail
 source "$1"
 installer_diagnostics_init agent-worktrees

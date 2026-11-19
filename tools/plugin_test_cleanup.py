@@ -6,9 +6,9 @@ import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import TypeVar
+from typing import TYPE_CHECKING, TypeVar, cast
 
-if __package__:
+if __package__ and not TYPE_CHECKING:
     from .native_test_paths import NativeTemporaryDirectory
 else:
     from native_test_paths import NativeTemporaryDirectory
@@ -46,4 +46,4 @@ def _cleanup_with_windows_retry(cleanup: Callable[[], _T]) -> _T:
 
 def cleanup_reaped_directory(path: Path | str) -> None:
     """Remove a runner-owned directory only after its caller verifies reaping."""
-    _cleanup_with_windows_retry(lambda: NativeTemporaryDirectory._rmtree(path))
+    _cleanup_with_windows_retry(lambda: cast(Callable[[Path | str], None], NativeTemporaryDirectory._rmtree)(path))

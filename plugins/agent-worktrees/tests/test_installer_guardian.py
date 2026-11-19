@@ -14,14 +14,14 @@ from types import SimpleNamespace
 import venv
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
-
+from typing import Any, NoReturn, cast
 import pytest
 import agent_procutil
 from agent_procutil import no_window_kwargs
 
 
-def _load(name, path):
-    spec = importlib.util.spec_from_file_location(name, path)
+def _load(name: str, path: "Path") -> "Any":
+    spec: Any = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module
     spec.loader.exec_module(module)
@@ -29,7 +29,7 @@ def _load(name, path):
 
 
 @pytest.mark.real_installer_processes
-def test_generated_windowless_parent_starts_with_fresh_annotation_semantics(tmp_path):
+def test_generated_windowless_parent_starts_with_fresh_annotation_semantics(tmp_path: Path) -> None:
     from test_installer_guardian_windowless import _parent_source
 
     prelude, marker, _ = _parent_source().partition("spec = json.loads(sys.argv[1])")
@@ -53,9 +53,9 @@ SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 
 
 @pytest.fixture
-def guardian():
+def guardian() -> Any:
     source = Path(__file__).resolve().parents[3] / "libs" / "installer-engine" / "installer_engine_process.py"
-    spec = importlib.util.spec_from_file_location("guardian_fixture", source)
+    spec: Any = importlib.util.spec_from_file_location("guardian_fixture", source)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -65,14 +65,14 @@ def guardian():
     (False, False), (False, True), (True, False), (True, True),
 ])
 def test_retained_dispatch_preserves_deadline_and_capture_options(
-    guardian, monkeypatch, tmp_path, with_deadline, with_capture,
-):
+    guardian: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, with_deadline: bool, with_capture: bool,
+) -> None:
     monkeypatch.setattr(guardian, "os", SimpleNamespace(name="nt"))
     monkeypatch.setattr(guardian.time, "monotonic", lambda: 10)
     calls = []
     result = subprocess.CompletedProcess(["owned-child"], 0, "owned output", "")
 
-    def retained(argv, **kwargs):
+    def retained(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         calls.append(kwargs)
         return result
 
@@ -94,8 +94,8 @@ def test_retained_dispatch_preserves_deadline_and_capture_options(
 
 @pytest.mark.parametrize("damage", ["syntax", "runtime"])
 def test_optional_capture_import_failure_does_not_catch_native_body(
-    guardian, tmp_path, monkeypatch, capsys, damage,
-):
+    guardian: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], damage: str,
+) -> None:
     helper = tmp_path / "broken-diagnostics.py"
     helper.write_text("def invalid(\n" if damage == "syntax" else
                       "raise RuntimeError('optional import failed')\n", encoding="utf-8")
@@ -116,8 +116,8 @@ def test_optional_capture_import_failure_does_not_catch_native_body(
 @pytest.mark.parametrize("damage", ["syntax", "runtime"])
 @pytest.mark.timeout(30)
 def test_retained_guardian_optional_import_failure_preserves_native_exit(
-    guardian, tmp_path, monkeypatch, capsys, boundary, damage,
-):
+    guardian: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], boundary: str, damage: str,
+) -> None:
     valid = SCRIPTS / "installer_diagnostics.py"
     helper = guardian._load_resource("import_failure_diagnostics_fixture", valid)
     environment = helper.reserve_launch(dict(os.environ, USERPROFILE=str(tmp_path), HOME=str(tmp_path)))
@@ -133,7 +133,7 @@ def test_retained_guardian_optional_import_failure_preserves_native_exit(
     if boundary == "parent":
         original = guardian._load_resource
 
-        def load(name, path):
+        def load(name: str, path: Path) -> Any:
             if name == "installer_parent_diagnostics":
                 raise SyntaxError("invalid helper") if damage == "syntax" else RuntimeError("helper failed")
             return original(name, path)
@@ -162,11 +162,11 @@ def test_retained_guardian_optional_import_failure_preserves_native_exit(
 
 
 @pytest.mark.parametrize("state,exited", [("S\n", False), ("Z\n", True), ("Z+\n", True)])
-def test_missing_waitid_uses_nonreaping_process_state(guardian, monkeypatch, state, exited):
+def test_missing_waitid_uses_nonreaping_process_state(guardian: Any, monkeypatch: pytest.MonkeyPatch, state: str, exited: bool) -> None:
     monkeypatch.setattr(guardian, "os", SimpleNamespace())
     calls = []
 
-    def observe(argv, **kwargs):
+    def observe(argv: list[str], **kwargs: Any) -> SimpleNamespace:
         calls.append((argv, kwargs))
         return SimpleNamespace(stdout=state)
 
@@ -177,7 +177,7 @@ def test_missing_waitid_uses_nonreaping_process_state(guardian, monkeypatch, sta
 
 
 @pytest.mark.parametrize("state", ["", "Z\nS\n"])
-def test_ambiguous_process_observation_is_not_exit(guardian, monkeypatch, state):
+def test_ambiguous_process_observation_is_not_exit(guardian: Any, monkeypatch: pytest.MonkeyPatch, state: str) -> None:
     monkeypatch.setattr(guardian, "os", SimpleNamespace())
     monkeypatch.setattr(guardian.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(stdout=state))
     with pytest.raises(RuntimeError, match="Cannot observe"):
@@ -185,9 +185,9 @@ def test_ambiguous_process_observation_is_not_exit(guardian, monkeypatch, state)
 
 
 @pytest.mark.parametrize("code,expected", [(23, 23), (-15, 143)])
-def test_guardian_reaps_only_after_group_settlement(guardian, monkeypatch, code, expected):
+def test_guardian_reaps_only_after_group_settlement(guardian: Any, monkeypatch: pytest.MonkeyPatch, code: int, expected: int) -> None:
     process = SimpleNamespace(pid=123, returncode=None)
-    events = []
+    events: list[str | tuple[str, int]] = []
     observations = iter([False, True])
     monkeypatch.setattr(guardian, "os", SimpleNamespace(
         close=lambda fd: events.append(("closed", fd)),
@@ -197,11 +197,11 @@ def test_guardian_reaps_only_after_group_settlement(guardian, monkeypatch, code,
     ))
     monkeypatch.setattr(guardian.select, "select", lambda *args: ([], [], []))
 
-    def observe(pid):
+    def observe(pid: int) -> bool:
         assert pid == 123 and process.returncode is None
         return next(observations)
 
-    def settle(child):
+    def settle(child: SimpleNamespace) -> None:
         assert child is process and child.returncode is None
         events.append("settled")
         child.returncode = code
@@ -213,11 +213,11 @@ def test_guardian_reaps_only_after_group_settlement(guardian, monkeypatch, code,
 
 
 @pytest.mark.parametrize("live_member", [False, True])
-def test_zombie_only_group_eperm_settles_via_process_observation(guardian, monkeypatch, live_member):
+def test_zombie_only_group_eperm_settles_via_process_observation(guardian: Any, monkeypatch: pytest.MonkeyPatch, live_member: bool) -> None:
     waits = []
     process = SimpleNamespace(pid=123, returncode=None, wait=lambda timeout: waits.append(timeout))
 
-    def killpg(pgid, sig):
+    def killpg(pgid: int, sig: int) -> NoReturn:
         raise PermissionError(1, "Operation not permitted")
 
     rows = "  123   123 Z\n" + ("  124   123 S\n" if live_member else "")
@@ -240,7 +240,7 @@ def test_zombie_only_group_eperm_settles_via_process_observation(guardian, monke
 
 
 @pytest.mark.skipif(os.name == "nt", reason="native POSIX ps/process-group guardian")
-def test_real_guardian_without_waitid_preserves_child_exit(guardian, tmp_path):
+def test_real_guardian_without_waitid_preserves_child_exit(guardian: Any, tmp_path: Path) -> None:
     script = (
         "import importlib.util,os,sys;"
         "s=importlib.util.spec_from_file_location('guardian',sys.argv[1]);"
@@ -261,8 +261,8 @@ def test_real_guardian_without_waitid_preserves_child_exit(guardian, tmp_path):
 @pytest.mark.parametrize("outcome", ["success", "exit", "timeout", "absolute-timeout", "launch"])
 @pytest.mark.timeout(30)
 def test_retained_windows_child_preserves_outcome_and_releases_custody(
-    guardian, tmp_path, outcome,
-):
+    guardian: Any, tmp_path: Path, outcome: str,
+) -> None:
     runtime_path = (
         Path(__file__).resolve().parents[3]
         / "libs" / "versioned-runtime" / "versioned_runtime.py"
@@ -285,7 +285,7 @@ def test_retained_windows_child_preserves_outcome_and_releases_custody(
         "launch": guardian.ChildLaunchError,
     }
     with runtime.construction_lease(root, "probe") as descriptor:
-        def run():
+        def run() -> Any:
             return guardian.run_owned(
                 commands[outcome], cwd=slot, env=dict(os.environ),
                 timeout=3, procutil=agent_procutil, construction_fd=descriptor,
@@ -364,8 +364,8 @@ finally:
 @pytest.mark.parametrize("timeout", [False, True])
 @pytest.mark.timeout(30)
 def test_retained_control_preserves_only_explicit_durable_children(
-    guardian, tmp_path, allow_breakaway, timeout,
-):
+    guardian: Any, tmp_path: Path, allow_breakaway: bool, timeout: bool,
+) -> None:
     import ctypes
     from ctypes import wintypes
 
@@ -373,16 +373,16 @@ def test_retained_control_preserves_only_explicit_durable_children(
     runtime = _load("control_lifetime_runtime", runtime_path)
     root = tmp_path / "runtime"
     slot = runtime.slot(root, "control")
-    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel = cast(Any, ctypes).WinDLL("kernel32", use_last_error=True)
     kernel.WaitForSingleObject.argtypes = (wintypes.HANDLE, wintypes.DWORD)
     kernel.WaitForSingleObject.restype = wintypes.DWORD
     kernel.CloseHandle.argtypes = (wintypes.HANDLE,)
-    handles = []
+    handles: list[int] = []
     try:
         with runtime.construction_lease(root, "control") as descriptor:
-            def run():
+            def run() -> Any:
                 return guardian.run_owned(
-                    [sys._base_executable, "-I", "-B", "-c", _CONTROL_CHILD_PROBE, str(os.getpid()),
+                    [cast(Any, sys)._base_executable, "-I", "-B", "-c", _CONTROL_CHILD_PROBE, str(os.getpid()),
                      agent_procutil.__file__, "timeout" if timeout else "success"],
                     cwd=slot, env=dict(os.environ), timeout=5, procutil=agent_procutil,
                     construction_fd=descriptor, runtime_root=root, runtime_version="control",
@@ -416,7 +416,7 @@ def test_retained_control_preserves_only_explicit_durable_children(
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows caller-death retention fence")
 @pytest.mark.timeout(30)
-def test_mode_control_owner_death_cannot_release_runtime_before_writers_exit(guardian, tmp_path):
+def test_mode_control_owner_death_cannot_release_runtime_before_writers_exit(guardian: Any, tmp_path: Path) -> None:
     import ctypes
     from ctypes import wintypes
 
@@ -426,7 +426,7 @@ def test_mode_control_owner_death_cannot_release_runtime_before_writers_exit(gua
     runtime.slot(root, "control")
     ready = tmp_path / "ready.json"
     child = [
-        sys._base_executable, "-I", "-B", "-c", _CONTROL_CHILD_PROBE, str(os.getpid()),
+        cast(Any, sys)._base_executable, "-I", "-B", "-c", _CONTROL_CHILD_PROBE, str(os.getpid()),
         agent_procutil.__file__, "owner-death", str(ready),
     ]
     owner_code = inspect.getsource(_load) + """
@@ -442,17 +442,17 @@ with runtime.retention_custody(root,"control") as (slot,descriptor):
         procutil=procutil,construction_fd=descriptor,runtime_root=root,
         runtime_version="control",runtime_path=Path(sys.argv[2]),allow_breakaway=True)
 """
-    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel = cast(Any, ctypes).WinDLL("kernel32", use_last_error=True)
     kernel.WaitForSingleObject.argtypes = (wintypes.HANDLE, wintypes.DWORD)
     kernel.WaitForSingleObject.restype = wintypes.DWORD
     kernel.CloseHandle.argtypes = (wintypes.HANDLE,)
     owner = subprocess.Popen(
-        [sys._base_executable, "-I", "-B", "-c", owner_code, guardian.__file__,
+        [cast(Any, sys)._base_executable, "-I", "-B", "-c", owner_code, guardian.__file__,
          str(runtime_path), agent_procutil.__file__, str(root), json.dumps(child)],
-        executable=sys._base_executable, cwd=tmp_path, stdin=subprocess.DEVNULL,
+        executable=cast(Any, sys)._base_executable, cwd=tmp_path, stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, **no_window_kwargs(),
     )
-    handles = []
+    handles: list[int] = []
     try:
         deadline = time.monotonic() + 10
         while not ready.exists():
@@ -492,7 +492,7 @@ with runtime.retention_custody(root,"control") as (slot,descriptor):
 
 
 @pytest.mark.parametrize("allow_breakaway", [None, 0, "true"])
-def test_installer_breakaway_policy_refuses_nonboolean_values(guardian, tmp_path, allow_breakaway):
+def test_installer_breakaway_policy_refuses_nonboolean_values(guardian: Any, tmp_path: Path, allow_breakaway: None | int | str) -> None:
     with pytest.raises(ValueError, match="breakaway policy"):
         guardian.run_owned(
             ["unused"], cwd=tmp_path, env={}, timeout=1, procutil=None,
@@ -501,7 +501,7 @@ def test_installer_breakaway_policy_refuses_nonboolean_values(guardian, tmp_path
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows finite mode-owner retention protocol")
-def test_mode_scope_acknowledges_only_after_real_candidate_retention(guardian, tmp_path):
+def test_mode_scope_acknowledges_only_after_real_candidate_retention(guardian: Any, tmp_path: Path) -> None:
     runtime_path = Path(__file__).resolve().parents[3] / "libs" / "versioned-runtime" / "versioned_runtime.py"
     runtime = _load("scope_registration_runtime", runtime_path)
     root = tmp_path / "runtime"
@@ -526,15 +526,15 @@ def test_mode_scope_acknowledges_only_after_real_candidate_retention(guardian, t
 
 @pytest.mark.parametrize("failure", ["cancelled", "denied"])
 def test_mode_scope_distinguishes_cancelled_request_from_storage_failure(
-    guardian, tmp_path, monkeypatch, failure,
-):
+    guardian: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str,
+) -> None:
     with ExitStack() as custody:
         scope = guardian._RetentionScope(tmp_path / "scope", tmp_path, None, custody)
         request = scope.directory / "cancelled.request"
         guardian._scope_packet(request, {})
         read_packet = guardian._read_scope_packet
 
-        def read(path):
+        def read(path: Path) -> Any:
             assert path == request
             if failure == "cancelled":
                 path.unlink()
@@ -552,14 +552,14 @@ def test_mode_scope_distinguishes_cancelled_request_from_storage_failure(
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows atomic-rename DELETE sharing")
-def test_mode_scope_packet_reads_while_publisher_retains_delete_access(guardian, tmp_path):
+def test_mode_scope_packet_reads_while_publisher_retains_delete_access(guardian: Any, tmp_path: Path) -> None:
     import ctypes
     from ctypes import wintypes
 
     packet = tmp_path / "published.ack"
     value = {"retained": True, "nonce": "fixture"}
     guardian._scope_packet(packet, value)
-    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel = cast(Any, ctypes).WinDLL("kernel32", use_last_error=True)
     kernel.CreateFileW.argtypes = [
         wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p,
         wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE,
@@ -568,7 +568,7 @@ def test_mode_scope_packet_reads_while_publisher_retains_delete_access(guardian,
     kernel.CloseHandle.argtypes = [wintypes.HANDLE]
     kernel.CloseHandle.restype = wintypes.BOOL
     publisher = kernel.CreateFileW(str(packet), 0x10000, 0x7, None, 3, 0x80, None)
-    assert publisher != wintypes.HANDLE(-1).value, ctypes.WinError(ctypes.get_last_error())
+    assert publisher != wintypes.HANDLE(-1).value, cast(Any, ctypes).WinError(cast(Any, ctypes).get_last_error())
     try:
         with pytest.raises(PermissionError):
             packet.open("rb")
@@ -579,7 +579,7 @@ def test_mode_scope_packet_reads_while_publisher_retains_delete_access(guardian,
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows finite mode-owner retention protocol")
-def test_mode_scope_rejects_success_shaped_integer_acknowledgement(guardian, tmp_path):
+def test_mode_scope_rejects_success_shaped_integer_acknowledgement(guardian: Any, tmp_path: Path) -> None:
     runtime_path = Path(__file__).resolve().parents[3] / "libs" / "versioned-runtime" / "versioned_runtime.py"
     runtime = _load("scope_invalid_ack_runtime", runtime_path)
     with ExitStack() as custody, ThreadPoolExecutor(max_workers=1) as executor:
@@ -601,8 +601,8 @@ def test_mode_scope_rejects_success_shaped_integer_acknowledgement(guardian, tmp
 @pytest.mark.skipif(os.name != "nt", reason="Windows finite mode-owner retention protocol")
 @pytest.mark.parametrize("failure", ["foreign-root", "invalid-version", "storage"])
 def test_mode_scope_refuses_invalid_or_unavailable_candidate_custody(
-    guardian, tmp_path, monkeypatch, failure,
-):
+    guardian: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str,
+) -> None:
     runtime_path = Path(__file__).resolve().parents[3] / "libs" / "versioned-runtime" / "versioned_runtime.py"
     runtime = _load("scope_refusal_runtime", runtime_path)
     with ExitStack() as custody:
@@ -616,7 +616,7 @@ def test_mode_scope_refuses_invalid_or_unavailable_candidate_custody(
         elif failure == "invalid-version":
             packet["runtime_version"] = "../foreign"
         else:
-            def denied(*_args, **_kwargs):
+            def denied(*_args: Any, **_kwargs: Any) -> NoReturn:
                 raise PermissionError("retention storage denied")
 
             monkeypatch.setattr(runtime, "retention_lease", denied)
@@ -632,7 +632,7 @@ def test_mode_scope_refuses_invalid_or_unavailable_candidate_custody(
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows nested Job retention accounting")
 @pytest.mark.timeout(30)
-def test_mode_scope_coretains_nested_writers_when_caller_job_closes(guardian, tmp_path):
+def test_mode_scope_coretains_nested_writers_when_caller_job_closes(guardian: Any, tmp_path: Path) -> None:
     import ctypes
     from ctypes import wintypes
 
@@ -642,7 +642,7 @@ def test_mode_scope_coretains_nested_writers_when_caller_job_closes(guardian, tm
     runtime.slot(root, "control")
     ready = tmp_path / "ready.json"
     writer = [
-        sys._base_executable, "-I", "-B", "-c", _CONTROL_CHILD_PROBE, str(os.getpid()),
+        cast(Any, sys)._base_executable, "-I", "-B", "-c", _CONTROL_CHILD_PROBE, str(os.getpid()),
         agent_procutil.__file__, "owner-death", str(ready),
     ]
     builder_code = inspect.getsource(_load) + """
@@ -662,7 +662,7 @@ with runtime.construction_lease(root,"candidate") as descriptor:
         runtime_version="candidate",runtime_path=Path(sys.argv[2]))
 """
     builder = [
-        sys._base_executable, "-I", "-B", "-c", builder_code, guardian.__file__,
+        cast(Any, sys)._base_executable, "-I", "-B", "-c", builder_code, guardian.__file__,
         str(runtime_path), agent_procutil.__file__, str(root), json.dumps(writer),
     ]
     caller_code = inspect.getsource(_load) + """
@@ -679,7 +679,7 @@ with runtime.retention_custody(root,"control") as (slot,descriptor):
         runtime_version="control",runtime_path=Path(sys.argv[2]),allow_breakaway=True,
         retention_scope=Path(sys.argv[6]))
 """
-    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel = cast(Any, ctypes).WinDLL("kernel32", use_last_error=True)
     kernel.WaitForSingleObject.argtypes = (wintypes.HANDLE, wintypes.DWORD)
     kernel.WaitForSingleObject.restype = wintypes.DWORD
     kernel.IsProcessInJob.argtypes = (
@@ -688,14 +688,14 @@ with runtime.retention_custody(root,"control") as (slot,descriptor):
     kernel.IsProcessInJob.restype = wintypes.BOOL
     kernel.CloseHandle.argtypes = (wintypes.HANDLE,)
     caller, job = agent_procutil.spawn_sync_in_kill_on_close_job(
-        [sys._base_executable, "-I", "-B", "-c", caller_code, guardian.__file__,
+        [cast(Any, sys)._base_executable, "-I", "-B", "-c", caller_code, guardian.__file__,
          str(runtime_path), agent_procutil.__file__, str(root), json.dumps(builder),
          str(tmp_path / "scope")],
-        require_job=True, allow_breakaway=True, executable=sys._base_executable,
+        require_job=True, allow_breakaway=True, executable=cast(Any, sys)._base_executable,
         cwd=tmp_path, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
         stderr=subprocess.PIPE, text=True, **no_window_kwargs(),
     )
-    handles = []
+    handles: list[int] = []
     try:
         deadline = time.monotonic() + 10
         while not ready.exists():
@@ -708,7 +708,7 @@ with runtime.retention_custody(root,"control") as (slot,descriptor):
         handles.extend(evidence[key] for key in ("ordinary", "durable", "scope_guardian") if key in evidence)
         in_job = wintypes.BOOL()
         assert kernel.IsProcessInJob(
-            evidence["scope_guardian"], job.handle, ctypes.byref(in_job),
+            evidence["scope_guardian"], cast(agent_procutil.JobHandle, job).handle, ctypes.byref(in_job),
         )
         assert bool(in_job.value) is agent_procutil.contained_test_mode(), {
             "in_caller_job": bool(in_job.value), "contained": agent_procutil.contained_test_mode(),
@@ -716,7 +716,7 @@ with runtime.retention_custody(root,"control") as (slot,descriptor):
         if agent_procutil.contained_test_mode():
             caller.kill()
         else:
-            job.terminate_and_wait(5)
+            cast(agent_procutil.JobHandle, job).terminate_and_wait(5)
         caller.communicate(timeout=10)
         deadline = time.monotonic() + 10
         while True:
@@ -738,16 +738,16 @@ with runtime.retention_custody(root,"control") as (slot,descriptor):
                 assert kernel.WaitForSingleObject(handle, 15000) == 0
             finally:
                 kernel.CloseHandle(handle)
-        if job.handle is not None:
-            job.terminate_and_wait(5)
+        if cast(agent_procutil.JobHandle, job).handle is not None:
+            cast(agent_procutil.JobHandle, job).terminate_and_wait(5)
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows retained Job guardian")
 @pytest.mark.parametrize("outcome", ["success", "exit", "timeout", "launch", "unavailable"])
 @pytest.mark.timeout(30)
 def test_retained_guardian_archives_child_not_protocol_and_preserves_outcome(
-    guardian, tmp_path, monkeypatch, outcome, capsys,
-):
+    guardian: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, outcome: str, capsys: pytest.CaptureFixture[str],
+) -> None:
     helper_path = SCRIPTS / "installer_diagnostics.py"
     diagnostics = guardian._load_resource("guardian_capture_fixture", helper_path)
     environment = dict(os.environ, USERPROFILE=str(tmp_path), HOME=str(tmp_path))
@@ -786,7 +786,7 @@ def test_retained_guardian_archives_child_not_protocol_and_preserves_outcome(
         "launch": guardian.ChildLaunchError,
     }
     with runtime.construction_lease(root, "probe") as descriptor:
-        def run():
+        def run() -> Any:
             return guardian.run_owned(
                 command, cwd=slot, env=environment, timeout=3,
                 procutil=agent_procutil, construction_fd=descriptor,
@@ -830,8 +830,8 @@ def test_retained_guardian_archives_child_not_protocol_and_preserves_outcome(
 @pytest.mark.parametrize("inherit_output", [True, False])
 @pytest.mark.timeout(30)
 def test_durable_guardian_keeps_existing_descendant_pipe_completion(
-    guardian, tmp_path, inherit_output,
-):
+    guardian: Any, tmp_path: Path, inherit_output: bool,
+) -> None:
     runtime_path = (
         Path(__file__).resolve().parents[3]
         / "libs" / "versioned-runtime" / "versioned_runtime.py"
@@ -854,7 +854,7 @@ def test_durable_guardian_keeps_existing_descendant_pipe_completion(
         "print('root complete',flush=True)"
     )
     with runtime.construction_lease(root, "probe") as descriptor:
-        def run():
+        def run() -> Any:
             return guardian.run_owned(
                 [sys.executable, "-I", "-c", script], cwd=slot, env=environment, timeout=3,
                 procutil=agent_procutil, construction_fd=descriptor,
@@ -873,18 +873,24 @@ def test_durable_guardian_keeps_existing_descendant_pipe_completion(
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows owned capture")
-def test_capture_write_failure_still_drains_both_native_streams(guardian):
-    class FailedCapture:
-        writes = 0
+@pytest.mark.parametrize("sink", ["failed-file", "pipe"])
+def test_capture_write_failure_still_drains_both_native_streams(guardian: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sink: str) -> None:
+    from agent_procutil import streaming
 
-        def write(self, data):
-            self.writes += 1
-            if self.writes == 1:
-                return 1
-            raise OSError("capture storage unavailable")
+    archive = (tmp_path / "stdout.raw").open("w+b", buffering=0)
+    pipe = os.pipe() if sink == "pipe" else None
+    original = os.write
+    writes = []
 
-    capture = FailedCapture()
-    warnings = []
+    def fail_archive(descriptor: int, data: bytes) -> int:
+        if descriptor != archive.fileno():
+            return original(descriptor, data)
+        writes.append(True)
+        if len(writes) == 1:
+            return original(descriptor, data[:1])
+        raise OSError("capture storage unavailable")
+
+    monkeypatch.setattr(cast(Any, streaming).os, "write", fail_archive)
     process, job = agent_procutil.spawn_sync_in_kill_on_close_job(
         [sys.executable, "-I", "-c",
          "import os;os.write(1,b'o'*300000);os.write(2,b'e'*300000)"],
@@ -894,24 +900,72 @@ def test_capture_write_failure_still_drains_both_native_streams(guardian):
     )
     try:
         output = guardian._output_capture(
-            process, agent_procutil,
-            guardian._diagnostic_writer({"stdout": capture}, lambda: warnings.append("missing")),
+            process, agent_procutil, None,
+            archive_fds={"stdout": archive.fileno() if pipe is None else pipe[1]},
         )
         output.wait(10, wait_for_eof=False)
-        job.terminate_and_wait(10)
+        cast(agent_procutil.JobHandle, job).terminate_and_wait(10)
         process.wait(timeout=10)
         stdout, stderr = guardian._settle_output(output.finish, 10, capture=output)
         assert process.returncode == 0
-        assert stdout == "o" * 300000 and stderr == "e" * 300000
-        assert warnings == ["missing"] and capture.writes == 2
+        assert stdout == b"o" * 300000 and stderr == b"e" * 300000
+        assert output.archive_failed and len(writes) == (2 if pipe is None else 0)
     finally:
-        job.terminate_and_wait(10)
+        if cast(agent_procutil.JobHandle, job).handle is not None:
+            cast(agent_procutil.JobHandle, job).terminate_and_wait(10)
         process.wait(timeout=10)
+        archive.close()
+        if pipe is not None:
+            for descriptor in pipe:
+                os.close(descriptor)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows owned capture")
+@pytest.mark.timeout(30)
+def test_capture_archives_before_child_exit_and_before_caller_waits(guardian: Any, tmp_path: Path) -> None:
+    release = tmp_path / "release"
+    archive = tmp_path / "stdout.raw"
+    script = (
+        "import os,sys,time;from pathlib import Path\n"
+        "os.write(1,b'durable-before-exit\\x00\\xff')\n"
+        "deadline=time.monotonic()+10\n"
+        "while not Path(sys.argv[1]).exists():\n"
+        " if time.monotonic()>deadline: raise SystemExit(91)\n"
+        " time.sleep(.01)\n"
+    )
+    with archive.open("w+b", buffering=0) as destination:
+        process, job = agent_procutil.spawn_sync_in_kill_on_close_job(
+            [sys.executable, "-I", "-c", script, str(release)],
+            require_job=True, allow_breakaway=False, stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, **no_window_kwargs(),
+        )
+        try:
+            capture = guardian._output_capture(
+                process, agent_procutil, None, archive_fds={"stdout": destination.fileno()},
+            )
+            deadline = time.monotonic() + 5
+            while archive.read_bytes() != b"durable-before-exit\x00\xff":
+                assert process.poll() is None
+                assert time.monotonic() < deadline, "archive did not retain the live child bytes"
+                time.sleep(.01)
+            assert process.poll() is None
+            release.touch()
+            capture.wait(10, wait_for_eof=False)
+            cast(agent_procutil.JobHandle, job).terminate_and_wait(10)
+            process.wait(timeout=10)
+            stdout, stderr = guardian._settle_output(capture.finish, 10, capture=capture)
+            assert stdout == b"durable-before-exit\x00\xff" and stderr == b""
+            assert not capture.archive_failed
+        finally:
+            release.touch()
+            if cast(agent_procutil.JobHandle, job).handle is not None:
+                cast(agent_procutil.JobHandle, job).terminate_and_wait(10)
+            process.wait(timeout=10)
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows executable-token limit")
 @pytest.mark.timeout(30)
-def test_retained_windows_guardian_accepts_a_long_owning_interpreter(guardian, tmp_path):
+def test_retained_windows_guardian_accepts_a_long_owning_interpreter(guardian: Any, tmp_path: Path) -> None:
     environment = tmp_path / "owner"
     while len(str(environment / "Scripts" / "python.exe")) <= 270:
         environment /= "interpreter-" + "x" * 30

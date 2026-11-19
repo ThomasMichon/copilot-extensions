@@ -11,7 +11,7 @@ import sys
 import threading
 import time
 from types import SimpleNamespace
-
+from typing import Any, BinaryIO, NoReturn, cast
 import pytest
 import update_telemetry as ut
 from update_telemetry.human import _available
@@ -24,10 +24,10 @@ from agent_worktrees import update_runtime_plan
 PAYLOAD = Path(__file__).resolve().parents[1]
 
 
-def test_other_runtime_steps_do_not_enable_representative_diagnostics(tmp_path, monkeypatch):
+def test_other_runtime_steps_do_not_enable_representative_diagnostics(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     captured = []
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: Any) -> SimpleNamespace:
         captured.append(kwargs)
         return SimpleNamespace(status="OK")
 
@@ -45,10 +45,10 @@ def test_other_runtime_steps_do_not_enable_representative_diagnostics(tmp_path, 
 
 
 @pytest.fixture
-def launch_env(tmp_path, monkeypatch):
+def launch_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
     monkeypatch.setattr(registry_paths, "_payload_root", lambda: PAYLOAD)
     # Tests execute the checkout helper, not an unrelated selected runtime.
-    monkeypatch.setattr(installer_diagnostics.sys, "prefix", str(tmp_path / "python"))
+    monkeypatch.setattr(cast(Any, installer_diagnostics).sys, "prefix", str(tmp_path / "python"))
     environment = dict(os.environ, HOME=str(tmp_path), USERPROFILE=str(tmp_path))
     environment.update(
         COPILOT_EXTENSIONS_DIAGNOSTICS_ATTEMPT="a" * 32,
@@ -58,13 +58,13 @@ def launch_env(tmp_path, monkeypatch):
     return environment
 
 
-def run(argv, environment, **kwargs):
+def run(argv: list[str], environment: dict[str, str], **kwargs: Any) -> installer_run.InstallerRun:
     return installer_run.run_installer(
         argv, cwd=PAYLOAD, env=environment, deadline_s=10, diagnostics=True, **kwargs,
     )
 
 
-def producer(body):
+def producer(body: str) -> list[str]:
     path = str(PAYLOAD / "scripts" / "installer_diagnostics.py")
     return [sys.executable, "-I", "-X", "utf8", "-c",
             f"import runpy;d=runpy.run_path({path!r});\n"
@@ -73,7 +73,7 @@ def producer(body):
 
 @pytest.mark.real_installer_processes
 @pytest.mark.parametrize("code", [0, 23])
-def test_native_producer_reference_survives_missing_live_streams(launch_env, tmp_path, code):
+def test_native_producer_reference_survives_missing_live_streams(launch_env: dict[str, str], tmp_path: Path, code: int) -> None:
     environment = dict(launch_env)
     parent_environment = {key: value for key, value in os.environ.items()
                           if key.startswith("COPILOT_EXTENSIONS_DIAGNOSTICS_")}
@@ -82,7 +82,7 @@ def test_native_producer_reference_survives_missing_live_streams(launch_env, tmp
             producer(f" print('useful fixture output',flush=True)\n raise SystemExit({code})"),
             environment, output_fd=stream.fileno(),
         )
-    reference = result.diagnostics
+    reference = cast(dict[str, Any], result.diagnostics)
     assert reference["status"] == "available"
     assert reference["installer_entry"] == "observed"
     assert not reference["missing_diagnostics"]
@@ -101,70 +101,70 @@ def test_native_producer_reference_survives_missing_live_streams(launch_env, tmp
 
 
 @pytest.mark.real_installer_processes
-def test_spawn_failure_keeps_exact_request_but_no_entry_claim(launch_env, tmp_path):
+def test_spawn_failure_keeps_exact_request_but_no_entry_claim(launch_env: dict[str, str], tmp_path: Path) -> None:
     argv = [str(tmp_path / "not-an-installer")]
     result = run(argv, launch_env)
     assert result.rc is None and not result.status.startswith("OK")
-    assert result.diagnostics["installer_entry"] == "missing"
-    assert result.diagnostics["missing_diagnostics"]
-    directory = Path(result.diagnostics["directory"])
+    assert cast(dict[str, Any], result.diagnostics)["installer_entry"] == "missing"
+    assert cast(dict[str, Any], result.diagnostics)["missing_diagnostics"]
+    directory = Path(cast(dict[str, Any], result.diagnostics)["directory"])
     assert (directory / "launch-request.json").is_file()
     assert not list(directory.glob("*.start.json"))
     assert not list(directory.glob("*.log"))
     assert json.loads((directory / "launch-result.json").read_text())["outcome"] == "spawn-failed"
     second = run(argv, launch_env)
-    assert second.diagnostics["attempt"] != result.diagnostics["attempt"]
+    assert cast(dict[str, Any], second.diagnostics)["attempt"] != cast(dict[str, Any], result.diagnostics)["attempt"]
     assert (directory / "launch-result.json").is_file()
 
 
 @pytest.mark.real_installer_processes
 @pytest.mark.parametrize("host", ["powershell.exe", "pwsh"])
-def test_native_parser_failure_does_not_claim_entry(host, launch_env, tmp_path):
+def test_native_parser_failure_does_not_claim_entry(host: str, launch_env: dict[str, str], tmp_path: Path) -> None:
     if os.name != "nt" or not shutil.which(host):
         pytest.skip("Windows PowerShell host unavailable")
     script = tmp_path / "invalid.ps1"
     script.write_text("param(\n", encoding="utf-8")
-    result = run([shutil.which(host), "-NoProfile", "-NonInteractive", "-File", str(script)], launch_env)
+    result = run([cast(str, shutil.which(host)), "-NoProfile", "-NonInteractive", "-File", str(script)], launch_env)
     assert result.rc != 0
-    assert result.diagnostics["installer_entry"] == "missing"
-    assert result.diagnostics["status"] == "missing"
+    assert cast(dict[str, Any], result.diagnostics)["installer_entry"] == "missing"
+    assert cast(dict[str, Any], result.diagnostics)["status"] == "missing"
 
 
 @pytest.mark.real_installer_processes
 @pytest.mark.parametrize("host", ["powershell.exe", "pwsh"])
-def test_native_powershell_entry_joins_the_reserved_attempt(host, launch_env, tmp_path):
+def test_native_powershell_entry_joins_the_reserved_attempt(host: str, launch_env: dict[str, str], tmp_path: Path) -> None:
     if os.name != "nt" or not shutil.which(host):
         pytest.skip("Windows PowerShell host unavailable")
     script = tmp_path / "entered.ps1"
-    helper = str(PAYLOAD / "scripts" / "installer-diagnostics.ps1").replace("'", "''")
+    helper: Any = str(PAYLOAD / "scripts" / "installer-diagnostics.ps1").replace("'", "''")
     script.write_text(
         f". '{helper}'\nInitialize-InstallerDiagnostics 'agent-worktrees'\n"
         "Write-InstallerDiagnostic 'native entry fixture'\n"
         "Complete-InstallerDiagnostics 23\nexit 23\n", encoding="utf-8",
     )
-    launch_env["PSModulePath"] = str(Path(shutil.which(host)).parent / "Modules")
-    result = run([shutil.which(host), "-NoProfile", "-NonInteractive", "-File", str(script)], launch_env)
+    launch_env["PSModulePath"] = str(Path(cast(str, shutil.which(host))).parent / "Modules")
+    result = run([cast(str, shutil.which(host)), "-NoProfile", "-NonInteractive", "-File", str(script)], launch_env)
     assert result.rc == 23 and result.status == "installer exited 23"
-    directory = Path(result.diagnostics["directory"])
-    helper = installer_diagnostics._helper()
+    directory = Path(cast(dict[str, Any], result.diagnostics)["directory"])
+    helper = cast(Any, installer_diagnostics)._helper()
     for path in directory.iterdir():
         fd = helper.files().open_file(path)
         os.close(fd)
-    assert result.diagnostics["status"] == "available", result.diagnostics
+    assert cast(dict[str, Any], result.diagnostics)["status"] == "available", result.diagnostics
     assert "native entry fixture" in next(directory.glob("*.log")).read_text(encoding="utf-8")
     assert not (directory / "completed.json").exists()
 
 
 @pytest.mark.real_installer_processes
-def test_timeout_preserves_entry_reference_and_unfinished_writers(launch_env):
+def test_timeout_preserves_entry_reference_and_unfinished_writers(launch_env: dict[str, str]) -> None:
     result = installer_run.run_installer(
         producer(" import time\n print('before deadline',flush=True)\n time.sleep(60)"),
         cwd=PAYLOAD, env=launch_env, deadline_s=2, diagnostics=True,
     )
     assert result.status == "timed out (deadline hit during build)" and result.rc is None
-    assert result.diagnostics["installer_entry"] == "observed"
-    assert result.diagnostics["status"] == "available"
-    directory = Path(result.diagnostics["directory"])
+    assert cast(dict[str, Any], result.diagnostics)["installer_entry"] == "observed"
+    assert cast(dict[str, Any], result.diagnostics)["status"] == "available"
+    directory = Path(cast(dict[str, Any], result.diagnostics)["directory"])
     assert "before deadline" in next(directory.glob("*.log")).read_text()
     assert not list(directory.glob("*.completed.json"))
     assert not (directory / "completed.json").exists()
@@ -173,8 +173,8 @@ def test_timeout_preserves_entry_reference_and_unfinished_writers(launch_env):
 
 @pytest.mark.real_installer_processes
 @pytest.mark.skipif(os.name != "nt", reason="existing positive Job-tree teardown is Windows-only")
-def test_flushed_partial_survives_owned_tree_timeout_without_retirement(launch_env, tmp_path):
-    helper = installer_diagnostics._helper()
+def test_flushed_partial_survives_owned_tree_timeout_without_retirement(launch_env: dict[str, str], tmp_path: Path) -> None:
+    helper = cast(Any, installer_diagnostics)._helper()
     sink = helper.files().private_directory(tmp_path / "private-presentation", create=True) / "output"
     with os.fdopen(helper.files().open_file(sink, create=True), "wb") as stream:
         result = installer_run.run_installer(
@@ -188,7 +188,7 @@ def test_flushed_partial_survives_owned_tree_timeout_without_retirement(launch_e
             output_fd=stream.fileno(), require_tree_exit=True,
         )
     assert result.status.startswith("timed out") and result.rc is None
-    directory = Path(result.diagnostics["directory"])
+    directory = Path(cast(dict[str, Any], result.diagnostics)["directory"])
     identifier = next(directory.glob("*.start.json")).name.removesuffix(".start.json")
     environment = dict(launch_env, COPILOT_EXTENSIONS_DIAGNOSTICS_ATTEMPT=directory.name)
     recovered = helper.recover_producer_checkpoint(environment, identifier)
@@ -202,7 +202,7 @@ def test_flushed_partial_survives_owned_tree_timeout_without_retirement(launch_e
 
 
 @pytest.mark.real_installer_processes
-def test_unavailable_diagnostics_preserve_native_result_and_warn(launch_env, capsys):
+def test_unavailable_diagnostics_preserve_native_result_and_warn(launch_env: dict[str, str], capsys: pytest.CaptureFixture[str]) -> None:
     launch_env["USERPROFILE" if os.name == "nt" else "HOME"] = "relative-home"
     result = run([sys.executable, "-I", "-c", "raise SystemExit(23)"], launch_env)
     assert result.status == "installer exited 23" and result.rc == 23
@@ -214,50 +214,50 @@ def test_unavailable_diagnostics_preserve_native_result_and_warn(launch_env, cap
     assert captured.err.count("continuing with missing diagnostics") == 1
 
 
-def test_logging_presentation_failure_cannot_replace_primary_result(launch_env, monkeypatch):
+def test_logging_presentation_failure_cannot_replace_primary_result(launch_env: dict[str, str], monkeypatch: pytest.MonkeyPatch) -> None:
     class Closed:
-        def fileno(self):
+        def fileno(self) -> NoReturn:
             raise OSError("closed stderr")
 
     expected = installer_run.InstallerRun("installer exited 23", 23, None, False, .1)
     monkeypatch.setattr(installer_run, "_run_installer", lambda *a, **k: expected)
     with monkeypatch.context() as scoped:
-        scoped.setattr(installer_diagnostics.sys, "stderr", Closed())
+        scoped.setattr(cast(Any, installer_diagnostics).sys, "stderr", Closed())
         result = run(["unused"], launch_env)
     assert result.status == expected.status and result.rc == expected.rc
 
 
 @pytest.mark.parametrize("boundary", ["import", "completion"])
 @pytest.mark.parametrize("error", [RuntimeError("optional helper failed"), SyntaxError("invalid helper")])
-def test_helper_failure_cannot_replace_primary_result(launch_env, monkeypatch, boundary, error):
-    def failed(*args, **kwargs):
+def test_helper_failure_cannot_replace_primary_result(launch_env: dict[str, str], monkeypatch: pytest.MonkeyPatch, boundary: str, error: Exception) -> None:
+    def failed(*args: Any, **kwargs: Any) -> NoReturn:
         raise error
 
     if boundary == "import":
         monkeypatch.setattr(installer_diagnostics, "_helper", failed)
     else:
-        helper = installer_diagnostics._helper()
+        helper = cast(Any, installer_diagnostics)._helper()
         monkeypatch.setattr(helper, "complete_launch", failed)
         monkeypatch.setattr(installer_diagnostics, "_helper", lambda: helper)
-    notices = []
+    notices: list[str] = []
     monkeypatch.setattr(installer_diagnostics, "_notify", notices.append)
     expected = installer_run.InstallerRun("installer exited 23", 23, None, False, .1)
     monkeypatch.setattr(installer_run, "_run_installer", lambda *a, **k: expected)
     result = run(["unused"], launch_env)
     assert result.status == expected.status and result.rc == 23
-    assert result.diagnostics["missing_diagnostics"]
-    assert result.diagnostics["installer_entry"] == "unknown"
-    assert result.diagnostics["status"] == ("missing" if boundary == "import" else "unknown")
+    assert cast(dict[str, Any], result.diagnostics)["missing_diagnostics"]
+    assert cast(dict[str, Any], result.diagnostics)["installer_entry"] == "unknown"
+    assert cast(dict[str, Any], result.diagnostics)["status"] == ("missing" if boundary == "import" else "unknown")
     assert sum("continuing with missing diagnostics" in message for message in notices) == 1
 
 
-def test_blocked_notification_keeps_one_worker_and_no_global_stream_redirect(monkeypatch):
+def test_blocked_notification_keeps_one_worker_and_no_global_stream_redirect(monkeypatch: pytest.MonkeyPatch) -> None:
     entered, release = threading.Event(), threading.Event()
     calls = []
     original_stdout = sys.stdout
 
     class Blocked:
-        def fileno(self):
+        def fileno(self) -> NoReturn:
             calls.append("fileno")
             entered.set()
             release.wait(5)
@@ -267,7 +267,7 @@ def test_blocked_notification_keeps_one_worker_and_no_global_stream_redirect(mon
     thread = None
     try:
         with monkeypatch.context() as scoped:
-            scoped.setattr(installer_diagnostics.sys, "stderr", Blocked())
+            scoped.setattr(cast(Any, installer_diagnostics).sys, "stderr", Blocked())
             started = time.monotonic()
             installer_diagnostics._notify("first")
             assert entered.wait(1)
@@ -287,7 +287,7 @@ def test_blocked_notification_keeps_one_worker_and_no_global_stream_redirect(mon
 
 @pytest.mark.real_installer_processes
 @pytest.mark.parametrize("missing", [False, True])
-def test_full_unread_stderr_cannot_hold_launch_or_process_exit(launch_env, tmp_path, missing):
+def test_full_unread_stderr_cannot_hold_launch_or_process_exit(launch_env: dict[str, str], tmp_path: Path, missing: bool) -> None:
     release = tmp_path / "release"
     program = """
 import json,os,sys,threading,time
@@ -325,14 +325,14 @@ print(json.dumps({'rc':result.rc,'status':result.status,'diagnostics':result.dia
     )
     try:
         deadline = time.monotonic() + 10
-        while not _available(process.stderr.fileno()) and process.poll() is None:
+        while not _available(cast(BinaryIO, process.stderr).fileno()) and process.poll() is None:
             assert time.monotonic() < deadline, "fixture did not fill stderr"
             time.sleep(.01)
         assert process.poll() is None
         release.touch()
         process.wait(timeout=10)  # Deliberately do not drain stderr to unblock it.
         assert process.returncode == 0
-        result = json.loads(process.stdout.read())
+        result = json.loads(cast(BinaryIO, process.stdout).read())
         assert result["rc"] == 23 and result["status"] == "installer exited 23", result
         assert release.with_name("child-output").read_bytes().strip() == b"healthy child output"
         reference = result["diagnostics"]
@@ -346,11 +346,11 @@ print(json.dumps({'rc':result.rc,'status':result.status,'diagnostics':result.dia
         if process.poll() is None:
             process.terminate()
             process.wait(timeout=5)
-        process.stdout.close()
-        process.stderr.close()
+        cast(BinaryIO, process.stdout).close()
+        cast(BinaryIO, process.stderr).close()
 
 
-def test_interrupted_launch_retains_reference_without_replacing_exception(launch_env, monkeypatch):
+def test_interrupted_launch_retains_reference_without_replacing_exception(launch_env: dict[str, str], monkeypatch: pytest.MonkeyPatch) -> None:
     error = KeyboardInterrupt()
     monkeypatch.setattr(installer_run, "_run_installer",
                         lambda *a, **k: (_ for _ in ()).throw(error))
@@ -363,10 +363,10 @@ def test_interrupted_launch_retains_reference_without_replacing_exception(launch
 
 
 @pytest.mark.parametrize("damage", ["writer", "privacy", "missing"])
-def test_unverifiable_evidence_is_never_available(launch_env, damage, monkeypatch):
+def test_unverifiable_evidence_is_never_available(launch_env: dict[str, str], damage: str, monkeypatch: pytest.MonkeyPatch) -> None:
     launch = installer_diagnostics.Launch(launch_env)
-    helper = launch.helper
-    directory = Path(launch.reference["directory"])
+    helper = cast(Any, launch.helper)
+    directory = Path(cast(str, launch.reference["directory"]))
     identifier = "c" * 32
     helper._record(directory / f"{identifier}.start.json", {
         "writer": "d" * 32 if damage == "writer" else identifier,
@@ -375,7 +375,7 @@ def test_unverifiable_evidence_is_never_available(launch_env, damage, monkeypatc
     if damage == "privacy":
         original = helper.files().open_file
 
-        def refused(path, *args, **kwargs):
+        def refused(path: Path, *args: Any, **kwargs: Any) -> Any:
             if path.name == f"{identifier}.log":
                 raise PermissionError("private file validation refused")
             return original(path, *args, **kwargs)
@@ -387,7 +387,7 @@ def test_unverifiable_evidence_is_never_available(launch_env, damage, monkeypatc
     assert result["status"] != "available" and result["missing_diagnostics"]
 
 
-def test_engine_records_exact_nested_reference_not_shared_root(launch_env, monkeypatch):
+def test_engine_records_exact_nested_reference_not_shared_root(launch_env: dict[str, str], monkeypatch: pytest.MonkeyPatch) -> None:
     reference = {"attempt": "c" * 32, "directory": "fixture-directory",
                  "status": "missing", "missing_diagnostics": True}
     events = []
@@ -395,7 +395,7 @@ def test_engine_records_exact_nested_reference_not_shared_root(launch_env, monke
                         SimpleNamespace(emit=lambda *a, **k: events.append((a, k))))
     monkeypatch.setattr(update_events, "record", lambda *a, **k: None)
 
-    def install(argv, **kwargs):
+    def install(argv: list[str], **kwargs: Any) -> installer_run.InstallerRun:
         assert kwargs["diagnostics"] is True and kwargs["receipt_owned"] is True
         return installer_run.InstallerRun("installer exited 23", 23, None, False, .1, reference)
 
@@ -407,7 +407,7 @@ def test_engine_records_exact_nested_reference_not_shared_root(launch_env, monke
 
 
 @pytest.mark.real_installer_processes
-def test_exact_reference_is_replayable_from_existing_update_events(launch_env, tmp_path, monkeypatch):
+def test_exact_reference_is_replayable_from_existing_update_events(launch_env: dict[str, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(ut.ENV_HOME, str(tmp_path / "telemetry"))
     for name in (ut.ENV_RUN_ID, ut.ENV_EVENTS, ut.ENV_OWNER):
         monkeypatch.delenv(name, raising=False)
@@ -415,7 +415,7 @@ def test_exact_reference_is_replayable_from_existing_update_events(launch_env, t
 
     monkeypatch.setattr(reconcile, "runtime_deployed_version", lambda *a, **k: None)
     update_events.start("fixture")
-    events_path = update_events._run.events_path
+    events_path = cast(Path, cast(ut.Run, update_events._run).events_path)
     rc = 1
     try:
         rc = runtime._run_engine_installer(

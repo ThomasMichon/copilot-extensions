@@ -3,7 +3,6 @@
 from __future__ import annotations
 from collections.abc import Callable, Iterator
 
-import importlib.util
 import codecs
 import hashlib
 import io
@@ -20,7 +19,6 @@ from contextlib import AbstractContextManager, ExitStack, contextmanager
 from dataclasses import dataclass, replace
 from functools import partial
 from pathlib import Path
-from types import ModuleType
 from typing import Any, TypedDict, cast
 
 if sys.version_info >= (3, 11):
@@ -52,6 +50,7 @@ _open, _unchanged, _digest = _snapshot_open, _snapshot_unchanged, _snapshot_dige
 from installer_source_build import (
     SourceWheelInputs, _selected_extras as _selected_extras,
     _source_deadline, _source_phase, retained_input_graph, retained_source_wheels,
+    retained_inputs, frozen_procutil as _procutil, _package_name as _package_name,
     revalidate_input_content, check_dev_owner,
     _wheel_construction_hash as _wheel_construction_hash)
 from installer_engine_health import (
@@ -62,6 +61,7 @@ from installer_engine_health import (
 )
 
 _ProgressOptions = TypedDict("_ProgressOptions", {"on_progress": Callable[[], None]}, total=False)
+_DiagnosticOptions = TypedDict("_DiagnosticOptions", {"diagnostics_path": Path}, total=False)
 _GENERATED_DIRECTORIES = {
     ".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache", ".test-runs",
     "build", "dist", "node_modules",
@@ -171,11 +171,6 @@ def _package_roots(plugin: Path) -> tuple[Path, ...]:
                 continue
             pending.append((child, dependency))
     return tuple(sorted(roots))
-
-
-def _package_name(root: Path) -> str:
-    name = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"]["name"]
-    return re.sub(r"[-_.]+", "-", name).lower()
 
 
 def _selected_local_packages(
@@ -342,40 +337,12 @@ def freeze_inputs(
         raise
 
 
-def _procutil(inputs: FrozenInputs) -> ModuleType:
-    for root in inputs.packages:
-        data = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
-        if data["project"]["name"] == "agent-procutil":
-            path = root / "src" / "agent_procutil" / "__init__.py"
-            namespace = "_installer_procutil_" + hashlib.sha256(str(path).encode("utf-8")).hexdigest()
-            spec = importlib.util.spec_from_file_location(namespace, path)
-            if spec is None or spec.loader is None:
-                raise ImportError(f"Cannot load frozen installer process ownership: {path}")
-            module = importlib.util.module_from_spec(spec)
-            sys.modules[spec.name] = module
-            try:
-                spec.loader.exec_module(module)
-            except BaseException:
-                sys.modules.pop(spec.name, None)
-                raise
-            return module
-    raise ValueError("Runtime inputs do not declare the canonical agent-procutil dependency")
-
-
-@contextmanager
 def _retained_inputs(
     inputs: FrozenInputs, uv: Path, python: Path, *, refresh: bool, timeout: float = 180,
-) -> Iterator[FrozenInputs]:
-    with ExitStack() as owner:
-        with _source_phase("retention", timeout, {}) as progress:
-            def completed() -> None:
-                _source_deadline(progress)
-                progress.renew()
-
-            frozen = owner.enter_context(_retained_input_graph(
-                inputs, uv, python, refresh=refresh, on_progress=completed,
-            ))
-        yield frozen
+) -> AbstractContextManager[FrozenInputs]:
+    return retained_inputs(
+        inputs, uv, python, refresh=refresh, timeout=timeout, engine=sys.modules[__name__],
+    )
 
 
 @contextmanager
@@ -436,7 +403,7 @@ def _child(
                 on_output=relay if on_progress is not None or not output_fds else None,
                 output_fds=output_fds,
                 allow_breakaway=allow_breakaway,
-                **({
+                **cast(_DiagnosticOptions, {
                     "diagnostics_path": inputs.plugin / "scripts" / "installer_diagnostics.py",
                 } if getattr(inputs, "diagnostics", False) else {}),
                 **cast(dict[str, Any], {

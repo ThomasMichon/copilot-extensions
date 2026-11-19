@@ -15,7 +15,7 @@ import subprocess
 import sys
 import textwrap
 from pathlib import Path
-
+from typing import Any, cast
 import agent_procutil as pu
 import pytest
 
@@ -133,7 +133,7 @@ if "error" in report:
 """
 
 
-def _load(name: str, path: Path):
+def _load(name: str, path: Path) -> Any:
     spec = importlib.util.spec_from_file_location(name, path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -142,7 +142,7 @@ def _load(name: str, path: Path):
     return module
 
 
-def _parent_source():
+def _parent_source() -> str:
     return (
         "from __future__ import annotations\n"
         + inspect.getsource(_load) + textwrap.dedent(_PARENT)
@@ -150,7 +150,7 @@ def _parent_source():
 
 
 @pytest.mark.parametrize("failure", ["timeout", "cancel"])
-def test_retained_guardian_from_pythonw_settles_without_desktop_side_effects(tmp_path, failure):
+def test_retained_guardian_from_pythonw_settles_without_desktop_side_effects(tmp_path: Path, failure: str) -> None:
     repo = Path(__file__).resolve().parents[3]
     observer_module = _load(
         "installer_guardian_window_observer",
@@ -191,7 +191,7 @@ def test_retained_guardian_from_pythonw_settles_without_desktop_side_effects(tmp
         "failure": failure,
         "diagnostics": str(helper_path),
     }
-    handles = []
+    handles: list[Any] = []
     log_path = tmp_path / "parent.log"
     with observer_module._WindowObserver(user32, kernel32, callback_type) as observer:
         with log_path.open("wb") as log:
@@ -207,7 +207,7 @@ def test_retained_guardian_from_pythonw_settles_without_desktop_side_effects(tmp
                 assert job is not None, "windowless parent needs strict outer containment"
                 for cycle in range(3):
                     state = tmp_path / str(cycle)
-                    def started(state=state):
+                    def started(state: Path = state) -> Any:
                         identities = observer_module._read_json(state / "pids.json")
                         if identities:
                             return identities
@@ -276,7 +276,7 @@ def test_retained_guardian_from_pythonw_settles_without_desktop_side_effects(tmp
                     assert "owned stdout" in text and "owned stderr" in text
                     assert '"returncode"' not in text and '"timed_out"' not in text
             finally:
-                job.terminate_and_wait(10)
+                cast(pu.JobHandle, job).terminate_and_wait(10)
                 process.wait(timeout=10)
                 for handle in handles:
                     assert kernel32.CloseHandle(handle)

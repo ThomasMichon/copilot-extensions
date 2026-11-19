@@ -571,8 +571,8 @@ def main() -> int:
     written = sync()
     if written:
         print(f"Synced installer-engine files ({len(written)} file(s)):")
-        for path in written:
-            print(f"  + {path}")
+        for written_path in written:
+            print(f"  + {written_path}")
     else:
         print("Installer-engine vendoring already in sync.")
     return 0

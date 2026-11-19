@@ -6,6 +6,7 @@ import math
 import os
 import queue
 import selectors
+import stat
 import subprocess
 import threading
 import time
@@ -53,6 +54,10 @@ class SyncProcessOutput:
     bytes share the ordinary captured-output storage. After timeout or output
     failure, retire the owned producer before ``finish``. No other reader may
     consume these pipes.
+
+    Optional ``archive_fds`` are borrowed regular files, written before queueing
+    each chunk. Archive failures set ``archive_failed`` without changing capture
+    or process results; pipes and other potentially blocking sinks are refused.
     """
 
     def __init__(
@@ -61,6 +66,7 @@ class SyncProcessOutput:
         output_fds: Mapping[str, int] | None = None, capture: bool = True,
         input_bytes: bytes | None = None,
         cleanup_deadline: float | None = None,
+        archive_fds: Mapping[str, int] | None = None,
     ) -> None:
         from ._output_relay import ByteRelay
 
@@ -75,6 +81,16 @@ class SyncProcessOutput:
         self.on_output = on_output
         self._notified = False
         self._finished = False
+        self.archive_failed = False
+        self._archive_fds: dict[str, int] = {}
+        for name, descriptor in (archive_fds or {}).items():
+            try:
+                if name not in ("stdout", "stderr") or not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                    raise ValueError("output archives require regular stdout/stderr files")
+            except (OSError, ValueError, TypeError):
+                self.archive_failed = True
+            else:
+                self._archive_fds[name] = descriptor
         self._relays = {}
         try:
             for name, descriptor in (output_fds or {}).items():
@@ -183,6 +199,7 @@ class SyncProcessOutput:
                     chunk = read(size)
                     if not chunk:
                         return
+                    self._archive(name, chunk)
                     with self._lock:
                         self._last_output = time.monotonic()
                         self._has_output = True
@@ -191,6 +208,21 @@ class SyncProcessOutput:
             self._events.put((name, error))
         finally:
             self._events.put((name, None))
+
+    def _archive(self, name: str, chunk: bytes) -> None:
+        descriptor = self._archive_fds.get(name)
+        if descriptor is None:
+            return
+        try:
+            remaining = memoryview(chunk)
+            while remaining:
+                count = os.write(descriptor, remaining)
+                if count <= 0:
+                    raise OSError("output archive made no progress")
+                remaining = remaining[count:]
+        except (OSError, ValueError, TypeError):
+            self.archive_failed = True
+            self._archive_fds.pop(name, None)
 
     def _deliver(self, name: str, chunk: bytes | BaseException | None) -> bool:
         if chunk is None:

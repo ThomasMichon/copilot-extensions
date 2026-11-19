@@ -57,7 +57,7 @@ class InstallerRun:
     receipt_version: str | None
     receipt_complete: bool
     duration_s: float
-    diagnostics: dict | None = None
+    diagnostics: dict[str, Any] | None = None
 
 
 class InstallerCleanupError(RuntimeError):
@@ -313,7 +313,7 @@ def run_installer(
     ``diagnostics`` reserves an unattributed launch request before spawning;
     only native writer evidence establishes installer entry. The additive
     result never changes status, exit, receipt judgment, stdio or containment.
-    See :func:`_run_installer` for those existing execution contracts.
+    See :func:`_run_with_resources` for those existing execution contracts.
     """
     arguments: dict[str, Any] = dict(
         cwd=cwd, env=env, deadline_s=deadline_s, target_version=target_version,
@@ -321,13 +321,13 @@ def run_installer(
         on_settled=on_settled, native_write_deadline=native_write_deadline,
     )
     if not diagnostics:
-        return _run_installer(argv, **arguments)
+        return _run_with_resources(argv, **arguments)
     from .installer_diagnostics import Launch
 
     launch = Launch(env)
     arguments["env"] = launch.environment
     try:
-        result = _run_installer(argv, **arguments)
+        result = _run_with_resources(argv, **arguments)
     except BaseException:
         launch.finish()
         raise
@@ -337,7 +337,7 @@ def run_installer(
     return dataclasses.replace(result, diagnostics=launch.finish(outcome, native_exit=result.rc))
 
 
-def _run_installer(
+def _run_with_resources(
     argv: Sequence[str],
     *,
     cwd: Path | None,

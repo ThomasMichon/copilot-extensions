@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
 import importlib.util
 import io
 import json
@@ -10,10 +11,9 @@ import stat
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
-
-
 REPO = Path(__file__).resolve().parents[1]
 MODULE_PATH = REPO / "tools" / "sync-installer-engine.py"
 HUMAN_CAPABILITY_PATH = (
@@ -26,14 +26,14 @@ sync_installer_engine = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(sync_installer_engine)
 
 
-def _human_admission():
+def _human_admission() -> Callable[[Path], bool]:
     spec = importlib.util.spec_from_file_location("native_human_capability", HUMAN_CAPABILITY_PATH)
+    assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return module.powershell_human_utf8_supported
+    return cast(Callable[[Path], bool], module.powershell_human_utf8_supported)
 
-
-def test_human_capability_probe_does_not_require_an_installed_runtime():
+def test_human_capability_probe_does_not_require_an_installed_runtime() -> None:
     program = """
 import importlib.util, pathlib, sys
 spec = importlib.util.spec_from_file_location("bare_human_capability", sys.argv[1])
@@ -47,12 +47,12 @@ assert module.powershell_human_utf8_supported(pathlib.Path(sys.argv[2]))
         [sys.executable, "-I", "-S", "-B", "-c", program, str(HUMAN_CAPABILITY_PATH),
          str(REPO / "plugins/agent-worktrees/scripts/install.ps1")],
         capture_output=True, text=True, timeout=15,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=cast(Any, subprocess).CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_human_output_declarations_bind_real_packaged_entrypoints():
+def test_human_output_declarations_bind_real_packaged_entrypoints() -> None:
     contract = sync_installer_engine.ier
     source = REPO / "libs" / "installer-engine" / contract.HUMAN_HELPER
     supports = _human_admission()
@@ -67,7 +67,7 @@ def test_human_output_declarations_bind_real_packaged_entrypoints():
 @pytest.mark.parametrize("plugin", (
     "agent-mcp", "agent-machines", "agent-containers", "budget-guidance", "agent-worktrees",
 ))
-def test_native_cleanup_ships_its_engine_and_finite_process_supervisor(plugin: str, tmp_path) -> None:
+def test_native_cleanup_ships_its_engine_and_finite_process_supervisor(plugin: str, tmp_path: Path) -> None:
     contract = sync_installer_engine.ier
     consumer = REPO / "plugins" / plugin
     assert consumer in contract.native_adopter_dirs(REPO)
@@ -78,7 +78,7 @@ def test_native_cleanup_ships_its_engine_and_finite_process_supervisor(plugin: s
         ).read_bytes()
 
 
-def test_native_machines_materializes_its_declared_retained_gui_bootstrap(tmp_path):
+def test_native_machines_materializes_its_declared_retained_gui_bootstrap(tmp_path: Path) -> None:
     import materialize_installer_engine
 
     scripts = tmp_path / "plugins" / "agent-machines" / "scripts"
@@ -92,7 +92,7 @@ def test_native_machines_materializes_its_declared_retained_gui_bootstrap(tmp_pa
     assert not (tmp_path / "plugins" / "agent-containers" / "scripts" / launcher.name).exists()
 
 
-def _materialized_consumer(consumer: Path, tmp_path: Path, names) -> Path:
+def _materialized_consumer(consumer: Path, tmp_path: Path, names: Iterable[str]) -> Path:
     import materialize_installer_engine as materializer
 
     candidate = tmp_path / consumer.name
@@ -106,13 +106,13 @@ def _materialized_consumer(consumer: Path, tmp_path: Path, names) -> Path:
 
 
 @pytest.mark.parametrize("shell", ["pwsh", "powershell"])
-def test_native_deploy_manifest_can_build_without_publishing(tmp_path, shell):
+def test_native_deploy_manifest_can_build_without_publishing(tmp_path: Path, shell: str) -> None:
     executable = shutil.which(shell)
     if not executable:
         pytest.skip(f"{shell} unavailable")
     script = tmp_path / "manifest.ps1"
     helper = REPO / "libs/installer-engine/installer-engine.ps1"
-    def quote(path):
+    def quote(path: Path) -> str:
         return "'" + str(path).replace("'", "''") + "'"
     script.write_text(
         "$ErrorActionPreference = 'Stop'\n"
@@ -135,7 +135,7 @@ def test_native_deploy_manifest_can_build_without_publishing(tmp_path, shell):
     result = subprocess.run(
         [executable, "-NoProfile", "-NonInteractive", "-File", str(script)],
         capture_output=True, text=True, timeout=20,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=cast(Any, subprocess).CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     built = json.loads(result.stdout)
@@ -190,7 +190,7 @@ write_deploy_manifest svc plugin "$2" "$3" "$4" '"preserved":"value"' '' 1.2.3
     assert built["preserved"] == "value"
 
 
-def test_diagnostics_assets_are_self_contained_canonical_projections():
+def test_diagnostics_assets_are_self_contained_canonical_projections() -> None:
     pairs = sync_installer_engine.ier.diagnostics_pairs(REPO)
     assert len(pairs) == 5
     for source, destination in pairs:
@@ -290,7 +290,7 @@ def test_installer_action_identity_uses_existing_progress_helpers(
         [executable, "-NoProfile", "-NonInteractive", "-File", str(harness)]
         if powershell else [executable, str(harness)]
     )
-    options = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    options = {"creationflags": cast(Any, subprocess).CREATE_NO_WINDOW} if os.name == "nt" else {}
     standalone = subprocess.run(
         argv, capture_output=True, text=True, timeout=10, check=False, **options,
     )
@@ -409,7 +409,7 @@ def test_construction_action_progress_precedes_native_failure(
     monkeypatch.syspath_prepend(str(REPO / "libs" / "update-telemetry" / "src"))
     from update_telemetry.human import HumanOperation, native_output
 
-    options = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    options = {"creationflags": cast(Any, subprocess).CREATE_NO_WINDOW} if os.name == "nt" else {}
     for action in ("install", "update", "provision"):
         argv = [
             executable, "-NoProfile", "-NonInteractive", "-File", str(fixture),
@@ -441,7 +441,7 @@ def _copy_real_installer_engine(root: Path) -> None:
     canonical = root / "libs" / "installer-engine"
     canonical.mkdir(parents=True)
     origin = REPO / "libs" / "installer-engine"
-    for asset in (*contract.FILES, *contract.support_files(origin)):
+    for asset in (*contract.FILES, *contract.support_files(origin), *(name for names in contract.STANDALONE_NATIVE_EXTRA_FILES.values() for name in names)):
         (canonical / asset).parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(origin / asset, canonical / asset)
 
@@ -452,7 +452,7 @@ def test_real_engine_fixture_retains_nested_support_assets(
     contract = sync_installer_engine.ier
     origin = tmp_path / "input"
     canonical = origin / "libs" / "installer-engine"
-    assets = (*contract.FILES, "nested/support.py")
+    assets = (*contract.FILES, "nested/support.py", *(name for names in contract.STANDALONE_NATIVE_EXTRA_FILES.values() for name in names))
     for asset in assets:
         path = canonical / asset
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -617,7 +617,7 @@ def test_whole_payload_human_contract(
                         shutil.copyfile(origin, target)
     original = materialize_main.materialize_launch_wrapper_assets
 
-    def later_owner(dest, *, canonical_root):
+    def later_owner(dest: Path, *, canonical_root: Path) -> list[str]:
         result = original(dest, canonical_root=canonical_root)
         # Exercise ordering after the real final asset materializer, including
         # the engine's own installer (which has no installer-engine reference).
@@ -705,8 +705,8 @@ def test_promotion_refreshes_declared_human_helper_preimages(
 )
 @pytest.mark.parametrize("asset", ["entrypoint", "declaration", "initializer"])
 def test_same_root_invalid_human_source_fails_before_any_rewrite(
-    tmp_path, monkeypatch, plugin, entrypoint, asset,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, plugin: str, entrypoint: str, asset: str,
+) -> None:
     import materialize_main
 
     root = tmp_path / "source"
@@ -736,7 +736,7 @@ def test_same_root_invalid_human_source_fails_before_any_rewrite(
 
 
 @pytest.fixture
-def fake_repo(tmp_path, monkeypatch):
+def fake_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     canonical_dir = tmp_path / "libs" / "installer-engine"
     canonical_dir.mkdir(parents=True)
     (canonical_dir / "installer-engine.ps1").write_text("canonical ps1\n", encoding="utf-8")
@@ -755,7 +755,7 @@ def _mk_plugin_scripts(repo: Path, name: str) -> Path:
     return scripts
 
 
-def test_evaluator_bootstrap_delivery_is_scoped_and_byte_identical(fake_repo, monkeypatch):
+def test_evaluator_bootstrap_delivery_is_scoped_and_byte_identical(fake_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sync_installer_engine, "ADOPTERS", ())
     monkeypatch.setattr(sync_installer_engine.ier, "STANDALONE_NATIVE_ADOPTERS", ())
     source = sync_installer_engine.CANONICAL_DIR / sync_installer_engine.BOOTSTRAP_FILE
@@ -781,7 +781,7 @@ def test_evaluator_bootstrap_delivery_is_scoped_and_byte_identical(fake_repo, mo
         sync_installer_engine.sync()
 
 
-def test_evaluator_bootstrap_refuses_linked_delivery(fake_repo, monkeypatch):
+def test_evaluator_bootstrap_refuses_linked_delivery(fake_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sync_installer_engine, "ADOPTERS", ())
     source = sync_installer_engine.CANONICAL_DIR / sync_installer_engine.BOOTSTRAP_FILE
     source.write_bytes(b"canonical\n")
@@ -800,7 +800,7 @@ def test_evaluator_bootstrap_refuses_linked_delivery(fake_repo, monkeypatch):
     assert foreign.read_bytes() == b"preserve\n"
 
 
-def test_python_engine_ships_and_checks_all_owned_process_files(fake_repo, monkeypatch):
+def test_python_engine_ships_and_checks_all_owned_process_files(fake_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sync_installer_engine, "ADOPTERS", ())
     monkeypatch.setattr(sync_installer_engine, "PYTHON_ADOPTERS", ("agent-python",))
     files = (*sync_installer_engine.ier.PYTHON_FILES, *sync_installer_engine.ier.SUPPORT_FILES)
@@ -817,7 +817,7 @@ def test_python_engine_ships_and_checks_all_owned_process_files(fake_repo, monke
 
 
 @pytest.mark.parametrize("plugin", ["agent-pull-requests", "agent-ssh", "agent-codespaces", "agent-bridge"])
-def test_first_use_input_freezer_uses_canonical_projection_owner(plugin, tmp_path):
+def test_first_use_input_freezer_uses_canonical_projection_owner(plugin: str, tmp_path: Path) -> None:
     contract = sync_installer_engine.ier
     consumer = REPO / "plugins" / plugin
     assert consumer in contract.python_adopter_dirs(REPO)
@@ -829,14 +829,14 @@ def test_first_use_input_freezer_uses_canonical_projection_owner(plugin, tmp_pat
         ).read_bytes()
 
 
-def test_unregistered_python_engine_is_rejected(fake_repo, monkeypatch):
+def test_unregistered_python_engine_is_rejected(fake_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sync_installer_engine, "ADOPTERS", ())
     scripts = _mk_plugin_scripts(fake_repo, "agent-unregistered")
     (scripts / "installer_engine.py").write_text("stray", encoding="utf-8")
     assert any("unregistered Python" in problem for problem in sync_installer_engine.verify())
 
 
-def test_standalone_native_engine_uses_existing_sync_owner(fake_repo, monkeypatch):
+def test_standalone_native_engine_uses_existing_sync_owner(fake_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     contract = sync_installer_engine.ier
     monkeypatch.setattr(sync_installer_engine, "ADOPTERS", ())
     monkeypatch.setattr(contract, "STANDALONE_PYTHON_ADOPTERS", ())
@@ -860,8 +860,8 @@ def test_standalone_native_engine_uses_existing_sync_owner(fake_repo, monkeypatc
 
 
 def test_standalone_native_engine_refuses_linked_destination(
-    fake_repo, monkeypatch, native_file_symlink,
-):
+    fake_repo: Path, monkeypatch: pytest.MonkeyPatch, native_file_symlink: Callable[[Path, Path], None],
+) -> None:
     contract = sync_installer_engine.ier
     monkeypatch.setattr(sync_installer_engine, "ADOPTERS", ())
     monkeypatch.setattr(contract, "STANDALONE_PYTHON_ADOPTERS", ())
@@ -898,7 +898,7 @@ def _write_local_refs(scripts: Path) -> None:
     )
 
 
-def test_verify_passes_when_adopter_is_byte_identical(fake_repo):
+def test_verify_passes_when_adopter_is_byte_identical(fake_repo: Path) -> None:
     scripts = _mk_plugin_scripts(fake_repo, "agent-registered")
     _write_local_refs(scripts)
     (scripts / "installer-engine.ps1").write_text("canonical ps1\n", encoding="utf-8")
@@ -907,14 +907,14 @@ def test_verify_passes_when_adopter_is_byte_identical(fake_repo):
     assert sync_installer_engine.verify() == []
 
 
-def test_verify_accepts_a_canonical_reference_with_no_local_copy(fake_repo):
+def test_verify_accepts_a_canonical_reference_with_no_local_copy(fake_repo: Path) -> None:
     scripts = _mk_plugin_scripts(fake_repo, "agent-registered")
     _write_canonical_refs(scripts)
 
     assert sync_installer_engine.verify() == []
 
 
-def test_verify_flags_drifted_registered_adopter(fake_repo):
+def test_verify_flags_drifted_registered_adopter(fake_repo: Path) -> None:
     scripts = _mk_plugin_scripts(fake_repo, "agent-registered")
     _write_local_refs(scripts)
     (scripts / "installer-engine.ps1").write_text("drifted content\n", encoding="utf-8")
@@ -925,12 +925,12 @@ def test_verify_flags_drifted_registered_adopter(fake_repo):
     assert any("differs from" in p and "installer-engine.ps1" in p for p in problems)
 
 
-def test_verify_flags_missing_registered_adopter(fake_repo):
+def test_verify_flags_missing_registered_adopter(fake_repo: Path) -> None:
     # agent-registered is declared in ADOPTERS but never vendored the files.
     assert any("is missing" in p for p in sync_installer_engine.verify())
 
 
-def test_verify_flags_unregistered_adopter_with_a_stray_copy(fake_repo):
+def test_verify_flags_unregistered_adopter_with_a_stray_copy(fake_repo: Path) -> None:
     # The registered adopter is in sync...
     scripts = _mk_plugin_scripts(fake_repo, "agent-registered")
     _write_local_refs(scripts)
@@ -947,7 +947,7 @@ def test_verify_flags_unregistered_adopter_with_a_stray_copy(fake_repo):
     )
 
 
-def test_verify_flags_unregistered_adopter_with_local_ref_and_no_copy(fake_repo):
+def test_verify_flags_unregistered_adopter_with_local_ref_and_no_copy(fake_repo: Path) -> None:
     scripts = _mk_plugin_scripts(fake_repo, "agent-registered")
     _write_local_refs(scripts)
     (scripts / "installer-engine.ps1").write_text("canonical ps1\n", encoding="utf-8")
@@ -963,7 +963,7 @@ def test_verify_flags_unregistered_adopter_with_local_ref_and_no_copy(fake_repo)
     )
 
 
-def test_verify_flags_unregistered_adopter_with_trailing_comment_ref_and_no_copy(fake_repo):
+def test_verify_flags_unregistered_adopter_with_trailing_comment_ref_and_no_copy(fake_repo: Path) -> None:
     scripts = _mk_plugin_scripts(fake_repo, "agent-registered")
     _write_local_refs(scripts)
     (scripts / "installer-engine.ps1").write_text("canonical ps1\n", encoding="utf-8")
@@ -986,7 +986,7 @@ def test_verify_flags_unregistered_adopter_with_trailing_comment_ref_and_no_copy
     )
 
 
-def test_verify_ignores_plugin_with_no_installer_engine_file(fake_repo):
+def test_verify_ignores_plugin_with_no_installer_engine_file(fake_repo: Path) -> None:
     scripts = _mk_plugin_scripts(fake_repo, "agent-registered")
     _write_local_refs(scripts)
     (scripts / "installer-engine.ps1").write_text("canonical ps1\n", encoding="utf-8")
@@ -996,7 +996,7 @@ def test_verify_ignores_plugin_with_no_installer_engine_file(fake_repo):
     assert sync_installer_engine.verify() == []
 
 
-def test_verify_flags_an_escaping_noncanonical_reference(fake_repo):
+def test_verify_flags_an_escaping_noncanonical_reference(fake_repo: Path) -> None:
     scripts = _mk_plugin_scripts(fake_repo, "agent-registered")
     (scripts / "install.sh").write_text(
         '. "$SCRIPT_DIR/../../../outside/installer-engine.sh"\n',
@@ -1015,7 +1015,7 @@ def test_verify_flags_an_escaping_noncanonical_reference(fake_repo):
     assert any("which is not libs/installer-engine/installer-engine.sh" in p for p in problems)
 
 
-def test_verify_rejects_malformed_local_reference_even_when_copies_exist(fake_repo):
+def test_verify_rejects_malformed_local_reference_even_when_copies_exist(fake_repo: Path) -> None:
     scripts = _mk_plugin_scripts(fake_repo, "agent-registered")
     (scripts / "install.ps1").write_text(
         ". (Join-Path $PSScriptRoot 'missing/installer-engine.ps1')\n",
@@ -1034,7 +1034,7 @@ def test_verify_rejects_malformed_local_reference_even_when_copies_exist(fake_re
     assert any("neither" in p and "installer-engine.ps1" in p for p in problems)
 
 
-def test_verify_rejects_normalized_local_reference_with_missing_intermediate(fake_repo):
+def test_verify_rejects_normalized_local_reference_with_missing_intermediate(fake_repo: Path) -> None:
     scripts = _mk_plugin_scripts(fake_repo, "agent-registered")
     (scripts / "install.sh").write_text(
         '. "$SCRIPT_DIR/missing/../installer-engine.sh"\n',
@@ -1053,7 +1053,7 @@ def test_verify_rejects_normalized_local_reference_with_missing_intermediate(fak
     assert any("neither" in p and "missing\\..\\installer-engine.ps1" in p for p in problems)
 
 
-def test_verify_rejects_mismatched_powershell_quotes(fake_repo):
+def test_verify_rejects_mismatched_powershell_quotes(fake_repo: Path) -> None:
     scripts = _mk_plugin_scripts(fake_repo, "agent-registered")
     (scripts / "install.ps1").write_text(
         ". (Join-Path $PSScriptRoot '..\\..\\..\\libs\\installer-engine\\installer-engine.ps1\")\n",
@@ -1069,7 +1069,7 @@ def test_verify_rejects_mismatched_powershell_quotes(fake_repo):
     assert any("does not source installer-engine" in p for p in problems)
 
 
-def test_verify_rejects_mixed_local_and_canonical_forms(fake_repo):
+def test_verify_rejects_mixed_local_and_canonical_forms(fake_repo: Path) -> None:
     scripts = _mk_plugin_scripts(fake_repo, "agent-registered")
     (scripts / "install.ps1").write_text(
         ". (Join-Path $PSScriptRoot 'installer-engine.ps1')\n",
@@ -1086,7 +1086,7 @@ def test_verify_rejects_mixed_local_and_canonical_forms(fake_repo):
     assert any("mixes installer-engine forms" in p for p in problems)
 
 
-def test_verify_rejects_symlinked_canonical_engine(fake_repo, native_file_symlink):
+def test_verify_rejects_symlinked_canonical_engine(fake_repo: Path, native_file_symlink: Callable[[Path, Path], None]) -> None:
     scripts = _mk_plugin_scripts(fake_repo, "agent-registered")
     _write_canonical_refs(scripts)
     real = fake_repo / "outside"
@@ -1102,7 +1102,7 @@ def test_verify_rejects_symlinked_canonical_engine(fake_repo, native_file_symlin
     assert any("is a symlink -- refusing" in p for p in problems)
 
 
-def test_verify_rejects_symlinked_canonical_engine_in_local_mode(fake_repo, native_file_symlink):
+def test_verify_rejects_symlinked_canonical_engine_in_local_mode(fake_repo: Path, native_file_symlink: Callable[[Path, Path], None]) -> None:
     scripts = _mk_plugin_scripts(fake_repo, "agent-registered")
     _write_local_refs(scripts)
     (scripts / "installer-engine.ps1").write_text("canonical ps1\n", encoding="utf-8")
@@ -1120,7 +1120,7 @@ def test_verify_rejects_symlinked_canonical_engine_in_local_mode(fake_repo, nati
     assert any("is a symlink -- refusing" in p for p in problems)
 
 
-def test_verify_flags_duplicate_engine_source_lines(fake_repo):
+def test_verify_flags_duplicate_engine_source_lines(fake_repo: Path) -> None:
     scripts = _mk_plugin_scripts(fake_repo, "agent-registered")
     (scripts / "install.sh").write_text(
         '. "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"\n'
@@ -1137,7 +1137,7 @@ def test_verify_flags_duplicate_engine_source_lines(fake_repo):
     assert any("contains 2 installer-engine source lines" in p for p in problems)
 
 
-def test_sync_repairs_missing_local_copy_when_wrappers_are_local(fake_repo):
+def test_sync_repairs_missing_local_copy_when_wrappers_are_local(fake_repo: Path) -> None:
     scripts = _mk_plugin_scripts(fake_repo, "agent-registered")
     _write_local_refs(scripts)
 
@@ -1149,7 +1149,7 @@ def test_sync_repairs_missing_local_copy_when_wrappers_are_local(fake_repo):
     assert (scripts / "installer-engine.sh").read_text(encoding="utf-8") == "canonical sh\n"
 
 
-def test_sync_removes_stale_local_copy_when_wrappers_are_canonical(fake_repo):
+def test_sync_removes_stale_local_copy_when_wrappers_are_canonical(fake_repo: Path) -> None:
     scripts = _mk_plugin_scripts(fake_repo, "agent-registered")
     _write_canonical_refs(scripts)
     (scripts / "installer-engine.ps1").write_text("stale\n", encoding="utf-8")
@@ -1165,7 +1165,7 @@ def test_sync_removes_stale_local_copy_when_wrappers_are_canonical(fake_repo):
 
 @pytest.mark.parametrize("mode", ["canonical", "local"])
 @pytest.mark.parametrize("initial", ["missing", "stale"])
-def test_sync_repairs_python_support_in_both_wrapper_modes(fake_repo, mode, initial):
+def test_sync_repairs_python_support_in_both_wrapper_modes(fake_repo: Path, mode: str, initial: str) -> None:
     scripts = _mk_plugin_scripts(fake_repo, "agent-registered")
     writer = _write_canonical_refs if mode == "canonical" else _write_local_refs
     writer(scripts)
@@ -1225,7 +1225,7 @@ def _promotion_installer_source(
 
 
 @pytest.mark.parametrize("stale", [False, True], ids=["absent", "stale"])
-def test_promotion_materializes_all_declared_installer_consumers_without_source_writes(tmp_path, stale):
+def test_promotion_materializes_all_declared_installer_consumers_without_source_writes(tmp_path: Path, stale: bool) -> None:
     import materialize_installer_engine as materializer
 
     source, candidate = tmp_path / "source", tmp_path / "candidate"
@@ -1285,7 +1285,7 @@ def test_hosted_candidate_verifier_uses_candidate_canonical_helpers(
             for target in node.targets
         )
     ]
-    exec(compile(ast.Module(body=bindings, type_ignores=[]), "<hosted-candidate-bindings>", "exec"), {
+    exec(compile(ast.Module(body=cast(list[ast.stmt], bindings), type_ignores=[]), "<hosted-candidate-bindings>", "exec"), {
         "sync": sync_installer_engine, "candidate": candidate,
     })
     assert sync_installer_engine.verify() == []
@@ -1297,7 +1297,7 @@ def test_hosted_candidate_verifier_uses_candidate_canonical_helpers(
 
 
 @pytest.mark.parametrize("change", ["foreign", "directory", "shared-inode"])
-def test_promotion_refuses_foreign_or_nonordinary_derived_slots_before_writes(tmp_path, change):
+def test_promotion_refuses_foreign_or_nonordinary_derived_slots_before_writes(tmp_path: Path, change: str) -> None:
     import materialize_installer_engine as materializer
 
     source, candidate = tmp_path / "source", tmp_path / "candidate"
@@ -1320,7 +1320,7 @@ def test_promotion_refuses_foreign_or_nonordinary_derived_slots_before_writes(tm
 
 @pytest.mark.parametrize("same_root", [True, False], ids=["same-root", "separate-root"])
 @pytest.mark.parametrize("stale", [False, True], ids=["absent", "stale"])
-def test_promotion_refreshes_locally_referenced_native_writers(tmp_path, same_root, stale):
+def test_promotion_refreshes_locally_referenced_native_writers(tmp_path: Path, same_root: bool, stale: bool) -> None:
     import materialize_installer_engine as materializer
 
     source = tmp_path / "source"
@@ -1351,7 +1351,7 @@ def test_promotion_refreshes_locally_referenced_native_writers(tmp_path, same_ro
 
 
 @pytest.mark.parametrize("initial", ["absent", "dev-copy"])
-def test_materialized_vault_copied_recognizer_preserves_foreign_commands(tmp_path, monkeypatch, initial):
+def test_materialized_vault_copied_recognizer_preserves_foreign_commands(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, initial: str) -> None:
     import materialize_installer_engine as materializer
 
     source, candidate = tmp_path / "source", tmp_path / "candidate"
@@ -1418,7 +1418,7 @@ def test_materialized_vault_copied_recognizer_preserves_foreign_commands(tmp_pat
     assert before == {path.relative_to(source): path.read_bytes() for path in source.rglob("*") if path.is_file()}
 
 
-def test_promotion_refuses_linked_derived_slot(tmp_path, native_file_symlink):
+def test_promotion_refuses_linked_derived_slot(tmp_path: Path, native_file_symlink: Callable[[Path, Path], None]) -> None:
     import materialize_installer_engine as materializer
 
     source, candidate = tmp_path / "source", tmp_path / "candidate"
@@ -1433,7 +1433,7 @@ def test_promotion_refuses_linked_derived_slot(tmp_path, native_file_symlink):
     assert outside.read_bytes() == b"# retain foreign bytes\n"
 
 
-def test_promotion_checks_actual_postwrite_bytes_before_reporting_success(tmp_path, monkeypatch):
+def test_promotion_checks_actual_postwrite_bytes_before_reporting_success(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import materialize_installer_engine as materializer
 
     source, candidate = tmp_path / "source", tmp_path / "candidate"
@@ -1445,7 +1445,7 @@ def test_promotion_checks_actual_postwrite_bytes_before_reporting_success(tmp_pa
     original = Path.write_bytes
     written = []
 
-    def corrupt_after_real_write(path, content):
+    def corrupt_after_real_write(path: Path, content: bytes) -> int:
         result = original(path, content)
         if path == target:
             written.append(content)
@@ -1463,7 +1463,7 @@ def test_promotion_checks_actual_postwrite_bytes_before_reporting_success(tmp_pa
 
 @pytest.mark.parametrize("initial", ["absent", "stale", "foreign"])
 @pytest.mark.parametrize("reference", ["local", "canonical"])
-def test_single_consumer_release_wrapper_refreshes_local_reference_assets(tmp_path, initial, reference):
+def test_single_consumer_release_wrapper_refreshes_local_reference_assets(tmp_path: Path, initial: str, reference: str) -> None:
     import materialize_main
     import materialize_installer_engine as materializer
 
@@ -1497,7 +1497,7 @@ def test_single_consumer_release_wrapper_refreshes_local_reference_assets(tmp_pa
                       for path in source.rglob("*") if path.is_file()}, log
 
 
-def test_promotion_checks_postwrite_single_link_identity(tmp_path, monkeypatch):
+def test_promotion_checks_postwrite_single_link_identity(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import materialize_installer_engine as materializer
 
     source, candidate = tmp_path / "source", tmp_path / "candidate"
@@ -1508,7 +1508,7 @@ def test_promotion_checks_postwrite_single_link_identity(tmp_path, monkeypatch):
     original = Path.write_bytes
     written = []
 
-    def share_after_real_write(path, content):
+    def share_after_real_write(path: Path, content: bytes) -> int:
         result = original(path, content)
         if path == target:
             written.append(content)
@@ -1522,7 +1522,7 @@ def test_promotion_checks_postwrite_single_link_identity(tmp_path, monkeypatch):
     assert not any(line.startswith("OK") for line in log), log
 
 
-def test_promotion_rechecks_canonical_drift_after_all_candidate_writes(tmp_path, monkeypatch):
+def test_promotion_rechecks_canonical_drift_after_all_candidate_writes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import materialize_installer_engine as materializer
 
     source, candidate = tmp_path / "source", tmp_path / "candidate"
@@ -1536,12 +1536,12 @@ def test_promotion_rechecks_canonical_drift_after_all_candidate_writes(tmp_path,
     original_write, original_read = Path.write_bytes, Path.read_bytes
     reads, written = [], []
 
-    def observe_read(path):
+    def observe_read(path: Path) -> bytes:
         if path == canonical:
             reads.append(path)
         return original_read(path)
 
-    def change_source_after_last_write(path, content):
+    def change_source_after_last_write(path: Path, content: bytes) -> int:
         result = original_write(path, content)
         if path == last_target:
             written.append(path)
@@ -1559,7 +1559,7 @@ def test_promotion_rechecks_canonical_drift_after_all_candidate_writes(tmp_path,
     assert not any(line.startswith("OK") for line in log), log
 
 
-def test_development_layout_is_not_materialized_copy_qualification(fake_repo, monkeypatch):
+def test_development_layout_is_not_materialized_copy_qualification(fake_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     contract = sync_installer_engine.ier
     monkeypatch.setattr(contract, "ADOPTERS", sync_installer_engine.ADOPTERS)
     scripts = _mk_plugin_scripts(fake_repo, "agent-registered")
@@ -1573,7 +1573,7 @@ def test_development_layout_is_not_materialized_copy_qualification(fake_repo, mo
     assert sync_installer_engine.verify(phase="development")
 
 
-def test_sync_refuses_symlinked_canonical_engine_in_local_mode(fake_repo, native_file_symlink):
+def test_sync_refuses_symlinked_canonical_engine_in_local_mode(fake_repo: Path, native_file_symlink: Callable[[Path, Path], None]) -> None:
     scripts = _mk_plugin_scripts(fake_repo, "agent-registered")
     _write_local_refs(scripts)
     real = fake_repo / "outside"
@@ -1592,8 +1592,8 @@ def test_sync_refuses_symlinked_canonical_engine_in_local_mode(fake_repo, native
 @pytest.mark.parametrize("name", sync_installer_engine.ier.SUPPORT_FILES)
 @pytest.mark.parametrize("target_state", ["different", "matching", "dangling"])
 def test_sync_refuses_linked_support_without_touching_target(
-    fake_repo, native_file_symlink, mode, name, target_state,
-):
+    fake_repo: Path, native_file_symlink: Callable[[Path, Path], None], mode: str, name: str, target_state: str,
+) -> None:
     scripts = _mk_plugin_scripts(fake_repo, "agent-registered")
     writer = _write_canonical_refs if mode == "canonical" else _write_local_refs
     writer(scripts)
