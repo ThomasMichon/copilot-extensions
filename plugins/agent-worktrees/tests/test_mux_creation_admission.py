@@ -365,6 +365,11 @@ def test_creation_keeps_compatible_path_copy_before_side_by_side_copies(
         "path-bin": (3, 4, 0, 0), "side/3.6.0": (3, 6, 0, 0),
     })
     monkeypatch.setattr(shutil, "which", lambda binary: paths["path-bin"])
+
+    def no_scan(roots: object) -> list[tuple[tuple[int, int, int, int], str]]:
+        raise AssertionError("a compatible PATH copy must not scan other roots")
+
+    monkeypatch.setattr(windows_mux_version, "compatible_candidates", no_scan)
     assert windows_mux_version.require_creation_binary(
         "psmux", search_roots=[str(tmp_path / "side")],
     ) == paths["path-bin"]
