@@ -19,6 +19,7 @@ from .models import (
     PhasedTimeouts,
     RetentionConfig,
 )
+from .passive_refresh import InheritedRefresh, stored_target
 from .session_status import SessionStatus
 from .spawn_target import REQUEST_OVERRIDES_KEY as _REQUEST_OVERRIDES_KEY
 from .session_manager import (
@@ -654,23 +655,11 @@ class _SessionCoreMixin(_SessionDrainGateMixin):
             if markers:
                 session.progress.update(markers)
 
-    @staticmethod
-    def _session_metadata_in_use(session: Session) -> bool:
-        return (
-            session.client is not None
-            or session._local_launch_owner is not None
-            or session._native_turn_transport is not None
-            or session._handoff_in_progress
-            or session.subscriber_count > 0
-            or session._lifecycle_lock.locked()
-            or session._codespace_ownership_lock.locked()
-            or session._turn_start_lock.locked()
-            or session._prompt_task is not None and not session._prompt_task.done()
-        )
+    _session_metadata_in_use = staticmethod(Session.metadata_in_use)
 
     def _rehydrate(
         self, *, read_only: bool = False, merge: bool = False,
-        session_id: str | None = None,
+        session_id: str | None = None, prepared: InheritedRefresh | None = None,
     ) -> None:
         """Reload session metadata from DB on startup.
 
@@ -685,23 +674,36 @@ class _SessionCoreMixin(_SessionDrainGateMixin):
 
         A merge is read-only and refreshes unowned metadata in place. Never
         replace a live successor's client, event stream, locks or turn state.
+        A prepared merge consumes an admitted snapshot without reading the DB.
         """
         read_only = read_only or merge
-        if session_id is None:
+        if prepared is not None:
+            if not merge or session_id is None:
+                raise ValueError("Prepared refresh requires a single-session merge")
+            if prepared.row is None:
+                return
+            if prepared.row["id"] != session_id or prepared.history is None:
+                raise ValueError("Expected complete metadata for the inherited session")
+            pending = self._sessions.get(session_id)
+            if (pending is None or not pending.awaiting_maintenance_refresh or pending.event_log is None
+                    or pending._retained_recovery_owner is not None or pending.metadata_in_use(include_readers=False)):
+                return
+            rows = [prepared.row]
+        elif session_id is None:
             rows = self._db.list_sessions()
         else:
             row = self._db.get_session(session_id)
             rows = [row] if row is not None else []
-        retained = self._db.gc_retained_relationship_session_ids()
+        retained = self._db.gc_retained_relationship_session_ids() if prepared is None else set()
         now = time.time()
         for row in rows:
             sid = row["id"]
             status = row["status"]
             existing = self._sessions.get(sid) if merge else None
-            if existing is not None and self._session_metadata_in_use(existing):
+            if prepared is None and existing is not None and self._session_metadata_in_use(existing):
                 continue
 
-            if status == SessionStatus.ENDED.value and sid not in retained:
+            if prepared is None and status == SessionStatus.ENDED.value and sid not in retained:
                 if read_only:
                     if existing is not None:
                         existing.status = SessionStatus.ENDED
@@ -718,14 +720,7 @@ class _SessionCoreMixin(_SessionDrainGateMixin):
                     )
                 continue
 
-            target_json = row.get("target_json")
-            if target_json:
-                target = SpawnTarget.from_json(target_json)
-            else:
-                target = SpawnTarget(
-                    type=row.get("target_type", "local"),
-                    cwd=row.get("target_dir", "."),
-                )
+            target = stored_target(row)
 
             session = existing or Session(
                 session_id=sid,
@@ -736,6 +731,9 @@ class _SessionCoreMixin(_SessionDrainGateMixin):
                 caller_session_id=row.get("caller_session_id"),
                 preserve_target=read_only,
             )
+            if prepared is not None:
+                assert session.event_log is not None and prepared.history is not None
+                session.event_log.refresh_subscribed_history(prepared.history)
             session.name = row["name"]
             session.target = target
             session.agent_name = row.get("agent_name")
@@ -745,7 +743,7 @@ class _SessionCoreMixin(_SessionDrainGateMixin):
             session.updated_at = row["updated_at"]
             session.acp_session_id = row.get("acp_session_id")
             # Startup already normalized the persisted row to STOPPED.
-            if not merge or existing is None or status != SessionStatus.STOPPED.value:
+            if prepared is not None or not merge or existing is None or status != SessionStatus.STOPPED.value:
                 session.restart_status = status
             session.background_recovery_enabled = (
                 row.get("runtime_custody_json") is None
@@ -805,12 +803,11 @@ class _SessionCoreMixin(_SessionDrainGateMixin):
                 session.status = SessionStatus(status)
 
             # Restore event log from DB
-            session.event_log = EventLog.from_db(
-                self._db,
-                sid,
-                acp_session_id=session.acp_session_id,
-                worktree_id=target.worktree_id,
-            )
+            if prepared is None:
+                session.event_log = EventLog.from_db(
+                    self._db, sid, acp_session_id=session.acp_session_id, worktree_id=target.worktree_id,
+                )
+            assert session.event_log is not None
             if not read_only and status in (
                 SessionStatus.RUNNING.value,
                 SessionStatus.IDLE.value,
@@ -831,12 +828,15 @@ class _SessionCoreMixin(_SessionDrainGateMixin):
                     "session_state_changed",
                     {"status": SessionStatus.STOPPED.value, "trigger": "daemon_restart"},
                 )
-            session.turn_count = len(self._db.get_turns(sid))
-
-            # Rebuild structured progress from the restored agent messages so a
-            # daemon restart preserves reported milestones (#46.3).
-            for ev in session.event_log.get_events(0):
-                self._capture_progress(session, ev.event, ev.data)
+            if prepared is None:
+                session.turn_count = len(self._db.get_turns(sid))
+                for ev in session.event_log.get_events(0):
+                    self._capture_progress(session, ev.event, ev.data)
+            else:
+                session.turn_count = prepared.turns
+                session.progress = dict(prepared.progress or {})
+                session.last_output_at = prepared.last_output
+                session.awaiting_maintenance_refresh = False
 
             # Restore context usage from DB
             session.context_size = row.get("context_size")

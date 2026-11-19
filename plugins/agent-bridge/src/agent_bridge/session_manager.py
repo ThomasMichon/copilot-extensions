@@ -771,6 +771,7 @@ class Session:
         self._retained_recovery_owner: Any = None
         self._native_turn_transport: NativeTurnTransport | AcquisitionHostTransport | None = None
         self._handoff_in_progress = False
+        self.awaiting_maintenance_refresh = False
         self._remote_affinity_cookies: Any = None
         self._remote_requested_session_id: str | None = None
         self.status = SessionStatus.CREATED
@@ -859,6 +860,19 @@ class Session:
 
     def touch(self) -> None:
         self.updated_at = time.time()
+
+    def metadata_in_use(self, *, include_readers: bool = True) -> bool:
+        return (
+            self.client is not None
+            or self._local_launch_owner is not None
+            or self._native_turn_transport is not None
+            or self._handoff_in_progress
+            or (include_readers and self.subscriber_count > 0)
+            or self._lifecycle_lock.locked()
+            or self._codespace_ownership_lock.locked()
+            or self._turn_start_lock.locked()
+            or (self._prompt_task is not None and not self._prompt_task.done())
+        )
 
     def note_heartbeat(self, now: float | None = None) -> None:
         """Record that the transport was confirmed alive (periodic beat)."""
