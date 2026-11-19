@@ -177,10 +177,11 @@ After the reviewed proposal, the operator admitted execution:
   legacy records. A separate exact-scope point-domain binding and default
   reader refusal are implemented, with an explicit
   [named-component read](../../../plugins/agent-index/docs/component-ledger.md#selected-named-component-reads)
-  through the existing qualification owners. Search/cluster/presentation
-  compatibility remains unqualified. Point-domain application, v2 execution,
-  automatic partial-effect/restore reconciliation and whole-claim completion
-  remain unimplemented.
+  through the existing qualification owners. Default query/HTTP/MCP/CLI
+  frontdoors have bounded native refusal qualification; the remaining direct
+  read-route and consumer composition inventory stays open. Point-domain
+  application, v2 execution, automatic partial-effect/restore reconciliation
+  and whole-claim completion remain unimplemented.
 - [ ] Persist acquisition progress so retry/restart does not restart a
   corpus-wide listing.
 - [ ] Move authoritative full enumeration into separately budgeted, resumable
