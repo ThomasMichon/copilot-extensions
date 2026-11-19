@@ -17,7 +17,7 @@ _BYTES = 4096
 _lock = threading.Lock()
 _users = 0
 _handler: logging.Handler | None = None
-_previous: tuple[int, bool] = (logging.NOTSET, True)
+_previous: tuple[int, bool, tuple[logging.Handler, ...]] = (logging.NOTSET, True, ())
 
 
 class _Stderr(logging.Handler):
@@ -40,6 +40,8 @@ class _Stderr(logging.Handler):
                     f"/proc/self/fd/{descriptor}", os.O_WRONLY | os.O_NONBLOCK | os.O_CLOEXEC,
                 )
             elif stat.S_ISSOCK(info.st_mode):
+                if socket.getdefaulttimeout() is not None:
+                    return
                 duplicate = os.dup(descriptor)
                 try:
                     selected = socket.socket(fileno=duplicate)
@@ -98,7 +100,9 @@ def reviewer_reads() -> Iterator[None]:
     logger = logging.getLogger(LOGGER)
     with _lock:
         if not _users:
-            _previous = logger.level, logger.propagate
+            _previous = logger.level, logger.propagate, tuple(logger.handlers)
+            for handler in _previous[2]:
+                logger.removeHandler(handler)
             _handler = _Stderr()
             logger.addHandler(_handler)
             logger.setLevel(logging.INFO)
@@ -116,3 +120,5 @@ def reviewer_reads() -> Iterator[None]:
                 _handler = None
                 logger.setLevel(_previous[0])
                 logger.propagate = _previous[1]
+                for handler in _previous[2]:
+                    logger.addHandler(handler)

@@ -140,7 +140,12 @@ retains at most one 4-KiB pending line and makes at most two write attempts per
 read. While that line cannot progress, newer diagnostics are dropped; the next
 admitted line reports `dropped_reads`. Oversized records and unsupported sinks
 are dropped too. Shutdown discards pending diagnostics without flushing or
-waiting for a stalled sink. An interrupted partial socket line is incomplete
+waiting for a stalled sink. Caller-installed handlers on this dedicated logger
+are detached while it is active and restored without closing them afterward.
+Sockets are declined when an embedding has configured a default socket timeout:
+constructing a Python socket wrapper in that mode could change the caller's
+shared flags and wait for readiness despite the nonblocking send flag.
+The host does not change that process setting. An interrupted partial socket line is incomplete
 evidence, not a valid JSON record. There is no diagnostic worker or drain loop.
 
 Core source support, host stderr configuration, installed package selection and

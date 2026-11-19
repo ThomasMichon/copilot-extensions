@@ -64,6 +64,15 @@ def blocking(descriptor: int) -> bool:
     raise RuntimeError("Linux stderr fixture required")
 
 
+def fill(sink: NativeSink) -> None:
+    for _ in range(1024):
+        try:
+            sink[2](b"x" * 4096)
+        except BlockingIOError:
+            return
+    pytest.fail("fixture did not fill its bounded diagnostic sink")
+
+
 def test_foreground_trace_sink_is_shared_and_restored_after_failure(
     native_sink: NativeSink, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -105,13 +114,7 @@ def test_stalled_sink_drops_without_blocking_reads_or_shutdown(
     native_sink: NativeSink, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(sys, "stderr", SimpleNamespace(fileno=lambda: native_sink[0]))
-    for _ in range(1024):
-        try:
-            native_sink[2](b"x" * 4096)
-        except BlockingIOError:
-            break
-    else:
-        pytest.fail("fixture did not fill its bounded diagnostic sink")
+    fill(native_sink)
     assert blocking(native_sink[0])
     result: dict[str, Any] = {
         "now": 1, "inventory": {"outcome": "complete", "observed_at": 1},
@@ -138,14 +141,55 @@ def test_shutdown_discards_a_stalled_pending_line_without_waiting(
     native_sink: NativeSink, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(sys, "stderr", SimpleNamespace(fileno=lambda: native_sink[0]))
-    for _ in range(1024):
-        try:
-            native_sink[2](b"x" * 4096)
-        except BlockingIOError:
-            break
-    else:
-        pytest.fail("fixture did not fill its bounded diagnostic sink")
+    fill(native_sink)
     started = time.monotonic()
     with reviewer_reads():
         logging.getLogger(LOGGER).info('{"outcome":"projected"}')
     assert time.monotonic() - started < 2 and blocking(native_sink[0])
+
+
+@pytest.mark.parametrize("native_sink", ["socket"], indirect=True)
+@pytest.mark.parametrize("timeout", [0.0, 5.0])
+def test_configured_socket_default_timeout_drops_without_touching_shared_flags(
+    native_sink: NativeSink, monkeypatch: pytest.MonkeyPatch, timeout: float,
+) -> None:
+    monkeypatch.setattr(sys, "stderr", SimpleNamespace(fileno=lambda: native_sink[0]))
+    fill(native_sink)
+    previous = socket.getdefaulttimeout()
+    before = logging.getLogger(LOGGER).level, list(logging.getLogger(LOGGER).handlers)
+    result: dict[str, Any] = {}
+    started = time.monotonic()
+    try:
+        socket.setdefaulttimeout(timeout)
+        with reviewer_reads():
+            assert read(
+                lambda: result, target="repository", repository_key="b" * 64, payload={},
+            ) is result
+            assert blocking(native_sink[0])
+        assert time.monotonic() - started < 2 and blocking(native_sink[0])
+    finally:
+        socket.setdefaulttimeout(previous)
+    assert (logging.getLogger(LOGGER).level, logging.getLogger(LOGGER).handlers) == before
+
+
+def test_stalled_caller_handler_is_detached_and_restored_not_closed(
+    native_sink: NativeSink, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sys, "stderr", SimpleNamespace(fileno=lambda: native_sink[0]))
+    fill(native_sink)
+    logger = logging.getLogger(LOGGER)
+    with os.fdopen(os.dup(native_sink[0]), "w") as stream:
+        original = logging.StreamHandler(stream)
+        logger.addHandler(original)
+        started = time.monotonic()
+        try:
+            with reviewer_reads():
+                assert original not in logger.handlers
+                assert read(
+                    lambda: {}, target="repository", repository_key="b" * 64, payload={},
+                ) == {}
+            assert original in logger.handlers and not stream.closed
+            assert time.monotonic() - started < 2
+        finally:
+            logger.removeHandler(original)
+            original.close()
