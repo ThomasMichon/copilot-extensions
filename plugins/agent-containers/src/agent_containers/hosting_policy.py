@@ -12,6 +12,7 @@ from agent_procutil import no_window_flags
 from repository_policy import AgentHostingError, validate_hosting_result
 
 if TYPE_CHECKING:
+    from .resolver import LiveExecTarget
     from .session_host_context import TrustedContext
 
 _OWNER_POLICY_JSON = (
@@ -51,6 +52,35 @@ def guest_check_command(workspace: str, *, operation: str = "launch") -> str:
         "{ POLICY_STATUS=$?; printf '%s\\n' \"$POLICY_RESULT\" >&2; exit \"$POLICY_STATUS\"; }; "
         f"printf '%s\\n' \"$POLICY_RESULT\" | python3 -c {shlex.quote(_OWNER_POLICY_JSON)})"
     )
+
+
+def exec_launch(command: str, workspace: str, *, portable: bool) -> str:
+    """The guest-guarded launch, or after a portable admission its workspace change only."""
+    if not portable:
+        return guarded_launch(command, workspace)
+    if not isinstance(workspace, str) or not workspace.startswith("/") or "\0" in workspace:
+        raise RuntimeError("Repository hosting admission requires an absolute guest checkout")
+    return f"cd -- {shlex.quote(workspace)} && {command}"
+
+
+def require_exec_hosting(target: LiveExecTarget) -> bool:
+    """Admit an ``exec`` launch; true when the portable receiver admitted it.
+
+    agent-bridge offers its receiving context only to driver-exec members,
+    which have no Session Host to run the portable receiver; every other
+    member keeps the guest agent-worktrees check.
+    """
+    import os
+
+    from .config import RESTRICTED_PROFILE
+    from .resolver import AGENT_CONTAINERS_EXEC_POLICY_CONTEXT_ENV
+
+    context = os.environ.get(AGENT_CONTAINERS_EXEC_POLICY_CONTEXT_ENV)
+    if context and getattr(target.fleet, "driver", None) and target.actual_profile != RESTRICTED_PROFILE:
+        require_portable_hosting(target, context)
+        return True
+    require_container_hosting(target)
+    return False
 
 
 def guarded_launch(command: str, workspace: str) -> str:

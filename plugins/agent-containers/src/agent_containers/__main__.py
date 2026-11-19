@@ -28,8 +28,7 @@ import subprocess
 import sys
 from dataclasses import asdict
 from pathlib import Path
-from types import ModuleType
-from typing import TYPE_CHECKING, Any
+from typing import Any, cast
 
 from agent_procutil import no_window_flags as _creation_flags
 
@@ -44,7 +43,6 @@ from .config import (
     load_config,
 )
 from .resolver import (
-    AGENT_CONTAINERS_EXEC_POLICY_CONTEXT_ENV,
     _append_copilot_args,
     add_related_plugins,
     build_restricted_acp_spawn_command,
@@ -63,14 +61,11 @@ from .ssh_transport import (
     write_remote_env,
 )
 
-if TYPE_CHECKING:
-    from .session_host_context import TrustedContext
-
 log = logging.getLogger("agent-containers")
 _BUSY_EXIT = 75
 
 
-def _runtime_drivers() -> ModuleType:
+def _runtime_drivers() -> Any:
     from . import runtime_drivers
 
     return runtime_drivers
@@ -305,8 +300,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         if getattr(args, "func", None) is not None:
-            result: int = args.func(args)
-            return result
+            return cast(int, args.func(args))
         if args.command == "fleet":
             return _cmd_fleet(args)
         if args.command == "up":
@@ -446,9 +440,7 @@ def _cmd_installer_readiness() -> int:
     return emit(evaluate(config, containers, failures))
 
 
-def _trusted_session_host_context(
-    name: str, expected_instance: str | None = None,
-) -> TrustedContext:
+def _trusted_session_host_context(name: str, expected_instance: str | None = None) -> Any:
     """Resolve a trusted fleet member without launching its Session Host."""
     from .session_host_context import resolve_context
 
@@ -459,12 +451,7 @@ def _cmd_session_host_prepare(args: argparse.Namespace) -> int:
     """Prepare endpoint + auth inputs; agent-bridge owns the Host lifecycle."""
     policy_context = getattr(args, "repository_policy_context", None)
     from ._invoke import payload_command_argv
-    from .container_shims import (
-        deploy as deploy_shims,
-    )
-    from .container_shims import (
-        git_credential_environment,
-    )
+    from .container_shims import deploy as deploy_shims, git_credential_environment
     from .relay_provider import token_for
 
     context = _trusted_session_host_context(args.name, args.expected_instance)
@@ -1001,17 +988,7 @@ def _cmd_exec(args: argparse.Namespace) -> int:
         return launch_task(args, _exec_stdio)
     extra = resolve_extra_copilot_args(getattr(args, "copilot_args", None))
     target = resolve_live_exec_target(args.name, config=load_config())
-    policy_context = os.environ.get(AGENT_CONTAINERS_EXEC_POLICY_CONTEXT_ENV)
-    # Only driver members are offered the portable receiver by agent-bridge
-    # (their direct exec has no Session Host to run it); every other member
-    # keeps the guest agent-worktrees check.
-    portable = bool(policy_context) and bool(getattr(target.fleet, "driver", None)) and (
-        target.actual_profile != RESTRICTED_PROFILE
-    )
-    if portable and policy_context:
-        hosting_policy.require_portable_hosting(target, policy_context)
-    else:
-        hosting_policy.require_container_hosting(target)
+    portable = hosting_policy.require_exec_hosting(target)
 
     if target.actual_profile == RESTRICTED_PROFILE:
         from .lease import ProviderAdmissionError, session_admission
@@ -1070,12 +1047,7 @@ def _launch_container_agent(
     handle: str | None = None,
     portable_policy: bool = False,
 ) -> int:
-    """Launch through the trust-profiled transport while holding its lock.
-
-    ``portable_policy`` means the portable receiver already admitted this
-    launch, so (as for the portable Session Host) a direct driver exec gets
-    no guest-side agent-worktrees launch guard.
-    """
+    """Launch through the trust-profiled transport while holding its lock."""
     if actual_profile == RESTRICTED_PROFILE:
         acp_command = hosting_policy.guarded_launch(acp_command, fleet.workspace_folder or config.workspace_folder)
         spawn_cmd = build_restricted_acp_spawn_command(
@@ -1170,11 +1142,10 @@ def _launch_container_agent(
     try:
         ssh_config = prepare_ssh_config(member, user) if plan.ssh else None
         copilot_auth_env = process_auth.prepare_launch(config, fleet, member, user)
-        acp_command = process_auth.wrap_command(acp_command, copilot_auth_env)
-        if not portable_policy or plan.ssh:
-            acp_command = hosting_policy.guarded_launch(
-                acp_command, fleet.workspace_folder or config.workspace_folder,
-            )
+        acp_command = hosting_policy.exec_launch(  # portable: no guest agent-worktrees guard
+            process_auth.wrap_command(acp_command, copilot_auth_env), fleet.workspace_folder or config.workspace_folder,
+            portable=portable_policy and not plan.ssh,
+        )
         remote_command = build_remote_command(acp_command, remote_env)
         spawn_cmd = build_ssh_command(
             ssh_config,

@@ -660,7 +660,10 @@ def test_exec_admits_driver_member_through_portable_policy_without_guest_worktre
     policy = workspace / ".copilot-extensions" / "agent-worktrees" / "config.yaml"
     policy.parent.mkdir(parents=True)
     policy.write_text(f"expose_agent: {str(allowed).lower()}\n")
-    config = _write_config(tmp_path, monkeypatch, relay_enabled=True, workspace_folder=str(workspace))
+    config = _write_config(
+        tmp_path, monkeypatch, relay_enabled=True, workspace_folder=str(workspace),
+        acp_command="./start-agent --acp",
+    )
     fleet.reconcile_up(config, "example")
     monkeypatch.setenv(AGENT_CONTAINERS_EXEC_POLICY_CONTEXT_ENV, json.dumps({
         "schema": "agent-bridge.receiving-policy", "version": 1, "marketplaceId": "example",
@@ -691,9 +694,10 @@ def test_exec_admits_driver_member_through_portable_policy_without_guest_worktre
     assert len(checks) == 1 and "python3 -I -S" in checks[0]["argv"][-1]
     assert not any("agent-worktrees" in json.dumps(call["request"]) for call in calls)
     if allowed:
-        launch = json.loads(seen["argv"][seen["argv"].index("--request") + 1])
-        assert "copilot --acp" in launch["argv"][2]
-        assert "agent-policy" not in launch["argv"][2]
+        launch = json.loads(seen["argv"][seen["argv"].index("--request") + 1])["argv"][2]
+        # No guest guard, but a relative custom command still runs in the workspace.
+        assert "agent-policy" not in launch
+        assert f"cd -- {workspace} && ./start-agent --acp" in launch
     else:
         assert "argv" not in seen
 
