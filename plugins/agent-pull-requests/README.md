@@ -556,7 +556,9 @@ with `activeStateVersion: 1`, a positive integer `engineGeneration`, and
 create this envelope or support an active version-2 subscription map.
 Unselected version partitions and selected-partition extensions remain opaque
 and preserved; they are not additional live registries or rollback permission.
-Versioned cold restore validates the complete selected collection before effects.
+The owner's shared read boundary strictly validates the complete versioned
+collection before cold start, self-boot, governed ensure, restart or resumption.
+Validation builds an effect-free candidate registry, never a partial live one.
 
 `engineGeneration` is an ordered executor-admission epoch, independent of
 package versions. The current executing storage implementation declares epoch
@@ -586,6 +588,11 @@ immediately before replacement. A changed document refuses rather than
 overwriting another partition or silently downgrading to a list. The existing
 `state_write_failed`, definite-failure rollback and uncertain-commit semantics
 remain. Rendezvous metadata retains its independent existing format.
+Versioned writes require the owner's strict registry validator: existing state,
+the replacement candidate and the final current state are all validated under
+the atomic boundary. A malformed selected registration is not permission to
+overwrite it or stop a healthy incumbent. Legacy-list decoding retains its
+original restore semantics.
 
 This is a receiver expansion baseline, not a migration tool, map/callback-cwd
 support or a cross-process writer lease. Existing writer/lifecycle ownership remains required.

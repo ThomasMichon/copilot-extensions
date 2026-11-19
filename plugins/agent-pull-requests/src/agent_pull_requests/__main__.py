@@ -488,10 +488,10 @@ def _watch_boot() -> None:
         return
     from agent_procutil import spawn_daemon
 
-    from .watch_storage import read_subscriptions_state, state_dir
+    from .watch_daemon import read_watch_state, state_dir
 
     root = state_dir().resolve()
-    read_subscriptions_state(root)
+    read_watch_state(root)
     root.mkdir(parents=True, exist_ok=True)
     # The child runs from ``root``: a relative override would resolve again there.
     home = "AGENT_PULL_REQUESTS_HOME"
@@ -623,9 +623,9 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         return 0
     if getattr(args, "passive_instance", None) or getattr(args, "port", 0):
         raise PermissionError("watch passive entry requires an explicit installation context")
-    from .watch_storage import read_subscriptions_state
+    from .watch_daemon import read_watch_state
 
-    read_subscriptions_state()
+    read_watch_state()
     return cast(Callable[[argparse.Namespace], int], _serve_legacy)(args)
 
 
@@ -720,9 +720,10 @@ def _cmd_serve_restart(args: argparse.Namespace) -> int:
         return 0
     from single_instance_lease import AlreadyRunningError, SingleInstance
 
-    from .watch_storage import WATCH_ENGINE_GENERATION, read_subscriptions_state, state_dir
+    from .watch_daemon import read_watch_state, state_dir
+    from .watch_storage import WATCH_ENGINE_GENERATION
 
-    read_subscriptions_state()
+    read_watch_state()
     lease = SingleInstance(state_dir(), service="agent-pull-requests-watch")
     try:
         lease.acquire()

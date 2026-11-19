@@ -21,7 +21,7 @@ from zdd.cutover_lock import CutoverLock
 from .watch_control import WatchControlClient, WatchControlOwner, WatchControlServer
 from .watch_custody import endpoint_tuple
 from .watch_driver import WatchDriver
-from .watch_daemon import Fetch, NativeFetch
+from .watch_daemon import Fetch, NativeFetch, read_watch_state
 from .watch_invocation import WatchInvocation
 from .watch_journal import WatchJournal, _regular_bytes, _target_selection, read_known_owner
 from .watch_runtime import WatchInstance
@@ -203,12 +203,10 @@ def ensure(
     """Ensure an owner is ready; report whether guarded discovery found one."""
     invocation.require_current()
     installation = invocation.fresh_installation()
-    from .watch_storage import read_subscriptions_state
-
-    read_subscriptions_state(installation.state_root)
+    read_watch_state(installation.state_root)
     with installation.transaction(timeout=timeout, environment={}) as guard:
         invocation.require_current()
-        read_subscriptions_state(installation.state_root)
+        read_watch_state(installation.state_root)
         owner = incumbent(invocation, guard, timeout=timeout)
         if owner is not None and not restart and owner.instance.runtime == invocation.runtime:
             return True

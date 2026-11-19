@@ -154,13 +154,20 @@ def read_subscriptions_state(root: Path | None = None) -> list[dict[str, Any]]:
         return _read_subscriptions_state(subscriptions_path(root))
 
 
-def write_subscriptions_state(entries: list[dict[str, Any]], root: Path | None = None) -> None:
+def write_subscriptions_state(
+    entries: list[dict[str, Any]], root: Path | None = None, *,
+    validate: Callable[[list[dict[str, Any]]], None] | None = None,
+) -> None:
     path = subscriptions_path(root)
 
     def checked_document() -> tuple[str | None, Any]:
         try:
             raw, document = _read_subscriptions_document(path)
-            _subscription_entries(document)
+            selected = _subscription_entries(document)
+            if isinstance(selected, VersionedSubscriptions):
+                if validate is None:
+                    raise ValueError("persisted watch subscriptions require registry validation")
+                validate(selected)
         except ValueError as exc:
             raise StateWriteRefused(str(exc)) from None
         return raw, document
@@ -171,6 +178,11 @@ def write_subscriptions_state(entries: list[dict[str, Any]], root: Path | None =
             # Only the admitted partition changes; unknown retained versions and
             # selected-partition extensions never pass through an older serializer.
             document["stateByVersion"]["1"]["subscriptions"] = entries
+            assert validate is not None
+            try:
+                validate(VersionedSubscriptions(entries))
+            except ValueError as exc:
+                raise StateWriteRefused(str(exc)) from None
         else:
             document = entries
 

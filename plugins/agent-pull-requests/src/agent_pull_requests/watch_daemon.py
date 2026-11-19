@@ -35,7 +35,8 @@ from .watch_storage import (
     StateCommitUncertain,
     VersionedSubscriptions,
     _atomic_write_json as _atomic_write_json, lock_path, read_lock_data, read_subscriptions_state,
-    state_dir, subscriptions_path, write_lock_data, write_subscriptions_state,
+    state_dir, subscriptions_path, write_lock_data,
+    write_subscriptions_state as _write_subscriptions_state,
 )
 
 _DEFAULT_POLL_INTERVAL_S = 30.0
@@ -47,6 +48,21 @@ _POLLER_IDLE_EXIT_S = 5.0
 #: and reporting it as unresponsive (the caller decides what to do next --
 #: this module never force-kills on the caller's behalf).
 _SHUTDOWN_REQUEST_DEADLINE_S = CALLBACK_TIMEOUT + 5.0
+
+
+def validate_versioned_entries(entries: list[dict[str, Any]]) -> None:
+    if isinstance(entries, VersionedSubscriptions):
+        WatchRegistry().restore_state(entries, strict=True)
+
+
+def read_watch_state(root: Path | None = None) -> list[dict[str, Any]]:
+    entries = read_subscriptions_state() if root is None else read_subscriptions_state(root)
+    validate_versioned_entries(entries)
+    return entries
+
+
+def write_subscriptions_state(entries: list[dict[str, Any]], root: Path | None = None) -> None:
+    _write_subscriptions_state(entries, root, validate=validate_versioned_entries)
 
 
 def rendezvous_fields(server: CoalescingServer) -> dict[str, Any]:
@@ -157,10 +173,7 @@ class WatchDaemon:
             self._ensure_poller(key)
 
     def _read_state(self) -> list[dict[str, Any]]:
-        return (
-            read_subscriptions_state() if self._state_root is None
-            else read_subscriptions_state(self._state_root)
-        )
+        return read_watch_state(self._state_root)
 
     def _persist(self, entries: list[dict[str, Any]] | None = None) -> None:
         """Serialize every persist call against every other -- multiple

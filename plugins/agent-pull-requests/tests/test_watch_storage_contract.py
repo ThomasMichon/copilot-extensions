@@ -11,7 +11,7 @@ import pytest
 
 from agent_pull_requests import watch_storage
 from agent_pull_requests.watch_contract import MERGED
-from agent_pull_requests.watch_daemon import WatchDaemon
+from agent_pull_requests.watch_daemon import WatchDaemon, validate_versioned_entries
 
 pytestmark = pytest.mark.contract("agent_pull_requests.watch.state_contract")
 
@@ -39,6 +39,12 @@ def partitioned_state(**changes: Any) -> str:
     })
 
 
+def malformed_versioned_state() -> str:
+    data = json.loads(partitioned_state())
+    data["stateByVersion"]["1"]["subscriptions"] = [{"subscriber_id": "invalid"}]
+    return json.dumps(data)
+
+
 def test_versioned_legacy_partition_preserves_other_versions_and_never_downgrades(
     tmp_path: Path,
 ) -> None:
@@ -46,13 +52,16 @@ def test_versioned_legacy_partition_preserves_other_versions_and_never_downgrade
     original = json.loads(partitioned_state())
     path.write_text(json.dumps(original), encoding="utf-8")
     assert watch_storage.read_subscriptions_state(tmp_path) == []
-    entries = [{"subscriber_id": "legacy", "notify": {"argv": ["callback"]}}]
-    watch_storage.write_subscriptions_state(entries, tmp_path)
+    entries = [{
+        "repo": "example/project", "number": 1, "subscriber_id": "legacy",
+        "until": [MERGED], "notify": {"argv": ["callback"]},
+    }]
+    watch_storage.write_subscriptions_state(entries, tmp_path, validate=validate_versioned_entries)
     assert watch_storage.read_subscriptions_state(tmp_path) == entries
     expected = json.loads(partitioned_state())
     expected["stateByVersion"]["1"]["subscriptions"] = entries
     assert json.loads(path.read_text(encoding="utf-8")) == expected
-    watch_storage.write_subscriptions_state([], tmp_path)
+    watch_storage.write_subscriptions_state([], tmp_path, validate=validate_versioned_entries)
     assert json.loads(path.read_text(encoding="utf-8")) == original
 
 
@@ -71,7 +80,7 @@ def test_versioned_state_refuses_incompatible_executor_or_active_partition(
     with pytest.raises(ValueError, match="persisted watch subscriptions"):
         watch_storage.read_subscriptions_state(tmp_path)
     with pytest.raises(OSError, match="persisted watch subscriptions"):
-        watch_storage.write_subscriptions_state([], tmp_path)
+        watch_storage.write_subscriptions_state([], tmp_path, validate=validate_versioned_entries)
     assert path.read_bytes() == original
 
 
@@ -91,7 +100,7 @@ def test_final_write_never_replaces_a_concurrently_changed_partition(
 
     monkeypatch.setattr(os, "fsync", replace_before_commit)
     with pytest.raises(OSError, match="persisted watch subscriptions"):
-        watch_storage.write_subscriptions_state([], tmp_path)
+        watch_storage.write_subscriptions_state([], tmp_path, validate=validate_versioned_entries)
     assert path.read_bytes() == original
     assert list(tmp_path.iterdir()) == [path]
 
@@ -111,6 +120,38 @@ def test_delayed_activation_rechecks_executor_generation_before_effects(tmp_path
         assert path.read_bytes() == original
         assert daemon.quiescent and not daemon.effects_enabled
         assert not daemon._pollers and daemon._deliveries.scheduler is None
+    finally:
+        daemon.close()
+
+
+def test_delayed_activation_rechecks_malformed_selected_entries_before_effects(tmp_path: Path) -> None:
+    daemon = WatchDaemon(
+        fetch=lambda *_args: pytest.fail("must not fetch"), state_root=tmp_path, active=False,
+    )
+    try:
+        daemon.reload_state()
+        original = malformed_versioned_state().encode()
+        path = watch_storage.subscriptions_path(tmp_path)
+        path.write_bytes(original)
+        with pytest.raises(ValueError, match="persisted|registration"):
+            daemon.resume_effects()
+        assert daemon.quiescent and not daemon.effects_enabled
+        assert path.read_bytes() == original
+    finally:
+        daemon.close()
+
+
+def test_malformed_selected_entries_cannot_stop_a_running_incumbent(tmp_path: Path) -> None:
+    daemon = WatchDaemon(fetch=lambda *_args: pytest.fail("must not fetch"), state_root=tmp_path)
+    path = watch_storage.subscriptions_path(tmp_path)
+    original = malformed_versioned_state().encode()
+    path.write_bytes(original)
+    try:
+        result = daemon.compute("shutdown", {"restart_engine_generation": 1})
+        assert "error" in result and not result.get("shutting_down")
+        assert not daemon._shutdown_event.is_set()
+        assert not daemon._lifecycle_shutdown_event.is_set()
+        assert path.read_bytes() == original
     finally:
         daemon.close()
 
@@ -409,9 +450,12 @@ def test_write_rechecks_after_temporary_snapshot_is_synced(
     assert list(tmp_path.iterdir()) == [path]
 
 
+@pytest.mark.parametrize(
+    "raw", [future_state(), malformed_versioned_state()], ids=["newer-contract", "malformed-entries"],
+)
 @pytest.mark.parametrize("operation", ["register", "replace", "unregister"])
 def test_running_owner_refuses_newer_disk_state_without_mutation_or_delivery(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str, raw: str,
 ) -> None:
     def no_effect(*_args: Any) -> NoReturn:
         pytest.fail("refused state must not start observation or delivery")
@@ -425,14 +469,14 @@ def test_running_owner_refuses_newer_disk_state_without_mutation_or_delivery(
     try:
         assert daemon.compute("register", request) == {"registered": True}
         before = daemon._registry.snapshot_state()
-        original = future_state().encode()
+        original = raw.encode()
         path = watch_storage.subscriptions_path(tmp_path)
         path.write_bytes(original)
         if operation == "register":
             request = {**request, "subscriber_id": "new"}
         elif operation == "replace":
             request = {**request, "timeout": 1}
-        with pytest.raises(OSError, match="persisted watch subscriptions"):
+        with pytest.raises(OSError, match="persisted|registration"):
             daemon.compute("unregister" if operation == "unregister" else "register", request)
         assert daemon._registry.snapshot_state() == before
         assert path.read_bytes() == original

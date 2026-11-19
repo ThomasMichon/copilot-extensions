@@ -136,12 +136,12 @@ def test_selected_partition_update_preserves_opaque_versions_and_generation(
     root = Path("fixture-state")
     assert storage.read_subscriptions_state(root) == []
     entries = [{"subscriber_id": "retained", "pending": {"event_id": "pending-id"}}]
-    storage.write_subscriptions_state(entries, root)
+    storage.write_subscriptions_state(entries, root, validate=lambda _entries: None)
     expected = json.loads(json.dumps(original))
     expected["stateByVersion"]["1"]["subscriptions"] = entries
     assert written == [expected]
     assert storage.read_subscriptions_state(root) == entries
-    storage.write_subscriptions_state([], root)
+    storage.write_subscriptions_state([], root, validate=lambda _entries: None)
     assert written[-1] == original
 
 
@@ -164,7 +164,9 @@ def test_final_guard_preserves_a_newer_opaque_partition(
 
     monkeypatch.setattr(storage, "_atomic_write_json", atomic)
     with pytest.raises(storage.StateWriteRefused, match="changed before replacement"):
-        storage.write_subscriptions_state([], Path("fixture-state"))
+        storage.write_subscriptions_state(
+            [], Path("fixture-state"), validate=lambda _entries: None,
+        )
     assert json.loads(current[0])["stateByVersion"]["2"]["pending"] == "later"
 
 
@@ -267,5 +269,41 @@ def test_round_trippable_numbers_remain_supported_in_retained_partitions(
         written.append(data)
 
     monkeypatch.setattr(storage, "_atomic_write_json", atomic)
-    storage.write_subscriptions_state([], Path("fixture-state"))
+    storage.write_subscriptions_state(
+        [], Path("fixture-state"), validate=lambda _entries: None,
+    )
     assert written == [json.loads(raw)]
+
+
+@pytest.mark.parametrize("stage", ["missing", "existing", "candidate", "final"])
+def test_versioned_write_requires_semantic_validation_at_every_boundary(
+    storage: Any, monkeypatch: pytest.MonkeyPatch, stage: str,
+) -> None:
+    document: dict[str, Any] = {
+        "schema": "agent-pull-requests.watch-subscriptions", "version": 2,
+        "engineGeneration": 1, "activeStateVersion": 1,
+        "stateByVersion": {"1": {"subscriptions": []}},
+    }
+    if stage == "existing":
+        document["stateByVersion"]["1"]["subscriptions"] = [{"bad": True}]
+    current = [json.dumps(document)]
+    monkeypatch.setattr(Path, "read_text", lambda *_args, **_kwargs: current[0])
+
+    def validate(entries: list[dict[str, Any]]) -> None:
+        assert isinstance(entries, storage.VersionedSubscriptions)
+        if any(entry.get("bad") for entry in entries):
+            raise ValueError("invalid persisted watch subscriptions registration")
+
+    def atomic(_path: Path, _entries: object, *, before_replace: Callable[[], None]) -> None:
+        assert stage == "final"
+        document["stateByVersion"]["1"]["subscriptions"] = [{"bad": True}]
+        current[0] = json.dumps(document)
+        before_replace()
+        pytest.fail("malformed registrations must never reach replacement")
+
+    monkeypatch.setattr(storage, "_atomic_write_json", atomic)
+    entries = [{"bad": True}] if stage == "candidate" else []
+    with pytest.raises(storage.StateWriteRefused, match="persisted watch subscriptions"):
+        storage.write_subscriptions_state(
+            entries, Path("fixture-state"), validate=None if stage == "missing" else validate,
+        )
