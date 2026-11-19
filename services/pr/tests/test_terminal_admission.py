@@ -134,6 +134,61 @@ def test_unsupported_retained_predicate_keeps_native_review_transition(
     assert events[0]["transitions"] == ["review_changed"]
 
 
+@pytest.mark.parametrize("completion", ["cancelled", "acknowledged"])
+def test_incompatible_completed_receipt_refuses_adoption_and_keeps_exact_retry(
+    configuration: Configuration, completion: str,
+) -> None:
+    _, _, config, baseline, _ = configured(configuration)
+    scope = config.bindings[0].scope
+    original: dict[str, Any] = {
+        "request_id": "original-completed", "issued_at": time.time(),
+        "number": 42,
+        "until": ("review_changed",) if completion == "acknowledged" else ("merged",),
+        "deadline_at": time.time() + 60 if completion == "acknowledged" else None,
+    }
+    receipt = baseline.execute(scope, "register", original, expires_at=expires())
+    target = ObservationTarget(scope.account, scope.repo, 42, frozenset({receipt["registration_id"]}))
+    finish = {
+        "request_id": original["request_id"], "issued_at": original["issued_at"],
+        "registration_id": receipt["registration_id"],
+    }
+    if completion == "acknowledged":
+        baseline.observe(target, PRSnapshot(review_decision="REVIEW_REQUIRED"), expires_at=expires())
+        baseline.observe(target, PRSnapshot(review_decision="APPROVED"), expires_at=expires())
+        event = baseline.execute(scope, "pending", {}, expires_at=expires())["events"][0]
+        finish["event_id"] = event["event_id"]
+    completed = baseline.execute(
+        scope, "acknowledge" if completion == "acknowledged" else "cancel",
+        finish, expires_at=expires(),
+    )
+    before = baseline.path.read_bytes()
+    with pytest.raises(ValueError, match="terminal predicates" if completion == "acknowledged" else "finite deadline"):
+        adopt(config)
+    assert baseline.path.read_bytes() == before
+    assert baseline.execute(scope, "register", original, expires_at=expires()) == completed
+
+
+@pytest.mark.parametrize("support", ["missing", "incompatible"])
+def test_missing_admission_core_refuses_terminal_selection_but_keeps_baseline(
+    configuration: Configuration, monkeypatch: pytest.MonkeyPatch, support: str,
+) -> None:
+    from agent_pull_requests import watch_admission
+
+    path, value, _, baseline, _ = configured(configuration)
+    before = baseline.path.read_bytes()
+    if support == "missing":
+        monkeypatch.delattr(watch_admission, "contract")
+    else:
+        monkeypatch.setattr(watch_admission, "contract", lambda: {"protocol": "unsupported"})
+    with pytest.raises(ValueError, match="core unsupported"):
+        load_config(path)
+    value["workspaces"]["terminal_reads"] = False
+    path.write_text(json.dumps(value))
+    owner = load_config(path).store()
+    assert owner.observation_targets(expires_at=expires()) == ()
+    assert owner.path.read_bytes() == before
+
+
 def test_frozen_pending_event_is_captured_without_replacement(
     configuration: Configuration, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

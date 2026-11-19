@@ -53,13 +53,18 @@ and retain their original reader; positive populated/recovery-compatible
 transition remains T3 work, not permission to settle or discard accepted work.
 Also require a bijection between full workspace scopes and account/repository
 targets, plus original consumer/account/repository reachability for every
-retained replay record. Active watches require finite original deadlines and
+retained replay record. Every retained watch receipt requires finite original deadlines and
 terminal-compatible `merged`, `closed` or `head_changed` predicates. Other
 predicates refuse without disabling their original native observer; richer
 predicate preservation remains full T3 work. Apply that same policy to new
 registrations on the selected terminal host, without changing strict legacy
-watch capability/receipt shapes. Advertise the optional terminal admission
-profile through workspace capabilities. Validate plain lease files
+watch capability/receipt shapes. Include acknowledged/cancelled receipts in
+preflight so the original register retry is never stranded by the new reader.
+Advertise the optional terminal admission profile through every watch binding's
+capabilities media profile, not only workspace discovery. The capable consumer
+checks criteria before suspension; settlement still reconciles original receipts.
+Keep optional old-core refusal and baseline-host compatibility.
+Validate plain lease files
 before PID writes and reject native callback state. Use bounded cache
 eligibility checks and the original monotonic budget, without scanning or
 repeatedly decoding retained generations.

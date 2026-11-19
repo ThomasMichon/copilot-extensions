@@ -85,6 +85,34 @@ core's 24 KiB/16-event bound. Responses are JSON with `Cache-Control: no-store`.
 Pending reads first durably sweep elapsed deadlines; they never ACK events.
 All other replay, retention and exact-completion semantics are unchanged.
 
+### Optional terminal admission profile
+
+An explicitly selected terminal host can restrict **new** registrations to
+finite original deadlines and `merged`, `closed` or `head_changed` predicates.
+Its trusted store sets `registration_admission` to the shared
+`TERMINAL_ADMISSION` declaration. Every affected watch binding, including a
+watch-only binding, advertises
+`Content-Type: application/json; profile="urn:agent-pull-requests:terminal-watch-admission:v1"`
+on its existing capabilities response. The strict v1/v2 JSON fields and
+receipt bodies do not change; the existing SDK preserves this standard
+response header without adding another endpoint or policy request.
+
+The current `ReplayClient.capabilities()` returns optional typed
+`registration_admission`. A missing profile retains the documented baseline;
+an unknown, malformed or duplicate profile refuses discovery before mutation.
+New delegation owners validate requested criteria/deadline against that
+declaration **before** suspending work. Ordinary receipt reconciliation must
+remain available and does not become a new registration.
+
+Legacy direct requests with supported finite criteria retain their semantics.
+Unaware delegation clients are not qualified for a new restricted profile:
+the deployment owner must retain the baseline host or select the capable
+consumer before enabling it. This source declaration does not upgrade live
+consumers or authorize activation. The standalone bootstrap refuses **all**
+incompatible retained receipts, including acknowledged/cancelled ones, before
+expansion, so their original owner can still replay the exact request.
+No deadline is invented and no richer predicate is silently converted.
+
 ### Opt-in scoped v2
 
 The same adapter also serves `agent-pull-requests.watch/v2` at

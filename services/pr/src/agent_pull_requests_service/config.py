@@ -25,7 +25,6 @@ from single_instance_lease import SingleInstance
 from .preparation import PreparationConfig
 from . import terminal
 from .reports import ReportConfig
-from .terminal_policy import TerminalReplayStore, TerminalWorkspaceOperations
 
 _LIMIT = 1024 * 1024
 
@@ -124,8 +123,11 @@ class WorkspaceConfig:
             key: {"comment_mappings": True} for key in mappings
         }
         terminal_options: dict[tuple[str, str], _TerminalOptions] = {}
+        terminal_operations: type[WorkspaceOperations] = WorkspaceOperations
         if self.terminal_targets:
             terminal.core()
+            from .terminal_policy import TerminalWorkspaceOperations
+            terminal_operations = TerminalWorkspaceOperations
             if self.terminal_mapping_reads:
                 terminal.mapping_core()
             for binding in self.terminal_targets:
@@ -153,7 +155,7 @@ class WorkspaceConfig:
         }
         return {
             (principal, target): (
-                TerminalWorkspaceOperations if (principal, target) in terminal_options else WorkspaceOperations
+                terminal_operations if (principal, target) in terminal_options else WorkspaceOperations
             )(
                 store, cache, scope=dict(reader.scope), read_owner=reader,
                 binding_ref=reader.binding_ref, checkpoint=checkpoint,
@@ -194,6 +196,7 @@ class HostConfig:
     def store(self) -> ReplayStore:
         if self.workspaces and self.workspaces.terminal_targets:
             terminal.core()
+            from .terminal_policy import TerminalReplayStore
             mapping_options: dict[str, Any] = {}
             if self.workspaces.terminal_mapping_reads:
                 terminal.mapping_core()

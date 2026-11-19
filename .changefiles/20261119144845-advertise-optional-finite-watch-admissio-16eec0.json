@@ -1,0 +1,9 @@
+{
+  "comment": "Advertise optional finite watch admission through a backwards-compatible media profile without changing strict replay JSON.",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

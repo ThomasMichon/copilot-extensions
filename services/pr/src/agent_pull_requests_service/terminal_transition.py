@@ -12,7 +12,6 @@ from agent_pull_requests.generation_cache import CacheFull, CacheInvalid, Genera
 from single_instance_lease import SingleInstance
 
 from . import terminal
-from .terminal_policy import registration
 
 if TYPE_CHECKING:
     from .config import HostConfig
@@ -47,6 +46,7 @@ def adopt(config: HostConfig) -> None:
         if targets.setdefault(tuple(sorted(scope.items())), key) != key:
             raise ValueError("workspace scope is ambiguous across terminal watch targets")
     store = config.store()
+    from .terminal_policy import registration
     if (
         not config.root.is_dir() or config.root.is_symlink()
         or not store.path.is_file() or store.path.is_symlink()
@@ -82,8 +82,7 @@ def adopt(config: HostConfig) -> None:
         for record in document["replay"]["records"]:
             if record["scope"] not in admitted:
                 raise ValueError("retained replay scope is absent from the selected bindings")
-            if record["outcome"] == "active":
-                registration(record)
+            registration(record)
         if mapping is not None and (
             document.get("review_intent_version") != 2
             or document.get("review_comment_mapping_version") != 1

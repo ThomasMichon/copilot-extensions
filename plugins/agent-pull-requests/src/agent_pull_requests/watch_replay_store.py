@@ -16,6 +16,7 @@ from typing import Any, Literal, Protocol, TypeVar, cast, overload
 from single_instance_lease import OperationLock, OperationLockedError
 
 from .watch_contract import PRSnapshot
+from .watch_admission import ReplayAdmission
 from .watch_replay import ConsumerScope, ObservationTarget, WatchReplay
 from .watch_storage import _atomic_write_json as _atomic_write_json
 from . import review_intent as _review_intent
@@ -102,6 +103,8 @@ class ReplayStore:
     transaction finishes. Reconcile its original identity, never assume absence.
     This is not a daemon lease or placement/update authority.
     """
+
+    registration_admission: ReplayAdmission | None = None
 
     def __init__(
         self, root: Path, namespace: str, *, clock: Callable[[], float] = time.time,

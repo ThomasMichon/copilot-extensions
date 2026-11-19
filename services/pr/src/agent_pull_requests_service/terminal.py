@@ -15,6 +15,7 @@ def core() -> tuple[Any, Any, Any]:
         from agent_pull_requests.terminal_retention import TerminalRetentionStore
         from agent_pull_requests.terminal_recovery import TerminalRecoveryStore
         from agent_pull_requests.terminal_cache_retirement import TerminalCacheRetirementStore
+        from agent_pull_requests.watch_admission import contract as admission_contract
 
         value = contract()
         if value != {
@@ -32,6 +33,12 @@ def core() -> tuple[Any, Any, Any]:
             "phase": "before_acquisition", "budget": "request_checkpoint_and_expiry",
         }:
             raise ValueError("unsupported terminal target capture")
+        if admission_contract() != {
+            "protocol": "agent-pull-requests.terminal-watch-admission/v1",
+            "profile": "urn:agent-pull-requests:terminal-watch-admission:v1",
+            "discovery": "watch_capabilities_content_type",
+        }:
+            raise ValueError("unsupported terminal watch admission discovery")
         return TerminalRetentionStore, TerminalRecoveryStore, TerminalCacheRetirementStore
     except (ImportError, AttributeError, TypeError, ValueError, RuntimeError):
         raise ValueError("selected terminal read core unsupported") from None

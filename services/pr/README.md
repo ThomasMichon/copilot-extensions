@@ -492,11 +492,13 @@ Keep those volumes with their original owner pending a separately qualified
 transition. Selected workspace scopes and account/repository targets must form
 a one-to-one mapping in both directions. Every retained replay scope must remain
 reachable through the selected consumer/account/repository bindings, including
-frozen pending events and completed receipts. Active watch registrations require
+frozen pending events and completed receipts. Every retained watch receipt requires
 finite original delivery deadlines and predicates supported by the terminal
 projection (`merged`, `closed`, `head_changed`); the command never invents
 deadlines or reinterprets richer predicates. A refused volume retains its
 original native review/checks watcher and usable pending/ACK reader.
+This includes incompatible acknowledged/cancelled receipts: refuse before
+expansion rather than making an exact original registration retry unusable.
 This separate command
 requires the terminal-reader selection and the same available service writer
 lease; a running or unconfirmed drain refuses without stopping the service.
@@ -543,11 +545,19 @@ deadline or with richer predicates receive an explicit invalid-request refusal;
 they never create an incompatible registration or fall back to another owner.
 The optional workspace capability response advertises
 `agent-pull-requests.terminal-watch-admission/v1` and its accepted predicates.
+Every affected watch binding also advertises that policy through the
+[capabilities media profile](../../plugins/agent-pull-requests/docs/watch-gateway.md#optional-terminal-admission-profile),
+including watch-only callers without a workspace route. The current Dispatch
+consumer checks it before durable suspension. An older or incompatible
+optional PR core refuses terminal selection before state creation; baseline
+hosting remains independent of that declaration.
 Legacy watch/v1-v2 capability and receipt shapes remain unchanged, and finite
 legacy requests using those predicates keep their original semantics. Clients
 needing unbounded or richer watches must retain the baseline host until a
 predicate-preserving transition is qualified; this opt-in profile does not
 silently convert them. Removing terminal selection is not a storage downgrade.
+Deployment must select a capability-aware delegation consumer before enabling
+the restricted profile; source publication does not update or activate one.
 
 Public terminal load/sync results contain only the selected workspace's compact
 retirement cursor, drain status and no-effect marker. Cross-consumer request,

@@ -1,0 +1,61 @@
+"""Real Gateway discovery rejects unsupported watches before durable suspension."""
+
+from __future__ import annotations
+
+import asyncio
+from importlib import import_module
+import json
+from pathlib import Path
+import time
+
+import pytest
+
+from agent_pull_requests.watch_admission import TERMINAL_ADMISSION
+
+pytestmark = pytest.mark.contract("agent_dispatch.delegated_replay.transport")
+
+
+@pytest.mark.parametrize("scoped", [False, True])
+def test_watch_only_terminal_admission_is_checked_before_suspension(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scoped: bool,
+) -> None:
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[3] / "fleet-manager" / "tests"))
+    helpers = import_module("tests.test_delegated_replay_transport")
+    fixtures = import_module("gateway_service_transport_fixtures")
+    transport = import_module("test_gateway_service_handler")
+
+    async def scenario() -> None:
+        store, gateway = helpers.service_owner(tmp_path, scoped=scoped)
+        store.registration_admission = TERMINAL_ADMISSION
+        queue = helpers.TaskQueue(tmp_path / "tasks.db")
+        task_id = helpers.task(queue)
+        async with fixtures.running(tmp_path) as rig:
+            await transport.connect_handler(rig, gateway.handle)
+            consumer, _ = helpers.new_consumer(queue, rig, scoped=scoped)
+            capabilities = await consumer.client.capabilities()
+            assert capabilities.registration_admission == TERMINAL_ADMISSION
+            spec = helpers.identity(queue)
+            issued_at = time.time()
+            spec.update(until=["review_changed"], timeout=300.0, replay={
+                "binding": consumer.binding, "request_id": "original",
+                "issued_at": issued_at, "deadline_at": issued_at + 300,
+            })
+            with pytest.raises(ValueError, match="terminal predicates"):
+                await consumer.prepare(
+                    task_id, delegation=spec, worker_id="worker",
+                    resume_worktree="host/wt", host="host", reason="waiting",
+                )
+            assert queue.get_active_run_waiter(task_id) is None
+            assert not queue.list_pending_run_waiters()
+            document = json.loads(store.path.read_bytes())
+            assert not (document["replay"] if scoped else document)["records"]
+            spec["until"] = ["merged"]
+            await consumer.prepare(
+                task_id, delegation=spec, worker_id="worker",
+                resume_worktree="host/wt", host="host", reason="waiting",
+            )
+            assert len(queue.list_pending_run_waiters()) == 1
+            assert rig.backends[0].requests == []
+            await gateway.drain(timeout=3)
+
+    asyncio.run(scenario())

@@ -8,21 +8,21 @@ from typing import Any
 from agent_pull_requests.watch_replay import ConsumerScope
 from agent_pull_requests.watch_replay_store import ReplayStore
 from agent_pull_requests.workspace_operations import WorkspaceOperations
-
-TRANSITIONS = ("merged", "closed", "head_changed")
+from agent_pull_requests.watch_admission import TERMINAL_ADMISSION
 
 
 def registration(payload: dict[str, Any]) -> None:
-    if payload.get("deadline_at") is None:
-        raise ValueError("terminal watches require an original finite deadline")
     until = payload.get("until")
-    if not isinstance(until, (list, tuple)) or any(
-        name not in TRANSITIONS for name in until
-    ):
+    if not isinstance(until, (list, tuple)):
         raise ValueError("terminal watches require supported terminal predicates")
+    TERMINAL_ADMISSION.validate_registration(
+        until=tuple(until), deadline_at=payload.get("deadline_at"),
+    )
 
 
 class TerminalReplayStore(ReplayStore):
+    registration_admission = TERMINAL_ADMISSION
+
     def execute(
         self, scope: ConsumerScope, operation: str, payload: dict[str, Any], *,
         expires_at: int, checkpoint: Callable[[], None] | None = None,
@@ -45,10 +45,7 @@ class TerminalWorkspaceOperations(WorkspaceOperations):
             selection_validator=selection_validator,
         )
         if operation == "capabilities":
-            value["watch_registration_policy"] = {
-                "protocol": "agent-pull-requests.terminal-watch-admission/v1",
-                "deadline": "finite_original", "until": list(TRANSITIONS),
-            }
+            value["watch_registration_policy"] = TERMINAL_ADMISSION.document()
         elif operation in ("load", "sync"):
             observation = value["result"].get("conversation", {})
             if "retirement" in observation:
