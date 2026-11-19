@@ -117,7 +117,11 @@ class PreparedJournal:
             conn.execute("BEGIN IMMEDIATE")
             self._require_parent(conn)
             if kind == "batch":
-                self._require_batch_plan(conn, writing=True)
+                kind = self._require_batch_plan(conn, writing=True)
+                if self._batch_plan is not None:
+                    for key, payload in values:
+                        self._put_immutable(conn, kind, key, payload)
+                    return
             conn.executemany(
                 "INSERT OR REPLACE INTO prepared_crawl_rows VALUES (?, ?, ?, ?, ?)",
                 [(self.source, kind, key, payload, hashlib.sha256(payload).hexdigest())
@@ -130,7 +134,7 @@ class PreparedJournal:
             conn.execute("BEGIN")
             self._require_parent(conn)
             if kind == "batch":
-                self._require_batch_plan(conn)
+                kind = self._require_batch_plan(conn)
             for start in range(0, len(keys), 200):
                 selected = keys[start:start + 200]
                 placeholders = ",".join("?" for _ in selected)
@@ -147,56 +151,68 @@ class PreparedJournal:
 
     def put_immutable(self, kind: str, key: str, payload: bytes) -> None:
         """Retain exact attempt intent without replacing an earlier publication."""
-        digest = hashlib.sha256(payload).hexdigest()
         with closing(self.paths._connect()) as conn, conn:
             conn.execute("BEGIN IMMEDIATE")
             self._require_parent(conn)
             if kind == "batch":
-                self._require_batch_plan(conn, writing=True)
-            row = conn.execute(
-                "SELECT payload, digest FROM prepared_crawl_rows "
-                "WHERE source = ? AND kind = ? AND key = ?", (self.source, kind, key),
-            ).fetchone()
-            if row is not None:
-                if (row["payload"], row["digest"]) != (payload, digest):
-                    raise PendingCrawlConflict("Prepared publication intent changed")
-                return
-            conn.execute(
-                "INSERT INTO prepared_crawl_rows VALUES (?, ?, ?, ?, ?)",
-                (self.source, kind, key, payload, digest),
-            )
+                kind = self._require_batch_plan(conn, writing=True)
+            self._put_immutable(conn, kind, key, payload)
 
-    def _require_batch_plan(self, conn: sqlite3.Connection, *, writing: bool = False) -> None:
-        plan = self._batch_plan
+    def _put_immutable(
+        self, conn: sqlite3.Connection, kind: str, key: str, payload: bytes,
+    ) -> None:
+        digest = hashlib.sha256(payload).hexdigest()
         row = conn.execute(
             "SELECT payload, digest FROM prepared_crawl_rows "
-            "WHERE source = ? AND kind = 'batch-plan/v1' AND key = 'current'", (self.source,),
+            "WHERE source = ? AND kind = ? AND key = ?", (self.source, kind, key),
         ).fetchone()
-        if plan is None:
-            if writing and row is not None:
-                raise PendingCrawlConflict("Prepared batch plan belongs to a bound application")
+        if row is not None:
+            if (row["payload"], row["digest"]) != (payload, digest):
+                raise PendingCrawlConflict("Prepared publication intent changed")
             return
+        conn.execute(
+            "INSERT INTO prepared_crawl_rows VALUES (?, ?, ?, ?, ?)",
+            (self.source, kind, key, payload, digest),
+        )
+
+    def _require_batch_plan(self, conn: sqlite3.Connection, *, writing: bool = False) -> str:
+        plan = self._batch_plan
+        if plan is None:
+            if writing and conn.execute(
+                "SELECT 1 FROM prepared_crawl_rows WHERE source = ? "
+                "AND kind IN ('batch-plan/v1', 'batch-plan/v2') LIMIT 1", (self.source,),
+            ).fetchone() is not None:
+                raise PendingCrawlConflict("Prepared batch plan belongs to a bound application")
+            return "batch"
+        row = conn.execute(
+            "SELECT payload, digest FROM prepared_crawl_rows "
+            "WHERE source = ? AND kind = 'batch-plan/v2' AND key = ?",
+            (self.source, plan.decode("ascii")),
+        ).fetchone()
         if row is None or (row["payload"], row["digest"]) != (
             plan, hashlib.sha256(plan).hexdigest(),
         ):
-            raise PendingCrawlConflict("Prepared batch plan was replaced")
+            raise PendingCrawlConflict("Prepared batch plan is missing or corrupt")
+        return "batch/v2:" + plan.decode("ascii")
 
     def reset_batches(self, *, bind_plan: bool = False) -> None:
-        """Replace batches, optionally binding this handle to that exact plan."""
+        """Reset legacy batches or bind a fresh handle to its own immutable plan."""
+        if self._batch_plan is not None:
+            raise PendingCrawlConflict("Prepared batch plan is already bound")
         plan = uuid.uuid4().hex.encode("ascii") if bind_plan else None
         with closing(self.paths._connect()) as conn, conn:
             conn.execute("BEGIN IMMEDIATE")
             self._require_parent(conn)
             if not bind_plan:
                 self._require_batch_plan(conn, writing=True)
-            conn.execute(
-                "DELETE FROM prepared_crawl_rows WHERE source = ? AND kind IN ('batch', 'batch-plan/v1')",
-                (self.source,),
-            )
+                conn.execute(
+                    "DELETE FROM prepared_crawl_rows WHERE source = ? AND kind = 'batch'",
+                    (self.source,),
+                )
             if plan is not None:
                 conn.execute(
-                    "INSERT OR REPLACE INTO prepared_crawl_rows VALUES (?, ?, ?, ?, ?)",
-                    (self.source, "batch-plan/v1", "current", plan,
+                    "INSERT INTO prepared_crawl_rows VALUES (?, ?, ?, ?, ?)",
+                    (self.source, "batch-plan/v2", plan.decode("ascii"), plan,
                      hashlib.sha256(plan).hexdigest()),
                 )
         self._batch_plan = plan

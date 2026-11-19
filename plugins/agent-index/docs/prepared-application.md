@@ -39,15 +39,21 @@ clears the manifest. Returning to identical manifest bytes cannot revive an old
 binding. Neither table has a cursor, source lease, completion marker or repair
 authority.
 
-Each `PreparedApplication` also binds its replaceable batch plan in the existing
-prepared rows. A later plan reset invalidates older application handles, including
-different component selections for the same claim. Batch reads/writes and the
+Each `PreparedApplication` also binds a fresh, one-shot batch plan in the existing
+prepared rows. Its `batch-plan/v2` marker and plan-specific batch namespace are
+separate from legacy `batch` rows, so even an already-running old journal cannot
+delete or overwrite them. Different preparations retain independent plans;
+rebinding an already-bound handle and changing a retained batch both refuse.
+Batch reads/writes and the
 pre-publication checkpoint check verify that plan binding in the same SQLite
 transaction as cache access. Exact vector pairs remain shared under the unchanged
 pending-parent incarnation. Bare journal round-trips keep their existing behavior
 when no application plan is bound.
 An unbound handle cannot write batches or reset a plan while an application
 binding exists; those checks share the mutation's SQLite transaction.
+Direct binding on a fresh journal only appends an isolated namespace: it cannot
+revoke an active publisher's plan, including during native writes. All namespaces
+remain subordinate to the pending parent's existing retirement triggers.
 
 The journal can bind a completed component envelope for subordinate cache work.
 The explicit [native component application](component-ledger.md#explicit-native-application)
@@ -152,8 +158,8 @@ not the complete candidate or claim. Missing observations, changed claims,
 scope/family mismatches, candidate changes and dirty domains refuse before
 changing existing preparation. Recomposition holds no native-domain exclusion;
 short native checks precede it. For every source-aware preparation, native
-exclusion covers the final clean check and the batch-plan reset transaction,
-so another preparation cannot revoke a publishing writer's plan mid-write.
+exclusion covers the final clean check and the fresh batch-plan binding transaction.
+Plans are never replaced, even through direct journal calls.
 It does not cover target recomposition, chunking or embedding.
 
 Point preparation uses the same subordinate journal, batch plan, checkpoint

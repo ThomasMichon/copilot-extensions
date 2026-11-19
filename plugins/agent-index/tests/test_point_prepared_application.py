@@ -7,10 +7,13 @@ from contextlib import closing
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Callable, cast
 
 import numpy as np
 import pytest
+
+import test_prepared_application
 
 from agent_index.engine.client import EngineClient
 from agent_index.index_config import IndexConfig, ModelProfile
@@ -27,6 +30,7 @@ from agent_index.indexing.point_hints import (
 from agent_index.indexing.prepared_application import PreparedApplication, publish_prepared_manifest
 from agent_index.indexing.prepared_journal import PreparedJournal
 from agent_index.indexing.prepared_points import PointAcquisition, PreparedPoints
+from agent_index.indexing.state import IndexState
 from agent_index.indexing.task_store import TaskStatus, TaskStore
 from agent_index.sources.base import FileEntry
 from agent_index.sources.delta import DeletedFile
@@ -35,6 +39,7 @@ from agent_index.store.multi_model_store import MultiModelStore
 from agent_index.store.source_layout import LAYOUT, SourceLayoutError, initialize_source_store
 
 FAMILY, SCOPE = "sample:components", "account/endpoint/query"
+ordinary_application = test_prepared_application.application
 
 
 @dataclass
@@ -355,7 +360,7 @@ def test_point_preparation_snapshots_metadata_before_binding_and_embedding(appli
 
 
 @pytest.mark.parametrize("application", [False], indirect=True)
-def test_point_batch_plan_replacement_invalidates_only_old_plan_handles(application: Fixture) -> None:
+def test_point_preparations_keep_independent_immutable_batch_plans(application: Fixture) -> None:
     f = application
     body = (FAMILY, "opaque-body")
     comment = (FAMILY, "opaque-comment")
@@ -364,10 +369,13 @@ def test_point_batch_plan_replacement_invalidates_only_old_plan_handles(applicat
     second = f.prepare(component_selection=frozenset({comment}))
     assert {chunk.file_path for batch in second.batches() for chunk in batch.chunks} == {comment[1]}
     second.require_current_checkpoints()
-    for read in (lambda: list(first.batches()), first.require_current_checkpoints):
-        with pytest.raises(PendingCrawlConflict, match="batch plan was replaced"):
-            read()
-    # Vector inputs belong to the exact claim cache, not the replaceable file plan.
+    assert {chunk.file_path for batch in first.batches() for chunk in batch.chunks} == {body[1]}
+    first.require_current_checkpoints()
+    with pytest.raises(PendingCrawlConflict, match="already bound"):
+        first.journal.reset_batches(bind_plan=True)
+    with pytest.raises(PendingCrawlConflict, match="intent changed"):
+        first.journal.put_batch(0, next(second.batches()))
+    # Vector inputs remain shared by the exact claim, not duplicated per plan.
     assert first.vectors("first", first_chunks).shape == (1, 2)
 
 
@@ -415,7 +423,7 @@ def test_point_preparation_reads_coverage_with_an_open_wal_without_relaxing_qual
 
 
 @pytest.mark.parametrize("bind_second", [False, True])
-def test_legacy_journal_plan_replacement_also_revokes_only_bound_plans(
+def test_new_journal_bindings_preserve_existing_plans_and_shared_vectors(
     tmp_path: Path, bind_second: bool,
 ) -> None:
     paths = PathIndex(tmp_path / "paths.db")
@@ -444,14 +452,11 @@ def test_legacy_journal_plan_replacement_also_revokes_only_bound_plans(
         assert np.array_equal(first.vectors(["pair"], 2)["pair"], [1, 0])
         return
     second.reset_batches(bind_plan=True)
-    second.put_batch(0, batch)
-    bound_operations: tuple[Callable[[], object], ...] = (
-        lambda: list(first.batches(1)), lambda: first.put_batch(0, batch),
-    )
-    for bound_operation in bound_operations:
-        with pytest.raises(PendingCrawlConflict, match="batch plan was replaced"):
-            bound_operation()
-    assert list(second.batches(1)) == [batch]
+    other_batch = FileBatch([], [("sample:legacy", "two.md", "other", 0)])
+    second.put_batch(0, other_batch)
+    assert list(first.batches(1)) == [batch]
+    first.put_batch(0, batch)
+    assert list(second.batches(1)) == [other_batch]
     assert np.array_equal(first.vectors(["pair"], 2)["pair"], [1, 0])
 
 
@@ -517,3 +522,58 @@ def test_source_aware_plan_reset_excludes_native_writers(
     f.prepare(**options).require_current_checkpoints()
     assert blocked == [True]
     assert domain.receipt() == receipt
+
+
+@pytest.mark.parametrize("interference", ["legacy-writer", "direct-reset"])
+def test_active_publication_keeps_its_batches_during_other_journal_writes(
+    ordinary_application: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, interference: str,
+) -> None:
+    f = ordinary_application
+    upsert = f.store.upsert_content
+    put_batch = PreparedJournal.put_batch
+    prepared: list[PreparedJournal] = []
+    interleaved: list[bool] = []
+
+    def remember(self: PreparedJournal, index: int, batch: FileBatch) -> None:
+        if self not in prepared:
+            prepared.append(self)
+        put_batch(self, index, batch)
+
+    def publish(*args: Any, **kwargs: Any) -> Any:
+        result = upsert(*args, **kwargs)
+        if interleaved:
+            return result
+        if f.selected:
+            assert f.store._source_domain.writing
+        active = prepared[0]
+        if interference == "legacy-writer":
+            # Emulate the shipped old journal, which has no bound-plan checks.
+            with closing(f.paths._connect()) as conn, conn:
+                conn.execute(
+                    "DELETE FROM prepared_crawl_rows WHERE source = ? "
+                    "AND kind IN ('batch', 'batch-plan/v1')", (active.source,),
+                )
+                conn.execute(
+                    "INSERT INTO prepared_crawl_rows VALUES (?, 'batch', '1', ?, 'old-digest')",
+                    (active.source, b'{"version":1,"chunks":[],"checkpoints":[]}'),
+                )
+        else:
+            with pytest.raises(PendingCrawlConflict, match="already bound"):
+                active.reset_batches(bind_plan=True)
+            fresh = PreparedJournal(f.paths, active.source, active.scope, active.payload)
+            fresh.reset_batches(bind_plan=True)
+            fresh.put_batch(0, FileBatch([], []))
+        assert len(list(active.batches(2))) == 2
+        interleaved.append(True)
+        return result
+
+    monkeypatch.setattr(PreparedJournal, "put_batch", remember)
+    monkeypatch.setattr(f.store, "upsert_content", publish)
+    result = f.run()
+    assert interleaved == [True]
+    assert result["work_counts"]["content_rows_upserted"] == 2
+    assert result["work_counts"]["checkpoint_rows_written"] == 2
+    assert set(f.paths.get_all_entries()) == {("sample:repo", entry.path) for entry in f.files}
+    assert IndexState.load(f.config.state_file).sources["sample:repo"].last_commit == "pinned"
+    if f.selected:
+        assert f.store._source_domain.receipt()["state"] == "clean"
