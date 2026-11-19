@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 import re
 import sys
-from typing import Any
+from typing import Any, cast
 
 from agenda import AgendaError, _read, _text, decode
 from agenda_publish import _invoke
@@ -50,7 +50,7 @@ def _owner(provider_python: str, project: str, command: list[str]) -> dict[str, 
         raise AgendaError(f"placement owner unavailable: {exc}") from exc
     if status["state"] != "delivered":
         raise AgendaError(f"placement owner refused: {status['error']['message']}")
-    reply = status["reply"]
+    reply = cast(dict[str, Any], status["reply"])
     if reply.get("schema") != PLACEMENT_SCHEMA or type(reply.get("version")) is not int or reply["version"] != 1:
         raise AgendaError("placement owner returned an unsupported response")
     return reply
@@ -68,6 +68,33 @@ def initialize(
     validate_initialization(request, actor=actor, session=session, initial_store_id=store_id)
     if request["change"]["worktree"] != worktree:
         raise AgendaError("managed initialization request must select the exact worktree")
+    placement = allocate(provider_python, project, worktree, creation_nonce, lane, store_id)
+    home = safe_path(Path(placement["state_home"]), directory=True)
+    store_files = {DATABASE + suffix for suffix in ("", "-journal", "-wal", "-shm")}
+    if any(path.name not in store_files for path in home.iterdir()):
+        try:
+            with transaction(home, readonly=True, store_version=2) as db:
+                existing = _state(db, home)
+                if existing["store_id"] != store_id or existing["snapshot"]["worktree"] != worktree:
+                    raise AgendaError("existing accepted store does not match the placement")
+        except AgendaError as exc:
+            raise AgendaError("managed initialization refuses a nonempty uninitialized or unqualified home") from exc
+    result, accepted = mutate(
+        home, request, actor=actor, session=session, initial_store_id=store_id,
+    )
+    if result["store_id"] != store_id or result["source"]["worktree"] != worktree:
+        raise AgendaError("initialized agenda identity differs from its admitted placement")
+    return {"schema": "efforts.agenda-managed-placement", "version": 1,
+            "placement": placement, "result": result, "accepted": accepted}
+
+
+def allocate(
+    provider_python: str, project: str, worktree: str, creation_nonce: str, lane: str,
+    store_id: str,
+) -> dict[str, Any]:
+    """Negotiate and validate one explicit placement without initializing a store."""
+    if not isinstance(store_id, str) or re.fullmatch(r"[0-9a-f]{32}", store_id) is None:
+        raise AgendaError("managed store ID must be 32 lowercase hexadecimal characters")
     support = _owner(provider_python, project, ["worktree-data-read", "--capabilities", "--json"])
     if support.get("capabilities") != ["worktree-data-v1"]:
         raise AgendaError("actual placement owner does not support worktree-data-v1")
@@ -103,22 +130,7 @@ def initialize(
     home = safe_path(Path(home_value), directory=True)
     if not home.is_dir():
         raise AgendaError("placement owner did not allocate its state home")
-    store_files = {DATABASE + suffix for suffix in ("", "-journal", "-wal", "-shm")}
-    if any(path.name not in store_files for path in home.iterdir()):
-        try:
-            with transaction(home, readonly=True, store_version=2) as db:
-                existing = _state(db, home)
-                if existing["store_id"] != store_id or existing["snapshot"]["worktree"] != worktree:
-                    raise AgendaError("existing accepted store does not match the placement")
-        except AgendaError as exc:
-            raise AgendaError("managed initialization refuses a nonempty uninitialized or unqualified home") from exc
-    result, accepted = mutate(
-        home, request, actor=actor, session=session, initial_store_id=store_id,
-    )
-    if result["store_id"] != store_id or result["source"]["worktree"] != worktree:
-        raise AgendaError("initialized agenda identity differs from its admitted placement")
-    return {"schema": "efforts.agenda-managed-placement", "version": 1,
-            "placement": placement, "result": result, "accepted": accepted}
+    return placement
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -64,6 +64,9 @@ journal home needs an owner-allocated compartment for this worktree.
 For explicitly selected fresh context-qualified stores, use the optional
 [managed placement helper](references/managed-placement.md) only after
 establishing the selected allocator's actual support; it does not migrate a lane.
+An explicitly authorized checkout-local format-2 relocation uses the separate
+[complete-export rescue procedure](references/agenda-rescue.md), not fresh
+initialization. Manual JSON and older stores remain protected.
 There is no mandatory journal provider: when none is available, choose an
 explicit worktree-local home such as `.effort-agenda/<lane>/`, excluded from
 publication using the repository's normal ignore convention.

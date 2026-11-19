@@ -140,7 +140,9 @@ the export lossless. Export does not collect unrelated files, credential files, 
 leases or other runtime authority. Sensitive content already present inside
 accepted planning records remains subject to the destination's privacy gate.
 
-No command restores a writer, head, claim, lease or live session from the
-export. Historical planning evidence is not current execution permission.
-Restoration, rescue, actual archive transport and retained-data reclamation
-remain independent owner operations and approval gates.
+No export command restores a writer, head, claim, lease or live session.
+Historical planning evidence is not current execution permission. The separate
+[explicit format-2 rescue owner](agenda-rescue.md) can relocate an admitted
+store after complete verification and a durable old-writer fence. It does not
+restore agency authority. Actual archive transport and retained-data
+reclamation remain independent owner operations and approval gates.

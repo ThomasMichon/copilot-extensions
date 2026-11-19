@@ -106,9 +106,12 @@ Report per-resource partial outcomes without releasing unresolved custody.
 
 - [x] R0 Review and merge this subplan before runtime implementation.
       #13280 merged after exact-head approval and required checks.
-- [ ] R1 Deliver explicit retained finalization and runtime support declaration.
-- [ ] R2 Deliver retained relationship discovery without changing obligations.
-- [ ] R3 Deliver selected test-cache/source-lifetime disposition.
+- [x] R1 Deliver explicit retained finalization and runtime support declaration.
+      Source #13314 merged; installed adoption is separate.
+- [x] R2 Deliver retained relationship discovery without changing obligations.
+      Source #13314 merged with bounded native consumer evidence.
+- [x] R3 Deliver selected test-cache/source-lifetime disposition.
+      Source #13314 merged; existing legacy caches remain outside retirement.
 - [ ] R4 Complete native consumer and legacy-protection qualification.
 - [ ] R5 Publish reality documentation, reconcile parent acceptance and preserve
       release/adopter obligations without claiming an unperformed rollout.
@@ -275,3 +278,128 @@ packet, current-head CI and review before merge. Earlier native Windows
 qualification includes 140 published-head CLI/recovery cases in
 [run 44417101889](https://github.com/ThomasMichon/copilot-extensions/actions/runs/44417101889);
 updated native qualification is still separate from those prior results.
+
+### 2026-11-19 - Complete-history rescue candidate
+
+#13314 merged the retained-resource core after current-head approval and passing
+required checks. R1-R3 are source-delivered, not installed adoption. R4/RV5
+remain open for the complete legacy-protection and rescue qualification.
+
+The bounded format-2 rescue candidate reuses Worktrees' actual allocation owner,
+verifies a complete export and binds its original store identity and history.
+It reserves a fenced destination, commits the source writer fence and recovery
+record, then activates the copied tables in one transaction. Matching retries
+preserve later accepted work; provider presentation additions do not change
+stable placement identity. Unsupported manual JSON and format-1 lanes remain
+protected. No operator data, installed selection or checkout has been moved or
+deleted by this source candidate.
+
+The native Linux allocator/rescue/parser/independent-reader selection passed
+21 cases within its original deadlines. The preceding agenda compatibility
+packet passed 322 cases with two platform skips on Linux and 259 with 65 skips
+on Windows. The source now also has bounded-recovery and additive-metadata
+controls; those final controls require refreshed source checks before
+publication. The broad packet does not substitute for the separate required
+unit-only CI, current-head review or installed/adopter evidence.
+
+Documentation impact: the Efforts entrypoint and command references now name
+the explicit rescue procedure, unsupported legacy states, durable cutover,
+unknown outcomes and retained evidence. Contract impact: the optional helper
+advertises `agenda-managed-rescue-v1` independently, reuses the existing
+`worktree-data-v1` provider contract and leaves fresh initialization and ordinary
+format-2 commands compatible. Old readers refuse the fenced source through
+their existing transaction-time format check; the new destination remains
+ordinary format 2. Source adoption does not require peers to upgrade together.
+
+### 2026-11-19 - Reservation preservation and publication barriers
+
+The rescue owner now requires a genuinely empty home before first database
+creation. Existing reservations are inspected read-only, so SQLite cannot
+recover or delete an unrecognized hot journal before ownership is established.
+The new reservation's directory entry is flushed after its commit and before
+the source writer fence. A failed barrier leaves the source usable and the
+destination reserved for an exact retry.
+
+The focused Linux packet passes 38 cases; the Windows packet passes 36 with
+two POSIX-only skips. Controls preserve all three orphan-sidecar forms and a
+real foreign hot journal byte-for-byte, and exercise a failed directory barrier
+followed by recovery. Five in-process units, fatal-error lint and whole-file
+strict typing for both target platforms pass.
+
+The first hosted Windows requests for #13403 executed all applicable tests
+successfully but remain incomplete because their selections included expected
+POSIX-only skips. They are not qualification passes. The corrected source needs
+a new native-only selection; the POSIX controls retain their Linux evidence.
+
+### 2026-11-19 - Bind database identity before recovery
+
+The common opener now binds an expected ordinary-file identity before any
+recovery-capable SQLite statement. It retains an operating-system descriptor
+through the transaction and revalidates the name after connection creation,
+under the database lock and before commit. Source fencing, first reservation
+and activation all use that binding, rather than detecting replacement only
+after SQLite could modify a different database.
+
+Six native controls inject replacement before and after connection creation at
+all three write boundaries. They preserve the original selected file, foreign
+database and foreign hot journal byte-for-byte. Disabling only the binding in a
+contained negative control reproduces the foreign-database modification.
+
+The broader Linux packet passes 334 cases with two platform skips, and its
+actual allocation/CLI selection passes all 21 cases. The broader Windows packet
+passes 271 cases with 65 platform skips; it reports one non-fatal asynchronous
+pipe warning. Five in-process rescue units, fatal-error lint and strict typing
+of all six changed Python files for both target platforms pass. Current-head
+review, required CI and hosted native qualification remain separate gates.
+
+### 2026-11-19 - Preserve overlapping SQLite locks on POSIX
+
+Review identified a platform interaction in the identity binding: closing an
+ordinary POSIX descriptor releases this process's record locks, including locks
+held by another SQLite connection. The common opener now uses named-file checks
+on POSIX and reserves the extra pinned handle for Windows. Checks still run
+before and after connection creation, under the transaction lock and before
+commit; no raw POSIX database descriptor is opened or closed.
+
+Three native POSIX controls keep another connection's writer transaction open
+through a successful read, rejected identity and real overlapping-write timeout.
+A separate process remains excluded until the original writer rolls back, then
+acquires its lock. Reintroducing only the raw-descriptor close makes all three
+test bodies fail because the competing writer is admitted. The first negative
+control setup was invalid and is not credited; the corrected controls reach
+and verify the actual lock assertions.
+
+The final focused Linux packet passes 47 cases, including all six prior
+file-replacement controls. The broader packet passed 336 cases with two platform
+skips before adding the timeout case. Windows passes 42 applicable focused cases;
+the new lock controls are POSIX-only. Five in-process rescue units and fatal-error
+lint pass. The preceding published head separately passed both hosted Windows
+requests and required CI; the new correction requires fresh publication gates.
+
+### 2026-11-19 - Complete the source barrier and canonical-reference preflight
+
+The next review reported no open findings but named two broader risks. Direct
+inspection and failing native controls confirmed both. The source fence now
+flushes its containing directory after commit, before destination activation.
+This persists journal deletion as well as database bytes. An injected barrier
+failure leaves both stores fenced, preserves their history and permits only an
+exact retry.
+
+Every effort-kind board source must now use an absolute local canonical
+reference. Relative references refuse before allocation or fencing; the rescue
+does not rewrite accepted history to compensate for a new home. The actual
+allocator consumer reads an independent canonical Goal after relocation.
+Canonical effort retention remains separate from later checkout cleanup.
+
+The corrected Linux selections pass 49 rescue/placement cases, 21 real
+allocator/CLI cases and seven in-process units. Windows passes 44 cases with five
+POSIX-only skips. Its long-history fixture still preserves all 103 accepted
+operations beyond the 100-entry presentation ceiling. Replacing an unrelated
+deep context lineage with repeated accepted wait records keeps that same
+completeness assertion within the original timeout; two earlier local runs
+timed out during old ledger verification and are not counted as passes.
+No deadline or production validation bound was increased.
+Whole-file strict checking passes all six changed Python files for both Linux
+and Windows targets in the existing Linux qualification environment. Local
+Windows checker preparation was unavailable; this is not a native Windows
+typing pass. Fatal-error lint passes.

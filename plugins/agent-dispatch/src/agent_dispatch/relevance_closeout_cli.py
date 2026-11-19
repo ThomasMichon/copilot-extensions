@@ -1,10 +1,12 @@
 """Let the original worker finalize before Dispatch acknowledges source closeout."""
 
 from __future__ import annotations
+from .review_closeout_submission import ABANDON, SUBMIT
 
 import argparse
 import os
 from pathlib import Path
+from typing import Any
 
 from .assignment_workspace import AssignmentWorkspace, same_assignment_worker
 from .client import DispatchClient
@@ -14,13 +16,13 @@ from .pool_worker_decline_cli import _finalize
 from .queue_records import TaskError
 
 
-def _matches(value: object, expected: dict) -> bool:
+def _matches(value: object, expected: dict[str, Any]) -> bool:
     return isinstance(value, dict) and all(
         type(value.get(key)) is type(item) and value[key] == item for key, item in expected.items()
     )
 
 
-def _captured(value: dict, task_id: str, worker_id: str, native: str) -> tuple[dict, dict]:
+def _captured(value: dict[str, Any], task_id: str, worker_id: str, native: str) -> tuple[dict[str, Any], dict[str, Any]]:
     generation, request_id = value.get("generation"), value.get("request_id")
     if (
         value.get("task_id") != task_id
@@ -69,7 +71,7 @@ def _captured(value: dict, task_id: str, worker_id: str, native: str) -> tuple[d
     }, binding
 
 
-def _acknowledged(value: dict, task_id: str, arguments: dict, binding: dict) -> bool:
+def _acknowledged(value: dict[str, Any], task_id: str, arguments: dict[str, Any], binding: dict[str, Any]) -> bool:
     receipt = value.get("acknowledgement")
     if receipt is None:
         return False
@@ -92,7 +94,7 @@ def _acknowledged(value: dict, task_id: str, arguments: dict, binding: dict) -> 
     return True
 
 
-def _allocation(prepared: dict, task_id: str, arguments: dict, binding: dict) -> str:
+def _allocation(prepared: dict[str, Any], task_id: str, arguments: dict[str, Any], binding: dict[str, Any]) -> str:
     receipt, relationship = prepared.get("receipt"), prepared.get("relationship")
     if not _matches(
         receipt,
@@ -114,9 +116,11 @@ def _allocation(prepared: dict, task_id: str, arguments: dict, binding: dict) ->
             409,
             "closeout original claim is not confirmed closed; custody retained; rerun to converge",
         )
+    if not isinstance(receipt, dict):
+        raise DispatchError(502, "closeout readiness is unavailable")
     observation = receipt.get("observation")
     workspace = binding["workspace"]
-    if not _matches(
+    if not isinstance(observation, dict) or not _matches(
         observation,
         {
             "ready": True,
@@ -148,7 +152,7 @@ def _allocation(prepared: dict, task_id: str, arguments: dict, binding: dict) ->
     return original_key
 
 
-def closeout(client: DispatchClient, task_id: str, worker_id: str) -> dict:
+def closeout(client: DispatchClient, task_id: str, worker_id: str) -> dict[str, Any]:
     native = os.environ.get("COPILOT_AGENT_SESSION_ID")
     if not isinstance(native, str) or not native.strip():
         raise DispatchError(
@@ -156,20 +160,29 @@ def closeout(client: DispatchClient, task_id: str, worker_id: str) -> dict:
         )
     current = client.relevance_closeout(task_id)
     arguments, binding = _captured(current, task_id, worker_id, native)
-    if not _acknowledged(current, task_id, arguments, binding):
-        prepared = client.prepare_relevance_closeout(task_id, arguments)
+    action = current.get("finish_action")
+    if _acknowledged(current, task_id, arguments, binding):
+        action = current["acknowledgement"].get("finish_action", ABANDON)
+    else:
+        if action not in (ABANDON, SUBMIT):
+            raise DispatchError(409, "receiver has not advertised a closeout finish action; custody retained")
+        finish_arguments = {**arguments, "finish_action": action}
+        prepared = client.prepare_relevance_closeout(task_id, finish_arguments)
         original_key = _allocation(prepared, task_id, arguments, binding)
+        fresh = client.relevance_closeout(task_id)
+        if fresh.get("finish_action") != action or _captured(fresh, task_id, worker_id, native) != (arguments, binding):
+            raise DispatchError(409, "closeout action or original binding changed before finalization")
         _finalize(
             {"task_id": task_id, "native_id": native, "reservation_key": original_key},
             binding["workspace"]["worktree"],
             expected_creation_nonce=binding["workspace"]["creation_nonce"],
         )
-        finished = client.finish_relevance_closeout(task_id, arguments)
+        finished = client.finish_relevance_closeout(task_id, finish_arguments)
         if not _matches(
             finished,
             {
                 "id": task_id,
-                "status": "abandoned",
+                "status": "submitted" if action == SUBMIT else "abandoned",
                 "generation": arguments["expected_generation"],
             },
         ):
@@ -178,7 +191,7 @@ def closeout(client: DispatchClient, task_id: str, worker_id: str) -> dict:
             )
     return {
         "id": task_id,
-        "status": "abandoned",
+        "status": "submitted" if action == SUBMIT else "abandoned",
         "generation": arguments["expected_generation"],
         "workspace_closeout": "finalized",
         "task_relationship": "closed",
@@ -193,4 +206,4 @@ def cmd_relevance_closeout(args: argparse.Namespace) -> int:
     if not machine or not worktree:
         raise DispatchError(409, "closeout requires the invoking worker's own machine/worktree")
     with core._client(args, allow_ssh_failover=False) as client:
-        return core._emit(closeout(client, args.task_id, f"{machine}/{worktree}"))
+        return int(core._emit(closeout(client, args.task_id, f"{machine}/{worktree}")))
