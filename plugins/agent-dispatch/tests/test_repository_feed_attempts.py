@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 import copy
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -14,6 +15,9 @@ from agent_dispatch.queue_feed_preparation import FeedWaiterAdmission
 from agent_dispatch.queue_records import TaskError
 from tests._helpers import RepoDefaultingQueue as TaskQueue
 from tests.test_repository_feed_preparation import prepare, setup
+from tests.test_repository_feed_waiter_storage import feed_intent
+from tests import test_pool_placement as placement
+from tests.test_pool_suspended_recovery import _cold, _disable_pools
 
 pytestmark = pytest.mark.contract("agent_dispatch.repository_feed.preparation")
 
@@ -196,3 +200,79 @@ def test_admitted_receipt_arms_without_another_request_or_wake(tmp_path: Path) -
     assert armed is not None and armed["state"] == "active"
     assert armed["feed_admission"] == waiter["feed_admission"]
     assert not queue.list_run_waiter_wakes(task_id)
+
+
+@pytest.mark.parametrize("kind", ["headless-steer", "pool-recovery", "pool-lane-wait"])
+@pytest.mark.parametrize("stage", ["attempt", "arm"])
+def test_native_resume_requests_fence_feed_even_without_an_ordinary_wake(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str, stage: str,
+) -> None:
+    monkeypatch.setattr("time.time", lambda: 100.0)
+    queue = TaskQueue(tmp_path / "tasks.db")
+    create: Callable[..., Any] = queue.create
+    task = create(
+        "review", repo="example", source="recipe", origin_ref="reviewer",
+        dedup_key="original-reviewer-association",
+    )
+    if kind == "headless-steer":
+        reservation, _ = queue.reserve_spawn(task.id)
+        queue.record_spawn(reservation.key, session_handle="local-body:session")
+        queue.claim_one("worker", task_id=task.id)
+        owner, session = "worker", "session"
+    else:
+        cast(Callable[..., Any], placement.publish)(
+            queue, cast(Callable[..., Any], placement.pool)(),
+        )
+        reservation, _ = cast(Callable[..., Any], placement.place)(queue, task)
+        cast(Callable[..., Any], placement.record_native)(queue, reservation)
+        queue.record_spawn(
+            reservation.key, session_handle="native", startup_complete=True, startup_revision=1,
+        )
+        owner, session = "host-a/worktree", "native"
+    claimed = queue.get(task.id)
+    assert claimed is not None
+    current = queue.start(
+        task.id, owner, owner_session_id=session, expected_generation=claimed.generation, now=101,
+    )
+    spec = feed_intent(queue)
+    spec["feed"].update(issued_at=100, deadline_at=400)
+    admission = FeedWaiterAdmission.observe(
+        current, lane="example", dedup_key="original-reviewer-association",
+    )
+    queue.prepare_repository_feed_waiter(
+        task.id, admission=admission, delegation=spec, worker_id=owner,
+        resume_worktree="host/wt", reason="wait", now=102,
+    )
+    waiter = queue.find_delegated_preparation(task.id, spec["preparation_id"])
+    assert waiter is not None
+    if stage == "arm":
+        queue.replay_waiter_progress(waiter, attempt=True)
+        queue.replay_waiter_progress(waiter, registration_id="receipt")
+    if kind == "headless-steer":
+        queue.submit_steer(task.id, fields={"decision": "continue"}, sender="operator",
+                           wake_requested=True, now=103)
+        assert not queue.list_wakes(task.id)
+    else:
+        if kind == "pool-lane-wait":
+            _cold(queue, reservation.key)
+            _disable_pools(queue)
+        queue.resume(task.id, owner, wake_requested=True, now=103)
+        if kind == "pool-lane-wait":
+            assert not queue.list_wakes(task.id)
+        else:
+            wake, = queue.list_wakes(task.id)
+            assert wake.pool_recovery_revision is not None
+    resumed = queue.get(task.id)
+    assert resumed is not None and resumed.resume_requested
+    assert resumed.steering_revision == admission.suspended_steering_revision
+    before = queue.find_delegated_preparation(task.id, spec["preparation_id"])
+    with pytest.raises(TaskError, match="native resume request"):
+        if stage == "attempt":
+            queue.replay_waiter_progress(waiter, attempt=True)
+        else:
+            queue.arm_run_waiter(
+                task.id, generation=waiter["generation"], kind="delegated",
+                delegation={**spec, "registration_id": "receipt"},
+            )
+    assert queue.find_delegated_preparation(task.id, spec["preparation_id"]) == before
+    assert not queue.list_run_waiter_wakes(task.id)

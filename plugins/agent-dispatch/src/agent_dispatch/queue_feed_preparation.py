@@ -89,6 +89,8 @@ def require_feed_preparation(
         raise TaskError("repository-feed task changed during preparation")
     if task.hold_reason is not None or task.awaiting_steer:
         raise TaskError("repository-feed preparation cannot override a hold or operator form")
+    if task.resume_requested:
+        raise TaskError("repository-feed preparation cannot override a native resume request")
     if task.status == Status.STARTED and conn.execute(
         "SELECT 1 FROM wake_outbox WHERE task_id=? AND id=? AND owner=?"
         " AND owner_session_id=? AND generation=? AND pool_recovery_revision IS NULL"

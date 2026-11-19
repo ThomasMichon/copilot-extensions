@@ -401,6 +401,7 @@ executing support before attempting this variant. Calling the existing
 `replay_waiter_progress(waiter, attempt=True)` on a feed row atomically checks
 the retained basis, current owner/session/generation/steering, finite recipe
 and live dedup association, holds/forms, execution and relationship admission,
+native resume requests (including headless steering or pool lane recovery),
 current ordinary wakes, waiter wakes/successors and original deadline. Only
 then does it record possible transmission. Repeating an attempted registration
 refuses: recover the original request through provider inspection, never
