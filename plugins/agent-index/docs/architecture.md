@@ -173,6 +173,31 @@ change-coverage qualification. It is not wired into acquisition or advertised
 as hint/page support. Its selection controls execute the SQL-compatible subset
 against synthetic SQLite rows, not a live Azure DevOps parser.
 
+`AzureDevOpsConnector.work_item_eligibility(id)` is a separate read-only
+membership operation, not a discovery capability. With no configured work-item
+queries it returns `None` without I/O. Otherwise it accepts one positive int32
+candidate and at most sixteen configured queries, requests fresh account and
+saved-definition bodies, qualifies every member against the flat literal
+grammar, and executes each singleton-restricted query. A union member cannot be
+silently skipped, including after another member matches. Saved definitions must
+match the requested ID, be flat and not be folders, deleted or invalid queries.
+Unsupported definitions, provider errors, bodyless responses, continuation and
+unexpected identities refuse the operation. Documented omitted/null empty
+work-item collections remain valid with an explicit flat result type.
+
+The maximum is 33 logical requests: one account, sixteen saved definitions and
+sixteen selections; the shared client's four retries bound this to 165 attempts
+under its default policy. Cancellation is checked between requests and after
+responses, not during the client's retry/backoff loop. Singleton predicates
+allow at most one matching identity without interpreting `$top` or short pages
+as completeness. The immutable result retains membership, endpoint/project/
+account scope and a binding of the configured specifications and actual saved
+definitions used. It changes no query specification, path inventory, journal or
+cursor. Ineligibility is **not** physical-deletion or complete-reconciliation
+authority. Synthetic transport controls qualify request construction, refusal,
+bindings and counts; live field/parser semantics and complete event/polling/
+repair coverage remain separate gates before adapter enablement.
+
 Azure DevOps retains operator-supplied WIQL and saved queries verbatim. Its
 work-item-only timestamp discovery first requests only `System.Id` and
 `System.ChangedDate` in batches of at most 200 query-selected identities, then
