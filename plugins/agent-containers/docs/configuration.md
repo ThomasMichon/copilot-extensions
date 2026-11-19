@@ -147,7 +147,12 @@ provisions one member named with the next free `<name_prefix>-<n>` index
 through the fleet's normal Docker, devcontainer or driver provisioning, then
 leases it. A fleet-scoped growth lock under the state directory spans the
 capacity check, provisioning and the lease, so concurrent borrows never exceed
-`max_size`; the lease lock itself is not held while a member builds. At the
+`max_size`; the lease lock itself is not held while a member builds. A
+provisioning marker (`fleet-growth.json` in the state directory) hides the
+member being built, including a devcontainer's temporary pre-rename name, from
+other borrows and refuses session admission to it until the grower leases it
+in the same lease-lock hold that clears the marker; a crashed grower's marker
+expires with its process or after the growth timeout. At the
 bound, or when provisioning fails, `borrow` returns the usual refusal with the
 reason appended and writes no lease. `borrow --container` never grows, and
 `borrow --no-grow` opts out per call. Grown members are ordinary warm members
