@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import sqlite3
 from dataclasses import replace
+from concurrent.futures import ThreadPoolExecutor
+from threading import Event
 from typing import Any
 
 import pytest
@@ -16,6 +18,10 @@ from test_live_inbox_runtime import (
 )
 
 
+def _wait_for_start(event: Event) -> None:
+    event.wait(5)
+
+
 @pytest.mark.parametrize("native", [False, True])
 def test_delivery_events_observe_committed_rows_without_duplicate_begin(
     serving: Serving, native: bool,
@@ -23,6 +29,7 @@ def test_delivery_events_observe_committed_rows_without_duplicate_begin(
     _, client, db, consumer = serving
     body = (native_enroll if native else enroll)(client, consumer)
     seen: list[dict[str, Any]] = []
+    completed = Event()
 
     def sink(event: dict[str, Any]) -> None:
         if event.get("name") != "inbox_delivery":
@@ -37,8 +44,10 @@ def test_delivery_events_observe_committed_rows_without_duplicate_begin(
         if field is not None:
             assert row[field] is not None
         seen.append(event)
+        if len(seen) == 4:
+            completed.set()
 
-    telemetry.set_telemetry_sink(sink)
+    writer = telemetry.set_buffered_telemetry_sink(sink)
     try:
         reply = client.post("/api/v1/live-sessions/native-a/messages", json={
             "sender": "peer", "body": "private-message-sentinel", "delivery": "queue",
@@ -51,6 +60,7 @@ def test_delivery_events_observe_committed_rows_without_duplicate_begin(
         for outcome in ("sdk_accepted", "consumed"):
             result = client.post(PREFIX + "/outcome", json=report(body, row, outcome))
             assert result.status_code == 200, result.text
+        assert completed.wait(5)
         assert [event["event"] for event in seen] == [
             "admitted", "handoff_started", "sdk_accepted", "consumed",
         ]
@@ -60,6 +70,7 @@ def test_delivery_events_observe_committed_rows_without_duplicate_begin(
         assert "private-message-sentinel" not in json.dumps(seen)
     finally:
         telemetry.clear_telemetry_sink()
+        assert writer.join(5)
 
 
 @pytest.mark.parametrize("native", [False, True])
@@ -82,13 +93,21 @@ def test_takeover_stages_keep_the_original_handoff_consumer(
     assert offered["handoff_id"] == original["handoff_id"]
     assert current_body["consumer"]["incarnation"] == successor.incarnation
     seen: list[dict[str, Any]] = []
-    telemetry.set_telemetry_sink(seen.append)
+    completed = Event()
+
+    def capture(event: dict[str, Any]) -> None:
+        seen.append(event)
+        if len(seen) == 3:
+            completed.set()
+
+    writer = telemetry.set_buffered_telemetry_sink(capture)
     try:
         result = client.post(PREFIX + "/begin", json=attempt(current_body, offered))
         assert result.status_code == 200 and result.json()["begin"]
         for outcome in ("sdk_accepted", "consumed"):
             result = client.post(PREFIX + "/outcome", json=report(original_body, original, outcome))
             assert result.status_code == 200, result.text
+        assert completed.wait(5)
         stages = [event for event in seen if event.get("name") == "inbox_delivery"]
         assert [event["event"] for event in stages] == ["handoff_started", "sdk_accepted", "consumed"]
         receipt = db.live_message_handoff_receipt(consumer.session_id, original["id"])
@@ -98,6 +117,7 @@ def test_takeover_stages_keep_the_original_handoff_consumer(
         assert all(event["handoff_id"] == original["handoff_id"] for event in stages)
     finally:
         telemetry.clear_telemetry_sink()
+        assert writer.join(5)
 
 
 def test_represented_diagnostics_are_redacted_and_never_status_or_receipt_evidence(
@@ -105,7 +125,13 @@ def test_represented_diagnostics_are_redacted_and_never_status_or_receipt_eviden
 ) -> None:
     _, _, db, _ = serving
     seen: list[dict[str, Any]] = []
-    telemetry.set_telemetry_sink(seen.append)
+    arrived, start = Event(), Event()
+
+    def capture(event: dict[str, Any]) -> None:
+        seen.append(event)
+        arrived.set()
+
+    writer = telemetry.set_buffered_telemetry_sink(capture, on_start=lambda: _wait_for_start(start))
     monkeypatch.setattr(status_producers, "normalized", lambda *a, **k: pytest.fail("status mutation"))
     try:
         data = {
@@ -118,6 +144,9 @@ def test_represented_diagnostics_are_redacted_and_never_status_or_receipt_eviden
         status_producers.represented(db, "native-a", [{
             "type": "bridge.delivery_observation", "data": data,
         }])
+        assert writer.stats()["accepted"] == 1, json.dumps(writer.stats())
+        start.set()
+        assert arrived.wait(5), writer.stats()
         assert seen[0]["failures"] == {"header_mismatch": 2, "not_root_input": 1}
         assert "private-" not in json.dumps(seen)
         assert db.execute_read("SELECT id FROM live_messages") == []
@@ -133,16 +162,20 @@ def test_represented_diagnostics_are_redacted_and_never_status_or_receipt_eviden
         status_producers.represented(db, "native-a", [{
             "type": "bridge.delivery_observation", "agentId": "child", "data": data,
         }])
-        assert len(seen) == 1
+        assert writer.stats()["accepted"] == 1 and len(seen) == 1
+        arrived.clear()
         delivery_telemetry.represented("native-a", {
             "stage": "hook_notice", "source": "pending-input-set-v1", "session_id": "native-a",
             "pending_count": 3, "incomplete": False, "delivery_path": "retained",
             "body": "private-body-sentinel",
         })
+        assert arrived.wait(5)
         assert seen[-1]["pending_count"] == 3 and seen[-1]["source"] == "pending-input-set-v1"
         assert seen[-1]["delivery_path"] == "retained"
     finally:
+        start.set()
         telemetry.clear_telemetry_sink()
+        assert writer.join(5)
 
 
 def test_disabled_and_failing_telemetry_do_not_change_inbox_behavior(
@@ -164,8 +197,24 @@ def test_disabled_and_failing_telemetry_do_not_change_inbox_behavior(
 
     telemetry.set_telemetry_sink(broken_sink)
     try:
+        delivery_telemetry.committed(db, "native-a", 1, "handoff_started")
+    finally:
+        telemetry.clear_telemetry_sink()
+    entered, start = Event(), Event()
+
+    def buffered_failure(event: dict[str, Any]) -> None:
+        entered.set()
+        raise RuntimeError("sink unavailable")
+
+    writer = telemetry.set_buffered_telemetry_sink(
+        buffered_failure, on_start=lambda: _wait_for_start(start),
+    )
+    try:
         delivery_telemetry.publish("unknown", "native-a", source="backend-receipt",
                                    fields={"message_id": 1})
+        assert writer.stats()["accepted"] == 1, json.dumps(writer.stats())
+        start.set()
+        assert entered.wait(5), writer.stats()
         def unavailable(*args: object) -> None:
             raise RuntimeError("receipt unavailable")
 
@@ -173,4 +222,57 @@ def test_disabled_and_failing_telemetry_do_not_change_inbox_behavior(
         delivery_telemetry.committed(db, "native-a", 1, "handoff_started")
         assert db.execute_read("SELECT id FROM live_messages") == []
     finally:
+        start.set()
         telemetry.clear_telemetry_sink()
+        assert writer.join(5)
+    assert writer.stats()["sink_failed"] == 1
+
+
+@pytest.mark.parametrize("mode", ["synchronous", "full"])
+def test_slow_or_full_sink_cannot_delay_a_committed_begin(serving: Serving, mode: str) -> None:
+    _, client, db, consumer = serving
+    body = enroll(client, consumer)
+    reply = client.post("/api/v1/live-sessions/native-a/messages", json={
+        "sender": "peer", "body": "original-input", "delivery": "queue",
+        "idempotency_key": "slow-sink-operation",
+    })
+    assert reply.status_code == 200, reply.text
+    offered = poll(client, body)
+    entered, release, start = Event(), Event(), Event()
+    writer = None
+
+    def blocked_sink(event: dict[str, Any]) -> None:
+        entered.set()
+        release.wait(5)
+
+    try:
+        if mode == "synchronous":
+            telemetry.set_telemetry_sink(blocked_sink)
+        else:
+            writer = telemetry.set_buffered_telemetry_sink(
+                blocked_sink, capacity=1, batch_size=1, on_start=lambda: _wait_for_start(start),
+            )
+            telemetry.emit({"kind": "event", "name": "occupy"})
+            assert writer.stats()["accepted"] == 1, json.dumps(writer.stats())
+            start.set()
+            assert entered.wait(5), writer.stats()
+            telemetry.emit({"kind": "event", "name": "queued"})
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            try:
+                pending = pool.submit(client.post, PREFIX + "/begin", json=attempt(body, offered))
+                result = pending.result(timeout=3)
+                assert result.status_code == 200 and result.json()["begin"]
+                receipt = db.live_message_handoff_receipt(consumer.session_id, offered["id"])
+                assert receipt is not None and receipt["stage"] == "sending"
+                if writer is None:
+                    assert not entered.is_set()
+                else:
+                    assert writer.stats()["full"] >= 1
+            finally:
+                release.set()
+    finally:
+        start.set()
+        release.set()
+        telemetry.clear_telemetry_sink()
+        if writer is not None:
+            assert writer.join(5)

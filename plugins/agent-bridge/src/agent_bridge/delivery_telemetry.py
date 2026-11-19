@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from . import telemetry
 
 if TYPE_CHECKING:
+    from process_telemetry.buffer import BufferedSink
     from .db import Database
 
 _IDENTITY = re.compile(r"[A-Za-z0-9._:-]{1,128}")
@@ -31,9 +32,27 @@ def _count(value: object) -> bool:
     return type(value) is int and 0 <= value <= (1 << 53) - 1
 
 
+def _buffer() -> BufferedSink | None:
+    slot = telemetry._slot
+    writer = getattr(slot, "_owned_buffer", None)
+    if writer is None:
+        return None
+    try:
+        from process_telemetry.buffer import BufferedSink
+    except ImportError:
+        return None
+    if (
+        isinstance(writer, BufferedSink) and writer is slot.sink
+        and getattr(writer, "closed", True) is False
+    ):
+        return writer
+    return None
+
+
 def publish(stage: str, session_id: str, *, source: str, fields: dict[str, object]) -> None:
-    """Emit only known metadata through the existing optional fail-open sink."""
-    if not telemetry.has_sink() or stage not in _STAGES or source not in _SOURCES:
+    """Offer known metadata only to the existing owner-started bounded writer."""
+    writer = _buffer()
+    if writer is None or stage not in _STAGES or source not in _SOURCES:
         return
     sid = _identity(session_id)
     if sid is None:
@@ -59,12 +78,12 @@ def publish(stage: str, session_id: str, *, source: str, fields: dict[str, objec
         record["failures"] = {
             key: value for key, value in failures.items() if key in _REASONS and _count(value)
         }
-    telemetry.emit(record)
+    writer(record)
 
 
 def committed(db: Database, session_id: str, message_id: int, stage: str) -> None:
     """Read original committed identities without selecting message content."""
-    if not telemetry.has_sink():
+    if _buffer() is None:
         return
     try:
         receipt = (

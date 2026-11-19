@@ -118,8 +118,13 @@ for `match_failed` reason counts and `hook_notice` observations. The latter name
 this is the hook's derived set, not an authoritative native SDK queue count.
 Reason codes and scalar fields are allow-listed. Prompt, response, event body,
 tool content, error text and filesystem paths are excluded. Diagnostic ingress
-never changes receipts or status projections. Sink absence is a no-op, failures
-remain best-effort, and no new endpoint, poller, service or replay path is added.
+never changes receipts or status projections. These events use only an already
+owner-started bounded telemetry buffer, including the configured retained spool.
+Synchronous legacy/custom sinks are skipped, not wrapped or called on the
+handoff path. Missing, closed, full or contended buffers drop observations;
+disabled or ineligible sinks also skip receipt lookup. No new writer starts
+from emission. Failures remain best-effort, and no new endpoint, poller, service
+or replay path is added.
 
 ## Prerequisites and unsupported cases
 
