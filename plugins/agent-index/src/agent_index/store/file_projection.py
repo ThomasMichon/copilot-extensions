@@ -16,7 +16,7 @@ from .scalar_index import (
     inspect_index,
     require_budget,
 )
-from .source_layout import SourceLayoutError
+from .source_layout import PointScope, SourceLayoutError
 
 if TYPE_CHECKING:
     from agent_index.index_config import IndexConfig
@@ -117,6 +117,7 @@ def require_file_projection_capacity(
 def capture_file_projection(
     config: IndexConfig, store: MultiModelStore, source: str, file_path: str, *,
     max_rows: int, retained_chunk_ids: tuple[str, ...] = (),
+    point_scope: PointScope | None = None,
 ) -> RawFileProjection:
     """Capture a capped file candidate set and its raw registered-model points.
 
@@ -144,7 +145,9 @@ def capture_file_projection(
             or set(store.model_ids) != set(config.model_profiles)
             or not config.model_profiles):
         raise SourceLayoutError("File projection requires the configured participating store")
-    with domain.operation(content.db):
+    with domain.operation(content.db, point_scope=point_scope):
+        if point_scope is not None and source != point_scope[1]:
+            raise SourceLayoutError("File projection is outside its selected component family")
         models = []
         tables = {config.content_table}
         for name, profile in sorted(config.model_profiles.items()):
@@ -180,7 +183,7 @@ def capture_file_projection(
         ids = tuple(sorted(set(retained_chunk_ids) | selected.keys()))
         if len(ids) > max_rows:
             raise ScalarIndexPreparationRequired("File projection point union budget exceeded")
-        canonical = indexed_chunk_rows(content, list(ids))
+        canonical = indexed_chunk_rows(content, list(ids), point_scope=point_scope)
         for row in canonical:
             if selected.get(row["chunk_id"]) != row:
                 raise SourceLayoutError("File projection ID belongs to different canonical input")
@@ -188,7 +191,7 @@ def capture_file_projection(
             raise SourceLayoutError("File projection canonical points are incomplete")
         projections = []
         for name, profile, owner in models:
-            rows = indexed_chunk_rows(owner, list(ids))
+            rows = indexed_chunk_rows(owner, list(ids), point_scope=point_scope)
             for row in rows:
                 cid = row["chunk_id"]
                 vector = row["vector"]

@@ -4,8 +4,11 @@ Back: [acquisition proposal](azure-devops-acquisition.md#composition-decision-an
 and [canonical effort](README.md), Phase 3. Owner:
 [#13386](https://github.com/ThomasMichon/copilot-extensions/issues/13386).
 This is an **agent-recommended contract**. Shared typed-target intake now retains
-parked v2 claims with v1-only queue selection; component execution and read
-isolation remain unsupported. Explicit
+parked v2 claims with v1-only queue selection; component execution and full
+read-surface admission remain unsupported. An explicit
+[named-component read](../../../plugins/agent-index/docs/component-ledger.md#selected-named-component-reads)
+qualifies one already-applied typed point in a selected domain; it does not
+enable other read surfaces. Explicit
 [native application and sealed-suffix reconciliation](../../../plugins/agent-index/docs/component-ledger.md#explicit-native-application)
 do not enable either boundary. The shared
 [component recovery carrier](../../../plugins/agent-index/docs/architecture.md#component-recovery-carrier-application-unsupported)
@@ -68,8 +71,9 @@ The selected **agent-recommended design** is one cold, separately owned
 source-aware data domain for one exact point scope. It extends the existing
 `store.source_layout.SourceDomain` and configured `IndexConfig.data_dir`, not
 another indexing engine, namespace registry or recovery owner. This section
-specifies the next implementation; it does not claim that a component reader,
-configuration selector or new layout protocol is implemented.
+defines the complete admission target. Exact protocol-2 domain binding,
+default refusal and an explicitly selected named-component read are implemented;
+point application and every-route compatibility qualification remain open.
 
 Do not put the combined and component representations in the same domain and
 rely on a source suffix, caller filter or content-table name to separate them.
@@ -157,8 +161,8 @@ is not support; do not probe and fall back to a legacy read of the new domain.
 Keep receipt protocol 1 and all legacy forms supported with unchanged meaning;
 no retirement or automatic conversion is proposed.
 
-Implement and qualify the domain binding/default-refusal seam first, then the
-explicit component result and its existing-owner reads. Before admitting any
+The domain binding/default-refusal seam and explicit named-component result
+reuse existing native owners. Before admitting any
 v2 executor or producer, exercise the inventory above with synthetic combined
 and component domains: unchanged legacy results, both cross-domain refusals,
 unfiltered and lexical reads, wrong reference IDs, direct hydration, bucket-

@@ -12,6 +12,7 @@ from .scalar_index import (
     prepare_index,
     require_budget,
 )
+from .source_layout import PointScope
 
 if TYPE_CHECKING:
     from .content_store import ContentStore
@@ -36,14 +37,13 @@ def prepare_chunk_id_index(
 
 def indexed_chunk_rows(
     owner: ContentStore | VectorTable, chunk_ids: list[str], *, columns: list[str] | None = None,
+    point_scope: PointScope | None = None,
 ) -> list[dict[str, Any]]:
     """Strict point reads; never build an index or scan an unprepared tail.
 
     Native manifest/index metadata work is not zero or independent of fragment
     count. The bound covers canonical data rows, input batches and index segments.
     """
-    if not chunk_ids:
-        return []
     if any(not isinstance(cid, str) or not cid for cid in chunk_ids):
         raise ValueError("Chunk IDs must be nonempty strings")
     domain = owner._source_domain
@@ -51,7 +51,9 @@ def indexed_chunk_rows(
         raise ChunkIdIndexPreparationRequired("Bounded reads require a participating source store")
     if columns is not None and "chunk_id" not in columns:
         raise ValueError("Chunk-ID reads must select chunk_id")
-    with domain.read(owner._db):
+    with domain.read(owner._db, point_scope=point_scope):
+        if not chunk_ids:
+            return []
         table = owner._get_or_create_table()
         state, _ = inspect_index(table, column="chunk_id")
         if not state.prepared:
