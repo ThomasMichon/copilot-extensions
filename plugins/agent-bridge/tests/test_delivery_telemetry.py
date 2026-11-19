@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from dataclasses import replace
 from typing import Any
 
 import pytest
@@ -61,6 +62,44 @@ def test_delivery_events_observe_committed_rows_without_duplicate_begin(
         telemetry.clear_telemetry_sink()
 
 
+@pytest.mark.parametrize("native", [False, True])
+def test_takeover_stages_keep_the_original_handoff_consumer(
+    serving: Serving, native: bool,
+) -> None:
+    _, client, db, consumer = serving
+    consumer = replace(consumer, message_base=1)
+    enroll_receiver = native_enroll if native else enroll
+    original_body = enroll_receiver(client, consumer)
+    reply = client.post("/api/v1/live-sessions/native-a/messages", json={
+        "sender": "peer", "body": "original-input", "delivery": "queue",
+        "idempotency_key": "takeover-operation",
+    })
+    assert reply.status_code == 200, reply.text
+    original = poll(client, original_body)
+    successor = replace(consumer, incarnation="successor")
+    current_body = enroll_receiver(client, successor)
+    offered = poll(client, current_body)
+    assert offered["handoff_id"] == original["handoff_id"]
+    assert current_body["consumer"]["incarnation"] == successor.incarnation
+    seen: list[dict[str, Any]] = []
+    telemetry.set_telemetry_sink(seen.append)
+    try:
+        result = client.post(PREFIX + "/begin", json=attempt(current_body, offered))
+        assert result.status_code == 200 and result.json()["begin"]
+        for outcome in ("sdk_accepted", "consumed"):
+            result = client.post(PREFIX + "/outcome", json=report(original_body, original, outcome))
+            assert result.status_code == 200, result.text
+        stages = [event for event in seen if event.get("name") == "inbox_delivery"]
+        assert [event["event"] for event in stages] == ["handoff_started", "sdk_accepted", "consumed"]
+        receipt = db.live_message_handoff_receipt(consumer.session_id, original["id"])
+        assert receipt is not None
+        assert receipt["consumer"]["incarnation"] == consumer.incarnation != successor.incarnation
+        assert all(event["consumer_incarnation"] == consumer.incarnation for event in stages)
+        assert all(event["handoff_id"] == original["handoff_id"] for event in stages)
+    finally:
+        telemetry.clear_telemetry_sink()
+
+
 def test_represented_diagnostics_are_redacted_and_never_status_or_receipt_evidence(
     serving: Serving, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -114,7 +153,11 @@ def test_disabled_and_failing_telemetry_do_not_change_inbox_behavior(
     monkeypatch.setattr(db, "live_message_receipt", lambda *a:
         pytest.fail("disabled diagnostics read receipts"),
     )
-    delivery_telemetry.admitted(db, "native-a", 1)
+    monkeypatch.setattr(db, "live_message_handoff_receipt", lambda *a:
+        pytest.fail("disabled diagnostics read handoffs"),
+    )
+    delivery_telemetry.committed(db, "native-a", 1, "admitted")
+    delivery_telemetry.committed(db, "native-a", 1, "handoff_started")
 
     def broken_sink(event: dict[str, Any]) -> None:
         raise RuntimeError("sink unavailable")
@@ -123,6 +166,11 @@ def test_disabled_and_failing_telemetry_do_not_change_inbox_behavior(
     try:
         delivery_telemetry.publish("unknown", "native-a", source="backend-receipt",
                                    fields={"message_id": 1})
+        def unavailable(*args: object) -> None:
+            raise RuntimeError("receipt unavailable")
+
+        monkeypatch.setattr(db, "live_message_handoff_receipt", unavailable)
+        delivery_telemetry.committed(db, "native-a", 1, "handoff_started")
         assert db.execute_read("SELECT id FROM live_messages") == []
     finally:
         telemetry.clear_telemetry_sink()

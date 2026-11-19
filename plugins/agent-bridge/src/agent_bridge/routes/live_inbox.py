@@ -188,7 +188,7 @@ def enqueue_message(
         )
     message_id, reason = result
     if message_id is not None and reason is None:
-        delivery_telemetry.admitted(db, session_id, message_id)
+        delivery_telemetry.committed(db, session_id, message_id, "admitted")
     return result
 
 
@@ -281,9 +281,7 @@ def begin(session_id: str, body: InboxHandoffRequest, request: Request) -> Inbox
                 native_only=body.receiving_api is None,
             )
         if granted:
-            delivery_telemetry.publish("handoff_started", session_id, source="backend-receipt",
-                                      fields={"message_id": body.message_id, "handoff_id": body.handoff_id,
-                                              "consumer_incarnation": body.consumer.incarnation})
+            delivery_telemetry.committed(db, session_id, body.message_id, "handoff_started")
         return InboxBeginResult(begin=granted)
     db, governance, runtime = _current_owners(request)
     with _refusals():
@@ -292,9 +290,7 @@ def begin(session_id: str, body: InboxHandoffRequest, request: Request) -> Inbox
             body.message_id, body.handoff_id, now=time.time(),
         )
     if granted:
-        delivery_telemetry.publish("handoff_started", session_id, source="backend-receipt",
-                                  fields={"message_id": body.message_id, "handoff_id": body.handoff_id,
-                                          "consumer_incarnation": body.consumer.incarnation})
+        delivery_telemetry.committed(db, session_id, body.message_id, "handoff_started")
     return InboxBeginResult(begin=granted)
 
 
@@ -343,7 +339,5 @@ def outcome(
             outcome=body.outcome, now=time.time(),
             compatible_consumer=body.receiving_api == "native-sdk-v1",
         )
-    delivery_telemetry.publish(stage, session_id, source="backend-receipt",
-                              fields={"message_id": body.message_id, "handoff_id": body.handoff_id,
-                                      "consumer_incarnation": body.consumer.incarnation})
+    delivery_telemetry.committed(db, session_id, body.message_id, stage)
     return InboxOutcomeResult.model_validate({"stage": stage})

@@ -108,6 +108,9 @@ commits. A fresh admission has no invented consumer or handoff identity.
 Available original message, handoff, native-session and consumer-incarnation
 identities correlate later stages; `observed_at` is the telemetry observation
 time, not a new native-event timestamp or delivery receipt.
+Receipt stages read their original consumer identity from the retained handoff,
+including an offer adopted by a successor. Hook metadata instead names its
+currently observing consumer when that identity is available.
 
 The extension uses its existing bounded represented-event buffer and flusher
 for `match_failed` reason counts and `hook_notice` observations. The latter names

@@ -62,15 +62,25 @@ def publish(stage: str, session_id: str, *, source: str, fields: dict[str, objec
     telemetry.emit(record)
 
 
-def admitted(db: Database, session_id: str, message_id: int) -> None:
-    """Read the actual committed target without selecting message content."""
+def committed(db: Database, session_id: str, message_id: int, stage: str) -> None:
+    """Read original committed identities without selecting message content."""
     if not telemetry.has_sink():
         return
     try:
-        receipt = db.live_message_receipt(session_id, message_id)
+        receipt = (
+            db.live_message_receipt(session_id, message_id) if stage == "admitted"
+            else db.live_message_handoff_receipt(session_id, message_id)
+        )
         if receipt is not None:
-            publish("admitted", receipt["session_id"], source="backend-admission",
-                    fields={"message_id": message_id})
+            fields: dict[str, object] = {
+                "message_id": receipt["message_id"], "handoff_id": receipt.get("handoff_id"),
+            }
+            consumer = receipt.get("consumer")
+            if isinstance(consumer, dict):
+                fields["consumer_incarnation"] = consumer.get("incarnation")
+            publish(stage, receipt["session_id"],
+                    source="backend-admission" if stage == "admitted" else "backend-receipt",
+                    fields=fields)
     except Exception:
         pass
 
