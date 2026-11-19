@@ -63,10 +63,14 @@ waits for the write lock. The writer's existing version check runs after that
 lock; no new marker file is assumed to constrain old code.
 
 Source fencing, initial reservation and destination activation bind their
-expected database identity in the common opener. It holds an operating-system
-file descriptor and checks the named and opened file identities before SQLite
-can run a recovery-capable statement, then checks again under the transaction
-lock. A replaced file refuses without recovering its unrelated hot journal.
+expected database identity in the common opener. It checks the named file
+before and after connection creation, before SQLite can run a recovery-capable
+statement, then checks again under the transaction lock and before commit.
+Windows also retains and checks a separate file handle. POSIX does not open a
+separate descriptor: closing one would release other SQLite connections'
+process-scoped record locks. A replaced file refuses without recovering its
+unrelated hot journal. These checks detect ordinary replacement races, not
+arbitrary hostile filesystem changes between every check and use.
 
 Destination activation copies the complete original tables in one transaction
 and verifies their exact content hashes. Only then does the destination become

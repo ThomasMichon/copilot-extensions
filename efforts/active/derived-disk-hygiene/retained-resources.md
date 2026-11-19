@@ -351,3 +351,27 @@ passes 271 cases with 65 platform skips; it reports one non-fatal asynchronous
 pipe warning. Five in-process rescue units, fatal-error lint and strict typing
 of all six changed Python files for both target platforms pass. Current-head
 review, required CI and hosted native qualification remain separate gates.
+
+### 2026-11-19 - Preserve overlapping SQLite locks on POSIX
+
+Review identified a platform interaction in the identity binding: closing an
+ordinary POSIX descriptor releases this process's record locks, including locks
+held by another SQLite connection. The common opener now uses named-file checks
+on POSIX and reserves the extra pinned handle for Windows. Checks still run
+before and after connection creation, under the transaction lock and before
+commit; no raw POSIX database descriptor is opened or closed.
+
+Three native POSIX controls keep another connection's writer transaction open
+through a successful read, rejected identity and real overlapping-write timeout.
+A separate process remains excluded until the original writer rolls back, then
+acquires its lock. Reintroducing only the raw-descriptor close makes all three
+test bodies fail because the competing writer is admitted. The first negative
+control setup was invalid and is not credited; the corrected controls reach
+and verify the actual lock assertions.
+
+The final focused Linux packet passes 47 cases, including all six prior
+file-replacement controls. The broader packet passed 336 cases with two platform
+skips before adding the timeout case. Windows passes 42 applicable focused cases;
+the new lock controls are POSIX-only. Five in-process rescue units and fatal-error
+lint pass. The preceding published head separately passed both hosted Windows
+requests and required CI; the new correction requires fresh publication gates.

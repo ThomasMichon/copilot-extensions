@@ -213,6 +213,68 @@ os._exit(0)
     assert (retained if moved else selected).read_bytes() == original
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX process-scoped record locks")
+@pytest.mark.parametrize("mode", ["read", "rejected", "timeout"])
+def test_identity_check_preserves_other_connection_writer_lock(
+    packet: dict[str, Any], monkeypatch: pytest.MonkeyPatch, mode: str,
+) -> None:
+    source = packet["source"]
+    database = source / STORE.DATABASE
+    identity = database.stat()
+    expected = (identity.st_dev, identity.st_ino + int(mode == "rejected"))
+    script = r'''
+import sqlite3,sys
+db=sqlite3.connect(sys.argv[1],isolation_level=None,timeout=0)
+try:
+    db.execute("BEGIN IMMEDIATE")
+except sqlite3.OperationalError as exc:
+    if "locked" not in str(exc):
+        raise
+    print("locked")
+else:
+    db.execute("ROLLBACK")
+    print("acquired")
+finally:
+    db.close()
+'''
+
+    def competing_writer() -> str:
+        result = subprocess.run(
+            [sys.executable, "-B", "-c", script, str(database)],
+            capture_output=True, text=True, timeout=10,
+        )
+        assert result.returncode == 0, result.stderr
+        return result.stdout.strip()
+
+    with closing(sqlite3.connect(database, isolation_level=None)) as writer:
+        writer.execute("BEGIN IMMEDIATE")
+        try:
+            if mode == "rejected":
+                with pytest.raises(STORE.AgendaError, match="identity changed"):
+                    with STORE.transaction(source, readonly=True, expected_file_id=expected):
+                        pytest.fail("mismatched file identity was admitted")
+            elif mode == "timeout":
+                native = sqlite3.connect
+
+                def short_timeout(*args: Any, **kwargs: Any) -> sqlite3.Connection:
+                    kwargs["timeout"] = 0.05
+                    connection: sqlite3.Connection = native(*args, **kwargs)
+                    return connection
+
+                with monkeypatch.context() as patch:
+                    patch.setattr(sqlite3, "connect", short_timeout)
+                    with pytest.raises(STORE.AgendaError, match="database is locked"):
+                        with STORE.transaction(source, write=True, expected_file_id=expected):
+                            pytest.fail("overlapping writer was admitted")
+            else:
+                with STORE.transaction(source, readonly=True, expected_file_id=expected) as reader:
+                    assert reader.execute("SELECT revision FROM state").fetchone()[0] == 3
+            assert writer.in_transaction and competing_writer() == "locked"
+        finally:
+            writer.execute("ROLLBACK")
+        assert competing_writer() == "acquired"
+
+
 def test_export_longer_than_a_history_page_moves_every_accepted_operation(
     packet: dict[str, Any],
 ) -> None:

@@ -173,23 +173,30 @@ def _bound_database(
     if expected is None:
         yield lambda: None
         return
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
-    fd = os.open(path, flags)
+    # POSIX close() on any descriptor releases this process's SQLite record locks.
+    # Only Windows can pin the file with a separate handle without that side effect.
+    fd = os.open(path, os.O_RDONLY) if os.name == "nt" else None
     try:
         def verify() -> None:
-            opened = os.fstat(fd)
             named = safe_path(path).stat()
             if (
-                not stat.S_ISREG(opened.st_mode) or opened.st_nlink != 1
-                or (opened.st_dev, opened.st_ino) != expected
+                not stat.S_ISREG(named.st_mode) or named.st_nlink != 1
                 or (named.st_dev, named.st_ino) != expected
             ):
                 raise AgendaError("database identity changed before SQLite access")
+            if fd is not None:
+                opened = os.fstat(fd)
+                if (
+                    not stat.S_ISREG(opened.st_mode) or opened.st_nlink != 1
+                    or (opened.st_dev, opened.st_ino) != expected
+                ):
+                    raise AgendaError("database identity changed before SQLite access")
 
         verify()
         yield verify
     finally:
-        os.close(fd)
+        if fd is not None:
+            os.close(fd)
 
 
 @contextmanager
