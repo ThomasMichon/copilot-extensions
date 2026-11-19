@@ -247,12 +247,9 @@ class _EventsMixin:
         ))
 
     def get_events(
-        self, session_id: str, after: int = 0, *, session_flush: bool = False,
+        self, session_id: str, after: int = 0
     ) -> list[dict[str, Any]]:
-        if session_flush:
-            self.flush(session_id=session_id)
-        else:
-            self.flush()
+        self.flush()
         rows = self.execute_read(
             "SELECT * FROM events WHERE session_id=? AND event_id>? ORDER BY event_id",
             (session_id, after),

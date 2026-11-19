@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -51,6 +52,14 @@ def stored_target(row: dict[str, Any]) -> SpawnTarget:
     if row.get("target_json"):
         return SpawnTarget.from_json(row["target_json"])
     return SpawnTarget(type=row.get("target_type", "local"), cwd=row.get("target_dir", "."))
+
+
+def _read_session_events(db: Database, sid: str) -> list[SseEvent]:
+    db.flush(session_id=sid)
+    rows = db.execute_read(
+        "SELECT event_id, event_type, data_json, timestamp FROM events WHERE session_id=? ORDER BY event_id", (sid,),
+    )
+    return [SseEvent(row[0], row[1], json.loads(row[2]), row[3]) for row in rows]
 
 
 @dataclass(frozen=True)
@@ -121,8 +130,7 @@ class InheritedRefresh:
         from .session_manager import _parse_progress_markers
 
         sid = row["id"]
-        events = [SseEvent(e["event_id"], e["event_type"], e["data"], e["timestamp"])
-                  for e in db.get_events(sid, after=0, session_flush=True)]
+        events = _read_session_events(db, sid)
         head = events[-1].id if events else 0
         if any(event.id != expected for expected, event in enumerate(events, 1)):
             return None

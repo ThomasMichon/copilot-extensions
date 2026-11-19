@@ -8,13 +8,14 @@ import threading
 from collections.abc import AsyncGenerator
 from contextlib import aclosing, closing
 from pathlib import Path
-from typing import Any, cast
+from typing import cast
 from unittest.mock import AsyncMock, Mock
 
 import pytest
 
 from agent_bridge.db import Database
-from agent_bridge.events import EventLog
+from agent_bridge import passive_refresh
+from agent_bridge.events import EventLog, SseEvent
 from agent_bridge.passive_refresh import InheritedRefresh, RefreshTarget
 from agent_bridge.routes.session_observations import observations
 from agent_bridge.routes.sessions import _sse_event_stream
@@ -37,10 +38,10 @@ async def test_existing_reader_retries_on_changed_history_or_session(
     row = tmp_db.get_session(sid)
     assert row is not None
     before = reader.snapshot_history()
-    get_events = tmp_db.get_events
+    get_events = passive_refresh._read_session_events
 
-    def finish_write(key: str, *, after: int = 0, session_flush: bool = False) -> list[dict[str, Any]]:
-        rows = get_events(key, after=after, session_flush=session_flush)
+    def finish_write(db: Database, key: str) -> list[SseEvent]:
+        rows = get_events(db, key)
         if change == "append":
             writer.append("agent_message", {"text": "PROGRESS: build=done"}, timestamp=3.0)
         elif change == "rebuild":
@@ -50,7 +51,7 @@ async def test_existing_reader_retries_on_changed_history_or_session(
         return rows
 
     with monkeypatch.context() as racing:
-        racing.setattr(tmp_db, "get_events", finish_write)
+        racing.setattr(passive_refresh, "_read_session_events", finish_write)
         assert InheritedRefresh.read(tmp_db, row, None) is None
     assert reader.snapshot_history() == before
 
