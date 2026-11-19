@@ -10,6 +10,7 @@ from typing import Any
 import numpy as np
 import pytest
 
+from agent_index.chunking.base import Chunk
 from agent_index.index_config import IndexConfig
 from agent_index.indexing.point_hints import PointBinding, PointChangeHints, WorkItemRevisionTarget
 from agent_index.store.cluster_store import ClusterStore
@@ -114,6 +115,26 @@ def test_relative_cluster_connection_cannot_retarget_to_marked_destination(
     assert store.replace_all([]) == 0
     assert store.stats()["clusters"] == 0
     assert snapshot(target) == before
+
+
+def test_relative_fts_maintenance_stays_on_original_content_connection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("AGENT_INDEX_STORE_LAYOUT", raising=False)
+    original, destination = tmp_path / "original", tmp_path / "destination"
+    original.mkdir()
+    destination.mkdir()
+    monkeypatch.chdir(original)
+    content = ContentStore(Path("lance"))
+    item = Chunk("searchable original fixture", "original.md", "text", "markdown", 1, 1, "git:sample")
+    content.upsert([item])
+    monkeypatch.setenv("AGENT_INDEX_STORE_LAYOUT", LAYOUT)
+    initialize_source_layout(destination / "lance", point_scope=claim().scope)
+    before = snapshot(destination)
+    monkeypatch.chdir(destination)
+    assert content.ensure_fts_index(max_retries=1)
+    assert [chunk_id for chunk_id, _ in content.fts_search("searchable")] == [item.chunk_id]
+    assert snapshot(destination) == before
 
 
 def test_point_scope_cannot_rebind_legacy_or_unmarked_state(

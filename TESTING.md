@@ -7536,6 +7536,9 @@ and explicitly selected readers.
 The cluster connection regression also marks a destination reached only after
 `chdir`: the original handle must keep reading and mutating its original
 database without changing the marked destination's files.
+The FTS maintenance case uses a real contained child build after a relative
+content-store open and `chdir`, proves the original content becomes searchable,
+and preserves every marked-destination file without creating a lock there.
 Neither lane enables component-shaped reads, applied-version qualification or
 v2 execution; selected point-domain handles still refuse legacy operations.
 

@@ -57,6 +57,9 @@ database and its sibling guard derive from the same constructor-resolved
 absolute database path. Every receipt
 reader rejects duplicate fields. Protocol 1 otherwise retains its existing
 meaning and forward-compatible metadata handling.
+The content store also retains its native connection URI for FTS lock paths
+and child arguments, so maintenance cannot retarget after a caller-directory
+change while its read guard stays on the original connection.
 
 Even an exactly selected point-domain handle refuses the current legacy-shaped
 `read`, `operation`, `write` and reconciliation paths. Component result types,
