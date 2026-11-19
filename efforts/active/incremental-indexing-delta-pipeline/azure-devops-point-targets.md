@@ -62,6 +62,113 @@ foreign-source rows and pending work remain intact. Replacement of the legacy
 reader representation would require a separately qualified complete base and
 an explicit migration/rollback plan; this proposal supplies neither.
 
+### Read-isolation design
+
+The selected **agent-recommended design** is one cold, separately owned
+source-aware data domain for one exact point scope. It extends the existing
+`store.source_layout.SourceDomain` and configured `IndexConfig.data_dir`, not
+another indexing engine, namespace registry or recovery owner. This section
+specifies the next implementation; it does not claim that a component reader,
+configuration selector or new layout protocol is implemented.
+
+Do not put the combined and component representations in the same domain and
+rely on a source suffix, caller filter or content-table name to separate them.
+Ordinary search can be unfiltered, model profiles select vector tables
+independently of the content-table name, and cluster reads reduce a source
+filter to a bucket. A separate content table alone therefore isolates neither
+candidate retrieval nor the derived artifact.
+
+#### Configuration and retained identity
+
+An explicit point configuration selects a fresh data directory, a distinct
+canonical component family and the complete existing `PointChangeHints.scope`:
+configured source, family, account and `PointBinding` (representation/version,
+effective endpoint, query union and query context). Do not infer this selection
+from a path suffix, connector label or chunk metadata. Preserve legacy source
+configuration, source hashes and combined rendering.
+
+Bind that exact selection in a versioned source-layout receipt before
+application, and compare it with the existing pending/prepared/application
+scope on reopening. Use a new receipt protocol, not an optional field on
+protocol 1: the current protocol-1 parser tolerates unknown fields and would
+not enforce their meaning. A changed scope requires a separately initialized
+domain, not rebinding, clearing pending work or borrowing a polling cursor.
+The receipt identifies the representation; it supplies no acquisition,
+application, permission or completion authority.
+The qualified point writer must admit only that exact component family and
+bound scope; ordinary combined-source ingestion cannot populate this domain.
+
+Keep the configured domain's content, model tables, cluster artifact, path
+checkpoints and pending/prepared state separate from the legacy data directory.
+Reuse their existing owners and coherent-state/restore requirements. This
+storage selection neither requires nor authorizes a second daemon, a new
+service, a directory allocation on a live installation or a volume migration.
+Cold initialization must refuse nonempty/unmarked state and incompatible
+existing bindings without altering them.
+
+#### Default refusal and explicit reads
+
+Keep every existing reader's default selection on the legacy representation.
+An ordinary `ContentStore`, `MultiModelStore`, `ClusterStore` or search-engine
+opening of a point domain must refuse before returning candidates, documents,
+members or measured inventory. Apply the same rule to nested and lazy reads;
+an earlier successful open is not permission to ignore a changed receipt.
+Retain the existing source-domain exclusion across retrieval, hydration and
+qualification. Protocol-1 readers must reject the new receipt, while current
+unselected readers retain their marked-domain refusal. Binaries predating the
+source-layout protocol are still excluded by the existing isolated-directory
+lifecycle rule; a new marker cannot fence such binaries.
+
+Start with an explicitly selected **in-process** component-read boundary.
+Its exact scope must match the configured domain. Reuse shared search,
+document and cluster owners rather than copy their algorithms. Return a
+component-specific result, never an ordinary legacy-shaped result with an
+optional annotation that callers can silently discard. Each exposed component
+identity reports its kind, parent item, optional comment ID, applied provider
+version, representation/rendering semantics and `named-target-only` coverage.
+An empty result or inventory also identifies that selected representation and
+coverage; it is not evidence that the full item/discussion was enumerated.
+
+Derive applied-version claims through the existing component application,
+ordering and projection owners under the same read exclusion. Ledger
+observations or serialized chunk metadata alone are not applied-content proof:
+the selected scope/policy, canonical identity, current native point, path
+checkpoint and routed-model coverage must agree. Missing or conflicting
+evidence refuses the affected read. A proven ordered deletion remains absent
+from searchable content, without discarding its ordering record or inventing
+legacy deletion authority. Bound per-result qualification through the existing
+point budgets; do not turn a query into a corpus-wide certification pass.
+
+The read-path inventory and acceptance obligations are:
+
+| Existing owner or surface | Required separation before point execution admission |
+|---------------------------|------------------------------------------------------|
+| `ContentStore` / `MultiModelStore` candidate retrieval, FTS, hydration, direct documents and enumeration | Default opens refuse the point domain; explicit reads qualify component identities without joining legacy rows |
+| `SearchEngine.search`, lexical fallback, `find_similar` and authorized fleet retrieval | Candidate and reference-ID lookup stay in the selected domain through qualification; family authorization still applies independently |
+| `ClusterStore` list, direct cluster/item lookup, members and statistics | Guard the domain even without a search-engine instance; qualify every exposed member or refuse, never rely on bucket filtering |
+| HTTP search/similar/clusters/status, MCP formatting, local/remote CLI and TTY rendering | Existing forms remain legacy-only and refuse point-domain access; do not leak a component through a legacy result or an available/empty status fallback |
+| Consumer store/search wrappers and direct Python callers | Preserve the default refusal through the actual shared constructor/decorator path; consumer presentation is not permission to strip required component semantics |
+
+No new HTTP parameter, CLI flag, MCP tool or fleet wire form is selected by
+this in-process design. Those surfaces remain unsupported for point reads
+until a separate provider-first contract declares and enforces their required
+semantics against the actual executing peer. An old peer ignoring a parameter
+is not support; do not probe and fall back to a legacy read of the new domain.
+Keep receipt protocol 1 and all legacy forms supported with unchanged meaning;
+no retirement or automatic conversion is proposed.
+
+Implement and qualify the domain binding/default-refusal seam first, then the
+explicit component result and its existing-owner reads. Before admitting any
+v2 executor or producer, exercise the inventory above with synthetic combined
+and component domains: unchanged legacy results, both cross-domain refusals,
+unfiltered and lexical reads, wrong reference IDs, direct hydration, bucket-
+collapsed clusters, empty/unknown inventory, receipt/scope drift, missing or
+stale application evidence, deletion and bounded qualification. Reopen retained
+state in the compatibility cases. Small pure/transport contract controls
+belong in required unit CI; native directory/process and restore cases stay in
+the existing explicitly selected bounded lane. Unsupported routes may refuse;
+they may not return a partially qualified legacy-shaped success.
+
 ## Typed target claims and completion
 
 `ChangeHints` v1 has opaque item IDs, metadata revisions and event IDs; it has
