@@ -72,6 +72,6 @@ def test_cursor_seeks_to_same_status_event_among_unrelated_history(tmp_path: Pat
         conn.executemany("INSERT INTO task_events(task_id,ts) VALUES (?,2)", ((f"other-{i}",) for i in range(4096)))
         conn.execute("ANALYZE task_events")
         plan = conn.execute("EXPLAIN QUERY PLAN " + queue_emitter_updates._CURSOR_QUERY, (task.id,)).fetchall()
-    assert any("SEARCH task_events USING COVERING INDEX idx_task_events_cursor (task_id=?)" in r[3] for r in plan)
+    assert any("SEARCH task_events USING COVERING INDEX idx_task_events_task (task_id=?)" in r[3] for r in plan)
     basis = observe_queued(queue, task.id, repo="example", key="key", source="recipe", origin="reviews")
     assert basis.last_event == tail
