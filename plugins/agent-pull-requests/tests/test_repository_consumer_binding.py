@@ -70,6 +70,47 @@ def test_running_capability_and_old_new_envelopes_keep_one_original_registration
     asyncio.run(scenario())
 
 
+def test_request_recovery_negotiates_and_reports_scoped_absence_or_cutoff_without_resubscription(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        selected = setup(tmp_path)
+        gateway = gateway_for(selected)
+        now = int(selected[0][0])
+        cutoff = now + 10
+        try:
+            capability = json.loads((await call(gateway, selected, "capabilities")).body)
+            assert capability["request_recovery"]["protocol"] == (
+                "agent-pull-requests.repository-request-recovery/v1"
+            )
+            before = selected[1].path.read_bytes()
+            absent = await call(gateway, selected, "inspect-request", {
+                "request": {"request_id": "original"}, "expected_consumer": "consumer",
+            })
+            assert absent.status == 200 and json.loads(absent.body)["result"] == {
+                "status": "not_found", "request_id": "original", "subscription": None, "now": now,
+            }
+            assert selected[1].path.read_bytes() == before
+            bounded = {"request": {"request_id": "original", "ttl": 60, "not_after": cutoff}}
+            admitted = json.loads((await call(gateway, selected, "subscribe", bounded)).body)["result"]
+            selected[0][0] = cutoff
+            before = selected[1].path.read_bytes()
+            refused = await call(gateway, selected, "subscribe", {
+                "request": {"request_id": "late", "ttl": 60, "not_after": cutoff},
+            })
+            assert refused.status == 410 and json.loads(refused.body) == {
+                "error": "repository_request_expired", "reconcile": "inspect-request",
+            }
+            original = json.loads((await call(gateway, selected, "subscribe", bounded)).body)["result"]
+            assert original["status"] == "expired"
+            assert original["subscription"] == admitted["subscription"]
+            assert selected[1].path.read_bytes() == before
+        finally:
+            gateway.stop_admission()
+            await gateway.drain(timeout=2)
+    asyncio.run(scenario())
+
+
 @pytest.mark.parametrize("extra,status,error", [
     ({"expected_consumer": "another"}, 409, "repository_consumer_mismatch"),
     ({"expected_consumer": None}, 409, "repository_consumer_mismatch"),

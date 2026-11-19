@@ -170,7 +170,7 @@ already-delivered unsettled IDs remain reconcilable and protected until ACK.
 `GET /v1/repositories` lists only the admitted principal's configured targets.
 `GET /v1/repositories/TARGET/capabilities` advertises the **running** protocol,
 namespace, complete repository key, storage support and budgets. Other
-operations are `POST /v1/repositories/TARGET/{query,subscribe,inspect,events,acknowledge,cancel}`
+operations are `POST /v1/repositories/TARGET/{query,subscribe,inspect,inspect-request,events,acknowledge,cancel}`
 with JSON:
 
 ```json
@@ -187,6 +187,66 @@ not the expected-binding fields. Missing/prior support refuses; clients never
 fall back to one-shot watch, a state-file read or an ambient account.
 The separately selected [reviewer-action capability](REVIEWER.md) adds
 `next-actions` and finite local SSE subscriptions under this same envelope.
+
+### Original-request recovery
+
+The running capability response advertises this optional provider expansion:
+
+```json
+{
+  "request_recovery": {
+    "protocol": "agent-pull-requests.repository-request-recovery/v1",
+    "inspection": "inspect-request",
+    "cutoff": "not_after",
+    "clock": "unix-seconds",
+    "expiry": "min-ttl-cutoff"
+  }
+}
+```
+
+Select this support before sending the new HTTP forms. The existing generic
+programmatic client's `request` method can carry them; the CLI's existing
+commands are unchanged. Missing support must not trigger a new-form attempt
+followed by a legacy retry.
+
+`inspect-request` takes `{"request_id": "ORIGINAL_REQUEST_ID"}`. It reads only
+the admitted repository and consumer's local receipt, returning `request_id`,
+provider Unix-seconds `now`, `subscription` and `status`. A retained receipt has
+its original registration, request and current `active`, `expired` or
+`cancelled` status. Absence returns `subscription: null` and `status:
+"not_found"`. Inspection neither creates nor renews a registration, advances a
+cursor, trims history or fetches a provider.
+
+`subscribe` additionally accepts optional integer Unix-seconds `not_after`.
+Persist it with the original request, alongside unchanged `request_id`, TTL
+and `after`. A new registration must be admitted before that cutoff, including
+after a writer-lock wait and at the commit checkpoint; its expiry is the
+earlier of the TTL-based expiry and the cutoff. Reconciliation of a retained
+request still returns the original registration after expiry. Changed intent
+refuses. Legacy requests without `not_after` keep their old shape and behavior.
+
+Recover a lost response by `inspect-request`, not by repeating `subscribe`.
+Expired, fully acknowledged receipts can be collected after their existing
+retention window. The immutable cutoff prevents a late original bounded
+request from recreating a collected registration. It is not permission to
+reuse collected request IDs with later cutoffs or changed intent.
+
+For cancellation with an unknown registration, retain the original request
+obligation. Cancel a found registration through the existing `cancel`
+operation; inspect again after an uncertain result. Absence before the cutoff
+does not exclude delayed acceptance. A provider observation at or beyond the
+original cutoff excludes further acceptance of that same request, and any
+accepted registration has expired by then. Already-delivered unacknowledged
+events remain retained. Clock rollback, unavailable inspection or a changed
+binding is not settlement. A `repository_request_expired` HTTP 410 recommends
+`inspect-request`; it must not be interpreted as proof that an earlier or
+just-committed attempt had no effect.
+
+The strict continuing-state reader accepts legacy requests and bounded
+requests together. A prior strict reader cannot interpret the added intent
+and refuses without rewriting it. This provider expansion does not perform
+reader lifecycle adoption, install a new runtime, promise transparent rollback,
+or enable a Dispatch consumer.
 
 ### Explicit expected-consumer client
 
