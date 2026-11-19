@@ -46,7 +46,10 @@ delete or overwrite them. Different preparations retain independent plans;
 rebinding an already-bound handle and changing a retained batch both refuse.
 Plans retain only compact references to shared, content-addressed
 `batch-payload/v1` bytes in the same journal. Identical retries do not duplicate
-full chunk/metadata payloads. Each read qualifies both the reference and the
+full chunk/metadata payloads. Batch serialization sorts object keys recursively,
+including metadata nested inside lists, without changing list or checkpoint order.
+Equivalent metadata insertion orders therefore share the same payload.
+Each read qualifies both the reference and the
 referenced payload's digest under one parent-checked SQLite snapshot.
 Batch reads/writes and the
 pre-publication checkpoint check verify that plan binding in the same SQLite

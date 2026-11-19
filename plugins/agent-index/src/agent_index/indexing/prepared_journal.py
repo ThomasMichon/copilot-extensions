@@ -263,7 +263,7 @@ class PreparedJournal:
             "version": 1,
             "chunks": [{name: getattr(chunk, name) for name in init_fields} for chunk in batch.chunks],
             "checkpoints": batch.checkpoints,
-        }, ensure_ascii=False).encode("utf-8")
+        }, ensure_ascii=False, sort_keys=True).encode("utf-8")
         self.put("batch", [(str(index), payload)])
 
     def batches(self, count: int) -> Iterator[FileBatch]:

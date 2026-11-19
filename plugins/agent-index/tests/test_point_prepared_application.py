@@ -16,6 +16,7 @@ import pytest
 
 import test_prepared_application
 
+from agent_index.chunking.base import Chunk
 from agent_index.engine.client import EngineClient
 from agent_index.index_config import IndexConfig, ModelProfile
 from agent_index.indexing.component_manifest import ComponentIdentity, ComponentVersion
@@ -399,6 +400,39 @@ def test_retries_share_immutable_batch_payloads_without_revoking_any_plan(applic
         assert list(plan.batches()) == batches
         plan.require_current_checkpoints()
     assert len(f.calls) == 2
+
+
+def test_bound_retries_share_payloads_with_reordered_nested_metadata(application: Fixture) -> None:
+    f = application
+    original = f.points.journal
+    metadata: list[dict[str, Any]] = [
+        {"state": "open", "nested": {"first": 1, "second": [{"a": True, "b": False}]}},
+        {"nested": {"second": [{"b": False, "a": True}], "first": 1}, "state": "open"},
+    ]
+    plans: list[PreparedJournal] = []
+    for values in metadata:
+        plan = PreparedJournal(
+            f.paths, original.source, original.scope, original.payload, point_claim=f.points.claim,
+        )
+        plan.reset_batches(bind_plan=True)
+        chunk = Chunk(
+            "Useful text.", "opaque-body", "text", "markdown", 1, 1, FAMILY, metadata=values,
+        )
+        plan.put_batch(0, FileBatch([chunk], [(FAMILY, "opaque-body", "fingerprint", 1)]))
+        plans.append(plan)
+    with closing(f.paths._connect()) as conn:
+        blobs = conn.execute(
+            "SELECT key FROM prepared_crawl_rows WHERE kind = 'batch-payload/v1'",
+        ).fetchall()
+        references = conn.execute(
+            "SELECT payload FROM prepared_crawl_rows WHERE kind LIKE 'batch-ref/v1:%'",
+        ).fetchall()
+    assert len(blobs) == 1
+    assert len(references) == len(plans)
+    assert {row["payload"].decode("ascii") for row in references} == {blobs[0]["key"]}
+    batches = [list(plan.batches(1)) for plan in plans]
+    assert batches[0] == batches[1]
+    assert batches[0][0].chunks[0].metadata == metadata[0]
 
 
 @pytest.mark.parametrize("damage", ["missing", "changed"])
