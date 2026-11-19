@@ -1,6 +1,7 @@
 """Standalone Manager adapter over the canonical Python installer engine."""
 # copilot-extensions:bootstrap-uv=1
 # copilot-extensions:toolchain-config=1
+# copilot-extensions:toolchain-context=1
 
 from __future__ import annotations
 
@@ -534,7 +535,9 @@ def _automatic_bootstrap_inhibited(args: argparse.Namespace) -> bool:
 
 def _foreground_install(args: argparse.Namespace, driver: ModuleType) -> Path | int:
     """Explicit bootstrap owns the existing finite driver, not a spawn fallback."""
-    from worktree_manager.update_driver_cli import _CONTEXT_KEYS, parse_options, request_context
+    from worktree_manager.update_driver_cli import (
+        _runner_context_keys, parse_options, request_context,
+    )
 
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     repair = False
@@ -577,16 +580,17 @@ def _foreground_install(args: argparse.Namespace, driver: ModuleType) -> Path | 
     if automatic:
         identity.append("--auto")
     caller = str(Path.cwd().resolve())
+    context = {**request_context(capture_toolchain=True), "WORKTREE_MANAGER_ROOT": str(args.root.resolve())}
     request = driver.enqueue(
         driver.RequestSpec(
             "manager-bootstrap", tuple(identity), project=str(args.root.resolve()),
             cwd=caller, source=digest,
-            context=tuple({**request_context(), "WORKTREE_MANAGER_ROOT": str(args.root.resolve())}.items()),
+            context=tuple(context.items()),
             repair=repair,
             killswitch_path=_bootstrap_hold_path(),
         ),
         runner=driver.TrustedRunner(
-            tuple(arguments), caller, context_keys=(*_CONTEXT_KEYS, BOOTSTRAP_PYTHON),
+            tuple(arguments), caller, context_keys=_runner_context_keys(context),
         ),
     )
     driver.drain()

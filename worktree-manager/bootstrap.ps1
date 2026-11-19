@@ -32,7 +32,7 @@ if ($args.Count -eq 1 -and $args[0] -ceq '--describe-source-inputs') {
 }
 
 if ($args.Count -eq 1 -and $args[0] -ceq '--describe-toolchain-config') {
-    [Console]::Out.WriteLine('{"schema":"copilot-extensions.toolchain-config","version":1,"capabilities":["native-file","python-index","python-install-mirror","uv-install-mirror","npm-registry"]}')
+    [Console]::Out.WriteLine('{"schema":"copilot-extensions.toolchain-config","version":1,"capabilities":["native-file","python-index","python-install-mirror","uv-install-mirror","npm-registry","request-context-v1"]}')
     exit 0
 }
 
@@ -109,10 +109,15 @@ if ($ToolchainConfig) {
             throw 'PIP_CONFIG_FILE disables native configuration.'
         }
         foreach ($name in @(
-            'UV_INDEX', 'UV_EXTRA_INDEX_URL', 'UV_FIND_LINKS', 'UV_CONFIG_FILE',
-            'UV_INSECURE_HOST', 'UV_NO_INDEX', 'UV_NO_CONFIG', 'PIP_EXTRA_INDEX_URL',
+            'UV_INDEX', 'UV_EXTRA_INDEX_URL', 'UV_FIND_LINKS',
+            'UV_INSECURE_HOST', 'UV_NO_INDEX', 'PIP_EXTRA_INDEX_URL',
             'PIP_FIND_LINKS', 'PIP_TRUSTED_HOST', 'PIP_NO_INDEX'
         )) {
+            if ([Environment]::GetEnvironmentVariable($name)) { throw "$name requires explicit source reconciliation." }
+        }
+    }
+    if ($ToolchainValues.ContainsKey('python_index_url') -or $ToolchainValues.ContainsKey('python_install_mirror')) {
+        foreach ($name in @('UV_CONFIG_FILE', 'UV_NO_CONFIG')) {
             if ([Environment]::GetEnvironmentVariable($name)) { throw "$name requires explicit source reconciliation." }
         }
     }
@@ -215,6 +220,14 @@ if ($ToolchainConfig) {
                     throw 'Existing pip index conflicts with toolchain configuration.'
                 }
             } elseif ($kind -eq 'uv') {
+                if (-not $ToolchainValues.ContainsKey('python_index_url') -and
+                    $line -notmatch '^\s*["'']?python-install-mirror["'']?\s*[=.]') { continue }
+                if (-not $ToolchainValues.ContainsKey('python_install_mirror') -and
+                    $line -match '^\s*["'']?python-install-mirror["'']?\s*[=.]') { continue }
+                if ($line -match '^\s*["'']?pip["'']?\s*[=.]' -and
+                    $line -match 'index|find-links|insecure-host') {
+                    throw 'Inline or dotted uv pip sources require reconciliation.'
+                }
                 if ($line -match '^\s*["'']?(?:extra-index-url|find-links|no-index|no-default-index|allow-insecure-host|index)["'']?\s*=') {
                     throw 'Legacy or additional uv sources require reconciliation.'
                 }
@@ -800,9 +813,13 @@ try {
         }
         $installerArgs += @('--bootstrap-uv', $Uv)
     }
-    if ($ToolchainConfig -and -not (Select-String -LiteralPath (Join-Path $PWD 'scripts\runtime_install.py') `
-        -CaseSensitive -Quiet -Pattern '^# copilot-extensions:toolchain-config=1$')) {
-        throw 'Selected Manager source does not support toolchain configuration; installation was not started.'
+    if ($ToolchainConfig) {
+        foreach ($capability in @('toolchain-config', 'toolchain-context')) {
+            if (-not (Select-String -LiteralPath (Join-Path $PWD 'scripts\runtime_install.py') `
+                -CaseSensitive -Quiet -Pattern "^# copilot-extensions:${capability}=1$")) {
+                throw 'Selected Manager source does not support toolchain configuration; installation was not started.'
+            }
+        }
     }
     $Python = if ($SystemPythonRequested) { $SystemPython } else { Find-BootstrapPython $Uv }
     $env:COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON = $Python

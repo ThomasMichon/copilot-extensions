@@ -30,7 +30,26 @@ _CONTEXT_KEYS = (
     "WORKTREE_MANAGER_ENGINE_CMD",
     "CE_UPDATE_AUTH",
 )
-_RUNNER_CONTEXT_KEYS = (*_CONTEXT_KEYS, _BOOTSTRAP_PYTHON)
+_TOOLCHAIN_CONTEXT_KEYS = (
+    "COPILOT_EXTENSIONS_TOOLCHAIN_CONFIG",
+    "UV_DEFAULT_INDEX", "UV_INDEX_URL", "UV_INDEX", "UV_EXTRA_INDEX_URL",
+    "UV_FIND_LINKS", "UV_CONFIG_FILE", "UV_NO_CONFIG", "UV_NO_INDEX", "UV_INSECURE_HOST",
+    "UV_PYTHON_INSTALL_MIRROR", "UV_INSTALLER_GITHUB_BASE_URL",
+    "UV_INSTALLER_GHE_BASE_URL", "UV_DOWNLOAD_URL", "INSTALLER_DOWNLOAD_URL",
+    "PIP_INDEX_URL", "PIP_EXTRA_INDEX_URL", "PIP_FIND_LINKS", "PIP_CONFIG_FILE",
+    "PIP_NO_INDEX", "PIP_TRUSTED_HOST",
+    "NPM_CONFIG_REGISTRY", "NPM_CONFIG_USERCONFIG", "NPM_CONFIG_GLOBALCONFIG",
+    "HOME", "USERPROFILE", "APPDATA", "PROGRAMDATA",
+    "XDG_CONFIG_HOME", "XDG_CONFIG_DIRS", "VIRTUAL_ENV",
+)
+_TOOLCHAIN_REQUEST_KEY = "COPILOT_EXTENSIONS_TOOLCHAIN_REQUEST"
+_NPM_CONTEXT_ALIASES = {
+    "COPILOT_EXTENSIONS_NPM_REGISTRY": "npm_config_registry",
+    "COPILOT_EXTENSIONS_NPM_USERCONFIG": "npm_config_userconfig",
+    "COPILOT_EXTENSIONS_NPM_GLOBALCONFIG": "npm_config_globalconfig",
+}
+_SUPPORTED_CONTEXT_KEYS = (*_CONTEXT_KEYS, *_TOOLCHAIN_CONTEXT_KEYS, _TOOLCHAIN_REQUEST_KEY, *_NPM_CONTEXT_ALIASES)
+_RUNNER_CONTEXT_KEYS = (*_CONTEXT_KEYS, "COPILOT_EXTENSIONS_TOOLCHAIN_CONFIG", _TOOLCHAIN_REQUEST_KEY, _BOOTSTRAP_PYTHON)
 
 
 class _EngineLaunchOptions(TypedDict, total=False):
@@ -169,7 +188,7 @@ def source_identity() -> dict[str, object]:
     }
 
 
-def request_context(*, capture_engine: bool = True) -> dict[str, str]:
+def request_context(*, capture_engine: bool = True, capture_toolchain: bool = False) -> dict[str, str]:
     excluded = set() if capture_engine else {
         "WORKTREE_MANAGER_ENGINE_ARGV", "WORKTREE_MANAGER_ENGINE_CMD",
     }
@@ -188,7 +207,67 @@ def request_context(*, capture_engine: bool = True) -> dict[str, str]:
     from .source_config import default_root
 
     context["WORKTREE_MANAGER_ROOT"] = str(default_root().expanduser().resolve())
+    if capture_toolchain:
+        version = os.environ.get(_TOOLCHAIN_REQUEST_KEY)
+        if version not in (None, "", "1") or (
+            version == "1" and not os.environ.get("COPILOT_EXTENSIONS_TOOLCHAIN_CONFIG")
+        ):
+            raise ValueError("Unsupported or incomplete toolchain request context")
+        selected = os.environ.get("COPILOT_EXTENSIONS_TOOLCHAIN_CONFIG")
+        if not selected:
+            for path in (
+                Path.cwd() / ".copilot-extensions" / "toolchain.conf",
+                Path(context["WORKTREE_MANAGER_ROOT"]) / "toolchain.conf",
+            ):
+                if path.exists():
+                    selected = str(path)
+                    break
+        if selected:
+            context.update(_toolchain_context(selected))
     return context
+
+
+def _toolchain_context(configuration: str) -> dict[str, str]:
+    """Capture credential-free routing only for requests selecting the new provider."""
+    selected = {key: os.environ[key] for key in _TOOLCHAIN_CONTEXT_KEYS if key in os.environ}
+    selected["COPILOT_EXTENSIONS_TOOLCHAIN_CONFIG"] = configuration
+    selected[_TOOLCHAIN_REQUEST_KEY] = "1"
+    if os.name != "nt":
+        for encoded, original in _NPM_CONTEXT_ALIASES.items():
+            if original in os.environ:
+                selected[encoded] = os.environ[original]
+    for key in (
+        "COPILOT_EXTENSIONS_TOOLCHAIN_CONFIG", "PIP_CONFIG_FILE", "UV_CONFIG_FILE",
+        "NPM_CONFIG_USERCONFIG", "npm_config_userconfig",
+        "NPM_CONFIG_GLOBALCONFIG", "npm_config_globalconfig",
+        "COPILOT_EXTENSIONS_NPM_USERCONFIG", "COPILOT_EXTENSIONS_NPM_GLOBALCONFIG",
+        "HOME", "USERPROFILE", "APPDATA", "PROGRAMDATA", "XDG_CONFIG_HOME", "VIRTUAL_ENV",
+    ):
+        value = selected.get(key)
+        if value and value.lower() not in {"nul", "/dev/null"}:
+            selected[key] = str(Path(value).expanduser().absolute())
+    if selected.get("XDG_CONFIG_DIRS"):
+        selected["XDG_CONFIG_DIRS"] = os.pathsep.join(
+            str(Path(value).expanduser().absolute()) for value in selected["XDG_CONFIG_DIRS"].split(os.pathsep)
+            if value
+        )
+    for key, value in selected.items():
+        if key in {
+            "UV_DEFAULT_INDEX", "UV_INDEX_URL", "UV_INDEX", "UV_EXTRA_INDEX_URL",
+            "UV_FIND_LINKS", "UV_PYTHON_INSTALL_MIRROR", "UV_INSTALLER_GITHUB_BASE_URL",
+            "UV_INSTALLER_GHE_BASE_URL", "UV_DOWNLOAD_URL", "INSTALLER_DOWNLOAD_URL",
+            "PIP_INDEX_URL", "PIP_EXTRA_INDEX_URL", "PIP_FIND_LINKS", "NPM_CONFIG_REGISTRY",
+            "COPILOT_EXTENSIONS_NPM_REGISTRY",
+        }:
+            for url in re.findall(r"[A-Za-z][A-Za-z0-9+.-]*://\S+", value):
+                parsed = urlsplit(url)
+                if parsed.username or parsed.password or parsed.query or parsed.fragment:
+                    raise ValueError("Request routing requires URLs without credentials, queries or fragments")
+    return selected
+
+
+def _runner_context_keys(context: Mapping[str, str]) -> tuple[str, ...]:
+    return (*_SUPPORTED_CONTEXT_KEYS, _BOOTSTRAP_PYTHON) if context.get(_TOOLCHAIN_REQUEST_KEY) == "1" else _RUNNER_CONTEXT_KEYS
 
 
 def request_source_anchor() -> str:
@@ -208,8 +287,14 @@ def _request_environment(
     from .source_config import SOURCE_ANCHOR_ENV
 
     values = dict(context)
-    if values.keys() - set(_CONTEXT_KEYS):
+    if values.keys() - set(_SUPPORTED_CONTEXT_KEYS):
         raise ValueError("update request contains unsupported execution context")
+    feature = values.keys() - set(_CONTEXT_KEYS)
+    if feature and (
+        values.get(_TOOLCHAIN_REQUEST_KEY) != "1"
+        or not values.get("COPILOT_EXTENSIONS_TOOLCHAIN_CONFIG")
+    ):
+        raise ValueError("update request requires toolchain request context v1")
     if cwd:
         if not Path(cwd).is_absolute():
             raise ValueError("update request source anchor must be absolute")
@@ -230,7 +315,12 @@ def _request_environment(
     values[_BOOTSTRAP_PYTHON] = (
         base_python if isinstance(base_python, str) and base_python else sys.executable
     )
-    keys: tuple[str, ...] = (*_RUNNER_CONTEXT_KEYS, SOURCE_ANCHOR_ENV)
+    keys: tuple[str, ...] = (*_runner_context_keys(values), SOURCE_ANCHOR_ENV)
+    if values.get(_TOOLCHAIN_REQUEST_KEY) == "1" and os.name != "nt":
+        keys = (*keys, *_NPM_CONTEXT_ALIASES.values())
+        for encoded, original in _NPM_CONTEXT_ALIASES.items():
+            if encoded in values:
+                values[original] = values[encoded]
     if killswitch_path is not None:
         keys = (*keys, "BOOTSTRAP_KILLSWITCH_STATE_FILE")
         if killswitch_path:
@@ -303,7 +393,7 @@ def self_install_request(operation: Callable[[], int]) -> int:
 
     try:
         installer_factory: Callable[[], Any] = _runtime_installer
-        with _request_environment(request_context()), installer_factory()._installation_custody() as custody:
+        with _request_environment(request_context(capture_toolchain=True)), installer_factory()._installation_custody() as custody:
             if custody is not None:
                 return operation()
             argv, environment = driver.runtime_command("worktree_manager", ["self-install", "--apply"])
@@ -311,7 +401,7 @@ def self_install_request(operation: Callable[[], int]) -> int:
             workspace = application_slot or running_payload_dir()
             root = str(default_root().expanduser().resolve())
             execution_directory = root if application_slot is not None else str(workspace)
-            context = {**request_context(), "WORKTREE_MANAGER_ROOT": root}
+            context = {**request_context(capture_toolchain=True), "WORKTREE_MANAGER_ROOT": root}
             selected = _current_authority(
                 driver, context=context.get("COPILOT_EXTENSIONS_CONTEXT", ""), cwd=str(workspace),
             )
@@ -322,7 +412,8 @@ def self_install_request(operation: Callable[[], int]) -> int:
                     authority="standalone" if selected.configured and selected.mode == "standalone" else "",
                 ),
                 runner=driver.TrustedRunner(
-                    argv, execution_directory, env=tuple(environment.items()), context_keys=_RUNNER_CONTEXT_KEYS,
+                    argv, execution_directory, env=tuple(environment.items()),
+                    context_keys=_runner_context_keys(context),
                 ),
             )
             driver.drain()
@@ -434,7 +525,7 @@ def cmd_update_request(rest: list[str]) -> int:
             for name in ("detach", "wait", "supervised_debug", "json")
             if getattr(options, name)
         ]
-        context = request_context()
+        context = request_context(capture_toolchain=True)
         source_anchor = request_source_anchor()
         selected = _current_authority(
             driver,
@@ -486,7 +577,7 @@ def cmd_update_request(rest: list[str]) -> int:
         argv, env = driver.runtime_command("worktree_manager", ["update", *arguments])
         request = driver.enqueue(
             spec, runner=driver.TrustedRunner(
-                argv, str(cwd), env=tuple(env.items()), context_keys=_RUNNER_CONTEXT_KEYS,
+                argv, str(cwd), env=tuple(env.items()), context_keys=_runner_context_keys(context),
             ),
         )
         print(f"Update request {request.id}; log: {request.log_path}", file=sys.stderr)

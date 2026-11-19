@@ -27,7 +27,7 @@ if [ "$#" -eq 1 ] && [ "${1-}" = --describe-source-inputs ]; then
 fi
 
 if [ "$#" -eq 1 ] && [ "${1-}" = --describe-toolchain-config ]; then
-    printf '%s\n' '{"schema":"copilot-extensions.toolchain-config","version":1,"capabilities":["native-file","python-index","python-install-mirror","uv-install-mirror","npm-registry"]}'
+    printf '%s\n' '{"schema":"copilot-extensions.toolchain-config","version":1,"capabilities":["native-file","python-index","python-install-mirror","uv-install-mirror","npm-registry","request-context-v1"]}'
     exit 0
 fi
 
@@ -99,11 +99,18 @@ if [ -n "$toolchain_config" ]; then
         if [ "${PIP_CONFIG_FILE:-}" = /dev/null ]; then
             printf '%s\n' 'PIP_CONFIG_FILE disables native configuration.' >&2; exit 2
         fi
-        for name in UV_INDEX UV_EXTRA_INDEX_URL UV_FIND_LINKS UV_CONFIG_FILE UV_INSECURE_HOST \
-            UV_NO_INDEX UV_NO_CONFIG PIP_EXTRA_INDEX_URL PIP_FIND_LINKS PIP_TRUSTED_HOST PIP_NO_INDEX; do
+        for name in UV_INDEX UV_EXTRA_INDEX_URL UV_FIND_LINKS UV_INSECURE_HOST \
+            UV_NO_INDEX PIP_EXTRA_INDEX_URL PIP_FIND_LINKS PIP_TRUSTED_HOST PIP_NO_INDEX; do
             if [ -n "${!name:-}" ]; then
                 printf '%s requires explicit source reconciliation.\n' "$name" >&2
                 exit 2
+            fi
+        done
+    fi
+    if [ -n "$tc_index$tc_python" ]; then
+        for name in UV_CONFIG_FILE UV_NO_CONFIG; do
+            if [ -n "${!name:-}" ]; then
+                printf '%s requires explicit source reconciliation.\n' "$name" >&2; exit 2
             fi
         done
     fi
@@ -186,6 +193,9 @@ if [ -n "$toolchain_config" ]; then
                     if (tolower(line) ~ /^[[:space:]]*(extra[-_]index[-_]url|find[-_]links|trusted[-_]host|no[-_]index)[[:space:]]*[:=]/) exit 1
                     if (tolower(line) ~ /^[[:space:]]*index[-_]url[[:space:]]*[:=]/ && !same(value(line), idx)) exit 1
                 } else if (kind == "uv") {
+                    if (idx == "" && line !~ /^[[:space:]]*["\047]?python-install-mirror["\047]?[[:space:]]*[=.]/) next
+                    if (mirror == "" && line ~ /^[[:space:]]*["\047]?python-install-mirror["\047]?[[:space:]]*[=.]/) next
+                    if (line ~ /^[[:space:]]*["\047]?pip["\047]?[[:space:]]*[=.]/ && line ~ /index|find-links|insecure-host/) exit 1
                     if (line ~ /^[[:space:]]*["\047]?(extra-index-url|find-links|no-index|no-default-index|allow-insecure-host|index)["\047]?[[:space:]]*=/) exit 1
                     if (line ~ /^[[:space:]]*\[\[[[:space:]]*["\047]?index["\047]?[[:space:]]*\]\][[:space:]]*(#.*)?$/) indexes++
                     if (line ~ /^[[:space:]]*["\047]?default["\047]?[[:space:]]*=[[:space:]]*true[[:space:]]*(#.*)?$/) defaults++
@@ -499,9 +509,13 @@ if [ "$recovery_only" -eq 0 ]; then
     fi
     installer_args+=(--bootstrap-uv "$UV")
 fi
-if [ -n "$toolchain_config" ] && ! grep -qx '# copilot-extensions:toolchain-config=1' scripts/runtime_install.py; then
-    _bootstrap_progress 'Selected Manager source does not support toolchain configuration; installation was not started.' failed
-    exit 2
+if [ -n "$toolchain_config" ]; then
+    for capability in toolchain-config toolchain-context; do
+        if ! grep -qx "# copilot-extensions:$capability=1" scripts/runtime_install.py; then
+            _bootstrap_progress 'Selected Manager source does not support toolchain configuration; installation was not started.' failed
+            exit 2
+        fi
+    done
 fi
 if ! PYTHON="$("$UV" python find --no-project --system --managed-python --no-python-downloads 3.11 2>/dev/null)"; then
     "$UV" python install --no-bin --no-registry 3.11

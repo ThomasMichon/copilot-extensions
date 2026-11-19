@@ -61,6 +61,9 @@ def test_toolchain_config_adds_only_selected_environment_and_preserves_input(tmp
     )
     with pytest.raises(ValueError, match="disables"):
         tc.environment(values, {"PIP_CONFIG_FILE": os.devnull})
+    for selector in ("UV_CONFIG_FILE", "UV_NO_CONFIG"):
+        with pytest.raises(ValueError, match=selector):
+            tc.environment({"python_install_mirror": PYTHON_MIRROR}, {selector: "selected"})
 
 
 def _native_fixture(monkeypatch: pytest.MonkeyPatch, home: Path) -> tuple[Path, Path, Path]:
@@ -143,7 +146,11 @@ def test_toolchain_config_conflicts_do_not_partially_write(
 
 
 @pytest.mark.parametrize("kind", ["ps1", "sh"])
-@pytest.mark.parametrize("invalid", ["", "unknown", "pip", "pip-colon", "uv", "uv-pip", "uv-system", "npm", "environment"])
+@pytest.mark.parametrize("invalid", [
+    "", "unknown", "pip", "pip-colon", "uv", "uv-pip", "uv-system",
+    "uv-inline", "uv-dotted", "npm", "environment",
+    "mirror-only", "mirror-configfile", "mirror-noconfig",
+])
 def test_toolchain_config_native_entry_precedes_first_prerequisite(
     tmp_path: Path, kind: str, invalid: str,
 ) -> None:
@@ -156,9 +163,11 @@ def test_toolchain_config_native_entry_precedes_first_prerequisite(
     home = tmp_path / "home"
     home.mkdir()
     config = tmp_path / "toolchain.conf"
+    mirror_only = invalid.startswith("mirror-")
     config.write_text(
-        f"schema=1\npython_index_url={INDEX}\nnpm_registry={REGISTRY}\n"
-        f"python_install_mirror={PYTHON_MIRROR}\nuv_install_mirror={UV_MIRROR}\n"
+        f"schema=1\npython_install_mirror={PYTHON_MIRROR}\n"
+        + ("" if mirror_only else
+           f"python_index_url={INDEX}\nnpm_registry={REGISTRY}\nuv_install_mirror={UV_MIRROR}\n")
         + ("unknown=value\n" if invalid == "unknown" else ""),
         encoding="ascii",
     )
@@ -173,7 +182,18 @@ def test_toolchain_config_native_entry_precedes_first_prerequisite(
     )
     if invalid == "environment":
         env["PIP_INDEX_URL"] = "https://other.example.invalid/simple/"
-    elif invalid in {"pip", "pip-colon", "uv", "uv-pip", "uv-system", "npm"}:
+    elif mirror_only:
+        target = (
+            home / "appdata" / "uv" / "uv.toml" if os.name == "nt"
+            else home / ".config" / "uv" / "uv.toml"
+        )
+        target.parent.mkdir(parents=True)
+        target.write_text('[pip]\nextra-index-url = ["https://unrelated.example.invalid/simple/"]\n', encoding="utf-8")
+        if invalid == "mirror-configfile":
+            env["UV_CONFIG_FILE"] = str(target)
+        elif invalid == "mirror-noconfig":
+            env["UV_NO_CONFIG"] = "1"
+    elif invalid in {"pip", "pip-colon", "uv", "uv-pip", "uv-system", "uv-inline", "uv-dotted", "npm"}:
         family = "pip" if invalid.startswith("pip") else "uv" if invalid.startswith("uv") else "npm"
         target = {
             "pip": home / "appdata" / "pip" / "pip.ini" if os.name == "nt" else home / ".config" / "pip" / "pip.conf",
@@ -195,6 +215,10 @@ def test_toolchain_config_native_entry_precedes_first_prerequisite(
             content = "[install]\nindex-url: https://other.example.invalid/simple/\n"
         elif invalid == "uv-pip":
             content = '[pip]\n"extra-index-url" = ["https://other.example.invalid/simple/"]\n'
+        elif invalid == "uv-inline":
+            content = 'pip = { extra-index-url = ["https://other.example.invalid/simple/"] }\n'
+        elif invalid == "uv-dotted":
+            content = 'pip.extra-index-url = ["https://other.example.invalid/simple/"]\n'
         target.write_text(content, encoding="utf-8")
     if kind == "ps1":
         escaped = str(bootstrap).replace("'", "''")
@@ -232,9 +256,12 @@ def test_toolchain_config_native_entry_precedes_first_prerequisite(
     )
     assert result.returncode != 0
     output = result.stdout + result.stderr
-    if invalid:
+    if invalid not in {"", "mirror-only"}:
         assert INDEX not in output
+        assert PYTHON_MIRROR not in output
         assert "FIRST_CONSUMER" not in output
+    elif mirror_only:
+        assert f"|||{PYTHON_MIRROR}|" in output
     else:
         assert f"{INDEX}|{INDEX}|{REGISTRY}|{PYTHON_MIRROR}|{UV_MIRROR}" in output
     assert not (home / "manager").exists()
@@ -322,9 +349,9 @@ def test_toolchain_config_real_native_tool_reads_persisted_defaults(
 
 
 @pytest.mark.parametrize("kind", ["ps1", "sh"])
-@pytest.mark.parametrize("supported", [False, True])
+@pytest.mark.parametrize("supported", [False, None, True])
 def test_toolchain_config_native_source_skew_is_explicit(
-    tmp_path: Path, kind: str, supported: bool,
+    tmp_path: Path, kind: str, supported: bool | None,
 ) -> None:
     from test_bootstrap_ps1 import _GIT_ID, _fake_tools, _source_repo
 
@@ -333,8 +360,13 @@ def test_toolchain_config_native_source_skew_is_explicit(
         pytest.skip("native shell and Git required")
     source = _source_repo(tmp_path)
     entry = source / "worktree-manager" / "scripts" / "runtime_install.py"
-    if supported:
-        entry.write_text(entry.read_text(encoding="utf-8") + "# copilot-extensions:toolchain-config=1\n", encoding="utf-8")
+    if supported is not False:
+        entry.write_text(
+            entry.read_text(encoding="utf-8")
+            + "# copilot-extensions:toolchain-config=1\n"
+            + ("# copilot-extensions:toolchain-context=1\n" if supported else ""),
+            encoding="utf-8",
+        )
         for args in (["add", "."], [*_GIT_ID, "commit", "-qm", "toolchain capability"]):
             subprocess.run(
                 ["git", "-C", str(source), *args], check=True, capture_output=True,
@@ -414,12 +446,12 @@ def test_toolchain_config_standard_setup_applies_before_prerequisite_owner(
 def test_toolchain_config_setup_preserves_parser_exit_status(
     monkeypatch: pytest.MonkeyPatch, code: int | str | None, expected: int,
 ) -> None:
-    from worktree_manager import setup_cli
+    from worktree_manager import repository_bootstrap, setup_cli
 
     def exit_parser(*_args: object, **_kwargs: object) -> None:
         raise SystemExit(code)
 
-    monkeypatch.setattr(setup_cli.repository_bootstrap, "parse", exit_parser)
+    monkeypatch.setattr(repository_bootstrap, "parse", exit_parser)
     assert setup_cli.cmd_setup([], banner="fixture") == expected
 
 
@@ -437,7 +469,46 @@ def test_toolchain_config_darwin_pip_paths_follow_native_directory(
     assert tc._native_paths(tmp_path, {}, False)[2] == native / "pip.conf"
 
 
-@pytest.mark.parametrize("selector", ["user-pip", "system-pip", "system-index", "system-mirror", "system-matching"])
+@pytest.mark.parametrize("url", [
+    "https://user:password@example.invalid/simple/",
+    "https://example.invalid/simple/?token=synthetic",
+])
+def test_toolchain_config_request_metadata_refuses_inline_credentials(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, url: str,
+) -> None:
+    from worktree_manager import update_driver_cli
+
+    monkeypatch.setenv(tc.CONFIGURATION_ENV, str(tmp_path / "toolchain.conf"))
+    monkeypatch.setenv("PIP_INDEX_URL", url)
+    legacy = update_driver_cli.request_context(capture_engine=False)
+    assert tc.CONFIGURATION_ENV not in legacy and "PIP_INDEX_URL" not in legacy
+    with pytest.raises(ValueError, match="without credentials"):
+        update_driver_cli.request_context(capture_engine=False, capture_toolchain=True)
+
+
+@pytest.mark.parametrize("context", [
+    {"COPILOT_EXTENSIONS_TOOLCHAIN_REQUEST": "2", tc.CONFIGURATION_ENV: "selected"},
+    {"COPILOT_EXTENSIONS_TOOLCHAIN_REQUEST": "1"},
+])
+def test_toolchain_config_request_receiver_refuses_unsupported_context(
+    context: dict[str, str], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from worktree_manager import update_driver_cli
+
+    original = dict(context)
+    with pytest.raises(ValueError):
+        tc._routing_environment(context)
+    assert context == original
+    monkeypatch.delenv(tc.CONFIGURATION_ENV, raising=False)
+    for key, value in context.items():
+        monkeypatch.setenv(key, value)
+    with pytest.raises(ValueError):
+        update_driver_cli.request_context(capture_engine=False, capture_toolchain=True)
+
+
+@pytest.mark.parametrize("selector", [
+    "user-pip", "system-pip", "system-index", "system-mirror", "system-matching", "mirror-only",
+])
 def test_toolchain_config_checks_merged_uv_sources_before_writes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, selector: str,
 ) -> None:
@@ -451,14 +522,21 @@ def test_toolchain_config_checks_merged_uv_sources_before_writes(
         content = 'python-install-mirror = "https://other.example.invalid/python/"\n'
     elif selector == "system-matching":
         content = f'[[index]]\nurl = "{INDEX}"\ndefault = true\n'
-    system.write_text("" if selector == "user-pip" else content, encoding="utf-8")
-    if selector == "user-pip":
+    system.write_text("" if selector in {"user-pip", "mirror-only"} else content, encoding="utf-8")
+    if selector in {"user-pip", "mirror-only"}:
         uv.parent.mkdir()
         uv.write_text(content, encoding="utf-8")
     config = tmp_path / "toolchain.conf"
-    config.write_text(f"schema=1\npython_index_url={INDEX}\npython_install_mirror={PYTHON_MIRROR}\n", encoding="ascii")
+    config.write_text(
+        f"schema=1\npython_install_mirror={PYTHON_MIRROR}\n"
+        + ("" if selector == "mirror-only" else f"python_index_url={INDEX}\n"), encoding="ascii",
+    )
     before = {path: path.read_bytes() if path.exists() else None for path in (pip, uv, system)}
-    if selector == "system-matching":
+    if selector == "mirror-only":
+        tc.apply_configuration(config, home=tmp_path)
+        assert "extra-index-url" in uv.read_text(encoding="utf-8")
+        assert not pip.exists()
+    elif selector == "system-matching":
         tc.apply_configuration(config, home=tmp_path)
         assert "[[index]]" not in uv.read_text(encoding="utf-8")
         assert INDEX in pip.read_text(encoding="utf-8")

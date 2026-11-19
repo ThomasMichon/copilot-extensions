@@ -25,6 +25,25 @@ URL = re.compile(r"https://[A-Za-z0-9.-]+(?::[0-9]+)?(?:/[A-Za-z0-9._~:/+-]*)?")
 MAX_SIZE = 16384
 
 
+def _routing_environment(current: Mapping[str, str]) -> dict[str, str]:
+    result = dict(current)
+    version = current.get("COPILOT_EXTENSIONS_TOOLCHAIN_REQUEST")
+    if version not in (None, "", "1"):
+        raise ValueError("Unsupported toolchain request context")
+    if version == "1" and not current.get(CONFIGURATION_ENV):
+        raise ValueError("Toolchain request context requires its selected configuration")
+    if current.get("COPILOT_EXTENSIONS_TOOLCHAIN_REQUEST") == "1" and os.name != "nt":
+        for encoded, original in (
+            ("COPILOT_EXTENSIONS_NPM_REGISTRY", "npm_config_registry"),
+            ("COPILOT_EXTENSIONS_NPM_USERCONFIG", "npm_config_userconfig"),
+            ("COPILOT_EXTENSIONS_NPM_GLOBALCONFIG", "npm_config_globalconfig"),
+        ):
+            result.pop(original, None)
+            if encoded in current:
+                result[original] = current[encoded]
+    return result
+
+
 def read_configuration(path: Path) -> dict[str, str]:
     """Read the same bounded, deliberately non-executable grammar as the seed."""
     if path.is_symlink() or not path.is_file():
@@ -63,12 +82,16 @@ def _same(actual: str, expected: str) -> bool:
 def environment(values: Mapping[str, str], current: Mapping[str, str]) -> dict[str, str]:
     """Preflight selectors before returning the additive child environment."""
     result = dict(current)
+    if "python_index_url" in values or "python_install_mirror" in values:
+        for key in ("UV_CONFIG_FILE", "UV_NO_CONFIG"):
+            if current.get(key):
+                raise ValueError(f"{key} requires explicit source reconciliation")
     if "python_index_url" in values:
         if current.get("PIP_CONFIG_FILE", "").lower() in {"nul", "/dev/null"}:
             raise ValueError("PIP_CONFIG_FILE disables native configuration")
         for key in (
-            "UV_INDEX", "UV_EXTRA_INDEX_URL", "UV_FIND_LINKS", "UV_CONFIG_FILE",
-            "UV_INSECURE_HOST", "UV_NO_INDEX", "UV_NO_CONFIG", "PIP_EXTRA_INDEX_URL",
+            "UV_INDEX", "UV_EXTRA_INDEX_URL", "UV_FIND_LINKS",
+            "UV_INSECURE_HOST", "UV_NO_INDEX", "PIP_EXTRA_INDEX_URL",
             "PIP_FIND_LINKS", "PIP_TRUSTED_HOST", "PIP_NO_INDEX",
         ):
             if current.get(key):
@@ -267,9 +290,10 @@ def plan_native_configuration(
 def apply_configuration(path: Path, *, home: Path | None = None, root: Path | None = None) -> None:
     """Apply selected defaults before the standard installer starts package work."""
     values = read_configuration(path)
-    selected_home = home or Path(os.environ.get("USERPROFILE") or Path.home())
-    updated = environment(values, os.environ)
-    changes = plan_native_configuration(values, selected_home, os.environ, windows=os.name == "nt")
+    current = _routing_environment(os.environ)
+    selected_home = home or Path(current.get("USERPROFILE") or Path.home())
+    updated = environment(values, current)
+    changes = plan_native_configuration(values, selected_home, current, windows=os.name == "nt")
     if root is not None:
         retained = root / "toolchain.conf"
         content = "schema=1\n" + "".join(f"{key}={value}\n" for key, value in values.items())
@@ -292,12 +316,16 @@ def apply_configuration(path: Path, *, home: Path | None = None, root: Path | No
         finally:
             if temporary is not None:
                 os.unlink(temporary)
+    if current.get("COPILOT_EXTENSIONS_TOOLCHAIN_REQUEST") == "1" and os.name != "nt":
+        for name in ("npm_config_registry", "npm_config_userconfig", "npm_config_globalconfig"):
+            os.environ.pop(name, None)
     os.environ.update(updated)
 
 
 def configure_selected(*, root: Path, apply: bool) -> None:
     """Reconcile the selected input without executing adopter-provided code."""
-    selected = os.environ.get(CONFIGURATION_ENV)
+    current = _routing_environment(os.environ)
+    selected = current.get(CONFIGURATION_ENV)
     if not selected:
         candidate = Path.cwd() / ".copilot-extensions" / "toolchain.conf"
         selected = str(candidate if candidate.exists() else root / "toolchain.conf")
@@ -311,6 +339,6 @@ def configure_selected(*, root: Path, apply: bool) -> None:
     else:
         values = read_configuration(path)
         plan_native_configuration(
-            values, Path(os.environ.get("USERPROFILE") or Path.home()), os.environ,
+            values, Path(current.get("USERPROFILE") or Path.home()), current,
             windows=os.name == "nt",
         )

@@ -82,6 +82,8 @@ preserved. Uv checks include `[pip]` selectors and the effective system file
 (the first discovered XDG system file, otherwise the platform system file).
 System configuration is never modified, and an existing matching system default
 does not cause setup to append a second default index.
+The no-Python native preflight refuses source-bearing inline/dotted uv pip
+forms rather than guessing; use ordinary `[pip]` tables for that path.
 Additional/opaque selectors such as extra indexes, find-links, scoped npm
 registries, explicit `UV_CONFIG_FILE`, or conflicting uv installer download
 overrides require reconciliation and are not cleared. Errors start no package
@@ -90,12 +92,33 @@ multi-file transaction or rollback of a later failed installation.
 An explicit pip configuration that disables discovery (`NUL` or `/dev/null`)
 is also refused. Relative native pip/npm config paths are anchored before
 bootstrap changes directories.
+Checks stay channel-specific: selecting only a managed-Python mirror preserves
+independent package-index settings. Explicit uv discovery overrides are still
+refused for either Python channel, since they can bypass the persisted file.
 
 This is a small defaults provider, not an organization policy engine. It does
 not classify an alternate endpoint as approved, discover credentials, replace a
 native source profile, or change artifact qualification and dependency
 seasoning. Organizations supply their own values; generic defaults remain
 organization-neutral.
+
+## Queued installation and update
+
+When configuration is selected, the existing execution request captures its
+selection and the bounded native routing selectors, including their absence.
+Participants restore those inputs before configuration preflight rather than
+inheriting a different draining worker's selection. Relative native config paths
+are anchored at submission. Lowercase npm selectors are preserved through
+explicit uppercase request fields on POSIX.
+
+This uses the execution owner's existing safe request context; it does not
+expand the runner's Python-import-only environment mapping or copy arbitrary
+environment/token variables. URL selectors containing embedded credentials,
+queries or fragments cannot enter this durable routing context; use the native
+credential owner instead. Credential-bearing file contents are not copied.
+No-config requests retain their older context baseline. A configured request
+requires a product receiver supporting this request-context contract; do not
+strip mandatory inputs to make an older strict receiver accept it.
 
 ## Channel and compatibility limits
 
@@ -107,11 +130,13 @@ prerequisite/application owner; this contract does not add a Node binary mirror
 or claim that an npm registry controls Node installation.
 
 `--describe-toolchain-config` on the selected native bootstrap describes
-`copilot-extensions.toolchain-config` version 1 and its supported fields.
+`copilot-extensions.toolchain-config` version 1, its supported fields and the
+`request-context-v1` capability.
 Callers must establish this support before sending the new leading option.
 The bootstrap additionally requires the fetched standard Python installer's
-`toolchain-config=1` capability marker when configuration is selected; an older
-source is refused rather than silently dropping persistence. No-config callers
+`toolchain-config=1` and `toolchain-context=1` capability markers when
+configuration is selected; an older source is refused rather than silently
+dropping persistence or queued routing. No-config callers
 retain their old syntax and do not require this capability.
 
 Release provider support before migrating adopters. A source merge is not a

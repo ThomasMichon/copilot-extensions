@@ -488,6 +488,81 @@ Path(sys.argv[1]).write_text(json.dumps(report),encoding="utf-8")
         assert os.environ[KEY] == "different-worker-selection"
 
 
+@pytest.mark.parametrize("configured", [True, False])
+def test_real_queued_toolchain_preflight_uses_caller_not_drainer_selectors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, configured: bool,
+) -> None:
+    index = "https://caller.example.invalid/simple/"
+    home, queue, root = tmp_path / "caller", tmp_path / "queue", tmp_path / "manager"
+    home.mkdir()
+    config, pip = home / "toolchain.conf", home / "selected-pip.ini"
+    config.write_text(f"schema=1\npython_index_url={index}\n", encoding="ascii")
+    pip.write_text("[global]\ntimeout = 73\n", encoding="utf-8")
+    for key, path in {
+        "HOME": home, "USERPROFILE": home, "APPDATA": home / "appdata",
+        "PROGRAMDATA": home / "programdata", "XDG_CONFIG_HOME": home / ".config",
+        "XDG_CONFIG_DIRS": home / "global-config", "WORKTREE_MANAGER_ROOT": root,
+    }.items():
+        monkeypatch.setenv(key, str(path))
+    selectors = (
+        "COPILOT_EXTENSIONS_TOOLCHAIN_CONFIG", "PIP_CONFIG_FILE",
+        "UV_DEFAULT_INDEX", "PIP_INDEX_URL", "UV_CONFIG_FILE", "UV_NO_CONFIG",
+    )
+    for key in (*selectors, "UV_INDEX", "UV_INDEX_URL", "UV_EXTRA_INDEX_URL", "PIP_EXTRA_INDEX_URL",
+                "UV_FIND_LINKS", "PIP_FIND_LINKS", "PIP_TRUSTED_HOST", "PIP_NO_INDEX",
+                "UV_INSECURE_HOST", "UV_NO_INDEX", "VIRTUAL_ENV"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv(selectors[0], str(config))
+    monkeypatch.delenv("npm_config_userconfig", raising=False)
+    if configured:
+        for key, value in {
+            "PIP_CONFIG_FILE": str(pip), "npm_config_userconfig": str(home / ".npmrc"),
+            "UV_DEFAULT_INDEX": index, "PIP_INDEX_URL": index,
+        }.items():
+            monkeypatch.setenv(key, value)
+    context = manager.request_context(capture_engine=False, capture_toolchain=True)
+    report = tmp_path / "toolchain-participant.json"
+    program = """
+import json,os,sys
+from pathlib import Path
+sys.path.insert(0,sys.argv[2])
+from worktree_manager import toolchain_config
+keys=json.loads(sys.argv[3])
+result={"before":{key:os.environ.get(key) for key in keys}}
+toolchain_config.configure_selected(root=Path(os.environ["WORKTREE_MANAGER_ROOT"]),apply=True)
+result["index"]=os.environ.get("PIP_INDEX_URL")
+result["retained"]=os.environ.get("COPILOT_EXTENSIONS_TOOLCHAIN_CONFIG")
+result["npm"]=os.environ.get("npm_config_userconfig")
+Path(sys.argv[1]).write_text(json.dumps(result),encoding="utf-8")
+"""
+    request = update_driver.enqueue(
+        update_driver.RequestSpec(
+            "manager", ("toolchain", str(configured)), cwd=str(tmp_path),
+            source="toolchain-request-context", context=tuple(context.items()),
+        ),
+        runner=update_driver.TrustedRunner(
+            (sys.executable, "-I", "-S", "-B", "-c", program, str(report),
+             str(Path(__file__).resolve().parents[1] / "src"), json.dumps(selectors)),
+            str(tmp_path), context_keys=manager._runner_context_keys(context),
+        ), root=queue,
+    )
+    for key in selectors:
+        monkeypatch.setenv(key, "foreign-drainer-selection")
+    monkeypatch.setenv("npm_config_userconfig", "foreign-drainer-selection")
+    assert update_driver.drain(root=queue) == 0
+    completed = update_driver.status(request.id, root=queue)
+    assert not isinstance(completed, tuple) and completed.state == "completed"
+    result = json.loads(report.read_text(encoding="utf-8"))
+    assert result["before"] == {key: context.get(key) for key in selectors}
+    assert result["index"] == index
+    assert result["retained"] == str(root / "toolchain.conf")
+    assert result["npm"] == (str(home / ".npmrc") if configured else None)
+    assert all(os.environ[key] == "foreign-drainer-selection" for key in selectors)
+    if configured:
+        assert index in pip.read_text(encoding="utf-8")
+        assert "timeout = 73" in pip.read_text(encoding="utf-8")
+
+
 def test_helper_base_interpreter_survives_application_environment_retirement(
     tmp_path: Path,
 ) -> None:
