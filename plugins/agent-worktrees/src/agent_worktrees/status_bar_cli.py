@@ -20,7 +20,7 @@ from . import output
 from . import worktree_identity
 from . import segment_render_observation
 from .git_state_types import _GitProbeOptions
-from machine_transport import detect_platform, machine_name
+from machine_transport import MachineEntry
 
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
@@ -787,7 +787,8 @@ def _resolve_machine_alias(machine: str, repo: str | None, platform: str) -> str
         entry = cfg.find_machine_entry(entries, machine, execution_platform=platform)
         if entry is None:
             return machine
-        return entry.physical_host or machine_name(entry)
+        name_of: Callable[[MachineEntry], str] = getattr(cfg, "machine_name")
+        return entry.physical_host or name_of(entry)
     except Exception:
         return machine
 
@@ -820,7 +821,8 @@ def _render_status_context(path: str | None = None, plain: bool = False) -> str:
     target = str(Path(path).resolve()) if path else os.getcwd()
     rec = _find_record_for_path(target)
 
-    platform = (rec.platform if rec and rec.platform else "") or detect_platform()
+    platform_detector: Callable[[], str] = getattr(cfg, "detect_platform")
+    platform = (rec.platform if rec and rec.platform else "") or platform_detector()
     machine = (rec.machine if rec and rec.machine else "") or cfg.detect_machine()
     machine = _resolve_machine_alias(machine, rec.repo if rec else None, platform)
     env = _platform_short(platform)
