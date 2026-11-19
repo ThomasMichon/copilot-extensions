@@ -38,6 +38,7 @@ on:
       - worktree-manager/tests/test_bootstrap_ps1.py
       - worktree-manager/tests/test_bootstrap_sh.py
       - worktree-manager/tests/test_toolchain_config.py
+      - worktree-manager/tests/test_toolchain_handoff.py
       - worktree-manager/tests/test_update_python_context.py
       - worktree-manager/tests/test_application_input_provider.py
       - worktree-manager/tests/test_update_bootstrap.py
@@ -89,6 +90,7 @@ jobs:
           --test-file tests/test_bootstrap_ps1.py
           --test-file tests/test_bootstrap_sh.py
           --test-file tests/test_toolchain_config.py
+          --test-file tests/test_toolchain_handoff.py
           --test-file tests/test_update_python_context.py
           -k "not full_declared_repository_inputs_reach_immutable_retention and
           (not test_bootstrap_ps1.py or managed_python or
