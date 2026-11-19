@@ -161,8 +161,11 @@ retaining strict legacy JSON. `ReplayConsumer.prepare` validates the requested
 criteria and original finite deadline before `prepare_run_waiter`: unsupported
 criteria leave the task unsuspended and emit no registration. Discovery applies
 to watch-only bindings too; no workspace route or extra policy request is
-required. Missing metadata preserves baseline behavior; unsupported metadata
-refuses capability negotiation. The normal cycle still reconciles existing
+required. The selected client must expose `registration_admission`; an older
+client without that attribute refuses new preparation before suspension.
+Only a capable client reporting `None` selects baseline policy. An absent
+provider media profile through that capable client remains supported;
+unsupported metadata refuses capability negotiation. The normal cycle still reconciles existing
 receipts, cancellation and wake-before-ACK; it does not apply a new-admission
 check to settlement. Actual TLS/PoP controls cover both v1 and scoped-v2 callers.
 Provider/consumer rollout and operational enrollment remain separate; this

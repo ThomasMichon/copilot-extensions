@@ -97,7 +97,10 @@ class ReplayConsumer:
             raise ValueError("replay binding changed")
         self._check_binding()
         capabilities = await self.client.capabilities()
-        admission = getattr(capabilities, "registration_admission", None)
+        try:
+            admission = capabilities.registration_admission
+        except AttributeError:
+            raise ValueError("replay registration admission capabilities unsupported") from None
         if admission is not None:
             admission.validate_registration(
                 until=tuple(delegation["until"]),

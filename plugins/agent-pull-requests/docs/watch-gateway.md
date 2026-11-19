@@ -103,6 +103,10 @@ an unknown, malformed or duplicate profile refuses discovery before mutation.
 New delegation owners validate requested criteria/deadline against that
 declaration **before** suspending work. Ordinary receipt reconciliation must
 remain available and does not become a new registration.
+An older optional client without the `registration_admission` capability
+attribute is unsupported for new preparation; absence of that client API is
+not the same as an admission-aware client reporting a baseline `None` policy.
+Existing receipt reconciliation remains available across that client skew.
 
 Legacy direct requests with supported finite criteria retain their semantics.
 Unaware delegation clients are not qualified for a new restricted profile:

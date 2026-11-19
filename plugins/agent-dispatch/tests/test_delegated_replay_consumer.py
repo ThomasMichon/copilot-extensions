@@ -2,24 +2,31 @@ from __future__ import annotations
 
 import asyncio
 import copy
+from collections.abc import Callable
+from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
 from agent_dispatch.delegated_replay_consumer import ReplayConsumer
 from agent_dispatch.delegated_waiter_contract import validate_delegation
-from agent_dispatch.queue import TaskError
+from agent_dispatch.queue_records import TaskError
 from agent_dispatch.run_waiter_recovery import recover_run_waiters
-from tests._delegation_helpers import event, identity, prepare, task
+from tests import _delegation_helpers
 from tests._helpers import RepoDefaultingQueue as TaskQueue
 
 pytestmark = pytest.mark.contract("agent_dispatch.delegated_replay")
 
 BINDING = {"gateway": "https://gateway.example", "route_prefix": "/services/pr",
            "target": "sample", "repo": "example/project", "caller_scope": "principal:one"}
+event: Callable[..., dict[str, Any]] = _delegation_helpers.event
+identity: Callable[..., dict[str, Any]] = _delegation_helpers.identity
+prepare: Callable[..., Any] = _delegation_helpers.prepare
+task: Callable[..., str] = _delegation_helpers.task
 
 
-def intent(queue, suffix="one"):
+def intent(queue: TaskQueue, suffix: str = "one") -> dict[str, Any]:
     return {**identity(queue, suffix), "replay": {
         "binding": copy.deepcopy(BINDING), "request_id": "request:" + suffix,
         "issued_at": 100.0, "deadline_at": 400.0,
@@ -27,24 +34,32 @@ def intent(queue, suffix="one"):
 
 
 class Service:
-    def __init__(self, queue):
+    def __init__(self, queue: TaskQueue) -> None:
         self.queue = queue
-        self.records, self.events, self.calls = {}, [], []
-        self.fault, self.on_register, self.on_ack = None, None, None
+        self.records: dict[str, SimpleNamespace] = {}
+        self.events: list[SimpleNamespace] = []
+        self.calls: list[tuple[str, Any]] = []
+        self.fault: str | None = None
+        self.on_register: Callable[[], Any] | None = None
+        self.on_ack: Callable[[], Any] | None = None
 
-    def call(self, name, request=None):
+    def call(self, name: str, request: Any = None) -> None:
         self.calls.append((name, request))
 
-    def fail(self, name):
+    def fail(self, name: str) -> None:
         if self.fault == name:
             self.fault = None
             raise ValueError("outcome unknown")
 
-    async def capabilities(self):
+    async def capabilities(self) -> SimpleNamespace:
         self.call("capabilities")
         self.fail("capabilities")
+        return SimpleNamespace(registration_admission=None)
 
-    async def register(self, request, *, number, until, deadline_at):
+    async def register(
+        self, request: tuple[str, float], *, number: int,
+        until: tuple[str, ...], deadline_at: float,
+    ) -> SimpleNamespace:
         self.call("register", request)
         self.fail("before-register")
         key = request[0]
@@ -57,14 +72,17 @@ class Service:
         self.fail("after-register")
         return copy.copy(self.records[key])
 
-    async def inspect(self, request):
+    async def inspect(self, request: tuple[str, float]) -> SimpleNamespace:
         self.call("inspect", request)
         self.fail("inspect")
         return copy.copy(self.records.get(request[0], SimpleNamespace(status="uncertain")))
 
-    async def acknowledge(self, request, *, registration_id, event_id):
+    async def acknowledge(
+        self, request: tuple[str, float], *, registration_id: str, event_id: str,
+    ) -> SimpleNamespace:
         self.call("acknowledge", request)
         waiter = self.queue.find_replay_waiter(BINDING, registration_id)
+        assert waiter is not None
         assert waiter["event_id"] == event_id and waiter["state"] == "retired"
         self.fail("before-ack")
         record = self.records[request[0]]
@@ -76,7 +94,7 @@ class Service:
         self.fail("after-ack")
         return copy.copy(record)
 
-    async def cancel(self, request, *, registration_id):
+    async def cancel(self, request: tuple[str, float], *, registration_id: str) -> SimpleNamespace:
         self.call("cancel", request)
         record = self.records[request[0]]
         assert record.registration_id == registration_id
@@ -85,12 +103,12 @@ class Service:
         self.fail("after-cancel")
         return copy.copy(record)
 
-    async def pending(self, *, limit):
+    async def pending(self, *, limit: int) -> SimpleNamespace:
         self.call("pending")
         assert limit == 16
         return SimpleNamespace(events=tuple(self.events[:limit]), more=len(self.events) > limit)
 
-    def fire(self, spec, **changes):
+    def fire(self, spec: dict[str, Any], **changes: Any) -> SimpleNamespace:
         registration = self.records[spec["replay"]["request_id"]].registration_id
         payload = event({**spec, "subscriber_id": registration}, registration=registration)
         payload.update(changes)
@@ -102,18 +120,20 @@ class Service:
         return fired
 
 
-def consumer(queue, service, binding=None):
+def consumer(
+    queue: TaskQueue, service: Service, binding: dict[str, Any] | None = None,
+) -> ReplayConsumer:
     return ReplayConsumer(
         queue, binding=binding or BINDING, client=service,
         request_factory=lambda request_id, issued_at: (request_id, issued_at),
     )
 
 
-def cycle(owner):
+def cycle(owner: ReplayConsumer) -> dict[str, Any]:
     return asyncio.run(owner.cycle())
 
 
-def setup(tmp_path):
+def setup(tmp_path: Path) -> tuple[TaskQueue, str, dict[str, Any], Service, ReplayConsumer]:
     queue = TaskQueue(tmp_path / "tasks.db")
     task_id = task(queue)
     spec = intent(queue)
@@ -123,7 +143,7 @@ def setup(tmp_path):
 
 
 @pytest.mark.parametrize("fault", ["before-register", "after-register"])
-def test_original_request_survives_registration_disconnect_and_restart(tmp_path, fault):
+def test_original_request_survives_registration_disconnect_and_restart(tmp_path: Path, fault: str) -> None:
     queue, task_id, spec, service, owner = setup(tmp_path)
     service.fault = fault
     assert cycle(owner)["blocked"]
@@ -135,17 +155,19 @@ def test_original_request_survives_registration_disconnect_and_restart(tmp_path,
     requests = [r for name, r in service.calls if name == "register"]
     assert requests == [("request:one", 100.0)] * 2
     assert len(service.records) == 1
-    assert restored.get_active_run_waiter(task_id)["delegation"]["replay"] == spec["replay"]
+    waiter = restored.get_active_run_waiter(task_id)
+    assert waiter is not None
+    assert waiter["delegation"]["replay"] == spec["replay"]
     assert not queue.list_run_waiter_wakes(task_id)
 
 
 @pytest.mark.parametrize("fault", [None, "before-ack", "after-ack", "cancelled-after-ack"])
-def test_effect_commits_before_ack_and_restarts_without_duplicate_wake(tmp_path, fault):
+def test_effect_commits_before_ack_and_restarts_without_duplicate_wake(tmp_path: Path, fault: str | None) -> None:
     queue, task_id, spec, service, owner = setup(tmp_path)
     cycle(owner)
     service.fire(spec, snapshot={"native": "retained upstream"})
     if fault == "cancelled-after-ack":
-        def cancel():
+        def cancel() -> None:
             raise asyncio.CancelledError
         service.on_ack = cancel
         with pytest.raises(asyncio.CancelledError):
@@ -163,7 +185,7 @@ def test_effect_commits_before_ack_and_restarts_without_duplicate_wake(tmp_path,
     assert len(service.records) == 1
 
 
-def test_supersession_during_remote_commit_cancels_only_original(tmp_path):
+def test_supersession_during_remote_commit_cancels_only_original(tmp_path: Path) -> None:
     queue, task_id, spec, service, owner = setup(tmp_path)
     service.on_register = lambda: prepare(queue, task_id, identity(queue, "next"))
     cycle(owner)
@@ -177,7 +199,7 @@ def test_supersession_during_remote_commit_cancels_only_original(tmp_path):
     assert queue.list_pending_run_waiters()[0]["generation"] == 2
 
 
-def test_cancelled_before_emission_never_registers(tmp_path):
+def test_cancelled_before_emission_never_registers(tmp_path: Path) -> None:
     queue, task_id, _, service, owner = setup(tmp_path)
     queue.cancel_preparing_run_waiter(task_id, generation=1, reason="cancelled")
     assert cycle(owner)["settled"] == 1
@@ -185,7 +207,7 @@ def test_cancelled_before_emission_never_registers(tmp_path):
     assert [c[0] for c in service.calls] == ["capabilities", "pending"]
 
 
-def test_cancel_commit_lost_receipt_is_reconciled_after_restart(tmp_path):
+def test_cancel_commit_lost_receipt_is_reconciled_after_restart(tmp_path: Path) -> None:
     queue, task_id, _, service, owner = setup(tmp_path)
     cycle(owner)
     queue.supersede_run_waiter_with_wake(
@@ -200,11 +222,11 @@ def test_cancel_commit_lost_receipt_is_reconciled_after_restart(tmp_path):
 
 
 @pytest.mark.parametrize("armed", [False, True])
-def test_legacy_recovery_never_probes_or_expires_service_wait(tmp_path, armed):
+def test_legacy_recovery_never_probes_or_expires_service_wait(tmp_path: Path, armed: bool) -> None:
     queue, task_id, spec, service, owner = setup(tmp_path)
     if armed:
         cycle(owner)
-    def forbidden(*args):
+    def forbidden(*args: Any) -> Any:
         pytest.fail("service replay is not local callback/PID recovery")
     queue._now = lambda _: 10_000.0
     counts = recover_run_waiters(
@@ -219,7 +241,7 @@ def test_legacy_recovery_never_probes_or_expires_service_wait(tmp_path, armed):
     ("gateway", "https://another.example"), ("target", "another"),
     ("route_prefix", "/services/another"), ("caller_scope", "principal:two"),
 ])
-def test_configuration_change_cannot_retarget_old_intent(tmp_path, field, value):
+def test_configuration_change_cannot_retarget_old_intent(tmp_path: Path, field: str, value: str) -> None:
     queue, _, _, service, _ = setup(tmp_path)
     owner = consumer(queue, service, {**BINDING, field: value})
     cycle(owner)
@@ -231,7 +253,7 @@ def test_configuration_change_cannot_retarget_old_intent(tmp_path, field, value)
     {"subscriber_id": "other"}, {"number": 8}, {"repo": "other/project"},
     {"transitions": ["checks_changed"]}, {"merged": "yes"},
 ])
-def test_mismatching_event_never_wakes_or_acknowledges(tmp_path, change):
+def test_mismatching_event_never_wakes_or_acknowledges(tmp_path: Path, change: dict[str, Any]) -> None:
     queue, task_id, spec, service, owner = setup(tmp_path)
     cycle(owner)
     service.fire(spec, **change)
@@ -240,7 +262,7 @@ def test_mismatching_event_never_wakes_or_acknowledges(tmp_path, change):
     assert "acknowledge" not in [c[0] for c in service.calls]
 
 
-def test_receipt_without_local_effect_cannot_fabricate_completion(tmp_path):
+def test_receipt_without_local_effect_cannot_fabricate_completion(tmp_path: Path) -> None:
     queue, task_id, _, service, owner = setup(tmp_path)
     cycle(owner)
     service.records["request:one"].status = "acknowledged"
@@ -251,7 +273,7 @@ def test_receipt_without_local_effect_cannot_fabricate_completion(tmp_path):
     assert queue.list_replay_waiters(BINDING)
 
 
-def test_bounded_scan_rotates_past_unknown_originals(tmp_path):
+def test_bounded_scan_rotates_past_unknown_originals(tmp_path: Path) -> None:
     queue = TaskQueue(tmp_path / "tasks.db")
     for i in range(35):
         prepare(queue, task(queue), intent(queue, str(i)))
@@ -265,7 +287,7 @@ def test_bounded_scan_rotates_past_unknown_originals(tmp_path):
     assert len(service.records) == 35
 
 
-def test_original_request_cannot_be_reused_by_another_task(tmp_path):
+def test_original_request_cannot_be_reused_by_another_task(tmp_path: Path) -> None:
     queue, _, spec, _, _ = setup(tmp_path)
     another = task(queue)
     with pytest.raises(TaskError, match="already bound"):
@@ -273,9 +295,9 @@ def test_original_request_cannot_be_reused_by_another_task(tmp_path):
     assert len(queue.list_pending_run_waiters()) == 1
 
 
-def test_attempt_is_durable_before_network_and_settlement_is_atomic(tmp_path):
+def test_attempt_is_durable_before_network_and_settlement_is_atomic(tmp_path: Path) -> None:
     queue, task_id, _, service, owner = setup(tmp_path)
-    def cancel():
+    def cancel() -> None:
         waiter = queue.list_pending_run_waiters()[0]
         assert waiter["replay_attempted"]
         queue.cancel_preparing_run_waiter(task_id, generation=1, reason="cancelled")
@@ -290,7 +312,7 @@ def test_attempt_is_durable_before_network_and_settlement_is_atomic(tmp_path):
     {"issued_at": True}, {"deadline_at": float("inf")}, {"deadline_at": 401.0},
     {"extra": "unknown"}, {"request_id": "invalid/id"},
 ])
-def test_invalid_remote_intent_is_rejected(tmp_path, change):
+def test_invalid_remote_intent_is_rejected(tmp_path: Path, change: dict[str, Any]) -> None:
     queue = TaskQueue(tmp_path / "tasks.db")
     spec = intent(queue)
     spec["replay"].update(change)
@@ -298,36 +320,42 @@ def test_invalid_remote_intent_is_rejected(tmp_path, change):
         validate_delegation(spec)
 
 
-def test_service_summary_uses_original_deadline(tmp_path):
+def test_service_summary_uses_original_deadline(tmp_path: Path) -> None:
     from agent_dispatch.queue_run_waiter_records import run_waiter_summary
     queue, task_id, _, service, owner = setup(tmp_path)
     cycle(owner)
-    summary = run_waiter_summary(queue.get_active_run_waiter(task_id))
+    waiter = queue.get_active_run_waiter(task_id)
+    assert waiter is not None
+    summary = run_waiter_summary(waiter)
     assert summary["observation_deadline"] == 400.0
     assert summary["delivery"] == "service-replay"
     with pytest.raises(TaskError):
-        queue.replay_waiter_progress(queue.get_active_run_waiter(task_id), settled=True)
+        queue.replay_waiter_progress(waiter, settled=True)
 
 
-def test_preparation_negotiates_before_suspending_task(tmp_path):
+def test_preparation_negotiates_before_suspending_task(tmp_path: Path) -> None:
     queue = TaskQueue(tmp_path / "tasks.db")
     task_id = task(queue)
     service = Service(queue)
     owner = consumer(queue, service)
     service.fault = "capabilities"
-    options = dict(delegation=intent(queue), worker_id="worker", resume_worktree="host/wt",
-                   host="host", reason="waiting")
+    options: dict[str, Any] = dict(
+        delegation=intent(queue), worker_id="worker", resume_worktree="host/wt",
+        host="host", reason="waiting",
+    )
     with pytest.raises(ValueError):
         asyncio.run(owner.prepare(task_id, **options))
-    assert queue.get(task_id).status == "started"
+    started = queue.get(task_id)
+    assert started is not None and started.status == "started"
     assert not queue.list_pending_run_waiters()
     asyncio.run(owner.prepare(task_id, **options))
-    assert queue.get(task_id).status == "suspended"
+    suspended = queue.get(task_id)
+    assert suspended is not None and suspended.status == "suspended"
     assert len(queue.list_pending_run_waiters()) == 1
     assert service.records == {}
 
 
-def test_failed_first_row_does_not_skip_rest_of_page_forever(tmp_path):
+def test_failed_first_row_does_not_skip_rest_of_page_forever(tmp_path: Path) -> None:
     queue = TaskQueue(tmp_path / "tasks.db")
     for i in range(35):
         prepare(queue, task(queue), intent(queue, str(i)))
@@ -343,22 +371,22 @@ def test_failed_first_row_does_not_skip_rest_of_page_forever(tmp_path):
 
 
 @pytest.mark.parametrize("status", ["uncertain", "conflict", "unavailable"])
-def test_ambiguous_or_refused_receipt_keeps_original_without_later_emission(tmp_path, status):
+def test_ambiguous_or_refused_receipt_keeps_original_without_later_emission(tmp_path: Path, status: str) -> None:
     queue, task_id, _, service, owner = setup(tmp_path)
-    async def register(*args, **kwargs):
+    async def register(*args: Any, **kwargs: Any) -> SimpleNamespace:
         return SimpleNamespace(status=status)
-    service.register = register
+    setattr(service, "register", register)
     assert cycle(owner)["blocked"]
     assert queue.list_pending_run_waiters()[0]["replay_attempted"]
     assert [c[0] for c in service.calls] == ["capabilities"]
     assert not queue.list_run_waiter_wakes(task_id)
 
 
-def test_completed_event_cannot_wake_replacement_generation(tmp_path):
+def test_completed_event_cannot_wake_replacement_generation(tmp_path: Path) -> None:
     queue, task_id, spec, service, owner = setup(tmp_path)
     cycle(owner)
     service.fire(spec)
-    def replace():
+    def replace() -> None:
         prepare(queue, task_id, identity(queue, "replacement"))
     service.on_ack = replace
     service.fault = "after-ack"
@@ -371,7 +399,7 @@ def test_completed_event_cannot_wake_replacement_generation(tmp_path):
     assert len(queue.list_run_waiter_wakes(task_id)) == 1
 
 
-def test_stale_pending_event_cancels_without_completing_new_generation(tmp_path):
+def test_stale_pending_event_cancels_without_completing_new_generation(tmp_path: Path) -> None:
     queue, task_id, spec, service, owner = setup(tmp_path)
     cycle(owner)
     fired = service.fire(spec)
@@ -384,7 +412,7 @@ def test_stale_pending_event_cancels_without_completing_new_generation(tmp_path)
     assert all(wake.sender != "agent-dispatch-hibernate" for wake in queue.list_run_waiter_wakes(task_id))
 
 
-def test_binding_mutation_and_changed_caller_are_not_new_admission(tmp_path):
+def test_binding_mutation_and_changed_caller_are_not_new_admission(tmp_path: Path) -> None:
     queue, _, _, service, owner = setup(tmp_path)
     owner.binding["gateway"] = "https://another.example"
     assert owner.binding == BINDING
@@ -393,7 +421,7 @@ def test_binding_mutation_and_changed_caller_are_not_new_admission(tmp_path):
     assert service.calls == []
 
 
-def test_duplicate_registration_is_refused_without_cross_task_effect(tmp_path):
+def test_duplicate_registration_is_refused_without_cross_task_effect(tmp_path: Path) -> None:
     queue, task_id, _, service, owner = setup(tmp_path)
     cycle(owner)
     another = task(queue)
@@ -406,23 +434,24 @@ def test_duplicate_registration_is_refused_without_cross_task_effect(tmp_path):
     assert queue.list_pending_run_waiters()[0]["task_id"] == another
 
 
-def test_oversized_pending_batch_is_refused(tmp_path):
+def test_oversized_pending_batch_is_refused(tmp_path: Path) -> None:
     queue, _, _, service, owner = setup(tmp_path)
-    async def pending(**kwargs):
+    async def pending(**kwargs: Any) -> SimpleNamespace:
         return SimpleNamespace(events=(object(),) * 17)
-    service.pending = pending
+    setattr(service, "pending", pending)
     assert cycle(owner)["blocked"]
     assert queue.list_active_run_waiters()
 
 
-def test_preparation_detaches_identity_before_awaiting_capabilities(tmp_path):
+def test_preparation_detaches_identity_before_awaiting_capabilities(tmp_path: Path) -> None:
     queue = TaskQueue(tmp_path / "tasks.db")
     task_id = task(queue)
     spec = intent(queue)
     service = Service(queue)
-    async def capabilities():
+    async def capabilities() -> SimpleNamespace:
         spec["replay"]["binding"]["gateway"] = "https://another.example"
-    service.capabilities = capabilities
+        return SimpleNamespace(registration_admission=None)
+    setattr(service, "capabilities", capabilities)
     owner = consumer(queue, service)
     asyncio.run(owner.prepare(
         task_id, delegation=spec, worker_id="worker", resume_worktree="host/wt",
@@ -431,7 +460,7 @@ def test_preparation_detaches_identity_before_awaiting_capabilities(tmp_path):
     assert queue.list_pending_run_waiters()[0]["delegation"]["replay"]["binding"] == BINDING
 
 
-def test_local_recovery_query_excludes_remote_projection_with_an_index(tmp_path):
+def test_local_recovery_query_excludes_remote_projection_with_an_index(tmp_path: Path) -> None:
     queue, task_id, _, service, owner = setup(tmp_path)
     assert queue.list_pending_run_waiters(local_only=True) == []
     cycle(owner)
@@ -447,7 +476,7 @@ def test_local_recovery_query_excludes_remote_projection_with_an_index(tmp_path)
     assert "TEMP B-TREE" not in details
 
 
-def test_worst_case_cycle_has_exact_82_call_bound(tmp_path):
+def test_worst_case_cycle_has_exact_82_call_bound(tmp_path: Path) -> None:
     queue = TaskQueue(tmp_path / "tasks.db")
     targets = []
     for i in range(48):
@@ -470,7 +499,7 @@ def test_worst_case_cycle_has_exact_82_call_bound(tmp_path):
     assert len(service.calls) == 82
 
 
-def test_unresolved_final_row_yields_a_separately_admitted_pending_turn(tmp_path):
+def test_unresolved_final_row_yields_a_separately_admitted_pending_turn(tmp_path: Path) -> None:
     queue, task_id, spec, service, owner = setup(tmp_path)
     final_task = task(queue)
     final_spec = intent(queue, "final")
@@ -492,7 +521,7 @@ def test_unresolved_final_row_yields_a_separately_admitted_pending_turn(tmp_path
 
 
 @pytest.mark.parametrize("operation", ["acknowledge", "cancel"])
-def test_unresolved_terminal_settlement_stops_before_later_registration(tmp_path, operation):
+def test_unresolved_terminal_settlement_stops_before_later_registration(tmp_path: Path, operation: str) -> None:
     queue, task_id, spec, service, owner = setup(tmp_path)
     cycle(owner)
     if operation == "acknowledge":
@@ -504,7 +533,7 @@ def test_unresolved_terminal_settlement_stops_before_later_registration(tmp_path
             task_id, reason="cancelled", message="recheck", sender="test",
         )
     prepare(queue, task(queue), intent(queue, "later"))
-    async def unresolved(*args, **kwargs):
+    async def unresolved(*args: Any, **kwargs: Any) -> SimpleNamespace:
         return SimpleNamespace(status="uncertain")
     setattr(service, operation, unresolved)
     result = cycle(consumer(queue, service))
@@ -513,7 +542,7 @@ def test_unresolved_terminal_settlement_stops_before_later_registration(tmp_path
     assert queue.list_replay_waiters(BINDING)[0]["task_id"] == task_id
 
 
-def test_duplicate_replay_transitions_refused_before_suspension(tmp_path):
+def test_duplicate_replay_transitions_refused_before_suspension(tmp_path: Path) -> None:
     queue = TaskQueue(tmp_path / "tasks.db")
     task_id = task(queue)
     spec = intent(queue)
@@ -524,7 +553,8 @@ def test_duplicate_replay_transitions_refused_before_suspension(tmp_path):
             task_id, delegation=spec, worker_id="worker", resume_worktree="host/wt",
             host="host", reason="waiting",
         ))
-    assert queue.get(task_id).status == "started"
+    started = queue.get(task_id)
+    assert started is not None and started.status == "started"
     assert not queue.list_pending_run_waiters()
     assert service.calls == []
     local = identity(queue)
