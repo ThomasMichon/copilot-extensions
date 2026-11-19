@@ -833,6 +833,7 @@ migration already works.
 
 ## Journal
 
+- [2026-11-18 - Installed Windows update attempt and refusal diagnostics](journal/2026/11.18-installed-update-attempt.md)
 - [2026-11-18 - Installed Windows native-client baseline](journal/2026/11.18-installed-windows-baseline.md)
 - [2026-11-18 - Settled update refusal and bounded Windows adoption](journal/2026/11.18-settled-update-refusal.md)
 - [2026-11-10 - Explicit originating-owner CLI handoff](journal/2026/11.10-explicit-owner-cli.md)

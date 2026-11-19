@@ -1389,8 +1389,32 @@ _deploy_python_runtime() {
         --result "$result_path" --expected-source-identity "$source_pin" \
         "${mode_args[@]}" || runtime_rc=$?
     if [[ "$runtime_rc" != 0 ]]; then
+        local refusal_detail=''
+        if [[ "$runtime_rc" == 1 ]]; then
+            refusal_detail="$("$base" -I -X utf8 -c '
+import json, sys
+try:
+    with open(sys.argv[1], encoding="utf-8") as stream:
+        result = json.load(stream)
+    refusal = result.get("installation_refused")
+    if (
+        isinstance(result.get("runtime_version"), str) and result["runtime_version"]
+        and isinstance(refusal, dict)
+        and set(refusal) == {"version", "settled", "publication_committed", "error"}
+        and type(refusal["version"]) is int and refusal["version"] == 1
+        and refusal["settled"] is True
+        and type(refusal["publication_committed"]) is bool
+        and isinstance(refusal["error"], str) and refusal["error"].strip()
+    ):
+        error = refusal["error"]
+        committed = str(refusal["publication_committed"]).lower()
+        print(f"{error} (publication_committed={committed}).")
+except (OSError, ValueError, TypeError, AttributeError):
+    pass
+' "$result_path" 2>/dev/null)" || refusal_detail=''
+        fi
         rm -f -- "$result_path"
-        err "Python runtime lifecycle failed"
+        err "Python runtime lifecycle failed (exit $runtime_rc).${refusal_detail:+ $refusal_detail}"
         return "$runtime_rc"
     fi
     parsed="$("$base" -I -X utf8 -c '
