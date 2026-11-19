@@ -120,6 +120,14 @@ source policies or content delivery. The explicit configuration provider merged
 in #13012; declaration observation is its next separate adapter slice. Neither
 source delivery is installed association or convergence evidence.
 
+The [adopter bootstrap configuration slice](bootstrap-toolchain-configuration.md)
+puts early toolchain/feed configuration under the standard finite installer.
+An adopter supplies data, not a prerequisite initialization script. Apply the
+selected configuration before the first applicable Python/pip/uv or Node/npm
+consumer while preserving independent source, credential and application owners.
+It extends the prerequisite boundary under #13409; it does not replace #13119's
+native source-profile feed-selection work or #12905's application conversion.
+
 The [current lifetime clarification](update-service-lifetimes.md) is part of
 this Goal: ordinary updates are foreground-owned and cancellable, while accepted
 service setup/start and its retained process/runtime tree have independent
@@ -221,6 +229,7 @@ service-supervision ownership changes.
 | Wheel-first transition coordinator | Owns the reviewed proposal, prioritized independently releasable app slices and whole-flow qualification | #7028 and #9688; app assignments/evidence in the contributor matrix; existing custodians and separate deployment ownership remain |
 | Fresh recovery dispatcher implementer | Owns the bounded fresh-bootstrap/selected-source composition and disposable entry qualification | #7028; source handle `greased-latch`; existing application, footprint and execution owners retain their scopes |
 | Native application consumer implementer | Owns the bounded standard-environment discovery, command/readiness and cache-adapter slice, not the remaining application portfolio | #7030; source handle `weathered-diode`; [bounded plan](native-application-consumers.md) |
+| Bootstrap configuration implementer | Owns early declarative adopter configuration and its standard bootstrap/setup consumers | #13409; [bounded plan](bootstrap-toolchain-configuration.md); existing prerequisite, feed, source-profile and app-footprint owners retained |
 
 ## Coordination
 
@@ -682,6 +691,10 @@ Existing checked rows below retain only their historical scope.
 
 ### Incremental source-install integration
 
+- [ ] B1: Implement and qualify [early adopter toolchain configuration](bootstrap-toolchain-configuration.md)
+  through the standard bootstrap/setup owners, without adopter initialization
+  scripts or changed no-configuration defaults; review this contract before code.
+
 - [x] S1: Complete the next independent deadline and Git-isolation source
   increments, keeping each bug class, affected canonical copies and focused
   regressions together under the existing owners. Deadline acquisition merged
@@ -845,6 +858,11 @@ adoption. Other completed source slices remain credited in the
   the effort Done or releases another owner's obligation.
 
 ## Validation Plan
+
+The [bootstrap configuration cases](bootstrap-toolchain-configuration.md#validation-plan)
+add first-consumer ordering, native configuration precedence/preservation and
+no-configuration compatibility. They are implementation and real-consumer gates,
+not credit from publishing this plan.
 
 The [app-footprint acceptance cases](app-footprint-transition.md#validation-and-completion-agent-recommended)
 add Manager independence, Main/local-Dev/WIP footprint parity, local version
