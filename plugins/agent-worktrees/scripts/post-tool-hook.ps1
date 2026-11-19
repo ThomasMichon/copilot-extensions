@@ -104,26 +104,61 @@ function Invoke-ResidentPostTool {
     $bytes = $utf8.GetBytes((ConvertTo-PostToolJson $request) + "`n")
     $requestLimit = if ($Kind -ceq 'preToolUse') { 2 * 1024 * 1024 } else { 65536 }
     if ($bytes.Length -gt $requestLimit) { return $null }
-    $client = [Net.Sockets.TcpClient]::new([Net.Sockets.AddressFamily]::InterNetwork)
+    $socket = [Net.Sockets.Socket]::new(
+        [Net.Sockets.AddressFamily]::InterNetwork,
+        [Net.Sockets.SocketType]::Stream, [Net.Sockets.ProtocolType]::Tcp)
     $response = [IO.MemoryStream]::new()
     try {
+        if ($timer.ElapsedMilliseconds -ge 500) { return $null }
+        $socket.Blocking = $false
+        try {
+            $socket.Connect([Net.IPAddress]::Loopback, $port)
+        } catch {
+            $failure = $_.Exception.GetBaseException()
+            if ($failure -isnot [Net.Sockets.SocketException] -or
+                $failure.SocketErrorCode -notin @(
+                    [Net.Sockets.SocketError]::WouldBlock, [Net.Sockets.SocketError]::InProgress,
+                    [Net.Sockets.SocketError]::AlreadyInProgress)) { throw }
+        }
         $remaining = 500 - [int]$timer.ElapsedMilliseconds
-        if ($remaining -le 0) { return $null }
-        $connect = $client.ConnectAsync([Net.IPAddress]::Loopback, $port)
-        if (-not $connect.Wait($remaining)) { return $null }
-        $stream = $client.GetStream()
-        $remaining = 500 - [int]$timer.ElapsedMilliseconds
-        if ($remaining -le 0) { return $null }
-        $stream.ReadTimeout = $remaining
-        $stream.WriteTimeout = $remaining
-        $stream.Write($bytes, 0, $bytes.Length)
+        if ($remaining -le 0 -or -not $socket.Poll(
+                $remaining * 1000, [Net.Sockets.SelectMode]::SelectWrite) -or
+            [int]$socket.GetSocketOption(
+                [Net.Sockets.SocketOptionLevel]::Socket, [Net.Sockets.SocketOptionName]::Error) -ne 0) {
+            return $null
+        }
+        $offset = 0
+        while ($offset -lt $bytes.Length) {
+            $remaining = 500 - [int]$timer.ElapsedMilliseconds
+            if ($remaining -le 0 -or -not $socket.Poll(
+                    $remaining * 1000, [Net.Sockets.SelectMode]::SelectWrite)) { return $null }
+            try {
+                $count = $socket.Send($bytes, $offset, $bytes.Length - $offset, [Net.Sockets.SocketFlags]::None)
+            } catch {
+                $failure = $_.Exception.GetBaseException()
+                if ($failure -is [Net.Sockets.SocketException] -and
+                    $failure.SocketErrorCode -eq [Net.Sockets.SocketError]::WouldBlock) { continue }
+                throw
+            }
+            if ($count -le 0) { return $null }
+            $offset += $count
+        }
         $buffer = [byte[]]::new(4096)
         $complete = $false
         while ($response.Length -lt 65536 -and -not $complete) {
             $remaining = 500 - [int]$timer.ElapsedMilliseconds
-            if ($remaining -le 0) { return $null }
-            $stream.ReadTimeout = $remaining
-            $count = $stream.Read($buffer, 0, [Math]::Min($buffer.Length, 65536 - $response.Length))
+            if ($remaining -le 0 -or -not $socket.Poll(
+                    $remaining * 1000, [Net.Sockets.SelectMode]::SelectRead)) { return $null }
+            try {
+                $count = $socket.Receive(
+                    $buffer, 0, [int][Math]::Min($buffer.Length, 65536 - $response.Length),
+                    [Net.Sockets.SocketFlags]::None)
+            } catch {
+                $failure = $_.Exception.GetBaseException()
+                if ($failure -is [Net.Sockets.SocketException] -and
+                    $failure.SocketErrorCode -eq [Net.Sockets.SocketError]::WouldBlock) { continue }
+                throw
+            }
             if ($count -eq 0) { break }
             for ($index = 0; $index -lt $count; $index++) {
                 if ($buffer[$index] -eq 10) {
@@ -153,10 +188,12 @@ function Invoke-ResidentPostTool {
                 if ($null -ne $context -and $context.Value -isnot [string]) { return $null }
             }
         }
-        return ConvertTo-PostToolJson $reply.result
+        $resultJson = ConvertTo-PostToolJson $reply.result
+        if ($timer.ElapsedMilliseconds -gt 500) { return $null }
+        return $resultJson
     } finally {
         $response.Dispose()
-        $client.Dispose()
+        $socket.Dispose()
     }
 }
 

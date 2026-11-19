@@ -6037,7 +6037,7 @@
         "tools/promotion_unit_tests/test_native_tool_policy.py": "b944ab1f7e00c8c274729f11786a3f27f3e1fac11752360a4aeaa4f9bbf09c6e",
         "plugins/agent-worktrees/src/agent_worktrees/status_monitor_cli.py": "4373a0cd34b021df97d76df4c3bfcde51d927f592e9f03a0ea43a3b2462cb596",
         "plugins/agent-worktrees/src/agent_worktrees/status_monitor_drain.py": "4eec0e916a630eca9ceb1b45ac8040a7a0677a58375b31953a1ee014ac8670f7",
-        "tools/promotion_unit_tests/test_hook_demand.py": "f3368b881e6adc2423ea1b6e46a6834613519d0f3cef7945dd73b104828473d3",
+        "tools/promotion_unit_tests/test_hook_demand.py": "20e289835db49fb4b9da25b7700b29dff353dd417a02d6edc32c57765392dfb8",
         "tools/promotion_unit_tests/test_automatic_update_policy.py": "73a271d5c48650a302ef26cf0ddf90673d5d6362a97a1f9ccca7d44fef5bec61",
         "worktree-manager/scripts/runtime_install.py": "f588fb932ffe74d6dc9f38dc057f22dd9bcc2d643aaf498575a1ae8c7340df59",
         "worktree-manager/src/worktree_manager/update_driver_cli.py": "878e325000727fb1528b1b9cd8951f4eb11b13dd5e8fcad3fc4282f1c61ad9bb",

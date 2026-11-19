@@ -2366,9 +2366,10 @@ def test_registered_file_local_write_reuses_original_guard_facts(
         ("policy-start", "    $result = Invoke-SelectedResidentToolHook -Kind preToolUse -Raw $raw -PreparedMembership $preparedMembership"),
     ):
         assert instrumented.count(statement) == 1
-        marker = f"Write-NativeWriteFixturePhase '{boundary}'"
+        phase_marker = f"Write-NativeWriteFixturePhase '{boundary}'"
         instrumented = instrumented.replace(
-            statement, statement + "\n" + marker if statement.endswith("{") else marker + "\n" + statement,
+            statement,
+            statement + "\n" + phase_marker if statement.endswith("{") else phase_marker + "\n" + statement,
         )
     native_entry.write_text(instrumented, encoding="utf-8")
     admission = scripts / "managed-session.ps1"

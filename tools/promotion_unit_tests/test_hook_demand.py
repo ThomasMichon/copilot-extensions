@@ -294,13 +294,14 @@ def _assert_native_mutation_boundary(api: SimpleNamespace, case: str, kind: str)
 def test_rejected_or_uncompleted_requests_do_not_retain_hook_demand(api: SimpleNamespace, case: str) -> None:
     def change(request: dict[str, Any], server: SimpleNamespace, handler: Any) -> None:
         if case in {"token", "version", "payload", "kind", "expired"}:
-            request.update({
+            overrides: dict[str, dict[str, Any]] = {
                 "token": {"token": "foreign"},
                 "version": {"version": 2},
                 "payload": {"payload": []},
                 "kind": {"kind": "handoffWake"},
                 "expired": {"deadline": 99.0},
-            }[case])
+            }
+            request.update(overrides[case])
         elif case == "closed":
             server.admission_closed = True
             server.admission_closed_reason = "superseded"
