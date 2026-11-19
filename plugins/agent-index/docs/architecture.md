@@ -160,6 +160,19 @@ GitHub snapshot. GitHub full acquisition and durable
 recovery within one item's comment pages remain separate adapter work; they are
 not supplied by this bounded polling contract.
 
+The pure `sources.azure_devops_query_scope.restrict_wiql_to_candidates` helper
+constructs candidate-restricted flat WIQL for later adapter integration. It
+parses bracketed reference names, simple single-quoted/numeric literals,
+comparisons, `IN`/`NOT IN`, `AND`/`OR`, grouping and optional ordering, then
+intersects the entire predicate with 1-100 positive int32 IDs. Source query
+strings remain unchanged. Other syntax, macros, history/link queries, escaped
+quotes and backslashes refuse instead of becoming unrestricted selection.
+Input/output queries have a 32,000-character limit; token and nesting budgets
+bound parsing. This helper performs no network calls, field-type validation or
+change-coverage qualification. It is not wired into acquisition or advertised
+as hint/page support. Its selection controls execute the SQL-compatible subset
+against synthetic SQLite rows, not a live Azure DevOps parser.
+
 Azure DevOps retains operator-supplied WIQL and saved queries verbatim. Its
 work-item-only timestamp discovery first requests only `System.Id` and
 `System.ChangedDate` in batches of at most 200 query-selected identities, then
