@@ -1,0 +1,9 @@
+{
+  "comment": "Admit explicitly scoped vector input under an owned point writer",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "dev"
+    }
+  ]
+}

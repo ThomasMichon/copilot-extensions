@@ -182,9 +182,15 @@ class MultiModelStore(_ItemRepresentationMixin):
         *,
         bounded_provenance: bool = False,
         bounded_input: bool = False,
+        point_scope: PointScope | None = None,
     ) -> int:
         """Store vectors for a specific model."""
         vt = self.get_vector_table(model_id)
+        if point_scope is not None:
+            return vt.upsert(
+                chunks, vectors, bounded_provenance=bounded_provenance,
+                bounded_input=bounded_input, point_scope=point_scope,
+            )
         if bounded_input:
             return vt.upsert(chunks, vectors, bounded_input=True)
         if bounded_provenance:

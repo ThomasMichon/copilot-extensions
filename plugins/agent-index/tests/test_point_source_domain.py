@@ -24,6 +24,7 @@ from agent_index.store.component_ledger import (
     BINDING, TABLE, ComponentEvidence, ComponentLedger, initialize_component_ledger,
 )
 from agent_index.store.content_store import ContentStore
+from agent_index.store.content_mutations import content_record
 from agent_index.store.file_projection import capture_file_projection
 from agent_index.store.ingestion_index import prepare_ingestion_indices
 from agent_index.store.multi_model_store import MultiModelStore
@@ -52,6 +53,114 @@ def claim() -> PointChangeHints:
 
 def snapshot(path: Path) -> dict[str, bytes]:
     return {str(item.relative_to(path)): item.read_bytes() for item in path.rglob("*") if item.is_file()}
+
+
+def test_point_vectors_require_exact_owned_current_input_even_for_empty_batches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AGENT_INDEX_STORE_LAYOUT", LAYOUT)
+    profile = ModelProfile("small", "fixture", dim=2)
+    config = IndexConfig(data_dir=tmp_path / "point", model_profiles={"small": profile})
+    scope = claim().scope
+    store = initialize_source_store(config, point_scope=scope)
+    domain = store._source_domain
+    assert domain is not None
+    item = Chunk("retained text", "one.md", "text", "markdown", 1, 1, scope[1], {"title": "current"})
+    values = np.array([[1.0, 0.0]], dtype=np.float32)
+    empty = np.zeros((0, 2), dtype=np.float32)
+    with domain._write(store.content_store.db, point_scope=scope):
+        domain.effect("fixture-canonical-seed")
+        store.content_store._get_or_create_table().add([{**content_record(item), "indexed_at": 0.0}])
+    prepare_ingestion_indices(store, max_rows=1, point_scope=scope)
+    before = snapshot(config.data_dir)
+    for chunks, vectors in (([item], values), ([], empty)):
+        with pytest.raises(SourceLayoutError, match="owning source writer"):
+            store.upsert_vectors("small", chunks, vectors, bounded_input=True, point_scope=scope)
+        assert snapshot(config.data_dir) == before
+
+    content_version = store.content_store._get_or_create_table().version
+    with domain._write(store.content_store.db, point_scope=scope):
+        before = snapshot(config.data_dir)
+        for chunks, vectors in (([item], values), ([], empty)):
+            for selected in (None, replace(claim(), account_id="other").scope):
+                with pytest.raises(SourceLayoutError):
+                    store.upsert_vectors("small", chunks, vectors, bounded_input=True, point_scope=selected)
+                assert snapshot(config.data_dir) == before
+            for flags in ({}, {"bounded_provenance": True}):
+                with pytest.raises(SourceLayoutError, match="current input"):
+                    store.upsert_vectors("small", chunks, vectors, point_scope=scope, **flags)
+                assert snapshot(config.data_dir) == before
+        for changed, message in (
+            (replace(item, source="other:points"), "selected family"),
+            (replace(item, metadata={"title": "outdated"}), "current canonical embedding input"),
+            (replace(item, content="outdated text"), "canonical"),
+        ):
+            with pytest.raises(SourceLayoutError, match=message):
+                store.upsert_vectors("small", [changed], values, bounded_input=True, point_scope=scope)
+            assert snapshot(config.data_dir) == before
+        assert store.upsert_vectors("small", [], empty, bounded_input=True, point_scope=scope) == 0
+        assert snapshot(config.data_dir) == before
+        assert store.upsert_vectors("small", [item], values, bounded_input=True, point_scope=scope) == 1
+        assert store.content_store._get_or_create_table().version == content_version
+
+    prepare_ingestion_indices(store, max_rows=1, point_scope=scope)
+    reopened = initialize_source_store(config, point_scope=scope)
+    retained = reopened.get_vector_table("small").get_point_vectors(
+        [item.chunk_id], point_scope=scope,
+    )
+    np.testing.assert_array_equal(retained[item.chunk_id], values[0])
+    assert domain.receipt()["state"] == "clean"
+    before = snapshot(config.data_dir)
+    for ordinary in (
+        lambda: reopened.upsert_vectors("small", [item], values),
+        lambda: reopened.upsert_vectors("small", [item], values, bounded_input=True),
+        lambda: reopened.upsert_content([item]),
+        lambda: reopened.get_vector_table("small").get_vectors([item.chunk_id]),
+    ):
+        with pytest.raises(SourceLayoutError):
+            ordinary()
+        assert snapshot(config.data_dir) == before
+
+
+def test_point_vector_interruption_keeps_existing_dirty_recovery_boundary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AGENT_INDEX_STORE_LAYOUT", LAYOUT)
+    profile = ModelProfile("small", "fixture", dim=2)
+    config = IndexConfig(data_dir=tmp_path / "point", model_profiles={"small": profile})
+    scope = claim().scope
+    store = initialize_source_store(config, point_scope=scope)
+    domain = store._source_domain
+    assert domain is not None
+    item = Chunk("text", "one.md", "text", "markdown", 1, 1, scope[1])
+    values = np.array([[1.0, 0.0]], dtype=np.float32)
+    with domain._write(store.content_store.db, point_scope=scope):
+        domain.effect("fixture-canonical-seed")
+        store.content_store._get_or_create_table().add([{**content_record(item), "indexed_at": 0.0}])
+    prepare_ingestion_indices(store, max_rows=1, point_scope=scope)
+    table = store.get_vector_table("small")._get_or_create_table()
+    add = type(table).add
+
+    def fail_after_add(self: Any, *args: Any, **kwargs: Any) -> Any:
+        result = add(self, *args, **kwargs)
+        if self.name == profile.table_name:
+            raise RuntimeError("fixture vector interruption after effect")
+        return result
+
+    with monkeypatch.context() as patch:
+        patch.setattr(type(table), "add", fail_after_add)
+        with pytest.raises(RuntimeError, match="after effect"):
+            with domain._write(store.content_store.db, point_scope=scope):
+                store.upsert_vectors("small", [item], values, bounded_input=True, point_scope=scope)
+    assert domain.receipt()["state"] == "dirty"
+    assert domain.receipt()["uncertain_effect"]
+    before = snapshot(config.data_dir)
+    with pytest.raises(SourceLayoutError, match="explicit recovery"):
+        with domain._write(store.content_store.db, point_scope=scope):
+            pytest.fail("interrupted vectors must not replay implicitly")
+    with pytest.raises(SourceLayoutError):
+        store.get_vector_table("small").get_point_vectors([item.chunk_id], point_scope=scope)
+    assert snapshot(config.data_dir) == before
 
 
 def test_cold_point_binding_reopens_without_enabling_default_stores(

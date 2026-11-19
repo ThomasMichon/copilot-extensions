@@ -80,7 +80,19 @@ private schema writer. Explicit scoped reads support the
 through applied-version qualification. Explicit
 [ledger/index preparation](component-ledger.md) now forwards that same exact
 selection through its existing owners and budgets, without admitting ordinary
-data writers. Qualified point application and every v2 executor/producer remain unsupported.
+data writers.
+
+The existing `VectorTable.upsert` and `MultiModelStore.upsert_vectors` accept
+an explicit `point_scope` only with `bounded_input=True` under an already-owned
+matching source writer. They reject another family or scope, including empty
+batches, and compare every canonical embedding-input field through the prepared
+chunk-ID index before reusing the existing vector mutation path. They never
+acquire outer point-writer ownership, prepare indices or mutate canonical
+content. An interrupted vector effect retains the existing dirty recovery
+boundary. Default vector writes and reads remain refused; selected reads still
+require their explicit prepared-index path.
+
+Qualified point application and every v2 executor/producer remain unsupported.
 The binding is not
 acquisition, application, completion or deployment authority. There is no live
 directory allocation, migration, new service, HTTP parameter, CLI flag or MCP
