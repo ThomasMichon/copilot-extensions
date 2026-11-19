@@ -42,14 +42,29 @@ def _context(value: str) -> str:
 
 def parse(argv: list[str], *, register: bool = False) -> argparse.Namespace:
     command = "register" if register else "setup"
-    parser = argparse.ArgumentParser(prog=f"worktree-manager {command}", allow_abbrev=False)
+    parser = argparse.ArgumentParser(
+        prog=f"worktree-manager {command}", allow_abbrev=False,
+        epilog=None if register else "toolchain-config-only=1",
+    )
     parser.add_argument("--apply", action="store_true")
+    parser.set_defaults(toolchain_only=False)
+    if not register:
+        parser.add_argument(
+            "--toolchain-only", action="store_true",
+            help="validate/apply selected toolchain defaults without provisioning or repository setup",
+        )
     parser.add_argument("repository" if register else "--repository", type=_repository)
     parser.add_argument("--repository-target")
     parser.add_argument("--repository-commit", type=_commit)
     parser.add_argument("--trust-repository-setup", action="store_true")
     parser.add_argument("--context", type=_context)
     args = parser.parse_args(argv)
+    if args.toolchain_only and (
+        args.repository is not None or args.repository_target is not None
+        or args.repository_commit is not None or args.trust_repository_setup
+        or args.context is not None
+    ):
+        parser.error("--toolchain-only cannot be combined with repository setup")
     if (
         args.repository_target is not None or args.repository_commit is not None
         or args.trust_repository_setup or args.context is not None
