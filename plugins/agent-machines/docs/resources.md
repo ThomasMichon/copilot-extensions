@@ -266,6 +266,7 @@ Converge a package-manager package. Identity is `(manager, id)`, so the same
 | `minimum_version` | no | Schema 5 numeric compatibility floor; preserves any acceptable installed version. Cannot share a declaration with `version` or `pin: true`. |
 | `blocked_versions` | no | Schema 5 known-bad numeric release prefixes; requires `minimum_version`. |
 | `state` | no | `present` (default) or `absent`. |
+| `source` | no | `uv-tool`/`pipx` only: install from `{path: <dir>}` or `{git: <url>, ref: <optional ref>}` instead of the index. See [Installing from a source](#installing-from-a-source). |
 | `pin` | no | Hold at `version` where supported. With a schema-5 compatibility declaration, explicit `false` removes a WinGet pin; omission preserves pin metadata. |
 | `process_guard.names` | no | Exact process image names that defer replacement/removal while running. Windows process probing is supported now; an unavailable/unsupported probe defers safely. |
 | `platforms` | no | Restrict to a subset of `windows` / `linux` / `wsl`. |
@@ -291,6 +292,36 @@ probe platform, or missing probe binary returns `status: deferred` without
 mutation, and reports the reason plus the command that remains pending. If
 installed package state cannot be established, guarded mutation also defers
 instead of assuming that the package is absent.
+
+#### Installing from a source
+
+A `uv-tool` or `pipx` package may declare exactly one `source`:
+
+```yaml
+resources:
+  - type: package
+    id: harness-tools          # the installed tool name: detection + uninstall
+    manager: uv-tool
+    source: { path: ../../../tools/harness-tools }
+  - type: package
+    id: other-tool
+    manager: pipx
+    source: { git: https://github.com/acme/other-tool.git, ref: v1.2.0 }
+```
+
+A relative `path` (after `~` expansion) is anchored at the directory of the
+requirement-package file that declares it; `git` installs
+`git+<url>[@<ref>]`. Any other manager rejects `source` at validation, as do
+values starting with `-` and whitespace or `@` in `git`/`ref`. Packages that
+declare different sources for the same identity are a `resource-conflict`
+error.
+
+Installs and updates run `uv tool install --force <spec>` /
+`pipx install --force <spec>`; `id` still names the installed tool, so
+detection and `state: absent` uninstall are unchanged. An installed tool with
+no declared `version` is left as is: declare `version` (or `minimum_version`)
+to force a reinstall from the source when the installed version differs,
+including after moving `ref`.
 
 #### Minimum plus known-bad exclusions
 
@@ -577,6 +608,76 @@ resource type rather than `type: package`.
   than a false success. If the binstub itself is not found at the resolved
   location (e.g. a non-WinGet install), the resource reports **skipped**.
 
+### `scheduled-job`
+
+Declare a small recurring job -- one console-script entrypoint of a centrally
+installed application -- and let agent-machines own its OS timer. A consumer
+repository (for example a harness needing periodic `hub-health` or
+`repo-sync` upkeep) declares the application as a `package` (typically with
+[`source`](#installing-from-a-source)) and the timer as a `scheduled-job`,
+instead of shipping its own installer and Scheduled Task / systemd
+registration. Withdrawing the declaration removes the timer. This is the one
+generic timer mechanism for consumer repositories; `self-update`,
+`fleet-update`, and `health-job` keep their own schedulers.
+
+```yaml
+resources:
+  - type: scheduled-job
+    id: hub-health
+    command: { application: harness-tools, entrypoint: hub-health, args: [--quiet] }
+    interval_seconds: 3600
+    timeout_seconds: 600
+```
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `type` | yes | `scheduled-job` |
+| `id` | yes | `[a-z0-9][a-z0-9-]*` (max 64). Names the timer `agent-machines-scheduled-job-<id>`. |
+| `state` | no | `present` (default) or `absent`. An `absent` declaration needs only `id`. |
+| `command.application` | present | Identifier of the application providing the entrypoint, used for reporting only and never validated. |
+| `command.entrypoint` | present | Bare console-script name, resolved from `~/.local/bin` then `PATH`. Never a path, shell string, or interpreter + script. |
+| `command.args` | no | List of string arguments, passed as argv (no shell). |
+| `interval_seconds` | present | Integer from 300 (5 minutes) to 604800 (7 days). |
+| `timeout_seconds` | no | Integer below `interval_seconds`; default 900. |
+| `platforms` | no | Restrict to a subset of `windows` / `linux` / `wsl`. |
+| `gate` | no | Restrict to specific machines (defaults to the package gate). |
+| `owner` | no | Override the collision owner label (defaults to the package name). |
+
+The declaration is the only authority. The sole local override is
+`~/.agent-machines/scheduled-jobs/overrides.json`
+(`{"<id>": {"interval_seconds": N}}`), which changes the interval only and is
+clamped to `max(300, timeout_seconds + 1)`..604800.
+
+`restore --apply` registers or refreshes each present job, removes each
+`absent` one, and records what it registered in
+`~/.agent-machines/scheduled-jobs/owned.json` together with the declaring
+package files. A job's removal for withdrawal must be confirmed: every
+declaring package file is in a repository root that is present and readable,
+and that file was either deleted or read without declaring the job present. An
+unreachable repository, an unread file, or a discovery/validation error never
+removes a timer. `--maintenance-safe` runs skip that sweep.
+
+Each timer runs `agent-machines scheduled-job run <id>` through the stable
+`agent-machines` binstub:
+
+- It re-resolves the current declarations first. A job whose withdrawal is
+  confirmed (or declared `absent`) removes its own timer, forgets ownership,
+  and exits 0 without running; an unconfirmed absence prints
+  `declaration unavailable; keeping timer` and exits 0 without running.
+- A per-id lock makes an overlapping run a quiet no-op; missed runs are not
+  caught up.
+- The entrypoint runs headless with `timeout_seconds` and its output is
+  appended to `~/.agent-machines/scheduled-jobs/logs/<id>.log` (truncated to
+  the newest half beyond 256 KiB). `state/<id>.json` records `started_at`,
+  `finished_at`, `exit_code`, and `timed_out`. A missing entrypoint exits 127.
+
+Backends: on Windows, a per-user Scheduled Task (Interactive logon, Limited
+run level, `MultipleInstances IgnoreNew`, no `StartWhenAvailable`) launching
+`conhost.exe --headless`; on Linux/WSL, a `systemd --user` oneshot service
+(`TimeoutStartSec`) plus timer (`OnUnitActiveSec`, `Persistent=false`). Other
+platforms, or Linux without a reachable user manager, report `skipped`.
+Registration refused for access reasons reports `deferred`.
+
 ## Path anchors
 
 | Anchor | Resolves to |
@@ -619,6 +720,8 @@ compatibility data from lower-authority declarations remain effective:
 | power setting conflicting `ac` or `dc` value | highest authority for that power source wins; equal-highest disagreement errors |
 | self-update `present` + `absent` | highest authority wins; equal-highest disagreement errors |
 | fleet-update `present` + `absent` | highest authority wins; equal-highest disagreement errors |
+| scheduled-job conflicting `state`, `command`, `interval_seconds`, or `timeout_seconds` | highest authority wins; equal-highest disagreement errors |
+| package conflicting `source` | error |
 | copilot-cli-update conflicting `auto_update` or `pinned_version` | highest authority wins; equal-highest disagreement errors |
 
 File `format` and `content` are selected from declarations participating in the
@@ -662,6 +765,10 @@ Resources appear in every verb:
   `status: ok|changed|deferred|skipped|error`), a `plan.resources` list, and
   stable `authority_decisions`. Any resource error makes the top-level `ok`
   false and the command exit nonzero.
+- `agent-machines scheduled-job run <id>` is what each job's timer invokes
+  (see [`scheduled-job`](#scheduled-job)); `agent-machines scheduled-job status
+  [--json]` reports, per declared or owned job, whether it is declared, owned,
+  and registered, its effective interval and source, and its last run.
 
 ## Adopter guide
 

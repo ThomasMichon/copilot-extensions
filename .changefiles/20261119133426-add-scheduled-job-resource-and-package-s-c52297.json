@@ -1,0 +1,9 @@
+{
+  "comment": "Add scheduled-job resource and package source for consumer-declared recurring jobs",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}

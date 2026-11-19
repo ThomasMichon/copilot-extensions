@@ -77,7 +77,7 @@ from typing import Any
 from agent_procutil import no_window_kwargs
 
 from .authority import contributor, effective_authority, sort_decisions
-from . import package_detection, package_versions
+from . import package_detection, package_source, package_versions
 from .registry_values import parse_reg_query as _parse_reg_query, registry_values_equal
 from .resource_file_ownership import (
     conflicting_git_config_files,
@@ -661,10 +661,9 @@ class PackageResourceHandler(ResourceHandler):
                 live["present"] and (ver or d.get("minimum_version"))
                 and not self._matches_package(live, d)
             )
-            if needs_install:
-                commands.append(mgr["install"](pkg_id, ver))
-            elif needs_update:
-                commands.append(mgr["update"](pkg_id, ver))
+            if needs_install or needs_update:
+                commands.append(package_source.install_argv(d) or mgr[
+                    "install" if needs_install else "update"](pkg_id, ver))
             if d.get("pin") and mgr.get("pin"):
                 pin = self._detect_pin(ctx, mgr, pkg_id)
                 if not self._matches_desired(pin, ver):
@@ -1825,6 +1824,7 @@ def _build_handlers() -> dict[str, ResourceHandler]:
     from .resource_power import PowerSettingResourceHandler
     from .resource_self_update import SelfUpdateResourceHandler
     from .resource_health_job import HealthJobResourceHandler
+    from .resource_scheduled_job import ScheduledJobResourceHandler
 
     return {
         "package": PackageResourceHandler(),
@@ -1834,6 +1834,7 @@ def _build_handlers() -> dict[str, ResourceHandler]:
         "power-setting": PowerSettingResourceHandler(),
         "self-update": SelfUpdateResourceHandler(),
         "health-job": HealthJobResourceHandler(),
+        "scheduled-job": ScheduledJobResourceHandler(),
         "fleet-update": FleetUpdateResourceHandler(),
         "copilot-cli-update": CopilotCliUpdateResourceHandler(),
         "gh-account": GhAccountResourceHandler(),
@@ -1991,6 +1992,9 @@ def apply_resources(
                 )
                 continue
         results.append(handler.apply(res, ctx, dry_run))
+    if (resource_types is None or "scheduled-job" in resource_types) and not maintenance_safe \
+            and (not only or "scheduled-job" in only):
+        results.extend(HANDLERS["scheduled-job"].sweep_orphans(resolved, packages, ctx, dry_run))
     return results
 
 

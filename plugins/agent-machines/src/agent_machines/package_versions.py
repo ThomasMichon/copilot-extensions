@@ -64,6 +64,7 @@ def conflicts(desired: dict[str, Any]) -> bool:
 def merge(
     members: list[ResourceContribution], identity: tuple,
 ) -> tuple[dict[str, Any], list[ResourceFinding], list[dict[str, Any]]]:
+    from . import package_source
     from .resources import ResourceFinding, _select_field
 
     findings, decisions, selected_values = [], [], {}
@@ -110,6 +111,8 @@ def merge(
             "error", "resource-conflict",
             f"package '{identity[2]}' ({identity[1]}) exact pin conflicts with compatibility constraints",
         ))
+    source, source_findings = package_source.merge(members, identity)
+    findings.extend(source_findings)
     guard_names = sorted({
         str(name).strip().casefold()
         for declaration in declarations
@@ -128,4 +131,5 @@ def merge(
         ),
         "maintenance_safe": any(bool(declaration.get("maintenance_safe")) for declaration in declarations),
         "process_guard": {"names": guard_names} if guard_names else None,
+        **({"source": source} if source else {}),
     }, findings, decisions
