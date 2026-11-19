@@ -104,11 +104,51 @@ gates have passed, and the effort is archived and released through the normal
 repository flow. Retained custody follows its existing owners. Finishing a
 typing pass, native run, PR or session does not permit premature finalization.
 
-**Now:** drive #12013 through review and required CI to an actual authorized
-merge, following the operator's 07:56 UTC completion order. Do not wait on the
-unavailable #1303 Bash route; perform another full capture only when review
-or CI specifically requires it. Then resume this charter's remaining
-qualification work without treating the PR as parent completion. Ubuntu run
+**Now:** #12013 merged at `6c008aa84a1ddede8690390501754170c3386aec`
+on November 17 at 10:02 UTC. Exact-head Copilot approval `5936343344`,
+required CI `44059828122` and all eight resolved findings precede the managed
+merge. This completes the operator's merge-first order, not this parent.
+Resume remaining installed-Manager result/refusal, authentic-baseline and
+frozen-candidate acceptance work through its existing owners. Preserve the
+order's deferred-capture policy and the unavailable #1303 Bash follow-up;
+neither is silently qualified. Dev #12995 retires the Bridge registry CI gate,
+so do not restore it or demand a replacement capture as a source-merge gate.
+The next natural controller run `44063395428` freezes candidate
+`8f90be5410d3fe6626a2b7dde804ded31a3c9fba` from Dev `73c8cab85c`, including
+#12013. Units pass, but artifact construction, installed TTY and Windows
+Resume fail; promotion correctly refuses. The descriptor-layout gap is
+subsequently repaired by the existing artifact source fix #13086 at
+`965684d48c51dddfb279c337fe8a591ecc1b29be`. On November 18 the operator directs
+adoption of that merged implementation and removal of the independently
+qualified, unpublished duplicate, retaining the journals and evidence.
+Current source is pulled forward without overwriting the broader reviewed
+share-data contract. No competing PR, trusted-controller activation, native
+rerun or failure waiver accompanies that reconciliation.
+The existing owner's later successful release `44397683514` publishes Dev
+`f2516d375206cbad6adf0b91d6eacc47a5bcf922` through #13302, merged at
+`5163a31ce167f74df563e3b8bae14eaba4b9d555`. Source ancestry and both artifact
+helper blobs establish that #13086's correction is now published on Main.
+All thirteen executing release jobs pass, including the existing TTY and
+Resume contracts; the failure watchdog skips. This is not the larger installed-
+suite lifecycle or authentic-baseline qualification, and no operator runtime
+is updated. The earlier failed run and cleanup holds remain unchanged.
+The subsequently authorized one-run `manager-suite` attempt `44430369826`
+at released Main `c9e2c3e68b` fails in all three modes before preparation:
+the runner cannot import `agent_procutil`. The #12013 import change removed
+the preceding canonical process-library bootstrap. Open #12708 already
+contains the explicit bootstrap in its overlapping runner changes, so the
+exact failure is shared with its authoring agent rather than pre-empted by a
+competing patch. A bootstrap-only cooperation decision is separate from that
+PR's broader authentic-source acceptance. No native retry is authorized.
+The author subsequently agrees the bootstrap-only handoff on #12708, and
+acceptance is posted before editing. The restorative source fix and real cold-
+CLI regression now proceed independently through ordinary review and CI,
+preserving the broader PR and its existing ownership.
+Separately, the [portfolio audit](workflow-portfolio-audit.md#november-17-source-pr-edit-repeated-execution-not-a-reuse-hit)
+proves one exact-context repeated source-CI execution after an evidence-only
+body edit. The base-retarget/event seam is coordinated on #3336 before shared
+CI changes; neither finding authorizes another capture or Main activation.
+Ubuntu run
 `44028815333` at the prior checkpoint `7ab79f8cfb` passes all
 638 controlled cases in both write and independent no-write modes, then all
 122 historical-publication controls under the original limits. Its 218
@@ -117,14 +157,15 @@ and validated against both contracts and all 1,141 fixtures. This qualifies
 that checkpoint, not later changed inputs, native Copilot or installed Manager
 behavior.
 
-The rebase preserves Dev's active current packet cohort and both owned capture
+The #12013 rebase preserves Dev's then-active packet cohort and both owned capture
 histories rather than splicing observations. Twelve prior execution inputs
 genuinely change; every original probe remains selected at 229 functions and
-638 cases. The canonical checker identifies the still-required fresh
-`_peer_launch.py` evidence. All 172 currently selected physical Python files
+638 cases. The manual canonical checker identifies fresh `_peer_launch.py`
+evidence that remains unperformed, not required CI after #12995.
+All 172 selected physical Python files
 in 24 owners pass their declared targets; the former compact-core hunk is now
-byte-identical to Dev, not excluded. The complete 5,219-node, 339-target,
-817-input unit manifest preserves both prior inventories and its original
+byte-identical to Dev, not excluded. That PR's complete 5,255-node, 341-target,
+821-input unit manifest preserves both prior inventories and its original
 budget. A positive Vault fixture is corrected without qualifying older
 runtimes: 16 focused controls, 69 configuration controls and seven related
 reader controls pass under unchanged limits.
@@ -134,8 +175,9 @@ Borrowed Budget platforms, succeed; they are not current-head gates for the
 reconciled source. The earlier `00831b44a4` Windows cleanup
 failure and its exact finished/reused-instance hold remain reported on #6237;
 a later green job is not record deletion, custody release or relabelling of
-that failure. The retained Index cleanup hold, native POSIX proof, current-head
-review and hosted Windows acceptance remain open. No original hold changes.
+that failure. The retained Index cleanup hold, native POSIX proof and hosted Windows
+acceptance remain open. Source review and CI are complete for #12013;
+no original custody hold changes.
 
 **Return:** after the refresh, re-read this Goal and the linked scope approvals,
 reconcile retained implementation/checker custody, and finish that slice under
@@ -640,6 +682,10 @@ authorizes critical main-path acceptance or a bounded administrative change.
   receipt explicitly leaves runtime installation unobserved.
   Complete-suite construction/actual Machines readiness is now the active slice;
   authentic-baseline update, mandatory enforcement and Main adoption remain open.
+- [x] Land the installed-suite source and read-only compatibility corrections,
+  complete changed-file strict typing and resolve actual review findings
+  through current required CI (#12013). The merge does not qualify subsequent
+  native execution, authentic older baselines or frozen-candidate enforcement.
 - [ ] Complete the [test validation burndown](test-validation-burndown.md):
   measured promotion/PR CI history, reliable parallel unit suites, per-suite
   coverage baselines and conservative PR selection, full unit execution on
