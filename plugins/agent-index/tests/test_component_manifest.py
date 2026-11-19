@@ -156,3 +156,110 @@ def test_direct_application_boundaries_refuse_before_touching_dependencies() -> 
             manifest=manifest, full=False, application=untouched, store=untouched, prepared=untouched,
         )
     assert untouched.mock_calls == []
+
+
+@pytest.mark.parametrize("version", [1, 3, 7])
+def test_component_parent_cannot_downgrade_into_legacy_recovery(
+    tmp_path: Path, version: int, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths = PathIndex(tmp_path / "paths.db")
+    journal = PendingCrawls(paths)
+    manifest = component_manifest()
+    journal.save(manifest, scope="scope", full=False)
+    original = journal.read_payload(manifest.source, "scope")
+    assert original is not None
+    legacy = journal.manifest_data(replace(manifest, component_versions=None))
+    if version == 3:
+        legacy["poll_refresh"] = {
+            "retain": True, "paths": {"items/1/body.md": "a" * 32}, "history": {},
+        }
+    data = {"version": version, "full": False, "manifest": legacy}
+    if version == 7:
+        data["page_protocol"] = "incremental"
+    decode = json.loads
+
+    def decode_without_writer_lock(payload: str) -> object:
+        if payload == original:
+            with closing(paths._connect()) as probe:
+                probe.execute("PRAGMA busy_timeout = 0")
+                probe.execute("BEGIN IMMEDIATE")
+                probe.rollback()
+        return decode(payload)
+
+    with monkeypatch.context() as patch:
+        patch.setattr("agent_index.indexing.pending_crawl.json.loads", decode_without_writer_lock)
+        with pytest.raises(ValueError, match="cannot be downgraded"):
+            journal.compare_and_save(
+                manifest.source, scope="scope", payload=json.dumps(data),
+                expected=original, family="sample:components",
+            )
+    reopened = PendingCrawls(PathIndex(tmp_path / "paths.db"))
+    assert reopened.read_payload(manifest.source, "scope") == original
+    with closing(paths._connect()) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM poll_refresh").fetchone()[0] == 0
+    untouched = Mock()
+    state = IndexState()
+    state_file = tmp_path / "state.json"
+    state.save(state_file)
+    before = state_file.read_bytes()
+    with pytest.raises(ValueError, match="Ordered component application"):
+        recover_source(
+            manifest.source, scope="scope", state=state, state_file=state_file, paths=paths,
+            full=False, acquire=untouched, prepare=untouched, publication=untouched,
+            apply=untouched, family="sample:components",
+        )
+    assert untouched.mock_calls == []
+    assert state_file.read_bytes() == before
+    assert reopened.read_payload(manifest.source, "scope") == original
+
+
+@pytest.mark.parametrize("with_manifest", [False, True])
+def test_component_parent_cannot_be_cleared_before_ordered_completion(
+    tmp_path: Path, with_manifest: bool,
+) -> None:
+    paths = PathIndex(tmp_path / "paths.db")
+    journal = PendingCrawls(paths)
+    manifest = component_manifest()
+    journal.save(manifest, scope="scope", full=False)
+    original = journal.read_payload(manifest.source, "scope")
+    with pytest.raises(ValueError, match="completion is not supported"):
+        if with_manifest:
+            journal.clear(
+                manifest.source, manifest=manifest, scope="scope", expected_payload=original,
+            )
+        else:
+            journal.clear(manifest.source)
+    reopened = PendingCrawls(PathIndex(tmp_path / "paths.db"))
+    assert reopened.read_payload(manifest.source, "scope") == original
+
+
+def test_component_parent_allows_exact_retry_but_not_partial_v8_replacement(tmp_path: Path) -> None:
+    paths = PathIndex(tmp_path / "paths.db")
+    journal = PendingCrawls(paths)
+    manifest = component_manifest()
+    journal.save(manifest, scope="scope", full=False)
+    original = journal.read_payload(manifest.source, "scope")
+    assert original is not None
+    with closing(paths._connect()) as observer:
+        before = observer.execute("PRAGMA data_version").fetchone()[0]
+        journal.compare_and_save(
+            manifest.source, scope="scope", payload=original, expected=original,
+            family="sample:components",
+        )
+        assert observer.execute("PRAGMA data_version").fetchone()[0] == before
+    assert manifest.component_versions is not None
+    partial = replace(
+        manifest, deletions=[], component_versions=manifest.component_versions[:1],
+    )
+    replacement = json.dumps({
+        "version": 8, "full": False, "manifest": journal.manifest_data(partial),
+    })
+    assert journal.decode_pending(replacement, manifest.source) == (partial, False)
+    with pytest.raises(ValueError, match="before ordered completion"):
+        journal.compare_and_save(
+            manifest.source, scope="scope", payload=replacement, expected=original,
+            family="sample:components",
+        )
+    reopened = PendingCrawls(PathIndex(tmp_path / "paths.db"))
+    assert reopened.load(manifest.source, "scope") == (manifest, False)
+    assert reopened.read_payload(manifest.source, "scope") == original

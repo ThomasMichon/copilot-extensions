@@ -7513,12 +7513,19 @@ evidence separate.
 ## Unit-only promotion packet
 
 The component-manifest units exercise strict provider-version/semantics records,
-exact mutation coverage and pre-application refusal without importing stores,
-opening SQLite or starting an actor. The plugin's
+exact mutation coverage, monotonic/deletion ordering, equal-version conflicts
+and pre-application refusal without importing stores, opening SQLite or starting
+an actor. The plugin's
 `tests/test_component_manifest.py` separately covers native SQLite reopen/CAS,
 legacy-envelope compatibility, preserved polling state and refusal at actual
-recovery/prepared/application entrypoints. Neither lane qualifies ordered store
-application or component read isolation.
+recovery/prepared/application entrypoints. It also checks transactional refusal
+of v8-to-legacy or changed-v8 replacement and premature completion, accepts an
+identical retry without losing a retained deletion, reopens the retained
+parent and proves ordinary recovery still refuses without callbacks or
+checkpoint changes. Downgrade preflight permits an independent SQLite writer
+while decoding the expected parent, then binds that parent through exact CAS.
+Neither lane qualifies ordered store application, durable
+applied-version/deletion evidence, backup recovery or component read isolation.
 
 The exclusive attachment-export consumer packet executes the real export
 entrypoint, health-selected command transport, extension registry, provider
