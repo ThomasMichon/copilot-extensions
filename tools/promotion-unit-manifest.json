@@ -2,6 +2,8 @@
     "profile": "copilot-extensions.promotion-units/v1",
     "max_seconds": 300,
     "nodes": [
+        "tools/promotion_unit_tests/test_point_hint_contract.py::test_v2_wire_union_preserves_binding_target_versions_and_v1_refusal",
+        "tools/promotion_unit_tests/test_point_hint_contract.py::test_v2_refuses_broad_unknown_or_unbound_targets_before_admission",
         "tools/promotion_unit_tests/test_paged_acquisition_requirement.py::test_selected_callable_and_connector_require_explicit_v1_without_legacy_effects",
         "tools/promotion_unit_tests/test_paged_acquisition_requirement.py::test_retained_provenance_never_promotes_unknown_or_different_mode_work",
         "tools/promotion_unit_tests/test_checkout_disposition.py::test_known_history_or_unqualified_source_never_queries[agenda]",

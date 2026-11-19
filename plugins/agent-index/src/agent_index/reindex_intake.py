@@ -5,13 +5,12 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from fastapi import HTTPException, Request
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
-from .indexing.change_hints import ChangeHints
-from .indexing.change_hints_contract import validate_scope
+from .indexing.point_hints import AcquisitionHints, decode_change_hints
 
 if TYPE_CHECKING:
     from .indexing.task_store import TaskRecord, TaskStore
@@ -26,18 +25,19 @@ class HintedReindexRequest(BaseModel):
 
     source: str
     full: bool = False
-    change_hints: ChangeHints
+    change_hints: AcquisitionHints
 
     @field_validator("change_hints", mode="before")
     @classmethod
-    def parse_hints(cls, value: object) -> ChangeHints:
+    def parse_hints(cls, value: object) -> AcquisitionHints:
         """Validate the entire versioned domain envelope before admission."""
-        return ChangeHints.from_dict(value)
+        return decode_change_hints(value)
 
     @model_validator(mode="after")
     def check_scope(self) -> HintedReindexRequest:
         """Validate exact-source incremental scope before queue effects."""
-        validate_scope(self.source, self.full, self.change_hints)
+        if self.full or self.source != self.change_hints.source:
+            raise ValueError("Change hints require matching exact-source incremental scope")
         return self
 
 
@@ -67,7 +67,7 @@ async def read_hinted_request(request: Request) -> HintedReindexRequest:
     except asyncio.TimeoutError:
         raise HTTPException(status_code=408, detail="Change-hints request timed out") from None
     except (ValueError, UnicodeError):
-        raise HTTPException(status_code=422, detail="Invalid change-hints v1 request") from None
+        raise HTTPException(status_code=422, detail="Invalid change-hints request (supported: v1, v2)") from None
 
 
 async def enqueue_hinted_request(
@@ -77,14 +77,19 @@ async def enqueue_hinted_request(
     from .indexing.runner import _settle
 
     async def enqueue_and_notify() -> TaskRecord:
-        task = await asyncio.to_thread(
-            store.enqueue,
-            source=body.source,
-            full=False,
-            change_hints=body.change_hints,
-            trigger_source="api:agent_index_reindex_hints",
-        )
+        try:
+            task = await asyncio.to_thread(
+                store.enqueue,
+                source=body.source,
+                full=False,
+                change_hints=body.change_hints,
+                trigger_source="api:agent_index_reindex_hints",
+            )
+        except ValueError:
+            raise HTTPException(
+                status_code=409, detail="Retained change-hints union refused; queue unchanged",
+            ) from None
         notify()
         return task
 
-    return await _settle(asyncio.create_task(enqueue_and_notify()))
+    return cast("TaskRecord", await _settle(asyncio.create_task(enqueue_and_notify())))
