@@ -11,7 +11,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from agent_index.indexing.component_manifest import ComponentVersion
+from agent_index.indexing.component_manifest import ComponentIdentity, ComponentVersion
 from agent_index.indexing.manifest import CrawlManifest
 from agent_index.indexing.path_index import PathIndex
 from agent_index.indexing.pending_crawl import PendingCrawls, recover_source
@@ -32,15 +32,23 @@ def component_manifest() -> CrawlManifest:
     )
 
 
-def test_component_journal_roundtrip_and_legacy_envelopes(tmp_path: Path) -> None:
+@pytest.mark.parametrize("typed", [False, True])
+def test_component_journal_roundtrip_and_legacy_envelopes(tmp_path: Path, typed: bool) -> None:
     paths = PathIndex(tmp_path / "paths.db")
     journal = PendingCrawls(paths)
     manifest = component_manifest()
+    if typed:
+        assert manifest.component_versions is not None
+        manifest.component_versions = [
+            replace(manifest.component_versions[0], identity=ComponentIdentity("work_item_revision", "1")),
+            replace(manifest.component_versions[1], identity=ComponentIdentity("comment_version", "1", "2")),
+        ]
     journal.save(manifest, scope="account/endpoint/query/representation", full=False)
     payload = journal.read_payload(manifest.source, "account/endpoint/query/representation")
     assert payload is not None
     raw = json.loads(payload)
     assert raw["version"] == 8
+    assert all(("identity" in item) is typed for item in raw["manifest"]["component_versions"])
     reopened = PendingCrawls(PathIndex(tmp_path / "paths.db"))
     assert reopened.load(manifest.source, "account/endpoint/query/representation") == (manifest, False)
     with pytest.raises(ValueError, match="configuration"):

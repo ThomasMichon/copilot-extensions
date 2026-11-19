@@ -11,6 +11,7 @@ from typing import Any, cast
 import httpx
 import pytest
 
+from agent_index.indexing.component_manifest import ComponentIdentity
 from agent_index.indexing.point_claim import PendingPointClaim
 from agent_index.indexing.manifest import CrawlManifest
 from agent_index.indexing.path_index import PathIndex
@@ -151,6 +152,11 @@ def test_retained_named_reads_resume_without_repeating_provider_body_acquisition
     assert provider.body_reads == 2
     assert len(candidate.upserts) == 2 and candidate.commit == "unchanged-poll"
     assert candidate.poll_refresh is None
+    assert candidate.component_versions is not None
+    assert {item.identity for item in candidate.component_versions} == {
+        ComponentIdentity("work_item_revision", "7"),
+        ComponentIdentity("comment_version", "7", "5"),
+    }
     assert pending.read_payload(manifest.source, "account/endpoint/query") == payload
 
 
@@ -191,6 +197,7 @@ def test_named_deleted_comment_is_only_its_versioned_component_deletion(
     assert result.deletion.path == "workitems/7/comments/5.md"
     assert result.deletion.source == result.component.source
     assert result.component.version == 2 and provider.body_reads == 1
+    assert result.component.identity == ComponentIdentity("comment_version", "7", "5")
 
 
 @pytest.mark.parametrize("mismatch", ["account", "query", "family", "endpoint", "target", "item"])

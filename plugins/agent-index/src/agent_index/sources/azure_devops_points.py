@@ -7,7 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
-from agent_index.indexing.component_manifest import ComponentVersion
+from agent_index.indexing.component_manifest import ComponentIdentity, ComponentVersion
 from agent_index.indexing.point_claim import PendingPointClaim
 from agent_index.indexing.point_hints import (
     CommentVersionTarget, PointBinding, PointTarget, WorkItemRevisionTarget,
@@ -175,6 +175,12 @@ def acquire_named_point(
         raise ValueError("Azure DevOps point rendering exceeds the decoded-content budget")
     qualify()
     return NamedPointObservation(
-        claim, target, expected, ComponentVersion(family, component_path, version, semantics),
+        claim, target, expected, ComponentVersion(
+            family, component_path, version, semantics,
+            ComponentIdentity(
+                target.kind, target.item_id,
+                target.comment_id if isinstance(target, CommentVersionTarget) else None,
+            ),
+        ),
         entry, deletion,
     )

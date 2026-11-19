@@ -20,7 +20,7 @@ from agent_index.index_config import IndexConfig, ModelProfile
 from agent_index.indexing.component_application import (
     PreparedComponentApplication, qualify_applied_component,
 )
-from agent_index.indexing.component_manifest import ComponentVersion
+from agent_index.indexing.component_manifest import ComponentIdentity, ComponentVersion
 from agent_index.indexing.component_publication import reconcile_component_publication
 from agent_index.indexing.manifest import CrawlManifest
 from agent_index.indexing.path_index import PathIndex
@@ -56,12 +56,13 @@ class Fixture:
 
     def retain(
         self, version: int, content: str = "Selected fields.", *, deleted: bool = False,
+        identity: ComponentIdentity | None = None,
     ) -> CrawlManifest:
         manifest = CrawlManifest(
             "selected", accounting_family=FAMILY, commit="unchanged-poll",
             upserts=[] if deleted else [FileEntry(PATH, content, "text", FAMILY)],
             deletions=[DeletedFile(FAMILY, PATH)] if deleted else [],
-            component_versions=[ComponentVersion(FAMILY, PATH, version, "fields-v1")],
+            component_versions=[ComponentVersion(FAMILY, PATH, version, "fields-v1", identity)],
         )
         PendingCrawls(self.paths).save(manifest, scope=SCOPE, full=False)
         return manifest
@@ -121,11 +122,12 @@ def application(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Fixture:
     return Fixture(config, store, PathIndex(config.data_dir / "path_index.db"))
 
 
+@pytest.mark.parametrize("identity", [None, ComponentIdentity("work_item_revision", "one")])
 def test_native_apply_reopen_duplicate_and_older_retain_parent_and_poll(
-    application: Fixture,
+    application: Fixture, identity: ComponentIdentity | None,
 ) -> None:
     f = application
-    manifest = f.retain(3)
+    manifest = f.retain(3, identity=identity)
     old_state = f.config.state_file.read_bytes()
     prepared = f.prepare(manifest)
     assert len(f.calls) == 2
@@ -133,6 +135,7 @@ def test_native_apply_reopen_duplicate_and_older_retain_parent_and_poll(
     assert prepared.publish() == (1, 0)
     expected = ComponentLedger(f.config, f.store).get(FAMILY, PATH)
     assert expected is not None
+    assert expected.content.component.identity == identity
     checkpoint = f.paths.get_entry(FAMILY, PATH)
     assert checkpoint is not None and checkpoint[0] == expected.content.fingerprint
     parent = PendingCrawls(f.paths).read_payload("selected", SCOPE)
@@ -147,34 +150,67 @@ def test_native_apply_reopen_duplicate_and_older_retain_parent_and_poll(
     with pytest.raises(ValueError, match="completion is not supported"):
         PendingCrawls(f.paths).clear("selected")
     f.retire_fixture_parent()
-    assert f.prepare(f.retain(1, "An older edit.")).publish() == (0, 1)
+    assert f.prepare(f.retain(1, "An older edit.", identity=identity)).publish() == (0, 1)
     assert ComponentLedger(f.config, f.store).get(FAMILY, PATH) == expected
     assert f.calls == []
     assert f.config.state_file.read_bytes() == old_state
 
 
-def test_replacement_and_tombstone_prevent_old_edit_resurrection(application: Fixture) -> None:
+@pytest.mark.parametrize("identity", [None, ComponentIdentity("comment_version", "one", "two")])
+def test_replacement_and_tombstone_prevent_old_edit_resurrection(
+    application: Fixture, identity: ComponentIdentity | None,
+) -> None:
     f = application
-    assert f.prepare(f.retain(1)).publish() == (1, 0)
+    assert f.prepare(f.retain(1, identity=identity)).publish() == (1, 0)
     original = ComponentLedger(f.config, f.store).get(FAMILY, PATH)
     assert original is not None
     f.retire_fixture_parent()
-    assert f.prepare(f.retain(2, "New fields.")).publish() == (1, 0)
+    assert f.prepare(f.retain(2, "New fields.", identity=identity)).publish() == (1, 0)
     updated = ComponentLedger(f.config, f.store).get(FAMILY, PATH)
     assert updated is not None and updated.content.component.version == 2
     assert set(original.projection.vector_chunk_ids) < set(updated.projection.vector_chunk_ids)
     f.retire_fixture_parent()
-    assert f.prepare(f.retain(3, deleted=True)).publish() == (1, 0)
+    assert f.prepare(f.retain(3, deleted=True, identity=identity)).publish() == (1, 0)
     deleted = ComponentLedger(f.config, f.store).get(FAMILY, PATH)
     assert deleted is not None and deleted.content.deleted
+    assert deleted.content.component.identity == identity
+    f.reopen()
+    snapshot = qualify_applied_component(
+        ComponentLedger(f.config, f.store), f.paths, deleted, scope=SCOPE, max_rows=8,
+    )
+    assert snapshot.evidence == deleted and snapshot.chunks == ()
     assert deleted.projection.content_rows == b"[]"
     assert all(model.rows == b"[]" for model in deleted.projection.models)
     assert f.paths.get_entry(FAMILY, PATH) is None
     f.retire_fixture_parent()
     f.calls.clear()
-    assert f.prepare(f.retain(2, "New fields.")).publish() == (0, 1)
+    assert f.prepare(f.retain(2, "New fields.", identity=identity)).publish() == (0, 1)
     assert f.calls == []
     assert ComponentLedger(f.config, f.store).get(FAMILY, PATH) == deleted
+
+
+@pytest.mark.parametrize(("prior", "identity"), [
+    (None, ComponentIdentity("work_item_revision", "one")),
+    (ComponentIdentity("work_item_revision", "one"), None),
+    (ComponentIdentity("work_item_revision", "one"), ComponentIdentity("work_item_revision", "two")),
+    (ComponentIdentity("comment_version", "one", "two"), ComponentIdentity("comment_version", "other", "two")),
+])
+def test_identity_rebinding_refuses_before_embedding_or_native_effects(
+    application: Fixture, prior: ComponentIdentity | None, identity: ComponentIdentity | None,
+) -> None:
+    f = application
+    f.prepare(f.retain(2, identity=prior)).publish()
+    previous = ComponentLedger(f.config, f.store).get(FAMILY, PATH)
+    f.retire_fixture_parent()
+    manifest = f.retain(3, identity=identity)
+    before = f.domain.receipt()
+    checkpoint = f.paths.get_entry(FAMILY, PATH)
+    f.calls.clear()
+    with pytest.raises(ValueError, match="identity"):
+        f.prepare(manifest)
+    assert f.calls == [] and f.domain.receipt() == before
+    assert f.paths.get_entry(FAMILY, PATH) == checkpoint
+    assert ComponentLedger(f.config, f.store).get(FAMILY, PATH) == previous
 
 
 def test_equal_version_conflict_refuses_before_embedding_or_mutation(application: Fixture) -> None:

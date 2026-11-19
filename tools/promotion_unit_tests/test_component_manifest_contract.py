@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
-from dataclasses import asdict, replace
+from dataclasses import replace
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
@@ -35,7 +35,26 @@ def test_component_versions_preserve_exact_mutation_coverage_and_semantics(api: 
         component_versions=[body, deleted], poll_refresh=None,
     )
     api.validate_components(manifest)
-    assert api.ComponentVersion.from_dict(asdict(deleted)) == deleted
+    legacy = {"source": deleted.source, "path": deleted.path, "version": 4, "semantics": "comment/v1"}
+    assert deleted.to_dict() == legacy
+    assert api.ComponentVersion.from_dict(legacy) == deleted
+    for identity in (
+        api.ComponentIdentity("work_item_revision", "1"),
+        api.ComponentIdentity("comment_version", "1", "2"),
+        api.ComponentIdentity("comment_version", "3", "2"),
+    ):
+        typed = replace(deleted, identity=identity)
+        assert api.ComponentVersion.from_dict(typed.to_dict()) == typed
+    for identity in (
+        None, {}, {"kind": "other", "item_id": "1"},
+        {"kind": "comment_version", "item_id": "1"},
+        {"kind": "comment_version", "item_id": "1", "comment_id": True},
+        {"kind": "work_item_revision", "item_id": "1", "comment_id": None},
+        {"kind": "work_item_revision", "item_id": 1},
+        {"kind": "work_item_revision", "item_id": " "},
+    ):
+        with pytest.raises(ValueError):
+            api.ComponentVersion.from_dict(legacy | {"identity": identity})
     for changed in (
         [], (body, deleted), [object()], [body], [body, deleted, body],
         [body, replace(deleted, source="another:account")],
@@ -45,17 +64,24 @@ def test_component_versions_preserve_exact_mutation_coverage_and_semantics(api: 
         with pytest.raises(ValueError):
             api.validate_components(manifest)
     manifest.component_versions = [body, deleted]
+    same_logical = api.ComponentIdentity("comment_version", "1", "2")
+    manifest.component_versions = [
+        replace(body, identity=same_logical), replace(deleted, identity=same_logical),
+    ]
+    with pytest.raises(ValueError, match="logical identity"):
+        api.validate_components(manifest)
+    manifest.component_versions = [body, deleted]
     manifest.poll_refresh = object()
     with pytest.raises(ValueError, match="polling refresh"):
         api.validate_components(manifest)
     for version in (True, False, 0, -1, 1.5, "7", None):
         with pytest.raises(ValueError, match="positive integer"):
-            api.ComponentVersion.from_dict(asdict(body) | {"version": version})
+            api.ComponentVersion.from_dict(body.to_dict() | {"version": version})
     for name in ("source", "path", "semantics"):
         for value in ("", " ", None, 1):
             with pytest.raises(ValueError, match="nonempty string"):
-                api.ComponentVersion.from_dict(asdict(body) | {name: value})
-    for raw in ({"version": 1}, asdict(body) | {"unknown": "ignored"}, None):
+                api.ComponentVersion.from_dict(body.to_dict() | {name: value})
+    for raw in ({"version": 1}, body.to_dict() | {"unknown": "ignored"}, None):
         with pytest.raises(ValueError, match="Invalid pending component"):
             api.ComponentVersion.from_dict(raw)
 
@@ -89,3 +115,18 @@ def test_component_ordering_retains_deletions_and_refuses_equal_version_conflict
     for field in ("source", "path"):
         with pytest.raises(ValueError, match="identity"):
             replace(current, component=replace(version, **{field: "different"})).covered_by(current)
+    identities = (
+        None, api.ComponentIdentity("work_item_revision", "1"),
+        api.ComponentIdentity("comment_version", "1", "2"),
+        api.ComponentIdentity("comment_version", "3", "2"),
+    )
+    for previous_identity in identities:
+        previous = replace(current, component=replace(version, identity=previous_identity))
+        for identity in identities:
+            for number in (6, 7, 8):
+                candidate = replace(current, component=replace(version, version=number, identity=identity))
+                if identity == previous_identity:
+                    assert candidate.covered_by(previous) is (number <= 7)
+                else:
+                    with pytest.raises(ValueError, match="identity"):
+                        candidate.covered_by(previous)

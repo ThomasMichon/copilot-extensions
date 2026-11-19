@@ -7,7 +7,7 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 from agent_index.indexing.change_hints import _identity, _keys
-from agent_index.indexing.component_manifest import ComponentVersion
+from agent_index.indexing.component_manifest import ComponentIdentity, ComponentVersion
 from agent_index.indexing.manifest import CrawlManifest, CrawlStats
 from agent_index.indexing.pending_crawl import PendingCrawlConflict, PendingCrawls
 from agent_index.indexing.point_claim import PendingPointClaim
@@ -70,6 +70,12 @@ class PointAcquisition:
         )
         if self.component.version != version:
             raise ValueError("Point acquisition component does not match the target version")
+        identity = ComponentIdentity(
+            self.target.kind, self.target.item_id,
+            self.target.comment_id if isinstance(self.target, CommentVersionTarget) else None,
+        )
+        if self.component.identity is not None and self.component.identity != identity:
+            raise ValueError("Point acquisition component identity does not match its target")
         if (self.entry is None) == (self.deletion is None):
             raise ValueError("Point acquisition requires exactly one upsert or deletion")
         mutation = self.entry if self.entry is not None else self.deletion
@@ -87,7 +93,7 @@ class PointAcquisition:
             _identity(self.entry.language, "language")
             _json(self.entry.metadata)
         data = {
-            "version": 1, "target": self.target.to_dict(), "component": asdict(self.component),
+            "version": 1, "target": self.target.to_dict(), "component": self.component.to_dict(),
             "entry": asdict(self.entry) if self.entry is not None else None,
             "deletion": asdict(self.deletion) if self.deletion is not None else None,
         }
