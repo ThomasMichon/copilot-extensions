@@ -1,0 +1,9 @@
+{
+  "comment": "Add explicit retained terminal-reader adoption under the existing service writer lease without startup migration or cache/effect changes.",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests-service",
+      "type": "patch"
+    }
+  ]
+}

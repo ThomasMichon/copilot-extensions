@@ -81,17 +81,17 @@ probe followed by a legacy provisioning fallback.
 
 ## Serial delivery and acceptance
 
-- [ ] Review this contract before implementing the command or changing retained
-  host adoption.
-- [ ] Implement the local existing-owner transition without changing baseline
+- [x] Review this contract before implementing the command or changing retained
+  host adoption (#13488; current-head Copilot approval and required green CI).
+- [x] Implement the local existing-owner transition without changing baseline
   provisioning, serving, remote workspace contracts or physical retirement.
-- [ ] Qualify a populated baseline volume, preserving original replay/cache and
+- [x] Qualify a populated baseline volume, preserving original replay/cache and
   unknown-effect identities through transition and fresh-reader restart.
-- [ ] Cover actual competing service/transition lease ownership, failed drain,
+- [x] Cover actual competing service/transition lease ownership, failed drain,
   operation expiry, unsupported core/layout/binding/capacity, partial adoption,
   uncertain replacement and explicit retry. Refusal before adoption must
   preserve bytes; partial progress must remain complete and recoverable.
-- [ ] Exercise the actual CLI and old/new reader directions, optional mapping
+- [x] Exercise the actual CLI and old/new reader directions, optional mapping
   selection and rollback refusal. Confirm no native acquisition, protected
   send, cache deletion or delivery/ACK advancement.
 - [ ] Return to full T3 and both parent acceptance plans. Source controls do not
@@ -100,6 +100,7 @@ probe followed by a legacy provisioning fallback.
 
 ## See Also
 
+- [Focused source qualification and retained boundaries](journal/2026/11.19%20Retained%20terminal%20reader%20transition.md)
 - [Standalone terminal host](../../../services/pr/README.md#optional-terminal-read-hosting)
 - [Coordinated terminal retention](terminal-retention.md)
 - [Canonical effort](README.md)

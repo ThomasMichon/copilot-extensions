@@ -1819,6 +1819,7 @@ callback an implicit credential store.
 ## Journal
 
 - [2026-11-19 - Historical physical transition design](journal/2026/11.19%20Historical%20physical%20transition%20design.md)
+- [2026-11-19 - Reviewed retained terminal-reader transition and focused source qualification](journal/2026/11.19%20Retained%20terminal%20reader%20transition.md)
 - [2026-11-18 - Present-only per-version receiver groundwork](journal/2026/11.18%20Per-version%20receiver%20groundwork.md)
 - [2026-11-18 - Version-aware watch-state refusal baseline](journal/2026/11.18%20Watch%20state%20contract%20baseline.md)
 - **2026-11-18 - Versioned per-subscription map design reviewed.** #13277

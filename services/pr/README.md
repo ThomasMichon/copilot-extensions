@@ -482,6 +482,22 @@ Existing volumes require their own reader/lifecycle transition. Removing the
 selection or rolling back to a reader that cannot understand adopted storage
 refuses without stripping extensions or rewriting the volume.
 
+An explicitly stopped standalone workspace owner can instead run
+`agent-pull-requests-service adopt-terminal --config /run/config/pr-service.json`
+against its existing valid conversation volume and cache. This separate command
+requires the terminal-reader selection and the same available service writer
+lease; a running or unconfirmed drain refuses without stopping the service.
+It preserves the original service/namespace binding, replay/delivery positions,
+cache objects and recovery identities, and performs no acquisition, compaction
+or cache retirement. It neither provisions missing state nor repairs it.
+The host-local lease does not fence another host or unsupported direct volume
+users; their exclusion remains with the deployment owner.
+The command returns zero after adoption and one with a sanitized unavailable
+diagnostic on failure. Interrupted adoption may leave complete partial extension
+progress; an explicit retry revalidates that same volume and continues compatible
+steps under its finite invocation budget, without rollback or reprovisioning.
+Old readers or selection rollback refuse expanded storage unchanged.
+
 The actual workspace receiver advertises
 [workspace/v2 terminal reads](../../plugins/agent-pull-requests/docs/workspace-tools.md)
 through the existing authenticated Gateway route. Native acquisition remains
@@ -525,6 +541,12 @@ retained volume without its extension does not adopt it or advertise support.
 Interrupted provisioning retains progress and refuses blind reprovisioning.
 Removing the selection or rolling back to a reader that cannot understand the
 adopted extension refuses the volume without rewriting it.
+
+For retained `adopt-terminal`, terminal mapping selection additionally requires
+prepared-review and acquired-comment mapping storage to be already adopted.
+It does not allocate new mapping slots on that path; a missing prerequisite
+refuses before terminal adoption. Fresh provisioning retains its existing
+prerequisite construction.
 
 The selected receiver separately advertises scoped `retained-comment` reads
 for original active and compact records. Terminal-read/v1 and the prior
