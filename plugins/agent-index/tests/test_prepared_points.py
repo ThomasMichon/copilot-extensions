@@ -243,7 +243,8 @@ def test_reverse_arrival_keeps_newest_upsert_or_tombstone(
 
 @pytest.mark.parametrize("invalid", [
     "extra-target", "wrong-version", "family", "mutation", "both", "neither",
-    "metadata-key", "metadata-tuple", "nan", "language", "text",
+    "metadata-key", "metadata-tuple", "metadata-dataclass", "metadata-dataclass-list",
+    "nan", "language", "text",
 ])
 def test_invalid_target_or_outcome_refuses_without_cache_mutation(
     retained: tuple[PreparedPoints, TaskStore], invalid: str,
@@ -271,6 +272,8 @@ def test_invalid_target_or_outcome_refuses_without_cache_mutation(
         changes: dict[str, Any] = {
             "metadata-key": {"metadata": {1: "not-string"}},
             "metadata-tuple": {"metadata": {"not-json": (1, 2)}},
+            "metadata-dataclass": {"metadata": {"not-json": observed.component}},
+            "metadata-dataclass-list": {"metadata": {"not-json": [observed.component]}},
             "nan": {"metadata": {"not-finite": float("nan")}},
             "language": {"language": ""},
             "text": {"content": None},

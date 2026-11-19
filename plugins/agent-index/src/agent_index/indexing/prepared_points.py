@@ -84,6 +84,7 @@ class PointAcquisition:
             if not isinstance(self.entry.content, str) or type(self.entry.metadata) is not dict:
                 raise ValueError("Point acquisition requires complete text and JSON metadata")
             _identity(self.entry.language, "language")
+            _json(self.entry.metadata)
         data = {
             "version": 1, "target": self.target.to_dict(), "component": asdict(self.component),
             "entry": asdict(self.entry) if self.entry is not None else None,
