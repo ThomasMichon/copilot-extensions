@@ -46,9 +46,12 @@ replace a different binding.
 `initialize_source_store(config, point_scope=hints.scope)` additionally
 bootstraps the configured empty content/model schemas through the existing
 writer and dirty/effect/clean protocol. It requires distinct configured tables
-and matching model IDs. Reopening retains the same receipt and tables; missing
-configured tables in an already prepared domain or changed vector schemas
-refuse rather than being added or converted. An interrupted bootstrap remains
+and matching model IDs. Receipt decisions, native schema validation and creation
+share one existing source-domain operation, so a concurrent initializer cannot
+lend it a stale empty-state decision. Reopening retains the same receipt and
+tables; missing configured tables in an already prepared domain, changed vector
+schemas or a content table with the wrong schema/role refuse rather than being
+added or converted. An interrupted bootstrap remains
 dirty and requires its existing recovery owner; initialization does not replay
 it. This is an in-process cold schema seam, not a component ledger/index
 bootstrap, point application or a configuration/wire selector.

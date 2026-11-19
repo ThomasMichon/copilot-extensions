@@ -604,6 +604,7 @@ def initialize_source_store(
     ):
         raise SourceLayoutError("point-domain bootstrap requires distinct configured tables")
     initialize_source_layout(config.lance_dir, point_scope=point_scope)
+    from .content_store import _CONTENT_SCHEMA
     from .multi_model_store import MultiModelStore
 
     store = MultiModelStore(
@@ -612,24 +613,26 @@ def initialize_source_store(
     domain = store._source_domain
     if domain is None:
         raise SourceLayoutError("source-aware store requires its configured domain")
-    existing = domain.receipt()["versions"]
     for profile in config.model_profiles.values():
         store.register_model(profile)
-    if names <= existing.keys():
-        with domain.read(store.content_store.db, point_scope=point_scope):
+    with domain.operation(store.content_store.db, point_scope=point_scope):
+        existing = domain.receipt()["versions"]
+        if names <= existing.keys():
             if point_scope is not None:
+                if not store.content_store._get_or_create_table().schema.equals(_CONTENT_SCHEMA):
+                    raise SourceLayoutError("point-domain bootstrap content schema changed")
                 for profile in config.model_profiles.values():
                     owner = store.get_vector_table(profile.model_id)
                     if not owner._get_or_create_table().schema.equals(owner._schema):
                         raise SourceLayoutError("point-domain bootstrap model schema changed")
             return store
-    if point_scope is not None and existing:
-        raise SourceLayoutError("point-domain bootstrap refuses changed configured tables")
-    # Scope is explicit only for schema bootstrap, never inherited by ordinary writers.
-    with domain._write(store.content_store.db, point_scope=point_scope):
-        cast("Callable[[], object]", store.content_store._get_or_create_table)()
-        for profile in config.model_profiles.values():
-            cast("Callable[[], object]", store.register_model(profile)._get_or_create_table)()
+        if point_scope is not None and existing:
+            raise SourceLayoutError("point-domain bootstrap refuses changed configured tables")
+        # Scope is explicit only for schema bootstrap, never inherited by ordinary writers.
+        with domain._write(store.content_store.db, point_scope=point_scope):
+            cast("Callable[[], object]", store.content_store._get_or_create_table)()
+            for profile in config.model_profiles.values():
+                cast("Callable[[], object]", store.register_model(profile)._get_or_create_table)()
     return store
 
 

@@ -169,6 +169,53 @@ def test_point_schema_bootstrap_never_rebinds_legacy_or_replays_interruption(
     assert snapshot(interrupted.data_dir) == before
 
 
+@pytest.mark.parametrize("same_table", [False, True])
+def test_point_schema_bootstrap_rechecks_an_interleaved_initializer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, same_table: bool,
+) -> None:
+    monkeypatch.setenv("AGENT_INDEX_STORE_LAYOUT", LAYOUT)
+    profile = ModelProfile("small", "fixture", dim=2)
+    config = IndexConfig(data_dir=tmp_path / "point", model_profiles={"small": profile})
+    competing = replace(config, model_profiles={"small": replace(
+        profile, dim=3 if same_table else 2,
+        table_name=profile.table_name if same_table else "other_vectors",
+    )})
+    register = MultiModelStore.register_model
+    before: dict[str, bytes] = {}
+    interleaved = False
+
+    def interleave(self: MultiModelStore, selected: ModelProfile) -> VectorTable:
+        nonlocal before, interleaved
+        if not interleaved:
+            interleaved = True
+            initialize_source_store(competing, point_scope=claim().scope)
+            before = snapshot(config.data_dir)
+        return register(self, selected)
+
+    monkeypatch.setattr(MultiModelStore, "register_model", interleave)
+    with pytest.raises(SourceLayoutError, match="bootstrap"):
+        initialize_source_store(config, point_scope=claim().scope)
+    assert interleaved and before
+    assert snapshot(config.data_dir) == before
+
+
+def test_point_schema_bootstrap_refuses_vector_table_as_content(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AGENT_INDEX_STORE_LAYOUT", LAYOUT)
+    first = ModelProfile("first", "fixture", dim=2, table_name="vectors_first")
+    second = ModelProfile("second", "fixture", dim=2, table_name="vectors_second")
+    config = IndexConfig(
+        data_dir=tmp_path / "point", model_profiles={"first": first, "second": second},
+    )
+    initialize_source_store(config, point_scope=claim().scope)
+    before = snapshot(config.data_dir)
+    changed = replace(config, content_table=second.table_name, model_profiles={"first": first})
+    with pytest.raises(SourceLayoutError, match="schema (?:changed|is incompatible)"):
+        initialize_source_store(changed, point_scope=claim().scope)
+    assert snapshot(config.data_dir) == before
+
+
 def test_relative_cluster_connection_cannot_retarget_to_marked_destination(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
