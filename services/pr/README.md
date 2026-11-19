@@ -484,13 +484,13 @@ refuses without stripping extensions or rewriting the volume.
 
 An explicitly stopped standalone workspace owner can instead run
 `agent-pull-requests-service adopt-terminal --config /run/config/pr-service.json`
-against an eligible existing conversation volume and empty workspace cache.
+against an eligible existing version-three conversation volume and empty workspace cache.
 This bootstrap path refuses cached generations/current pointers, active or
-compact review operations, and populated terminal-extension state: preserving
+compact review operations, conversation records and populated terminal-extension state: preserving
 their files alone would not preserve the original usable reader/recovery paths.
 Keep those volumes with their original owner pending a separately qualified
-transition. Selected workspace scopes must also map each account/repository to
-one full scope, and active watch registrations must retain finite original
+transition. Selected workspace scopes and account/repository targets must form
+a one-to-one mapping in both directions, and active watch registrations must retain finite original
 delivery deadlines; the command never invents deadlines.
 This separate command
 requires the terminal-reader selection and the same available service writer
@@ -510,6 +510,8 @@ diagnostic on failure. Interrupted adoption may leave complete partial extension
 progress; an explicit retry revalidates that same volume and continues compatible
 steps under its finite invocation budget, without rollback or reprovisioning.
 Old readers or selection rollback refuse expanded storage unchanged.
+Specialized attention/feedback owner layouts are not standalone bootstrap
+volumes and retain their original lifecycle/readers unchanged.
 
 The actual workspace receiver advertises
 [workspace/v2 terminal reads](../../plugins/agent-pull-requests/docs/workspace-tools.md)

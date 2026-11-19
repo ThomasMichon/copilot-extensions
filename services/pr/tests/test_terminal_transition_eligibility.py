@@ -10,17 +10,19 @@ from dataclasses import replace
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 from single_instance_lease import SingleInstance
 
 from agent_pull_requests.attention import Cursor
+from agent_pull_requests.attention_store import AttentionStore
 from agent_pull_requests.conversation_store import ConversationStore
 from agent_pull_requests.review_workspace import SECTIONS, build_generation
 from agent_pull_requests.terminal_recovery import TerminalRecoveryStore, compact
 from agent_pull_requests.terminal_retention import TerminalRetentionStore, bind_generation
 from agent_pull_requests.watch_replay import ObservationTarget
+from agent_pull_requests.watch_provider import decode_snapshot
 from agent_pull_requests.watch_replay_store import ReplayStore
 from agent_pull_requests_service import terminal_transition
 from agent_pull_requests_service.__main__ import main
@@ -34,15 +36,21 @@ else:
     from test_terminal_transition import cache_bytes, retained
 
 
-def test_shared_watch_binding_with_distinct_workspace_scopes_refuses(configuration: Configuration) -> None:
+@pytest.mark.parametrize("direction", ["forward", "reverse"])
+def test_ambiguous_watch_workspace_bindings_refuse(configuration: Configuration, direction: str) -> None:
     path, value, config = retained(configuration)
     value["workspaces"]["terminal_reads"] = False
-    value["bindings"].append({
+    binding = {
         **value["bindings"][0], "principal": "caller-b", "target": "repository-b", "consumer": "dispatch-b",
-    })
+    }
+    if direction == "reverse":
+        binding["account"] = "account-b"
+        value["observations"].append({**value["observations"][0], "account": "account-b"})
+    value["bindings"].append(binding)
     reader = copy.deepcopy(value["workspaces"]["bindings"][0])
     reader.update(principal="caller-b", target="repository-b")
-    reader["scope"]["principal_id"] = "another-reviewer"
+    if direction == "forward":
+        reader["scope"]["principal_id"] = "another-reviewer"
     value["workspaces"]["bindings"].append(reader)
     path.write_text(json.dumps(value))
     baseline = load_config(path)
@@ -92,6 +100,18 @@ def test_one_second_budget_survives_wall_clock_boundary(
     terminal_transition.adopt(config)
 
 
+def complete_evidence() -> dict[str, Any]:
+    evidence = json.loads((
+        Path(__file__).resolve().parents[3]
+        / "plugins/agent-pull-requests/docs/review-evidence.example.json"
+    ).read_text())
+    template = evidence["sections"]["pull_request"]
+    for name in SECTIONS:
+        evidence["sections"].setdefault(name, {**template, "data": []})
+        evidence["sections"][name].update(complete=True, errors=[])
+    return cast(dict[str, Any], evidence)
+
+
 @pytest.mark.parametrize("with_operation", [False, True])
 def test_retained_terminal_records_refuse_expansion_and_preserve_original_inspection(
     configuration: Configuration, with_operation: bool,
@@ -101,14 +121,7 @@ def test_retained_terminal_records_refuse_expansion_and_preserve_original_inspec
         config.root, config.namespace, service_identity=config.store().service_identity,
         terminal_retention=True, terminal_recovery=True,
     )
-    evidence = json.loads((
-        Path(__file__).resolve().parents[3]
-        / "plugins/agent-pull-requests/docs/review-evidence.example.json"
-    ).read_text())
-    template = evidence["sections"]["pull_request"]
-    for name in SECTIONS:
-        evidence["sections"].setdefault(name, {**template, "data": []})
-        evidence["sections"][name].update(complete=True, errors=[])
+    evidence = complete_evidence()
     live = build_generation(evidence)["generation"]
     target = ObservationTarget("account-a", "example/repository", live["scope"]["number"], frozenset())
     expires_at = int(time.time()) + 60
@@ -172,3 +185,64 @@ def test_retained_terminal_records_refuse_expansion_and_preserve_original_inspec
         else TerminalRetentionStore(owner).inspect(intent["scope"], cursor, expires_at=expires_at)
     )
     assert after == original_record
+
+
+def test_terminal_conversation_after_cache_rebuild_keeps_original_watch_poll(
+    configuration: Configuration,
+) -> None:
+    _, _, config = retained(configuration)
+    assert config.workspaces is not None
+    owner = ReplayStore(config.root, config.namespace, service_identity=config.store().service_identity)
+    evidence = complete_evidence()
+    evidence["sections"]["pull_request"]["data"]["status"] = "completed"
+    closed = build_generation(evidence)["generation"]
+    cache = config.workspaces.cache(owner)
+    cache.publish(closed, expected_current=None)
+    ConversationStore(owner).observe_workspace(closed, expires_at=int(time.time()) + 60)
+    cache.rebuild()
+    assert not list(cache.generations.iterdir()) and not list(cache.targets.iterdir())
+    scope = config.bindings[0].scope
+    receipt = owner.execute(scope, "register", {
+        "request_id": "original-after-rebuild", "issued_at": time.time(),
+        "number": closed["scope"]["number"], "until": ("closed",), "deadline_at": time.time() + 60,
+    }, expires_at=int(time.time()) + 60)
+    before = owner.path.read_bytes()
+    with pytest.raises(ValueError, match="retained conversations"):
+        terminal_transition.adopt(config)
+    assert owner.path.read_bytes() == before
+    target = ObservationTarget(
+        scope.account, scope.repo, closed["scope"]["number"], frozenset({receipt["registration_id"]}),
+    )
+    native = {
+        "schema": "agent-worktrees.pr-snapshot", "version": 1,
+        "repo": scope.repo, "pr": closed["scope"]["number"], "provider": "azure-devops",
+        "pr_state": "closed", "merged": False, "head_sha": closed["revision"]["head_sha"],
+        "base_ref": "master", "mergeable": None, "checks_state": "success",
+        "title": "Synthetic terminal PR", "draft": False,
+        "reviews": [{"body": "synthetic native details"}],
+    }
+    result = owner.observe(
+        target, decode_snapshot(native, scope.repo, target.number), expires_at=int(time.time()) + 60,
+    )
+    assert result["status"] == "observed"
+    after = json.loads(owner.path.read_bytes())
+    assert after["conversations"] == json.loads(before)["conversations"]
+    assert "terminal_retention_version" not in after
+    pending = owner.execute(scope, "pending", {}, expires_at=int(time.time()) + 60)
+    assert pending["events"][0]["snapshot"]["reviews"] == native["reviews"]
+
+
+def test_specialized_attention_owner_keeps_its_original_reader(configuration: Configuration) -> None:
+    _, _, config = retained(configuration)
+    owner = ReplayStore(config.root, config.namespace, service_identity=config.store().service_identity)
+    attention = AttentionStore(owner)
+    with SingleInstance(config.root, service="agent-pull-requests-watch") as lease:
+        def current() -> None:
+            assert lease.held
+        attention.adopt(lifecycle_checkpoint=current, expires_at=int(time.time()) + 60)
+    original = attention.snapshot(expires_at=int(time.time()) + 60)
+    before = owner.path.read_bytes()
+    with pytest.raises(ValueError, match="version-three"):
+        terminal_transition.adopt(config)
+    assert owner.path.read_bytes() == before
+    assert attention.snapshot(expires_at=int(time.time()) + 60) == original

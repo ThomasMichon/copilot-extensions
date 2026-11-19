@@ -37,11 +37,14 @@ def adopt(config: HostConfig) -> None:
         raise ValueError("retained transition requires explicit terminal workspace selection")
     readers = {(principal, target): dict(reader.scope) for principal, target, reader in workspace.readers}
     scopes: dict[tuple[str, str], dict[str, Any]] = {}
+    targets: dict[tuple[tuple[str, Any], ...], tuple[str, str]] = {}
     for binding in workspace.terminal_targets:
         key = binding.scope.account, binding.scope.repo
         scope = readers[(binding.principal, binding.target)]
         if scopes.setdefault(key, scope) != scope:
             raise ValueError("terminal watch binding is ambiguous across workspace scopes")
+        if targets.setdefault(tuple(sorted(scope.items())), key) != key:
+            raise ValueError("workspace scope is ambiguous across terminal watch targets")
     store = config.store()
     if (
         not config.root.is_dir() or config.root.is_symlink()
@@ -62,8 +65,8 @@ def adopt(config: HostConfig) -> None:
 
     def validate(document: dict[str, Any]) -> None:
         lifecycle()
-        if document["version"] not in (3, 4, 5, 6):
-            raise ValueError("retained transition requires an adopted conversation owner")
+        if document["version"] != 3:
+            raise ValueError("bootstrap requires the standalone version-three conversation owner")
         if document["reviews"]:
             raise ValueError("active review operations require their original recovery reader")
         if document.get("terminal_recovery", {}).get("operations"):
@@ -72,6 +75,8 @@ def adopt(config: HostConfig) -> None:
             "records", "generations", "admissions",
         )):
             raise ValueError("populated terminal state requires its original lifecycle transition")
+        if document["conversations"]["records"]:
+            raise ValueError("retained conversations require their original lifecycle transition")
         if any(
             record["outcome"] == "active" and record["deadline_at"] is None
             for record in document["replay"]["records"]

@@ -46,11 +46,13 @@ mapping selection may compose only its already supported prerequisites.
 The first finite implementation is a bootstrap-only retained-volume transition.
 Source review showed that retaining generation or unknown-attempt bytes would
 not preserve their original usable reader/recovery interfaces after selection.
-Require empty generation/pointer directories, empty active/compact operation
-journals and empty terminal-extension state. Refuse other volumes unchanged
+Require the standalone version-three owner, empty generation/pointer directories,
+empty active/compact operation and conversation journals, and empty
+terminal-extension state. Refuse other volumes unchanged
 and retain their original reader; positive populated/recovery-compatible
 transition remains T3 work, not permission to settle or discard accepted work.
-Also require one full workspace scope per account/repository and finite
+Also require a bijection between full workspace scopes and account/repository
+targets, plus finite
 original deadlines on active watch registrations. Validate plain lease files
 before PID writes and reject native callback state. Use bounded cache
 eligibility checks and the original monotonic budget, without scanning or
