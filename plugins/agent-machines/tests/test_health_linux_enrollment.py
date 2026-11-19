@@ -483,6 +483,35 @@ def test_native_cleanup_fence_still_blocks_a_fresh_owner_until_exact_cleanup(
     assert references.pending is None
 
 
+def test_fresh_owner_retries_failed_withdrawal_after_client_cleanup_and_manager_recovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner, pair, references, _ = linux_case(tmp_path, monkeypatch)
+    adopt(owner)
+    call = pair.call
+
+    def failed(operation: str, **fields: Any) -> dict[str, Any]:
+        if operation == "disable":
+            fields["on_native_begin"]()
+            fields["on_native_settled"]()
+            pair.unavailable = True
+            raise RuntimeError("systemctl exited nonzero")
+        return call(operation, **fields)
+
+    monkeypatch.setattr(pair, "call", failed)
+    assert owner.disable()["status"] == "unknown"
+    assert not owner.read()["pending"]["native_unsettled"] and references.pending is not None
+    pair.unavailable = False
+    monkeypatch.setattr(pair, "call", call)
+    successor = enrollment.Enrollment(
+        owner.installation, backend=pair, selector=owner.selector, qualifier=owner.qualifier,
+    )
+    result = successor.converge()
+    assert result["status"] == "disabled" and not result["recovery_required"]
+    assert not result["timer_enabled"] and not result["timer_active"]
+    assert references.pending is None and references.owners[enrollment.REFERENCE] == ["1.0"]
+
+
 def test_cross_platform_state_and_account_changes_refuse_before_native_calls(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

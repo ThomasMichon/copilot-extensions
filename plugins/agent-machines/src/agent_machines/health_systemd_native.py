@@ -165,18 +165,23 @@ class NativePair:
         mutating = bool(arguments and arguments[0] != "show")
         if mutating and self._native_begin is not None:
             self._native_begin()
-        result = run_caller_owned(
-            [executable, "--user", "--no-pager", *arguments],
-            timeout=timeout, budget=OwnedExecutionBudget.from_timeout(timeout, cleanup_reserve=5),
-            max_stdout_bytes=64 * 1024, max_stderr_bytes=4096,
-            env={**os.environ, "LC_ALL": "C", "TZ": "UTC", "SYSTEMD_COLORS": "0"},
-        )
+        client_settled: list[bool] = []
+        try:
+            result = run_caller_owned(
+                [executable, "--user", "--no-pager", *arguments],
+                timeout=timeout, budget=OwnedExecutionBudget.from_timeout(timeout, cleanup_reserve=5),
+                max_stdout_bytes=64 * 1024, max_stderr_bytes=4096,
+                env={**os.environ, "LC_ALL": "C", "TZ": "UTC", "SYSTEMD_COLORS": "0"},
+                on_settled=lambda: client_settled.append(True),
+            )
+            client_settled.append(True)
+        finally:
+            if client_settled and mutating and self._native_settled is not None:
+                self._native_settled()
         if result.returncode != 0 and not (
             missing and result.returncode in {1, 4} and "LoadState=not-found" in result.stdout.splitlines()
         ):
             raise slots.HealthError("native-health-pair-operation-unconfirmed")
-        if mutating and self._native_settled is not None:
-            self._native_settled()
         return cast(str, result.stdout)
 
     def _properties(self, unit: str) -> dict[str, str]:

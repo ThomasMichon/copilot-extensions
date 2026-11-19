@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import stat
+import subprocess
 import sys
 from types import SimpleNamespace
 from typing import Any, cast
@@ -49,7 +50,7 @@ def test_native_command_distinguishes_absent_unit_from_unavailable_manager(
     assert all("sudo" not in argv and "linger" not in argv for argv, _options in calls)
 
 
-def test_only_confirmed_native_mutations_clear_the_execution_fence(
+def test_confirmed_client_cleanup_clears_the_fence_independently_of_manager_result(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     pair = native.NativePair(NAME, OWNER)
@@ -67,7 +68,17 @@ def test_only_confirmed_native_mutations_clear_the_execution_fence(
     answer.returncode = 1
     with pytest.raises(ValueError, match="unconfirmed"):
         pair._command("start", NAME + ".timer")
-    assert events == ["begin"]
+    assert events == ["begin", "settled"]
+    events.clear()
+
+    def timeout(*_args: Any, **kwargs: Any) -> Any:
+        kwargs["on_settled"]()
+        raise subprocess.TimeoutExpired("systemctl", 15)
+
+    monkeypatch.setattr(owned_process, "run_caller_owned", timeout)
+    with pytest.raises(subprocess.TimeoutExpired):
+        pair._command("stop", NAME + ".timer")
+    assert events == ["begin", "settled"]
 
 
 @pytest.mark.parametrize(("mode", "uid", "links"), [
