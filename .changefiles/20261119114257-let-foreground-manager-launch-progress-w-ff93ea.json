@@ -2,11 +2,11 @@
   "comment": "Let foreground Manager launch progress without execution deadlines or a pre-UI Manager daemon dependency; retain bounded capture and owned cleanup.",
   "changes": [
     {
-      "plugin": "agent-procutil",
+      "plugin": "libs/agent-procutil",
       "type": "patch"
     },
     {
-      "plugin": "update-driver",
+      "plugin": "libs/update-driver",
       "type": "patch"
     },
     {
@@ -67,6 +67,18 @@
     },
     {
       "plugin": "wsl-setup",
+      "type": "patch"
+    },
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "services/chat",
+      "type": "patch"
+    },
+    {
+      "plugin": "services/ssh",
       "type": "patch"
     }
   ]

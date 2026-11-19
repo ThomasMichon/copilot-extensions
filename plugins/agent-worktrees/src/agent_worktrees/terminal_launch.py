@@ -34,7 +34,7 @@ def exit_for_query(arguments: list[str] | None = None) -> None:
 
 
 def select_receiver(
-    command: list[str], environment: dict[str, str],
+    command: list[str], environment: dict[str, str], *, timeout: float | None = 10,
 ) -> tuple[list[str], dict[str, str]]:
     environment = dict(environment)
     environment.pop(ENVIRONMENT, None)
@@ -51,7 +51,7 @@ def select_receiver(
         "AGENT_WORKTREES_NO_SELFPROVISION": "1",
     }
     result = run_caller_owned(
-        [*query_command, "--version"], env=query_environment, timeout=None,
+        [*query_command, "--version"], env=query_environment, timeout=timeout,
         max_stdout_bytes=4096, max_stderr_bytes=4096,
     )
     if result.returncode != 0 or result.stderr:

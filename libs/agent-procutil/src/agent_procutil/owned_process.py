@@ -280,6 +280,7 @@ def _communicate_unreaped(
     argv: list[str], timeout: float | None, capture_limits: tuple[int, int] | None = None,
     binary: bool = False,
     capture_timeout: bool = False,
+    on_root_exit: Callable[[], None] | None = None,
 ) -> tuple[str | bytes | None, ...]:
     streams = (process.stdout, process.stderr)
     output = (bytearray(), bytearray())
@@ -307,8 +308,29 @@ def _communicate_unreaped(
                 selector.register(process.stdin, selectors.EVENT_WRITE, -1)
             else:
                 process.stdin.close()
+        root_exited = False
+        drain_deadline: float | None = None
         while selector.get_map():
-            for key, _mask in selector.select(remaining() if deadline is not None else .05):
+            remaining()
+            if not root_exited and _observe_unreaped(process) is not None:
+                root_exited = True
+                if on_root_exit is not None:
+                    on_root_exit()
+                    drain_deadline = time.monotonic() + 2.0
+                if process.stdin is not None and not process.stdin.closed:
+                    selector.unregister(process.stdin)
+                    process.stdin.close()
+            if drain_deadline is not None and time.monotonic() >= drain_deadline:
+                raise RuntimeError("native child pipes did not settle after group retirement")
+            # An inherited group belongs to the enclosing supervisor, which must
+            # publish its completion before retiring that group. Drain available
+            # bytes, but never wait for descendants to close inherited pipe ends.
+            events = selector.select(
+                0 if root_exited else min(.05, remaining())
+            )
+            if root_exited and not events:
+                break
+            for key, _mask in events:
                 if key.data == -1:
                     try:
                         offset += os.write(key.fd, cast(memoryview, data)[offset:offset + 65536])
@@ -572,9 +594,6 @@ def _communicate_windows_bounded(
                 if _pipe_worker_definitely_unstarted(worker, started_workers[worker], error):
                     unstarted.add(worker)
                 raise
-        for worker, _completed in workers:
-            while worker.is_alive():
-                worker.join(min(0.05, _remaining(deadline, argv, timeout)))
         while process.poll() is None:
             remaining = _remaining(deadline, argv, timeout)
             try:
@@ -582,7 +601,7 @@ def _communicate_windows_bounded(
             except subprocess.TimeoutExpired:
                 continue
         if deadline is not None and time.monotonic() >= deadline:
-            raise subprocess.TimeoutExpired(argv, timeout)
+            raise subprocess.TimeoutExpired(argv, cast(float, timeout))
     except BaseException as error:
         note(error)
     finally:
@@ -772,11 +791,25 @@ def _run_owned(
                 argv=argv, timeout=cast(float, timeout),
             )
         else:
+            def settle_exited_group() -> None:
+                from agent_procutil._caller_owned import _confirm_group
+
+                try:
+                    _retire_posix_group(process)
+                    if confirm_posix_group or timeout is None:
+                        _confirm_group(process, budget=budget)
+                except BaseException as error:
+                    raise _posix_cleanup_error(
+                        process, confirm_group=confirm_posix_group or timeout is None,
+                        on_settled=on_settled,
+                    ) from error
+
             stdout, stderr = _communicate_unreaped(
                 process, input_text=input_text, deadline=cast(float, deadline),
                 argv=argv, timeout=cast(float, timeout),
                 capture_limits=capture_limits,
                 binary=binary,
+                on_root_exit=settle_exited_group if not inherit_process_group else None,
                 **({"capture_timeout": True} if budget is not None else {}),
             )
     except OwnedCleanupError as error:
@@ -801,7 +834,7 @@ def _run_owned(
                         job_settlement=settlement.job, process_settlement=settlement.process,
                         output_settlement=settlement.output,
                     ) from error
-            elif not windows:
+            elif not windows and not retained:
                 if confirm_posix_group:
                     from agent_procutil._caller_owned import _confirm_group
 

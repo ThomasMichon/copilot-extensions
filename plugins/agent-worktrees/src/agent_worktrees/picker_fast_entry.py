@@ -103,7 +103,7 @@ def dispatch(argv: list[str]) -> int | None:
 
     from .terminal_launch import select_receiver
 
-    selected, environment = select_receiver(result["manager_command"], environment)
+    selected, environment = select_receiver(result["manager_command"], environment, timeout=None)
     command = [*selected, "--project", argv[1]]
     # Without a terminal-host channel, Windows keeps this process as the
     # kill-on-close waiter: returning None would only reach the ordinary

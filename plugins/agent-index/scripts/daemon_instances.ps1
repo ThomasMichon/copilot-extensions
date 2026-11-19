@@ -160,7 +160,9 @@ sys.exit(main(packet))
         $qualification = $State.output.ReadLineAsync()
         Wait-DaemonInstanceTask $qualification $clock $startupSeconds
         if ($qualification.Result -ceq 'daemon-python-unsupported') {
-            $remaining = [Math]::Max(0, [Math]::Min(3000, 30000 - $clock.ElapsedMilliseconds))
+            $remaining = if ($NoTimeout) { 3000 } else {
+                [Math]::Max(0, [Math]::Min(3000, 30000 - $clock.ElapsedMilliseconds))
+            }
             if (-not $State.process.WaitForExit([int]$remaining)) {
                 throw 'Unsupported Python process exit is unconfirmed; selection was not retried.'
             }
@@ -241,7 +243,12 @@ function Invoke-DaemonInstanceRequest {
     param([Parameter(Mandatory)][hashtable]$Request, [switch]$Transient)
     $noTimeout = $Request.command -eq 'run-query' -and
         $Request.parameters.ContainsKey('timeout_ms') -and $null -eq $Request.parameters.timeout_ms
-    $gate = [string]::Intern('copilot-daemon-instance-shell-v1')
+    if ($noTimeout -and -not $Transient) {
+        throw 'A no-deadline native query requires transient caller custody.'
+    }
+    $gate = if ($Transient) { [object]::new() } else {
+        [string]::Intern('copilot-daemon-instance-shell-v1')
+    }
     $pendingState = $null
     $outcomeReceived = $false
     $cleanupAttempted = $false

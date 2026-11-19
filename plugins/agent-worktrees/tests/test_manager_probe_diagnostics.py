@@ -13,6 +13,7 @@ from typing import NoReturn
 import pytest
 
 from agent_worktrees import __main__ as core
+from agent_worktrees import config as cfg
 from agent_worktrees import manager_launch_cli as launch
 from agent_worktrees.control_plane_providers import _ControlPlaneProviderManifest
 
@@ -35,7 +36,7 @@ def test_engine_callback_preserves_source_without_unsealed_cache(
         "print(json.dumps({'args':sys.argv[1:],'value':value,'no_write':sys.dont_write_bytecode}))\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr(launch.cfg, "install_dir", lambda: root)
+    monkeypatch.setattr(cfg, "install_dir", lambda: root)
     previous_environment = os.environ.get("PYTHONPYCACHEPREFIX")
     previous_prefix = sys.pycache_prefix
 
@@ -103,7 +104,7 @@ def test_real_probe_failure_reaches_bare_front_door_as_failure(
     monkeypatch.setattr(core, "_is_noninteractive_invocation", lambda: False)
     monkeypatch.setattr(core, "_is_headless_project", lambda: False)
     monkeypatch.setattr(core, "_bundled_picker_available", lambda: False)
-    monkeypatch.setattr(core.cfg, "active_project", lambda: "demo")
+    monkeypatch.setattr(cfg, "active_project", lambda: "demo")
     monkeypatch.setattr(
         core, "_exec_worktree_manager", lambda *_a, **_kw: pytest.fail("failed provider launched"),
     )
@@ -189,7 +190,7 @@ def test_spawn_error_keeps_literal_cause_without_a_retry(
     assert captured.out == ""
 
 
-def test_external_timeout_preserves_partial_stderr_without_replaying(
+def test_exhausted_timeouts_preserve_partial_stderr_and_attempt_count(
     provider: Provider, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:
     provider("pass")
@@ -197,19 +198,20 @@ def test_external_timeout_preserves_partial_stderr_without_replaying(
 
     def failed(argv: list[str], **kwargs: object) -> NoReturn:
         calls.append(argv)
-        assert kwargs.get("timeout") is None
-        raise subprocess.TimeoutExpired(argv, 1, stderr=b"fixture resolver waiting")
+        timeout = kwargs["timeout"]
+        assert isinstance(timeout, (int, float))
+        raise subprocess.TimeoutExpired(argv, timeout, stderr=b"fixture resolver waiting")
 
     monkeypatch.setattr(launch.subprocess, "run", failed)
     assert launch._usable_worktree_manager() is None
     captured = capsys.readouterr()
-    assert len(calls) == 1
-    assert "reported a timeout" in captured.err
+    assert len(calls) == 2
+    assert "timed out" in captured.err
     assert "fixture resolver waiting" in captured.err
     assert captured.out == ""
 
 
-def test_external_timeout_stdout_fallback_is_redacted(
+def test_timeout_stdout_fallback_is_redacted_and_keeps_last_useful_evidence(
     provider: Provider, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:
     provider("pass")
@@ -217,18 +219,20 @@ def test_external_timeout_stdout_fallback_is_redacted(
 
     def failed(argv: list[str], **kwargs: object) -> NoReturn:
         calls.append(kwargs)
-        assert kwargs.get("timeout") is None
+        timeout = kwargs["timeout"]
+        assert isinstance(timeout, (int, float))
+        assert timeout == 20.0
         partial = (
             b"\x1b[31mresolver at https://packages.example/simple?token=fixture-secret\x1b[0m"
             if len(calls) == 1 else b""
         )
-        raise subprocess.TimeoutExpired(argv, 1, output=partial, stderr=b" \n")
+        raise subprocess.TimeoutExpired(argv, timeout, output=partial, stderr=b" \n")
 
     monkeypatch.setattr(launch.subprocess, "run", failed)
     assert launch._usable_worktree_manager() is None
     captured = capsys.readouterr()
-    assert len(calls) == 1
-    assert "reported a timeout" in captured.err
+    assert len(calls) == 2
+    assert "after 2 attempts (20s each)" in captured.err
     assert "resolver at https://packages.example/simple" in captured.err
     assert "fixture-secret" not in captured.err
     assert "\x1b" not in captured.err
@@ -286,14 +290,15 @@ def test_partial_timeout_url_userinfo_is_redacted_before_bounding(
 
     def failed(argv: list[str], **kwargs: object) -> NoReturn:
         calls.append(argv)
-        assert kwargs.get("timeout") is None
+        timeout = kwargs["timeout"]
+        assert isinstance(timeout, (int, float))
         partial = ("Fetching https://fixture-user:" + password).encode("utf-8")
-        raise subprocess.TimeoutExpired(argv, 1, stderr=partial)
+        raise subprocess.TimeoutExpired(argv, timeout, stderr=partial)
 
     monkeypatch.setattr(launch.subprocess, "run", failed)
     assert launch._usable_worktree_manager() is None
     captured = capsys.readouterr()
-    assert len(calls) == 1
+    assert len(calls) == 2
     assert "Fetching https://" in captured.err
     assert "fixture-user" not in captured.err
     assert password not in captured.err
@@ -336,23 +341,24 @@ def test_incomplete_or_alternate_terminal_controls_cannot_hide_the_cause(control
     assert all(char.isprintable() or char in "\n\t" for char in diagnostic)
 
 
-def test_probe_cancellation_is_not_reported_as_an_unusable_installation(
+def test_transient_probe_timeout_does_not_report_a_failure(
     provider: Provider, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:
-    provider("pass")
+    manifest = provider("pass")
     calls = []
 
-    def cancelled(argv: list[str], **kwargs: object) -> NoReturn:
+    def eventually(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         calls.append(argv)
-        assert kwargs.get("timeout") is None
-        raise KeyboardInterrupt
+        if len(calls) == 1:
+            timeout = kwargs["timeout"]
+            assert isinstance(timeout, (int, float))
+            raise subprocess.TimeoutExpired(argv, timeout, stderr="transient wait")
+        return subprocess.CompletedProcess(argv, 0, "worktree-manager 1.2.3\n", "")
 
-    monkeypatch.setattr(launch.subprocess, "run", cancelled)
-    with pytest.raises(KeyboardInterrupt):
-        launch._usable_worktree_manager()
-    assert len(calls) == 1
+    monkeypatch.setattr(launch.subprocess, "run", eventually)
+    assert launch._usable_worktree_manager() == manifest.command
     captured = capsys.readouterr()
-    assert not captured.err + captured.out
+    assert "transient wait" not in captured.err + captured.out
 
 
 def test_real_bundled_fallback_keeps_its_exit_status(
@@ -362,7 +368,7 @@ def test_real_bundled_fallback_keeps_its_exit_status(
     monkeypatch.setattr(core, "_is_noninteractive_invocation", lambda: False)
     monkeypatch.setattr(core, "_is_headless_project", lambda: False)
     monkeypatch.setattr(core, "_bundled_picker_available", lambda: True)
-    monkeypatch.setattr(core.cfg, "active_project", lambda: "demo")
+    monkeypatch.setattr(cfg, "active_project", lambda: "demo")
     monkeypatch.setattr(core, "cmd_launch", lambda _args: 7)
     assert launch.dispatch_bare_invocation(True) == 7
 

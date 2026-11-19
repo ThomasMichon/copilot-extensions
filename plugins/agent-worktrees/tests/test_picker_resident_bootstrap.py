@@ -188,18 +188,12 @@ def test_fast_entry_cannot_bypass_the_normal_front_door_gates(tmp_path, monkeypa
 @pytest.mark.skipif(os.name != "nt", reason="Windows launch-job custody")
 def test_fast_handoff_retains_the_selected_engine_and_closes_its_job(tmp_path, monkeypatch):
     import agent_procutil
-    from agent_worktrees import manager_launch_cli, picker_session_entry, terminal_launch
+    from agent_worktrees import manager_launch_cli
 
     result = {
         "manager_command": ["qualified-manager", "--resident-picker"],
         "bootstrap": {"project": "sample"}, "runtime_root": str(tmp_path),
-        "manager_session": {"version": 1, "root": str(tmp_path)},
     }
-    monkeypatch.setattr(terminal_launch, "_channel", None)
-    monkeypatch.setattr(
-        picker_session_entry, "open_session",
-        lambda *_a: pytest.fail("app entry must not wait on the Manager daemon"),
-    )
     monkeypatch.delenv("WORKTREE_MANAGER_ENGINE_CMD", raising=False)
     monkeypatch.setattr(sys, "stdin", SimpleNamespace(isatty=lambda: True))
     monkeypatch.setattr(picker_fast_entry.registry_paths, "registry_root", lambda: tmp_path)

@@ -552,14 +552,17 @@ guard, native-handle, finite Job and fresh-process compatibility details.
 Portable facade/transaction controls and actual Windows process/desktop
 qualification remain distinct.
 
-Finite shell queries use `Invoke-DaemonInstanceRequest -Transient` with the
+Shell capability queries use `Invoke-DaemonInstanceRequest -Transient` with the
 private `run-query` operation. It borrows the existing transport and strict
 child-Job/capture owner, not a daemon or new supervisor. A dedicated helper
 state closes before the response returns and never replaces the shell's
 existing instance guard. Requests supply literal argv, cwd and an explicit
 environment, a target deadline of at most 30 seconds (or explicit `null` for
-caller-cancellable launch admission without an execution deadline), and per-stream capture
-limits of at most 65536 bytes. Actual child-tree settlement is required;
+caller-cancellable launch admission without an execution deadline), and
+per-stream capture limits of at most 65536 bytes. A null deadline requires
+transient custody. Transient requests have independent helper state and monitors;
+they cannot block unrelated finite requests behind the shared-helper lock.
+Shared-helper requests remain serialized. Actual child-tree settlement is required;
 timeout, output overflow and unknown cleanup cannot become successful output.
 The caller still owns applicability and capability interpretation. This
 operation does not authorize installation or target effects.
@@ -864,6 +867,15 @@ without an elapsed execution limit. Per-stream byte limits, caller-death
 custody, cancellation and confirmed cleanup remain enforced. An explicit
 aggregate `budget` still bounds execution and settlement; `None` does not
 override it. This opt-in does not change finite timeouts on existing callers.
+Root exit is observed while pipes drain: a descendant retaining an inherited
+pipe cannot extend execution indefinitely. Windows retires and confirms the
+owned Job before joining its pipe workers. An exclusive POSIX owner retains
+the unreaped root through group retirement and confirmation, then drains
+available bytes. In the caller-owned POSIX supervisor, root exit drains
+available output without waiting for descendant EOF; publishing the completion
+frame lets the enclosing owner retire and confirm that same group before
+returning. Root output, nonzero exit codes and output-limit failures remain
+distinct from cleanup confirmation.
 
 ### Aggregate execution and settlement budget
 

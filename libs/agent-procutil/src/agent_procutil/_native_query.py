@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
+from typing import TypedDict
+
 from . import _job_scopes
 from ._native_owned import NativeOwnedFailure, _absolute_path
 from .owned_process import _run_owned
 
 
-def run(value: object) -> dict:
+class QueryResult(TypedDict):
+    returncode: int
+    stdout: str | None
+    stderr: str | None
+
+
+def run(value: object) -> QueryResult:
     if not isinstance(value, dict) or set(value) != {
         "executable", "arguments", "cwd", "timeout_ms", "environment", "limit",
     }:
