@@ -55,6 +55,18 @@ release gates, or count unexecuted native coverage as passing.
 
 ## Coordination
 
+The proposed #9568 family enters Phase 5 only through the existing Phase 7
+migration-intake deduplication and domain-Plan review. The primary maintainer
+retains portfolio ownership; existing workflow/runner, fixture, source-audit,
+runtime/native, release, cleanup and resource custodians retain their scopes.
+No implementation participant is appointed. Keep OPEN #1303, all incumbent
+claims/holds, unit-only required PR/promotion CI and hosted-Windows quiescence.
+Normal review must actually deliver the whole P9568/V9568/G9568 receiving
+and intake route; ledger publication alone is not domain acceptance.
+Current permitted receiving/source/owner readback precedes separate tracking
+judgment. Keep #9568 OPEN during this proposal. Historical capacity/results
+grant no native execution, resource transfer or changed budgets.
+
 The finite #13294 Windows-native unit-collector attribution family enters
 the existing Phase 4 tools/shared-library wave through Phase 7
 migration-intake deduplication and domain-Plan review. Preserve the existing
@@ -1076,6 +1088,61 @@ a different selection. Any changed controlled selection must be named as changed
 - [ ] Record and enforce per-plugin runtime and resource budgets.
 - [ ] Add contribution guidance requiring new test families to declare their
   contract, tier, effects, and expected budget impact.
+
+#### Independently bounded optional Windows scheduling - #9568
+
+_Agent-recommended finite receiving, not a newly reproduced regression or
+an assertion that the historical source defect remains current._
+
+- [ ] **P9568-1:** Preserve the attributed run 40949196454 on #9566:
+  DirectJob lifetime, cold construction and concurrent Manager recovery
+  passed; separate PowerShell/POSIX jobs passed; all three cold serving-slot
+  retention controls passed in 205.03, 134.57 and 141.34 seconds. The
+  combined Windows job timed out at 900 seconds and later finite removal
+  did NOT run. These are historical partial results, not a green aggregate
+  or current full qualification.
+- [ ] **P9568-2:** Give optional Windows consumer, retention and removal
+  independently bounded scheduling at the existing workflow/runner boundary.
+  Preserve underlying assertion coverage, group/job/process/storage/cleanup/
+  resource limits and truthful cancellation/not-run outcomes. Justified
+  scheduling-shape assertion updates must retain their intended checks,
+  including finite-removal coverage, rather than preserve obsolete topology.
+  Do not solve the combined timeout
+  by enlarging deadlines or dropping controls; its 900-second failure is
+  evidence, not an invented universal cap for every independent job.
+- [ ] **P9568-3:** Revalidate the actual current candidate and intended
+  contracts before changing six reported stale assertions in
+  `tools/test_installation_context_ci_scope.py`: native-launch description
+  (one), seed timeout 8 versus 12 (two), diagnostics-family exclusion of
+  MCP controls (two), and missing windows-native-process job inventory
+  (one). Do not blindly mandate 12 or update expectations to match a bug.
+  Credit any already-delivered corrections without losing remaining
+  scheduling/qualification obligations.
+- [ ] **P9568-4:** Keep the related queued-installer lifetime repair separate:
+  the original report left these assertion changes alone and did not publish
+  the proposed regrouping. Retain normal review, required CI and actual
+  installation acceptance as distinct gates. Use existing Phase 7 scope
+  revalidation, synthetic fixtures and the same custodians; no required-CI
+  native enrollment, new runner or execution authority follows from intake.
+
+##### Local Validation
+
+- [ ] **V9568-1:** Attribute each historical pass, timeout and not-run result
+  to its real source/run/tier. Never count the combined cancelled aggregate
+  or unexecuted removal as passing; retain all three retention controls.
+- [ ] **V9568-2:** Verify independent consumer/retention/removal selection,
+  finite scheduling and truthful timeout/cancellation/not-run reporting with
+  bounded workflow/runner fixtures, preserving underlying contract coverage
+  and resource/cleanup limits rather than increasing deadlines. Verify
+  justified assertion updates still exercise the moved finite-removal work.
+- [ ] **V9568-3:** Resolve all six reported assertion contracts against the
+  current intended behavior before any expectation change, with justified
+  regression coverage and accurate credit for existing delivery.
+- [ ] **V9568-4:** Resolve every P9568 clause at its existing finite tier,
+  preserving unit-only required PR/promotion CI, hosted-Windows quiescence,
+  OPEN #1303 and independent installer/installation/native/release gates.
+  A synthetic scheduling pass or receiving merge is not a native full pass,
+  installation acceptance, implementation appointment or resource release.
 
 #### Finite external image-mapping cleanup outcome - #7643
 
@@ -2307,6 +2374,15 @@ Phase 7 intake; this is not #7643's already-attributed external mapping.
 
 ## Validation Plan
 
+- [ ] **G9568:** Resolve every P9568-1 through P9568-4, local V9568-1
+  through V9568-4 and continuing Coordination condition: independently
+  bounded optional Windows consumer/retention/removal, accurate historical
+  partial results, all six intended-contract decisions before expectation
+  edits and preserved assertion coverage, tiers, deadlines and resource custody.
+  Preserve Phase 7 deduplication/domain acceptance, OPEN #1303, unit-only
+  required CI and hosted-Windows quiescence. No combined-timeout green claim,
+  enlarged deadlines, native execution grant or unrelated whole-parent gate.
+
 - [ ] **G13294:** Resolve every P13294/V13294 and continuing Coordination
   clause at the original finite Windows-native collector boundary:
   BOTH CPython 3.11.9 AND 3.14.7, actual extended-path loader/open-audit/
@@ -2631,6 +2707,20 @@ with another unbounded full-suite run. Portfolio reductions follow only after
 the inventory and evidence gates are available.
 
 ## Journal
+
+### 2026-11-19 UTC - Proposed bounded optional Windows scheduling receiving
+
+Propose complete P9568/V9568/G9568 Phase 5 retention through existing
+Phase 7 migration-intake and actual domain-Plan review, with the paired
+append-only intake route. Preserve the historical consumer/PowerShell/POSIX
+and three retention passes, combined 900-second timeout, removal NOT RUN
+and all six intended-contract decisions. All nine technical rows remain
+unchecked. Normal reviewed delivery and current permitted whole receiving/
+source/owner readback precede a separate source-specific tracking judgment;
+no extra administrative checkbox or receipt-PR gate is introduced.
+The [campaign record](../backlog-reconciliation/journal/2026/11.19-read-only-and-bounded-windows-receiving.md)
+retains the mapping. #9568 stays OPEN now. No native run, implementation,
+CI enrollment, installation, source/resource transfer or custody release occurred.
 
 ### 2026-11-19 UTC - Finite Windows collector receiving accepted
 
