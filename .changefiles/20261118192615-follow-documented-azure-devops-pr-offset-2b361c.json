@@ -1,0 +1,9 @@
+{
+  "comment": "Follow documented Azure DevOps PR offset pagination and refuse incomplete inventories",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

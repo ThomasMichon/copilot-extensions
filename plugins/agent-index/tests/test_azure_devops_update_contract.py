@@ -202,7 +202,10 @@ def _updated_pr_provider(request: httpx.Request) -> httpx.Response:
         assert request.url.params["searchCriteria.repositoryId"] == "repo-1"
         assert request.url.params["searchCriteria.status"] == "active"
         minimum = request.url.params.get("searchCriteria.minTime")
-        selected = minimum is None or pull["creationDate"] >= minimum
+        selected = (
+            not int(request.url.params["$skip"])
+            and (minimum is None or pull["creationDate"] >= minimum)
+        )
         return httpx.Response(200, json={"value": [pull] if selected else []})
     if path == "/acme/widgets/_apis/git/pullrequests/7":
         return httpx.Response(200, json=pull | {"description": "Updated complete description"})
@@ -283,8 +286,10 @@ def test_full_discovery_retains_old_pr_edits_and_id_only_scope(
         connector._http.client.close()
     assert [request.url.path for request in requests] == [
         "/acme/widgets/_apis/git/pullrequests",
+        "/acme/widgets/_apis/git/pullrequests",
         "/acme/widgets/_apis/git/pullrequests/7",
         "/acme/widgets/_apis/git/repositories/repo-1/pullRequests/7/threads",
+        "/acme/widgets/_apis/git/pullrequests",
         "/acme/widgets/_apis/git/pullrequests",
     ]
     assert all("searchCriteria.minTime" not in request.url.params for request in requests)
