@@ -121,6 +121,26 @@ async def test_real_predecessor_end_reports_missing_source_to_attached_reader(tm
     assert inherited.subscriber_count == 0
 
 
+@pytest.mark.parametrize("retained", ["row-reappeared", "local-client", "log-advanced"])
+def test_stale_absence_cannot_retire_a_retained_projection(tmp_db: Database, retained: str) -> None:
+    sid = "worker"
+    tmp_db.create_session(sid, sid, None, ".", "local", "stopped", 1.0)
+    mgr = _passive_manager(tmp_db)
+    session = mgr.get_session(sid)
+    assert session is not None and session.event_log is not None
+    session.awaiting_maintenance_refresh = True
+    tmp_db.delete_session(sid)
+    missing = InheritedRefresh(None, None, target=RefreshTarget.capture(session))
+    if retained == "row-reappeared":
+        tmp_db.create_session(sid, sid, None, ".", "local", "starting", 2.0)
+    elif retained == "local-client":
+        session.client = Mock()
+    else:
+        session.event_log.wake_observers()
+    mgr._rehydrate(merge=True, session_id=sid, prepared=missing)
+    assert mgr.get_session(sid) is session and not session.event_log.source_unavailable
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("change", ["first-id", "replacement-id", "rebuilt-journal"])
 async def test_follow_through_inherited_native_id_assignment(tmp_db: Database, change: str) -> None:
