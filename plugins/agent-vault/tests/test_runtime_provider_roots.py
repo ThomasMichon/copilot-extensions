@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import json
 import importlib.util
+from importlib import import_module
 import os
 from pathlib import Path
+import subprocess
 from types import ModuleType
 from typing import Any
 
 import pytest
+from agent_procutil import no_window_kwargs
 
 
 @pytest.fixture
@@ -129,6 +133,8 @@ def test_currentness_does_not_hide_an_unapplied_provider_selection(
         json.dumps({"source": {"version": "1.2.4"}}), encoding="utf-8",
     )
     assert target.current(root, payload, "1.2.4")
+    providers.persist(root, [])
+    assert target.current(root, payload, "1.2.4")
     providers.persist(root, ["example-provider"])
     assert not target.current(root, payload, "1.2.4")
     origins = slot / ".runtime-input-origins.json"
@@ -143,6 +149,51 @@ def test_currentness_does_not_hide_an_unapplied_provider_selection(
         }},
     }), encoding="utf-8")
     assert target.current(root, payload, "1.2.4")
+    providers.persist(root, [])
+    assert not target.current(root, payload, "1.2.4")
+    origins.unlink()
+    assert target.current(root, payload, "1.2.4")
+
+
+def test_provider_only_selection_bypasses_unchanged_base_fast_exit(tmp_path: Path) -> None:
+    assert __package__ is not None
+    bootstrap = import_module(".test_bootstrap_driver", __package__)
+    fixtures = import_module(".test_bootstrap_check_reconcile_always_on", __package__)
+    make_plugin: Callable[[Path, str], Path] = fixtures._make_fake_plugin
+    make_install: Callable[[Path, str], Path] = fixtures._make_fake_install
+    clean_env: Callable[[dict[str, str]], dict[str, str]] = fixtures._clean_env
+    native_command: Callable[[Path, Path, Path], list[str]] = bootstrap.native_bootstrap
+    home, project = tmp_path / "home", tmp_path / "project"
+    home.mkdir()
+    project.mkdir()
+    plugin = make_plugin(tmp_path, "agent-vault")
+    installation = make_install(home, "agent-vault")
+    (installation / ".venv").mkdir()
+    (installation / "deploy-manifest.json").write_text(
+        '{"source":{"version":"1.0.1"}}', encoding="utf-8",
+    )
+    (installation / "runtime-provider-roots.json").write_text(
+        '{"schema":"copilot-extensions.runtime-provider-roots","version":1,"roots":["example-provider"]}',
+        encoding="utf-8",
+    )
+    (plugin / "scripts" / "runtime_profile.py").write_text(
+        "import pathlib,sys\n"
+        "assert sys.argv[-3:] == ['current','--package-version','1.0.1']\n"
+        "pathlib.Path(sys.argv[2], 'provider-inspected').write_text('yes')\n"
+        "raise SystemExit(1)\n",
+        encoding="utf-8",
+    )
+    env = clean_env({
+        "HOME": str(home), "USERPROFILE": str(home),
+        "BOOTSTRAP_KILLSWITCH_STATE_FILE": str(home / "killswitch.json"),
+    })
+    result = subprocess.run(
+        native_command(plugin, project, home), env=env, cwd=project,
+        stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=15, **no_window_kwargs(),
+    )
+    assert result.returncode == 0 and json.loads(result.stdout) == {}, result.stderr
+    assert (installation / "provider-inspected").read_text() == "yes"
+    assert (project / "handoff").read_text(encoding="utf-8-sig").splitlines()[4] == "provision"
 
 
 def test_provider_cli_requires_explicit_persistence_and_excludes_core(

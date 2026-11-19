@@ -90,8 +90,9 @@ def current(root: Path, payload: Path, package_version: str) -> bool:
         return False
     import installer_provider_roots as providers
 
-    if providers.read(root) is not None:
-        origins = root / "versions" / version / ".runtime-input-origins.json"
+    desired = providers.read(root)
+    origins = root / "versions" / version / ".runtime-input-origins.json"
+    if desired is not None and (desired or os.path.lexists(origins)):
         try:
             if origins.stat().st_size > 1_048_576:
                 return False

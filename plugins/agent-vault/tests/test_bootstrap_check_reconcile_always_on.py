@@ -90,6 +90,8 @@ def _make_fake_plugin(root: Path, name: str) -> Path:
         "versioned_runtime_native.ps1", "installer_provider_roots.py",
     ):
         shutil.copyfile(_PLUGIN_ROOT / "scripts" / filename, scripts_dir / filename)
+    for source in (_PLUGIN_ROOT / "scripts").glob("versioned_runtime*.py"):
+        shutil.copyfile(source, scripts_dir / source.name)
     shutil.copytree(
         _PLUGIN_ROOT / "scripts" / "configuration-layers",
         scripts_dir / "configuration-layers",

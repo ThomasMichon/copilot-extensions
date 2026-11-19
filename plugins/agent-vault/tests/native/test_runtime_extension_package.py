@@ -149,6 +149,13 @@ def test_base_profile_update_refuses_unqualified_provider_inputs(
         assert selection.read_bytes() == before
         assert {name: (root / name).read_bytes() for name in retained} == retained
         assert sorted(path.name for path in (root / "versions").iterdir()) == versions
+        cleared = json.loads(before)
+        cleared["roots"] = []
+        selection.write_text(json.dumps(cleared), encoding="utf-8")
+        _run(_no_service_provision_command(home, installer, pwsh, action="update"), env, home)
+        version = json.loads((root / "deploy-manifest.json").read_text())["source"]["version"]
+        _run([sys.executable, "-I", "-B", payload / "scripts" / "runtime_profile.py",
+              "--root", root, "current", "--package-version", version], env, home)
 
 
 @pytest.mark.timeout(120)
