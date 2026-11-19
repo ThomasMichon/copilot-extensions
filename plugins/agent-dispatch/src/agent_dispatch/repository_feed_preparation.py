@@ -81,6 +81,21 @@ class RepositoryFeedPreparer:
     def binding(self) -> dict[str, Any]:
         return copy.deepcopy(self._binding)
 
+    async def _negotiate(self) -> dict[str, Any]:
+        capabilities = await self.client.negotiate()
+        feature = capabilities.get("consumer_binding")
+        if (
+            capabilities.get("protocol") != CACHE_PROTOCOL
+            or capabilities.get("identity") != self._binding["identity"]
+            or capabilities.get("namespace") != self._binding["identity"]["namespace"]
+            or capabilities.get("target") != self._binding["target"]
+            or not isinstance(feature, dict)
+            or feature.get("protocol") != "agent-pull-requests.repository-consumer/v1"
+            or feature.get("consumer") != self._binding["consumer"]
+        ):
+            raise ValueError("executing repository/consumer selection differs")
+        return capabilities
+
     async def prepare(
         self, task_id: str, *, delegation: dict[str, Any], worker_id: str,
         resume_worktree: str, reason: str, host: str | None = None,
@@ -120,18 +135,7 @@ class RepositoryFeedPreparer:
         self.client.deadline = min(prior_deadline, deadline) if prior_deadline is not None else deadline
         self._running = True
         try:
-            capabilities = await self.client.negotiate()
-            feature = capabilities.get("consumer_binding")
-            if (
-                capabilities.get("protocol") != CACHE_PROTOCOL
-                or capabilities.get("identity") != self._binding["identity"]
-                or capabilities.get("namespace") != self._binding["identity"]["namespace"]
-                or capabilities.get("target") != self._binding["target"]
-                or not isinstance(feature, dict)
-                or feature.get("protocol") != "agent-pull-requests.repository-consumer/v1"
-                or feature.get("consumer") != self._binding["consumer"]
-            ):
-                raise ValueError("executing repository/consumer selection differs")
+            await self._negotiate()
             self._checkpoint()
             page = await self.client.request("next-actions", {
                 "reviewer": self._binding["reviewer"], "limit": 1,
