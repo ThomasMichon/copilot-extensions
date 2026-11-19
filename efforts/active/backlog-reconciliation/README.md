@@ -377,10 +377,21 @@ the non-public approval conversation.
 The [complete terminal, offline-job and fixture receiving proposal](journal/2026/11.18-terminal-and-offline-receiving.md)
 directly preserves #13209/#13278/#13300/#13334 in existing domain Plan/local
 and global Validation, with the three portfolio lanes' actual migration-intake
-route recorded separately. All thirty new rows remain unchecked; normal
-reviewed delivery/readback precedes any separate tracker judgment. The complete
-05:39:32 UTC census is 915 whole open, 186 above fixed 729. No implementation
-or source effect follows.
+route recorded separately. Normal reviewed delivery/readback preceded separate
+tracker judgments. #13384 delivered
+the complete plans; #13388 records their accepted intake, checking only three
+administrative rows. All twenty-seven new technical rows remain unchecked.
+The four sources separately retired as redundant planned tracking, with their
+original requirements and actual custodians retained. The complete 06:45:44 UTC
+census is 912 whole open, 183 above fixed 729. No technical completion,
+implementation or resource-release credit follows.
+
+The same record proposes complete #13294 collector-attribution receiving in
+the existing portfolio Phase 4 and its Phase 7 intake, not another effort.
+All six technical rows and I13294 remain unchecked; the source stays OPEN
+pending reviewed complete delivery, permitted current readback and separate
+judgment. Both original CPython versions and all admission/refusal boundaries
+remain; no native run, source/bytecode mutation or new causal diagnosis follows.
 
 The [selected-PR receiving and source-closeout record](journal/2026/11.18-selected-pr-receiving-and-source-closeout.md)
 records #6467's separately audited planned-tracking retirement and the whole
