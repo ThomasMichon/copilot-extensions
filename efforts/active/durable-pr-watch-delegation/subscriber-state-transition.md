@@ -7,10 +7,13 @@ and [accepted callback/state contract](subscriber-callback-context.md#persistenc
 runtime realization. The operator accepted the one-time POSIX boot-boundary requirement
 as source design; the [complete decision](subscriber-callback-context.md#physical-transition-feasibility-and-accepted-migration-choice)
 retains its limits. Receiver groundwork is delivered in #13320. The first
-runtime slice adds an effect-free marker/path reader and legacy-absence
-guards under the existing storage owner. Every present phase still refuses;
+runtime slice, merged in #13508, adds an effect-free marker/path reader and
+legacy-absence guards under the existing storage owner. Every present phase still refuses;
 no phase label proves admission or selects an authority. Nothing here
-implements migration or enables versioned/map writes.
+implements migration or enables versioned/map writes. The current source
+candidate adds an internal, explicitly authorized preparation API and
+same-original-inode prepared recovery. It is not connected to ordinary CLI or
+control-plane entry, and adds no sealing or authority-selection capability.
 
 **Scope:** Historical-root admission, one recoverable state authority and
 P/V/G5947-3/4 prerequisites. No service stop, installation, reboot, rollout,
@@ -195,8 +198,8 @@ is removed. Rollback of code is not downgrade of retained state.
 1. The concrete transition amendment cleared review in #13493. Keep the
    receiver-only release and preserved provider prototype distinct while
    implementing the following runtime paths.
-2. The shared storage reader now derives fixed paths and observes the
-   version-1 `agent-pull-requests.watch-state-transition` phase header.
+2. The shared storage reader delivered in #13508 derives fixed paths and
+   observes the version-1 `agent-pull-requests.watch-state-transition` phase header.
    Missing markers preserve legacy behavior only without orphan transition
    artifacts. All present phases refuse through shared read and final-write
    boundaries; header parsing does not validate installation, boot or inode
@@ -229,3 +232,26 @@ Keep complete historical-runtime qualification separate from experiments
 using historical lease/entry source with current unrelated imports.
 Measure transition work once per phase and keep ordinary reads on the
 existing owner path; no process, filesystem scan or boot probe per callback.
+
+### Guarded preparation candidate
+
+The internal writer first revalidates its owner authorization and, when
+supplied, the pinned current `WatchInstallation`. It recognizes only an
+absent transition or a complete prepared record at the unchanged historical
+lease path. It finishes application quiescence while retaining that lease,
+strictly validates legacy registrations without effects and publishes the
+private record through no-replace persistence. A final callback rechecks
+scope, deadline, quiescence, descriptor/path identity and unchanged journal
+before publication. A failed drain or uncertain commit retains accountable
+custody rather than activating a successor.
+
+Prepared recovery never trusts a phase label or opens the retained inode.
+It validates exact binding, original file identity and absence of physical
+transition artifacts before native acquisition, then reconfirms durability
+without overwriting the record. It does not import an earlier snapshot, so a
+historical writer's intervening legacy registrations remain intact. Later
+phases still refuse and cannot be downgraded to preparation.
+
+This is a source-only internal API, not a released migration command or
+standalone/governed control-plane integration. Physical sealing, final-source
+import, actual boot-crossing qualification and map/cwd activation remain open.

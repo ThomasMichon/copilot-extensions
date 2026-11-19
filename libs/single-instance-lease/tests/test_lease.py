@@ -85,6 +85,44 @@ def test_read_owner_pid_records_holder(tmp_path: Path) -> None:
     lease.release()
 
 
+def test_held_file_identity_requires_current_native_custody(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lease = SingleInstance(tmp_path, service="svc")
+    with pytest.raises(PermissionError):
+        lease.held_file_identity()
+    lease.acquire()
+    try:
+        info = lease.lock_path.lstat()
+        assert lease.held_file_identity() == (info.st_dev, info.st_ino)
+        with monkeypatch.context() as child:
+            child.setattr(os, "getpid", lambda: -1)
+            with pytest.raises(PermissionError):
+                lease.held_file_identity()
+    finally:
+        lease.release()
+    with pytest.raises(PermissionError):
+        lease.held_file_identity()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows prevents moving an open lease")
+def test_held_file_identity_refuses_replaced_or_linked_path(tmp_path: Path) -> None:
+    lease = SingleInstance(tmp_path, service="svc")
+    lease.acquire()
+    retained = tmp_path / "retained"
+    try:
+        lease.lock_path.rename(retained)
+        lease.lock_path.write_text("replacement", encoding="ascii")
+        with pytest.raises(PermissionError):
+            lease.held_file_identity()
+        lease.lock_path.unlink()
+        lease.lock_path.symlink_to(retained)
+        with pytest.raises(PermissionError):
+            lease.held_file_identity()
+    finally:
+        lease.release()
+
+
 def test_read_owner_pid_missing_file_is_none(tmp_path: Path) -> None:
     assert read_owner_pid(tmp_path / "nope.lock") is None
 

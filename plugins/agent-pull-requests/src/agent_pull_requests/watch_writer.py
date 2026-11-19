@@ -13,11 +13,15 @@ import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from single_instance_lease import SingleInstance
 
 from .watch_daemon import Fetch, NativeFetch, Notify, WatchDaemon
 from .watch_notification import default_notify, positive_seconds
+
+if TYPE_CHECKING:
+    from .watch_installation import WatchInstallation
 
 
 class WatchWriter:
@@ -114,6 +118,39 @@ class WatchWriter:
             self._remaining(deadline)
             self._drain_started = False
 
+    def prepare_state_transition(
+        self, *, timeout: float, installation: WatchInstallation | None = None,
+    ) -> dict[str, Any]:
+        """Prepare explicitly under existing custody; never seal, import or activate."""
+        from .watch_transition import prepare, read_preparation
+
+        with self._operation(timeout) as deadline:
+            binding: dict[str, Any] = {"kind": "legacy", "stateRoot": str(self.root)}
+
+            def validate() -> None:
+                self._validate("prepare-state-transition", deadline)
+                if installation is not None:
+                    installation.require_current()
+                    if installation.state_root != self.root:
+                        raise PermissionError("watch preparation installation state root differs")
+                if not self.daemon.quiescent or self.daemon.effects_enabled:
+                    raise PermissionError("watch preparation requires completed quiescence")
+
+            self._validate("prepare-state-transition", deadline)
+            if installation is not None:
+                installation.require_current()
+                if installation.state_root != self.root:
+                    raise PermissionError("watch preparation installation state root differs")
+                binding.update(kind="installation", installation=installation.evidence())
+            read_preparation(self.root, binding)
+            if not self.writer_held:
+                self._lease.acquire()
+            self._read_ready = False
+            self._drain_started = True
+            if not self.daemon.quiescent:
+                self.daemon.quiesce(timeout=self._remaining(deadline))
+            return prepare(self.root, binding, self._lease, validate=validate)
+
     def drain_and_release(self, *, timeout: float) -> None:
         """Never release on incomplete drain or failed post-drain authorization."""
         with self._operation(timeout) as deadline:
@@ -145,7 +182,7 @@ class WatchWriter:
             self._remaining(deadline)
             self._drain_started = False
 
-    def compute(self, kind: str, payload: dict) -> dict:
+    def compute(self, kind: str, payload: dict[str, Any]) -> dict[str, Any]:
         self._assert_process()
         if kind in {"register", "unregister"} and not self.read_ready:
             return {"error": "watch writer is not read-ready", "retryable": True}

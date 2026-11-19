@@ -607,12 +607,25 @@ barrier or `watch-state` path is not ordinary absence. Missing transition
 evidence preserves existing legacy behavior, including a regular historical
 lease file; inspecting an empty root does not create it.
 
-No publisher or migration command creates these markers yet. Do not write
-one by hand or delete transition evidence to regain startup. Guarded
-preparation, physical sealing, boot qualification, authority validation and
-recovery are separate, still-unimplemented steps; this receiver alone does
-not make any transition phase usable. It performs no boot probe, lease
-transfer or automatic migration, and does not change installation selection.
+The internal `WatchWriter.prepare_state_transition()` API can now publish
+only a bound `prepared` record after completed quiescence. It rechecks the
+caller's `prepare-state-transition` authorization, optional current installation,
+original held lease inode and journal at the final no-replace publication
+boundary. Its strict legacy-state validation starts no effects. The writer
+retains its native lease with read/effect readiness disabled. Failed drain,
+authority checks or durability acknowledgement never grant a later phase.
+Prepared-only recovery validates that same root, installation and original
+inode before acquiring the historical lease, then confirms journal durability;
+it never selects or opens a retained/new writer inode.
+
+No CLI or control-plane operation invokes preparation yet, and ordinary
+startup/restart still refuses every present phase. Do not write markers by
+hand or delete evidence to regain startup. Physical sealing, boot qualification,
+post-seal recovery and authority selection remain unimplemented. This API
+performs no boot probe, lease transfer, import or automatic migration, and
+does not change installation selection. Preparation is not an authoritative
+subscription snapshot: later historical writes remain in the sole legacy file
+and must survive final import qualification.
 
 This is a receiver expansion baseline, not a migration tool, map/callback-cwd
 support or a cross-process writer lease. Existing writer/lifecycle ownership remains required.
