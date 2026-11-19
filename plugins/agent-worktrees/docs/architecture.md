@@ -3838,6 +3838,12 @@ explicitly unconfirmed. This changes neither the POSIX Python entry nor the
 separately selected SDK pilot below. A source change does not update cached
 commands or prove installed/composed latency.
 
+The prepared post-tool entry validates native membership once for the current
+event and passes that result to its prepared read helper. Direct helper calls
+still perform their own validation by default. This is same-call reuse, not a
+cross-event cache; fact freshness, accounting and demand notification remain
+unchanged.
+
 Unavailable evaluation
 returns bounded recovery `additionalContext` without a fabricated permission
 decision; it is not authorization or proof that policy was satisfied. Confirmed

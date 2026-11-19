@@ -154,7 +154,7 @@ jobs:
           python tools/run-plugin-tests.py agent-worktrees
           --test-file tests/test_managed_session.py
           --test-file tests/test_native_tool_hook_transport.py
-          -k "native_batch_entry_and_live_scoped_grants or real_powershell_hook_does_not_activate_unmanaged_repo or real_powershell_managed_pretool_preserves_protection or native_entry_resolves_caller_session_before_resident_admission or native_entry_resolves_caller_directory_before_resident_admission or original_guards_execute_without_any_process"
+          -k "native_batch_entry_and_live_scoped_grants or real_powershell_hook_does_not_activate_unmanaged_repo or real_powershell_managed_pretool_preserves_protection or native_entry_resolves_caller_session_before_resident_admission or native_entry_resolves_caller_directory_before_resident_admission or original_guards_execute_without_any_process or command_entry_never_launches_python"
           --allow-explicit-tiers --test-timeout 30 --timeout 300
 
   prepared-membership-linux:

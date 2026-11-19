@@ -1015,6 +1015,60 @@ def test_registered_prepared_cell_post_tool_uses_selected_original_owners(
 @pytest.mark.portfolio_tier("T2")
 @pytest.mark.effect("process")
 @pytest.mark.effect("filesystem")
+@pytest.mark.skipif(os.name != "nt", reason="Native post-tool membership work count")
+@pytest.mark.parametrize("prepared_read_event", ["legacy", "cell"], indirect=True)
+@pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
+def test_registered_prepared_cell_post_tool_validates_membership_once(
+    prepared_read_event: PreparedReadEvent, shell: str,
+) -> None:
+    from agent_procutil import no_window_kwargs
+
+    executable = shutil.which(shell)
+    assert executable, f"Required membership-count shell {shell} is unavailable"
+    fixture = prepared_read_event
+    scripts = fixture["payload_root"] / "scripts"
+    original = PLUGIN / "scripts" / "managed-session.ps1"
+    managed = original.read_text(encoding="utf-8")
+    start = managed.index("function Test-PreparedManagedWorktreesSession {")
+    first_statement = managed.index("    $stream =", start)
+    counted = scripts / "counted-managed-session.ps1"
+    counted.write_text(
+        managed[:first_statement] + "    $script:preparedAdmissionCalls++\n"
+        + managed[first_statement:],
+        encoding="utf-8",
+    )
+    wrapper = scripts / "managed-session.ps1"
+    source = str(original).replace("'", "''")
+    assert source in wrapper.read_text(encoding="utf-8")
+    wrapper.write_text(
+        wrapper.read_text(encoding="utf-8").replace(source, str(counted).replace("'", "''")),
+        encoding="utf-8",
+    )
+    harness = fixture["harness"].read_text(encoding="utf-8")
+    terminal = "[Console]::Error.WriteLine('entry_seconds='"
+    assert harness.count(terminal) == 1
+    fixture["harness"].write_text(
+        "$script:preparedAdmissionCalls=0\n" + harness.replace(
+            terminal,
+            "if ($script:preparedAdmissionCalls -ne 1) {\n"
+            " throw ('prepared admission count=' + $script:preparedAdmissionCalls)\n"
+            "}\n" + terminal,
+        ),
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [executable, "-NoProfile", "-NonInteractive", "-File", str(fixture["harness"])],
+        input=json.dumps(fixture["payload"]), text=True, capture_output=True, timeout=10,
+        env=fixture["env"], **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr
+    assert not result.stdout and result.stderr.startswith("entry_seconds="), result.stderr
+    assert json.loads(fixture["sidecar"].read_text())["count"] == 1
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
 @pytest.mark.skipif(os.name != "nt", reason="Native post-tool relative source compatibility")
 @pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
 @pytest.mark.parametrize("path_kind", ["relative", "drive-relative", "root-relative"])

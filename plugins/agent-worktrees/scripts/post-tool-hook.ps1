@@ -259,7 +259,7 @@ function Invoke-PostToolHook {
     $factsReader = [IO.Path]::Combine($PSScriptRoot, 'hook-facts.ps1')
     if ($prepared -and [IO.File]::Exists($factsReader)) {
         . $factsReader
-        $readResult = Invoke-PreparedPostToolRead -Raw $Raw
+        $readResult = Invoke-PreparedPostToolRead -Raw $Raw -PreparedMembership $prepared
         if ($null -ne $readResult) {
             if ($readResult.Count) { [Console]::Out.Write((ConvertTo-PreparedWorktreesJson -InputObject $readResult)) }
             return

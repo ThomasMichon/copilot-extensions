@@ -70,6 +70,11 @@ protection controls. Their disposable residents use original admission and
 guards, setup stamps membership outside entry, and native entries must not
 start Python or perform executable discovery. Missing-resident behavior remains
 in the separate cold transport controls.
+The existing native lane explicitly selects the complete command-entry transport
+matrix too, rather than only the process-free original-guard control.
+Registered post-tool work-count controls require one original membership
+validation per event on both engines in legacy and selected-cell contexts.
+Direct prepared-read helper calls retain their own admission check.
 The same native selection checks caller/resident session mismatch, explicit
 session preservation and absent caller identity through real managed admission.
 Native transport controls compare the forwarded pre-tool elevation Boolean with
