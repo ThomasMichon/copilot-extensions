@@ -12,6 +12,10 @@
 # is treated as invalid input (Python's limit depends on its recursion limit),
 # and very large inline commands (hundreds of KB) can exhaust the shared 1.5 s
 # decision budget sooner than in Python, which ends in the same budget outcome.
+# A body file without `@` is checked against the size limit without its NUL
+# bytes, because such bytes cannot form or hide a mention there. File reads
+# are time-bounded, but bash cannot bound a stalled open() of a regular file;
+# FIFOs and other non-regular files are refused before any open.
 
 shopt -u patsub_replacement 2>/dev/null
 set -f
@@ -26,6 +30,12 @@ if (( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 1) )
     G_RN=1
 else
     G_RN=0
+fi
+# bash 4.4 adds `mapfile -d`, and `$!` and `wait` for process substitutions.
+if (( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4) )); then
+    G_44=1
+else
+    G_44=0
 fi
 
 # Fast exit: a publication command needs a `gh` token and a write word, and
@@ -230,6 +240,8 @@ pick_sep() {
 }
 
 # read_file PATH LIMIT -> G_BUF (at most LIMIT bytes; NUL bytes are dropped).
+# Only for the small killswitch file, which the Python helper reads without a
+# time bound too.
 read_file() {
     G_BUF=
     if (( G_RN )); then
@@ -238,6 +250,47 @@ read_file() {
         G_BUF=$(head -c "$2" -- "$1"; printf x)
         G_BUF=${G_BUF%x}
     fi
+} 2>/dev/null
+
+# read_file_bounded PATH LIMIT STRICT -> G_BUF (at most LIMIT bytes), or
+# return 1 when the read fails or does not finish within the decision budget.
+# A NUL byte becomes \001: like NUL, it is neither a word character nor
+# whitespace, and it is invalid in JSON, so mention and JSON results match
+# Python. A bash variable cannot hold NUL.
+read_file_bounded() {
+    local p=$1 lim=$2 st data
+    G_BUF=
+    remaining_secs || return 1
+    if (( G_44 )); then
+        # `read -N` is buffered and honors -t, but it drops NUL bytes. NUL
+        # placement can change a result only when the text has an `@` (the
+        # mention) or must be valid JSON, so only then read again with
+        # `mapfile -d ''`, which keeps the NUL positions. That second pass
+        # follows a read that already finished, so it is not time-bounded.
+        exec 8< "$p" || return 1
+        IFS= read -r -N "$lim" -t "$G_SECS" -u 8 G_BUF
+        st=$?
+        exec 8<&-
+        (( st > 128 )) && return 1
+        if (( ${#G_BUF} < lim )) && [[ $3 == 1 || $G_BUF == *@* ]]; then
+            local -a parts=()
+            mapfile -d '' -n $((lim + 1)) parts < "$p" || return 1
+            local IFS=$'\001'
+            G_BUF="${parts[*]}"
+        fi
+        return 0
+    fi
+    # Older bash: read a bounded `head` through a pipe with a timeout. These
+    # versions cannot signal or wait for a process substitution, so a stalled
+    # `head` is left behind; it does not hold the hook's stdin or stdout.
+    exec 8< <(head -c "$lim" -- "$p" < /dev/null | tr '\000' '\001'; printf '\035%s' "${PIPESTATUS[0]}")
+    IFS= read -r -d '' -t "$G_SECS" -u 8 data
+    st=$?
+    exec 8<&-
+    (( st > 128 )) && return 1
+    case $data in *"$P_DQ"*) ;; *) return 1 ;; esac
+    [[ ${data##*"$P_DQ"} == 0 ]] || return 1
+    G_BUF=${data%"$P_DQ"*}
 } 2>/dev/null
 
 # crlf_norm: G_BUF with CRLF and lone CR changed to LF. Work in bounded
@@ -268,7 +321,7 @@ read_bounded() {
     fi
     [[ -n $p && -f $p && -r $p ]] || return 1
     expired && return 1
-    read_file "$p" 800005
+    read_file_bounded "$p" 800005 "$2" || return 1
     (( ${#G_BUF} > 800004 )) && return 1
     if [[ $2 == 1 ]]; then utf8_valid "$G_BUF" || return 1; fi
     [[ $G_BUF == *$G_CR* ]] && crlf_norm
@@ -1170,26 +1223,45 @@ manifest_target() {
 
 # repo_has CWD TARGET: `git remote --verbose` lists TARGET as a fetch remote.
 repo_has() {
-    local out st line name url rest seen=$G_US IFS
+    local out st line name url rest pid seen=$G_US IFS
     remaining_secs || return 1
-    IFS= read -r -d '' -t "$G_SECS" out < <(
-        {
-            cd -- "$1" || exit 1
-            unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
-            if [[ -n $G_LCSET ]]; then export LC_ALL=$G_LCVAL; else unset LC_ALL; fi
-            git remote --verbose < /dev/null
-            printf '\035%s' "$?"
-        } 2>/dev/null
-    )
-    st=$?
-    if (( st > 128 )); then
-        kill "$!" 2>/dev/null
-        return 1
+    if (( G_44 )); then
+        # `$!` is git itself (exec), so a timeout can kill and reap it, as
+        # Python's subprocess.run does.
+        IFS= read -r -d '' -t "$G_SECS" out < <(
+            {
+                cd -- "$1" || exit 1
+                unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
+                if [[ -n $G_LCSET ]]; then export LC_ALL=$G_LCVAL; else unset LC_ALL; fi
+                exec git remote --verbose < /dev/null
+            } 2>/dev/null
+        )
+        st=$?
+        pid=$!
+        if (( st != 1 )); then
+            kill -KILL "$pid" 2>/dev/null
+            wait "$pid" 2>/dev/null
+            return 1
+        fi
+        wait "$pid" 2>/dev/null || return 1
+    else
+        # Older bash cannot signal or wait for a process substitution, so a
+        # stalled git is left behind after the timeout.
+        IFS= read -r -d '' -t "$G_SECS" out < <(
+            {
+                cd -- "$1" || exit 1
+                unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
+                if [[ -n $G_LCSET ]]; then export LC_ALL=$G_LCVAL; else unset LC_ALL; fi
+                git remote --verbose < /dev/null
+                printf '\035%s' "$?"
+            } 2>/dev/null
+        )
+        (( $? > 128 )) && return 1
+        case $out in *"$P_DQ"*) ;; *) return 1 ;; esac
+        st=${out##*"$P_DQ"}
+        out=${out%"$P_DQ"*}
+        [[ $st == 0 ]] || return 1
     fi
-    case $out in *"$P_DQ"*) ;; *) return 1 ;; esac
-    st=${out##*"$P_DQ"}
-    out=${out%"$P_DQ"*}
-    [[ $st == 0 ]] || return 1
     out=${out//"$G_CR$G_NL"/$G_NL}
     out=${out//[$'\r\v\f\034\035\036']/$G_NL}
     out=${out//$'\xc2\x85'/$G_NL}

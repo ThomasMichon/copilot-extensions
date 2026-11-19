@@ -300,22 +300,50 @@ function Join-PyPath([string]$cwd, [string]$path) {
     return $base + $tail
 }
 
+# A pipe or a stalled filesystem can block an open or a read past the decision
+# budget. Run both on thread-pool tasks (a compiled delegate, because a script
+# block cannot run off the pipeline thread) and abandon a task that does not
+# finish in time; the hook process exit ends it, like Python's daemon reader.
+function Get-Opener {
+    if ($null -eq $S.Opener) {
+        $E = [Linq.Expressions.Expression]
+        $state = $E::Parameter([object], 'path')
+        $method = [IO.File].GetMethod('Open', [type[]]@([string], [IO.FileMode], [IO.FileAccess], [IO.FileShare]))
+        $argv = [Linq.Expressions.Expression[]]@(
+            $E::Convert($state, [string]), $E::Constant([IO.FileMode]::Open),
+            $E::Constant([IO.FileAccess]::Read), $E::Constant([IO.FileShare]::ReadWrite))
+        $S.Opener = $E::Lambda([Func[object, IO.FileStream]], $E::Call($method, $argv), [Linq.Expressions.ParameterExpression[]]@($state)).Compile()
+    }
+    return $S.Opener
+}
+
+function Wait-Task($task) {
+    $remaining = Get-Remaining
+    if ($remaining -le 0) { return $false }
+    return $task.Wait([int][Math]::Ceiling($remaining))
+}
+
 function Read-Bounded([string]$path, [bool]$strict, [string]$cwd) {
     try {
         if ($cwd -and -not (Test-AbsolutePath $path)) { $path = Join-PyPath $cwd $path }
-        if (-not $path -or -not [IO.File]::Exists($path)) { return $null }
-        if (Test-Expired) { return $null }
-        $stream = [IO.FileStream]::new($path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+        if (-not $path -or (Test-Expired)) { return $null }
+        $open = [Threading.Tasks.Task[IO.FileStream]]::Factory.StartNew((Get-Opener), [object]$path)
+        if (-not (Wait-Task $open)) { return $null }
+        $stream = $open.Result
+        $abandoned = $true
         try {
-            if ($stream.Length -gt 800004) { return $null }
-            $buffer = [byte[]]::new([int]$stream.Length)
+            $buffer = [byte[]]::new(800005)
             $count = 0
             while ($count -lt $buffer.Length) {
-                $read = $stream.Read($buffer, $count, $buffer.Length - $count)
+                $task = $stream.ReadAsync($buffer, $count, $buffer.Length - $count)
+                if (-not (Wait-Task $task)) { return $null }
+                $read = $task.Result
                 if ($read -le 0) { break }
                 $count += $read
             }
-        } finally { $stream.Dispose() }
+            $abandoned = $false
+        } finally { if (-not $abandoned) { $stream.Dispose() } }
+        if ($count -gt 800004) { return $null }
         $encoding = [Text.UTF8Encoding]::new($false, $strict)
         $text = $encoding.GetString($buffer, 0, $count)
         $text = $text.Replace("`r`n", "`n").Replace("`r", "`n")

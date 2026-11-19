@@ -785,6 +785,9 @@ def _guarded_workspace(root: Path, *, adopted: bool = True, remote: str | None =
     (root / "clean.txt").write_text("hello copilot-extensions reviewers", encoding="utf-8")
     (root / "body.json").write_text(json.dumps({"body": "@Copilot fix"}), encoding="utf-8")
     (root / "broken.json").write_text("{nope", encoding="utf-8")
+    (root / "nul-split.txt").write_bytes(b"hello @copilot\x00-extensions")
+    (root / "nul-join.txt").write_bytes(b"hello @cop\x00ilot")
+    (root / "nul.json").write_bytes(b'{"body": "ok\x00"}')
     return root
 
 
@@ -853,6 +856,9 @@ PARITY_EVENTS: list[tuple[str, str, dict[str, Any]]] = [
         ("adopted", "bash", 'gh pr edit 1 --body "@copilot-extensions and x@copilot"'),
         ("adopted", "bash", 'gh pr edit 1 --body "@cop\u0131lot \u00e9\U0001f680"'),
         ("adopted", "bash", "gh issue create --title x --body $'@copilot'"),
+        ("adopted", "bash", "gh pr comment 1 --body-file nul-split.txt"),
+        ("adopted", "powershell", "gh pr comment 1 --body-file nul-join.txt"),
+        ("adopted", "bash", "gh api repos/o/r/issues/1/comments --input nul.json"),
         ("adopted", "powershell", "git status --short"),
         ("adopted", "view", 'gh pr comment 1 --body "@copilot review"'),
         ("unadopted", "bash", 'gh pr comment 1 --body "@copilot review"'),
@@ -935,6 +941,92 @@ def test_registered_hooks_never_launch_python() -> None:
         assert not re.search(r"python|\bpy\b|\.py\b", hook[variant], re.IGNORECASE), variant
     assert "copilot-mention-guard.sh" in hook["bash"]
     assert "copilot-mention-guard.ps1" in hook["powershell"]
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+@pytest.mark.parametrize("variant", ["powershell", "bash"])
+def test_native_hook_bounds_a_stalled_body_reader(tmp_path: Path, variant: str) -> None:
+    """A body file that never delivers data is denied as unscannable in time."""
+    root = _guarded_workspace(tmp_path / "workspace")
+    marker = _python_shims(tmp_path / "shims")
+    stdin_event = {"toolName": "bash", "toolArgs": {"command": "gh pr comment 1 --body-file -"}}
+    expected = _run_reference(root, stdin_event).stdout.strip()
+    assert expected
+    if sys.platform == "win32":
+        import _winapi
+
+        path = rf"\\.\pipe\mention-guard-{os.getpid()}-{variant}"
+        # A byte-mode pipe instance that accepts a client but never writes.
+        handle = _winapi.CreateNamedPipe(
+            path, _winapi.PIPE_ACCESS_DUPLEX, _winapi.PIPE_WAIT, _winapi.PIPE_UNLIMITED_INSTANCES,
+            65536, 65536, 0, _winapi.NULL,
+        )
+    else:
+        path = str(tmp_path / "stalled")
+        os.mkfifo(path)
+    try:
+        started = time.monotonic()
+        event = {"toolName": "bash", "toolArgs": {"command": f"gh pr comment 1 --body-file '{path}'"}}
+        result = _run_native(variant, root, event, marker.parent)
+        elapsed = time.monotonic() - started
+    finally:
+        if sys.platform == "win32":
+            _winapi.CloseHandle(handle)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == expected
+    assert elapsed < 10
+    assert not marker.exists(), "native mention-guard hook started a Python interpreter"
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+def test_native_bash_hook_kills_and_reaps_a_stalled_git(tmp_path: Path) -> None:
+    shell = _native_shell("bash")
+    root = _guarded_workspace(tmp_path / "workspace")
+    marker = _python_shims(tmp_path / "shims")
+    pidfile = tmp_path / "git.pid"
+    git = marker.parent / "git"
+    git.write_text(
+        f"#!/usr/bin/env bash\necho $$ > '{_bash_path(pidfile)}'\nexec sleep 30\n",
+        encoding="utf-8", newline="\n",
+    )
+    git.chmod(0o755)
+    probe = tmp_path / "probe.sh"
+    probe.write_text(
+        'case $1 in\n'
+        '  ready) (( BASH_VERSINFO[0] * 100 + BASH_VERSINFO[1] >= 404 )) || exit 2\n'
+        '         [ "$(command -v git)" -ef "$2" ] || exit 3 ;;\n'
+        '  alive) kill -0 "$2" 2>/dev/null ;;\n'
+        'esac\n',
+        encoding="utf-8", newline="\n",
+    )
+    ready = subprocess.run(
+        [shell, _bash_path(probe), "ready", _bash_path(git)], timeout=15,
+        env={**os.environ, "PATH": str(marker.parent) + os.pathsep + os.environ.get("PATH", "")},
+        creationflags=NO_WINDOW,
+    ).returncode
+    if ready == 2:
+        pytest.skip("bash before 4.4 cannot signal a process substitution")
+    if ready != 0:
+        pytest.skip("this bash puts its own git ahead of the caller's PATH")
+    started = time.monotonic()
+    result = _run_native("bash", root, {"toolName": "bash", "toolArgs": {
+        "command": 'gh pr comment 1 --body "@copilot review"',
+    }}, marker.parent)
+    assert time.monotonic() - started < 10
+    assert result.returncode == 0, result.stderr
+    # The repository check failed, so the guard treats the call as out of scope.
+    assert result.stdout == ""
+    pid = pidfile.read_text(encoding="utf-8").strip()
+    assert pid.isdigit()
+    alive = subprocess.run(
+        [shell, _bash_path(probe), "alive", pid], timeout=15, creationflags=NO_WINDOW,
+    )
+    assert alive.returncode != 0, "the timed-out git process is still running"
+    assert not marker.exists(), "native mention-guard hook started a Python interpreter"
 
 
 @pytest.mark.portfolio_tier("T2")
