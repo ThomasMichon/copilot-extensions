@@ -69,6 +69,51 @@ def _table(owner: ContentStore | VectorTable) -> _ProjectionTable:
     return cast("Callable[[], _ProjectionTable]", owner._get_or_create_table)()
 
 
+def _path_rows(content: ContentStore, file_path: str, max_rows: int) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = (
+        _table(content).search()
+        .where(f"file_path = '{_sql_str(file_path)}'")
+        .limit(max_rows + 1).to_list()
+    )
+    if len(candidates) > max_rows:
+        raise ScalarIndexPreparationRequired("File projection path candidate budget exceeded")
+    if any(row["file_path"] != file_path for row in candidates):
+        raise SourceLayoutError("File projection returned an unexpected path")
+    return candidates
+
+
+def require_file_projection_capacity(
+    store: MultiModelStore, replacements: dict[tuple[str, str], int], *, max_rows: int,
+) -> None:
+    """Preflight final same-path occupancy across all selected source mutations."""
+    if type(max_rows) is not int or max_rows < 1:
+        raise ValueError("File projection requires a positive integer row budget")
+    by_path: dict[str, int] = {}
+    for (source, path), size in replacements.items():
+        if (
+            any(not isinstance(value, str) or not value.strip() for value in (source, path))
+            or type(size) is not int or size < 0
+        ):
+            raise ValueError("File projection replacements require exact points and row counts")
+        by_path[path] = by_path.get(path, 0) + size
+    content = store.content_store
+    domain = store._source_domain
+    if domain is None or content._source_domain is not domain:
+        raise SourceLayoutError("File projection capacity requires a participating source store")
+    with domain.operation(content.db):
+        state, _ = inspect_index(_table(content), column="file_path")
+        if not state.prepared:
+            raise ScalarIndexPreparationRequired("File projection needs a prepared file_path index")
+        require_budget(state, 0)
+        for path, replacement_rows in by_path.items():
+            unchanged_rows = sum(
+                (row["source"], path) not in replacements
+                for row in _path_rows(content, path, max_rows)
+            )
+            if unchanged_rows + replacement_rows > max_rows:
+                raise ScalarIndexPreparationRequired("Projected file path candidate budget exceeded")
+
+
 def capture_file_projection(
     config: IndexConfig, store: MultiModelStore, source: str, file_path: str, *,
     max_rows: int, retained_chunk_ids: tuple[str, ...] = (),
@@ -123,17 +168,9 @@ def capture_file_projection(
             if not state.prepared:
                 raise ScalarIndexPreparationRequired(f"File projection needs a prepared {column} index")
             require_budget(state, 0)
-        candidates = (
-            _table(content).search()
-            .where(f"file_path = '{_sql_str(file_path)}'")
-            .limit(max_rows + 1).to_list()
-        )
-        if len(candidates) > max_rows:
-            raise ScalarIndexPreparationRequired("File projection path candidate budget exceeded")
+        candidates = _path_rows(content, file_path, max_rows)
         selected: dict[str, dict[str, Any]] = {}
         for row in candidates:
-            if row["file_path"] != file_path:
-                raise SourceLayoutError("File projection returned an unexpected path")
             if row["source"] != source:
                 continue
             cid = row["chunk_id"]

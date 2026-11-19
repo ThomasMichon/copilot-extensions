@@ -16,7 +16,9 @@ from agent_index.indexing.pending_crawl import PendingCrawlConflict, PendingCraw
 from agent_index.indexing.prepared_application import PreparedApplication
 from agent_index.store.component_ledger import ComponentEvidence, ComponentLedger
 from agent_index.store.content_mutations import content_record
-from agent_index.store.file_projection import RawFileProjection, capture_file_projection
+from agent_index.store.file_projection import (
+    RawFileProjection, capture_file_projection, require_file_projection_capacity,
+)
 from agent_index.store.ingestion_index import prepare_ingestion_indices
 from agent_index.store.scalar_index import MAX_SEGMENTS, ScalarIndexPreparationRequired, inspect_index
 from agent_index.store.source_layout import SourceLayoutError
@@ -198,6 +200,10 @@ class PreparedComponentApplication:
                     )
             if not self.selected:
                 return 0, len(self.contents)
+            require_file_projection_capacity(
+                self.store, {point: len(chunks) for point, chunks in self.chunks.items()},
+                max_rows=self.max_rows,
+            )
             planned_rows = sum(len(chunks) for chunks in self.chunks.values())
             prepare_ingestion_indices(self.store, max_rows=0, reserve_segment=planned_rows > 0)
             ledger_state, _ = inspect_index(self.ledger._bound_table(), column="point_key")

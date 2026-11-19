@@ -321,6 +321,70 @@ def test_retained_id_union_budget_refuses_replacement_before_writer(application:
     assert PendingCrawls(f.paths).load("selected", SCOPE) == (manifest, False)
 
 
+@pytest.mark.parametrize("arrival", ["selected-union", "before-preparation", "during-preparation"])
+def test_projected_same_path_capacity_refuses_all_mutations_before_writer(
+    application: Fixture, arrival: str,
+) -> None:
+    f = application
+
+    def add_unrelated() -> None:
+        f.hook = None
+        legacy = Chunk("Retained document.", PATH, "text", "text", 1, 1, "sample:legacy")
+        f.store.upsert("first", [legacy], np.ones((1, 2), dtype=np.float32))
+        f.paths.mark_indexed("sample:legacy", PATH, content_hash="retained", chunk_count=1)
+        prepare_ingestion_indices(f.store, max_rows=1)
+
+    if arrival == "before-preparation":
+        add_unrelated()
+    elif arrival == "during-preparation":
+        f.hook = add_unrelated
+    sources = [FAMILY + ":a", FAMILY + ":b"] if arrival == "selected-union" else [FAMILY + ":new"]
+    manifest = CrawlManifest(
+        "selected", accounting_family=FAMILY,
+        upserts=[FileEntry(PATH, f"Fields for {source}.", "text", source) for source in sources],
+        component_versions=[ComponentVersion(source, PATH, 1, "fields-v1") for source in sources],
+    )
+    PendingCrawls(f.paths).save(manifest, scope=SCOPE, full=False)
+    prepared = f.prepare(manifest, max_rows=1)
+    before = f.domain.receipt()
+    checkpoints = f.paths.get_all_entries()
+    parent = PendingCrawls(f.paths).read_payload("selected", SCOPE)
+    with pytest.raises(ScalarIndexPreparationRequired, match="Projected file path"):
+        prepared.publish()
+    assert f.domain.receipt() == before
+    assert f.paths.get_all_entries() == checkpoints
+    assert PendingCrawls(f.paths).read_payload("selected", SCOPE) == parent
+    for source in sources:
+        assert ComponentLedger(f.config, f.store).get(source, PATH) is None
+
+
+def test_projected_same_path_capacity_accounts_for_selected_deletion(application: Fixture) -> None:
+    f = application
+    first, second = FAMILY + ":z", FAMILY + ":a"
+    initial = CrawlManifest(
+        "selected", accounting_family=FAMILY,
+        upserts=[FileEntry(PATH, "Original fields.", "text", first)],
+        component_versions=[ComponentVersion(first, PATH, 1, "fields-v1")],
+    )
+    PendingCrawls(f.paths).save(initial, scope=SCOPE, full=False)
+    f.prepare(initial, max_rows=1).publish()
+    f.retire_fixture_parent()
+    manifest = CrawlManifest(
+        "selected", accounting_family=FAMILY,
+        upserts=[FileEntry(PATH, "Replacement fields.", "text", second)],
+        deletions=[DeletedFile(first, PATH)],
+        component_versions=[
+            ComponentVersion(first, PATH, 2, "fields-v1"),
+            ComponentVersion(second, PATH, 1, "fields-v1"),
+        ],
+    )
+    PendingCrawls(f.paths).save(manifest, scope=SCOPE, full=False)
+    assert f.prepare(manifest, max_rows=1).publish() == (2, 0)
+    assert f.paths.get_entry(first, PATH) is None
+    assert f.paths.get_entry(second, PATH) is not None
+    assert f.domain.receipt()["state"] == "clean"
+
+
 @pytest.mark.parametrize("stage", ["before-writer", "after-store"])
 def test_cancellation_cannot_publish_ordering_or_path_completion(
     application: Fixture, monkeypatch: pytest.MonkeyPatch, stage: str,

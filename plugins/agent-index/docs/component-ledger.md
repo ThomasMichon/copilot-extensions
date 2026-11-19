@@ -97,7 +97,9 @@ no vectors. Preparation failure leaves native rows and path checkpoints unchange
 `publish()` rechecks the policy, configured owners, pending cache incarnation,
 selected path checkpoints, exact prior ledger records, raw native points and
 covered vector receipts under the existing domain operation. Native point/retained
-ID caps and index segment capacity refuse before writer entry. The existing
+ID caps, projected same-path occupancy across selected sources (including
+replacements/deletions and unselected neighbors) and index segment capacity
+refuse before writer entry. The existing
 writer then encloses content/vector writes, stale-ID cleanup, bounded index
 upkeep, final canonical/routed-vector qualification, native ordering evidence
 and finally path checkpoints. Deletions retain ordering and known vector IDs but
