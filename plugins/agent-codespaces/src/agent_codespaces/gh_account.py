@@ -31,11 +31,13 @@ import os
 import shutil
 import subprocess
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from agent_procutil import no_window_flags
 
 from . import worktrees
+from ._peer_launch import ContextRefused
 
 log = logging.getLogger("agent-codespaces")
 
@@ -146,7 +148,7 @@ def _token_for_account(login: str | None) -> str | None:
     return result.stdout.strip() or None
 
 
-def env_for_account(login: str | None, base: dict | None = None) -> dict:
+def env_for_account(login: str | None, base: Mapping[str, str] | None = None) -> dict[str, str]:
     """Return an env dict authenticating ``gh`` as ``login``.
 
     A copy of ``base`` (default ``os.environ``) with ``GH_TOKEN`` set to the
@@ -173,7 +175,7 @@ def env_for_account(login: str | None, base: dict | None = None) -> dict:
     return env
 
 
-def env_for_repo(slug: str | None, base: dict | None = None) -> dict:
+def env_for_repo(slug: str | None, base: Mapping[str, str] | None = None) -> dict[str, str]:
     """Return an env dict authenticating ``gh`` as the account for ``slug``."""
     return env_for_account(account_for_repo(slug), base)
 
@@ -234,7 +236,7 @@ def credential_account_for_codespace(name: str) -> str | None:
         from .lifecycle import account_for_codespace
 
         account = account_for_codespace(name)
-    except worktrees.ContextRefused:
+    except ContextRefused:
         raise
     except Exception:
         account = None
@@ -314,22 +316,29 @@ def account_inventory() -> AccountInventory:
     return _account_inventory()
 
 
+_LOOKUP_TIMEOUT_SECONDS = 10
+# The full resolution snapshot routinely takes 7-10s on a loaded host; a
+# timeout there fails every CodeSpace lookup, so give it real headroom.
+_SNAPSHOT_TIMEOUT_SECONDS = 30
+
+
 def _lookup(*args: str, strict: bool = False) -> subprocess.CompletedProcess[str] | None:
     explicit = worktrees.explicit_context()
+    timeout = _SNAPSHOT_TIMEOUT_SECONDS if strict else _LOOKUP_TIMEOUT_SECONDS
     try:
         if explicit:
-            return worktrees.run(*args, timeout=10)
+            return worktrees.run(*args, timeout=timeout)
         aw = _agent_worktrees_bin()
         if not aw:
             return None
         return subprocess.run(
-            [aw, *args], capture_output=True, text=True, timeout=10,
+            [aw, *args], capture_output=True, text=True, timeout=timeout,
             creationflags=_creation_flags(),
         )
     except (OSError, subprocess.SubprocessError, UnicodeError) as exc:
         if strict:
             if isinstance(exc, subprocess.TimeoutExpired):
-                reason = "invocation timed out after 10 seconds"
+                reason = f"invocation timed out after {exc.timeout:g} seconds"
             elif isinstance(exc, UnicodeError):
                 reason = "output decoding failed"
             elif isinstance(exc, OSError):
@@ -340,7 +349,7 @@ def _lookup(*args: str, strict: bool = False) -> subprocess.CompletedProcess[str
                 f"agent-worktrees account resolution snapshot is unavailable: {reason}",
             ) from exc
         if explicit:
-            raise worktrees.ContextRefused(
+            raise ContextRefused(
                 "Same-cell worktrees account lookup is unavailable",
             ) from exc
         return None
