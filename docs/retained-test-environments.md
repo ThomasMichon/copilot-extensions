@@ -51,10 +51,15 @@ Apply recomputes the selected source/cache binding and checks both directory
 identities and the preview's cache generation under the lease. A busy environment returns
 exit code 3 without changing its contents. A replaced, stale, linked,
 unqualified or unreadable selection refuses before removal.
+Both preparers advance the shared preparation generation before mutating an
+environment. Rebuilds preserve that token, and retirement binds its content,
+so even an in-place update deep in site-packages invalidates an older preview.
 
 Retirement first writes a terminal marker, then removes only the selected
 environment's contents. It preserves the directory inode and marker. Normal
 plugin and standalone preparation, including `--reinstall`, refuses a retired environment.
+Standalone execution also checks that fence under its held lease, including
+an interrupted `retiring` state whose interpreter still exists.
 This prevents an admitted waiter from recreating usable imports while source
 cleanup proceeds. Use a new managed source checkout for later work.
 Use ordinary `--reinstall`, not terminal retirement, when an active checkout

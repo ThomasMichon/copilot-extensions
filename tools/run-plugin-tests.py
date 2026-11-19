@@ -48,7 +48,8 @@ else:
     from seasoned_uv import run_uv_install
 from standalone_consumers import standalone_build_resources as standalone_build_resources
 from plugin_test_cache import (
-    clear_cache_contents, declared_test_requirements, dependency_fingerprint, has_dev_extra,
+    advance_preparation_generation, clear_cache_contents, declared_test_requirements,
+    dependency_fingerprint, has_dev_extra,
     ordinary_cache_root, retained_build_resources, source_resolution_arguments,
 )
 from plugin_test_resources import record_owner, retirement_venv_root, run_prefix, runs_root, venv_root
@@ -352,6 +353,7 @@ def _prepare_venv(name: str, uv: str, *, reinstall: bool, environment: dict[str,
         if name == "agent-worktrees" and not (venv / ".bootstrap-uv-cache").is_dir():
             drifted = True
     if reinstall or drifted or fresh:
+        advance_preparation_generation(venv)
         # The held lease is keyed by this directory's filesystem identity.
         # Remove only contents, never the directory (including on partial rebuild).
         clear_cache_contents(venv)

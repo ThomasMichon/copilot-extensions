@@ -19,6 +19,7 @@ from single_instance_lease import AlreadyRunningError as AlreadyRunningError
 from cache_directory_paths import ordinary_cache_root
 from native_test_paths import native_test_path
 from plugin_test_cache import clear_cache_contents as clear_cache_contents
+from plugin_test_cache import preparation_generation
 from plugin_test_resources import ENVIRONMENT_LAYOUT, resource_path
 from plugin_test_selection import resolve_plugin_root
 from standalone_consumers import STANDALONE_CONSUMERS
@@ -127,7 +128,7 @@ def _observe(source: Path, target: str, platform: str, environment: Path) -> Pre
         )) or value.get("state") not in {"retiring", "retired"}:
             raise ValueError("Retirement marker does not describe this environment")
     generation = hashlib.sha256(json.dumps(
-        [info.st_mtime_ns, sorted(rows)], separators=(",", ":"),
+        [info.st_mtime_ns, sorted(rows), preparation_generation(environment)], separators=(",", ":"),
     ).encode()).hexdigest()
     return Preview(
         SCHEMA, 1, str(source), source_info.st_dev, source_info.st_ino, target, platform, str(environment),

@@ -34,7 +34,7 @@ from standalone_consumers import (
     STANDALONE_CONSUMERS, local_dependency_source, standalone_build_resources,
 )
 from seasoned_uv import run_uv_install
-from plugin_test_cache import ordinary_cache_root
+from plugin_test_cache import advance_preparation_generation, ordinary_cache_root
 from plugin_test_retirement import require_active
 from plugin_test_resources import record_owner, retirement_venv_root, run_prefix, runs_root, venv_root
 
@@ -169,6 +169,7 @@ def prepare(component: str, python: Path, *, smoke: bool = False) -> None:
     """
     root = python.parent.parent
     require_active(root)
+    advance_preparation_generation(root)
     creationflags: int = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
     if not python.is_file():
         before = root.stat()
@@ -437,6 +438,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"standalone tests: {exc}", file=sys.stderr)
         return 1
     try:
+        require_active(environment_root)
         # Availability is meaningful only after a competing rebuild releases
         # the environment. No candidate code runs before this exclusion.
         if args.prepare and python.is_file() and not (environment_root / "pyvenv.cfg").is_file():
