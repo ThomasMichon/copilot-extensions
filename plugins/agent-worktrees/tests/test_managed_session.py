@@ -1282,6 +1282,7 @@ def environment(home: Path, anchor: Path) -> dict[str, str]:
 @contextmanager
 def registered_policy_resident(
     home: Path, registry: Path, env: dict[str, str], *, real_policy: bool = False,
+    require_admission: bool = False,
 ) -> Iterator[list[dict[str, Any]]]:
     from agent_worktrees.hook_ipc import HookIpcServer
     from agent_worktrees.native_tool_policy import POLICY_SWITCHES, decide_pre
@@ -1315,6 +1316,8 @@ def registered_policy_resident(
         return module
 
     def dispatch(kind: str, event: dict[str, Any], deadline: float) -> dict[str, Any]:
+        if require_admission and not client._managed_session_admitted(event, home=home):
+            return {}
         assert kind == "preToolUse"
         observed.append({key: value for key, value in event.items() if key != "_agentWorktrees"})
         if real_policy:
@@ -2838,7 +2841,11 @@ def test_real_managed_pretool_preserves_anchor_write_protection(tmp_path: Path) 
 
 @pytest.mark.parametrize("entry", ["python", "powershell"])
 @pytest.mark.timeout(120)
-def test_native_batch_entry_and_live_scoped_grants(tmp_path: Path, record_testsuite_property: Callable[[str, object], None], entry: str) -> None:
+def test_native_batch_entry_and_live_scoped_grants(
+    tmp_path: Path, record_testsuite_property: Callable[[str, object], None], entry: str,
+    native_resident: ResidentFactory, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     anchor, registry = fixture_project(tmp_path)
     caller, _ = fixture_linked_worktree(tmp_path, anchor)
     reader = load("guarded_anchor_map")
@@ -2874,14 +2881,11 @@ def test_native_batch_entry_and_live_scoped_grants(tmp_path: Path, record_testsu
             pytest.skip("PowerShell is unavailable")
         payload = tmp_path / "payload"
         shutil.copytree(SCRIPTS, payload / "scripts")
-        (payload / "scripts" / "resolve-runtime.ps1").write_text(
-            "param([string]$TraceMode)\n$AwPy = '" + sys.executable.replace("'", "''") + "'\n",
-            encoding="utf-8-sig",
-        )
         env["COPILOT_PLUGIN_ROOT"] = str(payload)
         hooks = json.loads((SCRIPTS.parent / "hooks.json").read_text())
         command = [powershell, "-NoProfile", "-NonInteractive", "-Command",
-                   hooks["hooks"]["preToolUse"][0]["powershell"]]
+                   "function Get-Command { throw 'native hook requested executable lookup' }; "
+                   + hooks["hooks"]["preToolUse"][0]["powershell"]]
     session = tmp_path / ".copilot" / "session-state" / "native-entry"
     session.mkdir(parents=True)
     event = {"sessionId": "native-entry", "cwd": str(caller), "toolCalls": [
@@ -2890,6 +2894,9 @@ def test_native_batch_entry_and_live_scoped_grants(tmp_path: Path, record_testsu
             f"*** Begin Patch\n*** Update File: {targets[0] / 'source.py'}\n*** End Patch\n"
         )},
     ]}
+    if entry == "powershell":
+        assert load("managed_session").admitted(event, home=tmp_path)
+        native_resident(tmp_path, registry, env, real_policy=True, require_admission=True)
     timings = []
 
     def invoke(value: dict[str, Any]) -> Any:
@@ -2946,7 +2953,11 @@ def test_invalid_query_does_not_reuse_ambient_admission(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("kind", ["preToolUse", "postToolUse", "sessionStart", "sessionEnd"])
-def test_real_powershell_hook_does_not_activate_unmanaged_repo(kind: str, tmp_path: Path) -> None:
+def test_real_powershell_hook_does_not_activate_unmanaged_repo(
+    kind: str, tmp_path: Path, native_resident: ResidentFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     powershell = shutil.which("pwsh") or shutil.which("powershell.exe")
     if not powershell:
         pytest.skip("PowerShell is unavailable")
@@ -2954,12 +2965,15 @@ def test_real_powershell_hook_does_not_activate_unmanaged_repo(kind: str, tmp_pa
     (registry / "projects.yaml").write_text("projects: {}\n")
     hooks = json.loads((SCRIPTS.parent / "hooks.json").read_text())
     command = hooks["hooks"][kind][0]["powershell"]
+    env = environment(tmp_path, anchor)
+    if kind in {"preToolUse", "postToolUse"}:
+        native_resident(tmp_path, registry, env, real_policy=True, require_admission=True)
     result = subprocess.run(
         [powershell, "-NoProfile", "-NonInteractive", "-Command", command],
         input=json.dumps({"sessionId": "unmanaged", "cwd": str(anchor), "toolName": "edit",
                           "toolArgs": {"path": str(anchor / "source.py")}}),
         text=True, capture_output=True, timeout=15, cwd=anchor,
-        env=environment(tmp_path, anchor), **no_window_kwargs(),
+        env=env, **no_window_kwargs(),
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() in {"", "{}"}, result.stdout
@@ -3408,23 +3422,25 @@ assert.equal(await check({sessionId: "runtime-only", workingDirectory}), true);
 
 
 @pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
-def test_real_powershell_managed_pretool_preserves_protection(tmp_path: Path, record_testsuite_property: Callable[[str, object], None], shell: str) -> None:
+def test_real_powershell_managed_pretool_preserves_protection(
+    tmp_path: Path, record_testsuite_property: Callable[[str, object], None], shell: str,
+    native_resident: ResidentFactory, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     powershell = shutil.which(shell)
     if not powershell:
         pytest.skip("PowerShell is unavailable")
-    anchor, _ = fixture_project(tmp_path)
+    anchor, registry = fixture_project(tmp_path)
     hooks = json.loads((SCRIPTS.parent / "hooks.json").read_text())
     env = environment(tmp_path, anchor)
-    env["AGENT_WORKTREES_RESIDENT_PRE_TOOL_PYTHON"] = sys.executable
     payload = tmp_path / "payload"
     shutil.copytree(SCRIPTS, payload / "scripts")
-    (payload / "scripts" / "resolve-runtime.ps1").write_text(
-        "param([string]$TraceMode)\n$AwPy = '" + sys.executable.replace("'", "''") + "'\n",
-        encoding="utf-8-sig",
-    )
     env["COPILOT_PLUGIN_ROOT"] = str(payload)
-    event = json.dumps({"sessionId": "managed", "cwd": str(anchor), "toolName": "edit",
-                        "toolArgs": {"path": str(anchor / "source.py")}})
+    event_payload = {"sessionId": "managed", "cwd": str(anchor), "toolName": "edit",
+                     "toolArgs": {"path": str(anchor / "source.py")}}
+    assert load("managed_session").admitted(event_payload, home=tmp_path)
+    native_resident(tmp_path, registry, env, real_policy=True, require_admission=True)
+    event = json.dumps(event_payload)
     visible: set[int] = set()
     foreground: set[int] = set()
     observed: set[int] = set()
@@ -3433,7 +3449,8 @@ def test_real_powershell_managed_pretool_preserves_protection(tmp_path: Path, re
         started = time.monotonic()
         process = subprocess.Popen(
             [powershell, "-NoProfile", "-NonInteractive", "-Command",
-             hooks["hooks"]["preToolUse"][0]["powershell"]],
+             "function Get-Command { throw 'native hook requested executable lookup' }; "
+             + hooks["hooks"]["preToolUse"][0]["powershell"]],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, cwd=anchor, env=env, **no_window_kwargs(),
         )
@@ -3469,7 +3486,7 @@ def test_real_powershell_managed_pretool_preserves_protection(tmp_path: Path, re
         assert process.returncode == 0, stderr
         assert json.loads(stdout).get("permissionDecision") == "deny", stdout + stderr
     if os.name == "nt":
-        assert len(observed) >= 2, "both windowless cycles must observe actual Python descendants"
+        assert not observed, "native hook cycles started a Python descendant"
         assert not visible and not foreground
     record_testsuite_property(f"native_hook_cold_warm_ms:{shell}", json.dumps(timings))
     record_testsuite_property(f"visible_windows:{shell}", len(visible))

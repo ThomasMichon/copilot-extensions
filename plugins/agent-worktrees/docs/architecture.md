@@ -3795,6 +3795,15 @@ requests additionally require current prepared installation-context admission;
 they never validate a cold cell by starting the Python SDK or substitute the
 legacy root.
 
+Native frames do not establish the caller's GitHub account/host authority or a
+caller-owned external-observation scope. The original supersede guard still
+classifies close attempts and honors the forwarded switches, but its identity
+and PR lookups report unavailable instead of using resident credentials or
+starting `gh`. No raw subprocess, timed-out observation descendant or
+compatibility worker is created on this path. Independent denials remain in
+force; unavailable is not permission. Standalone observation ownership is
+unchanged.
+
 The transport has one 500 ms allocation/connect/write/read budget. Pre-tool
 requests retain the existing 2 MiB newline-frame bound; post requests and typed
 responses remain bounded to 64 KiB. Pre-tool requests

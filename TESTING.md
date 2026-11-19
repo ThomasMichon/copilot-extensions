@@ -62,6 +62,14 @@ in `tools/promotion_unit_tests/test_native_tool_policy.py` and `test_hook_demand
 The original opt-in pre-entry packet retains guard/stop/JSON/cell-prerequisite
 controls without selecting a per-tool Python worker. Setup-only cell stamping
 still uses its original owner outside the measured hook.
+Caller/resident identity-mismatch controls require supersede observations to
+remain unavailable without any `gh` launch; the original process-free guard
+control also covers a close attempt. The existing native workflow separately
+selects the retained batch/live-grant, unmanaged-repository and two-cycle
+protection controls. Their disposable residents use original admission and
+guards, setup stamps membership outside entry, and native entries must not
+start Python or perform executable discovery. Missing-resident behavior remains
+in the separate cold transport controls.
 
 The focused Worktrees credential-isolation regression is
 `tests/test_git_credential_isolation.py`, selected through the canonical

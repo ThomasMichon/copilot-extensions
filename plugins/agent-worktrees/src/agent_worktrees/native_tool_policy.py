@@ -7,7 +7,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
-from typing import Any, cast
+from typing import Any, NoReturn, cast
 
 POLICY_SWITCHES = (
     "AGENT_WORKTREES_STATELESS_GUARD",
@@ -15,6 +15,14 @@ POLICY_SWITCHES = (
     "ANCHOR_WRITE_GUARD", "ANCHOR_WRITE_GUARD_MODE",
     "PR_SUPERSEDE_GUARD", "PR_SUPERSEDE_GUARD_MODE",
 )
+
+
+class _CallerObservationUnavailable(RuntimeError):
+    pass
+
+
+def _unavailable_pr_observation(*_args: object, **_kwargs: object) -> NoReturn:
+    raise _CallerObservationUnavailable
 
 
 def unavailable(boundary: str) -> dict[str, Any]:
@@ -91,16 +99,22 @@ def decide_pre(
                 combined = merge(combined, unavailable(f"{name} unavailable"))
                 continue
             try:
-                # The original PR guard directly owns its bounded gh observation.
-                # Do not route through the standalone policy-process/SDK launcher.
-                kwargs = {"deadline": monotonic_deadline} if name in {
+                kwargs: dict[str, Any] = {"deadline": monotonic_deadline} if name in {
                     "cross_repo_guard.py", "pr_supersede_guard.py",
                 } else {}
+                if name == "pr_supersede_guard.py":
+                    # Native frames carry no qualified caller GitHub identity or observation owner.
+                    kwargs.update(
+                        current_login=_unavailable_pr_observation,
+                        pr_lookup=_unavailable_pr_observation,
+                    )
                 decision = module.decide(
                     event, home=Path.home(), env=environment, **kwargs,
                 )
                 if not policy.valid_decision(decision):
                     raise ValueError("invalid guard response")
+            except _CallerObservationUnavailable:
+                decision = unavailable("caller-scoped PR observation is unavailable in native hooks")
             except Exception:
                 decision = unavailable(f"{name} evaluation failed")
             if decision:

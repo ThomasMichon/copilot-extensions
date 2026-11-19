@@ -44,11 +44,14 @@ def test_original_guards_execute_without_any_process(
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.setenv("AGENT_HOME", str(tmp_path))
     client = load("hook_client.py")
-    for tool in ("view", "edit", "powershell"):
+    for tool, command in (
+        ("view", ""), ("edit", ""), ("powershell", "Get-Date"),
+        ("powershell", "gh pr close 42 --repo example/project"),
+    ):
         result = decide_pre(
             {
                 "toolName": tool, "cwd": str(tmp_path),
-                "toolArgs": {"path": "sample", "command": "Get-Date"},
+                "toolArgs": {"path": "sample", "command": command},
                 "_agentWorktrees": {"nativePolicy": 1, "environment": dict.fromkeys(POLICY_SWITCHES)},
             },
             load_sibling=load, merge=client._merge_pre_decisions, deadline=time.time() + 0.5,

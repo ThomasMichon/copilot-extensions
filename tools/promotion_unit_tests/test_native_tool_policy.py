@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import time
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -100,6 +101,52 @@ def test_native_policy_preserves_batch_decisions_and_caller_switches(
         "anchor_write_guard.py", "pr_supersede_guard.py",
     ]
     assert all("CROSS_REPO_GUARD" not in environment for _, _, environment in seen)
+
+
+@pytest.mark.parametrize("case", ["close", "api", "off"])
+def test_native_supersede_never_observes_with_resident_identity(
+    monkeypatch: pytest.MonkeyPatch, case: str,
+) -> None:
+    monkeypatch.setenv("GH_TOKEN", "resident-only")
+    monkeypatch.setenv("GH_HOST", "resident.example")
+    guard = load("pr_supersede_guard.py")
+    observations: list[list[str]] = []
+
+    def inherited_gh(args: list[str], *unused: Any, **kwargs: Any) -> str:
+        observations.append(args)
+        if args[0] == "pr":
+            return json.dumps({"author": {"login": "resident-user"}, "state": "OPEN"})
+        return "resident-user"
+
+    monkeypatch.setattr(guard, "_run_gh", inherited_gh)
+
+    def sibling(name: str) -> ModuleType:
+        if name in {"tool_call_forms.py", "hook_pre_policy.py"}:
+            return load(name)
+        if name == "pr_supersede_guard.py":
+            return guard
+        module = ModuleType(name)
+        module.decide = lambda *_args, **_kwargs: None  # type: ignore[attr-defined]
+        return module
+
+    command = (
+        "gh api repos/example/project/pulls/42 -X PATCH -f state=closed"
+        if case == "api" else "gh pr close 42 --repo example/project"
+    )
+    payload = event(toolName="powershell", toolArgs={"command": command})
+    if case == "off":
+        payload["_agentWorktrees"]["environment"]["PR_SUPERSEDE_GUARD"] = "off"
+    result = decide_pre(
+        payload, load_sibling=sibling, merge=merge, deadline=time.time() + 0.5,
+    )
+    assert not observations, "native policy used the resident's external observation owner"
+    assert "permissionDecision" not in result
+    if case == "off":
+        assert result == {}
+    else:
+        assert "caller-scoped PR observation" in result["additionalContext"]
+        assert "not authorization" in result["additionalContext"]
+    assert "resident-user" not in str(result) and "resident-only" not in str(result)
 
 
 @pytest.mark.parametrize("failure", ["missing", "raises", "invalid"])

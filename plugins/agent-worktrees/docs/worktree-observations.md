@@ -178,6 +178,9 @@ The native-write subset below shares this shell-safe evaluation. Other Windows
 events use the [selected native resident contract](architecture.md#native-windows-pre-tool-entry),
 not a per-event Python fallback. Unprepared cells report unavailable rather than
 starting their validator. This is not the complete shell-only transition.
+Supersede attempts needing external GitHub observations report unavailable:
+native frames cannot establish caller account/host authority, so the resident
+does not substitute its own credentials or start an observation child.
 
 Prepared entry uses native file/path operations without loading PowerShell's
 Management module. Fully qualified source paths defer cwd repair until the
