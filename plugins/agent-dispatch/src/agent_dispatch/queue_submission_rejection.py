@@ -36,6 +36,13 @@ class QueueSubmissionRejectionMixin:
             task = self._fetch(conn, task_id)
             if task is None:
                 raise TaskError(f"no such task {task_id!r}")
+            from .review_closeout_rejection import record
+
+            disputed = record(self, conn, task, decision, key, ts, generation=expected_generation,
+                              native=expected_owner_session_id, worker=expected_completed_by, updated_at=expected_updated_at)
+            if disputed is not None:
+                conn.commit()
+                return disputed
             prior = conn.execute(
                 "SELECT ts, fields FROM task_steer WHERE task_id = ? AND idempotency_key = ?",
                 (task_id, key),

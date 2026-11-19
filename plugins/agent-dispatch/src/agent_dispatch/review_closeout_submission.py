@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 from .queue_common import CompletionOutcome, Task
 from .queue_records import Status, TaskError
 from .queue_submission_preparation import _encoded, _latest
-from .queue_submission_resubmission import retained_lineage
+from .queue_submission_resubmission import rejected_preparation, retained_lineage
 
 if TYPE_CHECKING:
     from .queue import TaskQueue
@@ -61,7 +61,9 @@ def prepare(queue: TaskQueue, conn: sqlite3.Connection, state: dict[str, Any]) -
         value = json.loads(prior["submission_preparation"])
         if _same_proposal(conn, state, value):
             return
-        raise TaskError("another retained submission exists; reconcile before review closeout")
+        if value.get("advancement") is None:
+            raise TaskError("another retained submission exists; reconcile before review closeout")
+        proposal["resubmission"] = rejected_preparation(conn, prior, proposal)
     if state["relationship"]["state"] == "closed":
         saved = conn.execute("SELECT readiness FROM task_relevance_closeouts WHERE task_id=?", (task.id,)).fetchone()
         ready = json.loads(saved["readiness"]) if saved and saved["readiness"] else {}

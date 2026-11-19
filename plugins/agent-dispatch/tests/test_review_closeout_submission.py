@@ -29,7 +29,8 @@ ready = transport.ready
 finalized = transport.finalized
 
 
-def test_original_worker_submits_only_after_finalization_and_never_twice(finalized: Ready) -> None:
+@pytest.mark.parametrize("reject", [False, True])
+def test_original_worker_submits_only_after_finalization_and_never_twice(finalized: Ready, reject: bool) -> None:
     queue, _, workspace, task, _ = finalized
     with transport.api(finalized) as api:
         url, args, headers = transport.path(finalized), transport.body(finalized), transport.headers(finalized)
@@ -45,19 +46,39 @@ def test_original_worker_submits_only_after_finalization_and_never_twice(finaliz
         assert original is not None and original.completed_by == workspace.worker_id
         assert len(queue.list_verification_requests(task.id)) == 1
         assert api.post(url + "/finish", headers=headers, json=args).json() == response.json()
-        queue.confirm(task.id, actor="fixture-evaluator")
+        if reject:
+            wakes = queue.list_wakes(task.id)
+            for expected_event in ("task.closeout_disputed", None):
+                result = queue.reject_submission(
+                    task.id, reason="source observation disputed", feedback={"inspect": "closure"},
+                    expected_generation=original.generation, expected_owner_session_id=original.owner_session_id,
+                    expected_completed_by=original.completed_by, expected_updated_at=original.updated_at,
+                )
+                assert result.task == original and result.event_type == expected_event
+            assert queue.list_wakes(task.id) == wakes
+            feedback = [row["fields"]["closeout_verification_rejection"] for row in queue.steer_log(task.id)
+                        if "closeout_verification_rejection" in row["fields"]]
+            assert len(feedback) == 1 and feedback[0]["feedback"] == {"inspect": "closure"}
+        else:
+            queue.confirm(task.id, actor="fixture-evaluator")
         observed = api.get(url, headers=headers).json()["result"]
         assert observed["acknowledgement"]["finish_action"] == SUBMIT
         assert len(queue.list_verification_requests(task.id)) == 1
 
 
-@pytest.mark.parametrize("legacy_prepare", [False, True])
+@pytest.mark.parametrize("scenario", ["pending-result", "legacy", "rejected"])
 def test_original_proposal_or_legacy_preparation_can_finish(
-    assignment: Assignment, monkeypatch: pytest.MonkeyPatch, legacy_prepare: bool,
+    assignment: Assignment, monkeypatch: pytest.MonkeyPatch, scenario: str,
 ) -> None:
     queue, _, workspace, task = assignment
     cast(Callable[..., object], start_managed)(queue, workspace, task)
-    if not legacy_prepare:
+    if scenario == "rejected":
+        monkeypatch.setattr(queue_submission_advancement, "observe_owner_state", lambda *_: {})
+        original = queue.complete(task.id, workspace.worker_id, result={"review": "old"}, result_ref="evidence")
+        queue.reject_submission(task.id, reason="still open", feedback={"inspect": "new head"},
+                                expected_generation=original.generation, expected_owner_session_id=original.owner_session_id,
+                                expected_completed_by=original.completed_by, expected_updated_at=original.updated_at)
+    if scenario == "pending-result":
         def unavailable(*_: object) -> None:
             raise TaskError("workspace not ready yet")
         monkeypatch.setattr(queue_submission_advancement, "observe_owner_state", unavailable)
@@ -66,7 +87,7 @@ def test_original_proposal_or_legacy_preparation_can_finish(
     cast(Callable[..., object], report)(queue, task.id, scope=bindings._scope(queue, task.id))
     from agent_dispatch import submission_readiness_observation
     monkeypatch.setattr(submission_readiness_observation, "observe", lambda *_: {"ready": True})
-    if legacy_prepare:
+    if scenario == "legacy":
         with monkeypatch.context() as legacy:
             legacy.setattr(review_closeout_submission, "prepare", lambda *_: None)
             readiness.prepare(queue, workspace, task)
@@ -84,6 +105,9 @@ def test_original_proposal_or_legacy_preparation_can_finish(
         assert response.status_code == 200, response.text
         finished = queue.get(task.id)
         assert finished is not None and finished.status == "submitted"
-        if not legacy_prepare:
+        if scenario == "pending-result":
             assert finished.result == {"review": "original"} and finished.result_ref == "evidence"
-        assert len(queue.list_verification_requests(task.id)) == 1
+        if scenario == "rejected":
+            proposal = queue.submission_preparation(task.id)
+            assert proposal is not None and proposal["request"]["resubmission"]["feedback"] == {"inspect": "new head"}
+        assert queue.list_verification_requests(task.id)

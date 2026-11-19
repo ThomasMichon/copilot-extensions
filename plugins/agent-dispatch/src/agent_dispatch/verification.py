@@ -293,7 +293,10 @@ def evaluate_submitted_task(
                 recovered = asdict(outcome.task)
                 if outcome.event_type is not None:
                     _publish(bus, outcome.event_type, recovered)
-                applied.append({"decision": "reject", "recovered": recovered})
+                if outcome.task.status == Status.SUBMITTED:
+                    applied.append({"decision": "reject", "retained": recovered, "execution_wake": False})
+                else:
+                    applied.append({"decision": "reject", "recovered": recovered})
                 continue
             if isinstance(decision, NoOp):
                 applied.append(decision.to_dict())
