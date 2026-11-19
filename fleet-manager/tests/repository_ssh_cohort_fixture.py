@@ -42,7 +42,8 @@ def original_engine_owner(home: Path) -> Path:
     source = PROJECT.parent / "plugins" / "agent-worktrees"
     owner = home / ".copilot" / "installed-plugins" / "copilot-extensions" / "agent-worktrees"
     shutil.copytree(
-        source, owner, ignore=shutil.ignore_patterns("__pycache__", "build", "dist", "*.egg-info"),
+        source, owner,
+        ignore=shutil.ignore_patterns("__pycache__", "build", "dist", "*.egg-info", "tests"),
     )
     materialize_consumer(PROJECT.parent, source, owner, deadline=time.monotonic() + 60)
     (home / ".copilot" / "settings.json").write_text(json.dumps({
@@ -55,19 +56,19 @@ def original_engine_owner(home: Path) -> Path:
     return owner.resolve(strict=True)
 
 
-def engine_application_command(
-    snapshot: Path, root: Path, uv: Path,
+def source_application_command(
+    snapshot: Path, component: str, root: Path, uv: Path,
 ) -> tuple[list[str], str]:
     import local_install_profile  # noqa: F401 - establishes the normal source-owner import roots
     import install_source
 
-    selected = install_source.select_project(snapshot, "agent-worktrees")
+    selected = install_source.select_project(snapshot, component)
     application = install_source._member(snapshot, selected.project["application"])
     declaration = install_source._read(application / "application.json")
     construction = declaration["construction"]
     arguments = [
         sys.executable, "-I", "-B", str(selected.payload / "scripts" / "install_source.py"),
-        "--install-source", str(snapshot), "--component", "agent-worktrees",
+        "--install-source", str(snapshot), "--component", component,
         "--payload", str(selected.payload), "--install-application", "--root", str(root),
         "--uv", str(uv), "--base-python", sys.executable,
         "--health-module", str(declaration["module"]).partition(":")[0],

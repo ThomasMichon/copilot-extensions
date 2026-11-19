@@ -150,7 +150,7 @@ def test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop(
     )
     if os.name == "nt":
         clean.update(HOMEDRIVE=home.drive, HOMEPATH=str(home)[len(home.drive):])
-    from repository_ssh_cohort_fixture import engine_application_command, original_engine_owner
+    from repository_ssh_cohort_fixture import original_engine_owner, source_application_command
 
     command_owner = original_engine_owner(home)
     monkeypatch.syspath_prepend(str(PROJECT.parent / "plugins" / "agent-worktrees" / "src"))
@@ -162,8 +162,8 @@ def test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop(
     def install_engine(component: str) -> None:
         uv = shutil.which("uv")
         assert uv is not None
-        arguments, identity = engine_application_command(
-            cohort[component], home / ".agent-worktrees", Path(uv),
+        arguments, identity = source_application_command(
+            cohort[component], "agent-worktrees", home / ".agent-worktrees", Path(uv),
         )
         selected = source_inputs.select_project(cohort[component], "agent-worktrees")
         assert command_owner != selected.payload.resolve()
@@ -204,11 +204,13 @@ def test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop(
 
     install_engine("engine-base")
     manager_snapshot = cohort["worktree-manager"]
-    manager_source = source_inputs.select_project(manager_snapshot, "worktree-manager")
+    uv = shutil.which("uv")
+    assert uv is not None
+    manager_command, _manager_identity = source_application_command(
+        manager_snapshot, "worktree-manager", home / ".worktree-manager", Path(uv),
+    )
     installed = run(
-        [sys.executable, "-I", "-B", str(manager_source.payload / "scripts" / "runtime_install.py"),
-         "--root", str(home / ".worktree-manager"), "--install-source", str(manager_snapshot),
-         "--", "--help"],
+        manager_command,
         cwd=home, env=clean, timeout=60,
     )
     assert installed.returncode == 0, installed.stdout + installed.stderr

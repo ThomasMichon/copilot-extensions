@@ -306,10 +306,14 @@ def test_cohort_composition_selects_every_declared_consumer_without_unrelated_pl
     ))]
 
 
-def test_engine_application_command_keeps_direct_source_without_main_composition(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize(("component", "package", "module"), [
+    ("agent-worktrees", "agent-worktrees", "agent_worktrees"),
+    ("worktree-manager", "copilot-extensions-worktree-manager", "worktree_manager.main"),
+])
+def test_source_application_command_keeps_direct_source_without_main_composition(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, component: str, package: str, module: str,
 ) -> None:
-    from repository_ssh_cohort_fixture import engine_application_command
+    from repository_ssh_cohort_fixture import source_application_command
 
     monkeypatch.syspath_prepend(str(PROJECT.parent / "tools"))
     from local_install_profile import source_inputs
@@ -318,12 +322,12 @@ def test_engine_application_command_keeps_direct_source_without_main_composition
     payload = snapshot / "payload"
     payload.mkdir(parents=True)
     (payload / "pyproject.toml").write_text(
-        '[project]\nname = "agent-worktrees"\nversion = "1.0.0"\n', encoding="utf-8",
+        f'[project]\nname = "{package}"\nversion = "1.0.0"\n', encoding="utf-8",
     )
     sources = source_inputs.engine.runtime_source
     assembly = sources.assembly_hash(payload)
     identity = sources.SourceIdentity(
-        "agent-worktrees", "1.0.0", "a" * 40, "b" * 40, assembly,
+        component, "1.0.0", "a" * 40, "b" * 40, assembly,
         sources.runtime_version("1.0.0", "a" * 40, assembly),
     )
     document = identity.document()
@@ -333,31 +337,35 @@ def test_engine_application_command_keeps_direct_source_without_main_composition
     selection = {"runtime_source": document, "runtime_version": identity.runtime_version}
     generation = identity.runtime_version + ".profile." + "c" * 16
     (application / "application.json").write_text(json.dumps({
-        "module": "agent_worktrees", "construction": {
+        "module": module, "construction": {
             "identity": selection, "runtime_version": generation, "payload_hash": "d" * 64,
         },
     }), encoding="utf-8")
     record = {
         "schema": "copilot-extensions.install-source", "version": 1, "kind": "source",
         "source_commit": "a" * 40, "source_tree": "b" * 40, "main_head": None,
-        "projects": {"agent-worktrees": {
+        "projects": {component: {
             "payload": "payload", "source": document, "application": "application",
         }},
     }
     manifest = snapshot / "install-source.json"
     original = json.dumps(record).encode()
     manifest.write_bytes(original)
-    arguments, pin = engine_application_command(snapshot, tmp_path / "runtime", Path(sys.executable))
+    arguments, pin = source_application_command(
+        snapshot, component, tmp_path / "runtime", Path(sys.executable),
+    )
     assert arguments[arguments.index("--install-source") + 1] == str(snapshot)
+    assert arguments[arguments.index("--component") + 1] == component
+    assert arguments[arguments.index("--health-module") + 1] == module
     assert arguments[arguments.index("--expected-runtime-version") + 1] == generation
     assert arguments[arguments.index("--expected-payload-hash") + 1] == "d" * 64
     assert json.loads(pin) == selection
     assert manifest.read_bytes() == original
     (payload / "pyproject.toml").write_text(
-        '[project]\nname = "agent-worktrees"\nversion = "2.0.0"\n', encoding="utf-8",
+        f'[project]\nname = "{package}"\nversion = "2.0.0"\n', encoding="utf-8",
     )
     with pytest.raises(ValueError):
-        engine_application_command(snapshot, tmp_path / "runtime", Path(sys.executable))
+        source_application_command(snapshot, component, tmp_path / "runtime", Path(sys.executable))
 
 
 def test_original_engine_owner_runs_its_declared_lifecycle_in_private_home(

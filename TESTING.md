@@ -2066,6 +2066,12 @@ selected Source pin and fixture repository context. The fixture's isolated
 Copilot home declares the copied owner's actual marketplace, and its control
 requires ownership publication, not merely a successful child command.
 Prepared application Source is never substituted as its own command owner.
+The copied owner omits development test trees, not runtime scripts or their
+declared materialized dependencies. Manager fixture support installs its already
+prepared Source application through the same existing application receiver,
+rather than reconstructing it through the separate source-payload adapter.
+The real installed Manager front door and all native setup assertions remain
+the acceptance boundary; this fixture does not qualify Manager self-installation.
 Preparation-only jobs retain the source controls locally; normal lifecycle jobs
 do not repeat that independently gated work inside their unchanged time budget.
 Direct Git Sources without Main composition use the existing
