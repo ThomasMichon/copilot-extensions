@@ -109,6 +109,17 @@ particularly for Phase 3's crash-recovery behavior.
 
 ## Coordination
 
+The agent-proposed finite #13203 captured-state liveness intake retains
+the existing queue/liveness, native-session, wake, task/owner/generation,
+handoff and resource custodians. Planning owns documentation only.
+Preserve incumbent checked credit, every unrelated requirement, actual
+hold, nonexpiry reservation and accepted-transfer condition. Existing
+normal review, complete Plan/local AND actual global Validation/
+Coordination/Journal delivery and permitted current receiving/custody
+readback precede separate source-specific judgment. This adds no generic
+ACK, permanent-OPEN requirement, implementation appointment, competing
+identity store or resource transfer.
+
 The finite #3966 captured-owner/handoff GC slice retains existing queue,
 owner-liveness, task/session/generation, handoff and resource custodians.
 The planning owner adds documentation only; #4202/#4214 backend, Tasks-pane/

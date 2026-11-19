@@ -4,6 +4,15 @@ Canonical component of [this same Active effort](README.md). This is not a child
 
 ## Validation Plan
 
+- [ ] **G13203:** Resolve P13203 and both local V13203 clauses in the
+  [captured-state liveness acceptance](plan-core-lifecycle.md#finite-captured-state-liveness-acceptance-from-13203)
+  at their original deterministic queue/resolver tier, including unchanged
+  generation/owner-session, attempt-cap, stale-stamp and actual-source
+  audit controls. Preserve every incumbent Plan/Validation and custody
+  gate. This finite slice requires neither live process-killing nor
+  completion of unrelated parent work; documentary intake is not a repair,
+  native/installed proof or resource release.
+
 - [ ] **G3966:** Resolve every
   [captured-owner/handoff Plan and local Validation clause](plan-core-lifecycle.md#finite-captured-owner-and-handoff-gc-acceptance-from-3966)
   at its retained evidence tier, preserving all incumbent checked credit,

@@ -118,6 +118,16 @@ receive the whole P8388 tracker or authorize installed activation.
 
 ## Coordination
 
+The finite #13208 retained-cleanup publication lane remains under the
+existing #3761 integration and #6748 publisher-recovery custodians.
+Preserve #6748's existing publisher-recovery coordination, separate
+planning/receipt reservation and all actual claims, holds and resource
+duties, including its applicable current-OPEN-parent/full-readback condition.
+Normal reviewed domain receiving and current source/receiver/custody
+readback precede separate source judgment. This does not require new
+companion #6748 clauses, a generic ACK or an implementation appointment.
+It authorizes no ticket release, restart, native execution or takeover.
+
 The proposed finite #5942 semantic-default-list case continues through the
 SAME authoritative selection/list/tracking interfaces and existing source/
 integration custodians. Preserve all incumbent phases, #3761/#4120,
@@ -994,6 +1004,38 @@ within the already-requested Phase 6d.3 real-consumer acceptance.
 - [ ] Journal the result and return the remaining parent acceptance to #3761;
       completing this narrow repair does not complete the whole effort.
 
+### Finite retained-cleanup publication recovery from #13208
+
+- [ ] **P13208-1:** Retain the reported Windows current/promoted-monitor failure:
+  publish_project_rosters retains an unclaimed ObservationCleanupError;
+  observation_blocked then makes publish_active_project repeatedly pending
+  and the segment cache returns no value, blanking every project session
+  despite correct manual status-segment computation. Through the existing
+  cleanup/publication owners, settle OR expire OR retry with a bound the
+  retained observation-cleanup/publication ticket or block. This does not
+  expire or release resource-cleanup obligations, claims, planning/receipt
+  reservations or another owner's custody. Preserve truthful stale/pending
+  publication without fabricating cleanup completion or freshness.
+- [ ] **P13208-2:** Preserve the original recovery alternative:
+  status-monitor-restart OR a dedicated verb offers supported recycling of
+  a current-but-wedged monitor rather than invariably leaving it "as-is".
+  Preserve existing identity, singleton, publication and cleanup custody;
+  this is not unconditional force-restart or PID-kill authority.
+
+#### Local Validation - #13208
+
+- [ ] **V13208-1:** At the Windows producer/cache/consumer boundary, retain
+  an unclaimed cleanup ticket across repeated sweeps and multiple sessions
+  of one project. Qualify the selected bounded ticket outcome, truthful
+  stale/pending status and eventual publication recovery. Read actual
+  published state and mux status consumers; a working direct status-segment
+  command or healthy monitor CPU/lock alone is not proof.
+- [ ] **V13208-2:** Qualify the chosen supported current-but-wedged recovery
+  route and its actual resulting usable publication generation, preserving
+  cleanup obligations, legitimate owner fencing and unaffected service.
+  Keep source, native and installed evidence distinct; this intake executes
+  none of them and does not complete #6748 or whole-daemon acceptance.
+
 ### Phase 6d.3b - Proposed ordinary-hook missing-endpoint recovery
 
 - [x] Review the original bounded owner-mediated recovery proposal before
@@ -1376,6 +1418,16 @@ _(Finite source acceptance in #11940; installed and parent gates stay separate.)
 
 ## Validation Plan
 
+- [ ] **G13208:** Resolve ALL P13208-1/P13208-2 and V13208-1/V13208-2
+  clauses through existing cleanup, publisher-recovery and actual status
+  consumer boundaries. Preserve settle OR expire OR bounded retry, restart
+  OR dedicated recovery, truthful degradation and current-owner recovery.
+  Observation-ticket handling does not expire resource duties or claims.
+  Preserve existing #6748 publisher-recovery coordination and independent
+  owners, including its applicable current-OPEN-parent/full-readback
+  condition. Receipt/client repairs, documentary receiving and unrelated
+  whole-parent/native gates do not substitute for this finite acceptance.
+
 ### Proposed ordinary-hook recovery source slice
 
 - [ ] Qualify native selected-cell membership with original stamped linked
@@ -1487,6 +1539,16 @@ confirming `module-componentization-discipline`'s `tracking.py` split has
 reached a stable resting point before Phase 2 actually starts cutting code.
 
 ## Journal
+
+### 2026-11-19 UTC - Proposed retained-cleanup publication receiving
+
+Propose complete P13208/V13208/G13208 receiving under the existing
+publisher-recovery coordination. All five new acceptance rows remain
+unchecked; all incumbent states, Request, alternatives, owners and holds
+remain. No new #6748 companion clauses or administrative checkbox are
+required by this intake. This records no implementation, cleanup settlement,
+native proof, service action, resource transfer or administrative retirement.
+Normal reviewed delivery and current readback precede separate judgment.
 
 ### 2026-11-10 15:37 UTC - Semantic archive source accepted
 

@@ -48,6 +48,7 @@ class QueueRunWaitersMixin(DelegatedWaiterBindingMixin):
         delegation: dict[str, Any] | None = None,
         now: float | None = None,
         _feed_admission: FeedWaiterAdmission | None = None,
+        _feed_creation_cutoff: int | None = None,
     ) -> dict[str, Any]:
         ts = self._now(now)
         release_enqueued = False
@@ -66,8 +67,7 @@ class QueueRunWaitersMixin(DelegatedWaiterBindingMixin):
                 )
                 if delegation is None or "feed" not in delegation:
                     raise TaskError("repository-feed admission requires its retained feed intent")
-                if self._now(now) >= delegation["feed"]["deadline_at"]:
-                    raise TaskError("original repository-feed deadline elapsed")
+                self._check_feed_preparation_deadline(delegation, _feed_creation_cutoff, self._now(now))
             if delegation is not None:
                 existing = self._find_delegated_preparation(conn, task_id, delegation["preparation_id"])
                 if _feed_admission is not None:
@@ -162,8 +162,7 @@ class QueueRunWaitersMixin(DelegatedWaiterBindingMixin):
                  json.dumps(_feed_admission.record()) if _feed_admission is not None else None,
                  task_id, generation),
             )
-            self._store_replay_intent(conn, delegation, task_id, generation)
-            conn.execute("COMMIT")
+            self._commit_run_waiter_preparation(conn, delegation, task_id, generation, _feed_creation_cutoff, now)
         self._notify_run_waiter_prepare()
         if release_enqueued:
             self._notify_wake()
