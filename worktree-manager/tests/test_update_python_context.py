@@ -276,6 +276,7 @@ raise SystemExit(code)
 def test_bootstrap_update_carries_uv_in_participant_arguments(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / "scripts"))
     import bootstrap_inputs
     import bootstrap_update
     from update_driver.authority import UpdateAuthority
@@ -284,8 +285,14 @@ def test_bootstrap_update_carries_uv_in_participant_arguments(
     payload = tmp_path / "source"
     payload.mkdir()
     runners: list[Any] = []
+    context_requests: list[bool] = []
+
+    def request_context(*, capture_toolchain: bool = False) -> dict[str, str]:
+        context_requests.append(capture_toolchain)
+        return {}
+
     monkeypatch.setattr(bootstrap_inputs, "retain", lambda payload, *a, **k: (payload, True))
-    monkeypatch.setattr(manager, "request_context", lambda: {})
+    monkeypatch.setattr(manager, "request_context", request_context)
     monkeypatch.setattr(manager, "_source_key", lambda: "configured-source")
     monkeypatch.setattr(manager, "_update_context_directory", lambda context: None)
     monkeypatch.setattr(update_python_path, "finish_update", lambda command, code: code)
@@ -308,6 +315,7 @@ def test_bootstrap_update_carries_uv_in_participant_arguments(
     )
     execute: Callable[..., int] = bootstrap_update.execute
     assert execute(args, driver, source_digest="a" * 64) == 0
+    assert context_requests == [True]
     arguments = runners[0].argv
     assert arguments[arguments.index("--bootstrap-uv") + 1] == str(args.bootstrap_uv)
 
