@@ -28,33 +28,34 @@ def capability() -> dict[str, Any]:
 
 def _activity(
     facts: dict[str, Any], activity: dict[str, Any], reviewer: str, observed_at: int,
-) -> tuple[attention.ReviewActivity, dict[str, Any] | None]:
+) -> tuple[attention.ReviewActivity, dict[str, Any] | None, str | None]:
     unknown = attention.ReviewActivity(reviewer, "unknown")
     if facts["reviews_complete"] is not True:
-        return unknown, None
+        return unknown, None, None
     reviews = []
     for row in facts["reviews"]:
         state = row["state"]
         if state in ("PENDING", "REQUEST_REVIEW"):
             continue
         if not isinstance(row["user"], str) or not row["user"].strip():
-            return unknown, None
+            return unknown, None, None
         if row["user"].casefold() != reviewer.casefold():
             continue
         evidence = review_evidence(row, observed_at)
         if evidence is None:
-            return unknown, None
+            reason = "review-dismissed" if row["dismissed"] is True else None
+            return unknown, None, reason
         reviews.append((evidence.submitted_at, evidence.review_id, row, evidence.signature))
     if not reviews:
-        return attention.ReviewActivity(reviewer, "initial"), None
+        return attention.ReviewActivity(reviewer, "initial"), None, None
     matching = [item for item in reviews if item[2]["commit_id"] == facts["head_sha"]]
     if matching:
         row = max(matching, key=lambda item: item[:2])[2]
-        return attention.ReviewActivity(reviewer, "head-reviewed", row["id"]), row
+        return attention.ReviewActivity(reviewer, "head-reviewed", row["id"]), row, None
     selected = max(reviews, key=lambda item: item[:2])
     if any(item[3] not in activity["candidate_reviews"] for item in reviews):
-        return attention.ReviewActivity(reviewer, "order-unknown", selected[1]), None
-    return attention.ReviewActivity(reviewer, "updated", selected[1]), selected[2]
+        return attention.ReviewActivity(reviewer, "order-unknown", selected[1]), None, None
+    return attention.ReviewActivity(reviewer, "updated", selected[1]), selected[2], None
 
 
 def page(
@@ -101,7 +102,7 @@ def page(
         key = attention.PRKey(
             identity.provider, identity.endpoint, identity.repo, number, identity.account, identity.namespace,
         )
-        review, original = _activity(facts, activity, reviewer, pull["observed_at"])
+        review, original, review_reason = _activity(facts, activity, reviewer, pull["observed_at"])
         cause = activity["conflict"] if facts["mergeable"] is False else activity["candidate"]
         selected = attention.Facts(
             key, candidate, attention.Cursor(1, state["next_sequence"] - 1),
@@ -123,6 +124,8 @@ def page(
         )
         if not author_known:
             item = replace(item, status="unavailable", reasons=("author-unavailable",))
+        if item.reasons == ("review-activity-unavailable",) and review_reason is not None:
+            item = replace(item, reasons=(review_reason,))
         if item.status == "unavailable":
             result["unavailable"].append({"pr": number, "reason": item.reasons[0]})
         projected.append(item)
