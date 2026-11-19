@@ -226,7 +226,7 @@ def test_refresh_restart_candidate_and_conflict_keep_their_actual_cause_ages(tmp
     ({"reviews_complete": False}, None, "review-activity-unavailable"),
     ({"reviews_complete": None}, None, "review-activity-unavailable"),
     ({"reviews": [verdict(commit_id=HEAD)]}, None, "reviewed-base-unknown"),
-    ({"reviews": [verdict(dismissed=True)]}, None, "review-activity-unavailable"),
+    ({"reviews": [verdict(dismissed=True)]}, None, "review-dismissed"),
     ({"reviews": [verdict(submitted_at="unknown")]}, None, "review-activity-unavailable"),
     ({"reviews": [verdict(state="unknown")]}, None, "review-activity-unavailable"),
     ({"reviews": [verdict(commit_id="")]}, None, "review-activity-unavailable"),
@@ -249,6 +249,42 @@ def test_only_qualified_review_causes_become_actions(
     assert [row["action"] for row in result["next_actions"]] == ([action] if action else [])
     assert [row["reason"] for row in result["unavailable"]] == ([unavailable] if unavailable else [])
     assert selected[1].path.read_bytes() == before
+
+
+@pytest.mark.parametrize("reviews", [
+    [verdict(dismissed=True, commit_id=HEAD)],
+    [verdict(dismissed=True), verdict(id=10, commit_id=HEAD)],
+    [verdict(commit_id=HEAD), verdict(id=10, dismissed=True)],
+])
+def test_dismissed_review_diagnostic_does_not_invent_a_verdict_or_order(
+    tmp_path: Path, reviews: list[dict[str, Any]],
+) -> None:
+    selected = setup(tmp_path)
+    observe(selected, head_sha=OLD, reviews=reviews)
+    observe(selected, reviews=reviews)
+    before = selected[1].path.read_bytes()
+    result = request(selected)
+    assert result["unavailable"] == [{"pr": 7, "reason": "review-dismissed"}]
+    assert not result["next_actions"]
+    assert selected[1].path.read_bytes() == before
+
+
+@pytest.mark.parametrize("changes, action, unavailable", [
+    ({"reviews": [verdict(dismissed=True, user="other")]}, "initial_verdict", None),
+    ({"reviews": [verdict(dismissed=True, state="PENDING")]}, "initial_verdict", None),
+    ({"reviews": [verdict(dismissed=True)], "mergeable": False}, "rebase", None),
+    ({"reviews": [verdict(dismissed=True)], "reviews_complete": False},
+     None, "review-activity-unavailable"),
+    ({"reviews": [verdict(dismissed=True)], "author": ""}, None, "author-unavailable"),
+])
+def test_dismissal_diagnostic_preserves_selection_and_other_evidence_precedence(
+    tmp_path: Path, changes: dict[str, Any], action: str | None, unavailable: str | None,
+) -> None:
+    selected = setup(tmp_path)
+    observe(selected, **changes)
+    result = request(selected)
+    assert [row["action"] for row in result["next_actions"]] == ([action] if action else [])
+    assert [row["reason"] for row in result["unavailable"]] == ([unavailable] if unavailable else [])
 
 
 def test_observed_review_set_orders_candidate_without_relying_on_creation_order(tmp_path: Path) -> None:

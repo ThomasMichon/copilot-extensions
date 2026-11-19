@@ -148,6 +148,43 @@ After the reviewed proposal, the operator admitted execution:
   reconciliation slices. A missing checkpoint or expired cursor requests
   visible repair; it must not disguise an unlimited rebuild as a tiny update.
 
+#### Explicit caller acquisition requirements (proposed)
+
+Issue [#13392](https://github.com/ThomasMichon/copilot-extensions/issues/13392)
+owns an **agent-recommended, opt-in in-process requirement** before implementation.
+The existing collector prefers page protocols but otherwise permits legacy
+`list_paths()` / `discover_changed()` acquisition. Give a consumer a way to
+require the declared paged protocol instead of silently accepting that fallback;
+retain compatibility behavior for callers that do not opt in.
+
+Use the existing engine/collector preflight and selected-callable capability
+owners. A required incremental round selects `AcquisitionPage` v1; a required
+hinted round also retains negotiated hints v1 and its immutable claim; a required
+full round selects `SnapshotPage` v1. Unsupported or malformed selections fail
+visibly before acquisition or application of unqualified retained work. Selecting
+a protocol is not new proof of provider coverage, finite nested HTTP work,
+bounded whole-manifest memory or payload bytes. Existing provider qualification
+and explicit repair requirements remain independent.
+
+The realization must preserve source/account and pending-state ownership,
+polling checkpoints, source-scope hashes and old callable behavior. Do not add a
+caller policy to `SourceSpec`'s hashed source identity. Negotiate support on the
+actual selected indexing callable before an opted-in caller supplies the new
+requirement; an old callable must not silently ignore it. Keep this initial
+slice in-process: new service/CLI/provider wire forms require their own
+contract-evolution review, not incidental forwarding.
+
+Focused controls must exercise the actual engine plus the existing collector:
+compatible legacy calls still work; a required call cannot invoke legacy
+listing/discovery; all three admitted page forms retain their scope and cursor
+semantics; malformed capability declarations refuse; and incompatible
+pending/ready replay cannot evade preflight, discard progress or mutate the
+indexed projection. Reopen retained state in the recovery cases. Qualify new
+caller/new engine and old caller/new engine behavior; an unsupported old selected
+callable refuses the new requirement. Put only small contract cases in required
+CI. Preserve both parent plans, the #13386 Azure DevOps coverage gate and
+separately budgeted reconciliation; this proposal authorizes no live operation.
+
 ### Phase 4 - Delta writes and derived maintenance
 
 - [x] Skip identical content/vector upserts; support targeted metadata updates

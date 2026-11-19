@@ -787,3 +787,44 @@ receiving-ledger/reporter/prune-pair assertion union and the original Windows
 containment/build-tooling/control-packet distinctions. All corresponding
 technical P/V/G rows remain unchecked. No implementation appointment,
 execution, cleanup, source closure, claim expiry or resource release follows.
+
+## Finite tool and qualification tracker outcomes (2026-11-19 UTC)
+
+After #13384's complete reviewed receiving and #13388's reviewed administrative
+receipt actually merged, separate source-specific judgments retired the
+following redundant tracking tokens. Earlier proposal and receiving records
+remain unchanged history; these entries update tracker outcomes, not technical
+acceptance or primary ownership.
+
+| Source | Current tracker outcome | Unchanged primary canonical owner and residual |
+|--------|-------------------------|-----------------------------------------------|
+| #13278 | `NOT_PLANNED`; audited explanation 7001897602 | [test-portfolio-rationalization](../test-portfolio-rationalization/README.md), Phase 4 P13278/V13278/G13278; native/scenario/caller-loss and retained container/output/workspace qualification remain unchecked |
+| #13300 | `NOT_PLANNED`; audited explanation 7001904583 | [test-portfolio-rationalization](../test-portfolio-rationalization/README.md), Phase 4 P13300/V13300/G13300; exact packet AND authority negatives AND prune/pair qualification remain unchecked |
+| #13334 | `NOT_PLANNED`; audited explanation 7001910813 | [test-portfolio-rationalization](../test-portfolio-rationalization/README.md), Phase 4 P13334/V13334/G13334; original Windows containment/build-tooling/standalone evidence, unknown control and unproved cause remain unchecked |
+
+Fresh complete author/editor/comment metadata, the stable full collaborator
+roster, direct receiver bindings and unchanged source/custody invariants were
+verified around each explanation and closure. Original reports, all prior
+discussions, actual custodians and resource claims remain unchanged. The three
+administrative I receipts stay checked; every corresponding technical P/V/G
+row stays unchecked. No implementation, native job, execution-hold waiver,
+resource cleanup, claim expiry or owner transfer follows.
+
+## Proposed finite Windows collector attribution intake (2026-11-19 UTC)
+
+This proposes `routed`; it takes effect only when normal review accepts and
+actually merges the accompanying complete direct domain amendment and intake
+route. Ledger publication alone is not domain acceptance. Preserve every
+prior row and receipt unchanged.
+
+| Candidate | Source | Disposition | Primary canonical owner | Tracker outcome |
+|-----------|--------|-------------|-------------------------|-----------------|
+| Complete finite Windows-native unit-collector extended-path source/bytecode attribution contract, both exact CPython versions, focused native and actor-free controls, and preserved admission/refusal boundaries | Public #13294, complete unchanged original and zero comments; #13295/#13320 explicitly retain the collector gap, also retained by #13362 | routed (proposed; effective after reviewed complete domain acceptance) | [test-portfolio-rationalization](../test-portfolio-rationalization/README.md), Phase 4 P13294/V13294/G13294 only | Existing #13294 remains OPEN pending actual complete reviewed receiving/intake delivery, permitted current source/receiver/custody readback and separate source-specific judgment; no new issue, technical completion or custody transfer |
+
+Phase 7 I13294 records this single canonical placement, not another owner.
+All six technical rows and I13294 remain unchecked during the proposal.
+Preserve existing collector/loader/admission/audit/fixture/runner/native/
+release/resource custody, hosted-Windows quiescence and source holds.
+Native unfinishedness remains technical work, not an added generic physical
+tracker barrier. No implementation appointment, ACK requirement, execution,
+source/bytecode mutation, claim expiry or resource release follows.

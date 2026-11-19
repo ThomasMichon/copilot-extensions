@@ -85,6 +85,17 @@ An absent, empty or whitespace-only author remains `author-unavailable`,
 including for author-owned rebase recommendations; it cannot establish that the
 selected reviewer is a different actor.
 
+When a submitted record from the selected reviewer is dismissed, the unchanged
+unavailable-item shape reports `reason: review-dismissed` instead of the generic
+`review-activity-unavailable`. This is a diagnostic refinement, not a new
+eligibility rule: dismissal does not prove that the reviewer never acted, that
+a prior review still applies, or that its head precedes the current candidate.
+The query preserves the cached history and does not manufacture an initial or
+follow-up verdict. Consumers must retain unavailable coverage regardless of
+the reason string; reasons are explanatory, not an exhaustive action enum.
+Independent author-owned rebase recommendations and higher-priority missing
+or stale evidence keep their existing behavior.
+
 Body-only/prior Gitea readers leave `reviews_complete` unknown because hidden
 pending drafts can create empty intermediate pages. An explicitly selected native
 reader can instead supply qualified authoritative pagination evidence through
