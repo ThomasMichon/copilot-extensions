@@ -160,6 +160,9 @@ named accepted objective; a component's relocation does not complete it.
 - [ ] Resolve #3966's finite
   [captured-owner/handoff GC acceptance](plan-core-lifecycle.md#finite-captured-owner-and-handoff-gc-acceptance-from-3966),
   including its local and [actual global Validation](validation.md).
+- [ ] Resolve #13203's finite
+  [captured-state liveness acceptance](plan-core-lifecycle.md#finite-captured-state-liveness-acceptance-from-13203),
+  including both local Validation clauses and actual global G13203.
 - [ ] Resolve [all retained manual reliability acceptance](acceptance-manual-reliability.md).
 - [ ] Resolve [all suspension-reason/viewer acceptance](acceptance-suspension-reasons.md).
 - [ ] Resolve [all exact-owner delivery and intake acceptance](acceptance-delivery-and-intake.md).
@@ -216,6 +219,14 @@ COMPLETED/CONFIRMED terminology. Current work uses SUBMITTED/COMPLETED under the
 [task-conversation amendment](task-conversation-amendment.md); no old enum is restored.
 
 ## Journal
+
+The proposed finite #13203 receiving amendment adds explicit captured-state
+verdict/stamp fencing and deterministic race/control acceptance to this same
+effort's Plan, local and actual global Validation, and Coordination. It
+preserves incumbent credit and source-specific custody; it records neither
+an implemented repair nor a source disposition. Reviewed delivery, permitted
+current receiving/custody readback and separate source-specific judgment
+remain distinct.
 
 The [2026-11-14 finite receiving record](../backlog-reconciliation/journal/2026/11.14-accepted-receivers-and-owner-frontier.md#bounded-current-source-and-receiving-comparisons)
 retains the #3966 comparison and ten new unchecked Plan/local/global/link rows.

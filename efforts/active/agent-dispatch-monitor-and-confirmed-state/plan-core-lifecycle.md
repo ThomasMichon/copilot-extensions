@@ -242,6 +242,34 @@ mutation-boundary requirements; it does not claim their implementation.
   neither supplies missing owner evidence for the other. Separately exercise
   an unowned queued-target sweep and the claimed/started handoff barrier.
 
+#### Finite captured-state liveness acceptance from #13203
+
+Agent-proposed direct receiving clarification of
+[#13203](https://github.com/ThomasMichon/copilot-extensions/issues/13203).
+This refines the existing captured-owner mutation-boundary family without
+replacing its independent handoff, nonexpiry or resource-custody requirements.
+
+- [ ] **P13203:** Apply a liveness verdict and its liveness stamp only to
+  the same captured task state and assignment. A state change invalidates
+  both; leave the task for fresh observation. Preserve existing native,
+  wake, owner-session and generation fences, and audit the actual source
+  state. Retain the legacy/direct finite-owner scope and intentional
+  unowned configured-pool skip. This is a source-identified race, not a
+  measured production incident or a request for more frequent probes or
+  longer leases.
+
+- [ ] **V13203-1:** Use a synthetic liveness resolver with two barriers and
+  a temporary SQLite queue. Pause a claimed CLI task's GONE observation;
+  start it through a separate queue connection with unchanged generation
+  and owner-session; release the probe. Assert the newer STARTED state,
+  owner and attempt count survive, neither stale verdict nor stamp
+  applies, and no stale requeue, abandonment or misleading audit event
+  occurs. Repeat at the attempt cap.
+
+- [ ] **V13203-2:** Preserve stable claimed/GONE policy, fresh started/GONE
+  policy and UNKNOWN-not-absence controls, including actual audit source
+  state. No live process needs to be killed.
+
 ### Phase 5 - Uniform submission and task-owned confirmation policy
 
 - [ ] Resolve emitter `auto_confirm` and manual per-task review choices into
