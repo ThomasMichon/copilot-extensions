@@ -802,9 +802,12 @@ def _run_native(
     }
     env.pop("COPILOT_EXTENSIONS_CONTEXT", None)
     env.pop("COPILOT_PROJECT_DIR", None)
-    argv = [shell, "-c", _hook("bash")] if variant == "bash" else [
-        shell, "-NoProfile", "-NonInteractive", "-Command", _hook("powershell"),
-    ]
+    if variant == "bash":
+        hook_script = shims / "native-hook.sh"
+        hook_script.write_text(_hook("bash") + "\n", encoding="utf-8", newline="\n")
+        argv = [shell, convert(hook_script)]
+    else:
+        argv = [shell, "-NoProfile", "-NonInteractive", "-Command", _hook("powershell")]
     return subprocess.run(
         argv, input=json.dumps(payload), cwd=root, env=env, capture_output=True,
         text=True, encoding="utf-8", timeout=15, creationflags=NO_WINDOW,
