@@ -703,13 +703,13 @@ resources:
     strategy: managed-block
     block: "agent-worktrees mux keybinds (opt-in)"
     content: |
-      # Opt-in intercept: every unprefixed key/mouse event passes straight
-      # through to the inner application; only the prefix (Ctrl+B) is intercepted.
+      # Only the prefix (Ctrl+B) is intercepted; unbound keys reach the application.
       set -g prefix C-b
       unbind-key -a -T root
-      # Re-add mouse-wheel passthrough (cleared by the unbind above).
-      bind-key -T root WheelUpPane   send-keys -M
-      bind-key -T root WheelDownPane send-keys -M
+      # PSMux handles both wheel directions natively, outside the root key table.
+      # Forwarding still depends on the target/application's mouse capabilities.
+      set -g mouse on
+      set -g scroll-enter-copy-mode off
       # Disable Windows Ctrl+V paste interception.
       set -g paste-detection off
 ```
@@ -720,7 +720,7 @@ owns PSMux provisioning. The `managed-block` strategy derives its markers from
 `# <<< agent-worktrees mux keybinds (opt-in) <<<`, which match the block a prior
 imperative `apply-mux-keybinds` script wrote by hand -- so adopting the resource
 takes over the existing block seamlessly and the custom persistence script can
-be deleted. The rest of `~/.psmux.conf` (the user's own `set -g mouse on` and
+be deleted. The rest of `~/.psmux.conf` (the user's own status options and
 any hand edits) is preserved; only the marked block is engine-owned, and it is
 refreshed idempotently on every restore. Setting `state: absent` on the same
 resource removes the block cleanly.

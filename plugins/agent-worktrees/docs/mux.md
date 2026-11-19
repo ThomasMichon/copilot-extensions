@@ -3,8 +3,8 @@
 agent-worktrees runs your interactive Copilot sessions inside a **terminal
 multiplexer** — `tmux` on Linux/WSL, `psmux` on Windows. This page explains
 *why* that matters and *when* you want a muxed session versus a plain,
-non-muxed worktree. For the mechanics (status bar, per-session config, the
-opt-in keybinds) see [cli-reference.md § Status bar segment](cli-reference.md#status-bar-segment-tmux--psmux);
+non-muxed worktree. For the mechanics (status bar, scoped defaults and optional
+host-wide tuning) see [cli-reference.md § Status bar segment](cli-reference.md#status-bar-segment-tmux--psmux);
 for the launch surface see [The Worktree Picker](picker.md).
 
 ## Why a multiplexer
@@ -403,13 +403,41 @@ authorize recovery.
 `tmux` (Linux/WSL) and `psmux` (Windows) are different implementations of the
 **same** model — a named, detachable session with a status bar. The launcher
 (relocated to Worktree Manager's `bin/` in Phase 3b Sub-slice 2a Step 2)
-configures them **per session** (`set -t <session>`, never a global `-g`), so
-**neither agent-worktrees nor Worktree Manager owns or overwrites** your
-personal `~/.tmux.conf` / `~/.psmux.conf`, and ad-hoc mux sessions you start
-yourself are untouched. The few server-global settings it can't scope
-per-session (keystroke passthrough, `escape-time`) live in an **opt-in**
-`apply-mux-keybinds.{sh,ps1}` you run only if you want them.
+applies ordinary options to the named session. PSMux create/join also
+automatically sources passthrough and Companion bindings into that worktree's
+private server; server-global directives in that fragment do not target the
+other PSMux servers. Shared-server tmux key tuning is deliberately opt-in.
+Ordinary launch does not rewrite personal `~/.tmux.conf` / `~/.psmux.conf`.
+The separate `apply-mux-keybinds.{sh,ps1}` helpers default to persisting a
+managed block when explicitly invoked; the PowerShell helper additionally
+applies the fragment to every listed live server, including personal sessions.
+Legacy owned-file retirement retains its own lifecycle/approval boundary,
+not permission to remove unknown or edited personal files.
 Full detail: [cli-reference.md § Status bar segment](cli-reference.md#status-bar-segment-tmux--psmux).
+
+## PSMux wheel input
+
+The PowerShell helper and private-session passthrough fragment enable
+`mouse on` and `scroll-enter-copy-mode off`. PSMux handles wheel-up and
+wheel-down natively, outside the root key table; clearing that table does
+not require re-adding tmux's `WheelUpPane` / `WheelDownPane send-keys -M`
+bindings. PSMux does not implement those mouse-key bindings.
+
+The target and receiving application still determine delivery:
+
+- The reported [PSMux3.3.4 receiver](https://github.com/psmux/psmux/blob/v3.3.4/src/window_ops.rs#L923-L977)
+  forwards both directions to alternate-screen applications. A main-screen
+  application does not acquire mouse forwarding from a tmux-style binding.
+- [PSMux3.4.0's actual predicate](https://github.com/psmux/psmux/blob/v3.4.0/src/window_ops.rs#L396-L398)
+  also permits an application-attributed mouse protocol. Applications that
+  do not satisfy its gate retain native scrollback/copy-mode behavior; no
+  unconditional arrow-key or Enter translation is installed.
+
+These are source-supported capability boundaries, not a census of installed
+versions or a guarantee for every frontend. Successful `source-file` execution
+alone does not prove that an application received a wheel event. Ordinary
+tmux retains its supported mouse bindings. New-session version selection,
+older-session compatibility and runtime upgrades keep their existing owners.
 
 ## Troubleshooting: every mux session died at once
 
