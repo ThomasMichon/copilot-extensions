@@ -82,9 +82,11 @@ def test_point_receipt_requires_complete_exact_scope_and_new_protocol(
         raw = json.dumps({**api.receipt, "protocol": protocol}).encode()
         with pytest.raises(layout.SourceLayoutError, match="incompatible"):
             selected.receipt()
-    raw = json.dumps(api.receipt).replace('"protocol": 2', '"protocol": 1, "protocol": 2').encode()
-    with pytest.raises(layout.SourceLayoutError, match="invalid point"):
-        selected.receipt()
+    for fields in ('"protocol": 1, "protocol": 2', '"protocol": 2, "protocol": 1'):
+        raw = json.dumps(api.receipt).replace('"protocol": 2', fields).encode()
+        for reader in (selected, layout.SourceDomain(selected.path)):
+            with pytest.raises(layout.SourceLayoutError, match="duplicate"):
+                reader.receipt()
     raw = json.dumps({**api.receipt, "protocol": 1, "future_metadata": {"kept": True}}).encode()
     assert layout.SourceDomain(selected.path).receipt()["future_metadata"] == {"kept": True}
 
@@ -153,10 +155,11 @@ def test_unmarked_handle_refuses_later_selection_before_read_or_write(
     api: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     marked = False
+    checked: list[str] = []
 
     class FixturePath:
-        def __init__(self, _value: str) -> None:
-            pass
+        def __init__(self, value: str) -> None:
+            checked.append(value)
 
         def __truediv__(self, _name: str) -> FixturePath:
             return self
@@ -166,7 +169,10 @@ def test_unmarked_handle_refuses_later_selection_before_read_or_write(
 
     monkeypatch.setattr(api.layout, "Path", FixturePath)
     calls: list[str] = []
-    reader = SimpleNamespace(_source_domain=None, _db_path="unused-default-domain")
+    reader = SimpleNamespace(
+        _source_domain=None, _db_path="relative/default-domain",
+        _content=SimpleNamespace(_db=SimpleNamespace(uri="/original/default-domain")),
+    )
 
     def access(_self: Any) -> list[str]:
         calls.append("legacy")
@@ -180,4 +186,5 @@ def test_unmarked_handle_refuses_later_selection_before_read_or_write(
         with pytest.raises(api.layout.SourceLayoutError, match="newly selected"):
             guarded(reader)
         assert calls == before
+        assert checked[-1] == "/original/default-domain"
         marked = False

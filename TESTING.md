@@ -7530,6 +7530,9 @@ directory bootstrap/reopen, both cross-domain refusals, default store and
 cluster constructors, cached-handle separation and unchanged bytes on refusal.
 Late-marked native content, vector, combined-store and sibling-cluster handles
 refuse before reads or writes, including empty input and empty inventory.
+The same native controls cover relative opens followed by a working-directory
+change; in-memory controls cover both duplicate-protocol orders for default
+and explicitly selected readers.
 Neither lane enables component-shaped reads, applied-version qualification or
 v2 execution; selected point-domain handles still refuse legacy operations.
 

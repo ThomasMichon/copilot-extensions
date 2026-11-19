@@ -5956,8 +5956,8 @@
         "tools/owned_producer.py"
     ],
     "sources": {
-        "tools/promotion_unit_tests/test_point_source_domain_contract.py": "92b24462ab3e9b7c5a2660b492818df7cbdf006cb4d83e784e030c25a066d0f9",
-        "plugins/agent-index/src/agent_index/store/source_layout.py": "8b0230c8e1dc887adc35a6340a23c9860f46f29d83f3434fe6e255b41e878cf1",
+        "tools/promotion_unit_tests/test_point_source_domain_contract.py": "c129c9569a86e6b86bab69dfabd823b29459bdae37fb95f069859464930f65bd",
+        "plugins/agent-index/src/agent_index/store/source_layout.py": "f32a1a4ba219e021fb517e52c319351d9f8c49594484076baefbe9ef9a971406",
         "tools/promotion_unit_tests/test_component_manifest_contract.py": "9d07617137fb4b526784867c12c6e8574deb6b5f925f28a587c1470a613dc118",
         "plugins/agent-index/src/agent_index/indexing/component_manifest.py": "413f3978af018383a3d586a14addfaf2f30b4a27dc021185df6dc56eda079f67",
         "tools/promotion_unit_tests/test_point_hint_contract.py": "730bf4cbea18d6f75d0b13c49df91848e5afe2ca6c4301f622f3989b4ffb0de6",

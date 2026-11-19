@@ -154,9 +154,11 @@ def _versions(db: Any) -> dict[str, int]:
 
 
 def _refuse_marked_legacy(store: Any) -> None:
-    path = getattr(store, "_source_path", getattr(store, "_db_path", None))
+    path = getattr(store, "_source_path", None)
     if path is None:
-        path = getattr(getattr(store, "_db", None), "uri", None)
+        content = getattr(store, "_content", store)
+        uri = getattr(getattr(content, "_db", None), "uri", None)
+        path = uri if isinstance(uri, (str, Path)) else getattr(store, "_db_path", None)
     if isinstance(path, (str, Path)) and (Path(path) / MARKER).exists():
         raise SourceLayoutError("legacy handle refuses a newly selected source-aware domain")
 
@@ -243,9 +245,9 @@ class SourceDomain:
             value = json.loads(raw, object_pairs_hook=fields)
         except (OSError, ValueError) as exc:
             raise SourceLayoutError("source-aware layout not initialized") from exc
+        if duplicate:
+            raise SourceLayoutError("invalid source-layout receipt: duplicate fields")
         self._validate_receipt(value)
-        if self._point_scope is not None and duplicate:
-            raise SourceLayoutError("invalid point-domain receipt")
         return cast("dict[str, Any]", value)
 
     def _validate_receipt(self, value: object) -> None:

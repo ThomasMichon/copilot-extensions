@@ -50,8 +50,11 @@ protocol 2 before opening their native stores. Default and explicitly selected
 domain handles do not share cached selection; existing nested/lazy guards
 recheck the receipt instead of trusting an earlier open. Legacy handles opened
 before marking also check for later selection before native reads or writes,
-including direct vector access and sibling cluster state. Protocol 1 retains
-its existing meaning and forward-compatible metadata handling.
+including direct vector access and sibling cluster state. Guards use the native
+connection's stable URI or an absolute retained sibling path, not a relative
+caller path that can retarget after a working-directory change. Every receipt
+reader rejects duplicate fields. Protocol 1 otherwise retains its existing
+meaning and forward-compatible metadata handling.
 
 Even an exactly selected point-domain handle refuses the current legacy-shaped
 `read`, `operation`, `write` and reconciliation paths. Component result types,

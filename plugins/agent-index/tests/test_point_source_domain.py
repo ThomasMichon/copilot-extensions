@@ -148,15 +148,24 @@ def test_cached_default_reader_refuses_receipt_drift_and_cannot_overwrite_it(
     assert store.stats()["total_chunks"] == 0
 
 
+@pytest.mark.parametrize("relative", [False, True])
 def test_unmarked_native_handles_refuse_a_later_point_domain(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, relative: bool,
 ) -> None:
     monkeypatch.delenv("AGENT_INDEX_STORE_LAYOUT", raising=False)
-    config = IndexConfig(data_dir=tmp_path / "late-selection")
-    content = ContentStore(config.lance_dir)
+    caller = tmp_path / "caller"
+    caller.mkdir()
+    monkeypatch.chdir(caller)
+    config = IndexConfig(data_dir=caller / "late-selection")
+    opened_path = Path("late-selection/lance") if relative else config.lance_dir
+    content = ContentStore(opened_path)
     vectors = VectorTable(content.db, table_name="vectors_fixture", dim=2)
-    store = MultiModelStore(config.lance_dir)
-    clusters = ClusterStore(config.data_dir / "clusters.db")
+    store = MultiModelStore(opened_path)
+    cluster_path = Path("late-selection/clusters.db") if relative else config.data_dir / "clusters.db"
+    clusters = ClusterStore(cluster_path)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
     monkeypatch.setenv("AGENT_INDEX_STORE_LAYOUT", LAYOUT)
     initialize_source_layout(config.lance_dir, point_scope=claim().scope)
     before = snapshot(config.data_dir)
