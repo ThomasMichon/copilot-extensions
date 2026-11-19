@@ -59,7 +59,7 @@ if (-not $ToolchainConfig) {
     }
 }
 $ToolchainValues = @{}
-$ToolchainEnvironment = @{}
+$ToolchainEnvironment = [Collections.Generic.Dictionary[string,string]]::new([StringComparer]::Ordinal)
 if ($ToolchainConfig) {
     if (-not [IO.Path]::IsPathRooted($ToolchainConfig)) { throw 'Toolchain configuration must be absolute.' }
     $file = Get-Item -LiteralPath $ToolchainConfig -Force
@@ -92,7 +92,7 @@ if ($ToolchainConfig) {
         python_index_url = @('UV_DEFAULT_INDEX', 'PIP_INDEX_URL', 'UV_INDEX_URL')
         python_install_mirror = @('UV_PYTHON_INSTALL_MIRROR')
         uv_install_mirror = @('UV_INSTALLER_GITHUB_BASE_URL')
-        npm_registry = @('npm_config_registry')
+        npm_registry = @('npm_config_registry', 'NPM_CONFIG_REGISTRY')
     }
     foreach ($key in $mapping.Keys) {
         if (-not $ToolchainValues.ContainsKey($key)) { continue }
@@ -194,11 +194,26 @@ if ($ToolchainConfig) {
         }
     }
     if ($ToolchainValues.ContainsKey('npm_registry')) {
+        foreach ($suffix in @('USERCONFIG', 'GLOBALCONFIG')) {
+            $upper = [Environment]::GetEnvironmentVariable("NPM_CONFIG_$suffix")
+            $lower = [Environment]::GetEnvironmentVariable("npm_config_$($suffix.ToLowerInvariant())")
+            if ($upper -and $lower -and
+                $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($upper) -cne
+                $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($lower)) {
+                throw 'npm configuration-file selections conflict.'
+            }
+        }
         $npmUser = if ($env:NPM_CONFIG_USERCONFIG) { $env:NPM_CONFIG_USERCONFIG } else {
-            Join-Path $env:USERPROFILE '.npmrc'
+            if ($env:npm_config_userconfig) { $env:npm_config_userconfig } else {
+                $npmHome = if ($env:USERPROFILE) { $env:USERPROFILE } else { $env:HOME }
+                Join-Path $npmHome '.npmrc'
+            }
         }
         $nativeConfigs += ,@($npmUser, 'npm')
-        if ($env:NPM_CONFIG_GLOBALCONFIG) { $nativeConfigs += ,@($env:NPM_CONFIG_GLOBALCONFIG, 'npm') }
+        $npmGlobal = if ($env:NPM_CONFIG_GLOBALCONFIG) { $env:NPM_CONFIG_GLOBALCONFIG } else {
+            $env:npm_config_globalconfig
+        }
+        if ($npmGlobal) { $nativeConfigs += ,@($npmGlobal, 'npm') }
     }
     foreach ($entry in $nativeConfigs) {
         $path, $kind = $entry
@@ -257,7 +272,10 @@ if ($ToolchainConfig) {
         }
     }
     $ToolchainConfig = $file.FullName
-    foreach ($name in @('PIP_CONFIG_FILE', 'NPM_CONFIG_USERCONFIG', 'NPM_CONFIG_GLOBALCONFIG')) {
+    foreach ($name in @(
+        'PIP_CONFIG_FILE', 'NPM_CONFIG_USERCONFIG', 'npm_config_userconfig',
+        'NPM_CONFIG_GLOBALCONFIG', 'npm_config_globalconfig'
+    )) {
         $value = [Environment]::GetEnvironmentVariable($name)
         if ($value) {
             $ToolchainEnvironment[$name] = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($value)

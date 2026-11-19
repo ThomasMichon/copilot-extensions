@@ -40,7 +40,7 @@ def test_toolchain_context_negotiates_actual_queued_manager_to_engine_handoff(
 ) -> None:
     home, root = tmp_path / "home", tmp_path / "manager"
     home.mkdir()
-    for key in update_driver_cli._SUPPORTED_CONTEXT_KEYS:
+    for key in (*update_driver_cli._SUPPORTED_CONTEXT_KEYS, *update_driver_cli._NPM_CONTEXT_ALIASES.values()):
         monkeypatch.delenv(key, raising=False)
     for key, value in {
         "HOME": str(home), "USERPROFILE": str(home), "WORKTREE_MANAGER_ROOT": str(root),
@@ -50,9 +50,10 @@ def test_toolchain_context_negotiates_actual_queued_manager_to_engine_handoff(
     }.items():
         monkeypatch.setenv(key, value)
     mirror = "https://downloads.example.invalid/uv/"
+    registry = "https://packages.example.invalid/npm/"
     (home / "pip.ini").write_text("[global]\ntimeout = 73\n", encoding="ascii")
     (home / "toolchain.conf").write_text(
-        f"schema=1\nuv_install_mirror={mirror}\n",
+        f"schema=1\nuv_install_mirror={mirror}\nnpm_registry={registry}\n",
         encoding="ascii",
     )
     context = update_driver_cli.installation_request_context()
@@ -90,6 +91,7 @@ raise SystemExit(result)
     monkeypatch.setenv("PIP_INDEX_URL", "https://drainer.example.invalid/simple/")
     monkeypatch.setenv("UV_CONFIG_FILE", "foreign-drainer-config")
     monkeypatch.setenv("UV_INSTALLER_GITHUB_BASE_URL", "https://drainer.example.invalid/uv/")
+    monkeypatch.setenv("npm_config_registry", "https://drainer.example.invalid/npm/")
     assert update_driver.drain(root=queue) == 0
     result = update_driver.status(request.id, root=queue)
     assert not isinstance(result, tuple)
@@ -102,6 +104,7 @@ raise SystemExit(result)
         assert received["PIP_CONFIG_FILE"] == context["PIP_CONFIG_FILE"]
         assert received["COPILOT_EXTENSIONS_TOOLCHAIN_CONFIG"] == context["COPILOT_EXTENSIONS_TOOLCHAIN_CONFIG"]
         assert received["UV_INSTALLER_GITHUB_BASE_URL"] == mirror
+        assert received["NPM_CONFIG_REGISTRY" if os.name == "nt" else "npm_config_registry"] == registry
         assert "UV_CONFIG_FILE" not in received
     else:
         assert result.exit_code == 19, log
@@ -109,6 +112,7 @@ raise SystemExit(result)
         assert not report.exists()
     assert os.environ["UV_CONFIG_FILE"] == "foreign-drainer-config"
     assert os.environ["UV_INSTALLER_GITHUB_BASE_URL"] == "https://drainer.example.invalid/uv/"
+    assert os.environ["npm_config_registry"] == "https://drainer.example.invalid/npm/"
 
 
 @pytest.mark.parametrize("capability", [None, {}, {"schema": "wrong", "version": 1},

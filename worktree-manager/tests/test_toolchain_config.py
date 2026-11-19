@@ -134,8 +134,9 @@ def test_toolchain_config_preserves_indented_pip_options(
 
 @pytest.mark.parametrize("shell_name", ["pwsh", "powershell"])
 @pytest.mark.parametrize("conflict", [False, True])
+@pytest.mark.parametrize("selector", ["PIP_CONFIG_FILE", "npm_config_userconfig", "npm_config_globalconfig"])
 def test_toolchain_config_powershell_relative_paths_follow_provider_location(
-    tmp_path: Path, shell_name: str, conflict: bool,
+    tmp_path: Path, shell_name: str, conflict: bool, selector: str,
 ) -> None:
     shell = shutil.which(shell_name)
     if shell is None:
@@ -144,10 +145,13 @@ def test_toolchain_config_powershell_relative_paths_follow_provider_location(
     home.mkdir()
     other.mkdir()
     foreign = "https://other.example.invalid/simple/"
-    for directory, index in ((home, foreign if conflict else INDEX), (other, INDEX if conflict else foreign)):
-        (directory / "selected.ini").write_text(f"[global]\nindex-url={index}\n", encoding="ascii")
+    expected = INDEX if selector == "PIP_CONFIG_FILE" else REGISTRY
+    for directory, index in ((home, foreign if conflict else expected), (other, expected if conflict else foreign)):
+        content = f"[global]\nindex-url={index}\n" if selector == "PIP_CONFIG_FILE" else f"registry={index}\n"
+        (directory / "selected.ini").write_text(content, encoding="ascii")
     config = tmp_path / "toolchain.conf"
-    config.write_text(f"schema=1\npython_index_url={INDEX}\n", encoding="ascii")
+    field = "python_index_url" if selector == "PIP_CONFIG_FILE" else "npm_registry"
+    config.write_text(f"schema=1\n{field}={expected}\n", encoding="ascii")
     bootstrap = Path(__file__).resolve().parents[1] / "bootstrap.ps1"
     def quote(path: Path) -> str:
         return str(path).replace("'", "''")
@@ -155,7 +159,8 @@ def test_toolchain_config_powershell_relative_paths_follow_provider_location(
     program = (
         f"[Environment]::CurrentDirectory='{quote(other)}'; Set-Location -LiteralPath '{quote(home)}'; "
         "function Get-Command { param($Name); if ($Name -like 'uv*') { "
-        "[Console]::Out.WriteLine('FIRST_CONSUMER|' + $env:PIP_CONFIG_FILE); throw 'STOP'; }; "
+        f"[Console]::Out.WriteLine('FIRST_CONSUMER|' + [Environment]::GetEnvironmentVariable('{selector}')); "
+        "throw 'STOP'; }; "
         "throw 'UNEXPECTED_COMMAND' }; "
         f"& '{quote(bootstrap)}' --toolchain-config '{quote(config)}' --version"
     )
@@ -167,8 +172,10 @@ def test_toolchain_config_powershell_relative_paths_follow_provider_location(
         HOME=str(home), USERPROFILE=str(home), APPDATA=str(home / "appdata"),
         PROGRAMDATA=str(home / "programdata"), XDG_CONFIG_HOME=str(home / ".config"),
         XDG_CONFIG_DIRS=str(home / "system"), WORKTREE_MANAGER_ROOT=str(home / "manager"),
-        PIP_CONFIG_FILE="selected.ini",
     )
+    env[selector] = "selected.ini"
+    if os.name != "nt":
+        env.pop("USERPROFILE")
     result = subprocess.run(
         [shell, "-NoProfile", "-NonInteractive", "-Command", program],
         cwd=other, env=env, capture_output=True, text=True, timeout=20,
@@ -252,7 +259,7 @@ def test_toolchain_config_conflicts_do_not_partially_write(
 @pytest.mark.parametrize("kind", ["ps1", "sh"])
 @pytest.mark.parametrize("invalid", [
     "", "unknown", "pip", "pip-colon", "uv", "uv-pip", "uv-system", "uv-system-default",
-    "uv-inline", "uv-dotted", "npm", "environment",
+    "uv-inline", "uv-dotted", "npm", "environment", "npm-upper-environment", "npm-config-aliases",
     "mirror-only", "mirror-configfile", "mirror-noconfig",
 ])
 def test_toolchain_config_native_entry_precedes_first_prerequisite(
@@ -263,6 +270,8 @@ def test_toolchain_config_native_entry_precedes_first_prerequisite(
         pytest.skip("native shell unavailable")
     if invalid == "uv-system-default" and os.name == "nt":
         pytest.skip("XDG system defaults are a POSIX native contract")
+    if invalid == "npm-config-aliases" and os.name == "nt":
+        pytest.skip("Windows environment variable names are case-insensitive")
     # This first-touch control stops at uv discovery. No Python, package manager,
     # Git source or installed Manager is required or allowed to execute.
     bootstrap = Path(__file__).resolve().parents[1] / f"bootstrap.{kind}"
@@ -296,6 +305,11 @@ def test_toolchain_config_native_entry_precedes_first_prerequisite(
         env.pop("XDG_CONFIG_DIRS")
     if invalid == "environment":
         env["PIP_INDEX_URL"] = "https://other.example.invalid/simple/"
+    elif invalid == "npm-upper-environment":
+        env["NPM_CONFIG_REGISTRY"] = "https://other.example.invalid/npm/"
+    elif invalid == "npm-config-aliases":
+        env["NPM_CONFIG_USERCONFIG"] = str(home / "upper.npmrc")
+        env["npm_config_userconfig"] = str(home / "lower.npmrc")
     elif mirror_only:
         target = (
             home / "appdata" / "uv" / "uv.toml" if os.name == "nt"

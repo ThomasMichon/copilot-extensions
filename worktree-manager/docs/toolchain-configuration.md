@@ -100,7 +100,9 @@ is also refused. Relative native pip/npm config paths are anchored before
 bootstrap changes directories.
 PowerShell resolves those paths through its current filesystem provider
 location, not an independently inherited .NET process directory; preflight
-reads the same resolved file.
+reads the same resolved file. Native PowerShell also checks both npm environment
+spellings on POSIX, refuses conflicting file aliases and anchors each selected
+alias before changing directories.
 Checks stay channel-specific: selecting only a managed-Python mirror preserves
 independent package-index settings. Explicit uv discovery overrides are still
 refused for either Python channel, since they can bypass the persisted file.
@@ -118,6 +120,9 @@ selection and the validated effective native routing selectors, including
 defaults derived from the data file and the absence of other selectors.
 This keeps file-only mirror values intact when a downstream participant
 restores the original request rather than trusting its inherited environment.
+Windows environment names are normalized before capture, including a registry
+derived only from the file; POSIX lowercase npm selectors use the explicit
+uppercase request fields described below.
 Participants restore those inputs before configuration preflight rather than
 inheriting a different draining worker's selection. Relative native config paths
 are anchored at submission. Lowercase npm selectors are preserved through

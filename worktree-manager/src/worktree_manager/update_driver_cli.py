@@ -246,6 +246,8 @@ def _toolchain_context(configuration: str) -> dict[str, str]:
         read_configuration(Path(configuration).expanduser().absolute()),
         _routing_environment(os.environ),
     )
+    if os.name == "nt":
+        current = {key.upper(): value for key, value in current.items()}
     selected = {key: current[key] for key in _TOOLCHAIN_CONTEXT_KEYS if key in current}
     selected["COPILOT_EXTENSIONS_TOOLCHAIN_CONFIG"] = configuration
     selected[_TOOLCHAIN_REQUEST_KEY] = "1"
