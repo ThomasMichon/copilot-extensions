@@ -14,6 +14,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import threading
 import time
 from typing import cast
 
@@ -84,8 +85,10 @@ def test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop(
     assert os.environ.get("COPILOT_EXTENSIONS_TEST_CONTAINED") != "1", (
         "normal SSH application lifetime requires the explicit ephemeral native owner"
     )
+    progress_lock = threading.Lock()
+
     def progress(message: str) -> None:
-        with capfd.disabled():
+        with progress_lock, capfd.disabled():
             print(message, flush=True)
 
     if sys.platform == "linux":
@@ -137,6 +140,7 @@ def test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop(
     ).hexdigest())
     from repository_ssh_cohort_fixture import (
         assert_installed_engine_origin, engine_cost_diagnostic,
+        install_native_prerequisites,
         manager_activation_diagnostic, manager_stack_diagnostic, native_setup_environment,
         original_engine_owner, source_application_command,
     )
@@ -192,31 +196,34 @@ def test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop(
         )
         progress(f"normal engine application {component} ready: {time.monotonic() - started:.2f}s")
 
-    install_engine("engine-base")
     manager_snapshot = cohort["worktree-manager"]
     uv = shutil.which("uv")
     assert uv is not None
     manager_command, _manager_identity = source_application_command(
         manager_snapshot, "worktree-manager", home / ".worktree-manager", Path(uv),
     )
-    manager_started = time.monotonic()
-    progress("normal Manager application start")
-    try:
-        installed = run(manager_stack_diagnostic(manager_command), cwd=home, env=clean, timeout=60)
-    except subprocess.TimeoutExpired as error:
-        diagnostic = error.stderr or b""
-        text = diagnostic.decode("utf-8", errors="replace") if isinstance(diagnostic, bytes) else diagnostic
-        phases = [line for line in text.splitlines() if line.startswith("Source wheel")]
-        progress("Manager fixture timeout phases:\n" + "\n".join(phases[-24:]))
-        stack = text.partition("Timeout (")[2]
-        if stack:
-            progress("Manager fixture stack:\nTimeout (" + stack)
-        progress(manager_activation_diagnostic(home / ".worktree-manager"))
-        raise
-    if installed.returncode:
-        progress(manager_activation_diagnostic(home / ".worktree-manager"))
-    assert installed.returncode == 0, installed.stdout + installed.stderr
-    progress(f"normal Manager application ready: {time.monotonic() - manager_started:.2f}s")
+
+    def install_manager() -> None:
+        manager_started = time.monotonic()
+        progress("normal Manager application start")
+        try:
+            installed = run(manager_stack_diagnostic(manager_command), cwd=home, env=clean, timeout=60)
+        except subprocess.TimeoutExpired as error:
+            diagnostic = error.stderr or b""
+            text = diagnostic.decode("utf-8", errors="replace") if isinstance(diagnostic, bytes) else diagnostic
+            phases = [line for line in text.splitlines() if line.startswith("Source wheel")]
+            progress("Manager fixture timeout phases:\n" + "\n".join(phases[-24:]))
+            stack = text.partition("Timeout (")[2]
+            if stack:
+                progress("Manager fixture stack:\nTimeout (" + stack)
+            progress(manager_activation_diagnostic(home / ".worktree-manager"))
+            raise
+        if installed.returncode:
+            progress(manager_activation_diagnostic(home / ".worktree-manager"))
+        assert installed.returncode == 0, installed.stdout + installed.stderr
+        progress(f"normal Manager application ready: {time.monotonic() - manager_started:.2f}s")
+
+    install_native_prerequisites(lambda: install_engine("engine-base"), install_manager)
     launcher = home / ".local" / "bin" / (
         "worktree-manager.ps1" if os.name == "nt" else "worktree-manager"
     )

@@ -45,6 +45,15 @@ class EngineOrigin(TypedDict):
     paths: list[str]
 
 
+def install_native_prerequisites(
+    engine: Callable[[], None], manager: Callable[[], None],
+) -> None:
+    with ThreadPoolExecutor(max_workers=2) as installers:
+        results = [installers.submit(operation) for operation in (engine, manager)]
+        for result in results:
+            result.result()
+
+
 def assert_installed_engine_origin(
     facts: EngineOrigin, slot: Path, source: Path, *, with_sdk: bool,
 ) -> None:

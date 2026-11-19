@@ -65,6 +65,44 @@ project_at = cast(Callable[[Path], tuple[Path, Path]], legacy_project_at)
 select_host = cast(Callable[[Path], Document], legacy_select_host)
 
 
+@pytest.mark.parametrize("failure", [None, "engine", "manager"])
+def test_native_prerequisites_overlap_and_settle_both_children(
+    tmp_path: Path, failure: str | None,
+) -> None:
+    from repository_ssh_cohort_fixture import install_native_prerequisites
+
+    script = (
+        "import sys,time;from pathlib import Path;"
+        "root=Path(sys.argv[1]);name,other,failure=sys.argv[2:];"
+        "(root/(name+'.ready')).touch();deadline=time.monotonic()+3\n"
+        "while not (root/(other+'.ready')).exists():\n"
+        " assert time.monotonic()<deadline,'other installer never started'\n"
+        " time.sleep(.01)\n"
+        "if name!=failure: time.sleep(.15)\n"
+        "(root/(name+'.done')).touch();sys.exit(7 if name==failure else 0)"
+    )
+
+    def install(name: str, other: str) -> None:
+        result = run([
+            sys.executable, "-I", "-B", "-c", script,
+            str(tmp_path), name, other, failure or "",
+        ], timeout=10)
+        if result.returncode:
+            raise RuntimeError(f"{name} installation failed: {result.stderr}")
+
+    def prepare() -> None:
+        install_native_prerequisites(
+            lambda: install("engine", "manager"), lambda: install("manager", "engine"),
+        )
+
+    if failure:
+        with pytest.raises(RuntimeError, match=failure + " installation failed"):
+            prepare()
+    else:
+        prepare()
+    assert all((tmp_path / (name + ".done")).is_file() for name in ("engine", "manager"))
+
+
 def unavailable_source(snapshot: Path) -> Path:
     destination = snapshot.with_name("unavailable-snapshot")
     if destination.exists():

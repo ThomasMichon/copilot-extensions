@@ -2074,6 +2074,12 @@ Source admission before construction. A fixture-only Python wrapper enables a
 single stack dump after 40 seconds while preserving the installer script,
 arguments and script import root. A timed-out Manager support call reports that
 stack plus bounded Source phase/progress lines; its 60-second limit is unchanged.
+The initial SDK-free engine and Manager support installations overlap through
+two fixture workers, with separate runtime roots and their original commands
+and 90/60-second call bounds. Both settle before any Manager setup call, including
+on failure; the later SDK upgrade and all lifecycle assertions remain ordered.
+Real child controls require overlap and verify settlement when either installer
+fails. This removes serial fixture overhead without relaxing a native deadline.
 The wrapper's real subprocess control verifies argument forwarding and stack
 delivery without constructing or modifying a prepared Source.
 Failed or timed-out activation also reports at most the final 16 KiB of the
