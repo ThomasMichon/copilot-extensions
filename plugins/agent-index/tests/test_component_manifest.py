@@ -160,7 +160,7 @@ def test_direct_application_boundaries_refuse_before_touching_dependencies() -> 
 
 @pytest.mark.parametrize("version", [1, 3, 7])
 def test_component_parent_cannot_downgrade_into_legacy_recovery(
-    tmp_path: Path, version: int,
+    tmp_path: Path, version: int, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     paths = PathIndex(tmp_path / "paths.db")
     journal = PendingCrawls(paths)
@@ -176,11 +176,23 @@ def test_component_parent_cannot_downgrade_into_legacy_recovery(
     data = {"version": version, "full": False, "manifest": legacy}
     if version == 7:
         data["page_protocol"] = "incremental"
-    with pytest.raises(ValueError, match="cannot be downgraded"):
-        journal.compare_and_save(
-            manifest.source, scope="scope", payload=json.dumps(data),
-            expected=original, family="sample:components",
-        )
+    decode = json.loads
+
+    def decode_without_writer_lock(payload: str) -> object:
+        if payload == original:
+            with closing(paths._connect()) as probe:
+                probe.execute("PRAGMA busy_timeout = 0")
+                probe.execute("BEGIN IMMEDIATE")
+                probe.rollback()
+        return decode(payload)
+
+    with monkeypatch.context() as patch:
+        patch.setattr("agent_index.indexing.pending_crawl.json.loads", decode_without_writer_lock)
+        with pytest.raises(ValueError, match="cannot be downgraded"):
+            journal.compare_and_save(
+                manifest.source, scope="scope", payload=json.dumps(data),
+                expected=original, family="sample:components",
+            )
     reopened = PendingCrawls(PathIndex(tmp_path / "paths.db"))
     assert reopened.read_payload(manifest.source, "scope") == original
     with closing(paths._connect()) as conn:

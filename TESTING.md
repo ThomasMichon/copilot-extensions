@@ -7496,7 +7496,9 @@ legacy-envelope compatibility, preserved polling state and refusal at actual
 recovery/prepared/application entrypoints. It also checks transactional refusal
 of v8-to-legacy replacement and premature completion, reopens the retained
 parent and proves ordinary recovery still refuses without callbacks or
-checkpoint changes. Neither lane qualifies ordered store application, durable
+checkpoint changes. Downgrade preflight permits an independent SQLite writer
+while decoding the expected parent, then binds that parent through exact CAS.
+Neither lane qualifies ordered store application, durable
 applied-version/deletion evidence, backup recovery or component read isolation.
 
 The exclusive attachment-export consumer packet executes the real export

@@ -170,6 +170,7 @@ class PendingCrawls(PollRefreshJournal):
             completed = decoded[0]
         elif isinstance(data, dict) and data.get("version") in (3, 6, 7):
             completed = self.decode_manifest(data["manifest"], source)
+        expected_components = expected is not None and json.loads(expected).get("version") == 8
         with closing(self._paths._connect()) as conn, conn:
             conn.execute("BEGIN IMMEDIATE")
             self._assert_family_available(conn, source, family)
@@ -180,11 +181,7 @@ class PendingCrawls(PollRefreshJournal):
                 row is not None and (row["scope"] != scope or row["payload"] != expected)
             ):
                 raise PendingCrawlConflict("Pending acquisition changed before progress publication")
-            if (
-                row is not None
-                and json.loads(row["payload"]).get("version") == 8
-                and data.get("version") != 8
-            ):
+            if expected_components and data.get("version") != 8:
                 raise ValueError("Component pending work cannot be downgraded")
             if row is None:
                 conn.execute(
@@ -359,19 +356,16 @@ class PendingCrawls(PollRefreshJournal):
     ) -> None:
         with closing(self._paths._connect()) as conn, conn:
             conn.execute("BEGIN IMMEDIATE")
-            retained = conn.execute(
-                "SELECT payload FROM pending_crawls WHERE source = ?", (source,),
+            row = conn.execute(
+                "SELECT scope, payload FROM pending_crawls WHERE source = ?", (source,),
             ).fetchone()
-            if retained is not None and json.loads(retained["payload"]).get("version") == 8:
+            if row is None:
+                return
+            data = json.loads(row["payload"])
+            if data.get("version") == 8:
                 raise ValueError("Component pending completion is not supported")
             if manifest is not None:
                 assert scope is not None
-                row = conn.execute(
-                    "SELECT scope, payload FROM pending_crawls WHERE source = ?", (source,),
-                ).fetchone()
-                if row is None:
-                    return
-                data = json.loads(row["payload"])
                 if (
                     row["scope"] != scope
                     or expected_payload is not None and row["payload"] != expected_payload
