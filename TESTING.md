@@ -7527,6 +7527,15 @@ while decoding the expected parent, then binds that parent through exact CAS.
 Neither lane qualifies ordered store application, durable
 applied-version/deletion evidence, backup recovery or component read isolation.
 
+`plugins/agent-index/tests/test_file_projection.py` is a separately selected
+native-store packet for raw point observations. It covers prepared-index
+preflight before queries, same-path candidate and retained-ID budgets, duplicate
+rows, exact metadata, configured models, provenance, finite vectors, known vector
+remnants and backend failure propagation. A 10,001-row synthetic native base
+checks indexed file/content/vector plans select only the one requested point.
+It is not part of required actor-free unit admission and does not qualify an
+ordered receiver, durable tombstones, backup recovery or native Windows execution.
+
 The exclusive attachment-export consumer packet executes the real export
 entrypoint, health-selected command transport, extension registry, provider
 dispatch and descriptor-pinned writer with an in-memory filesystem and
