@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from agent_dispatch.queue import TaskQueue
+from agent_dispatch import queue_emitter_updates
 from agent_dispatch.queue_common import Task
 from agent_dispatch.queue_emitter_updates import QueuedObservation, observe_queued, update_queued
 from agent_dispatch.queue_records import TaskError
@@ -52,3 +53,25 @@ def test_queue_claim_and_hold_win_over_an_earlier_observation(tmp_path: Path) ->
         update_queued(queue, a, "B")
     current = queue.get(task.id)
     assert current is not None and current.payload_inline == "A"
+    yielded = queue.yield_task(task.id, "fixture")
+    assert yielded.status == "queued" and not queue.list_reservations(task_id=task.id)
+    with pytest.raises(TaskError, match="previously assigned"):
+        observe_queued(queue, task.id, repo="example", key="key", source="recipe", origin="reviews")
+
+
+def test_cursor_seeks_to_same_status_event_among_unrelated_history(tmp_path: Path) -> None:
+    queue = TaskQueue(tmp_path / "tasks.db")
+    task = queue.create("review", repo="example", dedup_key="key", source="recipe", origin_ref="reviews")
+    assert isinstance(task, Task)
+    with queue._connect() as conn:
+        conn.execute("BEGIN")
+        tail = conn.execute(
+            "INSERT INTO task_events(task_id,ts,from_status,to_status) VALUES (?,1,'queued','queued')",
+            (task.id,),
+        ).lastrowid
+        conn.executemany("INSERT INTO task_events(task_id,ts) VALUES (?,2)", ((f"other-{i}",) for i in range(4096)))
+        conn.execute("ANALYZE task_events")
+        plan = conn.execute("EXPLAIN QUERY PLAN " + queue_emitter_updates._CURSOR_QUERY, (task.id,)).fetchall()
+    assert any("SEARCH task_events USING COVERING INDEX idx_task_events_cursor (task_id=?)" in r[3] for r in plan)
+    basis = observe_queued(queue, task.id, repo="example", key="key", source="recipe", origin="reviews")
+    assert basis.last_event == tail

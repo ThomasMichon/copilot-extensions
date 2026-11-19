@@ -21,6 +21,8 @@ from .queue_records import Status, TaskError
 if TYPE_CHECKING:
     from .queue import TaskQueue
 
+_CURSOR_QUERY = "SELECT COALESCE(MAX(id), 0) FROM task_events WHERE task_id=?"
+
 
 @dataclass(frozen=True)
 class QueuedObservation:
@@ -33,9 +35,7 @@ class QueuedObservation:
 
 
 def _cursor(conn: sqlite3.Connection, task_id: str) -> int:
-    return int(conn.execute(
-        "SELECT COALESCE(MAX(id), 0) FROM task_events WHERE task_id=?", (task_id,),
-    ).fetchone()[0])
+    return int(conn.execute(_CURSOR_QUERY, (task_id,)).fetchone()[0])
 
 
 def _queued(
@@ -48,6 +48,8 @@ def _queued(
     if (task.status != Status.QUEUED or task.kind != "finite" or task.owner or task.owner_session_id
             or task.hold_reason is not None or task.payload_ref is not None or task.awaiting_steer):
         raise TaskError("emitter observation requires an available queued inline task")
+    if task.attempts or task.generation:
+        raise TaskError("previously assigned tasks require an update for the original worker")
     if (task.producer_fence is not None
             or ProducerFenceMixin._producer_scope_row(conn, repo=repo, source=source) is not None
             or ProducerFenceMixin._required_label_scope_rows(conn, labels=task.labels)):

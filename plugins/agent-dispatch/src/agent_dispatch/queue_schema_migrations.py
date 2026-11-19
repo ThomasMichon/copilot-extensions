@@ -113,6 +113,7 @@ def run_queue_schema_migrations(
         except sqlite3.OperationalError as exc:
             if "duplicate column name" not in str(exc).lower():
                 raise
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_task_events_cursor ON task_events(task_id, id)")
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_task_events_transition ON task_events(task_id, id)"
         " WHERE from_status IS NOT to_status"
