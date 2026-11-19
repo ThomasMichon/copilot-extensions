@@ -131,7 +131,7 @@ def wheel_selection(
     import installer_provider_roots as providers
 
     selected = selection(root, payload, requested)
-    roots = providers.select(root, admitted.get("roots", []), core="agent-vault")
+    roots = providers.select(root, admitted.get("provider_roots", []))
     if (
         selected["source_identity"] is not None or admitted.get("identity") != {}
         or admitted.get("extras") != list(PROFILES[selected["profile"]])
@@ -261,7 +261,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.persist:
             import installer_provider_roots as providers
 
-            providers.select(args.root, admitted.get("roots", []), core="agent-vault", write=True)
+            providers.select(args.root, admitted.get("provider_roots", []), write=True)
         print(json.dumps(result, sort_keys=True))
         return 0
     if args.command == "select":

@@ -1227,7 +1227,7 @@ def test_retained_guardian_startup_cannot_renew_an_absolute_deadline(
     root.mkdir()
     slot = runtime.slot(root, "probe")
     marker = tmp_path / "must-not-start"
-    procutil = cast(Callable[[], ModuleType], worker_procutil)()
+    procutil = worker_procutil()
     with runtime.construction_lease(root, "probe") as descriptor:
         started = time.monotonic()
         with pytest.raises(selected.ChildTimeoutExpired):

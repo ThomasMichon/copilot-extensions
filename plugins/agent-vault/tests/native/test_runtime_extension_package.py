@@ -61,6 +61,20 @@ from agent_procutil import no_window_kwargs
 root = home / ".agent-vault"
 installer_provider_roots.persist(root, ["example-vault-provider"])
 desire = (root / installer_provider_roots.FILE).read_bytes()
+inactive = json.loads(profile.read_text())
+inactive["roots"] = [inactive["roots"][0], 'example-vault-provider; python_version < "3.0"']
+inactive["wheels"] = [row for row in inactive["wheels"] if row["name"] != "example-vault-provider"]
+inactive_file = home / "inactive-provider-profile.json"
+inactive_file.write_text(json.dumps(inactive))
+with install_source.wheel_inputs(inactive_file, wheels) as inactive_inputs:
+    inactive_selection = install_source.wheel_selection(payload, "agent-vault", inactive_inputs)
+    assert inactive_selection["provider_roots"] == []
+    try:
+        runtime_profile.wheel_selection(root, payload, inactive_selection, "ssh")
+    except ValueError as error:
+        assert "changes selected" in str(error)
+    else:
+        raise AssertionError("an inactive root satisfied the selected provider")
 with install_source.wheel_inputs(profile, wheels) as inputs:
     admitted = install_source.wheel_selection(payload, "agent-vault", inputs)
     selected = runtime_profile.wheel_selection(root, payload, admitted, "ssh")

@@ -297,13 +297,15 @@ def _wheel_selection(payload: Path, version: str, inputs: WheelInstallInputs) ->
         row["selected_extras"] for row in profile["wheels"] if row["name"] == name
     ))
     extras = engine._selected_extras(payload, extras)
+    from installer_provider_roots import from_profile
+
     return {
         "runtime_version": version + ".profile." + receipt["lock_id"][7:23],
         "payload_hash": engine._wheel_construction_hash(
             engine._construction_hash(engine._source_files(packages), extras, local), inputs,
         ),
         "extras": list(extras), "local_packages": list(local),
-        "roots": list(profile["roots"]),
+        "provider_roots": from_profile(profile, core=name),
     }
 
 

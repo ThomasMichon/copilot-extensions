@@ -29,7 +29,7 @@ def _name(value: str) -> str:
 
 
 def normalize(roots: object, *, core: str | None = None) -> list[str]:
-    if not isinstance(roots, list) or len(roots) > 32:
+    if not isinstance(roots, list) or len(roots) > (256 if core is not None else 32):
         raise ValueError("Runtime provider roots require a bounded list")
     selected: dict[str, str] = {}
     for value in roots:
@@ -52,6 +52,33 @@ def normalize(roots: object, *, core: str | None = None) -> list[str]:
             raise ValueError("Duplicate runtime provider extra")
         selected[name] = name + ("[" + ",".join(sorted(extras)) + "]" if extras else "")
     return sorted(selected.values())
+
+
+def from_profile(profile: dict[str, object], *, core: str) -> list[str]:
+    """Derive provider selection from applicable, inspected distributions."""
+    roots = normalize(profile.get("roots"), core=core)
+    wheels = profile.get("wheels")
+    if not isinstance(wheels, list):
+        raise ValueError("Provider selection requires the inspected wheel closure")
+    installed = {}
+    for row in wheels:
+        if not isinstance(row, dict) or not isinstance(row.get("name"), str):
+            raise ValueError("Provider selection requires inspected distribution names")
+        installed[_name(row["name"])] = row.get("selected_extras", [])
+    result = []
+    for root in roots:
+        match = _ROOT.fullmatch(root)
+        assert match is not None
+        if match[1] not in installed:
+            continue
+        extras = installed[match[1]]
+        if not isinstance(extras, list) or not all(isinstance(extra, str) for extra in extras):
+            raise ValueError("Provider selection requires inspected extras")
+        requested = set((match[2] or "").split(",")) - {""}
+        if not requested <= {_name(extra) for extra in extras}:
+            continue
+        result.append(root)
+    return result
 
 
 def read(root: Path) -> list[str] | None:
@@ -78,6 +105,8 @@ def persist(root: Path, roots: object) -> list[str]:
     selected = normalize(roots)
     read(root)
     body = json.dumps({"schema": SCHEMA, "version": 1, "roots": selected}) + "\n"
+    if len(body.encode("utf-8")) > 16_384:
+        raise ValueError("Runtime provider roots exceed the persisted byte bound")
     path = root / FILE
     if path.exists() and path.read_text(encoding="utf-8") == body:
         return selected
@@ -101,10 +130,8 @@ def require_inputs(root: Path, *, closed_wheels: bool) -> None:
         )
 
 
-def select(
-    root: Path, profile_roots: object, *, core: str, write: bool = False,
-) -> list[str]:
-    incoming = normalize(profile_roots, core=core)
+def select(root: Path, provider_roots: object, *, write: bool = False) -> list[str]:
+    incoming = normalize(provider_roots)
     desired = read(root)
     if desired is not None and incoming != desired:
         raise ValueError(
@@ -129,4 +156,4 @@ def check_construction(root: Path, receipt: dict[str, object] | None, *, core: s
         profile = binding.get("profile", binding)
         if not isinstance(profile, dict):
             raise ValueError("Selected providers require an inspected complete wheel profile")
-        select(root, profile.get("roots"), core=core)
+        select(root, from_profile(profile, core=core))

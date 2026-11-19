@@ -7,6 +7,7 @@ import importlib.util
 import os
 from pathlib import Path
 from types import ModuleType
+from typing import Any
 
 import pytest
 
@@ -26,7 +27,10 @@ def test_provider_desire_survives_core_reconstruction(providers: ModuleType, tmp
     before = path.read_bytes(), path.stat().st_mtime_ns
     for version in ("1.2.3", "1.2.4"):
         roots = [f"agent-vault[ssh]=={version}", "example-provider[feature-a,feature-b]==0.1.0"]
-        receipt = {"binding": {"roots": roots}}
+        receipt = {"binding": {"roots": roots, "wheels": [
+            {"name": "agent-vault", "selected_extras": ["ssh"]},
+            {"name": "example-provider", "selected_extras": ["feature-a", "feature-b"]},
+        ]}}
         providers.check_construction(tmp_path, receipt, core="agent-vault")
         providers.check_construction(
             tmp_path, {"binding": {"profile": receipt["binding"]}}, core="agent-vault",
@@ -37,7 +41,9 @@ def test_provider_desire_survives_core_reconstruction(providers: ModuleType, tmp
         providers.check_construction(tmp_path, None, core="agent-vault")
     for roots in (["agent-vault==1.2.4"], ["agent-vault", "example-provider[feature-a]"]):
         with pytest.raises(ValueError, match="changes selected"):
-            providers.check_construction(tmp_path, {"binding": {"roots": roots}}, core="agent-vault")
+            providers.check_construction(
+                tmp_path, {"binding": {**receipt["binding"], "roots": roots}}, core="agent-vault",
+            )
     assert (path.read_bytes(), path.stat().st_mtime_ns) == before
 
 
@@ -67,11 +73,13 @@ def test_explicit_removal_does_not_change_runtime(providers: ModuleType, tmp_pat
     providers.persist(tmp_path, [])
     providers.check_construction(tmp_path, None, core="agent-vault")
     providers.check_construction(
-        tmp_path, {"binding": {"roots": ["agent-vault==2"]}}, core="agent-vault",
+        tmp_path, {"binding": {"roots": ["agent-vault==2"], "wheels": []}}, core="agent-vault",
     )
     with pytest.raises(ValueError, match="changes selected"):
         providers.check_construction(
-            tmp_path, {"binding": {"roots": ["agent-vault", "example-provider"]}},
+            tmp_path, {"binding": {"roots": ["agent-vault", "example-provider"], "wheels": [
+                {"name": "example-provider", "selected_extras": []},
+            ]}},
             core="agent-vault",
         )
     assert marker.read_text(encoding="utf-8") == "retained-generation"
@@ -125,11 +133,14 @@ def test_currentness_does_not_hide_an_unapplied_provider_selection(
     assert not target.current(root, payload, "1.2.4")
     origins = slot / ".runtime-input-origins.json"
     origins.write_text(json.dumps({
-        "wheel_inputs": {"binding": {"roots": ["agent-vault==1.2.4"]}},
+        "wheel_inputs": {"binding": {"roots": ["agent-vault==1.2.4"], "wheels": []}},
     }), encoding="utf-8")
     assert not target.current(root, payload, "1.2.4")
     origins.write_text(json.dumps({
-        "wheel_inputs": {"binding": {"roots": ["agent-vault==1.2.4", "example-provider==0.1"]}},
+        "wheel_inputs": {"binding": {
+            "roots": ["agent-vault==1.2.4", "example-provider==0.1"],
+            "wheels": [{"name": "example-provider", "selected_extras": []}],
+        }},
     }), encoding="utf-8")
     assert target.current(root, payload, "1.2.4")
 
@@ -152,3 +163,25 @@ def test_provider_cli_requires_explicit_persistence_and_excludes_core(
     with pytest.raises(ValueError, match="owning core"):
         module.main(arguments + ["--roots", '["agent-vault"]', "--persist"])
     assert providers.read(tmp_path) == ["example-provider"]
+
+
+def test_inactive_roots_and_unselected_extras_do_not_satisfy_provider_desire(
+    providers: ModuleType, tmp_path: Path,
+) -> None:
+    providers.persist(tmp_path, ["example-provider"])
+    profile: dict[str, Any] = {
+        "roots": ['agent-vault', 'example-provider; python_version < "3.0"'],
+        "wheels": [{"name": "agent-vault", "selected_extras": []}],
+    }
+    active = providers.from_profile(profile, core="agent-vault")
+    assert active == []
+    with pytest.raises(ValueError, match="changes selected"):
+        providers.select(tmp_path, active, write=True)
+    with pytest.raises(ValueError, match="changes selected"):
+        providers.check_construction(tmp_path, {"binding": profile}, core="agent-vault")
+    assert providers.read(tmp_path) == ["example-provider"]
+    profile["roots"] = ["agent-vault", "example-provider[feature]"]
+    profile["wheels"].append({"name": "example-provider", "selected_extras": []})
+    assert providers.from_profile(profile, core="agent-vault") == []
+    with pytest.raises(ValueError, match="changes selected"):
+        providers.check_construction(tmp_path, {"binding": profile}, core="agent-vault")

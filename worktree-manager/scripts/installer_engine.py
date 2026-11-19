@@ -44,6 +44,7 @@ from installer_engine_process import (
     run_owned,
 )
 from installer_wheel_inputs import _check_deadline, _ordinary
+from installer_provider_roots import check_construction
 from installer_wheel_snapshot import (
     WheelInstallInputs, WheelReuseInputs as WheelReuseInputs, _digest as _snapshot_digest,
     _open as _snapshot_open, _unchanged as _snapshot_unchanged)
@@ -801,8 +802,6 @@ def _candidate(
         installed = {name for name, _version, _filename, _digest in wheel_inputs.distributions}
         if not selected_packages <= installed or (included - selected_packages) & installed:
             raise ValueError("Inspected wheels differ from the selected local dependency graph")
-    from installer_provider_roots import check_construction
-
     check_construction(
         root, wheel_inputs.receipt() if wheel_inputs is not None else None,
         core=_package_name(plugin),
