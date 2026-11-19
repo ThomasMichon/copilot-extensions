@@ -893,3 +893,26 @@ coordination, actual nonexpiry reservations, owner/effect agreements and
 independent technical acceptance remain. No implementation, native job,
 restart, ticket/resource release, custody transfer or new tracker effect
 follows from recording these completed administrative placements.
+
+## Proposed bounded optional Windows scheduling receiving - 2026-11-19 UTC
+
+| Source | Disposition | Primary canonical owner | Retained gates |
+|---|---|---|---|
+| #9568 optional Windows consumer/retention/removal scheduling and six reported assertion contracts | routed (proposed; effective after actual reviewed complete domain acceptance) | [Test Portfolio Rationalization](../test-portfolio-rationalization/README.md), Phase 5 P9568/V9568/G9568, through existing Phase 7 | Source stays OPEN during proposal; all nine technical rows remain unchecked; normal domain review must cover complete requirements, deduplication and ownership, not merely this ledger |
+
+This same planning unit supplies the direct domain Plan, local and actual
+global Validation, Coordination and dated Journal. Existing #9568 supplies
+the public tracker; no new issue, administrative checkbox or receipt-PR
+requirement is added. Revalidate current technical scope before execution.
+Normal reviewed complete delivery and permitted current whole receiving/
+source/owner readback precede a separate tracking judgment. Ledger-only
+publication is not domain acceptance.
+
+Retain the historical partial passes, combined 900-second timeout and
+unexecuted removal, all six intended-contract decisions and independently
+bounded scheduling without deadline inflation or dropped assertions.
+Existing owners, claims, resource/cleanup limits, unit-only required CI,
+hosted-Windows quiescence and OPEN #1303 remain. No implementation, native
+execution, installer acceptance, source/resource transfer or custody release
+is authorized. The [campaign record](../backlog-reconciliation/journal/2026/11.19-read-only-and-bounded-windows-receiving.md)
+preserves the separate proposal and disposition boundaries.
