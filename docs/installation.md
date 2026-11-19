@@ -126,6 +126,13 @@ installation promise. Optional standalone products such as
 [Worktree Manager](../worktree-manager/README.md) own their own installers and
 prerequisites; they are not required to load a payload-only skill plugin.
 
+For adopter-provided feed defaults before Python or uv is installed, the
+standard Manager bootstrap accepts a small
+[toolchain configuration file](../worktree-manager/docs/toolchain-configuration.md).
+Package indexes, managed Python/uv acquisition and npm registries remain
+separate channels; this does not select organization-specific defaults or
+provide a Node binary mirror.
+
 ## Maintenance and recovery
 
 For an agent-worktrees-adopted deployment, `agent-worktrees update` is the
