@@ -4,17 +4,20 @@ from __future__ import annotations
 
 import asyncio
 import sqlite3
-from contextlib import closing
+from collections.abc import AsyncGenerator
+from contextlib import aclosing, closing
 from pathlib import Path
-from typing import Any
-from unittest.mock import Mock
+from typing import Any, cast
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
 from agent_bridge.db import Database
 from agent_bridge.events import EventLog
 from agent_bridge.passive_refresh import InheritedRefresh, RefreshTarget
+from agent_bridge.routes.session_observations import observations
 from agent_bridge.session_manager import SessionManager
+from agent_bridge.session_observation_contract import ReadRequest, decode, read_position, validate_frame
 from agent_bridge.session_status import SessionStatus
 
 
@@ -78,6 +81,51 @@ def test_missing_history_cannot_advance_reader(tmp_db: Database) -> None:
 def _passive_manager(db: Database) -> SessionManager:
     (Path(db.db_path).parent / "hosts").mkdir()
     return SessionManager(db, read_only_rehydrate=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("change", ["first-id", "replacement-id", "rebuilt-journal"])
+async def test_follow_through_inherited_native_id_assignment(tmp_db: Database, change: str) -> None:
+    sid = "worker"
+    tmp_db.create_session(sid, sid, None, ".", "local", "starting", 1.0,
+                          target_json='{"type":"local","cwd":".","worktree_id":"tree"}',
+                          acp_session_id="previous" if change == "replacement-id" else None)
+    writer = EventLog(db=tmp_db, session_id=sid)
+    writer.append("agent_message", {"text": "first"})
+    mgr = _passive_manager(tmp_db)
+    session = mgr.get_session(sid)
+    assert session is not None
+    session.awaiting_maintenance_refresh = True
+    req = Mock()
+    req.app.state.uvicorn_server = None
+    req.app.state.session_manager = mgr
+    req.is_disconnected = AsyncMock(return_value=False)
+    read = ReadRequest.parse(sid, [("contract_version", "1"), ("worktree_id", "tree"),
+                                   ("follow", "true")], history=False)
+    async with aclosing(cast(AsyncGenerator[bytes, None], observations(req, read))) as stream:
+        first = decode((await anext(stream)).split(b"data: ", 1)[1].strip())
+        assert read_position(first["position"], first["source"]) == 1 and session.subscriber_count == 1
+        tmp_db.update_session_acp_id(sid, "assigned")
+        if change == "rebuilt-journal":
+            writer.rebuild([("agent_message", {"text": "different"})])
+        else:
+            writer.append("agent_message", {"text": "second"})
+        row = tmp_db.get_session(sid)
+        assert row is not None
+        prepared = InheritedRefresh.read(tmp_db, row, None, target=RefreshTarget.capture(session))
+        assert prepared is not None
+        mgr._rehydrate(merge=True, session_id=sid, prepared=prepared)
+        assert not session.awaiting_maintenance_refresh
+        following = decode((await asyncio.wait_for(anext(stream), 2)).split(b"data: ", 1)[1].strip())
+        validate_frame(following, read)
+        if change == "first-id":
+            assert following["kind"] == "delta" and following["source"]["durable_session_id"] == "assigned"
+            assert following["base_position"] == first["position"]
+            assert [event["native_event_id"] for event in following["entries"]] == [2]
+            assert read_position(following["position"], following["source"]) == 2
+        else:
+            assert following["kind"] == "gap" and following["code"] == "source-changed"
+    assert session.subscriber_count == 0
 
 
 @pytest.mark.asyncio
