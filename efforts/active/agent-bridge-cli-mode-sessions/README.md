@@ -75,7 +75,10 @@ unified Bridge/session-acquisition boundary, not a second launcher, session
 index or recovery engine. Existing Bridge/native-host, selected-backend
 permission, workspace/task, transport and resource owners retain their
 responsibilities. No implementer is appointed. This is a distinct explicit
-non-worktree caller policy; ordinary per-request CLI-mode opt-in and mux
+session category for existing managed-worktree or standalone callers, not
+a declaration that its caller has no worktree. Preserve real originating
+worktree obligations; apply the explicit non-worktree caller policy only
+when no worktree exists. Ordinary per-request CLI-mode opt-in and mux
 behavior remain unchanged. Review the focused contract against
 `visions/session-hosting` before implementation. This maintainer-owned shared
 capability does not impose upstream contribution on a consumer.
@@ -782,8 +785,10 @@ allocation-failure fallback or a change to ordinary CLI-mode defaults._
   allocate a workspace/mux to make the request succeed.
 - [ ] **P9056-R4:** Preserve the declared context, exact native conversation
   and originating responsibility through reconnect and follow-up. Use
-  existing obligation tracking and an explicit non-worktree caller policy;
-  do not fabricate worktree ownership or bypass source/repository/hosting
+  existing obligation tracking, including real originating managed-worktree
+  obligations when present; use an explicit non-worktree caller policy only
+  for callers without a worktree. Neither discard existing nor fabricate
+  absent worktree ownership, and never bypass source/repository/hosting
   admission because the requested category is read-only.
 - [ ] **P9056-R5:** Retain exact-conversation selection, concurrent-turn
   fencing and truthful interrupted/unknown resume acceptance and follow-up
@@ -893,8 +898,10 @@ or a claim that the historical failure was newly reproduced._
   unsupported native/AHP capabilities refuse honestly before effects.
   Neither labels, prompts nor silent broader tools count as enforcement.
 - [ ] **V9056-R4:** Verify context, exact native identity, origin and existing
-  obligations survive reconnect/follow-up without fabricated worktree
-  ownership or relaxed repository/source/hosting admission.
+  obligations survive reconnect/follow-up for BOTH managed-worktree and
+  standalone callers. Preserve real worktree responsibility and apply the
+  non-worktree policy only where applicable, without invented ownership or
+  relaxed repository/source/hosting admission.
 - [ ] **V9056-R5:** Exercise concurrent-turn exclusion and interrupted/
   unknown resume and follow-up outcomes on the original conversation.
   Cover authoritative accepted/rejected reconciliation and still-unknown
