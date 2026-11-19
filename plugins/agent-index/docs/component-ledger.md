@@ -167,6 +167,15 @@ before accepting prior versions and again before publication. Missing or
 conflicting evidence refuses without repairing state or treating absence as
 an unobserved deletion.
 
+Coverage and checkpoint qualification use non-creating, immutable read-only
+SQLite connections under that existing source-domain exclusion. They neither
+initialize empty files nor change journal mode or create WAL/SHM sidecars.
+Nonempty WAL or rollback journals refuse qualification rather than being
+silently ignored; their existing writer/recovery owner must settle them first.
+Qualification never checkpoints, deletes journals or repairs missing, empty
+or corrupt path evidence. Ordinary application/reuse connection defaults are
+unchanged.
+
 This helper supports the existing explicit native application prerequisites.
 Its optional exact `point_scope` propagates through the existing ledger, raw
 projection, chunk-ID and vector-coverage owners. Omitting that selection still

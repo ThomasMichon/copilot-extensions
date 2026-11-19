@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar, Literal
@@ -67,7 +68,7 @@ def _component_contents(
 def _qualified_chunks(
     projection: RawFileProjection, config: IndexConfig, store: MultiModelStore,
     coverage: EmbeddingCoverage,
-    *, point_scope: PointScope | None = None,
+    *, point_scope: PointScope | None = None, read_only: bool = False,
 ) -> list[Chunk]:
     """Qualify canonical inputs and exact routed pairs, not just an old raw witness."""
     chunks = []
@@ -88,6 +89,7 @@ def _qualified_chunks(
             store.get_vector_table(model.model_id), selected,
             config.model_profiles[model.model_id], bounded=True,
             point_scope=point_scope,
+            read_only=read_only,
         ):
             raise SourceLayoutError("Component routed vector coverage is incomplete")
     return chunks
@@ -127,10 +129,14 @@ def qualify_applied_component(
         )
         if projection != evidence.projection:
             raise SourceLayoutError("Component application native projection changed")
-        chunks = _qualified_chunks(
-            projection, config, store, EmbeddingCoverage(paths), point_scope=point_scope,
-        )
-        checkpoint = paths.get_checkpoint_rows([point]).get(point)
+        try:
+            chunks = _qualified_chunks(
+                projection, config, store, EmbeddingCoverage(paths), point_scope=point_scope,
+                read_only=True,
+            )
+            checkpoint = paths.get_checkpoint_rows([point], read_only=True).get(point)
+        except sqlite3.Error as exc:
+            raise SourceLayoutError("Component application path evidence is unavailable") from exc
         if content.deleted:
             if chunks or any(model.rows != b"[]" for model in projection.models):
                 raise SourceLayoutError("Component deletion still has native content or vectors")

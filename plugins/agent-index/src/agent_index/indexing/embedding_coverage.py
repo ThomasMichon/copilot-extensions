@@ -67,10 +67,14 @@ class EmbeddingCoverage:
         self, table: VectorTable, chunks: list[Chunk], profile: ModelProfile,
         *, bounded: bool = False,
         point_scope: PointScope | None = None,
+        read_only: bool = False,
     ) -> list[Chunk]:
         """Select missing pairs; bounded reads require explicit index preparation."""
         receipts: dict[str, tuple[str, str]] = {}
-        conn = self.paths._connect()
+        conn = (
+            self.paths._connect(read_only=True)
+            if read_only or point_scope is not None else self.paths._connect()
+        )
         try:
             for start in range(0, len(chunks), 200):
                 ids = [chunk.chunk_id for chunk in chunks[start:start + 200]]

@@ -749,14 +749,15 @@ def test_selected_component_read_retains_identity_and_default_refusal(
 
 @pytest.mark.parametrize(
     "drift", ["scope", "family", "binding", "untyped", "missing", "coverage",
-              "checkpoint", "missing-path-db", "policy", "native", "receipt", "budget"],
+              "checkpoint", "missing-path-db", "empty-path-db", "empty-deleted-path-db",
+              "corrupt-path-db", "policy", "native", "receipt", "budget"],
 )
 def test_selected_component_read_refuses_unqualified_points_without_repair(
     application: Fixture, drift: str,
 ) -> None:
     f = application
     identity = None if drift == "untyped" else ComponentIdentity("work_item_revision", "opaque")
-    f.prepare(f.retain(3, identity=identity)).publish()
+    f.prepare(f.retain(3, identity=identity, deleted=drift == "empty-deleted-path-db")).publish()
     if drift == "coverage":
         with closing(f.paths._connect()) as conn, conn:
             conn.execute("DELETE FROM embedding_coverage")
@@ -782,6 +783,8 @@ def test_selected_component_read_refuses_unqualified_points_without_repair(
         marker.write_text(json.dumps(receipt))
     elif drift == "missing-path-db":
         Path(f.paths._db_path).unlink()
+    elif drift in ("empty-path-db", "empty-deleted-path-db", "corrupt-path-db"):
+        Path(f.paths._db_path).write_bytes(b"not SQLite" if drift == "corrupt-path-db" else b"")
     before = {str(p): p.read_bytes() for p in f.config.data_dir.rglob("*") if p.is_file()}
     with pytest.raises((SourceLayoutError, ValueError)):
         read_component(
@@ -791,6 +794,25 @@ def test_selected_component_read_refuses_unqualified_points_without_repair(
             max_rows=0 if drift == "budget" else 8,
         )
     assert {str(p): p.read_bytes() for p in f.config.data_dir.rglob("*") if p.is_file()} == before
+
+
+def test_selected_read_never_ignores_or_changes_uncheckpointed_path_evidence(
+    application: Fixture,
+) -> None:
+    f = application
+    f.prepare(f.retain(3, identity=ComponentIdentity("work_item_revision", "opaque"))).publish()
+    hints = select_point_fixture(f)
+    with closing(f.paths._connect()) as conn:
+        conn.execute("UPDATE indexed_files SET indexed_at = indexed_at + 1")
+        conn.commit()
+        assert Path(f.paths._db_path + "-wal").stat().st_size > 0
+        before = {str(p): p.read_bytes() for p in f.config.data_dir.rglob("*") if p.is_file()}
+        with pytest.raises(SourceLayoutError, match="path evidence"):
+            read_component(
+                ComponentLedger(f.config, f.store), f.paths, PATH,
+                point_scope=hints.scope, application_scope=SCOPE, max_rows=8,
+            )
+        assert {str(p): p.read_bytes() for p in f.config.data_dir.rglob("*") if p.is_file()} == before
 
 
 def test_retained_id_union_budget_refuses_replacement_before_writer(application: Fixture) -> None:
