@@ -55,6 +55,17 @@ release gates, or count unexecuted native coverage as passing.
 
 ## Coordination
 
+The proposed finite #10487 author-command family enters the Phase 3 Worktrees
+pilot through existing Phase 7 migration-intake deduplication and domain review.
+The primary maintainer and actual CLI registration, lazy-dispatch/scanner,
+cluster-loading, fixture, runner and source/resource owners retain their scopes.
+Preserve OPEN #1303, all incumbent checks/holds, unit-only required CI and
+hosted-Windows quiescence. Normal review must deliver every P10487/V10487/G10487
+clause and its intake route; ledger publication alone is not domain acceptance.
+Keep #10487 OPEN during the proposal. Current permitted whole receiving/source/
+custody readback precedes a separate tracking judgment, not a generic ACK,
+implementation appointment, execution grant or resource release.
+
 The proposed finite #9970 fixture family enters the Phase 4 Dispatch wave;
 the separate #10031 initial guard-map startup/cutover and #10032 native
 platform families enter the Phase 3 Worktrees pilot. All three use existing
@@ -517,6 +528,38 @@ suites first.
   improvement relative to analysis cost, narrow the effort to containment,
   budgets, tiering, and contribution gates rather than forcing an exhaustive
   per-plugin disposition campaign.
+
+#### Finite author-command registration and cold loading from #10487
+
+Agent-recommended Phase 3 Worktrees-pilot receiving through Phase 7.
+
+- [ ] **P10487-1:** Retain `pr-author-capabilities`, `pr-update` and `pr-push`.
+  Reconcile the parser-registration roster, runtime lazy-dispatch table,
+  regenerated scan and `pr_author_cli` cluster-free declaration against the
+  actual supported registrations; neither dropping commands nor weakening
+  either regeneration-equality assertion is a correction.
+- [ ] **P10487-2:** Qualify genuine cold-handler behavior for EACH of those
+  three author commands before deciding the author module's cluster-loading
+  requirement. Earlier source research credited static roster/declaration
+  repairs but found that the cold-handler selection omitted these commands;
+  static equality and unrelated inventory tests do not supply that proof.
+- [ ] **P10487-3:** Keep the two original lazy-dispatch guards and their
+  finite cold-author controls with the existing CLI/fixture owners. Preserve
+  the historical two-failure/187-pass/31-skip coupled observation and separate
+  120-case/one-skip owner-file result as scoped history, not current success.
+  Use the appropriate bounded tier; do not expand required unit-only CI or
+  make project-wide inventory completion a prerequisite.
+
+##### Local Validation for #10487
+
+- [ ] **V10487-1:** Prove both named regeneration guards agree with the
+  supported parser/runtime registrations, retaining all three author commands.
+  Exercise each command's actual cold handler and required cluster-loading
+  behavior rather than warming imports or substituting a static roster check.
+- [ ] **V10487-2:** Record source/selection identity, real assertion results,
+  skips and owned cleanup for the focused guard/cold controls. Preserve the
+  regeneration assertions, supported command behavior and existing runner
+  bounds; source comparison is not executed or installed qualification.
 
 ### Phase 4 — Rationalize the portfolio in waves
 
@@ -1221,6 +1264,13 @@ an assertion that the historical source defect remains current._
   effort Done, and archive it.
 
 ### Phase 7 — Reconcile deferred backlog
+
+The proposed P10487/V10487/G10487 family has one primary placement in the
+Phase 3 Worktrees pilot. The append-only migration-intake ledger records its
+deduplication and unchanged owners; this same planning unit supplies the
+complete domain Plan, local/global Validation, Coordination and dated Journal
+for review. Existing #10487 supplies its tracker during the proposal; no
+new tracker, administrative checkbox or implementation appointment follows.
 
 The proposed #9970 family has one primary placement in Phase 4's Dispatch
 wave. The separate #10031 and #10032 families each have one primary
@@ -2527,6 +2577,14 @@ independent of #10031's large-caller startup/cutover lane.
 
 ## Validation Plan
 
+- [ ] **G10487:** Resolve every P10487/V10487 and continuing Coordination
+  clause: both regeneration equalities, all three supported author commands,
+  genuine per-command cold-handler/cluster-loading proof and attributable
+  focused results. Preserve static-repair credit, original assertions,
+  distinct historical selections, actual owners and Phase 7 domain acceptance.
+  Documentary consolidation neither supplies a passing test nor relaxes
+  unit-only CI, execution admission or the parent's own completion gate.
+
 - [ ] **G9970:** Resolve every P9970/V9970 and continuing Coordination
   clause at the finite original fixture boundary: authoritative initial
   observation, genuinely pending refusal, pending/no-duplicate assertions,
@@ -2880,6 +2938,16 @@ with another unbounded full-suite run. Portfolio reductions follow only after
 the inventory and evidence gates are available.
 
 ## Journal
+
+### 2026-11-19 UTC - Proposed finite author-command guard receiving
+
+The complete qualified #10487 original was compared with this existing
+Worktrees pilot and migration-intake contract. Direct unchecked Plan,
+local/global Validation and continuing Coordination retain static equality
+AND the omitted three-command cold-handler proof, without repeating source
+or native execution. The [six-source receiving record](../backlog-reconciliation/journal/2026/11.19-bounded-readers-guidance-and-recipes-receiving.md)
+retains the proposal and separate disposition gates. No technical completion,
+tracker retirement, implementation appointment or custody release is claimed.
 
 ### 2026-11-19 UTC - Proposed cold-fixture and guard-map qualification receiving
 

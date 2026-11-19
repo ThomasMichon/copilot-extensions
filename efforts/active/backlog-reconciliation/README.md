@@ -410,6 +410,16 @@ the non-public approval conversation.
 
 ## Plan
 
+The [six-source existing-owner receiving unit](journal/2026/11.19-bounded-readers-guidance-and-recipes-receiving.md)
+proposes complete direct #10487 portfolio, #10811 bounded enumeration,
+#11210 transcript-reader/output, #11239/#11240 guidance and #11296 recipe
+contracts in four existing domain plans. All thirty-eight new technical
+rows remain unchecked. Twelve complete current metadata records, eleven
+unchanged admitted whole discussions and #10212's changed complete comment
+also retain six specific source/owner/receiving gaps. The same unit records
+actual #13523 delivery, three separately verified tracking retirements and
+the 898-open census; it introduces no new issue disposition or technical credit.
+
 The [cold-fixture and guard-map receiving unit](journal/2026/11.19-cold-fixture-and-guard-map-receiving.md)
 proposes complete direct #9970 Phase 4 and #10031/#10032 Phase 3
 test-portfolio families through existing Phase 7 intake/domain review.
@@ -4930,6 +4940,16 @@ closure credit, resource release or parent checkbox change follows.
   normal publication flow.
 
 ## Validation Plan
+
+The [six-source receiving contract](journal/2026/11.19-bounded-readers-guidance-and-recipes-receiving.md)
+directly retains all six finite original unions in their existing owners'
+Plan and actual global Validation, with local Validation and Phase 7 intake
+where applicable. Every incumbent check state remains; all thirty-eight
+new technical rows are unchecked. Ordinary review must accept the complete
+domain contracts, coordination and deduplication route, followed by permitted
+current whole receiving/source/custody readback and separate source judgments.
+No implementation, stronger native/public-receipt prerequisite, source
+retirement or resource release follows from a proposed map or document merge.
 
 The [three-family receiving proposal](journal/2026/11.19-cold-fixture-and-guard-map-receiving.md)
 directly retains all #9970 cold/pending/bounded-publication conditions
