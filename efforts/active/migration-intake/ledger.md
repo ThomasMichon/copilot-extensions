@@ -947,3 +947,22 @@ receiving grants no native run, implementation, service action, deployment,
 privilege change or custody release. The
 [campaign record](../backlog-reconciliation/journal/2026/11.19-cold-fixture-and-guard-map-receiving.md)
 retains the independent source and prior-publication evidence.
+
+## Proposed finite author-command guard and cold-handler receiving - 2026-11-19 UTC
+
+| Source | Disposition | Primary canonical owner | Retained gates |
+|---|---|---|---|
+| #10487 lazy-dispatch/scanner equality and all three author-command cold handlers | routed (proposed; effective after actual reviewed complete domain acceptance) | [Test Portfolio Rationalization](../test-portfolio-rationalization/README.md), Phase 3 Worktrees pilot, P10487/V10487/G10487 through Phase 7 | Both original regeneration assertions, supported `pr-author-capabilities`/`pr-update`/`pr-push`, actual per-command cluster-loading proof, historical/source-versus-executed distinctions and unchanged runner/resource owners |
+
+This same planning unit supplies complete direct domain Plan, local and actual
+global Validation, Coordination and dated Journal. Ledger publication alone
+is not domain acceptance. Existing #10487 supplies the tracker during the
+proposal; no new issue, administrative checkbox, generic ACK or implementation
+appointment is added. Normal reviewed whole receiving delivery and permitted
+current source/receiver/custody readback precede a separate tracking judgment.
+All six technical rows remain unchecked. Preserve OPEN #1303, all existing
+checks/holds, unit-only required CI, hosted-Windows quiescence and original
+source/fixture/runner/resource custody. No product test, native run, runtime
+repair, source takeover or resource release follows. The
+[campaign record](../backlog-reconciliation/journal/2026/11.19-bounded-readers-guidance-and-recipes-receiving.md)
+retains this proposal and its independent source judgment.

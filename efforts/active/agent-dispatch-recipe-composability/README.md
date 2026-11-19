@@ -57,6 +57,17 @@ fits.
 
 ## Coordination
 
+The proposed finite #11296 default-recipe charter-field lane below remains
+with the existing recipe/registrar, body-launch/agent-overlay, consumer,
+reservation and source/resource owners. It is independent of unfinished
+taxonomy/origin, optional-hook, catalog and motivating-consumer work; no
+whole-parent completion prerequisite or implementation appointment is added.
+Ordinary reviewed complete P11296/V11296/G11296 delivery and current
+permitted whole receiving/source/custody readback precede a separate tracking
+judgment. Keep #11296 OPEN during the proposal. Observed failed starts and
+`creation_pending` reservations remain unresolved history, not permission
+to launch a reviewer, reset reservations, replay effects or release custody.
+
 The finite #4959 inherited-script origin clarification below preserves ALL
 directly incorporated #5174 clauses under the existing recipe/registrar/
 base-engine/provider/source/resource custodians. #8300's bounded reservation
@@ -535,7 +546,51 @@ not a substitute for that complete supported-field contract.
   finite evidence tier and separately owned #5731 full-suite follow-up.
   No new generic handshake, mandatory catalog or private-consumer rollout gate.
 
+### Finite default-recipe charter-field contract from #11296
+
+Agent-recommended correctness lane under the existing recipe/registrar owner.
+
+- [ ] **P11296-1:** Correct BOTH default reviewer and conflict-resolution
+  recipes so `body.charter` is a real resolvable behavior-overlay name
+  passed to Copilot's `--agent`, not an instruction paragraph. Preserve
+  the original alternatives: carry prose in an actual instruction-bearing
+  prompt/goal field with charter unset or valid, OR ship a real `.agent.md`
+  overlay and reference its name.
+- [ ] **P11296-2:** Preserve recipe instructions and consumer overrides
+  through actual declaration expansion, registrar serialization and body
+  launch. Consider declaration-time rejection of invalid overlay identifiers
+  such as whitespace/newline prose as prevention, not a second registry or
+  an asserted repair of already-created sessions/reservations.
+- [ ] **P11296-3:** Retain the reported before-first-turn startup failures,
+  later `creation_pending` retries and consuming-repository overlay override
+  as historical effects/workaround. Earlier recipe/schema comparison did
+  not inspect the whole supervisor entrypoint or establish end-to-end
+  recovery. Keep existing source/consumer and reservation custody; plan
+  acceptance neither admits held entrypoints nor authorizes replay.
+
+#### Local Validation for #11296
+
+- [ ] **V11296-1:** Expand BOTH shipped defaults without a consumer override
+  through the real registrar-to-body argument/prompt construction boundary;
+  prove no prose becomes the agent identifier and all instructions reach an
+  instruction-bearing field or the actual shipped resolvable overlay.
+- [ ] **V11296-2:** Preserve supported explicit consumer overlay overrides
+  and no-charter behavior. If declaration validation is selected, cover valid
+  names versus whitespace/newline prose before launch; invalid declarations
+  must not allocate a session merely to discover an invalid agent name.
+- [ ] **V11296-3:** Use bounded synthetic/fixture-owned consumer controls
+  and report uninspected/unavailable source or execution explicitly. Do not
+  certify historical reservation recovery, duplicate-safe retry or installed
+  reviewer operation from source equality or an argument-construction test.
+
 ## Validation Plan
+
+- [ ] **G11296:** Resolve every P11296/V11296 and continuing Coordination
+  clause for BOTH defaults, the instruction-field OR shipped-overlay choice,
+  real registrar/body boundary and compatible consumer overrides. Preserve
+  actual historical unknown effects, source/entrypoint holds and current
+  reservation/resource owners. Planned consolidation is not launch/recovery
+  proof, taxonomy completion, runtime repair or custody release.
 
 - [ ] **WHOLE4959-G:** Complete the entire RC1..4/RCV1..3 source union:
   P4959/V4959 and actual recursive/direct typed-engine execution, EVERY
@@ -608,6 +663,16 @@ detailed here once implementation starts, if it grows beyond what the Plan
 items above already specify._
 
 ## Journal
+
+### 2026-11-19 - Proposed finite recipe charter-field receiving
+
+The complete qualified #11296 original was compared with this entire current
+ROOT. Three unchecked Plan, three local Validation and one actual global
+gate retain both defaults, the literal instruction-field OR shipped-overlay
+choice, optional identifier validation, compatible overrides and the actual
+registrar/body consumer. The [six-source receiving record](../backlog-reconciliation/journal/2026/11.19-bounded-readers-guidance-and-recipes-receiving.md)
+preserves separate review and tracking judgments. No held entrypoint, reviewer
+launch, reservation recovery, implementation or resource release follows.
 
 ### 2026-11-17 - Whole composition and taxonomy receiving proposed
 
