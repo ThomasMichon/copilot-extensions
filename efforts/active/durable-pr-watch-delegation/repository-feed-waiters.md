@@ -229,6 +229,13 @@ basis before each service effect. It does not replace a failed new invocation
 with a legacy invocation. A lost subscribe response is recovered through
 `inspect-request`, not another create attempt.
 
+The bounded registration/inspection leaf retains service receipts without
+arming a native waiter. An active provider receipt is not native activation.
+Later arming must recheck the actual receipt expiry under the native arm
+transaction's write lock and immediately before commit, preserving original
+deadline, task, hold/form, generation and wake guards. The registration leaf
+does not close that later arming/completion or wake-before-ACK obligation.
+
 Cancellation of an unknown registration keeps the native reconciliation
 obligation. If inspection finds it, use the existing scoped cancellation
 operation and reconcile an uncertain cancellation through inspection. If

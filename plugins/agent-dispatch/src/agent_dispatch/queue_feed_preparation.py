@@ -14,6 +14,20 @@ from .queue_task_relationships import require_relationship
 
 PREPARATION_PROTOCOL = "agent-dispatch.repository-feed-preparation/v1"
 ADMISSION_PROTOCOL = "agent-dispatch.repository-feed-admission/v1"
+REGISTRATION_PROTOCOL = "agent-dispatch.repository-feed-registration/v1"
+
+
+def require_feed_creation_deadline(
+    delegation: dict[str, Any], cutoff: int | None, now: float,
+) -> None:
+    """Check the original lifetime and optional sender cutoff under the write lock."""
+    deadline = delegation["feed"]["deadline_at"]
+    if now >= deadline:
+        raise TaskError("original repository-feed deadline elapsed")
+    if cutoff is not None and (
+        type(cutoff) is not int or cutoff != int(deadline) or now >= cutoff
+    ):
+        raise TaskError("original repository-feed creation cutoff elapsed or differs")
 
 
 @dataclass(frozen=True)
