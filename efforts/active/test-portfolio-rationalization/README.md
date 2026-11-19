@@ -1144,7 +1144,7 @@ a different selection. Any changed controlled selection must be named as changed
   disposition.
 - [ ] Place each accepted public tracker item in exactly one existing phase,
   extending this plan before implementation when necessary.
-- [ ] **I13294:** Record deduplicated acceptance of the complete
+- [x] **I13294:** Record deduplicated acceptance of the complete
   P13294/V13294/G13294 family through existing migration-intake and
   domain review into Phase 4 only. Existing #13294 supplies its tracker;
   check this administrative row only after actual reviewed complete
@@ -2631,6 +2631,20 @@ with another unbounded full-suite run. Portfolio reductions follow only after
 the inventory and evidence gates are available.
 
 ## Journal
+
+### 2026-11-19 UTC - Finite Windows collector receiving accepted
+
+#13395 delivered the complete P13294/V13294/G13294 domain Plan, local
+and actual global Validation, Coordination and Phase 7 intake after review
+explicitly covering complete domain acceptance, deduplication and ownership.
+Permitted current receiving/source/custody readback supports administrative
+I13294; all six technical rows remain unchecked. The separate #13294
+redundant-tracking retirement is audited at explanation 7002336101, not a
+collector repair, native pass, implementation appointment or claim release.
+The [campaign record](../backlog-reconciliation/journal/2026/11.18-terminal-and-offline-receiving.md)
+retains actual merge/review, current readback and separate source evidence.
+Both CPython versions, native AND actor-free controls, byte-identical LF
+admission, all refusals, existing custodians and execution holds remain.
 
 ### 2026-11-19 UTC - Proposed finite Windows collector receiving
 

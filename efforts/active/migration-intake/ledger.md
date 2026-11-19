@@ -828,3 +828,42 @@ release/resource custody, hosted-Windows quiescence and source holds.
 Native unfinishedness remains technical work, not an added generic physical
 tracker barrier. No implementation appointment, ACK requirement, execution,
 source/bytecode mutation, claim expiry or resource release follows.
+
+## Accepted finite Windows collector attribution intake (2026-11-19 UTC)
+
+#13395 actually merged the complete direct domain Plan, local and actual
+global Validation, Coordination, dated Journal and intake route after
+review explicitly covering domain acceptance, deduplication and ownership.
+Approval 5970637083 on 0c4e645a87ac66a38d30887da395e56cf8ca716b preceded
+merge 344987f52bba88ac141926fda9d9af36498dd797. Permitted current
+receiving/source/custody readback confirms that delivery. The earlier
+conditional proposal remains unchanged history.
+
+| Candidate | Source | Disposition | Primary canonical owner | Tracker outcome |
+|-----------|--------|-------------|-------------------------|-----------------|
+| Complete finite Windows-native unit-collector extended-path source/bytecode attribution contract | Public #13294, complete unchanged original and zero prior comments; separately referenced passing selections remain distinct | routed | [test-portfolio-rationalization](../test-portfolio-rationalization/README.md), Phase 4 P13294/V13294/G13294 only | Complete reviewed receiving/intake accepted; separate redundant-tracking retirement `NOT_PLANNED` audited at explanation 7002336101; technical qualification and actual custody remain unchanged |
+
+I13294 records administrative acceptance, not another canonical owner.
+All six technical rows remain unchecked. Preserve BOTH CPython 3.11.9 AND
+3.14.7, focused native AND actor-free controls, byte-identical LF admission,
+source/bytecode/mutation/actor refusals, hosted-Windows quiescence and
+existing custodians/holds. No implementation, execution, claim expiry,
+source/bytecode mutation or resource release follows.
+
+## Proposed finite reaper and publication receiving - 2026-11-19 UTC
+
+These rows propose routed ownership. They become accepted routing records
+only after explicit normal domain review, actual merge and current readback
+of the complete receiving contract. Ledger text alone establishes neither
+acceptance nor source retirement, implementation or resource transfer.
+
+| Source | Disposition | Canonical owner | Tracker outcome |
+|---|---|---|---|
+| #13207 and its terminal-client/victim-argv refinement | routed (proposed; effective after reviewed complete domain acceptance) | [Installation-Independent Sessions](../installation-independent-sessions/README.md), P13207/V13207/G13207 | Existing source and #8669 coordination preserved; separate source judgment pending. Diagnostic proposals remain proposals; no launcher-only fulfillment or process/resource authority. |
+| #13208, including bounded observation-ticket handling, truthful degraded publication and supported current-owner recovery | routed (proposed; effective after reviewed complete domain acceptance) | [Authoritative Write-Through Daemon](../agent-worktrees-authoritative-daemon/README.md), P13208/V13208/G13208 | Existing #6748 recovery coordination and independent reservations preserved; separate source judgment pending. Ticket handling does not expire claims or resource obligations. |
+
+No new administrative checkbox, companion #6748 clause or receipt-PR gate is
+introduced. Preserve its applicable current OPEN-parent/full-readback condition
+and independent publisher/planning/resource custodians. All ten technical
+receiving rows remain unchecked; the source trackers stay OPEN through this
+proposal and any later disposition is separate.

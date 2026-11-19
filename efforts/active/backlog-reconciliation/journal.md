@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-18 - Finite liveness, reaper and publisher receiving](journal/2026/11.18-liveness-reaper-and-publication-receiving.md)
+
 - [2026-11-18 - Complete finite terminal, offline-job and fixture receiving](journal/2026/11.18-terminal-and-offline-receiving.md)
 
 - [2026-11-18 - Selected-PR receiving and finite source closeout](journal/2026/11.18-selected-pr-receiving-and-source-closeout.md)
