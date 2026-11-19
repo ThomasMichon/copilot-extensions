@@ -12,13 +12,15 @@ from typing import cast
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from fastapi import HTTPException
 
 from agent_bridge.db import Database
 from agent_bridge import passive_refresh
 from agent_bridge.events import EventLog, SseEvent
 from agent_bridge.passive_refresh import InheritedRefresh, RefreshTarget
 from agent_bridge.routes.session_observations import observations
-from agent_bridge.routes.sessions import _sse_event_stream
+from agent_bridge.routes.sessions import _sse_event_stream, wait_for_attention
+from agent_bridge.models import AttentionReason
 from agent_bridge.session_manager import SessionManager
 from agent_bridge.session_observation_contract import ReadRequest, decode, read_position, validate_frame
 from agent_bridge.session_status import SessionStatus
@@ -84,6 +86,43 @@ def test_missing_history_cannot_advance_reader(tmp_db: Database) -> None:
 def _passive_manager(db: Database) -> SessionManager:
     (Path(db.db_path).parent / "hosts").mkdir()
     return SessionManager(db, read_only_rehydrate=True)
+
+
+@pytest.mark.asyncio
+async def test_attention_wait_exits_when_its_inherited_source_retires(
+    tmp_db: Database, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sid = "worker"
+    tmp_db.create_session(sid, sid, None, ".", "local", "running", 1.0)
+    manager = _passive_manager(tmp_db)
+    session = manager.get_session(sid)
+    assert session is not None and session.event_log is not None
+    session.awaiting_maintenance_refresh = True
+    log = session.event_log
+    wait = log.wait_for_events
+    waiting = asyncio.Event()
+
+    async def once(after: int, timeout: float) -> list[SseEvent]:
+        assert not waiting.is_set(), "retired attention wait retried instead of terminating"
+        waiting.set()
+        return await wait(after, timeout)
+
+    monkeypatch.setattr(log, "wait_for_events", once)
+    req = Mock()
+    req.app.state.session_manager = manager
+    task = asyncio.create_task(wait_for_attention(sid, req, [AttentionReason.INPUT_REQUIRED], None, 30))
+    try:
+        await asyncio.wait_for(waiting.wait(), 2)
+        tmp_db.delete_session(sid)
+        manager._rehydrate(merge=True, session_id=sid,
+                           prepared=InheritedRefresh(None, None, target=RefreshTarget.capture(session)))
+        with pytest.raises(HTTPException) as unavailable:
+            await asyncio.wait_for(task, 2)
+        assert unavailable.value.status_code == 410
+        assert unavailable.value.detail["code"] == "source_unavailable"
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
 
 
 @pytest.mark.asyncio

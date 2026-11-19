@@ -1025,6 +1025,11 @@ async def wait_for_attention(
 
     deadline = time.monotonic() + timeout_seconds
     while True:
+        if session.event_log.source_unavailable:
+            raise HTTPException(
+                status_code=410,
+                detail={"code": "source_unavailable", "message": "The inherited event source is gone"},
+            )
         after = session.event_log.latest_id
         try:
             result = evaluate_owned_attention(
