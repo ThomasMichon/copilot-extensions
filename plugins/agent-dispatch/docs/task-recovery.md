@@ -3,6 +3,26 @@
 Back to [agent-dispatch](../README.md). See also
 [task authority](task-authority.md) and [wake custody](execution-wake-custody.md).
 
+### Isolated proposal records
+
+The Python `proposal_recovery.ProposalIntake` adapter creates one private,
+unowned proposal in a fresh directory. Its callers must own the directory
+and serialize its lifecycle; never point it at a coordinator queue. It records
+the original task ID, creation inputs (including payload text), keyed steer
+inputs and original acceptance receipts in `proposal.records`, independently
+of each generation's task DB and payload files. A write is acknowledged only
+after the independent record commits. Preserve that file with the same privacy
+and retention controls as the task contents; it is not diagnostic telemetry.
+
+`recover(records, new_generation)` uses the ordinary queue creator and steering
+consumer to rebuild into an absent directory. It compares every receipt before
+moving the journal writer epoch. An unsuccessful replay leaves the old writer
+epoch in place; keep the incomplete destination aside and retry into a fresh
+directory. A failed sidecar acknowledgment invalidates that intake handle.
+An exact steer retry remains idempotent and a conflicting key refuses.
+No HTTP endpoint, ordinary queue, existing proposal, executable claim,
+consumption, provider wake, or full production history is migrated by this API.
+
 ## Inspect before choosing an action
 
 `agent-dispatch task-diagnostics <task-id>` reads one bounded coordinator
