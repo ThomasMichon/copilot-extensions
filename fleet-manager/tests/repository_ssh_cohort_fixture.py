@@ -36,6 +36,28 @@ class RequiredDistribution(Protocol):
 DistributionT = TypeVar("DistributionT", bound=RequiredDistribution)
 
 
+def native_setup_environment(
+    environment: Mapping[str, str], home: Path, root: Path,
+) -> dict[str, str]:
+    clean = {
+        name: value for name, value in environment.items()
+        if not name.startswith("UV_")
+        and name not in {"VIRTUAL_ENV", "PYTHONPATH", "PYTHONHOME", "FLEET_MANAGER_HOST_NONCE"}
+    }
+    clean.update(
+        HOME=str(home), USERPROFILE=str(home), AGENT_HOME=str(home),
+        LOCALAPPDATA=str(home / "local"), APPDATA=str(home / "roaming"),
+        COPILOT_HOME=str(home / ".copilot"),
+        WORKTREE_MANAGER_ROOT=str(home / ".worktree-manager"),
+        UV_OFFLINE="1", UV_PYTHON=sys.executable,
+        UV_PYTHON_DOWNLOADS="never", UV_CACHE_DIR=str(root.parent / "uv-cache"),
+        FLEET_MANAGER_HOME=str(root), AGENT_WORKTREES_STATUS_MONITOR="0",
+    )
+    if os.name == "nt":
+        clean.update(HOMEDRIVE=home.drive, HOMEPATH=str(home)[len(home.drive):])
+    return clean
+
+
 def original_engine_owner(home: Path) -> Path:
     from prepare_runtime_source import materialize_consumer
 

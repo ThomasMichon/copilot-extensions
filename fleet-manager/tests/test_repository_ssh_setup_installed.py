@@ -135,23 +135,11 @@ def test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop(
     state = home / (".fleet-continuity-" + hashlib.sha256(
         json.dumps([url, "harness-a"], separators=(",", ":")).encode(),
     ).hexdigest())
-    clean = {
-        name: item for name, item in os.environ.items()
-        if not name.startswith("UV_")
-        and name not in {"VIRTUAL_ENV", "PYTHONPATH", "PYTHONHOME", "FLEET_MANAGER_HOST_NONCE"}
-    }
-    clean.update(
-        HOME=str(home), USERPROFILE=str(home), AGENT_HOME=str(home),
-        LOCALAPPDATA=str(home / "local"), APPDATA=str(home / "roaming"),
-        COPILOT_HOME=str(home / ".copilot"),
-        UV_OFFLINE="1", UV_PYTHON=sys.executable,
-        UV_PYTHON_DOWNLOADS="never", UV_CACHE_DIR=str(tmp_path / "uv-cache"),
-        FLEET_MANAGER_HOME=str(root), AGENT_WORKTREES_STATUS_MONITOR="0",
+    from repository_ssh_cohort_fixture import (
+        native_setup_environment, original_engine_owner, source_application_command,
     )
-    if os.name == "nt":
-        clean.update(HOMEDRIVE=home.drive, HOMEPATH=str(home)[len(home.drive):])
-    from repository_ssh_cohort_fixture import original_engine_owner, source_application_command
 
+    clean = native_setup_environment(os.environ, home, root)
     command_owner = original_engine_owner(home)
     monkeypatch.syspath_prepend(str(PROJECT.parent / "plugins" / "agent-worktrees" / "src"))
     from agent_worktrees.update_runtime_source import PIN_ENV

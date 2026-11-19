@@ -369,6 +369,7 @@ def test_source_application_command_keeps_direct_source_without_main_composition
             raise NativeSourceAccepted
 
         monkeypatch.setattr(adapter, "_execution_driver", reached_native)
+        monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(tmp_path / "receiver-root"))
         with pytest.raises(NativeSourceAccepted):
             adapter.main(arguments[4:])
     else:
@@ -383,6 +384,47 @@ def test_source_application_command_keeps_direct_source_without_main_composition
     )
     with pytest.raises(ValueError):
         source_application_command(snapshot, component, tmp_path / "runtime", Path(sys.executable))
+
+
+def test_native_manager_launcher_uses_fixture_root_despite_runner_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from repository_ssh_cohort_fixture import native_setup_environment
+
+    monkeypatch.syspath_prepend(str(PROJECT.parent / "libs" / "installer-engine"))
+    from runtime_application_binstubs import global_binstubs
+
+    home = tmp_path / "home"
+    manager = home / ".worktree-manager"
+    slot = manager / "versions" / "1.0.0"
+    slot.mkdir(parents=True)
+    (manager / "current-version").write_text("1.0.0", encoding="utf-8")
+    stubs = global_binstubs(
+        "worktree-manager", "WORKTREE_MANAGER_ROOT", ".worktree-manager", root=manager,
+    )
+    if os.name == "nt":
+        shell = shutil.which("pwsh")
+        assert shell is not None
+        launcher = tmp_path / "worktree-manager.ps1"
+        launcher.write_text(stubs[launcher.name], encoding="utf-8")
+        (slot / launcher.name).write_text("Write-Output 'fixture-manager-root'\n", encoding="utf-8")
+        command = [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-File", str(launcher)]
+    else:
+        launcher = tmp_path / "worktree-manager"
+        launcher.write_text(stubs[launcher.name], encoding="utf-8")
+        launcher.chmod(0o755)
+        target = slot / "worktree-manager.sh"
+        target.write_text("#!/bin/sh\nprintf '%s\\n' fixture-manager-root\n", encoding="utf-8")
+        target.chmod(0o755)
+        command = [str(launcher)]
+    environment = native_setup_environment(
+        {**os.environ, "WORKTREE_MANAGER_ROOT": str(tmp_path / "runner-root")},
+        home, tmp_path / "fleet",
+    )
+    result = run(command, cwd=home, env=environment)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == "fixture-manager-root"
+    assert not (tmp_path / "runner-root").exists()
 
 
 def test_original_engine_owner_runs_its_declared_lifecycle_in_private_home(

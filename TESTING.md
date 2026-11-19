@@ -2072,6 +2072,9 @@ declared materialized dependencies. Manager support must use its existing
 explicitly refuses Manager. Its receiver-level control exercises actual native
 Source admission before construction. A timed-out Manager support call reports
 only bounded Source phase/progress lines; its 60-second limit is unchanged.
+The fixture explicitly selects its Manager root as well as its private homes;
+a real generated-launcher control retains an inherited runner root override and
+verifies that the fixture still reaches its own selected slot.
 The real installed Manager front door and all native setup assertions remain
 the acceptance boundary; this fixture does not establish complete Manager
 self-installation qualification.
