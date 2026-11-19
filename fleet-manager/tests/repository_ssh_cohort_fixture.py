@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections.abc import Callable, Iterator, Mapping, Sequence
+from functools import wraps
 import hashlib
 import importlib.metadata
 import inspect
@@ -191,6 +192,21 @@ def source_build_diagnostic(
     return load
 
 
+def profile_step_diagnostic(
+    operation: Callable[..., Any], label: str, progress: Progress,
+) -> Callable[..., Any]:
+    @wraps(operation)
+    def timed(*args: Any, **kwargs: Any) -> Any:
+        started = time.monotonic()
+        progress("normal profile step start: " + label)
+        try:
+            return operation(*args, **kwargs)
+        finally:
+            progress(f"normal profile step {label}: {time.monotonic() - started:.3f}s")
+
+    return timed
+
+
 class ProfileBuilder(Protocol):
     def prepare_registry_lock(
         self, snapshot: Path, output: Path, *, uv: str, deadline: float,
@@ -338,7 +354,11 @@ def prepare_cohort(
         "standalone:fleet-manager", "agent-ssh",
     )
     progress("normal Source cohort: compose selected Git source " + commit)
-    record = sources.compose(root, commit, None, snapshot, projects=projects)
+
+    def observe(phase: int, state: int, elapsed: float) -> None:
+        progress(f"normal Source phase {phase} {'start' if state == 0 else 'complete'}: {elapsed:.3f}s")
+
+    record = sources.compose(root, commit, None, snapshot, projects=projects, observer=observe)
     progress(f"normal Source cohort materialized: {time.monotonic() - started:.2f}s")
     first_party: dict[str, Any] = {}
     for relative in (
@@ -415,14 +435,20 @@ def prepare_cohort(
         diagnostic.setattr(sources, "_load_module", source_build_diagnostic(sources._load_module, progress))
         sources.build_projects(snapshot, record, projects=projects)
     progress(f"normal Source cohort built: {time.monotonic() - started:.2f}s")
-    outputs = _prepare_profiles(snapshot, tmp_path, profiles, uv, progress, started)
-    select_feed("updated/simple")
-    updated_profile = profiles.prepare_registry_lock(
-        snapshot, tmp_path / "profile-updated", uv=uv,
-        deadline=time.monotonic() + 120, prepare_profile=True,
-        component="fleet-manager", extras=("gateway-host", "ssh-client"),
-    )
-    outputs["updated"] = Path(updated_profile["snapshot"])
+    with monkeypatch.context() as diagnostic:
+        for name in ("first_party", "_prepare_profile", "_write_snapshot", "_lock_application"):
+            diagnostic.setattr(
+                profiles, name,
+                profile_step_diagnostic(getattr(profiles, name), name, progress),
+            )
+        outputs = _prepare_profiles(snapshot, tmp_path, profiles, uv, progress, started)
+        select_feed("updated/simple")
+        updated_profile = profiles.prepare_registry_lock(
+            snapshot, tmp_path / "profile-updated", uv=uv,
+            deadline=time.monotonic() + 120, prepare_profile=True,
+            component="fleet-manager", extras=("gateway-host", "ssh-client"),
+        )
+        outputs["updated"] = Path(updated_profile["snapshot"])
     for component, output in outputs.items():
         selected = source_inputs.select_project(
             output, {"updated": "fleet-manager", "engine-base": "agent-worktrees"}.get(

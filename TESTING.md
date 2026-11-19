@@ -2094,6 +2094,13 @@ The normal cohort fixture records each canonical wheel-build duration and
 names bootstrap/engine/Manager setup phases. These observations preserve the
 actual builder calls, return values, refusals, lifecycle sequence and all
 existing deadlines; they do not enable artifact reuse or skip a setup stage.
+The composer supplies its existing archive/extraction/materialization observer;
+fixture-only wall timers also bracket actual first-party profile inspection,
+profile construction, snapshot writing and application locking. Their starts
+remain visible if the original preparation bound expires. They preserve actual
+arguments, results and refusals, and are restored after preparation; nested
+durations are inclusive rather than additive. Local parallel-write/streaming
+extraction experiments did not establish a sustained gain and are not retained.
 The engine receiver runs with fixture-only wall timing around its actual
 construction, child, freezing and identity functions. The import observer
 preserves each callable's arguments, result and refusal and restores its loader

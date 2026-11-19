@@ -536,6 +536,33 @@ def test_source_build_diagnostic_preserves_the_actual_builder_result(
     assert len(messages) == 1 and messages[0].startswith("normal Source wheel source: ")
 
 
+@pytest.mark.parametrize("fails", [False, True])
+def test_profile_step_diagnostic_preserves_actual_arguments_and_refusal(
+    tmp_path: Path, fails: bool,
+) -> None:
+    from repository_ssh_cohort_fixture import profile_step_diagnostic
+
+    expected = {"snapshot": tmp_path / "actual"}
+    calls: list[tuple[Path, str]] = []
+    messages: list[str] = []
+
+    def prepare(snapshot: Path, *, uv: str) -> dict[str, Path]:
+        calls.append((snapshot, uv))
+        if fails:
+            raise RuntimeError("actual profile refusal")
+        return expected
+
+    operation = profile_step_diagnostic(prepare, "actual-profile-step", messages.append)
+    if fails:
+        with pytest.raises(RuntimeError, match="actual profile refusal"):
+            operation(tmp_path, uv="actual-uv")
+    else:
+        assert operation(tmp_path, uv="actual-uv") is expected
+    assert calls == [(tmp_path, "actual-uv")]
+    assert messages[0] == "normal profile step start: actual-profile-step"
+    assert len(messages) == 2 and messages[1].startswith("normal profile step actual-profile-step: ")
+
+
 @pytest.mark.parametrize("failure", ["transient", "ordinary", "expired"])
 def test_source_denial_retries_only_bounded_windows_sharing_failures(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str,
