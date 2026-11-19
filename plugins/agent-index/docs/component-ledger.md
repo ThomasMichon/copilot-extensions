@@ -82,7 +82,7 @@ chunker and model-policy fingerprint. Its versioned policy identity binds the
 configured chunker, content table and model/profile/routing mapping. It refuses
 prior observations from a different scope/policy or rendering contract, native
 state without qualified application evidence, conflicting equal versions, and
-missing/mismatched path checkpoints. Lower or equal covered versions additionally
+missing/mismatched path fingerprints or chunk counts. Lower or equal covered versions additionally
 require an unchanged complete raw point, valid canonical chunk identities, exact
 routed model membership and current embedding receipts qualified against actual
 vectors. A cached embedding or ledger observation alone is insufficient.
@@ -127,6 +127,34 @@ consolidation. `tests/test_component_application.py` exercises native ordering,
 replacement/deletion, routed coverage, unrelated-row preservation, preparation
 replay, publication races and interruption refusals in its explicitly selected
 native lane; it is not an unconditional required unit matrix.
+
+### Applied native snapshots
+
+`indexing.component_application.qualify_applied_component(ledger, paths, evidence,
+scope=..., max_rows=...)` qualifies one exact retained observation under the
+existing source-domain operation. It derives configuration/store ownership from
+the ledger, checks the configured path-index location, and requires the current
+ledger record, scope, application policy and raw native projection to agree.
+Canonical chunk identities, exact routed membership and current vector receipts
+are qualified through the same application helpers. A present component requires
+both its fingerprint and actual canonical chunk count in the path checkpoint.
+A deletion requires empty content/model points and no path checkpoint.
+
+The returned `AppliedComponentSnapshot` carries the retained content/version/
+rendering evidence, qualified chunks and `named-target-only` coverage. It is an
+in-process snapshot at that exclusion boundary, not a durable certificate,
+permission, successful claim acknowledgement or assurance that the point remains
+unchanged after the operation returns. Applications reuse this qualification
+before accepting prior versions and again before publication. Missing or
+conflicting evidence refuses without repairing state or treating absence as
+an unobserved deletion.
+
+This helper supports the existing explicit native application prerequisites.
+It does not open a protocol-2 point domain, provide a component search/document/
+cluster presentation route, or infer item/comment identity from path strings.
+Selected point-domain reads and every v2 execution/producer boundary remain
+disabled until their own complete identity, coverage and compatibility contract
+is implemented and qualified.
 
 ### Sealed native publication suffix
 

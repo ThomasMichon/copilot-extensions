@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar, Literal
 
 from agent_index.chunking.base import Chunk
 from agent_index.indexing.component_manifest import ComponentContent
@@ -90,6 +91,52 @@ def _qualified_chunks(
     return chunks
 
 
+@dataclass(frozen=True)
+class AppliedComponentSnapshot:
+    """Qualified native point at one read boundary, not a durable completion token."""
+
+    evidence: ComponentEvidence
+    chunks: tuple[Chunk, ...]
+    coverage: ClassVar[Literal["named-target-only"]] = "named-target-only"
+
+
+def qualify_applied_component(
+    ledger: ComponentLedger, paths: PathIndex, evidence: ComponentEvidence, *,
+    scope: str, max_rows: int,
+) -> AppliedComponentSnapshot:
+    """Qualify exact ordering, native, checkpoint and routed-coverage owners."""
+    config, store = ledger._config, ledger._store
+    if (type(max_rows) is not int or max_rows < 1
+            or not isinstance(scope, str) or not scope.strip()
+            or Path(paths._db_path).resolve() != (config.data_dir / "path_index.db").resolve()):
+        raise ValueError("Component qualification requires configured path/scope/point budget")
+    content = evidence.content
+    point = content.component.source, content.component.path
+    with ledger._source_domain.operation(store.content_store.db):
+        if ((evidence.scope, evidence.policy) != (scope, _policy(config))
+                or ledger.get(*point) != evidence):
+            raise SourceLayoutError("Component application evidence changed or is unqualified")
+        projection = capture_file_projection(
+            config, store, *point, max_rows=max_rows,
+            retained_chunk_ids=evidence.projection.vector_chunk_ids,
+        )
+        if projection != evidence.projection:
+            raise SourceLayoutError("Component application native projection changed")
+        chunks = _qualified_chunks(projection, config, store, EmbeddingCoverage(paths))
+        checkpoint = paths.get_checkpoint_rows([point]).get(point)
+        if content.deleted:
+            if chunks or any(model.rows != b"[]" for model in projection.models):
+                raise SourceLayoutError("Component deletion still has native content or vectors")
+            complete = checkpoint is None
+        else:
+            complete = checkpoint is not None and checkpoint[:2] == (
+                content.fingerprint, len(chunks),
+            )
+        if not complete:
+            raise SourceLayoutError("Component application checkpoint is incomplete")
+        return AppliedComponentSnapshot(evidence, tuple(chunks))
+
+
 class PreparedComponentApplication:
     """Apply one retained manifest without clearing it or advancing source state.
 
@@ -132,7 +179,12 @@ class PreparedComponentApplication:
             self.checkpoints = paths.get_checkpoint_rows(list(self.contents))
             for point, content in self.contents.items():
                 previous = self.ledger.get(*point)
-                projection = self._capture(point, previous)
+                if previous is None:
+                    projection = self._capture(point, previous)
+                else:
+                    projection = qualify_applied_component(
+                        self.ledger, paths, previous, scope=scope, max_rows=max_rows,
+                    ).evidence.projection
                 self.previous[point], self.projections[point] = previous, projection
                 if previous is None:
                     if projection.content_rows != b"[]" or any(
@@ -140,19 +192,8 @@ class PreparedComponentApplication:
                     ) or point in self.checkpoints:
                         raise SourceLayoutError("Component has native state without application evidence")
                 else:
-                    if (previous.scope, previous.policy, previous.projection) != (
-                        scope, self.policy, projection,
-                    ) or previous.content.component.semantics != content.component.semantics:
+                    if previous.content.component.semantics != content.component.semantics:
                         raise SourceLayoutError("Component application evidence changed or is unqualified")
-                    _qualified_chunks(projection, config, store, self.coverage)
-                    checkpoint = self.checkpoints.get(point)
-                    if (
-                        previous.content.deleted and checkpoint is not None
-                        or not previous.content.deleted and (
-                            checkpoint is None or checkpoint[0] != previous.content.fingerprint
-                        )
-                    ):
-                        raise SourceLayoutError("Component application checkpoint is incomplete")
                     if content.covered_by(previous.content):
                         continue
                 self.selected.add(point)
@@ -197,15 +238,15 @@ class PreparedComponentApplication:
             if self.paths.get_checkpoint_rows(list(self.contents)) != self.checkpoints:
                 raise PendingCrawlConflict("Component checkpoints changed during preparation")
             for point in self.contents:
-                if (
-                    self.ledger.get(*point) != self.previous[point]
-                    or self._capture(point, self.previous[point]) != self.projections[point]
-                ):
-                    raise PendingCrawlConflict("Component native point changed during preparation")
-                if self.previous[point] is not None:
-                    _qualified_chunks(
-                        self.projections[point], self.config, self.store, self.coverage,
+                previous = self.previous[point]
+                if previous is not None:
+                    qualify_applied_component(
+                        self.ledger, self.paths, previous,
+                        scope=self.scope, max_rows=self.max_rows,
                     )
+                elif (self.ledger.get(*point) is not None
+                        or self._capture(point, None) != self.projections[point]):
+                    raise PendingCrawlConflict("Component native point changed during preparation")
             if not self.selected:
                 return 0, len(self.contents)
             require_file_projection_capacity(
