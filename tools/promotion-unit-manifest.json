@@ -6697,6 +6697,7 @@
         "tools/promotion_unit_tests/test_manager_activation.py": "047b6135b5882a9fb1eec41d78f331b1ed212fa4d87da07fca8902c3c07a81f5",
         "fleet-manager/setup.py": "85af516449571a6e0d3208e35fcca48d527fbfed84da5f29cce8c5c5dae93e0a",
         "libs/installer-engine/install_source.py": "60943cec50dc8df7844a57371e34e1d98260b7935f1d97c3ebd2d16a3647f95c",
+        "libs/installer-engine/installer_protected_source.py": "56dc9172fe654f71bb4c684bef4fab0bcd785814cc553bc4bb6025191f9d9be8",
         "libs/installer-engine/installer_driver.py": "d63882f5024114f5ab6623b95fbdb45b7322dfbffd3546ee24e1de8bd93ca98a",
         "libs/installer-engine/installer_engine_commands.py": "5d8028b9286f61480b0d19d77b82a4a932fa7ea8193635a728170afc4f61d4ed",
         "libs/installer-engine/installer_engine_stop.py": "5a563fe15a205d7168871a8e9470a286c1281bbeead93acb486bda259eaaee16",

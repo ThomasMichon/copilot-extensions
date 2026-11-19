@@ -203,6 +203,8 @@ def _protected(path: Path, *, directory: bool) -> None:
 
 
 def _output_directory(path: Path) -> None:
+    if sys.platform != "linux":
+        raise ValueError("protected output ACL inspection requires Linux")
     try:
         acl = os.getxattr(path, "system.posix_acl_default", follow_symlinks=False)
     except OSError as error:
@@ -322,6 +324,8 @@ def _document(path: Path) -> dict[str, Any]:
 
 
 def _root_identity() -> bool:
+    if sys.platform != "linux":
+        return False
     return all(
         identity() == 0
         for identity in (
