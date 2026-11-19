@@ -277,6 +277,10 @@ State remains in the existing `watch-subscriptions.json`; malformed opted-in
 records stop startup with an explicit sanitized error and are not discarded.
 Legacy persisted records still load. Do not downgrade until opted-in
 registrations have acknowledged or been explicitly cancelled.
+The [internal transition receiver](../README.md#governed-watch-state-groundwork-internal)
+also refuses startup, self-boot and restart when transition evidence is
+present; it cannot yet recover or activate a migrated state root. No CLI
+verb publishes that evidence or enables migration.
 
 For shutdown/restart boundaries, durability, and recovery detail, see
 [the owning README](../README.md#acknowledged-watch-callbacks-opt-in).

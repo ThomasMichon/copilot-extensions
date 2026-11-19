@@ -5,18 +5,48 @@ from __future__ import annotations
 import json
 import math
 import os
+import stat
 import tempfile
 import threading
 from collections.abc import Callable
+from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, NoReturn
+from typing import Any, Literal, NoReturn, cast
 
 _ATOMIC_REPLACE_LOCK = threading.RLock()
 _SUBSCRIPTIONS_SCHEMA = "agent-pull-requests.watch-subscriptions"
 # An ordered admission epoch of this executing implementation, not a payload
 # stamp or package version. Advance when older executors must not reactivate.
 WATCH_ENGINE_GENERATION = 1
+TransitionPhase = Literal["absent", "prepared", "sealed-legacy", "import-ready", "active"]
+_TRANSITION_PHASES = {"prepared", "sealed-legacy", "import-ready", "active"}
+_REPARSE_POINT = 0x400
+
+
+@dataclass(frozen=True)
+class WatchStatePaths:
+    legacy_subscriptions: Path
+    historical_lock: Path
+    retained_lock: Path
+    staged_barrier: Path
+    journal: Path
+    isolated_subscriptions: Path
+    writer_lock: Path
+
+
+def watch_state_paths(root: Path | None = None) -> WatchStatePaths:
+    base = state_dir() if root is None else root
+    historical_lock = base / "agent-pull-requests-watch.lock"
+    return WatchStatePaths(
+        legacy_subscriptions=base / "watch-subscriptions.json",
+        historical_lock=historical_lock,
+        retained_lock=base / "watch-state-transition.legacy.lock",
+        staged_barrier=base / "watch-state-transition.barrier",
+        journal=base / "watch-state-transition.json",
+        isolated_subscriptions=base / "watch-state" / "subscriptions.json",
+        writer_lock=historical_lock / "writer.lock",
+    )
 
 
 class VersionedSubscriptions(list[dict[str, Any]]):
@@ -41,7 +71,86 @@ def lock_path() -> Path:
 
 
 def subscriptions_path(root: Path | None = None) -> Path:
-    return (state_dir() if root is None else root) / "watch-subscriptions.json"
+    return watch_state_paths(root).legacy_subscriptions
+
+
+def _regular_bytes(path: Path) -> bytes | None:
+    try:
+        info = path.stat(follow_symlinks=False)
+    except FileNotFoundError:
+        return None
+    if (
+        not stat.S_ISREG(info.st_mode)
+        or getattr(info, "st_file_attributes", 0) & _REPARSE_POINT
+    ):
+        raise PermissionError("watch journal metadata must be a regular non-link file")
+    if info.st_size > 1_048_576:
+        raise ValueError("watch journal metadata exceeds its bounded size")
+    with path.open("rb") as handle:
+        opened = os.fstat(handle.fileno())
+        content = handle.read(1_048_577)
+        finished = os.fstat(handle.fileno())
+    current = path.stat(follow_symlinks=False)
+    identities = [
+        (item.st_dev, item.st_ino, item.st_size, item.st_mtime_ns)
+        for item in (info, opened, finished, current)
+    ]
+    # Windows can expose creation time via lstat and change time via fstat.
+    metadata_stable = all(
+        (before.st_mode, before.st_ctime_ns) == (after.st_mode, after.st_ctime_ns)
+        for before, after in ((info, current), (opened, finished))
+    )
+    if (
+        len(content) > 1_048_576 or any(item != identities[0] for item in identities[1:])
+        or not metadata_stable
+        or not stat.S_ISREG(current.st_mode)
+        or getattr(current, "st_file_attributes", 0) & _REPARSE_POINT
+    ):
+        raise PermissionError("watch journal metadata changed during its bounded read")
+    return content
+
+
+def read_transition_phase(root: Path | None = None) -> TransitionPhase:
+    """Observe a marker, never establish physical sealing, custody or authority."""
+    paths = watch_state_paths(root)
+    try:
+        raw = _regular_bytes(paths.journal)
+    except (OSError, ValueError) as exc:
+        raise ValueError("watch state transition journal cannot be read safely") from exc
+    if raw is not None:
+        try:
+            data = json.loads(raw, object_pairs_hook=_unique_object, parse_constant=_reject_constant)
+            if (
+                not isinstance(data, dict)
+                or data.get("schema") != "agent-pull-requests.watch-state-transition"
+                or type(data.get("version")) is not int or data["version"] != 1
+                or not isinstance(data.get("phase"), str)
+                or data["phase"] not in _TRANSITION_PHASES
+            ):
+                raise ValueError("unsupported marker")
+        except (ValueError, UnicodeError):
+            raise ValueError("invalid watch state transition journal") from None
+        return cast(TransitionPhase, data["phase"])
+    for path in (
+        paths.historical_lock, paths.retained_lock, paths.staged_barrier,
+        paths.isolated_subscriptions.parent,
+    ):
+        try:
+            info = path.stat(follow_symlinks=False)
+        except FileNotFoundError:
+            continue
+        if (
+            path != paths.historical_lock or not stat.S_ISREG(info.st_mode)
+            or getattr(info, "st_file_attributes", 0) & _REPARSE_POINT
+        ):
+            raise ValueError("watch state transition evidence has no journal")
+    return "absent"
+
+
+def _require_legacy_state(root: Path | None) -> None:
+    phase = read_transition_phase(root)
+    if phase != "absent":
+        raise ValueError(f"watch state transition requires guarded recovery ({phase})")
 
 
 def _atomic_write_json(
@@ -151,6 +260,7 @@ def _read_subscriptions_state(path: Path) -> list[dict[str, Any]]:
 
 def read_subscriptions_state(root: Path | None = None) -> list[dict[str, Any]]:
     with _ATOMIC_REPLACE_LOCK:
+        _require_legacy_state(root)
         return _read_subscriptions_state(subscriptions_path(root))
 
 
@@ -162,6 +272,7 @@ def write_subscriptions_state(
 
     def checked_document() -> tuple[str | None, Any]:
         try:
+            _require_legacy_state(root)
             raw, document = _read_subscriptions_document(path)
             selected = _subscription_entries(document)
             if isinstance(selected, VersionedSubscriptions):

@@ -10,7 +10,8 @@ older-engine restart/per-version state amendment is reviewed in #13310.
 **Current direction:** Continue the version-aware design with older-engine
 restart refusal and per-version overwrite isolation under that reviewed
 contract. The receiver-only expansion landed in #13320; physical historical
-isolation and recoverable migration remain open. The preserved provider
+isolation and recoverable migration design is reviewed in #13493, while its
+runtime implementation and qualification remain open. The preserved provider
 prototype is not delivered and map writes are not enabled.
 **Scope:** P5947-3/4, V5947-3/4 and G5947-3/4. This does not complete those
 items, expiry acceptance, M1, or the parent effort.
@@ -451,7 +452,7 @@ journal is an unresolved transition, not permission to replace a live owner.
 The operator accepted this one-time POSIX historical-migration boot boundary
 as a **source design**, not a choice to retire historical support, enable map
 writes or perform operations. Normal review of this concrete transition
-amendment precedes runtime realization. A boot-independent transition would
+amendment cleared in #13493; runtime realization follows. A boot-independent transition would
 need a different enforceable historical execution boundary; the current lease
 and new-version metadata alone do not provide one.
 
@@ -472,7 +473,7 @@ answer accepts only the question's source-design requirement and limits.
 The [concrete physical transition proposal](subscriber-state-transition.md)
 defines staged authority, retained-inode custody, boot evidence, interrupted
 recovery and serial implementation/qualification under the existing owner.
-It requires normal review before runtime realization.
+It cleared normal review in #13493, not runtime or installed qualification.
 
 ### Execution and missing directories
 
