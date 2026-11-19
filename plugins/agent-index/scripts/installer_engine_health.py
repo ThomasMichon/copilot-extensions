@@ -8,7 +8,6 @@ from pathlib import Path
 import subprocess
 
 from installer_dependency_policy import DependencyPolicyError, _native_retained_path
-from installer_engine_process import ChildLaunchError, ChildTimeoutExpired
 from installer_source_build import SourceWheelInputs
 from installer_wheel_inputs import WheelDeadlineError, WheelError, _ordinary
 from installer_wheel_snapshot import WheelInstallInputs, WheelReuseInputs, _digest, _open, _unchanged
@@ -59,7 +58,7 @@ def verify_installed_inputs(
     wheel_inputs: WheelInstallInputs | WheelReuseInputs | None,
     source_wheels: SourceWheelInputs | None = None,
     health_callable: str | None = None, require_frozen_origin: bool = True,
-    confirm_source_contents: bool = False, run: Callable,
+    confirm_source_contents: bool = False, run: Callable[[list[str]], object],
 ) -> None:
     """Verify installed construction facts without inventing a source project."""
     if python is None:
@@ -102,7 +101,7 @@ if nested:
 else:
     resolved = lambda path: pathlib.Path(path).resolve()
 if sys.platform == "win32":
-    # Metadata and imports need the same physical long-path spelling as construction.
+    # Metadata checks retain construction's physical long-path spelling.
     native_slot = pathlib.Path(sys.argv[11]).resolve()
     original_resolved = resolved
     def resolved(path):
@@ -201,19 +200,32 @@ for name, expected in expected_origins.items():
             unquote(actual.path) == unquote(copied.path) and not actual.query and not actual.fragment, \
             f"{name} was not installed from its pinned slot wheel"
         if name in (expected_selection or []):
-            import base64, csv, io, zipfile
+            import base64, csv, io, sysconfig, zipfile
             with zipfile.ZipFile(slot / "wheels" / wheel["filename"]) as bundle:
                 records = [
                     member for member in bundle.namelist()
                     if member.count("/") == 1 and member.endswith(".dist-info/RECORD")
                 ]
                 assert len(records) == 1, f"{name} has ambiguous installed wheel RECORD"
+                data_directory = records[0].removesuffix(".dist-info/RECORD") + ".data"
                 data = bundle.read(records[0])
                 assert len(data) <= 4 << 20, f"{name} wheel RECORD exceeds its bound"
                 for member, recorded_hash, recorded_size in csv.reader(io.StringIO(data.decode("utf-8"))):
                     if member == records[0]:
                         continue
-                    path = resolved(distribution.locate_file(member))
+                    relative = pathlib.PurePosixPath(member)
+                    assert not relative.is_absolute() and ".." not in relative.parts and \
+                        not pathlib.PureWindowsPath(member).drive and chr(92) not in member, \
+                        f"{name} has an unsafe wheel member: {member}"
+                    if relative.parts[0] == data_directory:
+                        assert len(relative.parts) >= 3 and relative.parts[1] in \
+                            {"data", "purelib", "platlib"}, \
+                            f"{name} has an unsupported wheel relocation: {member}"
+                        # Wheel .data members are spread into the interpreter's install scheme.
+                        destination = pathlib.Path(sysconfig.get_path(relative.parts[1]))
+                        path = resolved(destination.joinpath(*relative.parts[2:]))
+                    else:
+                        path = resolved(distribution.locate_file(member))
                     native = pathlib.Path(native_path(path))
                     assert path.is_relative_to(slot) and native.stat().st_size == int(recorded_size), \
                         f"{name} installed member differs from its wheel: {member}"
@@ -249,6 +261,12 @@ for name in excluded_packages:
         print("Published runtime input evidence differs from installed inputs", file=sys.stderr)
         raise SystemExit(74)
     raise
+if sys.platform == "win32":
+    # Dependency imports may join ".." to __file__, which extended paths reject.
+    sys.path[:] = [
+        str(resolved(entry)) if entry and resolved(entry).is_relative_to(slot) else entry
+        for entry in sys.path
+    ]
 module = importlib.import_module(sys.argv[2])
 assert module.__file__ and resolved(module.__file__).is_relative_to(slot), \
     "health module is outside the candidate runtime"
@@ -266,7 +284,7 @@ if sys.argv[4]:
         )
         if nested and wheel_inputs is not None:
             verify_application_wheels(wheel_inputs, slot)
-    except (subprocess.CalledProcessError, ChildLaunchError, ChildTimeoutExpired) as error:
+    except subprocess.CalledProcessError as error:
         if isinstance(wheel_inputs, WheelReuseInputs) and getattr(error, "returncode", None) == 74:
             raise DependencyPolicyError("Published runtime input evidence differs from installed inputs") from error
         if require_frozen_origin:
@@ -284,7 +302,11 @@ def verify_application_wheels(
     }
     directory = slot / "wheels"
     try:
-        if directory.is_symlink() or {path.name for path in directory.iterdir()} != set(expected):
+        if (
+            directory.is_symlink()
+            or getattr(directory.lstat(), "st_file_attributes", 0) & 0x400
+            or {path.name for path in directory.iterdir()} != set(expected)
+        ):
             raise HealthRepairRequired("Application wheel set differs from its retained construction inputs")
         for filename, digest in expected.items():
             path = directory / filename

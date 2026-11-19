@@ -549,6 +549,7 @@ def retain_source_profile(
                 }
             extras = "[" + ",".join(record["extras"]) + "]" if record["extras"] else ""
             roots = [f"{root}{extras}=={project['version']}"]
+            roots.extend(record.get("provider_roots", []))
             wanted = _extras(wheels, roots, record["target"]["environment"], deadline)
             build_names = {item["name"] for item in build_record["wheels"]} if build_record else set()
             if set(wheels) - wanted.keys() - build_names:

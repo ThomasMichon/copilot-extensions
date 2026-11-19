@@ -18,6 +18,7 @@ from agent_procutil.owned_process import run_caller_owned
     "src/agent_chat_service/installer_dependency_config.py", "src/agent_chat_service/installer_retained_content.py",
     "src/agent_chat_service/installer_wheel_inputs.py",
     "src/agent_chat_service/installer_wheel_snapshot.py",
+    "src/agent_chat_service/installer_provider_roots.py",
 ])
 def test_independent_sdist_refuses_missing_construction_input(
     tmp_path: Path, installed_chat: SimpleNamespace, missing: str,
@@ -67,14 +68,19 @@ assert Path(engine.__file__).parent == root
 assert engine.runtime is runtime
 for name in ("versioned_runtime_source","installer_engine_process","installer_dependency_policy",
              "installer_wheel_inputs","installer_wheel_snapshot",
+             "installer_provider_roots",
              "installer_source_wheel_cache","installer_source_build","installer_engine_health"):
     assert Path(sys.modules["agent_chat_service."+name].__file__).parent == root
     assert name not in sys.modules
+assert "versioned_runtime" not in sys.modules
+files=(root/"__init__.py",)
+assert engine._construction_hash(files,()) == runtime.fingerprint_source(files)
 assert "versioned_runtime" not in sys.modules
 policy=sys.modules["agent_chat_service.installer_dependency_policy"]
 assert Path(policy._configuration_path).parent == root
 assert Path(policy._configuration._content_path).parent == root
 assert callable(engine.numbered_candidate)
+assert engine.check_construction.__module__ == "agent_chat_service.installer_provider_roots"
 assert callable(runtime.remove_owned_candidate)
 print(json.dumps({"construction":"ready","artifact_contained":True}))
 """
@@ -99,6 +105,7 @@ from agent_chat_service.construction import _engine
 names=("versioned_runtime","versioned_runtime_source",
        "installer_dependency_policy","installer_engine_process",
        "installer_wheel_inputs","installer_wheel_snapshot",
+       "installer_provider_roots",
        "installer_source_wheel_cache","installer_source_build","installer_engine_health")
 for name in names:
     foreign=ModuleType(name)
@@ -119,7 +126,7 @@ print(json.dumps({"foreign_imports_preserved":len(names)}))
 """
     assert json.loads(installed_chat.run(
         [str(installed_chat.core_python), "-I", "-B", "-c", probe], cwd=tmp_path,
-    )) == {"foreign_imports_preserved": 9}
+    )) == {"foreign_imports_preserved": 10}
 
 
 def independent_inputs(
@@ -183,6 +190,7 @@ assert not any(name in sys.modules for name in (
     "versioned_runtime","versioned_runtime_source",
     "installer_dependency_policy","installer_engine_process",
     "installer_wheel_inputs","installer_wheel_snapshot",
+    "installer_provider_roots",
     "installer_source_wheel_cache","installer_source_build",
 ))
 assert not (project.parents[1]/"libs"/"versioned-runtime").exists()

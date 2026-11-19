@@ -28,8 +28,9 @@ else:
     from installer_dependency_policy import _toml_parser
     tomllib = _toml_parser()
 from types import ModuleType
-from typing import TYPE_CHECKING, Any, BinaryIO, cast
+from typing import TYPE_CHECKING, Any, BinaryIO, TypedDict, cast
 import subprocess
+import versioned_runtime as runtime
 
 from installer_dependency_policy import (
     RetainedUVInstall,
@@ -53,6 +54,29 @@ _Tree = dict[str, tuple[str, int]]
 
 if TYPE_CHECKING:
     from installer_engine import FrozenInputs
+
+
+_ProgressOptions = TypedDict("_ProgressOptions", {"on_progress": Callable[[], None]}, total=False)
+
+
+def _construction_hash(files: tuple[Path, ...], extras: tuple[str, ...],
+    local_packages: tuple[str, ...] | None = None,
+    *, on_progress: Callable[[], None] | None = None,
+    file_hashes: dict[Path, str] | None = None    ) -> str:
+
+    progress: _ProgressOptions = {"on_progress": on_progress} if on_progress is not None else {}
+    source_hash = runtime.fingerprint_source(
+        files, file_hashes=file_hashes, **progress,
+    )
+    if not extras and local_packages is None:
+        return source_hash
+    profile: dict[str, object] = {"source_hash": source_hash, "extras": extras}
+    if local_packages is not None:
+        profile["local_packages"] = local_packages
+    return hashlib.sha256(json.dumps({
+        "schema": "installer-engine.dependency-profile", "version": 1,
+        **profile,
+    }, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
 def _wheel_construction_hash(source_hash: str, wheels: WheelInstallInputs | WheelReuseInputs | None) -> str:
