@@ -75,3 +75,38 @@ def test_cursor_seeks_to_same_status_event_among_unrelated_history(tmp_path: Pat
     assert any("SEARCH task_events USING COVERING INDEX idx_task_events_task (task_id=?)" in r[3] for r in plan)
     basis = observe_queued(queue, task.id, repo="example", key="key", source="recipe", origin="reviews")
     assert basis.last_event == tail
+
+
+@pytest.mark.parametrize("protection", ["fenced-task", "new-source-scope", "foreign-label"])
+def test_managed_protection_refuses_without_changing_payload_or_cursor(tmp_path: Path, protection: str) -> None:
+    queue = TaskQueue(tmp_path / "tasks.db")
+    lane, key, source, origin = "example/project", "review:7", "recipe", "reviews"
+    if protection == "fenced-task":
+        grant = queue.handoff_producer_scope(lane, source, producer_id=origin, expected_generation=0)
+        task = queue.create("review", repo=lane, dedup_key=key, source=source, origin_ref=origin,
+                            payload_inline="A", producer_scope={"repo": lane, "source": source},
+                            producer_id=origin, producer_generation=1, producer_capability=grant.producer_capability,
+                            producer_request_id="first")
+    else:
+        task = queue.create("review", repo=lane, dedup_key=key, source=source, origin_ref=origin, payload_inline="A")
+    assert isinstance(task, Task)
+    if protection == "fenced-task":
+        # A supplied basis must not bypass admission even with the correct cursor.
+        with queue._connect() as conn:
+            basis = QueuedObservation(task.id, lane, key, source, origin, queue_emitter_updates._cursor(conn, task.id))
+    else:
+        basis = observe_queued(queue, task.id, repo=lane, key=key, source=source, origin=origin)
+        if protection == "new-source-scope":
+            queue.handoff_producer_scope(lane, source, producer_id=origin, expected_generation=0)
+        else:
+            queue.handoff_producer_scope("other/project", "other-source", producer_id="other",
+                                         expected_generation=0, required_label="protected")
+            # Normal creation rejects foreign protected labels. Model a legacy row.
+            with queue._connect() as conn:
+                conn.execute("UPDATE tasks SET labels=? WHERE id=?", ('["protected"]', task.id))
+    before = queue.get(task.id), queue.events(task.id)
+    with pytest.raises(TaskError, match="managed emitter observations"):
+        observe_queued(queue, task.id, repo=lane, key=key, source=source, origin=origin)
+    with pytest.raises(TaskError, match="managed emitter observations"):
+        update_queued(queue, basis, "B")
+    assert (queue.get(task.id), queue.events(task.id)) == before
