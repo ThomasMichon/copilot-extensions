@@ -200,6 +200,13 @@ array or the supported legacy bare array, with object records. An unrecognized
 object, including `{}` or a count without a value array, cannot certify an empty
 inventory. Parsed observations are recorded before validation and deduplication;
 they are not completeness evidence.
+PR header-token traversal requests complete bodies without conditional ETags:
+the shared HTTP validator cache does not retain those bodies. An unexpected
+304 refuses traversal rather than returning an empty or partial inventory.
+Repeated/cyclic tokens, including a supplied initial token, refuse before
+refetching that page. Query parameters, opaque token values, parsed-page
+observations and request counters remain intact. Distinct-token page counts
+and accumulated response memory are not budgeted or persisted by this helper.
 Azure DevOps does not yet implement the
 shared paged acquisition journal, durable query progress, immutable full
 snapshots or authoritative tombstones. This legacy optimization does not

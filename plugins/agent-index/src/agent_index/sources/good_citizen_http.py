@@ -254,19 +254,26 @@ class GoodCitizenSession:
         """Collect pages using a continuation-token response header."""
         pages: list[ApiResult] = []
         next_token: str | None = None
+        seen_tokens: set[str] = set()
+        initial_token = (params or {}).get(continuation_param)
+        if isinstance(initial_token, str) and initial_token:
+            seen_tokens.add(initial_token)
         while True:
             page_params = dict(params or {})
             if next_token:
                 page_params[continuation_param] = next_token
-            result = self.get_json(path, params=page_params, purpose=purpose)
+            result = self.get_json(path, params=page_params, etag=False, purpose=purpose)
             if result.not_modified:
-                return pages
+                raise ValueError("HTTP continuation traversal has no body for a not-modified page")
             if on_page is not None:
                 on_page(result)
             pages.append(result)
             next_token = result.headers.get(continuation_header)
             if not next_token:
                 return pages
+            if next_token in seen_tokens:
+                raise ValueError("HTTP continuation traversal made no progress")
+            seen_tokens.add(next_token)
 
     def _wait_min_interval(self) -> None:
         if self._min_interval_s <= 0 or self._last_request_at <= 0:
@@ -361,6 +368,7 @@ def _rate_reset_delay(response: httpx.Response) -> float | None:
 
 def _first_header(response: httpx.Response, names: tuple[str, ...]) -> str | None:
     for name in names:
-        if value := response.headers.get(name):
+        value: str | None = response.headers.get(name)
+        if value:
             return value
     return None
