@@ -433,10 +433,87 @@ def test_legacy_journal_plan_replacement_also_revokes_only_bound_plans(
     first.put_batch(0, batch)
     first.put_vectors(["pair"], np.array([[1, 0]], dtype=np.float32), 2)
     second = PreparedJournal(paths, manifest.source, SCOPE, payload)
-    second.reset_batches(bind_plan=bind_second)
+    if not bind_second:
+        unbound_operations: tuple[Callable[[], None], ...] = (
+            second.reset_batches, lambda: second.put_batch(0, batch),
+        )
+        for unbound_operation in unbound_operations:
+            with pytest.raises(PendingCrawlConflict, match="bound application"):
+                unbound_operation()
+        assert list(first.batches(1)) == [batch]
+        assert np.array_equal(first.vectors(["pair"], 2)["pair"], [1, 0])
+        return
+    second.reset_batches(bind_plan=True)
     second.put_batch(0, batch)
-    for operation in (lambda: list(first.batches(1)), lambda: first.put_batch(0, batch)):
+    bound_operations: tuple[Callable[[], object], ...] = (
+        lambda: list(first.batches(1)), lambda: first.put_batch(0, batch),
+    )
+    for bound_operation in bound_operations:
         with pytest.raises(PendingCrawlConflict, match="batch plan was replaced"):
-            operation()
+            bound_operation()
     assert list(second.batches(1)) == [batch]
     assert np.array_equal(first.vectors(["pair"], 2)["pair"], [1, 0])
+
+
+@pytest.mark.parametrize("operation", ["put-batch", "put", "immutable", "reset"])
+def test_unbound_point_cache_cannot_mutate_an_application_plan(
+    application: Fixture, operation: str,
+) -> None:
+    f = application
+    prepared = f.prepare()
+    before = f.cache()
+    unbound = f.points.journal
+    payload = b'{"version":1,"chunks":[],"checkpoints":[["wrong","wrong","fp",0]]}'
+    with pytest.raises(PendingCrawlConflict, match="bound application"):
+        if operation == "put-batch":
+            unbound.put_batch(0, FileBatch([], [("wrong", "wrong", "fp", 0)]))
+        elif operation == "put":
+            unbound.put("batch", [("0", payload)])
+        elif operation == "immutable":
+            unbound.put_immutable("batch", "1", payload)
+        else:
+            unbound.reset_batches()
+    assert f.cache() == before
+    assert {chunk.file_path for batch in prepared.batches() for chunk in batch.chunks} == {"opaque-body"}
+
+
+@pytest.mark.parametrize("point", [False, True])
+def test_source_aware_plan_reset_excludes_native_writers(
+    application: Fixture, monkeypatch: pytest.MonkeyPatch, point: bool,
+) -> None:
+    f = application
+    options: dict[str, Any] = {"clients": {}}
+    store = f.store
+    scope = f.points.claim.hints.scope if point else None
+    if not point:
+        config = replace(f.config, data_dir=f.config.data_dir / "ordinary")
+        store = initialize_source_store(config)
+        paths = PathIndex(config.data_dir / "paths.db")
+        manifest = replace(f.candidate, component_versions=None)
+        PendingCrawls(paths).save(manifest, scope=SCOPE, full=False)
+        options.update(
+            config=config, store=store, paths=paths, manifest=manifest,
+            point_claim=None, component_selection=None,
+        )
+    domain = store._source_domain
+    assert domain is not None
+    receipt = domain.receipt()
+    reset = PreparedJournal.reset_batches
+    blocked = []
+
+    def try_writer() -> None:
+        with pytest.raises(SourceLayoutError, match="busy"):
+            with domain._write(store.content_store.db, point_scope=scope):
+                pytest.fail("Native writer entered during plan replacement")
+        blocked.append(True)
+
+    def reset_under_exclusion(self: PreparedJournal, *, bind_plan: bool = False) -> None:
+        assert getattr(domain._local, "reading", False)
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            pool.submit(try_writer).result(timeout=5)
+        reset(self, bind_plan=bind_plan)
+
+    monkeypatch.setattr(PreparedJournal, "reset_batches", reset_under_exclusion)
+    f.prepare(**options).require_current_checkpoints()
+    assert blocked == [True]
+    assert domain.receipt() == receipt

@@ -117,7 +117,7 @@ class PreparedJournal:
             conn.execute("BEGIN IMMEDIATE")
             self._require_parent(conn)
             if kind == "batch":
-                self._require_batch_plan(conn)
+                self._require_batch_plan(conn, writing=True)
             conn.executemany(
                 "INSERT OR REPLACE INTO prepared_crawl_rows VALUES (?, ?, ?, ?, ?)",
                 [(self.source, kind, key, payload, hashlib.sha256(payload).hexdigest())
@@ -151,6 +151,8 @@ class PreparedJournal:
         with closing(self.paths._connect()) as conn, conn:
             conn.execute("BEGIN IMMEDIATE")
             self._require_parent(conn)
+            if kind == "batch":
+                self._require_batch_plan(conn, writing=True)
             row = conn.execute(
                 "SELECT payload, digest FROM prepared_crawl_rows "
                 "WHERE source = ? AND kind = ? AND key = ?", (self.source, kind, key),
@@ -164,14 +166,16 @@ class PreparedJournal:
                 (self.source, kind, key, payload, digest),
             )
 
-    def _require_batch_plan(self, conn: sqlite3.Connection) -> None:
+    def _require_batch_plan(self, conn: sqlite3.Connection, *, writing: bool = False) -> None:
         plan = self._batch_plan
-        if plan is None:
-            return
         row = conn.execute(
             "SELECT payload, digest FROM prepared_crawl_rows "
             "WHERE source = ? AND kind = 'batch-plan/v1' AND key = 'current'", (self.source,),
         ).fetchone()
+        if plan is None:
+            if writing and row is not None:
+                raise PendingCrawlConflict("Prepared batch plan belongs to a bound application")
+            return
         if row is None or (row["payload"], row["digest"]) != (
             plan, hashlib.sha256(plan).hexdigest(),
         ):
@@ -183,6 +187,8 @@ class PreparedJournal:
         with closing(self.paths._connect()) as conn, conn:
             conn.execute("BEGIN IMMEDIATE")
             self._require_parent(conn)
+            if not bind_plan:
+                self._require_batch_plan(conn, writing=True)
             conn.execute(
                 "DELETE FROM prepared_crawl_rows WHERE source = ? AND kind IN ('batch', 'batch-plan/v1')",
                 (self.source,),

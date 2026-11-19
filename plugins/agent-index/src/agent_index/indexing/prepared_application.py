@@ -117,10 +117,10 @@ class PreparedApplication:
         self.identities = [(entry.source, entry.path) for entry in files]
         self.checkpoints = paths.get_entries(self.identities)
         self.batch_count = 0
-        if self.point_scope is not None and domain is not None:
-            with domain.read(store.content_store.db, point_scope=self.point_scope):
-                pass
-        self.journal.reset_batches(bind_plan=True)
+        with domain.read(
+            store.content_store.db, point_scope=self.point_scope,
+        ) if domain is not None else nullcontext():
+            self.journal.reset_batches(bind_plan=True)
         coverage = EmbeddingCoverage(paths)
         for batch in file_batches(
             files, path_index=paths, model_profiles=profiles,

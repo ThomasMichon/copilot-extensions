@@ -44,7 +44,10 @@ prepared rows. A later plan reset invalidates older application handles, includi
 different component selections for the same claim. Batch reads/writes and the
 pre-publication checkpoint check verify that plan binding in the same SQLite
 transaction as cache access. Exact vector pairs remain shared under the unchanged
-pending-parent incarnation. Bare journal round-trips keep their existing behavior.
+pending-parent incarnation. Bare journal round-trips keep their existing behavior
+when no application plan is bound.
+An unbound handle cannot write batches or reset a plan while an application
+binding exists; those checks share the mutation's SQLite transaction.
 
 The journal can bind a completed component envelope for subordinate cache work.
 The explicit [native component application](component-ledger.md#explicit-native-application)
@@ -148,7 +151,10 @@ resetting batches or calling an embedding client. Selection narrows chunking,
 not the complete candidate or claim. Missing observations, changed claims,
 scope/family mismatches, candidate changes and dirty domains refuse before
 changing existing preparation. Recomposition holds no native-domain exclusion;
-short native checks precede it and recheck cleanliness before batch reset.
+short native checks precede it. For every source-aware preparation, native
+exclusion covers the final clean check and the batch-plan reset transaction,
+so another preparation cannot revoke a publishing writer's plan mid-write.
+It does not cover target recomposition, chunking or embedding.
 
 Point preparation uses the same subordinate journal, batch plan, checkpoint
 snapshot and exact vector cache. Its existing coverage/vector readers receive
