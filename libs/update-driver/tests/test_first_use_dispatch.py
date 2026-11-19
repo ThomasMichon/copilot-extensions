@@ -1,6 +1,6 @@
 """Dispatch's fixed legacy recipes, separately from ordinary publisher adoption."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 import json
 import os
 from pathlib import Path
@@ -9,11 +9,13 @@ import runpy
 import shutil
 import subprocess
 import sys
+import time
 from types import ModuleType
 from typing import Protocol, cast
 import zipfile
 
 import pytest
+from _pytest.capture import CaptureManager
 from packaging.version import Version
 
 from agent_procutil import no_window_kwargs
@@ -36,6 +38,7 @@ from test_first_use_vault_bootstrap import receipt_completed_count as _receipt_c
 
 OwningPayload = tuple[Path, Path, Path]
 Diagnostic = Callable[[], str]
+Phase = Callable[[str], None]
 
 
 class NativeCommand(Protocol):
@@ -88,6 +91,91 @@ pytestmark = pytest.mark.skipif(
     reason="native Dispatch recipes are qualified only on Windows and Linux",
 )
 REPOSITORY = Path(__file__).resolve().parents[3]
+
+
+def _dispatch_phase_reporter(capture: CaptureManager, *, active: bool) -> Phase:
+    allowed = {
+        "fixture-enter", "materialize-start", "materialize-ready", "body-enter", "body-exit",
+        "setup-start", "setup-ready", "caller-start", "caller-acknowledged",
+        "foundation-wait", "caller-closed",
+        "receipt-wait", "receipt-completed", "registration-checked", "consumers-checked",
+        "owner-settlement-wait", "owners-settled", "history-checked",
+        "pending-cleanup-start", "pending-cleanup-finished",
+    }
+    emitted: set[str] = set()
+    started = time.monotonic()
+
+    def report(phase: str) -> None:
+        if phase not in allowed:
+            raise ValueError("unknown Dispatch diagnostic phase")
+        if not active or phase in emitted:
+            return
+        emitted.add(phase)
+        with capture.global_and_fixture_disabled():
+            print(
+                f"[dispatch-recipe-phase] phase={phase} elapsed={time.monotonic() - started:.3f}s",
+                file=sys.stderr, flush=True,
+            )
+
+    return report
+
+
+@pytest.fixture
+def dispatch_cold_phase(request: pytest.FixtureRequest) -> Phase:
+    capture = cast(CaptureManager, request.config.pluginmanager.getplugin("capturemanager"))
+    phase = _dispatch_phase_reporter(
+        capture, active=os.name == "nt" and request.node.name == (
+            "test_actual_dispatch_original_provision_survives_caller_loss"
+        ),
+    )
+    phase("fixture-enter")
+    return phase
+
+
+@pytest.fixture
+def dispatch_cold_body_phase(
+    native_recipe_runner: NativeRecipeRunner, dispatch_cold_phase: Phase,
+) -> Iterator[Phase]:
+    dispatch_cold_phase("body-enter")
+    try:
+        yield dispatch_cold_phase
+    finally:
+        dispatch_cold_phase("body-exit")
+
+
+def test_dispatch_diagnostic_phases_are_bounded_and_context_free(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from contextlib import contextmanager
+    import io
+    from types import SimpleNamespace
+
+    events: list[str] = []
+
+    class Output(io.StringIO):
+        def flush(self) -> None:
+            events.append("flush")
+            super().flush()
+
+    @contextmanager
+    def disabled() -> Iterator[None]:
+        events.append("disabled-enter")
+        yield
+        events.append("disabled-exit")
+
+    output = Output()
+    monkeypatch.setattr(sys, "stderr", output)
+    monkeypatch.setattr(time, "monotonic", lambda: 10.0)
+    capture = cast(CaptureManager, SimpleNamespace(global_and_fixture_disabled=disabled))
+    phase = _dispatch_phase_reporter(capture, active=True)
+    phase("receipt-wait")
+    phase("receipt-wait")
+    with pytest.raises(ValueError, match="unknown Dispatch diagnostic phase"):
+        phase("foreign private diagnostic context")
+    assert output.getvalue() == "[dispatch-recipe-phase] phase=receipt-wait elapsed=0.000s\n"
+    assert events == ["disabled-enter", "flush", "disabled-exit"]
+    _dispatch_phase_reporter(capture, active=False)("receipt-wait")
+    assert events == ["disabled-enter", "flush", "disabled-exit"]
 
 
 @pytest.mark.parametrize(("fixture_name", "plugin"), [
@@ -370,7 +458,10 @@ def test_dispatch_never_substitutes_accepted_source(
 
 
 @pytest.fixture
-def materialized_dispatch(owning_dispatch: OwningPayload, area: Path) -> OwningPayload:
+def materialized_dispatch(
+    owning_dispatch: OwningPayload, area: Path, dispatch_cold_phase: Phase,
+) -> OwningPayload:
+    dispatch_cold_phase("materialize-start")
     payload, installation, project = owning_dispatch
     candidate = area / "materialized/plugins/agent-dispatch"
     shutil.copytree(REPOSITORY / "plugins/agent-dispatch", candidate, ignore=shutil.ignore_patterns(
@@ -385,6 +476,7 @@ def materialized_dispatch(owning_dispatch: OwningPayload, area: Path) -> OwningP
     assert not any(line.startswith("SKIP ") for line in result), result
     shutil.rmtree(payload)
     shutil.copytree(candidate, payload)
+    dispatch_cold_phase("materialize-ready")
     return payload, installation, project
 
 
@@ -675,16 +767,24 @@ def assert_dispatch_consumers(
 def test_actual_dispatch_original_provision_survives_caller_loss(
     materialized_dispatch: OwningPayload, area: Path,
     native_recipe_runner: NativeRecipeRunner, native_window_observation: None,
+    dispatch_cold_body_phase: Phase,
 ) -> None:
+    phase = dispatch_cold_body_phase
     payload, installation, project = materialized_dispatch
+    phase("setup-start")
     env, adapter, before, root, diagnostic, command = dispatch_native_setup(materialized_dispatch, area)
+    phase("setup-ready")
+    phase("caller-start")
     caller, _log = native_recipe_runner.start(
         command, env=env, cwd=project, root=root, diagnostic=diagnostic, contain_caller=True,
     )
+    phase("caller-acknowledged")
+    phase("foundation-wait")
     observe(lambda: foundation_status(root=root) is not None, 120, diagnostic)
     foundation = foundation_status(root=root)
     assert foundation is not None and foundation.state == "running", diagnostic()
     native_recipe_runner.lose_caller(caller)
+    phase("caller-closed")
 
     def original_completed() -> bool:
         foundation = foundation_status(root=root)
@@ -696,7 +796,9 @@ def test_actual_dispatch_original_provision_survives_caller_loss(
             assert logs and receipt_completed_count(root, 1, logs[0]), diagnostic()
         return bool(logs) and receipt_completed_count(root, 1, logs[0])
 
+    phase("receipt-wait")
     observe(original_completed, 900, diagnostic)
+    phase("receipt-completed")
     result, = _requests(root)
     assert result.state == "completed" and result.exit_code == 0, diagnostic()
     assert result.spec.argv == ()
@@ -705,12 +807,16 @@ def test_actual_dispatch_original_provision_survives_caller_loss(
         "agent-dispatch", str(payload), str(installation), str(project),
     )
     assert_dispatch_registration(installation, adapter)
+    phase("registration-checked")
     selected = (installation / "current-version").read_text().strip()
     slot = installation / "versions" / selected
     completion = slot / ".install-complete.json"
     completed = completion.read_bytes()
     assert_dispatch_consumers(payload, installation, project, env)
+    phase("consumers-checked")
+    phase("owner-settlement-wait")
     observe(native_recipe_runner.owners_finished, 120, diagnostic)
+    phase("owners-settled")
     runner = TrustedRunner((sys.executable, "-c", "pass"), str(project))
     failed = enqueue(RequestSpec("retained-dispatch-failure"), runner=runner, root=root)
     drain(root=root, executor=lambda _transaction: 23)
@@ -723,9 +829,12 @@ def test_actual_dispatch_original_provision_survives_caller_loss(
         assert _requests(root) == history and completion.read_bytes() == completed
         assert (adapter / "effects.jsonl").read_bytes() == effects
         assert {path: path.read_bytes() for path in payload.rglob("*") if path.is_file()} == before
+        phase("history-checked")
     finally:
+        phase("pending-cleanup-start")
         assert [item.id for item in _requests(root) if item.state == "pending"] == [pending.id]
         drain(root=root, executor=lambda _transaction: 0)
+        phase("pending-cleanup-finished")
 
 
 @native_genesis

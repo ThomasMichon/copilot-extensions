@@ -2,6 +2,8 @@
 
 [Back to the effort](README.md). The Plan and Validation Plan remain the completion gate.
 
+- [2026-11-19 - Dispatch native provenance and cold-execution gates](<journal/2026/11.19 dispatch-native-provenance-and-cold-gates.md>)
+
 ## 2026-11-13 - Original application integration merged
 
 [Source and bounded native evidence](<journal/2026/11.13 canonical-application-integration.md>)

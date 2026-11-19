@@ -5643,6 +5643,12 @@ these seven cases is selected exactly once per platform, preserving every
 previous packet selection. Source fixtures bind `COPILOT_HOME` to the same private
 profile containing their installed payload and marketplace declaration, retaining
 normal provenance validation even when the runner supplies another Copilot home.
+The Windows original-caller-loss case emits bounded fixed phase names and elapsed
+times through pytest's disabled-capture scope with immediate flushing. These
+diagnostic-only markers distinguish fixture preparation, acknowledgement,
+foundation observation, caller closure, receipt waiting and body exit before
+owner teardown; they contain no arguments, paths or source logs and grant no
+qualification credit. All original assertions, custody and time limits remain.
 Bounded independent packets cover Python/native
 no-write refusals, exact `stamp`/`provision` action custody, source replacement,
 deferred real stamping, and actual cold construction after the original caller's
