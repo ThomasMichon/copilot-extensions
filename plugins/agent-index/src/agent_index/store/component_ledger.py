@@ -202,12 +202,13 @@ class ComponentLedger:
 
     def put(
         self, evidence: ComponentEvidence, *, expected: ComponentEvidence | None, max_rows: int,
+        point_scope: PointScope | None = None,
     ) -> bool:
         """Retain a witnessed point under an already-owned writer; never execute application."""
         if not self._source_domain.writing:
             raise SourceLayoutError("Component evidence requires the owning source writer")
         component = evidence.content.component
-        previous = self.get(component.source, component.path)
+        previous = self.get(component.source, component.path, point_scope=point_scope)
         if previous != expected:
             raise SourceLayoutError("Component evidence prior record changed")
         if previous is not None and (previous.scope, previous.policy) != (evidence.scope, evidence.policy):
@@ -221,7 +222,7 @@ class ComponentLedger:
         ))
         actual = capture_file_projection(
             self._config, self._store, component.source, component.path,
-            max_rows=max_rows, retained_chunk_ids=retained,
+            max_rows=max_rows, retained_chunk_ids=retained, point_scope=point_scope,
         )
         if actual != selected.projection:
             raise SourceLayoutError("Component evidence does not match the current native point")
@@ -241,7 +242,7 @@ class ComponentLedger:
         table.merge_insert("point_key").when_matched_update_all().when_not_matched_insert_all().execute([
             {"point_key": _key(component.source, component.path), "record": payload},
         ])
-        prepare_index(self, column="point_key", max_rows=1)
+        prepare_index(self, column="point_key", max_rows=1, point_scope=point_scope)
         self._bind(self._get_or_create_table(), identity)
         return True
 

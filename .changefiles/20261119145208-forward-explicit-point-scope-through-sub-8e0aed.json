@@ -1,0 +1,9 @@
+{
+  "comment": "Forward explicit point scope through subordinate component-ledger retention under an already-owned writer.",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}
