@@ -36,10 +36,16 @@ def unavailable(boundary: str) -> dict[str, Any]:
     )}
 
 
+def _result_json_size(result: dict[str, Any]) -> int:
+    encoded = json.dumps(result)
+    # PowerShell 5 reserializes these HTML-sensitive characters as six-byte escapes.
+    return len(encoded) + 5 * sum(encoded.count(character) for character in "<>&'")
+
+
 def _bounded_result(result: dict[str, Any]) -> dict[str, Any]:
     # Reserve envelope space inside the transport's unchanged 64 KiB frame.
     limit = 60 * 1024
-    if len(json.dumps(result)) <= limit:
+    if _result_json_size(result) <= limit:
         return result
     result = dict(result)
     notice = "\n[agent-worktrees pre-tool] Text truncated to fit native response."
@@ -48,13 +54,13 @@ def _bounded_result(result: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(text, str):
             continue
         result[field] = notice
-        if len(json.dumps(result)) > limit:
+        if _result_json_size(result) > limit:
             continue
         low, high = 0, len(text)
         while low < high:
             middle = (low + high + 1) // 2
             result[field] = text[:middle] + notice
-            if len(json.dumps(result)) <= limit:
+            if _result_json_size(result) <= limit:
                 low = middle
             else:
                 high = middle - 1

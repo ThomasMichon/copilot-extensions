@@ -3817,8 +3817,9 @@ compatibility worker is created on this path. Independent denials remain in
 force; unavailable is not permission. Standalone observation ownership is
 unchanged.
 Repeated recovery context is deduplicated per boundary within one request.
-Native result text is limited to 60 KiB of ASCII-escaped standard JSON, reserving
-space inside the existing response frame. Confirmed decisions are retained;
+Native result text is limited to 60 KiB of ASCII-escaped standard JSON including
+Windows PowerShell 5's expansion of HTML-sensitive characters, reserving space
+inside the existing response frame and the client reserialization. Confirmed decisions are retained;
 excess context is truncated before a decision reason, with an explicit notice.
 An oversized reason retains its prefix and a truncation notice. Maximum-batch
 controls cover both repeated unavailability and large valid guard responses.

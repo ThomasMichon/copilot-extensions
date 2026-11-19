@@ -323,7 +323,7 @@ def test_incomplete_native_input_is_explicitly_unavailable(payload: dict[str, An
     assert "not authorization" in result["additionalContext"]
 
 
-@pytest.mark.parametrize("case", ["late-deny", "warnings-only", "long-reason"])
+@pytest.mark.parametrize("case", ["late-deny", "warnings-only", "long-reason", "html-reason"])
 def test_large_valid_native_output_keeps_decision_inside_response_frame(case: str) -> None:
     def sibling(name: str) -> ModuleType:
         if name in {"tool_call_forms.py", "hook_pre_policy.py"}:
@@ -331,14 +331,16 @@ def test_large_valid_native_output_keeps_decision_inside_response_frame(case: st
         module = ModuleType(name)
 
         def decide(payload: dict[str, Any], **kwargs: Any) -> dict[str, str] | None:
-            if name == "statelessness_guard.py" and case != "long-reason":
+            if name == "statelessness_guard.py" and case not in {"long-reason", "html-reason"}:
                 return {"additionalContext": "notice \U0001f680" * 128}
             if name == "anchor_write_guard.py" and payload["toolName"] == "edit":
                 return {
                     "permissionDecision": "deny",
                     "permissionDecisionReason": (
-                        "protected " + "\U0001f680" * 12000
-                        if case == "long-reason" else "protected"
+                        "protected " + (
+                            "<>&'\"" if case == "html-reason" else "\U0001f680"
+                        ) * 12000
+                        if case in {"long-reason", "html-reason"} else "protected"
                     ),
                 }
             return None
@@ -357,7 +359,11 @@ def test_large_valid_native_output_keeps_decision_inside_response_frame(case: st
         "version": 1, "hook_generation": "fixture",
         "hook_capabilities": ["native-tool-policy-v1"], "result": result,
     }
-    assert len(json.dumps(frame).encode("utf-8")) + 1 <= 65536
+    encoded = json.dumps(frame)
+    if case == "html-reason":
+        for character in "<>&'":
+            encoded = encoded.replace(character, "\\u%04x" % ord(character))
+    assert len(encoded.encode("utf-8")) + 1 <= 65536
     if case == "warnings-only":
         assert "permissionDecision" not in result
     else:
@@ -366,7 +372,7 @@ def test_large_valid_native_output_keeps_decision_inside_response_frame(case: st
             assert result["permissionDecisionReason"] == "protected"
         else:
             assert result["permissionDecisionReason"].startswith("protected ")
-    field = "permissionDecisionReason" if case == "long-reason" else "additionalContext"
+    field = "permissionDecisionReason" if case in {"long-reason", "html-reason"} else "additionalContext"
     assert "truncat" in result[field]
 
 

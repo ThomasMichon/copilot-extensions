@@ -63,7 +63,7 @@ def test_original_guards_execute_without_any_process(
 
 @pytest.mark.parametrize("engine", ["powershell.exe", "pwsh"])
 @pytest.mark.parametrize("kind", ["preToolUse", "postToolUse"])
-@pytest.mark.parametrize("case", ["warm", "large", "cold", "unsupported", "closed", "invalid", "timeout"])
+@pytest.mark.parametrize("case", ["warm", "large", "large-html", "cold", "unsupported", "closed", "invalid", "timeout"])
 def test_command_entry_never_launches_python(
     tmp_path: Path, engine: str, kind: str, case: str,
     record_property: Any,
@@ -94,7 +94,7 @@ def test_command_entry_never_launches_python(
 
     def decide(operation: str, payload: dict[str, Any], deadline: float) -> dict[str, Any]:
         seen.append((operation, payload))
-        if case == "large":
+        if case in {"large", "large-html"}:
             def sibling(name: str) -> ModuleType:
                 if name in {"tool_call_forms.py", "hook_pre_policy.py", "hook_client.py"}:
                     spec = importlib.util.spec_from_file_location(name, PLUGIN / "scripts" / name)
@@ -104,7 +104,9 @@ def test_command_entry_never_launches_python(
                     return module
                 module = ModuleType(name)
                 module.decide = lambda *_args, **_kwargs: {  # type: ignore[attr-defined]
-                    "additionalContext": "notice \U0001f680" * 12000,
+                    "additionalContext": (
+                        "notice <>&'\"" if case == "large-html" else "notice \U0001f680"
+                    ) * 12000,
                     "permissionDecision": "deny", "permissionDecisionReason": "protected",
                 }
                 return module
@@ -163,7 +165,7 @@ def test_command_entry_never_launches_python(
         record_property("entry_seconds", time.monotonic() - started)
         assert result.returncode == 0, result.stderr
         assert not sentinel.exists(), "a direct or membership Python fallback ran"
-        if case in {"warm", "large"}:
+        if case in {"warm", "large", "large-html"}:
             assert len(seen) == 1
             assert seen[0][0] == kind
             metadata = seen[0][1]["_agentWorktrees"]
@@ -175,10 +177,12 @@ def test_command_entry_never_launches_python(
                 )
             else:
                 assert "callerElevated" not in metadata
-            if case == "large":
+            if case in {"large", "large-html"}:
                 response = json.loads(result.stdout)
+                assert len(result.stdout.encode("utf-8")) <= 65536
                 assert "truncat" in response["additionalContext"]
-                assert response["additionalContext"].startswith("notice \U0001f680")
+                prefix = "notice <>&'\"" if case == "large-html" else "notice \U0001f680"
+                assert response["additionalContext"].startswith(prefix)
                 if kind == "preToolUse":
                     assert response["permissionDecision"] == "deny"
                     assert response["permissionDecisionReason"] == "protected"
