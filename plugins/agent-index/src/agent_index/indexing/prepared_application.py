@@ -71,7 +71,9 @@ class PreparedApplication:
         payload = PendingCrawls(paths).read_payload(manifest.source, scope)
         if payload is None:
             raise PendingCrawlConflict("Prepared application requires its pending crawl")
-        self.journal = PreparedJournal(paths, manifest.source, scope, payload)
+        self.journal = PreparedJournal(
+            paths, manifest.source, scope, payload, manifest=manifest, full=full,
+        )
         self.profiles = profiles
         self.progress_cb = progress_cb
         self.identities = [(entry.source, entry.path) for entry in manifest.upserts]

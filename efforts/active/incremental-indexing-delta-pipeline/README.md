@@ -151,7 +151,11 @@ After the reviewed proposal, the operator admitted execution:
   does not qualify durable application or deletion evidence.
   [Raw file-point observations](../../../plugins/agent-index/docs/file-projection.md)
   provide a separately budgeted native snapshot prerequisite, not applied-version
-  or deletion proof. Representation,
+  or deletion proof. The opt-in
+  [native component ledger](../../../plugins/agent-index/docs/component-ledger.md)
+  retains scoped ordering/tombstone observations with missing-history refusal and
+  binding-aware bounded consolidation; it is not an applied-content certificate.
+  Representation,
   v2 execution, ordered application and read isolation remain unimplemented.
 - [ ] Persist acquisition progress so retry/restart does not restart a
   corpus-wide listing.
