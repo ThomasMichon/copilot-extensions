@@ -807,7 +807,7 @@ def test_ado_parsed_empty_pull_pages_differ_from_unrecognized_envelopes(
                 "pullRequestId": 1, "repository": {"id": "repo-1"},
             }) == []
         else:
-            assert list(connector._iter_pull_requests(since=None)) == []
+            assert list(connector._iter_pull_requests()) == []
         return {}
 
     counts = run()["work_counts"]
@@ -871,7 +871,7 @@ def test_ado_parsed_pull_pages_remain_counted_after_later_request_failure(failur
         error = httpx.HTTPStatusError if failure == "http" else ValueError
         emitted = []
         with pytest.raises(error):
-            for entry in connector._iter_pull_requests(since=None):
+            for entry in connector._iter_pull_requests():
                 emitted.append(entry)
         assert emitted == []  # Preserve the existing buffered acquisition behavior.
         return {}

@@ -161,14 +161,20 @@ recovery within one item's comment pages remain separate adapter work; they are
 not supplied by this bounded polling contract.
 
 Azure DevOps retains operator-supplied WIQL and saved queries verbatim. Its
-legacy timestamp discovery first requests only `System.Id` and
+work-item-only timestamp discovery first requests only `System.Id` and
 `System.ChangedDate` in batches of at most 200 query-selected identities, then
 hydrates full bodies and comments only for identities in the overlap window.
 Missing, duplicate, unexpected or invalid metadata refuses acquisition rather
-than silently dropping work. Explicit full discovery still fetches every
-selected body; ID-only listing remains unchanged. This reduces body transfer,
-not the number of selected identities: ordinary discovery still scans all
-query-selected IDs and timestamps. Azure DevOps does not yet implement the
+than silently dropping work. With PR queries configured, a nonempty timestamp
+instead refuses before any acquisition: the PR-list API's `minTime` filters
+creation/closure, not later description or comment changes. The connector does
+not silently replace this unsupported update feed with a full scan.
+Explicit full discovery still fetches every selected body; ID-only listing
+remains unchanged. The legacy engine receives no complete project cursor from
+`current_commit()`, so its ordinary acquisition still takes the legacy full
+path, not the work-item timestamp optimization. Even that optimization reduces
+body transfer, not the number of query-selected identities and timestamps.
+Azure DevOps does not yet implement the
 shared paged acquisition journal, durable query progress, immutable full
 snapshots or authoritative tombstones. This legacy optimization does not
 qualify those delta-bounded or recovery gates.

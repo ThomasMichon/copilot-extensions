@@ -123,8 +123,9 @@ ignore the optional mapping; no new invocation or required capability is added.
 Azure DevOps uses the same counters under its `ado:<org>/<project>:workitems`
 and `:pulls` child sources. WIQL/saved-query `workItems` objects and relation
 `target` objects count as identity records before union/deduplication. PR-list
-objects likewise count before deduplication and timestamp filtering. Work-item
-full-batch objects count once as bodies when their `fields` contain at least one
+objects likewise count before deduplication. Timestamp-based discovery with PR
+queries refuses before acquisition; that failure is not a successful no-op round.
+Work-item full-batch objects count once as bodies when their `fields` contain at least one
 string/null `System.Description`, `Microsoft.VSTS.TCM.ReproSteps` or
 `Microsoft.VSTS.Common.AcceptanceCriteria`; ID/date metadata probes do not count.
 PR descriptions use the string/null `description` field. Work-item comments
