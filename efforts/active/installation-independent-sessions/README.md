@@ -41,6 +41,16 @@ survival; neither substitutes for the other.
 
 ## Coordination
 
+The finite #13207 lane retains terminal-tab attachment safety during
+stale-runtime reaping and the source's diagnostic proposals. Existing
+terminal, Picker, launch-depth and runtime-retirement custodians retain
+their work; preserve the #5579 shared-edit agreement before overlapping
+implementation. This does not receive whole installer or retirement-policy
+ownership, appoint an executor, clear a hold or authorize native operations.
+Normal reviewed receiving and current source/receiver/custody readback
+precede separate tracking judgment. Unrelated whole-program acceptance is
+not a prerequisite for this finite leaf.
+
 The finite #13209 terminal-attachment lane retains the existing terminal,
 Picker, selected-payload and launch-depth custodians, including the recorded
 #5579 overlap boundary. Tracking does not appoint an executor, reopen or
@@ -373,6 +383,36 @@ no-channel Python waiter.
   behavior. Record source/component evidence separately from any independently
   authorized native evidence.
 
+### Finite stale-runtime reaper attachment safety from #13207
+
+- [ ] **P13207-1:** Retain the old-slot terminal-tab client incident:
+  interactive runtime-Python/resident-Picker/Manager ancestors can be reaped
+  while the mux server and pane shell/Copilot survive, including when restart
+  leaves the current monitor "as-is". Keep the wedged-one-shot sweep from
+  killing these long-lived clients. Preserve the suggested alternatives:
+  recognized one-shot argv scope, explicit interactive exclusion/protected
+  launch roots, or current-slot re-exec; do not require all alternatives.
+- [ ] **P13207-2:** Review and resolve the source's diagnostic proposals:
+  report would-reap target argv, explicit admission before non-verb killing,
+  actual reaped argv in the command summary, and victim argv in reap-audit
+  rather than only the reaper's own argv. Preserve the diagnostic-flag
+  proposal for review without selecting or mandating it. A diagnostic flag
+  does not itself grant native execution or process-kill authority; preserve
+  actual protected roots, custody, approval gates and the reviewed selection.
+  #13209/#13210 launcher tracking or partial delivery does not fulfill this
+  reaper-scope/diagnostic contract.
+
+#### Local Validation - #13207
+
+- [ ] **V13207-1:** Qualify the actual restart/reaper boundary with an old-slot,
+  unregistered interactive client chain, including the current-owner-as-is
+  branch. Attachment survives alongside the original mux/pane processes;
+  legitimate owned one-shot cleanup and protected-root behavior remain.
+- [ ] **V13207-2:** Exercise the selected diagnostic behavior through its
+  actual audit and command-output consumers; distinguish victim argv from
+  caller argv and retain the disposition of every original suggestion.
+  Source/component evidence is separate from authorized native evidence.
+
 ### Phase 4 - Native and clean-room acceptance
 
 - [ ] Run the complete matrix in Validation Plan on production code and real
@@ -691,6 +731,13 @@ Current bounded #9470/#9479 literal-forwarding and blanket-renderer-removal cred
 
 All detailed controls below are **agent-recommended** ways to prove the
 operator's installation-survival contract.
+
+- [ ] **G13207:** Resolve ALL P13207-1/P13207-2 and V13207-1/V13207-2
+  obligations at the finite stale-runtime reaper/terminal-client boundary,
+  including the as-is restart, preserved scope alternatives and diagnostic
+  proposals. Preserve existing source/resource custody and all incumbent
+  installation-survival gates. Launcher-only credit, a surviving pane alone,
+  or documentary receiving does not establish this outcome.
 
 - [ ] **G13209:** Resolve P13209-1/P13209-2 and V13209-1/V13209-2 at their
   finite Windows caller/attachment boundary, retaining #13210's partial
@@ -1047,6 +1094,14 @@ and does not delay final Copilot exit indefinitely merely to deliver a lifecycle
 notice; the existing bounded/quiet absent-handler contract remains intact.
 
 ## Journal
+
+### 2026-11-19 UTC - Proposed finite reaper attachment receiving
+
+Propose complete P13207/V13207/G13207 receiving. All five new acceptance
+rows remain unchecked; every incumbent state, Request, owner and hold remains.
+This is distinct from #13209's launcher contract and grants no technical,
+native, resource or administrative-retirement credit. Reviewed delivery and
+current readback precede a separate source judgment.
 
 ### 2026-11-19 UTC - Proposed finite Windows attachment receiving
 

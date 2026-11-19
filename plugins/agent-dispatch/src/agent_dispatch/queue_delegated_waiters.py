@@ -12,7 +12,10 @@ from .delegated_waiter_contract import (
 from .queue_records import Status, TaskError
 from .queue_replay_waiters import ReplayWaiterProgressMixin
 from .queue_common import RunWaiterWakeOperation, Task
-from .queue_feed_preparation import PREPARATION_PROTOCOL, FeedWaiterAdmission
+from .queue_feed_preparation import (
+    PREPARATION_PROTOCOL, REGISTRATION_PROTOCOL, FeedWaiterAdmission,
+    require_feed_creation_deadline,
+)
 from .queue_run_waiter_transition_cleanup import CLAIM_RELEASE_SENDER
 from .repository_feed_waiter_contract import validate_feed_delegation
 
@@ -20,13 +23,28 @@ from .repository_feed_waiter_contract import validate_feed_delegation
 class DelegatedWaiterBindingMixin(ReplayWaiterProgressMixin):
     if TYPE_CHECKING:
         prepare_run_waiter: Callable[..., dict[str, Any]]
+        _now: Callable[[float | None], float]
 
     repository_feed_preparation_protocol = PREPARATION_PROTOCOL
+    repository_feed_registration_protocol = REGISTRATION_PROTOCOL
+    _check_feed_preparation_deadline = staticmethod(require_feed_creation_deadline)
+
+    def _commit_run_waiter_preparation(
+        self, conn: sqlite3.Connection, delegation: dict[str, Any] | None,
+        task_id: str, generation: int, creation_cutoff: int | None, now: float | None,
+    ) -> None:
+        self._store_replay_intent(conn, delegation, task_id, generation)
+        if creation_cutoff is not None:
+            if delegation is None or "feed" not in delegation:
+                raise TaskError("repository-feed creation cutoff requires its original feed")
+            require_feed_creation_deadline(delegation, creation_cutoff, self._now(now))
+        conn.execute("COMMIT")
 
     def prepare_repository_feed_waiter(
         self, task_id: str, *, admission: FeedWaiterAdmission, delegation: dict[str, Any],
         worker_id: str, resume_worktree: str, reason: str,
         host: str | None = None, now: float | None = None,
+        creation_cutoff: int | None = None,
     ) -> dict[str, Any]:
         """Native preparation after the embedding negotiates actual service support."""
         selected = validate_feed_delegation(delegation)
@@ -36,6 +54,7 @@ class DelegatedWaiterBindingMixin(ReplayWaiterProgressMixin):
             task_id, worker_id=worker_id, resume_worktree=resume_worktree,
             reason=reason, host=host, command=[], kind="delegated",
             delegation=selected, now=now, _feed_admission=admission,
+            _feed_creation_cutoff=creation_cutoff,
         )
 
     @staticmethod

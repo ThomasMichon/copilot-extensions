@@ -425,3 +425,72 @@ arbitrary older readers enforce it, operational adoption or a qualified
 rollback. The lifecycle owner must preserve reconciliation custody.
 `test_repository_feed_attempts.py` exercises reopen, strict retained records,
 native task/wake/closure races, original deadlines and late receipt retention.
+
+### Explicit original-request registration recovery
+
+`agent_dispatch.repository_feed_registration.RepositoryFeedRegistrar` extends
+the same preparation adapter for an explicitly selected embedding and injected
+bound asynchronous PR-service client. Its in-process protocol is
+`agent-dispatch.repository-feed-registration/v1`. It is not selected by the
+coordinator factory, callback route, CLI or default startup.
+
+Its `prepare` requires the executing native attempt protocol above
+and the service's `repository-request-recovery/v1` capability before suspension.
+The ordinary preparation-only adapter remains compatible and inert. Calling
+`await registrar.reconcile_registration(task_id, preparation_id)` then makes
+one registration or original-request inspection exchange. A missing original
+baseline refuses creation; no new baseline or request identity is allocated.
+The registrar rejects missing baselines, timeouts above the provider's 86,400
+second TTL limit, out-of-range provider cursors/cutoffs and an already elapsed
+creation cutoff before preparing or suspending a native task. The inert
+preparation-only adapter retains its broader storage contract.
+The selected queue must additionally declare
+`repository_feed_registration_protocol` equal to the registrar's protocol.
+Only that capable owner receives the optional `creation_cutoff` on its existing
+preparation operation. It verifies the immutable rounded cutoff under the same
+suspension write lock, both after acquisition and immediately before commit.
+Crossing the cutoff rolls back task suspension and waiter creation, without
+rewriting the original deadline. Older preparation-only callers send no new
+argument and retain their original lifetime and commit behavior.
+
+The original request freezes `after` from the retained baseline cursor, TTL
+from the original timeout rounded up to seconds, and `not_after` from the
+original deadline rounded down to seconds. The provider therefore cannot
+accept or retain a registration beyond that finite deadline. The native
+attempt transaction commits before possible transmission. Every later call,
+including after a lost reply or process restart, uses `inspect-request` for
+the original identity rather than another `subscribe`.
+
+The returned receipt must match the configured consumer, full repository
+identity, original request and immutable intent, with expiry no later than its
+cutoff. Its registration is retained through the existing progress owner, even
+after a task changes. This leaf does not arm a native waiter: a provider's
+`status: active` is a service receipt state, not native activation or permission
+to wake. Unknown responses retain the attempted identity; no exception is
+treated as proof of nonacceptance.
+
+Each explicit call has a thirty-second monotonic IO bound, shortened by an
+already selected client deadline. Inspection can reconcile after the original
+acceptance deadline; it never renews it. The bound client rechecks executing
+recovery support at the effect/inspection boundary as well as the adapter's
+preflight. This is at most three HTTP exchanges per call, outside SQLite,
+not another scheduled cycle or acquisition loop.
+
+An absent receipt, including absence after cutoff, remains `unresolved` here.
+Cancelled/expired receipts are retained but cannot arm or complete the native
+waiter. This registration leaf does not cancel subscriptions, settle native
+arming/expiry, select useful activity, wake a task, ACK delivery or supply a full
+consumer. Those operations still require the existing owner's separately
+qualified completion/settlement path; do not activate this adapter as a
+standalone waiter loop.
+Before a later consumer can arm a recovered receipt, its actual expiry must be
+checked by the native arm transaction under its write lock and immediately
+before commit, as well as the existing task/wake/original-deadline guards.
+A pre-IO or pre-lock receipt check is not that qualification.
+
+`test_repository_feed_registration.py` composes actual native SQLite waiters
+with real repository receipt storage and a real private-Unix SDK/ingress case.
+It covers reopen, lost committed replies, absent requests without creation
+replay, unsupported selection before suspension, changed-task late receipts,
+foreign intent, original cutoff, unknown baseline, cancellation and expiry.
+No case starts a production consumer or asserts a task wake/ACK occurred.

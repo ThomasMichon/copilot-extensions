@@ -105,6 +105,7 @@ def acquire_pages(
     last_commit: str | None, journal: PendingCrawls, discover: DiscoverPage,
     cancel_check: Callable[[], None] | None = None, page_budget: int = 128,
     hints: ChangeHints | None = None, track_refresh: bool = False,
+    require_paged_acquisition: bool = False,
 ) -> CrawlManifest:
     """Persist each complete unit before requesting the next; publish no source state."""
     if type(page_budget) is not int or page_budget <= 0:
@@ -175,6 +176,8 @@ def acquire_pages(
             "full": False,
             "manifest": journal.manifest_data(manifest),
         }
+        if page.cursor is None and hints is None and require_paged_acquisition:
+            envelope.update(version=7, page_protocol="incremental")
         if page.cursor is not None or hints is not None:
             envelope.update(base_commit=last_commit, cursor=page.cursor, generation=generation)
             if hints is not None:

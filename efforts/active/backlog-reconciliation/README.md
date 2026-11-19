@@ -374,6 +374,16 @@ the non-public approval conversation.
 
 ## Plan
 
+The [liveness, reaper and publisher receiving proposal](journal/2026/11.18-liveness-reaper-and-publication-receiving.md)
+directly preserves #13203/#13207/#13208 in three existing owning efforts'
+Plan/local AND actual global Validation/Coordination, with fifteen new
+unchecked rows and the two applicable conditional intake routes. #13204
+remains an explicitly unadopted alternative because its allocation semantics
+conflict with qualified standing vision; no vision or Request is rewritten.
+All three proposed receiving sources stay OPEN pending actual reviewed
+delivery, permitted current readback and separate judgments. Existing
+keepers, reservations and execution/resource holds remain.
+
 The [complete terminal, offline-job and fixture receiving proposal](journal/2026/11.18-terminal-and-offline-receiving.md)
 directly preserves #13209/#13278/#13300/#13334 in existing domain Plan/local
 and global Validation, with the three portfolio lanes' actual migration-intake
@@ -386,12 +396,14 @@ original requirements and actual custodians retained. The complete 06:45:44 UTC
 census is 912 whole open, 183 above fixed 729. No technical completion,
 implementation or resource-release credit follows.
 
-The same record proposes complete #13294 collector-attribution receiving in
-the existing portfolio Phase 4 and its Phase 7 intake, not another effort.
-All six technical rows and I13294 remain unchecked; the source stays OPEN
-pending reviewed complete delivery, permitted current readback and separate
-judgment. Both original CPython versions and all admission/refusal boundaries
-remain; no native run, source/bytecode mutation or new causal diagnosis follows.
+The same record captures #13395's complete #13294 collector-attribution
+receiving in the existing portfolio Phase 4 and its Phase 7 intake, not
+another effort. Permitted current readback supports administrative I13294
+and its separate audited redundant-tracking retirement; all six technical
+rows remain unchecked. Both original CPython versions and all admission/
+refusal boundaries remain; no native run, source/bytecode mutation or new
+causal diagnosis follows. The subsequent complete 07:10:02 UTC census is
+912 whole open, still 183 above fixed 729.
 
 The [selected-PR receiving and source-closeout record](journal/2026/11.18-selected-pr-receiving-and-source-closeout.md)
 records #6467's separately audited planned-tracking retirement and the whole

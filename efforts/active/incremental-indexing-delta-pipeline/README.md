@@ -142,16 +142,24 @@ After the reviewed proposal, the operator admitted execution:
   and identity. Provider limitations must remain explicit; the
   [Azure DevOps proposal](azure-devops-acquisition.md) stages query-qualified
   exact identities before broader polling and repair coverage (#13363).
+  Its [point-component contract proposal](azure-devops-point-targets.md)
+  separates named target coverage from combined-document replacement (#13386);
+  representation, typed intake, ordered application and read isolation remain
+  unimplemented.
 - [ ] Persist acquisition progress so retry/restart does not restart a
   corpus-wide listing.
 - [ ] Move authoritative full enumeration into separately budgeted, resumable
   reconciliation slices. A missing checkpoint or expired cursor requests
   visible repair; it must not disguise an unlimited rebuild as a tiny update.
 
-#### Explicit caller acquisition requirements (proposed)
+#### Explicit caller acquisition requirements
 
 Issue [#13392](https://github.com/ThomasMichon/copilot-extensions/issues/13392)
-owns an **agent-recommended, opt-in in-process requirement** before implementation.
+owns the reviewed **agent-recommended, opt-in in-process requirement**.
+The [consumer contract](../../../plugins/agent-index/docs/consumer-migration.md#requiring-page-acquisition)
+documents `require_paged_acquisition`, selected-callable negotiation and retained
+v7 page provenance; legacy/default producers and all existing source hashes
+remain unchanged.
 The existing collector prefers page protocols but otherwise permits legacy
 `list_paths()` / `discover_changed()` acquisition. Give a consumer a way to
 require the declared paged protocol instead of silently accepting that fallback;

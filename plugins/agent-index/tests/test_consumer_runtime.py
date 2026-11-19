@@ -21,6 +21,7 @@ from agent_index.indexing.task_store import TaskStore
 from agent_index.sources import register_connector
 from agent_index.sources.base import FileEntry
 from agent_index.sources.delta import SourceDelta
+from agent_index.sources.delta import AcquisitionPage, SnapshotPage
 from agent_index.store.multi_model_store import MultiModelStore
 from agent_index.store.source_layout import LAYOUT, initialize_source_store
 
@@ -64,6 +65,83 @@ class Connector:
 
     def discover(self, **kwargs: object) -> list[FileEntry]:
         return self.entries
+
+
+@pytest.mark.parametrize("full", [False, True])
+def test_required_page_consumer_uses_native_store_and_refuses_legacy_ready_replay(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, full: bool,
+) -> None:
+    from agent_index.indexing.acquisition_requirement import require_execution_v1
+    from agent_index.indexing.manifest import CrawlManifest
+    from agent_index.indexing.path_index import PathIndex
+    from agent_index.indexing.pending_crawl import PendingCrawls, recovery_scope
+
+    monkeypatch.delenv("AGENT_INDEX_STORE_LAYOUT", raising=False)
+    config = IndexConfig(
+        data_dir=tmp_path / "consumer", cluster_enabled=False,
+        model_profiles={"a": ModelProfile("a", "fixture", dim=2)},
+    )
+    connector = Connector("sample:repo")
+    spec = engine.SourceSpec(connector.source_name, type="sample")
+    from agent_index import sources
+
+    monkeypatch.setattr(sources, "_CONNECTORS", dict(sources._CONNECTORS))
+    register_connector("sample", cast(Any, lambda **kwargs: connector))
+    calls = []
+
+    def pages(*args: object, **kwargs: object) -> AcquisitionPage | SnapshotPage:
+        calls.append(args)
+        if full:
+            return SnapshotPage("snapshot", connector.entries, "target")
+        return AcquisitionPage(SourceDelta(upserts=connector.entries, commit="target"))
+
+    setattr(pages, "acquisition_page_versions", (1,))
+    setattr(pages, "snapshot_page_versions", (1,))
+    monkeypatch.setattr(connector, "discover_delta_page", pages, raising=False)
+    monkeypatch.setattr(connector, "discover_snapshot_page", pages, raising=False)
+    monkeypatch.setattr(connector, "discover_delta", forbidden)
+    monkeypatch.setattr(connector, "discover", forbidden)
+    monkeypatch.setattr("agent_index.sources.get_connector", lambda *a, **k: connector)
+    monkeypatch.setattr(engine, "_connector_kwargs", lambda spec: {})
+    clients = []
+
+    def create(profile: ModelProfile) -> Client:
+        client = Client(profile.model_id, [])
+        clients.append(client)
+        return client
+
+    require_execution_v1(engine.run_reindex)
+    runtime = EmbeddingRuntime(create, lambda *args: False, forbidden)
+
+    def run() -> dict[str, object]:
+        return engine.run_reindex(
+            config=config, source_specs=[spec], source=spec.name, full=full,
+            embedding_runtime=runtime, require_paged_acquisition=True,
+        )
+
+    assert cast(int, run()["chunks_total"]) > 0
+    assert len(calls) == 1 and clients[0].texts
+    store = MultiModelStore(config.lance_dir)
+    document = store.get_document(spec.name, "one.md")
+    assert document is not None and document.content == connector.entries[0].content
+    scope = recovery_scope(engine.source_scope_hash(spec), cast(Any, connector))
+    paths = PathIndex(config.data_dir / "path_index.db")
+    journal = PendingCrawls(paths)
+    journal.save(
+        CrawlManifest(
+            source=spec.name, accounting_family=spec.name, commit="unqualified",
+            upserts=[replace(connector.entries[0], content="must not publish")],
+        ),
+        scope=scope, full=full,
+    )
+    before = journal.read_payload(spec.name, scope)
+    with pytest.raises(ValueError, match="cannot qualify retained acquisition"):
+        run()
+    assert journal.read_payload(spec.name, scope) == before and len(calls) == 1
+    assert not clients[-1].texts
+    document = store.get_document(spec.name, "one.md")
+    assert document is not None and document.content == connector.entries[0].content
+    assert IndexState.load(config.state_file).sources[spec.name].last_commit == "target"
 
 
 @pytest.mark.parametrize("models", [1, 2])
@@ -117,7 +195,8 @@ def test_injected_consumer_uses_shared_pipeline_and_reuses_metadata_pairs(
     assert "sources_failed" not in run()
     assert all(not client.texts for client in clients[models:])
     store = MultiModelStore(config.lance_dir)
-    assert store.get_document(connector.source_name, "one.md").metadata == {"state": "closed"}
+    document = store.get_document(connector.source_name, "one.md")
+    assert document is not None and document.metadata == {"state": "closed"}
     assert IndexState.load(config.state_file).sources[connector.source_name].last_commit == "second"
 
     # Full reconciliation preserves registered consumer schemes in both GC paths.

@@ -68,6 +68,7 @@ def acquire_snapshot(
     last_commit: str | None, journal: PendingCrawls, discover: DiscoverSnapshotPage,
     refresh: PollRefresh | None = None, cancel_check: Callable[[], None] | None = None,
     unit_budget: int = 128,
+    require_paged_acquisition: bool = False,
 ) -> CrawlManifest:
     """Acquire immutable coverage, then compare bounded stored-identity pages.
 
@@ -143,6 +144,8 @@ def acquire_snapshot(
                 "version": 3 if refresh is not None else 1, "full": True,
                 "manifest": journal.manifest_data(manifest),
             }
+            if require_paged_acquisition:
+                envelope.update(version=7, page_protocol="full")
         else:
             envelope = {
                 "version": 4, "full": True, "manifest": journal.manifest_data(manifest),
