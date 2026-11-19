@@ -73,6 +73,9 @@ for name in ("versioned_runtime_source","installer_engine_process","installer_de
     assert Path(sys.modules["agent_chat_service."+name].__file__).parent == root
     assert name not in sys.modules
 assert "versioned_runtime" not in sys.modules
+files=(root/"__init__.py",)
+assert engine._construction_hash(files,()) == runtime.fingerprint_source(files)
+assert "versioned_runtime" not in sys.modules
 policy=sys.modules["agent_chat_service.installer_dependency_policy"]
 assert Path(policy._configuration_path).parent == root
 assert Path(policy._configuration._content_path).parent == root
