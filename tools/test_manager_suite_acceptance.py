@@ -6,6 +6,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager, nullcontext
 import importlib.util
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -32,6 +33,24 @@ _ADAPTER_SPEC = importlib.util.spec_from_file_location(
 assert _ADAPTER_SPEC is not None and _ADAPTER_SPEC.loader is not None
 adapter_runner = importlib.util.module_from_spec(_ADAPTER_SPEC)
 _ADAPTER_SPEC.loader.exec_module(adapter_runner)
+
+
+def test_suite_cli_bootstraps_process_helpers_without_site_packages(tmp_path: Path) -> None:
+    from agent_procutil import no_window_kwargs
+
+    (tmp_path / "agent_procutil.py").write_text(
+        "raise RuntimeError('untrusted cwd source imported')\n", encoding="utf-8",
+    )
+    result = subprocess.run(
+        [
+            sys.executable, "-E", "-S", "-B",
+            str(Path(__file__).with_name("run-manager-suite-acceptance.py")), "--help",
+        ],
+        cwd=tmp_path, env={**os.environ, "PYTHONPATH": str(tmp_path)},
+        capture_output=True, text=True, timeout=30, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr
+    assert "--mode" in result.stdout
 
 
 @pytest.mark.parametrize("outcome", (
