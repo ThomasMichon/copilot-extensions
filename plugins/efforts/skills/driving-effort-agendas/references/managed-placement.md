@@ -64,3 +64,5 @@ This source path qualifies only new managed stores. It does not import an
 active legacy lane, move data, archive it, change checkout cleanup or authorize
 deletion. Filesystem durability remains conditional on the actual owner/store
 barriers; source API doubles do not establish native Windows acceptance.
+The separate [format-2 rescue helper](agenda-rescue.md) reuses the same
+allocator for explicit history-preserving relocation; `init` remains fresh-only.

@@ -5550,7 +5550,14 @@
         "tools/promotion_unit_tests/test_typecheck_new_code.py::test_ordinary_installer_uses_its_composed_sdk_and_preserves_outer_scope[False-False]",
         "tools/promotion_unit_tests/test_typecheck_new_code.py::test_ordinary_installer_uses_its_composed_sdk_and_preserves_outer_scope[False-True]",
         "tools/promotion_unit_tests/test_typecheck_new_code.py::test_ordinary_installer_uses_its_composed_sdk_and_preserves_outer_scope[True-False]",
-        "tools/promotion_unit_tests/test_typecheck_new_code.py::test_ordinary_installer_uses_its_composed_sdk_and_preserves_outer_scope[True-True]"
+        "tools/promotion_unit_tests/test_typecheck_new_code.py::test_ordinary_installer_uses_its_composed_sdk_and_preserves_outer_scope[True-True]",
+        "tools/promotion_unit_tests/test_agenda_rescue.py::test_activation_copies_original_history_and_retry_never_replays",
+        "tools/promotion_unit_tests/test_agenda_rescue.py::test_activation_refuses_foreign_reservation_and_rolls_back_partial_copy[wrong-operation]",
+        "tools/promotion_unit_tests/test_agenda_rescue.py::test_activation_refuses_foreign_reservation_and_rolls_back_partial_copy[history]",
+        "tools/promotion_unit_tests/test_agenda_rescue.py::test_activation_refuses_foreign_reservation_and_rolls_back_partial_copy[copy-failure]",
+        "tools/promotion_unit_tests/test_agenda_rescue.py::test_oversized_recovery_refuses_before_changing_the_database",
+        "tools/promotion_unit_tests/test_agenda_rescue.py::test_relocation_refuses_home_dependent_canonical_references[True]",
+        "tools/promotion_unit_tests/test_agenda_rescue.py::test_relocation_refuses_home_dependent_canonical_references[False]"
     ],
     "coverage_targets": [
         "plugins/agent-index/src/agent_index/indexing/component_manifest.py",
@@ -5930,7 +5937,8 @@
         "plugins/agent-bridge/src/agent_bridge/retained_postload_evidence.py",
         "plugins/agent-bridge/src/agent_bridge/retained_load_configuration.py",
         "tools/artifact_bundle_validation.py",
-        "tools/promotion_source_history.py"
+        "tools/promotion_source_history.py",
+        "plugins/efforts/skills/driving-effort-agendas/scripts/agenda_rescue.py"
     ],
     "sources": {
         "tools/promotion_unit_tests/test_component_manifest_contract.py": "a60b524ec9c54544284b44eab463e52323178b328d6b88205dc932e6d01577e0",
@@ -6818,6 +6826,26 @@
         "tools/promotion_unit_tests/test_bridge_contract_git.py": "03974fea5ac2c52cbda95424116b69626b870c2987bf848e604471533bea205e",
         "tools/artifact_bundle_validation.py": "792ab0e34fed19164447b36bed160d69616b55d2be7902050507150640638427",
         "tools/promotion_source_history.py": "9f5b543da797a7e4059c4b57e20eb715b7e8c780e744258dc63e325e1de8cb8c",
-        "tools/runtime_profile_errors.py": "6e959565fc5ec6527b67346ac67d32d7aaca410e9a56f5f8e48c85b1453f4fce"
+        "tools/runtime_profile_errors.py": "6e959565fc5ec6527b67346ac67d32d7aaca410e9a56f5f8e48c85b1453f4fce",
+        "plugins/efforts/skills/driving-effort-agendas/scripts/agenda.py": "b5c206db7a8f74f2f535bef1d4b91e9b876a26ec52473d08d1dc3d4d0fe4fd55",
+        "plugins/efforts/skills/driving-effort-agendas/scripts/agenda_context.py": "76a73519356d0903b8d2708d160e4ea970f3b32ee4d35730c425f85c1602dda8",
+        "plugins/efforts/skills/driving-effort-agendas/scripts/agenda_export.py": "c6a482942ceab139392e6d5bf8829e44b4d7747ba607fe085a81312fb4d15a19",
+        "plugins/efforts/skills/driving-effort-agendas/scripts/agenda_goal.py": "6f449490473c8382737939de8a7a90a85ecb5d42c032e02bb84f9f8ae08e86d2",
+        "plugins/efforts/skills/driving-effort-agendas/scripts/agenda_history.py": "39922b30e087c7b187b1ec480f824cd213060e0143eebbf2c6bd15bd2f26161a",
+        "plugins/efforts/skills/driving-effort-agendas/scripts/agenda_history_contract.py": "b6d6fda729b414a45ec6fc6470f16d934c0757b0864385c05c5cc281eda64264",
+        "plugins/efforts/skills/driving-effort-agendas/scripts/agenda_managed.py": "016f277446dba561b562ba55abfae62f915ea3a9d91653cc973a4c381ec2bb2b",
+        "plugins/efforts/skills/driving-effort-agendas/scripts/agenda_migration.py": "c99ac4ffad4d092e744d4c9a94585a608771990b8809ed2bebaf40a4079aaf47",
+        "plugins/efforts/skills/driving-effort-agendas/scripts/agenda_operations.py": "4147405c3d621a1efaf71ba9331c704c497b0a93fe506f7d3020c7528941df97",
+        "plugins/efforts/skills/driving-effort-agendas/scripts/agenda_publish.py": "5d79d21b05ca13fa9616826315338deb794adf420a6ea185f95465a67f12151f",
+        "plugins/efforts/skills/driving-effort-agendas/scripts/agenda_queue.py": "d24061baeb7bee15f23aeb5b995e380ccec08eb68d4b5a11cca2aa814d7607d5",
+        "plugins/efforts/skills/driving-effort-agendas/scripts/agenda_rescue.py": "f9234b7d3e976a6fb42fbbfc913a76166d69fdbce382877db79a5f1a36bc7b1f",
+        "plugins/efforts/skills/driving-effort-agendas/scripts/agenda_store.py": "d654fcd30207337b0d581c8b6af4e4c1a58506ff13a7265256140014246e1786",
+        "plugins/efforts/skills/driving-effort-agendas/scripts/agenda_store_v2.py": "432de3403f96e5bda6df7ea776ab56b563de0ccc2906ab63b749e1c11792410b",
+        "plugins/efforts/skills/driving-effort-agendas/scripts/agenda_v2_graph.py": "a6106aab00ef9a06991656b85bdd8f6bc9a893a5c92e487970dec06bb102f567",
+        "plugins/efforts/skills/driving-effort-agendas/scripts/agenda_v2_operations.py": "7be63465c253b2af6ce7f4e0258b91e9b31f89bdaa957dacb82fb9eaa32f4d73",
+        "plugins/efforts/skills/driving-effort-agendas/scripts/agenda_v2_projection.py": "f9507f81d1e91abb1a92f9938ef8c75cded910472b0c8e499cc35316652a1c6c",
+        "plugins/efforts/skills/driving-effort-agendas/scripts/agenda_v2_records.py": "0eb64fe209149583b7ee2487ade6be3a261d8a2d07d9509912ac61a11dd6aa0d",
+        "plugins/efforts/skills/driving-effort-agendas/scripts/agenda_v2_schema.py": "f79bf3814f205ddd11b1b903b0e6a0ab644c8416dd0113eddfa173ef71405048",
+        "tools/promotion_unit_tests/test_agenda_rescue.py": "12a13246161d3bdc9da202585c353d3470d7f97fad564d38045517534d7327e1"
     }
 }

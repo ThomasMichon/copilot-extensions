@@ -11,7 +11,7 @@ import os
 from pathlib import Path
 import sqlite3
 import stat
-from typing import Any, Iterator
+from typing import Any, Callable, Iterator
 from uuid import uuid4
 
 from agenda import AgendaError, Snapshot, _number, _object, _read, _text, decode, inspect_documents
@@ -21,6 +21,7 @@ import agenda_migration
 DATABASE = "agenda.sqlite3"
 SCHEMA = "efforts.agenda-request"
 MAX_REVISION = (1 << 63) - 1
+RELOCATED_VERSION = 0x41524731
 
 
 def _revision(value: Any, label: str, *, increment: bool = False) -> int:
@@ -100,7 +101,7 @@ def validate_documents(home: Path, documents: Any) -> Snapshot:
         name = board_name(home, name)
         if name not in boards:
             raise AgendaError(f"missing referenced board: {name}")
-        return boards[name]
+        return _object(boards[name], "referenced board")
 
     queue = cursor.get("queue")
     if not isinstance(queue, list):
@@ -166,10 +167,47 @@ def _schema(db: sqlite3.Connection) -> None:
 
 
 @contextmanager
+def _bound_database(
+    path: Path, expected: tuple[int, int] | None,
+) -> Iterator[Callable[[], None]]:
+    if expected is None:
+        yield lambda: None
+        return
+    # POSIX close() on any descriptor releases this process's SQLite record locks.
+    # Only Windows can pin the file with a separate handle without that side effect.
+    fd = os.open(path, os.O_RDONLY) if os.name == "nt" else None
+    try:
+        def verify() -> None:
+            named = safe_path(path).stat()
+            if (
+                not stat.S_ISREG(named.st_mode) or named.st_nlink != 1
+                or (named.st_dev, named.st_ino) != expected
+            ):
+                raise AgendaError("database identity changed before SQLite access")
+            if fd is not None:
+                opened = os.fstat(fd)
+                if (
+                    not stat.S_ISREG(opened.st_mode) or opened.st_nlink != 1
+                    or (opened.st_dev, opened.st_ino) != expected
+                ):
+                    raise AgendaError("database identity changed before SQLite access")
+
+        verify()
+        yield verify
+    finally:
+        if fd is not None:
+            os.close(fd)
+
+
+@contextmanager
 def transaction(home: Path, *, create: bool = False, write: bool = False,
-                store_version: int | None = None, readonly: bool = False) -> Iterator[sqlite3.Connection]:
+                store_version: int | None = None, readonly: bool = False,
+                relocation: bool = False,
+                expected_file_id: tuple[int, int] | None = None) -> Iterator[sqlite3.Connection]:
     if readonly and (create or write):
         raise AgendaError("read-only agenda transactions cannot create or write")
+    if relocation and (create or store_version is not None):
+        raise AgendaError("relocation access cannot initialize or select an execution policy")
     home = safe_path(home, directory=True)
     if not home.is_dir():
         raise AgendaError("explicit state home must already exist")
@@ -180,48 +218,53 @@ def transaction(home: Path, *, create: bool = False, write: bool = False,
         raise AgendaError("managed store does not exist; explicitly init/import first")
     before = home.stat()
     try:
-        mode = "ro" if readonly else "rwc" if create else "rw"
-        db = sqlite3.connect(path.as_uri() + "?mode=" + mode,
-                             uri=True, timeout=5, isolation_level=None)
-        try:
-            after = home.stat()
-            if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino):
-                raise AgendaError("state home changed during open")
-            safe_path(path)
-            db.execute("PRAGMA synchronous=FULL")
-            # SQLite owns journal fsync and commit ordering; sync a newly-created directory entry.
-            if create and os.name == "posix":
-                fd = os.open(home, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-                try:
-                    os.fsync(fd)
-                finally:
-                    os.close(fd)
-            db.execute("BEGIN IMMEDIATE" if write else "BEGIN")
-            if db.execute("PRAGMA journal_mode").fetchone()[0] != "delete":
-                raise AgendaError("unsupported agenda journal mode; standalone store requires DELETE")
-            version = db.execute("PRAGMA user_version").fetchone()[0]
-            if version == 0 and not create and (home / agenda_migration.RECOVERY).exists():
-                raise AgendaError("initialization interrupted; retry the saved init request in "
-                                  "agenda.init-recovery.json; never restore stale cursor.json")
-            if version not in (0, 1, 2) or (version == 0 and not create):
-                raise AgendaError("unsupported or uninitialized agenda store version")
-            if store_version is not None and version not in (0, store_version):
-                raise AgendaError("request and store execution policy versions disagree; no automatic migration")
-            if version == 0 and db.execute(
-                    "SELECT 1 FROM sqlite_master WHERE type='table'").fetchone():
-                raise AgendaError("refusing an unrelated SQLite database")
-            if create and version == 0:
-                if store_version == 2:
-                    from agenda_store_v2 import schema
-                    schema(db)
-                else:
-                    _schema(db)
-            yield db
-            db.execute("COMMIT")
-        finally:
-            if db.in_transaction:
-                db.execute("ROLLBACK")
-            db.close()
+        with _bound_database(path, expected_file_id) as verify_file:
+            mode = "ro" if readonly else "rwc" if create else "rw"
+            db = sqlite3.connect(path.as_uri() + "?mode=" + mode,
+                                 uri=True, timeout=5, isolation_level=None)
+            try:
+                after = home.stat()
+                if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino):
+                    raise AgendaError("state home changed during open")
+                safe_path(path)
+                verify_file()
+                db.execute("PRAGMA synchronous=FULL")
+                # SQLite owns journal fsync and commit ordering; sync a new directory entry.
+                if create and os.name == "posix":
+                    fd = os.open(home, os.O_RDONLY | getattr(os, "O_DIRECTORY") | getattr(os, "O_NOFOLLOW"))
+                    try:
+                        os.fsync(fd)
+                    finally:
+                        os.close(fd)
+                db.execute("BEGIN IMMEDIATE" if write else "BEGIN")
+                verify_file()
+                if db.execute("PRAGMA journal_mode").fetchone()[0] != "delete":
+                    raise AgendaError("unsupported agenda journal mode; standalone store requires DELETE")
+                version = db.execute("PRAGMA user_version").fetchone()[0]
+                if version == 0 and not create and (home / agenda_migration.RECOVERY).exists():
+                    raise AgendaError("initialization interrupted; retry the saved init request in "
+                                      "agenda.init-recovery.json; never restore stale cursor.json")
+                versions = (2, RELOCATED_VERSION) if relocation else (0, 1, 2)
+                if version not in versions or (version == 0 and not create):
+                    raise AgendaError("unsupported or uninitialized agenda store version")
+                if store_version is not None and version not in (0, store_version):
+                    raise AgendaError("request and store execution policy versions disagree; no automatic migration")
+                if version == 0 and db.execute(
+                        "SELECT 1 FROM sqlite_master WHERE type='table'").fetchone():
+                    raise AgendaError("refusing an unrelated SQLite database")
+                if create and version == 0:
+                    if store_version == 2:
+                        from agenda_store_v2 import schema
+                        schema(db)
+                    else:
+                        _schema(db)
+                yield db
+                verify_file()
+                db.execute("COMMIT")
+            finally:
+                if db.in_transaction:
+                    db.execute("ROLLBACK")
+                db.close()
     except (sqlite3.Error, OSError) as exc:
         recovery = ("; adoption may be fenced: preserve cursor.json and agenda.init-recovery.json "
                     "and retry the saved init request" if create and

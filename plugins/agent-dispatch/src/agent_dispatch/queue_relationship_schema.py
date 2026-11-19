@@ -8,12 +8,35 @@ from typing import Literal
 from .task_obligations import ASSIGNMENT_PREDICATE
 
 
-def bound_relationship_condition(task: Literal["t", "NEW"]) -> str:
+def bound_relationship_condition(task: Literal["t", "NEW"], *, finalized_submission: bool = False) -> str:
     """Keep live checks and persisted rollback guards on the same assignment."""
+    state = "closed" if finalized_submission else "bound"
     return (
         "EXISTS (SELECT 1 FROM task_events e"  # noqa: S608 -- fixed SQL aliases
         f" WHERE e.task_id={task}.id AND e.task_relationship IS NOT NULL"
-        " AND json_extract(e.task_relationship, '$.state')='bound'"
+        f" AND json_extract(e.task_relationship, '$.state')='{state}'"
+        + (
+            " AND NEW.status='submitted' AND OLD.status IN ('started','suspended')"
+            " AND OLD.hold_reason IS NULL AND OLD.awaiting_steer=0 AND NEW.require_verification=1"
+            " AND NEW.evaluator_ref IS NOT NULL AND NEW.completed_by=OLD.owner AND NEW.owner IS NULL"
+            " AND NEW.generation=OLD.generation AND NEW.owner_session_id=OLD.owner_session_id"
+            " AND EXISTS (SELECT 1 FROM task_relevance_closeouts c WHERE c.task_id=NEW.id"
+            " AND c.owner=OLD.owner AND c.owner_session_id=OLD.owner_session_id AND c.generation=OLD.generation"
+            " AND json_extract(c.resource_binding,'$.assignment_event_id')=e.id"
+            " AND json_extract(c.acknowledgement,'$.finish_action')='submit-finalized-review/v1'"
+            " AND json_extract(c.acknowledgement,'$.binding')=json(c.resource_binding)"
+            " AND json_extract(c.acknowledgement,'$.arguments.request_id')=c.request_id"
+            " AND json_extract(c.acknowledgement,'$.at')=NEW.completed_at"
+            " AND NEW.result_ref IS json_extract(c.acknowledgement,'$.submission_result_ref')"
+            " AND EXISTS (SELECT 1 FROM task_events p WHERE p.task_id=NEW.id"
+            " AND p.id=json_extract(c.acknowledgement,'$.preparation_id')"
+            " AND json_extract(p.submission_preparation,'$.advancement.state')='admitting'"
+            " AND json_extract(p.submission_preparation,'$.request.assignment_event_id')=e.id)"
+            " AND json_extract(c.acknowledgement,'$.observation.status')='finalized'"
+            " AND json_extract(c.acknowledgement,'$.observation.creation_nonce')="
+            " json_extract(e.task_relationship,'$.request.workspace.creation_nonce'))"
+            if finalized_submission else ""
+        ) +
         " AND COALESCE(json_extract(e.task_relationship, '$.continuation.generation'),"
         f" json_extract(e.task_relationship, '$.request.generation'))={task}.generation"
         " AND (json_type(e.task_relationship, '$.continuation.owner_session_id') IS NULL"
@@ -107,7 +130,7 @@ def migrate_relationships(conn: sqlite3.Connection) -> None:
     # These guards survive a provider rollback. Older queue code cannot admit
     # a governed assignment by forgetting an optional Python field.
     conn.execute(
-        "CREATE TRIGGER IF NOT EXISTS task_relationship_execution_guard_v4"  # noqa: S608 -- fixed predicate
+        "CREATE TRIGGER IF NOT EXISTS task_relationship_execution_guard_v6"  # noqa: S608 -- fixed predicate
         " BEFORE UPDATE OF status, generation, owner, owner_session_id ON tasks"
         " WHEN (EXISTS (SELECT 1 FROM task_events e WHERE e.task_id=NEW.id"
         " AND e.task_relationship IS NOT NULL) OR EXISTS (SELECT 1 FROM spawn_reservations s"
@@ -124,10 +147,12 @@ def migrate_relationships(conn: sqlite3.Connection) -> None:
         " OR (NEW.status='submitted' AND OLD.status<>'submitted')"
         " OR (NEW.status='completed' AND OLD.status NOT IN ('submitted','completed'))) AND NOT "
         + bound_relationship_condition("NEW")
-        + "))"
+        + " AND NOT " + bound_relationship_condition("NEW", finalized_submission=True) + "))"
         " BEGIN SELECT RAISE(ABORT, 'task relationship protection is unconfirmed'); END"
     )
     # Recovery metadata and submitted-result acceptance do not admit execution.
     # Install the admission guard before removing its stricter predecessors.
+    conn.execute("DROP TRIGGER IF EXISTS task_relationship_execution_guard_v5")
+    conn.execute("DROP TRIGGER IF EXISTS task_relationship_execution_guard_v4")
     conn.execute("DROP TRIGGER IF EXISTS task_relationship_execution_guard_v3")
     conn.execute("DROP TRIGGER IF EXISTS task_relationship_execution_guard_v2")

@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 import json
 import sqlite3
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .assignment_workspace import AssignmentWorkspace, same_assignment_worker
 from .queue_records import SpawnState, Status, TaskError
@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from .queue import TaskQueue
 
 
-def _state(queue: TaskQueue, conn: sqlite3.Connection, task_id: str, arguments: dict) -> dict:
+def _state(queue: TaskQueue, conn: sqlite3.Connection, task_id: str, arguments: dict[str, Any]) -> dict[str, Any]:
     from .ordinary_native_bindings import reservation_native_identity
     from .queue_relationship_continuation import current_binding
 
@@ -135,7 +135,7 @@ def _state(queue: TaskQueue, conn: sqlite3.Connection, task_id: str, arguments: 
 def prepare(
     queue: TaskQueue, task_id: str, *,
     authority_guard: Callable[[], None] | None = None, **arguments: str | int,
-) -> dict:
+) -> dict[str, Any]:
     """Internal provider only: obtain readiness, commit it, then settle the exact claim."""
     if authority_guard is not None:
         authority_guard()
@@ -183,6 +183,13 @@ def prepare(
                 receipt = json.loads(prior)
     if receipt["arguments"] != arguments or receipt["binding"] != original["binding"]:
         raise TaskError("relevance closeout readiness belongs to another incarnation")
+    from .review_closeout_submission import prepare as prepare_review
+
+    with queue._connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        if authority_guard is not None:
+            authority_guard()
+        prepare_review(queue, conn, _state(queue, conn, task_id, arguments))
     from .queue_pool_decline_closeout import _settle
 
     return {"receipt": receipt, "relationship": _settle(queue, task_id, {
@@ -190,7 +197,7 @@ def prepare(
     }, authority_guard=authority_guard)}
 
 
-def release_evidence(queue: TaskQueue, conn: sqlite3.Connection, raw: str) -> dict | None:
+def release_evidence(queue: TaskQueue, conn: sqlite3.Connection, raw: str) -> dict[str, Any] | None:
     """Revalidate persisted readiness in the same snapshot as the obligation read."""
     receipt = json.loads(raw)
     try:
