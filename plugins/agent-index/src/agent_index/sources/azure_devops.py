@@ -674,15 +674,14 @@ class AzureDevOpsConnector:
     def _marker_with_overlap(self, marker: str) -> str:
         dt = _parse_datetime(marker)
         if dt is None:
-            return self._format_marker(marker)
-        overlapped = dt - timedelta(seconds=self._overlap_seconds)
+            raise ValueError("Azure DevOps change marker must be a valid timestamp")
+        try:
+            overlapped = dt - timedelta(seconds=self._overlap_seconds)
+        except OverflowError as exc:
+            raise ValueError(
+                "Azure DevOps change marker overlap is outside the supported timestamp range",
+            ) from exc
         return overlapped.isoformat(timespec="seconds").replace("+00:00", "Z")
-
-    def _format_marker(self, marker: str) -> str:
-        dt = _parse_datetime(marker)
-        if dt is None:
-            return marker
-        return dt.isoformat(timespec="seconds").replace("+00:00", "Z")
 
     def _project_path(self, *parts: str) -> str:
         quoted = [quote(self.org, safe=""), quote(self.project, safe="")]
@@ -903,16 +902,16 @@ def _parse_datetime(value: str | None) -> datetime | None:
         return None
     try:
         return datetime.fromtimestamp(float(value), tz=UTC)
-    except ValueError:
+    except (ValueError, OverflowError, OSError):
         pass
     try:
         normalized = value.replace("Z", "+00:00")
         parsed = datetime.fromisoformat(normalized)
-    except ValueError:
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=UTC)
+        return parsed.astimezone(UTC)
+    except (ValueError, OverflowError):
         return None
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=UTC)
-    return parsed.astimezone(UTC)
 
 
 def _plain(value: Any) -> str:
