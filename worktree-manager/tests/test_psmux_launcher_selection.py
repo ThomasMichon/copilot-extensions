@@ -75,3 +75,40 @@ def test_launcher_keeps_compatible_path_client_and_puts_selection_first(
             "bin": str(side_dir / "psmux.exe"),
             "path": f"{side_dir};{other_dir};{old_dir}",
         }
+
+
+@pytest.mark.skipif(os.name != "nt" or not PWSH, reason="Native Windows PowerShell")
+def test_launcher_replaces_compatible_link_stub_with_its_target(tmp_path: Path) -> None:
+    assert PWSH is not None
+    package_dir = tmp_path / "package"
+    links_dir = tmp_path / "links"
+    for directory in (package_dir, links_dir):
+        directory.mkdir()
+    real = package_dir / "psmux.exe"
+    real.write_bytes(b"fixture")
+    stub = links_dir / "psmux.exe"
+    try:
+        stub.symlink_to(real)
+    except OSError:
+        pytest.skip("symbolic links need Developer Mode or elevation")
+    (tmp_path / "psmux-path.ps1").write_text(
+        "function Test-AwPsmuxVersionCompatible { param($Version,$MinimumVersion) $true }\n"
+        "function Get-AwPsmuxSideBySideRoot { 'unused' }\n"
+        "function Find-AwCompatiblePsmuxPackageBinary { throw 'not expected' }\n",
+        encoding="utf-8",
+    )
+    script = tmp_path / "resolve.ps1"
+    script.write_text(
+        "$ErrorActionPreference='Stop'\n"
+        + _launcher_functions("Resolve-AwPsmuxBin") + "\n"
+        f"$cmd = [pscustomobject]@{{ Source = '{stub}' }}\n"
+        "Resolve-AwPsmuxBin $cmd\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [PWSH, "-NoProfile", "-File", str(script)],
+        capture_output=True, text=True, timeout=15,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip().splitlines()[-1] == str(real)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -472,6 +473,9 @@ $second = Install-AwPsmuxSideBySide -Version '3.4.0' -Root $Root `
     second = $second.Status
     version = $first.Version
     downloads = $script:Downloads
+    firstDirectory = Split-Path $first.Directory -Leaf
+    selected = (Find-AwCompatiblePsmuxPackageBinary -PackageRoot (Join-Path $Root 'none') `
+        -SideBySideRoot $Root -VersionProbe $probe).Directory
     entries = @(Get-ChildItem -LiteralPath $Root -Force -Name | Sort-Object)
     files = @(Get-ChildItem -LiteralPath (Join-Path $Root '3.4.0') -Name -ErrorAction SilentlyContinue | Sort-Object)
 } | ConvertTo-Json -Compress
@@ -499,9 +503,14 @@ def test_side_by_side_install_verifies_archive_and_is_idempotent(tmp_path: Path,
         assert result["entries"] == ["3.4.0"]
         assert result["files"] == ["psmux.exe", "tmux.exe"]
     elif mode == "conflict":
-        assert (result["first"], result["second"]) == ("conflict", "conflict")
-        assert result["downloads"] == 0
-        assert result["entries"] == ["3.4.0"]
+        # The damaged directory stays unchanged; the verified copy goes into a
+        # new generation directory that discovery selects.
+        assert (result["first"], result["second"]) == ("installed", "present")
+        assert result["downloads"] == 1
+        generation = result["firstDirectory"]
+        assert re.fullmatch(r"3\.4\.0-r[0-9a-f]{8}", generation)
+        assert result["entries"] == ["3.4.0", generation]
+        assert Path(result["selected"]).name == generation
         assert (root / "3.4.0" / "psmux.exe").read_text(encoding="utf-8").strip() == "3.3.8"
     else:
         # A tampered archive or an unexpected binary version installs nothing

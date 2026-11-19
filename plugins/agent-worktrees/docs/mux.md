@@ -103,8 +103,10 @@ provider process is present or its absence is unconfirmed. In that state the
 installer instead puts the required version side by side under
 `%USERPROFILE%\.agent-worktrees\psmux\<version>\`, from the WinGet
 portable archive after it verifies the manifest SHA-256 and the binary file
-version. It then moves that directory before older PSMux entries on the user
-PATH. The older provider keeps its live sessions, and a newer client can still
+version. If that version directory already exists but is empty, damaged or
+holds another version, the installer leaves it unchanged and uses a new
+`<version>-r<id>` directory instead. It then moves the selected directory
+before older PSMux entries on the user PATH. The older provider keeps its live sessions, and a newer client can still
 list, capture and attach them. Legacy binaries without version metadata are not
 executed merely to discover their version while provider activity may be live.
 The in-place package upgrade still runs only after the live-session gate is

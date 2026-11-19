@@ -144,10 +144,12 @@ function Test-AwPsmuxSideBySidePath {
     foreach ($root in @($SideBySideRoot)) {
         if ([string]::IsNullOrWhiteSpace($root)) { continue }
         $rootN = ConvertTo-AwNormalizedPath $root
-        if (-not $pathN.StartsWith($rootN + '\', [StringComparison]::OrdinalIgnoreCase)) {
+        if (-not $pathN.StartsWith($rootN, [StringComparison]::OrdinalIgnoreCase)) {
             continue
         }
-        $relative = $pathN.Substring($rootN.Length + 1)
+        $relative = $pathN.Substring($rootN.Length)
+        if (-not ($relative.StartsWith('\') -or $relative.StartsWith('/'))) { continue }
+        $relative = $relative.TrimStart('\', '/')
         if ($relative -and $relative -notmatch '[\\/]') { return $true }
     }
     return $false
@@ -264,8 +266,10 @@ function Install-AwPsmuxSideBySide {
        running provider, its sessions or the WinGet package registration.
        The archive comes from the WinGet source (`winget download`) and must
        match the manifest SHA-256; the extracted psmux.exe must report the
-       requested version. A valid existing copy is reused, and an unexpected
-       existing directory is left unchanged. #>
+       requested version. A valid existing copy is reused. An empty, damaged or
+       wrong-version <Root>\<Version> directory is left unchanged, and the
+       verified copy goes into a new <Root>\<Version>-r<id> directory that
+       discovery selects by its file version. #>
     param(
         [Parameter(Mandatory)][string]$Version,
         [Parameter(Mandatory)][string]$Root,
@@ -274,32 +278,34 @@ function Install-AwPsmuxSideBySide {
     )
     $expected = ConvertTo-AwPsmuxVersionText $Version
     $target = Join-Path $Root $Version
-    $targetExe = Join-Path $target 'psmux.exe'
 
     function New-AwPsmuxSideBySideResult {
-        param([string]$Status, [string]$Message, [string]$FoundVersion)
+        param([string]$Status, [string]$Message, [string]$FoundVersion, [string]$Directory = $target)
         [pscustomobject]@{
             Status = $Status
-            Path = $targetExe
-            Directory = $target
+            Path = Join-Path $Directory 'psmux.exe'
+            Directory = $Directory
             Version = $FoundVersion
             Message = $Message
         }
     }
 
     function Get-AwExistingSideBySide {
-        if (-not (Test-Path -LiteralPath $target)) { return $null }
-        $found = if (Test-Path -LiteralPath $targetExe -PathType Leaf) {
-            ConvertTo-AwPsmuxVersionText (Get-AwPsmuxBinaryVersion `
-                -Path $targetExe -VersionProbe $VersionProbe)
+        # The canonical directory first, then replacement generations.
+        $candidates = @($target) + @(Get-ChildItem -LiteralPath $Root -Directory `
+                -Filter "$Version-r*" -ErrorAction SilentlyContinue |
+            Sort-Object Name | ForEach-Object { $_.FullName })
+        foreach ($directory in $candidates) {
+            $exe = Join-Path $directory 'psmux.exe'
+            if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { continue }
+            $found = ConvertTo-AwPsmuxVersionText (Get-AwPsmuxBinaryVersion `
+                -Path $exe -VersionProbe $VersionProbe)
+            if ($found -and $found -eq $expected) {
+                return New-AwPsmuxSideBySideResult 'present' `
+                    "psmux $found is already installed side by side at $directory" $found $directory
+            }
         }
-        if ($found -and $found -eq $expected) {
-            return New-AwPsmuxSideBySideResult 'present' `
-                "psmux $found is already installed side by side" $found
-        }
-        $shown = if ($found) { $found } else { 'unknown' }
-        return New-AwPsmuxSideBySideResult 'conflict' `
-            "$target already exists but does not hold psmux $expected (found $shown); it was left unchanged" $found
+        return $null
     }
 
     if (-not $expected) {
@@ -311,6 +317,11 @@ function Install-AwPsmuxSideBySide {
     $id = [guid]::NewGuid().ToString('N')
     $staging = Join-Path $Root ".staging-$id"
     $partial = Join-Path $Root "$Version.partial-$id"
+    $destination = $target
+    $replaced = Test-Path -LiteralPath $target
+    if ($replaced) {
+        $destination = Join-Path $Root "$Version-r$($id.Substring(0, 8))"
+    }
     try {
         $download = Join-Path $staging 'download'
         $expanded = Join-Path $staging 'expanded'
@@ -364,14 +375,15 @@ function Install-AwPsmuxSideBySide {
             Copy-Item -Destination $partial -Recurse -Force
         try {
             # Directory.Move refuses an existing destination instead of nesting.
-            [IO.Directory]::Move($partial, $target)
+            [IO.Directory]::Move($partial, $destination)
         } catch {
             $existing = Get-AwExistingSideBySide
             if ($existing) { return $existing }
             throw
         }
+        $note = if ($replaced) { "; the unexpected $target directory was left unchanged" } else { '' }
         return New-AwPsmuxSideBySideResult 'installed' `
-            "psmux $found installed side by side at $target" $found
+            "psmux $found installed side by side at $destination$note" $found $destination
     } catch {
         return New-AwPsmuxSideBySideResult 'failed' `
             "side-by-side install of psmux $Version failed: $($_.Exception.Message)" $null

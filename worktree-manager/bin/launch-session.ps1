@@ -1521,11 +1521,25 @@ function Resolve-AwPsmuxBin {
     if (Test-Path -LiteralPath $pathHelper) {
         . $pathHelper
         # A compatible PATH client wins, as in the Python creation gate. Only
-        # file metadata is read, so no provider process starts.
+        # file metadata is read, so no provider process starts. A WinGet link
+        # stub is replaced by its real target, which PowerShell 7.4 can launch.
+        $pathClient = $src
+        try {
+            $item = Get-Item -LiteralPath $src -ErrorAction Stop
+            if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+                $pathClient = $null
+                $linked = $item.ResolveLinkTarget($true)
+                if ($linked -and $linked.Exists) { $pathClient = $linked.FullName }
+            } elseif ($item.Length -eq 0) {
+                $pathClient = $null
+            }
+        } catch { $pathClient = $null }
         $pathVersion = $null
-        try { $pathVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo($src).FileVersion } catch {}
+        if ($pathClient) {
+            try { $pathVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo($pathClient).FileVersion } catch {}
+        }
         if (Test-AwPsmuxVersionCompatible -Version $pathVersion -MinimumVersion '3.4.0') {
-            return $src
+            return $pathClient
         }
         # Side-by-side copies let a newer client create sessions while an older
         # provider keeps serving its live sessions.
