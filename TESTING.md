@@ -120,6 +120,15 @@ Worktrees Python owner; ordinary runs and reusable caches keep their existing
 behavior. The real consumer qualification is the opt-in Worktrees
 `tests/test_artifact_runner.py` T3 packet, not an installed rollout.
 
+The same allocation/process owners support selected disposable commands through
+`tools/run-owned-producer.py`; see
+[other disposable producers](plugins/agent-worktrees/docs/artifact-scratch.md#other-disposable-producers).
+The explicit T3 `tests/test_owned_producer.py` packet exercises real analysis,
+build, archive, report and qualification-image consumers. Pair it with
+`tests/test_artifact_runner_contract.py` and the existing pilot packet after
+changing the shared context. Ordinary tests and reusable-cache defaults do not
+change; external durable output remains separately owned.
+
 This page is a reference catalog, not a sequential checklist. Read the lane
 needed for the changed behavior; optional packets below do not all become
 prerequisites for one contribution.

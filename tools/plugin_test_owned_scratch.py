@@ -108,6 +108,8 @@ def prepare_owned(
 
 
 class OwnedTestSandbox:
+    diagnostic_schema = "copilot-extensions.test-runner-diagnostic/v1"
+
     def __init__(self, owner: str, repository: Path, *, stage: str) -> None:
         try:
             from agent_worktrees import artifact_scratch, artifact_storage, config, config_sources
@@ -197,7 +199,7 @@ class OwnedTestSandbox:
         diagnostic = None
         if failed:
             diagnostic = json.dumps({
-                "schema": "copilot-extensions.test-runner-diagnostic/v1", "stage": self.stage,
+                "schema": self.diagnostic_schema, "stage": self.stage,
                 "results_tail": self.results,
                 "omitted_result_count": self.group_count - len(self.results),
                 "exception_type": exc_type.__name__ if exc_type is not None else None,
