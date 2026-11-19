@@ -17,8 +17,6 @@ from ..session_observation_contract import (
     VERSION,
     ObservationError,
     ReadRequest,
-    position,
-    read_position,
     sse,
 )
 from ..session_observations import admit, frame
@@ -83,23 +81,11 @@ async def observations(request: Request, read: ReadRequest) -> AsyncIterator[byt
                 return
             try:
                 current = admit(state, read)
-                frame_cursor = cursor
                 if known is not None and (
-                    current.log is not known.log or current.session is not known.session
+                    current.log is not known.log or current.source != known.source
+                    or current.session is not known.session
                 ):
                     raise ObservationError("source-changed", "admitted session source changed")
-                if known is not None and current.source != known.source:
-                    native_id = current.source["durable_session_id"]
-                    if (current.registry != "owned" or prior_source is None or native_id is None
-                            or known.source["durable_session_id"] is not None
-                            or current.source != {**known.source, "durable_session_id": native_id}):
-                        raise ObservationError("source-changed", "admitted session source changed")
-                    if cursor is not None:
-                        # Rebind only the cursor this follower issued. Keep its old
-                        # incarnation so frame() still refuses a concurrent rebuild.
-                        frame_cursor = position(
-                            {**prior_source, "durable_session_id": native_id}, read_position(cursor, prior_source)
-                        )
                 known = current
                 if read.follow and known.registry == "owned" and not subscribed:
                     known.session.subscriber_count += 1
@@ -113,14 +99,14 @@ async def observations(request: Request, read: ReadRequest) -> AsyncIterator[byt
                         producer = tracker
                         unsubscribe = tracker.subscribe(known.log.wake_observers) if tracker else None
                 wake_revision = known.log.observation_revision
-                body = frame(known, read, after=frame_cursor)
-                if frame_cursor != cursor:
-                    body["base_position"] = cursor
+                body = frame(known, read, after=cursor)
                 requests_key = content_key(body.get("current_request_state"))
                 statistics_key = body.get("tool_statistics")
-                if (prior_source is not None and prior_source["journal_incarnation"] is not None
-                        and prior_source["journal_incarnation"] != body["source"]["journal_incarnation"]):
-                    raise ObservationError("source-changed", "event history incarnation changed")
+                if prior_source is not None and body["source"] != prior_source:
+                    if prior_source["journal_incarnation"] is not None:
+                        raise ObservationError(
+                            "source-changed", "event history incarnation changed"
+                        )
                 send = (
                     prior_source is None or prior_source != body["source"] or bool(body["entries"])
                     or requests_key != prior_requests

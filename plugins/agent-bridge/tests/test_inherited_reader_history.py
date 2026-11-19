@@ -119,13 +119,13 @@ async def test_follow_through_inherited_native_id_assignment(tmp_db: Database, c
         assert not session.awaiting_maintenance_refresh
         following = decode((await asyncio.wait_for(anext(stream), 2)).split(b"data: ", 1)[1].strip())
         validate_frame(following, read)
-        if change == "first-id":
-            assert following["kind"] == "delta" and following["source"]["durable_session_id"] == "assigned"
-            assert following["base_position"] == first["position"]
-            assert [event["native_event_id"] for event in following["entries"]] == [2]
-            assert read_position(following["position"], following["source"]) == 2
-        else:
-            assert following["kind"] == "gap" and following["code"] == "source-changed"
+        assert following["kind"] == "gap" and following["code"] == "source-changed"
+        assert following["reconcile"] == "new-snapshot"
+    async with aclosing(cast(AsyncGenerator[bytes, None], observations(req, read))) as fresh:
+        snapshot = decode((await anext(fresh)).split(b"data: ", 1)[1].strip())
+        validate_frame(snapshot, read)
+        assert snapshot["kind"] == "snapshot" and snapshot["source"]["durable_session_id"] == "assigned"
+        assert read_position(snapshot["position"], snapshot["source"]) == writer.latest_id
     assert session.subscriber_count == 0
 
 
