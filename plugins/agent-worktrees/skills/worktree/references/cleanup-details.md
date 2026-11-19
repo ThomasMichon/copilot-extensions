@@ -45,6 +45,11 @@ or completed disposition. Preserve the data or use its producer's explicit
 reclaim operation, then retry cleanup. This includes legacy local history;
 an export alone does not establish a supported writer cutover or permit source
 deletion. Failed ignored-path inspection is a hold, not an empty result.
+Nonempty tracked submodule paths are held too: the parent's clean status does
+not inspect their ignored evidence. Have the submodule owner preserve or dispose
+of its local data and deinitialize it through Git before retrying root cleanup.
+List/status eligibility remains advisory and uses no fresh ignored-data scan;
+the physical removal boundary always rechecks.
 
 Before physical removal, cleanup also checks for live processes whose current
 directory is inside the checkout. Any observed holder defers removal, including

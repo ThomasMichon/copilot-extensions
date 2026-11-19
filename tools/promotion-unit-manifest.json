@@ -9,8 +9,10 @@
         "tools/promotion_unit_tests/test_checkout_disposition.py::test_ignored_disposition_uses_bounded_selected_observation[ignored]",
         "tools/promotion_unit_tests/test_checkout_disposition.py::test_ignored_disposition_uses_bounded_selected_observation[failed]",
         "tools/promotion_unit_tests/test_checkout_disposition.py::test_ignored_disposition_uses_bounded_selected_observation[oversized]",
+        "tools/promotion_unit_tests/test_checkout_disposition.py::test_ignored_disposition_uses_bounded_selected_observation[submodule]",
         "tools/promotion_unit_tests/test_checkout_disposition.py::test_unavailable_observation_preserves_data[timeout]",
         "tools/promotion_unit_tests/test_checkout_disposition.py::test_unavailable_observation_preserves_data[output-limit]",
+        "tools/promotion_unit_tests/test_checkout_disposition.py::test_cached_classification_uses_history_hint_without_fresh_process_work",
         "tools/promotion_unit_tests/test_watch_storage_contract.py::test_incompatible_contract_refuses_read_and_final_write_guard[newer]",
         "tools/promotion_unit_tests/test_watch_storage_contract.py::test_incompatible_contract_refuses_read_and_final_write_guard[future]",
         "tools/promotion_unit_tests/test_watch_storage_contract.py::test_incompatible_contract_refuses_read_and_final_write_guard[invalid]",
@@ -5533,6 +5535,7 @@
     ],
     "coverage_targets": [
         "plugins/agent-worktrees/src/agent_worktrees/checkout_data.py",
+        "plugins/agent-worktrees/src/agent_worktrees/prune.py",
         "plugins/agent-pull-requests/src/agent_pull_requests/watch_storage.py",
         "plugins/agent-worktrees/src/agent_worktrees/resource_delivery.py",
         "libs/plugin-resolve/src/plugin_resolve/git.py",
@@ -5906,7 +5909,8 @@
         "tools/promotion_source_history.py"
     ],
     "sources": {
-        "tools/promotion_unit_tests/test_checkout_disposition.py": "385ee51a7215fb128907e007a2781d6bd8bd3603e69bc6f5b1002101c865b5c5",
+        "tools/promotion_unit_tests/test_checkout_disposition.py": "6fb76b462dbf84919ededfe62ecc181aa51533c61d71489b6d7dc140c70c8bc9",
+        "plugins/agent-worktrees/src/agent_worktrees/prune.py": "933a34e607f4eebb34e967d8920132bf4695842f6e0897e19ff718daadcfe049",
         "plugins/agent-pull-requests/src/agent_pull_requests/watch_storage.py": "a906dabaf190c45bb7a4188c770124864f6abeda310478c4fecd5de113e3b1ff",
         "tools/promotion_unit_tests/test_watch_storage_contract.py": "cf9f31b5b3372891e9db30acfc62a3dbd20cdee4d07be4a5698df531b2f4089d",
         "plugins/agent-worktrees/src/agent_worktrees/git_process.py": "6cc675a4d988e7d1fd6b0d76a48fde5909f78f085ef194ec69625c6334b4f80f",
@@ -6506,7 +6510,7 @@
         "plugins/agent-worktrees/src/agent_worktrees/env_scrub.py": "782334638b61c54bd0f1808aa3abff3b81b26b55b491b8cd6f5a408ec86c2bb5",
         "plugins/agent-worktrees/src/agent_worktrees/execution_spaces.py": "1a6a079dd6c27c1856d9849adfbeea647e3361e973ebf8a98a2bf50924adc06b",
         "plugins/agent-worktrees/src/agent_worktrees/git_errors.py": "caadfc46b1c7b8f52936f946c2cb9b7003a928c0defe7922f1371fdd4c926e6b",
-        "plugins/agent-worktrees/src/agent_worktrees/checkout_data.py": "4cd72d7baba69dbaa7ccd4a62be9ee1ff2d4a24f5d9dd7aaa526e213305115f8",
+        "plugins/agent-worktrees/src/agent_worktrees/checkout_data.py": "c416911e75043fdf58e5d6a5644ed451e23aa4f15b97da52c4c0d1098485fa4b",
         "plugins/agent-worktrees/src/agent_worktrees/git_ops.py": "e6d700d073c54488288bda0f537532091799c6d2cbd2ff689139e14923df2e88",
         "plugins/agent-worktrees/src/agent_worktrees/git_acquisition_budget.py": "ddca41a58c6a1126204260cb1979648db8e3922dd766568072c4d73a67c526d7",
         "plugins/agent-worktrees/src/agent_worktrees/git_fetch.py": "1148ed12cee14ab54f6f2d207fd3052a59944b159bd082493e1bae74bbb61b8a",

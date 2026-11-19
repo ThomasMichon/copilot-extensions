@@ -259,6 +259,35 @@ def test_local_finalization_refuses_ignored_dirty_submodule(
     assert tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml").status == "active"
 
 
+def test_ignored_submodule_evidence_survives_until_owner_disposition_and_deinitialization(
+    local_repo: LocalRepo, foreign_repo: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config, wid, checkout = local_repo
+    (foreign_repo / ".gitignore").write_text("*.evidence\n", encoding="utf-8")
+    (foreign_repo / "tracked.txt").write_text("base\n", encoding="utf-8")
+    _git("add", ".gitignore", "tracked.txt", cwd=foreign_repo)
+    _git("commit", "-m", "submodule fixture", cwd=foreign_repo)
+    _git("-c", "protocol.file.allow=always", "submodule", "add", str(foreign_repo), "nested", cwd=checkout)
+    _git("commit", "-m", "add submodule fixture", cwd=checkout)
+    _git("merge", "--ff-only", f"worktree/{wid}", cwd=Path(config.default_repo.anchor))
+    evidence = checkout / "nested" / "capture.evidence"
+    evidence.write_bytes(b"synthetic ignored submodule evidence")
+    assert not _git("status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none", cwd=checkout)
+    monkeypatch.setattr(finalize, "_has_live_session", lambda record: False)
+    monkeypatch.setattr(procs, "checkout_retirement_blocker", lambda path: None)
+    monkeypatch.setattr(sessions, "_list_mux_sessions", lambda: [])
+
+    assert finalize.validate_and_finalize(wid, config)
+    cleanup_gc_cli.cmd_cleanup(Namespace(clean=True, include_unused=False))
+    assert evidence.read_bytes() == b"synthetic ignored submodule evidence"
+    assert checkout.is_dir()
+
+    evidence.unlink()
+    _git("submodule", "deinit", "--all", cwd=checkout)
+    cleanup_gc_cli.cmd_cleanup(Namespace(clean=True, include_unused=False))
+    assert not checkout.exists()
+
+
 @pytest.mark.parametrize("later", ["committed", "hidden-untracked", "missing-checkout"])
 def test_local_cleanup_rechecks_content_after_finalize(
     local_repo: LocalRepo, monkeypatch: pytest.MonkeyPatch, later: str,

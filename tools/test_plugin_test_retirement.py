@@ -107,7 +107,29 @@ def test_partial_retirement_holds_source_and_can_be_repreviewed(
     assert source.is_dir() and (root / ".dep-fingerprint").exists()
     with pytest.raises(ValueError, match="terminally retired"):
         retirement.require_active(root)
+    (root / (retirement.MARKER + ".new")).write_bytes((root / retirement.MARKER).read_bytes())
     monkeypatch.setattr(retirement, "clear_cache_contents", clear)
+    assert retirement.apply(retirement.preview(source, "example"))["outcome"] == "retired"
+
+
+def test_failed_marker_publication_cleans_its_own_temporary_file(
+    environment: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, root = environment
+    replace_path = Path.replace
+
+    def failed(path: Path, target: str | Path) -> Path:
+        if path.name.startswith(retirement.MARKER + ".new-"):
+            raise PermissionError("fixture marker publication failed")
+        return replace_path(path, target)
+
+    monkeypatch.setattr(Path, "replace", failed)
+    with pytest.raises(PermissionError, match="fixture marker"):
+        retirement.apply(retirement.preview(source, "example"))
+    assert (root / "interpreter").exists()
+    assert not list(root.glob(retirement.MARKER + ".new-*"))
+    assert not (root / retirement.MARKER).exists()
+    monkeypatch.setattr(Path, "replace", replace_path)
     assert retirement.apply(retirement.preview(source, "example"))["outcome"] == "retired"
 
 
@@ -242,6 +264,51 @@ def test_interrupted_owner_keeps_the_fence_and_requires_a_new_preview(
     with pytest.raises(ValueError, match="stale"):
         retirement.apply(plan)
     assert retirement.apply(retirement.preview(source, "example"))["outcome"] == "retired"
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+def test_interrupted_final_marker_publication_recovers_with_a_new_preview(
+    environment: tuple[Path, Path], tmp_path: Path,
+) -> None:
+    source, root = environment
+    plan = retirement.preview(source, "example")
+    ready = tmp_path / "marker-publication-ready"
+    code = "\n".join((
+        "import json,os,pathlib,sys,threading",
+        "sys.path.insert(0,sys.argv[1])",
+        "import plugin_test_retirement as r",
+        "threading.Timer(15,lambda:os._exit(124)).start()",
+        "original=pathlib.Path.replace",
+        "def paused(path,target):",
+        " if path.name.startswith(r.MARKER+'.new-') and json.loads(path.read_text())['state']=='retired':",
+        "  pathlib.Path(sys.argv[3]).write_text('ready')",
+        "  sys.stdin.readline()",
+        " return original(path,target)",
+        "pathlib.Path.replace=paused",
+        "r.apply(r.parse_preview(json.loads(sys.argv[2])))",
+    ))
+    process = subprocess.Popen(
+        [sys.executable, "-B", "-c", code, str(Path(__file__).parent), json.dumps(asdict(plan)), str(ready)],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    try:
+        deadline = time.monotonic() + 10
+        while not ready.exists() and process.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert ready.exists(), "retirement owner did not reach final marker publication"
+    finally:
+        if process.poll() is None:
+            process.terminate()
+        process.communicate(timeout=10)
+    assert process.returncode != 0
+    assert json.loads((root / retirement.MARKER).read_text())["state"] == "retiring"
+    assert len(list(root.glob(retirement.MARKER + ".new-*"))) == 1
+    assert source.is_dir()
+    assert retirement.apply(retirement.preview(source, "example"))["outcome"] == "retired"
+    assert [path.name for path in root.iterdir()] == [retirement.MARKER]
 
 
 @pytest.mark.portfolio_tier("T2")
