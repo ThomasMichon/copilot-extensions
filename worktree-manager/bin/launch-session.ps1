@@ -1516,9 +1516,17 @@ if (-not $noMux -and -not $psmuxCmd) {
 function Resolve-AwPsmuxBin {
     param($Cmd)
     if (-not $Cmd) { return 'psmux' }
+    $src = $Cmd.Source
     $pathHelper = Join-Path $PSScriptRoot 'psmux-path.ps1'
     if (Test-Path -LiteralPath $pathHelper) {
         . $pathHelper
+        # A compatible PATH client wins, as in the Python creation gate. Only
+        # file metadata is read, so no provider process starts.
+        $pathVersion = $null
+        try { $pathVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo($src).FileVersion } catch {}
+        if (Test-AwPsmuxVersionCompatible -Version $pathVersion -MinimumVersion '3.4.0') {
+            return $src
+        }
         # Side-by-side copies let a newer client create sessions while an older
         # provider keeps serving its live sessions.
         $desired = Find-AwCompatiblePsmuxPackageBinary `
@@ -1526,7 +1534,6 @@ function Resolve-AwPsmuxBin {
             -SideBySideRoot (Get-AwPsmuxSideBySideRoot)
         if ($desired) { return $desired.Path }
     }
-    $src = $Cmd.Source
     try {
         $item = Get-Item -LiteralPath $src -ErrorAction Stop
         $isReparse = [bool]($item.Attributes -band [IO.FileAttributes]::ReparsePoint)
@@ -1540,9 +1547,22 @@ function Resolve-AwPsmuxBin {
     } catch {}
     return $src
 }
+
+# Put the selected client's directory first on this process PATH, so panes and
+# helpers that run a bare `psmux` use the same client as the launcher.
+function Set-AwPsmuxProcessPathFirst {
+    param([string]$Binary)
+    if (-not $Binary -or -not [IO.Path]::IsPathRooted($Binary)) { return }
+    $dir = (Split-Path -Parent $Binary).TrimEnd('\', '/')
+    $sep = [IO.Path]::PathSeparator
+    $entries = @(([string]$env:PATH) -split [regex]::Escape([string]$sep) | Where-Object { $_ })
+    $rest = @($entries | Where-Object { $_.TrimEnd('\', '/') -ine $dir })
+    $env:PATH = (@($dir) + $rest) -join $sep
+}
 $script:AwPsmuxBin = Resolve-AwPsmuxBin $psmuxCmd
 if ($psmuxCmd -and $script:AwPsmuxBin -ne $psmuxCmd.Source) {
-    Write-SetupLog "psmux: resolved WinGet reparse stub to real exe: $($script:AwPsmuxBin)"
+    Write-SetupLog "psmux: selected $($script:AwPsmuxBin) instead of PATH $($psmuxCmd.Source)"
+    Set-AwPsmuxProcessPathFirst $script:AwPsmuxBin
 }
 
 # Detect nested invocation: if we're already inside a psmux/tmux session,

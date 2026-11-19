@@ -342,6 +342,22 @@ def test_creation_selects_newest_side_by_side_copy_when_path_copy_is_old(
     assert Path(selected) == Path(paths["side/3.5.1"])
 
 
+def test_creation_ignores_incomplete_side_by_side_install_directories(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths = _versioned_tree(tmp_path, monkeypatch, {
+        "path-bin": (3, 3, 8, 0),
+        "side/3.4.0": (3, 4, 0, 0),
+        "side/3.9.0.partial-abc": (3, 9, 0, 0),
+        "side/.staging-abc": (3, 9, 0, 0),
+    })
+    monkeypatch.setattr(shutil, "which", lambda binary: paths["path-bin"])
+    selected = windows_mux_version.require_creation_binary(
+        "psmux", search_roots=[str(tmp_path / "side")],
+    )
+    assert Path(selected) == Path(paths["side/3.4.0"])
+
+
 def test_creation_keeps_compatible_path_copy_before_side_by_side_copies(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

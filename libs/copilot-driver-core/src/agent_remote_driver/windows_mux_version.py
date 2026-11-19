@@ -76,6 +76,12 @@ def default_search_roots() -> list[str]:
     return roots
 
 
+def _is_install_staging(name: str) -> bool:
+    # The installer copies into ".staging-*" or "<version>.partial-*" and then
+    # renames the directory; an incomplete copy must never be selected.
+    return name.startswith(".") or ".partial-" in name
+
+
 def compatible_candidates(
     search_roots: "Iterable[str]",
 ) -> list[tuple[tuple[int, int, int, int], str]]:
@@ -90,7 +96,8 @@ def compatible_candidates(
         try:
             paths.extend(
                 os.path.join(entry.path, "psmux.exe")
-                for entry in os.scandir(root) if entry.is_dir()
+                for entry in os.scandir(root)
+                if entry.is_dir() and not _is_install_staging(entry.name)
             )
         except OSError:
             pass
