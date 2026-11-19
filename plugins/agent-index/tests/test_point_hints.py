@@ -314,6 +314,43 @@ def test_point_pin_cannot_be_applied_to_plain_v1_or_terminal_work(tmp_path: Path
     assert "point_claim_id" not in record(store, plain.id).to_dict()
 
 
+@pytest.mark.parametrize("subset", [False, True])
+def test_legacy_duplicate_or_subset_union_cannot_absorb_post_pin_delivery(
+    tmp_path: Path, subset: bool,
+) -> None:
+    path = tmp_path / "tasks.db"
+    store = TaskStore(path)
+    original = hints(targets=(
+        WorkItemRevisionTarget("42", 7, ("event-a",)),
+        CommentVersionTarget("42", "9", 2, ("event-b",)),
+    ))
+    task = enqueue(store, original)
+    pinned = store.pin_point_claim(task.id, expected_hints=original)
+    delivery = replace(original, targets=original.targets[:1]) if subset else original
+    with sqlite3.connect(path) as conn:
+        # Released v2 writers select any parked row, including a pinned one.
+        conn.execute("BEGIN IMMEDIATE")
+        selected = conn.execute(
+            "SELECT id, point_change_hints FROM tasks WHERE status = 'queued_hints_v2' "
+            "AND source = ? AND change_hints_version = 2 ORDER BY created_at, id",
+            (original.source,),
+        ).fetchone()
+        assert selected is not None and selected[0] == task.id
+        retained = read_change_hints(selected[1])
+        assert isinstance(retained, PointChangeHints)
+        unchanged = retained.union(delivery)
+        assert unchanged == original
+        with pytest.raises(sqlite3.IntegrityError, match="Pinned point claim"):
+            conn.execute(
+                "UPDATE tasks SET change_hints = NULL, point_change_hints = ?, "
+                "updated_at = updated_at + 1 WHERE id = ?", (unchanged.to_json(), task.id),
+            )
+    assert record(store, task.id) == pinned
+    trailing = enqueue(store, delivery)
+    assert trailing.id != task.id and trailing.change_hints == delivery
+    assert record(store, task.id) == pinned
+
+
 def test_union_budget_refuses_atomically_and_duplicate_at_limit_is_idempotent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

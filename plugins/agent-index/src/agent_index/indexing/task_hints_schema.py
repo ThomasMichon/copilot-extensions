@@ -110,13 +110,7 @@ def install_hints_schema(conn: sqlite3.Connection) -> None:
         CREATE TRIGGER IF NOT EXISTS tasks_point_claim_immutable
         BEFORE UPDATE OF id, source, full, change_hints, point_change_hints,
             change_hints_version, point_claim_id ON tasks
-        WHEN OLD.point_claim_id IS NOT NULL AND (
-            NEW.id IS NOT OLD.id OR NEW.source IS NOT OLD.source
-            OR NEW.full IS NOT OLD.full OR NEW.change_hints IS NOT OLD.change_hints
-            OR NEW.point_change_hints IS NOT OLD.point_change_hints
-            OR NEW.change_hints_version IS NOT OLD.change_hints_version
-            OR NEW.point_claim_id IS NOT OLD.point_claim_id
-        )
+        WHEN OLD.point_claim_id IS NOT NULL
         BEGIN
             SELECT RAISE(ABORT, 'Pinned point claim and its entire scope are immutable');
         END;

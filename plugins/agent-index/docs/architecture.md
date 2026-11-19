@@ -1203,9 +1203,10 @@ New arrivals union only into unpinned rows, so deliveries after the pin create
 or extend trailing work, even if they repeat an already pinned target. A
 separate durable trigger rejects changes to a pinned task's identity, full
 flag, source, hint version, complete payload or pin; an older runtime replacing
-the original hints trigger cannot remove this protection. An old union writer
-that selects the pinned row fails visibly rather than modifying it. Legacy
-plain/v1 rows and their positional `TaskRecord` constructor remain unchanged.
+the original hints trigger cannot remove this protection. Every write targeting
+those protected columns refuses, including unchanged duplicate/subset unions:
+an old writer must not report a post-pin delivery accepted by the frozen row.
+Legacy plain/v1 rows and their positional `TaskRecord` constructor remain unchanged.
 No runner or HTTP/CLI producer calls this Python-only pin operation.
 
 There is **no v2 execution capability**, even if a selected callable has v1
