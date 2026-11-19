@@ -1234,13 +1234,17 @@ canonical fingerprint and retained applied record. The opt-in
 Its explicit [native application](component-ledger.md#explicit-native-application)
 qualifies pending-parent, raw-point, fingerprint, routed-model and path evidence,
 then applies selected points under the existing writer without polling or claim
-completion.
+completion. Its explicit
+[sealed publication continuation](component-ledger.md#sealed-native-publication-suffix)
+can reconcile ordering/path suffixes only after the native phase is fully
+qualified and durably sealed under those same owners.
 
 There is no advertised component execution capability or producer. Automatic
 partial-effect/backup reconciliation, whole-claim completion and explicit read
 isolation remain required before recovery refusal or the v2 queue fences can be
-expanded. The explicit native application retains pending work and refuses
-dirty/uncertain state; it does not change legacy callers or default readers.
+expanded. Ordinary reopening still refuses dirty/uncertain state; an unknown
+mid-native effect cannot be recovered from cached bytes or surviving rows.
+These helpers do not change legacy callers or default readers.
 
 An in-process connector opts in by advertising `change_hints_versions = (1,)`
 on its actual `discover_hints(hints, last_commit, *, cancel_check=None)` callable.

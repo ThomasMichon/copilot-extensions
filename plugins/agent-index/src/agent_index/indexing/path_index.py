@@ -231,7 +231,7 @@ class PathIndex:
                       OR (source >= ? COLLATE BINARY AND source < ? COLLATE BINARY)""",
                 (family, f"{family}:", f"{family};"),
             ).fetchone()
-            return row["total"]
+            return int(row["total"])
         finally:
             conn.close()
 
@@ -408,6 +408,30 @@ class PathIndex:
         finally:
             conn.close()
 
+    def get_checkpoint_rows(
+        self, identities: list[tuple[str, str]],
+    ) -> dict[tuple[str, str], tuple[str | None, int, float]]:
+        """Read selected hashes, counts and timestamps for exact publication recovery."""
+        identities = list(dict.fromkeys(identities))
+        result: dict[tuple[str, str], tuple[str | None, int, float]] = {}
+        conn = self._connect()
+        try:
+            for offset in range(0, len(identities), 100):
+                batch = identities[offset:offset + 100]
+                predicate = " OR ".join("(source = ? AND file_path = ?)" for _ in batch)
+                rows = conn.execute(
+                    "SELECT source, file_path, content_hash, chunk_count, indexed_at "
+                    f"FROM indexed_files WHERE {predicate}",
+                    [value for identity in batch for value in identity],
+                )
+                for row in rows:
+                    result[(row["source"], row["file_path"])] = (
+                        row["content_hash"], row["chunk_count"], row["indexed_at"],
+                    )
+            return result
+        finally:
+            conn.close()
+
     def get_content_hashes(self, source: str) -> dict[str, str | None]:
         """Return {file_path: content_hash} for all files in a source."""
         conn = self._connect()
@@ -433,7 +457,7 @@ class PathIndex:
                 row = conn.execute(
                     "SELECT COUNT(*) AS cnt FROM indexed_files",
                 ).fetchone()
-            return row["cnt"]
+            return int(row["cnt"])
         finally:
             conn.close()
 
