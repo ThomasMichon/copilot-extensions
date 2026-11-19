@@ -2,6 +2,7 @@
 
 import json
 from contextlib import nullcontext
+from copy import deepcopy
 from pathlib import Path
 import secrets
 import shutil
@@ -244,7 +245,9 @@ def test_target_disposition_preserves_an_unrelated_sibling_allocation(
     expected = {"success": 0, "failure": 7, "timeout": 124, "unknown": 125}[disposition]
     program = "from pathlib import Path; import time; Path('payload.bin').write_bytes(b'target'); "
     program += "time.sleep(30)" if disposition == "timeout" else f"raise SystemExit({7 if disposition == 'failure' else 0})"
-    with (pytest.raises(UnreapedProcessError) if disposition == "unknown" else nullcontext()):
+    with (pytest.raises(
+        UnreapedProcessError, match=r"\Apreserve the enclosing scope while target cleanup is unknown\Z",
+    ) if disposition == "unknown" else nullcontext()):
         with sibling as raw_sibling:
             sibling_path = Path(raw_sibling)
             sentinel = sibling_path / "sibling.bin"
@@ -253,6 +256,10 @@ def test_target_disposition_preserves_an_unrelated_sibling_allocation(
             marker = (sibling_path / "scratch-owner.json").read_bytes()
             assert sibling.allocation is not None
             sibling_token = sibling.allocation["token"]
+            bound_ref = sibling.allocation["ref"]
+            bound_producer = deepcopy(sibling.allocation["producer"])
+            initial_claim, = tracking.load_record(ledger).resources
+            assert initial_claim.ref == bound_ref and initial_claim.producer == bound_producer
             assert runner.main([
                 "--owner", owner, "--kind", "spike",
                 "--timeout", "2" if disposition == "timeout" else "20",
@@ -271,6 +278,7 @@ def test_target_disposition_preserves_an_unrelated_sibling_allocation(
             target_claim = next(claim for claim in claims if claim is not sibling_claim)
             sibling_state, target_state = sibling_claim.producer, target_claim.producer
             assert isinstance(sibling_state, dict) and isinstance(target_state, dict)
+            assert sibling_claim.ref == bound_ref and sibling_state == bound_producer
             assert sibling_state["phase"] == "bound" and sibling_claim.is_unsettled
             assert target_state["phase"] == {
                 "success": "closed", "failure": "retained", "timeout": "retained", "unknown": "bound",
