@@ -68,16 +68,16 @@ opt-in, so an unsatisfied required account cannot become a successful skip.
 resources:
   - type: health-job
     state: present
-    platforms: [windows]
+    platforms: [windows, linux]
     maintenance_safe: true
 ```
 
-Converge an already adopted **local** Windows health job through its installed
+Converge an already adopted **local** Windows or Linux health job through its installed
 runtime owner. An absent local opt-in is a no-op, not enrollment. This resource
 accepts only common resource fields and `state`; store/policy, account,
 enabled intent and execution fields cannot be supplied by a package.
-`state: absent` settles/removes the owned task and withdraws local adoption,
-preserving health history and unrelated tasks. Linux enrollment is unsupported.
+`state: absent` settles/removes the owned task or service/timer pair and withdraws
+local adoption, preserving health history and unrelated native jobs.
 Use [`health job configure`](health-report.md#installed-windows-enrollment)
 for local preview/confirmation, and that page for replacement, rollback,
 unknown-outcome custody and status. This job is not the self-update watchdog.
