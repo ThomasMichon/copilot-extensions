@@ -206,6 +206,151 @@ def test_persisted_fence_survives_old_status_retry_and_completion_sql(tmp_path: 
     assert record(TaskStore(path), task.id).change_hints == task.change_hints
 
 
+def test_pin_freezes_whole_claim_and_retains_trailing_union_after_reopen(tmp_path: Path) -> None:
+    path = tmp_path / "tasks.db"
+    store = TaskStore(path)
+    original = hints(targets=(
+        WorkItemRevisionTarget("42", 7, ("event-a",)),
+        CommentVersionTarget("42", "9", 2, ("event-b",)),
+        CommentVersionTarget("43", "9", 2, ("event-c",)),
+    ))
+    task = enqueue(store, original)
+    pinned = store.pin_point_claim(task.id, expected_hints=original)
+    assert pinned.point_claim_id is not None
+    assert pinned.status == "queued_hints_v2"
+    assert pinned.change_hints == original
+    assert TaskStore(path).pin_point_claim(task.id, expected_hints=original) == pinned
+    later = hints(targets=(
+        WorkItemRevisionTarget("42", 8, ("event-d",)),
+        CommentVersionTarget("42", "9", 3, ("event-e",)),
+    ))
+    trailing = enqueue(TaskStore(path), later)
+    assert trailing.id != task.id and trailing.point_claim_id is None
+    duplicate = enqueue(store, original)
+    assert duplicate.id == trailing.id
+    assert duplicate.change_hints == later.union(original)
+    assert record(store, task.id) == pinned
+    assert store.cancel(task.id)
+    assert store.retry(task.id) is not None
+    retried = record(TaskStore(path), task.id)
+    assert retried.point_claim_id == pinned.point_claim_id
+    assert retried.change_hints == original
+    assert retried.attempt_count == 2
+    assert enqueue(store, later).id == trailing.id
+    assert store.dequeue_next(accept_change_hints=True) is None
+    assert store.get_active_task() is None
+    assert retried.to_dict()["point_claim_id"] == pinned.point_claim_id
+    before = sql(path, "SELECT * FROM tasks ORDER BY id")
+    for status in ("processing", "complete", "partial"):
+        with pytest.raises(sqlite3.IntegrityError, match="v2 execution is unsupported"):
+            store.update_status(task.id, status)
+    with pytest.raises(sqlite3.IntegrityError, match="worker not registered"):
+        store.set_worker(task.id, 123, "test", "future")
+    assert sql(path, "SELECT * FROM tasks ORDER BY id") == before
+
+
+def test_pin_refuses_stale_or_partial_snapshot_without_losing_arrivals(tmp_path: Path) -> None:
+    path = tmp_path / "tasks.db"
+    store = TaskStore(path)
+    original = hints()
+    task = enqueue(store, original)
+    later = hints(targets=(CommentVersionTarget("42", "9", 2, ("event-b",)),))
+    merged = enqueue(store, later)
+    before = sql(path, "SELECT * FROM tasks")
+    for stale in (original, later, replace(original, account_id="another")):
+        with pytest.raises(ValueError, match="no longer matches"):
+            store.pin_point_claim(task.id, expected_hints=stale)
+        assert sql(path, "SELECT * FROM tasks") == before
+    pinned = store.pin_point_claim(task.id, expected_hints=original.union(later))
+    assert pinned.change_hints == merged.change_hints
+    with pytest.raises(ValueError, match="does not exist"):
+        store.pin_point_claim("absent", expected_hints=original)
+    assert store.cancel(task.id)
+    before = sql(path, "SELECT * FROM tasks")
+    with pytest.raises(ValueError, match="no longer matches"):
+        store.pin_point_claim(task.id, expected_hints=original.union(later))
+    assert sql(path, "SELECT * FROM tasks") == before
+
+
+@pytest.mark.parametrize("assignment,value", [
+    ("point_change_hints", hints(targets=(WorkItemRevisionTarget("42", 8),)).to_json()),
+    ("point_change_hints", None), ("point_claim_id", None),
+    ("point_claim_id", "a" * 32), ("source", "ado:other:points"),
+    ("id", "replacement-task"), ("full", 1), ("change_hints_version", 1),
+])
+def test_pinned_claim_survives_legacy_union_and_reinitialization(
+    tmp_path: Path, assignment: str, value: object,
+) -> None:
+    path = tmp_path / "tasks.db"
+    store = TaskStore(path)
+    task = enqueue(store)
+    pinned = store.pin_point_claim(task.id, expected_hints=hints())
+    # Prior installers recreate the shared hints trigger. The additive pin
+    # trigger must protect the snapshot independently of that older definition.
+    sql(path, "DROP TRIGGER tasks_hints_immutable")
+    before = sql(path, "SELECT * FROM tasks")
+    with pytest.raises(sqlite3.IntegrityError, match="Pinned point claim"):
+        sql(path, f"UPDATE tasks SET {assignment} = ? WHERE id = ?", (value, task.id))
+    assert sql(path, "SELECT * FROM tasks") == before
+    assert record(TaskStore(path), task.id) == pinned
+
+
+def test_point_pin_cannot_be_applied_to_plain_v1_or_terminal_work(tmp_path: Path) -> None:
+    path = tmp_path / "tasks.db"
+    store = TaskStore(path)
+    plain = store.enqueue("git:plain")
+    legacy = ChangeHints(source=hints().source, canonical_family=hints().canonical_family,
+                         account_id=hints().account_id, item_ids=("42",))
+    v1 = store.enqueue(legacy.source, change_hints=legacy)
+    point = enqueue(store)
+    assert store.cancel(point.id)
+    before = sql(path, "SELECT * FROM tasks ORDER BY id")
+    for task in (plain, v1, point):
+        with pytest.raises(ValueError, match="no longer matches"):
+            store.pin_point_claim(task.id, expected_hints=hints())
+        with pytest.raises(sqlite3.IntegrityError, match="require a parked v2"):
+            sql(path, "UPDATE tasks SET point_claim_id = ? WHERE id = ?", ("b" * 32, task.id))
+    assert sql(path, "SELECT * FROM tasks ORDER BY id") == before
+    assert "point_claim_id" not in record(store, plain.id).to_dict()
+
+
+@pytest.mark.parametrize("subset", [False, True])
+def test_legacy_duplicate_or_subset_union_cannot_absorb_post_pin_delivery(
+    tmp_path: Path, subset: bool,
+) -> None:
+    path = tmp_path / "tasks.db"
+    store = TaskStore(path)
+    original = hints(targets=(
+        WorkItemRevisionTarget("42", 7, ("event-a",)),
+        CommentVersionTarget("42", "9", 2, ("event-b",)),
+    ))
+    task = enqueue(store, original)
+    pinned = store.pin_point_claim(task.id, expected_hints=original)
+    delivery = replace(original, targets=original.targets[:1]) if subset else original
+    with sqlite3.connect(path) as conn:
+        # Released v2 writers select any parked row, including a pinned one.
+        conn.execute("BEGIN IMMEDIATE")
+        selected = conn.execute(
+            "SELECT id, point_change_hints FROM tasks WHERE status = 'queued_hints_v2' "
+            "AND source = ? AND change_hints_version = 2 ORDER BY created_at, id",
+            (original.source,),
+        ).fetchone()
+        assert selected is not None and selected[0] == task.id
+        retained = read_change_hints(selected[1])
+        assert isinstance(retained, PointChangeHints)
+        unchanged = retained.union(delivery)
+        assert unchanged == original
+        with pytest.raises(sqlite3.IntegrityError, match="Pinned point claim"):
+            conn.execute(
+                "UPDATE tasks SET change_hints = NULL, point_change_hints = ?, "
+                "updated_at = updated_at + 1 WHERE id = ?", (unchanged.to_json(), task.id),
+            )
+    assert record(store, task.id) == pinned
+    trailing = enqueue(store, delivery)
+    assert trailing.id != task.id and trailing.change_hints == delivery
+    assert record(store, task.id) == pinned
+
+
 def test_union_budget_refuses_atomically_and_duplicate_at_limit_is_idempotent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

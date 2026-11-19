@@ -88,6 +88,15 @@ through the existing `agent-index.change-hints` contract, retaining v1:
   Retain the ordinary polling checkpoint. Partial, unsupported, cancelled or
   failed work cannot become successful acknowledgement of the claim.
 
+  The shared queue now exposes an explicit
+  [parked whole-envelope pin](../../../plugins/agent-index/docs/architecture.md#point-only-v2-intake-execution-unsupported).
+  It isolates trailing arrivals and retains an immutable claim identity across
+  retry, but supplies no target coverage or completion receipt. Binding this
+  identity and the entire typed target set to a pending acquisition/application,
+  qualifying every target's durable outcome, and acknowledging only that exact
+  claim remain prerequisites; the v2 execution and terminal-success fences stay
+  closed.
+
 The existing owners are `indexing/change_hints.py` and
 `change_hints_contract.py` for intake/negotiation, `task_store.py` and
 `task_hints_schema.py` for durable union/claim isolation, `hinted_crawl.py` and

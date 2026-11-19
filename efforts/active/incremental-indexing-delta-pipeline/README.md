@@ -144,7 +144,8 @@ After the reviewed proposal, the operator admitted execution:
   exact identities before broader polling and repair coverage (#13363).
   Its [point-component contract proposal](azure-devops-point-targets.md)
   separates named target coverage from combined-document replacement (#13386);
-  typed intake now retains parked v2 claims with v1-only dequeue isolation.
+  typed intake now retains parked v2 claims with v1-only dequeue isolation and
+  explicit whole-envelope pinning that separates trailing arrivals.
   A [retained component carrier](../../../plugins/agent-index/docs/architecture.md#component-recovery-carrier-application-unsupported)
   preserves ordering inputs behind pre-application refusal, including changed
   replacement and premature-completion refusal. Pure content/version comparison
