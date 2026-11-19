@@ -286,7 +286,9 @@ async def _lifespan(app: FastAPI):
     app.state.db = db
 
     if independent_source:
-        (db_path.parent / "hosts").mkdir(parents=True, exist_ok=True)
+        from .session_host.host_index import HostIndex
+
+        HostIndex.provision_root(db_path.parent / "hosts")
         mgr = session_manager_from_config(db, cfg, read_only_rehydrate=True)
     else:
         mgr = session_manager_from_config(db, cfg)
