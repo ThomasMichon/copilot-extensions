@@ -13,6 +13,7 @@ import pytest
 from agent_index.index_config import IndexConfig
 from agent_index.indexing.point_hints import PointBinding, PointChangeHints, WorkItemRevisionTarget
 from agent_index.store.cluster_store import ClusterStore
+from agent_index.store.clustering import Cluster, ClusterMember
 from agent_index.store.content_store import ContentStore
 from agent_index.store.multi_model_store import MultiModelStore
 from agent_index.store.source_layout import (
@@ -83,6 +84,36 @@ def test_cold_point_binding_reopens_without_enabling_default_stores(
     with pytest.raises(SourceLayoutError):
         ContentStore(config.lance_dir)
     assert snapshot(config.data_dir) == before
+
+
+def test_relative_cluster_connection_cannot_retarget_to_marked_destination(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("AGENT_INDEX_STORE_LAYOUT", raising=False)
+    original, destination = tmp_path / "original", tmp_path / "destination"
+    original.mkdir()
+    destination.mkdir()
+    monkeypatch.chdir(original)
+    store = ClusterStore(Path("shared/clusters.db"))
+
+    def cluster(name: str) -> Cluster:
+        return Cluster(
+            "sample:items", name, (ClusterMember("sample:items", f"{name}.md", 1.0, False),), False,
+        )
+
+    assert store.replace_all([cluster("original")]) == 1
+    target = destination / "shared"
+    other = ClusterStore(target / "clusters.db")
+    assert other.replace_all([cluster("destination-a"), cluster("destination-b")]) == 2
+    monkeypatch.setenv("AGENT_INDEX_STORE_LAYOUT", LAYOUT)
+    initialize_source_layout(target / "lance", point_scope=claim().scope)
+    before = snapshot(target)
+    monkeypatch.chdir(destination)
+    assert store.stats()["clusters"] == 1
+    assert len(store.list_clusters()) == 1
+    assert store.replace_all([]) == 0
+    assert store.stats()["clusters"] == 0
+    assert snapshot(target) == before
 
 
 def test_point_scope_cannot_rebind_legacy_or_unmarked_state(

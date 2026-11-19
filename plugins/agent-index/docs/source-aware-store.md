@@ -52,7 +52,9 @@ recheck the receipt instead of trusting an earlier open. Legacy handles opened
 before marking also check for later selection before native reads or writes,
 including direct vector access and sibling cluster state. Guards use the native
 connection's stable URI or an absolute retained sibling path, not a relative
-caller path that can retarget after a working-directory change. Every receipt
+caller path that can retarget after a working-directory change. The cluster
+database and its sibling guard derive from the same constructor-resolved
+absolute database path. Every receipt
 reader rejects duplicate fields. Protocol 1 otherwise retains its existing
 meaning and forward-compatible metadata handling.
 

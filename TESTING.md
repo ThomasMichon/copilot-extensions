@@ -7533,6 +7533,9 @@ refuse before reads or writes, including empty input and empty inventory.
 The same native controls cover relative opens followed by a working-directory
 change; in-memory controls cover both duplicate-protocol orders for default
 and explicitly selected readers.
+The cluster connection regression also marks a destination reached only after
+`chdir`: the original handle must keep reading and mutating its original
+database without changing the marked destination's files.
 Neither lane enables component-shaped reads, applied-version qualification or
 v2 execution; selected point-domain handles still refuse legacy operations.
 

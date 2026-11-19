@@ -119,8 +119,8 @@ class ClusterStore:
     """Persisted similarity clusters with simple query access."""
 
     def __init__(self, db_path: str | Path) -> None:
-        self._db_path = str(db_path)
-        self._source_path = Path(db_path).resolve().parent / "lance"
+        self._db_path = str(Path(db_path).resolve())
+        self._source_path = Path(self._db_path).parent / "lance"
         self._source_domain = domain_for(self._source_path)
         if self._source_domain is None:
             self._init_db()
