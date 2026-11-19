@@ -87,7 +87,10 @@ shared owners:
   acknowledgement contract needed to represent those targets without replacing
   uncovered content. Preserve existing indexed content and reader behavior,
   use negotiated old/new compatibility, and do not silently introduce a
-  body-only projection or a connector-private progress store.
+  body-only projection or a connector-private progress store. The
+  [point-component proposal](azure-devops-point-targets.md) selects an explicit
+  separate representation, typed claims and version-ordered application; it
+  does not enable that representation or migrate existing sources.
 
 In either path, bind endpoint/account, query union and current
 definition/context, candidate identity and the precise claimed target. Refuse
