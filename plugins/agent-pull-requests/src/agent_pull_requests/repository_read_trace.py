@@ -10,7 +10,7 @@ from typing import Any
 
 LOGGER = "agent_pull_requests.reviewer_reads"
 _LOG = logging.getLogger(LOGGER)
-_LIMIT = 16
+_LIMIT = 8
 _REASONS = frozenset({
     "activity-unavailable", "candidate-unavailable", "author-unavailable",
     "review-activity-unavailable", "review-dismissed", "reviewed-base-unknown",

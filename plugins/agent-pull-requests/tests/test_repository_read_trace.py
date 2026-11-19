@@ -186,5 +186,5 @@ def test_read_trace_caps_summaries_and_never_serializes_opaque_fields(
     )
     assert returned is result
     row, = records(caplog)
-    assert row["unavailable_count"] == 40 and len(row["unavailable"]) == 16 and row["truncated"]
+    assert row["unavailable_count"] == 40 and len(row["unavailable"]) == 8 and row["truncated"]
     assert marker not in caplog.text and len(caplog.records[0].getMessage().encode()) < 8192

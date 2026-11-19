@@ -118,7 +118,7 @@ owns capture and retention. There is no separate file, exporter, timer or poller
 Records use schema `agent-pull-requests.reviewer-read`, version 1. They include
 the configured target, repository-key digest and requested reviewer; requested,
 projection and event cursors; inventory outcome/age; returned PR/head/base,
-action/reason and unavailable PR/reason summaries. At most 16 entries from
+action/reason and unavailable PR/reason summaries. At most eight entries from
 each list are included, with counts and a truncation flag. An empty successful
 projection is distinct from stale/unavailable evidence and a failed read.
 Failed reads keep unavailable cursor/age fields null, not invented or
@@ -133,6 +133,15 @@ fixed diagnostic rather than exception text. Summaries omit request/response
 bodies, titles, review/comment content, principals, consumers, registrations,
 transport headers, endpoint URLs and all credential material. Logging failure
 does not change read eligibility, results or the original exception.
+
+The foreground handler uses Linux nonblocking writes to its existing pipe or
+Unix-stream stderr sink, without changing the caller's descriptor flags. It
+retains at most one 4-KiB pending line and makes at most two write attempts per
+read. While that line cannot progress, newer diagnostics are dropped; the next
+admitted line reports `dropped_reads`. Oversized records and unsupported sinks
+are dropped too. Shutdown discards pending diagnostics without flushing or
+waiting for a stalled sink. An interrupted partial socket line is incomplete
+evidence, not a valid JSON record. There is no diagnostic worker or drain loop.
 
 Core source support, host stderr configuration, installed package selection and
 actual supervisor-captured records are separate evidence. Updating source alone
