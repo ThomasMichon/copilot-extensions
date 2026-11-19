@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Mapping
+from typing import Any, Callable, Mapping
 from urllib.parse import urlsplit
 
 from pydantic import ValidationError
@@ -30,7 +30,7 @@ class RemoteTargetEntry:
     global_scope: bool = True
     reason: str = ""
 
-    def row(self) -> dict:
+    def row(self) -> dict[str, Any]:
         state = "bound" if self.target is not None else (
             "requires-binding" if self.reason in {
                 "instance-binding-required", "binding-owner-mismatch", "binding-project-mismatch",
@@ -53,6 +53,7 @@ class RemoteTargetEntry:
             "global_scope": self.global_scope,
             "state": state,
             "unavailable_reason": self.reason,
+            "supports_worktrees": False,
         }
 
 
@@ -162,7 +163,7 @@ class RemoteAcpCatalog:
                         )
         return entries
 
-    def rows(self, project: str | None = None, *, refresh: bool = True) -> list[dict]:
+    def rows(self, project: str | None = None, *, refresh: bool = True) -> list[dict[str, Any]]:
         if refresh:
             self.apply(self.discover())
         return [
@@ -170,7 +171,7 @@ class RemoteAcpCatalog:
             if project is None or entry.global_scope or project in entry.projects
         ]
 
-    def detail(self, name: str, project: str | None = None) -> dict | None:
+    def detail(self, name: str, project: str | None = None) -> dict[str, Any] | None:
         report = self._project_report(self.discover())
         entry = self._entries(report, project).get(name.removeprefix("remote-acp:"))
         if entry and (project is None or entry.global_scope or project in entry.projects):
@@ -214,9 +215,9 @@ def _project_bindings(project: str) -> Mapping[str, RemoteAcpBinding]:
 
 
 def reconcile_remote_rows(
-    rows: list[dict], catalog: RemoteAcpCatalog | None,
+    rows: list[dict[str, Any]], catalog: RemoteAcpCatalog | None,
     report: RemoteContributionReport | None, current: RemoteAcpCatalog | None,
-) -> tuple[list[dict], bool]:
+) -> tuple[list[dict[str, Any]], bool]:
     """Omit superseded remote rows after an asynchronous assembly boundary."""
     changed = current is not catalog or getattr(catalog, "contribution_report", None) is not report
     return (

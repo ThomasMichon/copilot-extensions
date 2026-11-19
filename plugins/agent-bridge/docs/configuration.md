@@ -78,6 +78,34 @@ topology path inheritance may point to admitted knowledge state; it does **not**
 itself graft repository preferences. `config adopt` writes only the user
 profile and does not modify repositories or create a knowledge binding.
 
+### Worktree capability in the agent catalog
+
+An ordinary entry in the selected `agents_config` JSON may declare
+`"supports_worktrees": true`, `false` or `null`. Namespace providers may
+declare the same nullable field in their existing list rows. Only booleans
+and null are valid; strings and numbers are not coerced. Omission means
+unknown, including topology-derived agents without an explicit declaration.
+Project, root, transport, spawnability and discovery flags do not imply it.
+
+The ordinary/namespace list, roster cache and applicable detail response
+publish that declaration as `supports_worktrees`. Remote ACP catalog entries
+publish false because Bridge's remote start operation does not accept a
+local worktree allocation/identity. This describes Bridge's operation, not
+the remote service's unrelated internal capabilities.
+
+This is passive metadata, not readiness, reachability, permission or a new
+dispatch gate. Reads do not resolve or launch a target to establish support.
+Names, aliases, selection and operation-side admission retain their existing
+behavior; an unknown declaration does not hide an agent or trigger repair.
+
+Older HTTP responses omit the field; consumers must treat missing/null as
+unknown, never unsupported. Existing HTTP clients can ignore the additive
+response key. Expand Bridge namespace readers before a provider starts
+emitting this optional list field: older strict namespace-row constructors
+do not accept unknown keys. Existing providers may continue omitting it.
+No HTTP support-floor change, new handshake, automatic provider migration
+or installed rollout is implied.
+
 ### Ordinary spawn-default layers
 
 For an admitted installed Worktrees owner, Bridge now reads the canonical
