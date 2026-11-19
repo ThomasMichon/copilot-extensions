@@ -5,11 +5,12 @@ Back to the [canonical effort](README.md#subscriber-callback-context-and-truthfu
 **Status:** Original contract reviewed and merged in #13228; operator-selected
 map/version amendment reviewed and merged in #13277. The version-aware
 read/final-write refusal baseline is merged in #13295. Historical-reader
-transition protection and map/cwd consumer acceptance remain open.
+transition protection and map/cwd consumer acceptance remain open. The
+older-engine restart/per-version state amendment is reviewed in #13310.
 **Current direction:** Continue the version-aware design with older-engine
-restart refusal and per-version overwrite isolation. Review the revised
-contract before implementation; the preserved provider prototype is not
-delivered and map writes are not enabled.
+restart refusal and per-version overwrite isolation under that reviewed
+contract; the preserved provider prototype is not delivered and map writes
+are not enabled.
 **Scope:** P5947-3/4, V5947-3/4 and G5947-3/4. This does not complete those
 items, expiry acceptance, M1, or the parent effort.
 **Vision reconciliation:** Closes the existing

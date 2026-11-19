@@ -5,9 +5,12 @@ from __future__ import annotations
 from agent_procutil.daemon_instances import DaemonInstanceSpec, daemon_entrypoint
 from pathlib import Path
 
+import argparse
 import os
 import socket
 import sys
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, cast
 from uuid import uuid4
 
 from agent_procutil import spawn_daemon
@@ -18,13 +21,19 @@ from zdd.cutover_lock import CutoverLock
 from .watch_control import WatchControlClient, WatchControlOwner, WatchControlServer
 from .watch_custody import endpoint_tuple
 from .watch_driver import WatchDriver
+from .watch_daemon import Fetch, NativeFetch, read_watch_state
 from .watch_invocation import WatchInvocation
 from .watch_journal import WatchJournal, _regular_bytes, _target_selection, read_known_owner
 from .watch_runtime import WatchInstance
 from .watch_retirement import WatchRetirement
 
+if TYPE_CHECKING:
+    daemon_entrypoint = cast(
+        Callable[..., Callable[[Callable[..., int]], Callable[..., int]]], daemon_entrypoint,
+    )
 
-def _client(invocation: WatchInvocation, document: dict, role: str) -> WatchControlClient:
+
+def _client(invocation: WatchInvocation, document: dict[str, Any], role: str) -> WatchControlClient:
     installation = invocation.fresh_installation()
     if document[role] is None or document["endpoints"][role] is None:
         raise PermissionError("watch owner discovery has no private endpoint custody")
@@ -55,10 +64,10 @@ def dial(invocation: WatchInvocation) -> tuple[str, int, str] | None:
             _require_selection(installation, withdrawal, withdrawn=True)
             from zdd import routing
 
-            require_withdrawn_route(
-                installation, routing.read_table(installation.run_root, strict=True),
-                probe_writer=True,
-            )
+            table = routing.read_table(installation.run_root, strict=True)
+            if table is None:
+                raise PermissionError("watch withdrawn route is unavailable")
+            require_withdrawn_route(installation, table, probe_writer=True)
         return None
     role = "predecessor" if document["phase"] == "rolled-back" else "successor"
     if document[role] is None:
@@ -81,10 +90,12 @@ def dial(invocation: WatchInvocation) -> tuple[str, int, str] | None:
 def _port() -> int:
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
-        return listener.getsockname()[1]
+        return int(listener.getsockname()[1])
 
 
-def call(invocation: WatchInvocation, kind: str, payload: dict, *, boot: bool) -> dict:
+def call(
+    invocation: WatchInvocation, kind: str, payload: dict[str, Any], *, boot: bool,
+) -> dict[str, Any]:
     endpoint = dial(invocation)
     if endpoint is None and boot:
         ensure(invocation)
@@ -98,7 +109,9 @@ def call(invocation: WatchInvocation, kind: str, payload: dict, *, boot: bool) -
             request_deadline_s=timeout, completion_timeout_s=timeout,
         )
     except DaemonUnavailable:
-        result = {"error": "installation-local watch request completion is unconfirmed"}
+        result: dict[str, Any] = {
+            "error": "installation-local watch request completion is unconfirmed",
+        }
         if kind == "register":
             result["ambiguous_registration"] = True
         elif kind == "unregister":
@@ -155,7 +168,7 @@ def incumbent(
 def run_target(
     journal: WatchJournal, invocation: WatchInvocation, *, poll_interval: float, timeout: float,
 ) -> CutoverResult:
-    def spawn(port: int, instance_id: str):
+    def spawn(port: int, instance_id: str) -> Any:
         invocation.require_current()
         installation = invocation.fresh_installation()
         environment = dict(os.environ)
@@ -190,8 +203,10 @@ def ensure(
     """Ensure an owner is ready; report whether guarded discovery found one."""
     invocation.require_current()
     installation = invocation.fresh_installation()
+    read_watch_state(installation.state_root)
     with installation.transaction(timeout=timeout, environment={}) as guard:
         invocation.require_current()
+        read_watch_state(installation.state_root)
         owner = incumbent(invocation, guard, timeout=timeout)
         if owner is not None and not restart and owner.instance.runtime == invocation.runtime:
             return True
@@ -227,7 +242,10 @@ def stop(invocation: WatchInvocation, *, timeout: float = 120.0) -> bool:
     "agent-pull-requests", source=__file__, purpose="production",
     runtime_root=lambda invocation, *args, **kwargs: invocation.runtime.runtime_root,
 )
-def serve_passive(invocation: WatchInvocation, args, *, fetch, native_fetch=None) -> int:
+def serve_passive(
+    invocation: WatchInvocation, args: argparse.Namespace, *, fetch: Fetch,
+    native_fetch: NativeFetch | None = None,
+) -> int:
     if not args.passive_instance or not 0 < args.port <= 65535:
         raise PermissionError("watch passive entry requires its reserved instance and port")
     owner = WatchControlOwner(
