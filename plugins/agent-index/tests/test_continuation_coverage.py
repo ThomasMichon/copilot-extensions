@@ -173,7 +173,7 @@ def test_opaque_custom_tokens_empty_terminal_and_http_accounting_are_preserved()
     assert http["attempts"] == http["responses"] == http["json_results"] == 2
 
 
-@pytest.mark.parametrize("fault", ["initial-304", "later-304", "repeat", "cycle"])
+@pytest.mark.parametrize("fault", ["initial-304", "later-304", "repeat"])
 def test_incomplete_pr_traversal_cannot_publish_deletion_coverage(
     fault: str,
     tmp_path: Path,
@@ -189,7 +189,6 @@ def test_incomplete_pr_traversal_cannot_publish_deletion_coverage(
         assert listing_requests <= 3, "Traversal refetched a repeated token"
         if fault == "initial-304" or (fault == "later-304" and listing_requests == 2):
             return httpx.Response(304)
-        token = "second" if fault == "cycle" and listing_requests == 2 else "first"
         return httpx.Response(
             200,
             json={
@@ -201,7 +200,6 @@ def test_incomplete_pr_traversal_cannot_publish_deletion_coverage(
                     }
                 ]
             },
-            headers={"x-ms-continuationtoken": token},
         )
 
     connector = AzureDevOpsConnector(
@@ -211,6 +209,7 @@ def test_incomplete_pr_traversal_cannot_publish_deletion_coverage(
         transport=httpx.MockTransport(handler),
         work_item_queries=[],
         pull_request_queries=[{"repository_id": "repo-1"}],
+        page_size=1,
     )
     paths = PathIndex(tmp_path / "paths.db")
     family = "ado:acme/widgets:pulls"
@@ -225,7 +224,7 @@ def test_incomplete_pr_traversal_cannot_publish_deletion_coverage(
     state = IndexState()
     before_state = asdict(state)
     try:
-        with pytest.raises(ValueError, match="continuation"):
+        with pytest.raises(ValueError, match="pagination"):
             collect_source_changes(
                 "selected",
                 state=state,

@@ -63,6 +63,8 @@ class AzureDevOpsConnector:
         batch_size: int = _DEFAULT_BATCH_SIZE,
         page_size: int = _DEFAULT_PAGE_SIZE,
     ) -> None:
+        if type(page_size) is not int or page_size <= 0:
+            raise ValueError("Azure DevOps page_size must be a positive integer")
         self._source = source
         self.org, self.project = self._parse_source(source)
         self.api_base = (api_base or os.environ.get("AGENT_INDEX_ADO_BASE") or _DEFAULT_API_BASE)
@@ -155,7 +157,7 @@ class AzureDevOpsConnector:
             work_items.add(f"workitems/{work_item_id}.md")
 
         pulls: set[str] = set()
-        for pull_request in self._iter_pull_requests():
+        for pull_request in self._iter_pull_requests(cancel_check):
             if cancel_check:
                 cancel_check()
             pull_request_id = pull_request.get("pullRequestId")
@@ -331,6 +333,7 @@ class AzureDevOpsConnector:
         return self._http.get_json(
             self._project_path("_apis", "wit", "wiql", saved_query_id),
             params={"api-version": _DEFAULT_API_VERSION},
+            etag=False,
             purpose="identity_page",
         )
 
@@ -383,7 +386,7 @@ class AzureDevOpsConnector:
     ) -> list[FileEntry]:
         entries: list[FileEntry] = []
         seen_ids: set[Any] = set()
-        for pull_request in self._iter_pull_requests():
+        for pull_request in self._iter_pull_requests(cancel_check):
             if cancel_check:
                 cancel_check()
             pull_request_id = pull_request.get("pullRequestId")
@@ -438,7 +441,9 @@ class AzureDevOpsConnector:
             ),
         }
 
-    def _iter_pull_requests(self) -> Iterable[dict[str, Any]]:
+    def _iter_pull_requests(
+        self, cancel_check: Callable[[], None] | None = None,
+    ) -> Iterable[dict[str, Any]]:
         if not self._pull_request_queries:
             self._log_no_pull_request_queries()
             return
@@ -446,18 +451,36 @@ class AzureDevOpsConnector:
         seen_ids: set[Any] = set()
         for query in self._pull_request_queries:
             params = self._pull_request_params(query)
-            for result in self._http.paginate_continuation(
-                self._project_path("_apis", "git", "pullrequests"),
-                params=params,
-                purpose="identity_page",
-                on_page=lambda page: self._observe_records(page.data, kind="pulls"),
-            ):
-                for item in _values(result.data):
+            selected: dict[int, dict[str, Any]] = {}
+            offset = 0
+            while True:
+                if cancel_check:
+                    cancel_check()
+                result = self._http.get_json(
+                    self._project_path("_apis", "git", "pullrequests"),
+                    params=params | {"$skip": offset},
+                    etag=False,
+                    purpose="identity_page",
+                )
+                if result.not_modified:
+                    raise ValueError("Azure DevOps PR pagination requires a response body")
+                self._observe_records(result.data, kind="pulls")
+                items = _values(result.data)
+                previous_count = len(selected)
+                for item in items:
                     pull_request_id = item.get("pullRequestId")
                     if type(pull_request_id) is not int or pull_request_id <= 0:
                         raise ValueError("Azure DevOps pull-request listing has invalid identity")
-                    if pull_request_id in seen_ids:
-                        continue
+                    selected.setdefault(pull_request_id, item)
+                if len(items) > self._page_size or (
+                    items and offset and len(selected) == previous_count
+                ):
+                    raise ValueError("Azure DevOps PR pagination made no reliable progress")
+                if not items:
+                    break
+                offset += len(items)
+            for pull_request_id, item in selected.items():
+                if pull_request_id not in seen_ids:
                     seen_ids.add(pull_request_id)
                     yield item
 
@@ -545,6 +568,7 @@ class AzureDevOpsConnector:
                     "threads",
                 ),
                 params={"api-version": _DEFAULT_API_VERSION},
+                etag=False,
                 purpose="comment_page",
             )
         except httpx.HTTPStatusError as exc:

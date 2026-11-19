@@ -24,6 +24,8 @@ def _connector(payload: object, phase: str) -> AzureDevOpsConnector:
         elif path.endswith("/wiql"):
             result = payload
         elif path.endswith("/pullrequests"):
+            if int(request.url.params["$skip"]):
+                return httpx.Response(200, json={"value": []})
             result = (
                 payload
                 if phase == "pulls"
@@ -196,6 +198,149 @@ def test_thread_serialized_defaults_remain_valid(thread: dict[str, Any]) -> None
         assert [entry.path for entry in connector.discover()] == ["pulls/7.md"]
     finally:
         connector._http.client.close()
+
+
+def _body_connector(
+    owner: str,
+    transport: httpx.MockTransport,
+) -> AzureDevOpsConnector:
+    return AzureDevOpsConnector(
+        "ado:acme/widgets",
+        token="fixture-token",
+        transport=transport,
+        min_interval_s=0,
+        work_item_queries=[{"saved_query_id": "shared/team-query"}] if owner == "query" else [],
+        pull_request_queries=[{"repository_id": "repo-1"}] if owner == "threads" else [],
+    )
+
+
+def _body_response(request: httpx.Request) -> httpx.Response:
+    path = request.url.path
+    if path.endswith("/connectionData"):
+        return httpx.Response(200, json={"authenticatedUser": {"id": "test-account"}})
+    if "/wiql/" in path:
+        return httpx.Response(200, json={"workItems": [{"id": 7}]})
+    if path.endswith("/workitemsbatch"):
+        return httpx.Response(
+            200,
+            json={
+                "value": [
+                    {
+                        "id": 7,
+                        "fields": {"System.Title": "Selected item", "System.Description": "Body"},
+                    }
+                ]
+            },
+        )
+    if path.endswith("/workItems/7/comments"):
+        return httpx.Response(200, json={"comments": [{"text": "Complete comment"}]})
+    if path.endswith("/pullrequests"):
+        return httpx.Response(
+            200,
+            json={
+                "value": []
+                if int(request.url.params["$skip"])
+                else [
+                    {
+                        "pullRequestId": 7,
+                        "repository": {"id": "repo-1"},
+                        "description": "",
+                    }
+                ]
+            },
+        )
+    assert path.endswith("/repositories/repo-1/pullRequests/7/threads")
+    return httpx.Response(200, json={"value": [{"comments": [{"content": "Complete comment"}]}]})
+
+
+@pytest.mark.parametrize("owner", ["query", "threads"])
+def test_repeated_complete_body_reads_do_not_send_validators(owner: str) -> None:
+    validators: list[str | None] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        selected = (
+            "/wiql/" in request.url.path
+            if owner == "query"
+            else (request.url.path.endswith("/threads"))
+        )
+        if selected:
+            validators.append(request.headers.get("If-None-Match"))
+            assert request.url.params["api-version"] == "7.1"
+            if owner == "query":
+                assert request.url.path.endswith("/wiql/shared/team-query")
+            if validators[-1] is not None:
+                return httpx.Response(304)
+        result = _body_response(request)
+        if selected:
+            result.headers["ETag"] = '"selected-revision"'
+        return result
+
+    connector = _body_connector(owner, httpx.MockTransport(handler))
+
+    @measure_reindex
+    def run() -> dict[str, object]:
+        entries = connector.discover()
+        assert [entry.path for entry in entries] == [
+            "workitems/7.md" if owner == "query" else "pulls/7.md",
+        ]
+        assert "Complete comment" in entries[0].content
+        return {}
+
+    try:
+        for _ in range(2):
+            counts = run()["work_counts"]
+            assert isinstance(counts, dict)
+            assert counts["acquisition_by_source"] == {
+                f"ado:acme/widgets:{'workitems' if owner == 'query' else 'pulls'}": {
+                    "identity_records": 1,
+                    "item_body_records": 1,
+                    "comment_body_records": 1,
+                },
+            }
+            assert counts["http"]["not_modified"] == 0
+    finally:
+        connector._http.client.close()
+    assert validators == [None, None]
+
+
+@pytest.mark.parametrize("owner", ["query", "threads"])
+def test_unexpected_bodyless_response_preserves_collector_state(
+    owner: str, tmp_path: Path
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if (owner == "query" and "/wiql/" in request.url.path) or (
+            owner == "threads" and request.url.path.endswith("/threads")
+        ):
+            return httpx.Response(304)
+        return _body_response(request)
+
+    connector = _body_connector(owner, httpx.MockTransport(handler))
+    family = f"ado:acme/widgets:{'workitems' if owner == 'query' else 'pulls'}"
+    path = "workitems/7.md" if owner == "query" else "pulls/7.md"
+    paths = PathIndex(tmp_path / "paths.db")
+    paths.mark_indexed_batch(
+        [
+            (family, path, "old", 1),
+            ("ado:other/project:pulls", "pulls/7.md", "foreign", 1),
+        ]
+    )
+    before_paths = paths.get_paths_by_family("ado")
+    state = IndexState()
+    before_state = asdict(state)
+    try:
+        with pytest.raises(ValueError, match="Azure DevOps"):
+            collect_source_changes(
+                "selected",
+                state=state,
+                path_index=paths,
+                connector=connector,
+                full=True,
+                source_aware=True,
+            )
+    finally:
+        connector._http.client.close()
+    assert paths.get_paths_by_family("ado") == before_paths
+    assert asdict(state) == before_state
 
 
 def test_nested_record_observations_survive_refusal() -> None:

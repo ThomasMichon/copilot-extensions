@@ -200,13 +200,28 @@ array or the supported legacy bare array, with object records. An unrecognized
 object, including `{}` or a count without a value array, cannot certify an empty
 inventory. Parsed observations are recorded before validation and deduplication;
 they are not completeness evidence.
-PR header-token traversal requests complete bodies without conditional ETags:
-the shared HTTP validator cache does not retain those bodies. An unexpected
-304 refuses traversal rather than returning an empty or partial inventory.
-Repeated/cyclic tokens, including a supplied initial token, refuse before
-refetching that page. Query parameters, opaque token values, parsed-page
-observations and request counters remain intact. Distinct-token page counts
-and accumulated response memory are not budgeted or persisted by this helper.
+PR inventories use the documented
+[`$skip`/`$top` pagination](https://learn.microsoft.com/en-us/rest/api/azure/devops/git/pull-requests/get-pull-requests-by-project?view=azure-devops-rest-7.1),
+not continuation headers. Each query retains its filters, advances the offset
+by the raw page length and stops only at an explicit empty page. Short pages
+can reflect a server-side cap and do not certify exhaustion. A positive integer
+`page_size` is required
+before network acquisition. Oversized pages and later nonempty pages containing
+no new query-selected identities refuse acquisition. Each query remains buffered
+until traversal completes, with cross-query identity deduplication afterward.
+Cancellation is checked before each page. Requests are unconditional because
+the shared HTTP validator cache does not retain response bodies; an unexpected
+304 refuses rather than returning an empty or partial inventory. Parsed-page
+observations and request counters remain intact on later failure.
+Saved-query selection results and PR review-thread bodies also request complete
+bodies without conditional validators. Repeated reads must retain selected
+identities and complete comments; an unexpected bodyless response refuses
+through the same response validation rather than certifying an empty source.
+Direct HTTP conditional-read support remains available outside these owners.
+The shared HTTP header-token helper remains available for APIs that use it,
+including repeat/cycle refusal and opaque-token preservation. Neither traversal
+budgets or persists its accumulated response memory. Mutable offsets do not
+provide concurrent-edit stability or immutable snapshot membership.
 Azure DevOps does not yet implement the
 shared paged acquisition journal, durable query progress, immutable full
 snapshots or authoritative tombstones. This legacy optimization does not

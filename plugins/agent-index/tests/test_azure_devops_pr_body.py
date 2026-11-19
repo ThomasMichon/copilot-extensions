@@ -15,6 +15,13 @@ from agent_index.indexing.work_counts import measure_reindex
 from agent_index.sources.azure_devops import AzureDevOpsConnector
 
 
+def _pull_page(request: httpx.Request, items: list[dict[str, Any]]) -> httpx.Response:
+    offset = int(request.url.params["$skip"])
+    return httpx.Response(
+        200, json={"value": items[offset:offset + int(request.url.params["$top"])]},
+    )
+
+
 @pytest.mark.parametrize(
     "outcome",
     [
@@ -51,7 +58,7 @@ def test_selected_pull_description_is_complete_or_refused(outcome: str) -> None:
         requests.append(path)
         if path == "/acme/widgets/_apis/git/pullrequests":
             assert request.url.params["searchCriteria.repositoryId"] == "repo-1"
-            return httpx.Response(200, json={"value": [listed]})
+            return _pull_page(request, [listed])
         if path == "/acme/widgets/_apis/git/pullrequests/7":
             if outcome == "unavailable":
                 return httpx.Response(404, json={"message": "not available"})
@@ -113,6 +120,7 @@ def test_selected_pull_description_is_complete_or_refused(outcome: str) -> None:
     }
     assert requests == [
         "/acme/widgets/_apis/git/pullrequests",
+        "/acme/widgets/_apis/git/pullrequests",
         "/acme/widgets/_apis/git/pullrequests/7",
         *(
             ["/acme/widgets/_apis/git/repositories/repo-1/pullRequests/7/threads"]
@@ -122,7 +130,7 @@ def test_selected_pull_description_is_complete_or_refused(outcome: str) -> None:
         ),
     ]
     purposes = counts["http_by_purpose"]
-    assert purposes["identity_page"]["attempts"] == 1
+    assert purposes["identity_page"]["attempts"] == 2
     assert purposes["item_body"]["attempts"] == 1
 
 
@@ -139,7 +147,7 @@ def test_list_description_accepts_omitted_empty_and_refuses_nontext(body: str) -
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request.url.path)
         if request.url.path.endswith("/pullrequests"):
-            return httpx.Response(200, json={"value": [listed]})
+            return _pull_page(request, [listed])
         assert body in {"missing", "null", "empty"}
         assert request.url.path.endswith("/pullRequests/7/threads")
         return httpx.Response(200, json={"value": []})
@@ -161,7 +169,7 @@ def test_list_description_accepts_omitted_empty_and_refuses_nontext(body: str) -
                 connector.discover()
     finally:
         connector._http.client.close()
-    assert len(requests) == (2 if body in {"missing", "null", "empty"} else 1)
+    assert len(requests) == (3 if body in {"missing", "null", "empty"} else 2)
 
 
 def test_pull_counts_retain_parsed_work_on_invalid_body_and_id_only_paths() -> None:
@@ -173,17 +181,12 @@ def test_pull_counts_retain_parsed_work_on_invalid_body_and_id_only_paths() -> N
             return httpx.Response(200, json={"value": [{"id": "repo-1", "name": "widgets"}]})
         if path.endswith("/pullrequests"):
             item = {"pullRequestId": 1, "description": None, "repository": {"id": "repo-1"}}
-            return httpx.Response(
-                200,
-                json={
-                    "value": [
-                        item,
-                        item,
-                        {"pullRequestId": 2, "description": 9},
-                        {"pullRequestId": 3},
-                    ]
-                },
-            )
+            return _pull_page(request, [
+                item,
+                item,
+                {"pullRequestId": 2, "description": 9},
+                {"pullRequestId": 3},
+            ])
         assert path.endswith("/pullRequests/1/threads")
         return httpx.Response(
             200,
@@ -227,7 +230,7 @@ def test_pull_counts_retain_parsed_work_on_invalid_body_and_id_only_paths() -> N
             },
         }
         assert counts["http_by_purpose"]["metadata"]["attempts"] == 2
-        assert counts["http_by_purpose"]["identity_page"]["attempts"] == 1
+        assert counts["http_by_purpose"]["identity_page"]["attempts"] == 2
         assert counts["http_by_purpose"]["comment_page"]["attempts"] == 1
         assert "unclassified" not in counts["http_by_purpose"]
         path_counts = run(True)["work_counts"]
@@ -261,7 +264,7 @@ def test_missing_review_target_is_recovered_or_refused(
         if path.endswith("/connectionData"):
             return httpx.Response(200, json={"authenticatedUser": {"id": "test-account"}})
         if path.endswith("/pullrequests"):
-            return httpx.Response(200, json={"value": [listed]})
+            return _pull_page(request, [listed])
         if path.endswith("/pullrequests/7"):
             if outcome == "unavailable":
                 return httpx.Response(404, json={"message": "unavailable"})
@@ -323,7 +326,7 @@ def test_cancellation_after_description_read_prevents_comment_request() -> None:
         nonlocal cancelled
         requests.append(request.url.path)
         if request.url.path.endswith("/pullrequests"):
-            return httpx.Response(200, json={"value": [listed]})
+            return _pull_page(request, [listed])
         if request.url.path.endswith("/pullrequests/7"):
             cancelled = True
             return httpx.Response(200, json=listed)
@@ -348,6 +351,7 @@ def test_cancellation_after_description_read_prevents_comment_request() -> None:
         connector._http.client.close()
     assert requests == [
         "/acme/widgets/_apis/git/pullrequests",
+        "/acme/widgets/_apis/git/pullrequests",
         "/acme/widgets/_apis/git/pullrequests/7",
     ]
 
@@ -363,7 +367,7 @@ def test_repeated_description_reads_do_not_request_bodyless_304() -> None:
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("/pullrequests"):
-            return httpx.Response(200, json={"value": [listed]})
+            return _pull_page(request, [listed])
         if request.url.path.endswith("/pullrequests/7"):
             detail_requests.append(request)
             if request.headers.get("If-None-Match") == '"revision-1"':
@@ -396,7 +400,7 @@ def test_repeated_description_reads_do_not_request_bodyless_304() -> None:
         for _ in range(2):
             counts = run()["work_counts"]
             assert isinstance(counts, dict)
-            assert counts["http"]["attempts"] == 3
+            assert counts["http"]["attempts"] == 4
             assert counts["http"]["not_modified"] == 0
             assert counts["http_by_purpose"]["item_body"]["attempts"] == 1
     finally:
@@ -421,7 +425,7 @@ def test_description_reads_follow_duplicate_filtering() -> None:
         path = request.url.path
         requests.append(path)
         if path.endswith("/pullrequests"):
-            return httpx.Response(200, json={"value": [selected, selected]})
+            return _pull_page(request, [selected, selected])
         if path.endswith("/pullrequests/7"):
             return httpx.Response(
                 200,
@@ -457,6 +461,7 @@ def test_description_reads_follow_duplicate_filtering() -> None:
     finally:
         connector._http.client.close()
     assert requests == [
+        "/acme/widgets/_apis/git/pullrequests",
         "/acme/widgets/_apis/git/pullrequests",
         "/acme/widgets/_apis/git/pullrequests/7",
         "/acme/widgets/_apis/git/repositories/repo-1/pullRequests/7/threads",
