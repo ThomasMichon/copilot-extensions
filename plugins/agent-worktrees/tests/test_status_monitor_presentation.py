@@ -384,6 +384,7 @@ def test_active_projection_keeps_completed_content_advisory_until_refresh(
 
     path = str(tmp_path)
     clock = [100.0]
+    creation_nonce = ["first"]
     monkeypatch.setattr(status_segment_cache, "time", SimpleNamespace(monotonic=lambda: clock[0]))
     monkeypatch.setattr(git_ops, "_windows_observation", lambda: True)
     monkeypatch.setattr(cfg, "active_project", lambda: "project")
@@ -392,7 +393,7 @@ def test_active_projection_keeps_completed_content_advisory_until_refresh(
         default_repo=SimpleNamespace(anchor=path),
     ))
     monkeypatch.setattr(monitor, "_find_record_for_path", lambda *a: SimpleNamespace(
-        worktree_id="one", worktree_path=path,
+        worktree_id="one", worktree_path=path, creation_nonce=creation_nonce[0],
     ))
     descriptor = {
         "version": DESCRIPTOR_VERSION, "label": "ACTIVE", "style": "active",
@@ -452,6 +453,7 @@ def test_active_projection_keeps_completed_content_advisory_until_refresh(
                 "availability": {"status": "stale"},
                 "worktrees": [{
                     "id": "one", "path": path, "state": "active", "closure": descriptor,
+                    "creation_nonce": creation_nonce[0],
                 }],
             },
         ) == 1
@@ -488,6 +490,20 @@ def test_active_projection_keeps_completed_content_advisory_until_refresh(
         ) == 1
         segment = requests[-1]["values"]["@aw_seg"]
         assert "STATE(?)" in segment and "CONVO" not in segment
+    creation_nonce[0] = "second"
+    owner.invalidate(path)
+    assert run_monitor_sweep(
+        monitor._monitor_sweep, "psmux.exe", "monitor", "fixture", set(),
+        managed_mux_cache=cache, segment_cache=owner,
+        state_snapshot=lambda project: {
+            "ok": True, "projection": {"quality": "current"}, "worktrees": [{
+                "id": "one", "path": path, "state": "active", "closure": descriptor,
+                "creation_nonce": creation_nonce[0],
+            }],
+        },
+    ) == 1
+    segment = requests[-1]["values"]["@aw_seg"]
+    assert "STATE(?)" in segment and "CONVO" not in segment
 
 
 @pytest.mark.parametrize("second_present", [True, False])

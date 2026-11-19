@@ -160,7 +160,7 @@ def run_monitor_sweep(
         ):
             advisory = getattr(segments, "get_advisory", None)
             if callable(advisory):
-                completed = advisory(project, path, row["id"])
+                completed = advisory(project, path, row["id"], row.get("creation_nonce"))
                 if isinstance(completed, str):
                     return completed
         if segments is not None and segments.observation_blocked(project, path):

@@ -172,7 +172,7 @@ def test_status_reason_follows_only_the_matching_observation_scope(owner: _Statu
 
 
 @pytest.mark.parametrize("condition", [
-    "expired", "invalidated", "busy", "project", "worktree", "path", "cleanup", "retiring",
+    "expired", "invalidated", "busy", "project", "worktree", "path", "creation", "cleanup", "retiring",
 ])
 def test_advisory_segment_preserves_subject_and_hard_observation_fences(
     owner: _StatusSegmentCache, monkeypatch: pytest.MonkeyPatch, condition: str,
@@ -185,7 +185,7 @@ def test_advisory_segment_preserves_subject_and_hard_observation_fences(
         default_repo=SimpleNamespace(anchor="/repo"),
     ))
     monkeypatch.setattr(core, "_find_record_for_path", lambda *a: SimpleNamespace(
-        worktree_id="one", worktree_path=path,
+        worktree_id="one", worktree_path=path, creation_nonce="first",
     ))
     monkeypatch.setattr(core, "_render_status_segment", lambda *a, **k: "DIRTY")
     assert owner.get(path) == "DIRTY"
@@ -204,6 +204,7 @@ def test_advisory_segment_preserves_subject_and_hard_observation_fences(
         "B" if condition == "project" else "A",
         "/different/wt" if condition == "path" else path,
         "two" if condition == "worktree" else "one",
+        "second" if condition == "creation" else "first",
     )
     if condition in {"expired", "invalidated", "busy"}:
         assert result is not None and "DIRTY" in result and "(stale)" in result

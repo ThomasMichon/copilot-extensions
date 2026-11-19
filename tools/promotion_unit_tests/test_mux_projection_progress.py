@@ -313,6 +313,23 @@ def test_active_projection_retains_subject_bound_advisory_content(
     ) == 1
     assert "STATE(?)" in writes[-1] and "CONVO" not in writes[-1]
     api.package.status_bar_cli._find_record_for_path = lambda value: SimpleNamespace(
+        worktree_path=path, worktree_id="one", creation_nonce="first",
+    )
+    owner.invalidate(path)
+    assert owner.get(path) == "CONVO"
+    owner.invalidate(path)
+    assert api.presentation.run_monitor_sweep(
+        sweep, "psmux.exe", "monitor", "fixture", set(),
+        managed_mux_cache=object(), segment_cache=owner,
+        state_snapshot=lambda project: {
+            "ok": True, "projection": {"quality": "current"}, "worktrees": [{
+                "id": "one", "path": path, "state": "active", "creation_nonce": "second",
+                "closure": {"supported": True, "style": "active", "compact": "ACTIVE"},
+            }],
+        },
+    ) == 1
+    assert "STATE(?)" in writes[-1] and "CONVO" not in writes[-1]
+    api.package.status_bar_cli._find_record_for_path = lambda value: SimpleNamespace(
         worktree_path=path,
     )
     owner.invalidate(path)

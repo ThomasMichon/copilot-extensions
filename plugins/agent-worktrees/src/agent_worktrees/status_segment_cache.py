@@ -35,6 +35,7 @@ class _ObservationTicket:
 class _CompletedSegment:
     project: str
     worktree_id: str
+    creation_nonce: str
     value: str
 
 
@@ -351,7 +352,9 @@ class _StatusSegmentCache:
             return self.pending_segment_for_path(path)
         return None
 
-    def get_advisory(self, project: str, path: str, worktree_id: str) -> str | None:
+    def get_advisory(
+        self, project: str, path: str, worktree_id: str, creation_nonce: str | None = None,
+    ) -> str | None:
         """Retain subject-bound presentation, never fresh observation evidence."""
         key = self._key(path)
         with self._lock:
@@ -361,6 +364,7 @@ class _StatusSegmentCache:
             if (
                 completed is None or completed.project != project
                 or completed.worktree_id != worktree_id
+                or completed.creation_nonce != (creation_nonce or "")
             ):
                 return None
             return completed.value + " #[fg=colour244](stale)#[default]"
@@ -424,9 +428,13 @@ class _StatusSegmentCache:
             self._entries[key] = (time.monotonic(), value)
             self._entry_projects[key] = project
             worktree_id = getattr(record, "worktree_id", None)
-            if isinstance(worktree_id, str) and worktree_id and subject_project and value:
+            creation_nonce = getattr(record, "creation_nonce", "")
+            if (
+                isinstance(worktree_id, str) and worktree_id and subject_project and value
+                and isinstance(creation_nonce, str)
+            ):
                 self._completed[key] = _CompletedSegment(
-                    subject_project, worktree_id, value,
+                    subject_project, worktree_id, creation_nonce, value,
                 )
             else:
                 self._completed.pop(key, None)
