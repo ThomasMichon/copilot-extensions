@@ -17,6 +17,7 @@ import logging
 import sqlite3
 import time
 from dataclasses import dataclass
+from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -118,14 +119,13 @@ class ClusterStore:
     """Persisted similarity clusters with simple query access."""
 
     def __init__(self, db_path: str | Path) -> None:
-        self._db_path = str(db_path)
-        self._source_domain = domain_for(Path(db_path).parent / "lance")
+        self._db_path = str(Path(db_path).resolve())
+        self._source_path = Path(self._db_path).parent / "lance"
+        self._source_domain = domain_for(self._source_path)
         if self._source_domain is None:
             self._init_db()
         else:
-            import lancedb
-
-            self._source_db = lancedb.connect(str(self._source_domain.path))
+            self._source_db = import_module("lancedb").connect(str(self._source_domain.path))
 
     def _connect(self) -> sqlite3.Connection:
         if (self._source_domain is not None and not self._source_domain.writing

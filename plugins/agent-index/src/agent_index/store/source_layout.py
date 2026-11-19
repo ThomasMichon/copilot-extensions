@@ -16,12 +16,16 @@ from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, BinaryIO, Protocol, TypeVar, cast
 
+from ..indexing.change_hints import _identity
+from ..indexing.point_hints import PointBinding
+
 if TYPE_CHECKING:
     from agent_index.index_config import IndexConfig
 
     from .multi_model_store import MultiModelStore
 
 F = TypeVar("F", bound=Callable[..., Any])
+PointScope = tuple[str, str, str, PointBinding]
 
 
 class _ValidationTable(Protocol):
@@ -32,7 +36,7 @@ LAYOUT = "source-aware-v1"
 MARKER = ".source-layout.json"
 LOCK = ".source-writer.lock"
 FTS_LOCK = ".source-fts.lock"
-_domains: dict[tuple[int, int], SourceDomain] = {}
+_domains: dict[tuple[int, int, str | None], SourceDomain] = {}
 _registry = threading.Lock()
 _child_guards = []
 log = logging.getLogger(__name__)
@@ -119,6 +123,25 @@ class SourceLayoutError(RuntimeError):
     """Unprepared, changed, busy or incompatible isolated domain."""
 
 
+def _point_scope_json(scope: PointScope | None) -> str | None:
+    if scope is None:
+        return None
+    if not isinstance(scope, tuple) or len(scope) != 4 or type(scope[3]) is not PointBinding:
+        raise SourceLayoutError("point domain requires an exact typed point scope")
+    source, family, account, binding = scope
+    try:
+        for name, value in (("source", source), ("canonical_family", family), ("account_id", account)):
+            _identity(value, name)
+        if source == "all":
+            raise ValueError("point domain requires an exact source")
+    except ValueError as exc:
+        raise SourceLayoutError("point domain requires an exact typed point scope") from exc
+    return json.dumps({
+        "source": source, "canonical_family": family, "account_id": account,
+        "binding": binding.to_dict(),
+    }, sort_keys=True)
+
+
 def selected_layout() -> str | None:
     value = os.environ.get("AGENT_INDEX_STORE_LAYOUT")
     if value not in (None, "", LAYOUT):
@@ -130,11 +153,26 @@ def _versions(db: Any) -> dict[str, int]:
     return {name: db.open_table(name).version for name in db.list_tables().tables}
 
 
+def _refuse_marked_legacy(store: Any) -> None:
+    path = getattr(store, "_source_path", None)
+    if path is None:
+        content = getattr(store, "_content", store)
+        uri = getattr(getattr(content, "_db", None), "uri", None)
+        path = uri if isinstance(uri, (str, Path)) else getattr(store, "_db_path", None)
+    if isinstance(path, (str, Path)) and (Path(path) / MARKER).exists():
+        raise SourceLayoutError("legacy handle refuses a newly selected source-aware domain")
+
+
 class SourceDomain:
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, *, point_scope: PointScope | None = None) -> None:
         self.path = path
+        self._point_scope = _point_scope_json(point_scope)
         self._mutex = threading.RLock()
         self._local = threading.local()
+
+    def _require_legacy_access(self) -> None:
+        if self._point_scope is not None:
+            raise SourceLayoutError("point-domain reads and application are not admitted")
 
     @property
     def writing(self) -> bool:
@@ -172,7 +210,9 @@ class SourceDomain:
     @contextmanager
     def operation(self, db: Any) -> Iterator[None]:
         """Hold existing exclusion across independently committed reads/writes."""
+        self._require_legacy_access()
         if self.writing or getattr(self._local, "operation", False):
+            self.receipt()
             yield
             return
         with self.exclusion():
@@ -187,22 +227,44 @@ class SourceDomain:
                 self._local.operation = False
 
     def receipt(self) -> dict[str, Any]:
+        duplicate = False
+
+        def fields(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+            nonlocal duplicate
+            result: dict[str, Any] = {}
+            for key, item in pairs:
+                duplicate |= key in result
+                result[key] = item
+            return result
+
         try:
             with _open_receipt(self.path / MARKER) as stream:
                 raw = stream.read(65537)
             if len(raw) > 65536:
                 raise SourceLayoutError("invalid source-layout receipt")
-            value = json.loads(raw)
+            value = json.loads(raw, object_pairs_hook=fields)
         except (OSError, ValueError) as exc:
             raise SourceLayoutError("source-aware layout not initialized") from exc
+        if duplicate:
+            raise SourceLayoutError("invalid source-layout receipt: duplicate fields")
+        self._validate_receipt(value)
+        return cast("dict[str, Any]", value)
+
+    def _validate_receipt(self, value: object) -> None:
         if (not isinstance(value, dict) or value.get("layout") != LAYOUT
-                or type(value.get("protocol")) is not int or value["protocol"] != 1
+                or type(value.get("protocol")) is not int
+                or value["protocol"] != (2 if self._point_scope is not None else 1)
                 or value.get("state") not in ("clean", "dirty")
                 or not isinstance(value.get("versions"), dict)):
             raise SourceLayoutError("incompatible source-layout receipt")
-        return value
+        if (self._point_scope is not None
+                and json.dumps(value.get("point_scope"), sort_keys=True) != self._point_scope):
+            raise SourceLayoutError("point-domain scope differs from its retained binding")
 
     def save(self, value: dict[str, Any]) -> None:
+        self._validate_receipt(value)
+        if (self.path / MARKER).exists():
+            self.receipt()
         payload = json.dumps(value, sort_keys=True)
         logical = value.get("logical_projection")
         if (len(payload.encode("utf-8")) > 65536 and isinstance(logical, dict)
@@ -230,7 +292,9 @@ class SourceDomain:
 
     @contextmanager
     def read(self, db: Any) -> Iterator[None]:
+        self._require_legacy_access()
         if self.writing or getattr(self._local, "reading", False):
+            self.receipt()
             yield
             return
         with self.exclusion():
@@ -388,7 +452,9 @@ class SourceDomain:
     def _write(
         self, db: Any, *, reconciliation: tuple[str, str] | None = None,
     ) -> Iterator[None]:
+        self._require_legacy_access()
         if self.writing:
+            self.receipt()
             if reconciliation is not None:
                 raise SourceLayoutError("reconciliation requires outer source ownership")
             self._local.depth += 1
@@ -460,34 +526,50 @@ class SourceDomain:
                 self._local.bucket_witness = {}
 
 
-def domain_for(path: str | Path) -> SourceDomain | None:
+def domain_for(
+    path: str | Path, *, point_scope: PointScope | None = None,
+) -> SourceDomain | None:
+    """Open one exact receipt selection; ordinary callers remain protocol-1-only."""
+    scope = _point_scope_json(point_scope)
     path = Path(path).resolve()
     marker = path / MARKER
     if selected_layout() != LAYOUT:
-        if marker.exists():
+        if marker.exists() or scope is not None:
             raise SourceLayoutError("source-aware store refuses unselected binary mode")
         return None
     if not marker.is_file():
         raise SourceLayoutError("initialize a fresh isolated source-aware store explicitly")
     info = path.stat()
-    identity = (info.st_dev, info.st_ino)
+    identity = (info.st_dev, info.st_ino, scope)
     with _registry:
         if identity not in _domains:
-            _domains[identity] = SourceDomain(path)
+            _domains[identity] = SourceDomain(path, point_scope=point_scope)
         result = _domains[identity]
     result.receipt()
     return result
 
 
-def initialize_source_layout(path: str | Path) -> dict[str, Any]:
+def initialize_source_layout(
+    path: str | Path, *, point_scope: PointScope | None = None,
+) -> dict[str, Any]:
     """Writer bootstrap only; no legacy adoption, transfer, backfill or offline assertion."""
     if selected_layout() != LAYOUT:
         raise SourceLayoutError("source-aware layout must be explicitly selected")
+    domain = SourceDomain(Path(path).resolve(), point_scope=point_scope)
+    receipt: dict[str, Any] = {
+        "layout": LAYOUT, "protocol": 2 if point_scope is not None else 1,
+        "state": "clean", "domain": uuid.uuid4().hex, "versions": {},
+    }
+    if domain._point_scope is not None:
+        receipt["point_scope"] = json.loads(domain._point_scope)
+    if len(json.dumps(receipt).encode("utf-8")) > 65536:
+        raise SourceLayoutError("source-layout receipt exceeds its size limit")
     path = Path(path).resolve()
+    if (path / MARKER).exists():
+        domain.receipt()
     if path.exists() and not (path / MARKER).exists() and any(path.iterdir()):
         raise SourceLayoutError("cold initialization refuses nonempty or legacy state")
     path.mkdir(parents=True, exist_ok=True)
-    domain = SourceDomain(path)
     with domain.exclusion():
         if (path / MARKER).exists():
             receipt = domain.receipt()
@@ -500,8 +582,6 @@ def initialize_source_layout(path: str | Path) -> dict[str, Any]:
             return receipt
         if any(item.name not in (LOCK, FTS_LOCK) for item in path.iterdir()):
             raise SourceLayoutError("cold initialization refuses nonempty or legacy state")
-        receipt = {"layout": LAYOUT, "protocol": 1, "state": "clean",
-                   "domain": uuid.uuid4().hex, "versions": {}}
         domain.save(receipt)
         return receipt
 
@@ -593,6 +673,7 @@ def source_write(method: F) -> F:
     def call(self: Any, *args: Any, **kwargs: Any) -> Any:
         domain = getattr(self, "_source_domain", None)
         if domain is None:
+            _refuse_marked_legacy(self)
             return method(self, *args, **kwargs)
         db = (self._content.db if hasattr(self, "_content")
               else getattr(self, "_source_db", getattr(self, "_db", None)))
@@ -627,6 +708,7 @@ def source_read(method: F) -> F:
         store = getattr(self, "_store", self)
         domain = getattr(store, "_source_domain", None)
         if domain is None:
+            _refuse_marked_legacy(store)
             yield
             return
         db = (store._content.db if hasattr(store, "_content")
