@@ -1146,12 +1146,22 @@ CAS, family exclusion, cancellation and explicit-discard rules apply. Older
 readers reject incomplete v5 state; finish or explicitly discard it before
 rollback. Ordinary v2 pages, full v4 snapshots and nonpaged hints are unchanged.
 
-Terminal acquisition promotes to the existing ready v1/v3 manifest, preserving
-store-before-checkpoint replay. For a connector already requiring poll refresh,
-candidate generations are retained atomically with that terminal promotion in
-the current refresh owner. Partial hinted pages certify no refresh coverage,
+Terminal acquisition hands its completed manifest to the existing replay owner,
+preserving store-before-checkpoint ordering. For a connector already requiring poll refresh,
+candidate generations are retained atomically with terminal promotion in the
+current refresh owner. Partial hinted pages certify no refresh coverage,
 and completion does not clear candidates or advance the polling cursor.
 This shared seam does not enable any additional built-in connector.
+
+Hinted progress retains per-generation cursor digests, including across restart,
+so multi-step cycles refuse without replacing the last accepted unit. Terminal
+hinted work uses a ready v6 envelope retaining its immutable claim identity.
+After an embedding or state-publication failure, matching claimed hints replay
+that ready manifest without reacquiring remote units. Different claims and
+legacy nonpaged requests retain their acquisition behavior. Completion clears
+only the exact observed payload; ready v6 work is mandatory replay and never
+eligible for acquisition discard. Finish its replay before rollback to an older
+reader. This is retained ready work, not a ledger of every completed hint claim.
 
 Git implements ref-range hints with immutable full hexadecimal commit identities.
 It requires the exact configured source and an explicit nonsecret `hint_account`;

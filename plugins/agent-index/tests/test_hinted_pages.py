@@ -133,9 +133,11 @@ def interrupt(acquisition: SimpleNamespace) -> str:
     return payload
 
 
+@pytest.mark.parametrize("retry_claim", ["same", "different", "legacy"])
 def test_restart_reuses_completed_unit_and_retains_refresh_only_at_terminal(
     acquisition: SimpleNamespace,
     tmp_path: Path,
+    retry_claim: str,
 ) -> None:
     a = acquisition
     a.provider.hint_poll_refresh = True
@@ -163,6 +165,14 @@ def test_restart_reuses_completed_unit_and_retains_refresh_only_at_terminal(
     assert a.journal.load("alias", a.scope) == (result, False)
     refresh = a.journal.refresh_candidates("alias", a.scope, FAMILY)
     assert refresh is not None and set(refresh.paths) == {"1.md", "2.md"}
+    with pytest.raises(ValueError, match="mandatory replay"):
+        discard_acquisition(
+            "alias",
+            paths=a.paths,
+            connector=a.provider,
+            source_scope="config",
+            expected_payload=a.journal.read_payload("alias", a.scope),
+        )
 
     applied: list[CrawlManifest] = []
 
@@ -182,9 +192,17 @@ def test_restart_reuses_completed_unit_and_retains_refresh_only_at_terminal(
         full=False,
         family=FAMILY,
         apply=apply,
+        change_hints=(
+            a.hints
+            if retry_claim == "same"
+            else replace(a.hints, event_ids=("new",))
+            if retry_claim == "different"
+            else None
+        ),
         acquire=lambda: CrawlManifest(source="alias", commit="poll", accounting_family=FAMILY),
     ) == (2, 0, 2)
     assert applied[0] == result
+    assert len(applied) == (1 if retry_claim == "same" else 2)
     assert IndexState.load(tmp_path / "state.json").sources["alias"].last_commit == "poll"
     assert a.journal.read_payload("alias", a.scope) is None
     assert a.journal.refresh_candidates("alias", a.scope, FAMILY) == refresh
@@ -358,11 +376,13 @@ def test_unnegotiated_page_callable_never_replaces_legacy_hints(
 
 
 @pytest.mark.parametrize("source_aware", [False, True])
+@pytest.mark.parametrize("failure_stage", ["acquisition", "embedding", "state"])
 def test_actual_engine_indexes_only_after_terminal_page_and_preserves_poll_cursor(
     acquisition: SimpleNamespace,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     source_aware: bool,
+    failure_stage: str,
 ) -> None:
     from test_consumer_runtime import Client
 
@@ -384,18 +404,45 @@ def test_actual_engine_indexes_only_after_terminal_page_and_preserves_poll_curso
     monkeypatch.setattr(PathIndex, "get_paths_by_family", forbidden)
     events: list[str] = []
     clients: list[Any] = []
+    failed = False
+    expected_calls = (
+        [None, "unit-2", "unit-2"] if failure_stage == "acquisition" else [None, "unit-2"]
+    )
+
+    class InterruptedClient(Client):
+        def embed_texts(self, texts: Any) -> Any:
+            nonlocal failed
+            if failure_stage == "embedding" and not failed:
+                failed = True
+                raise RuntimeError("interrupted embedding")
+            return super().embed_texts(texts)
 
     def create(profile: ModelProfile) -> Any:
-        client = Client(profile.model_id, events)
+        client = InterruptedClient(profile.model_id, events)
         clients.append(client)
         return client
 
     def ensure(*args: object) -> bool:
-        assert a.calls == [None, "unit-2", "unit-2"]
+        assert a.calls == expected_calls
         return True
 
+    original_save = IndexState.save
+
+    def save(state: IndexState, path: Path) -> None:
+        nonlocal failed
+        if failure_stage == "state" and not failed:
+            failed = True
+            raise RuntimeError("interrupted state publication")
+        original_save(state, path)
+
+    monkeypatch.setattr(IndexState, "save", save)
     runtime = EmbeddingRuntime(create, ensure, lambda *args: None)
-    a.responses.extend([page(1, "unit-2"), RuntimeError("interrupted")])
+    a.responses.extend(
+        [
+            page(1, "unit-2"),
+            RuntimeError("interrupted") if failure_stage == "acquisition" else page(2),
+        ]
+    )
 
     def run() -> dict[str, Any]:
         return engine.run_reindex(
@@ -408,13 +455,36 @@ def test_actual_engine_indexes_only_after_terminal_page_and_preserves_poll_curso
 
     with pytest.raises(RuntimeError, match="interrupted"):
         run()
-    assert not clients[0].texts
+    if failure_stage != "state":
+        assert not clients[0].texts
     assert IndexState.load(config.state_file).sources["alias"].last_commit == "poll"
-    a.responses.append(page(2))
+    if failure_stage == "acquisition":
+        a.responses.append(page(2))
     result = run()
     assert not result.get("sources_failed")
-    assert result["work_counts"]["upserts_acquired"] == 2
-    assert result["chunks_total"] > 0 and clients[-1].texts
-    assert a.calls == [None, "unit-2", "unit-2"]
+    if failure_stage == "acquisition":
+        assert result["work_counts"]["upserts_acquired"] == 2
+    if failure_stage != "state":
+        assert result["chunks_total"] > 0 and clients[-1].texts
+    assert a.calls == expected_calls
     assert IndexState.load(config.state_file).sources["alias"].last_commit == "poll"
     assert PendingCrawls(PathIndex(config.data_dir / "path_index.db")).sources() == []
+
+
+def test_cursor_cycle_across_restart_refuses_before_refetch(acquisition: SimpleNamespace) -> None:
+    a = acquisition
+    a.responses.extend(
+        [
+            AcquisitionPage(SourceDelta(commit="poll"), "A"),
+            AcquisitionPage(SourceDelta(commit="poll"), "B"),
+            RuntimeError("interrupted"),
+        ]
+    )
+    with pytest.raises(RuntimeError, match="interrupted"):
+        a.collect()
+    before = a.journal.read_payload("alias", a.scope)
+    a.responses.append(AcquisitionPage(SourceDelta(commit="poll"), "A"))
+    with pytest.raises(ValueError, match="cursor"):
+        a.collect()
+    assert a.calls == [None, "A", "B", "B"]
+    assert a.journal.read_payload("alias", a.scope) == before
