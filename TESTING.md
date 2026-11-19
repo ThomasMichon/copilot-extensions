@@ -72,9 +72,17 @@ start Python or perform executable discovery. Missing-resident behavior remains
 in the separate cold transport controls.
 The same native selection checks caller/resident session mismatch, explicit
 session preservation and absent caller identity through real managed admission.
+Native transport controls compare the forwarded pre-tool elevation Boolean with
+the invoking process's actual token, without requesting elevation. Actor-free
+controls retain original cross-repository posture filtering with opposite caller
+and resident token states, and stop further guard work at a simulated deadline.
+Caller-directory controls also cover absent, explicit, aliased and null fields.
 The unit packet also exercises a 128-call batch with repeated missing/raising
 guards and a final denial, requiring one recovery message per boundary and a
 response inside 64 KiB without dropping the decision or reason.
+Large valid warnings and oversized non-BMP reasons require explicit truncation
+without losing a confirmed decision; both native engines consume the bounded
+large response through their original 500 ms transport.
 
 The focused Worktrees credential-isolation regression is
 `tests/test_git_credential_isolation.py`, selected through the canonical

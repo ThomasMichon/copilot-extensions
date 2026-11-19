@@ -3802,6 +3802,11 @@ null, never a fallback to the resident's session identity.
 The same boundary resolves an absent `cwd` from payload `workingDirectory`,
 then caller `COPILOT_PROJECT_DIR`. Explicit values, including null, are preserved;
 an absent caller directory becomes null rather than the resident's directory.
+Pre-tool transport reads its own Windows token without requesting elevation and
+forwards that Boolean separately from policy switches. Native cross-repository
+evaluation uses this caller value, never the resident's token; missing or invalid
+values retain non-elevated restrictions. Standalone guard calls keep their existing
+process-token behavior.
 
 Native frames do not establish the caller's GitHub account/host authority or a
 caller-owned external-observation scope. The original supersede guard still
@@ -3817,6 +3822,11 @@ space inside the existing response frame. Confirmed decisions are retained;
 excess context is truncated before a decision reason, with an explicit notice.
 An oversized reason retains its prefix and a truncation notice. Maximum-batch
 controls cover both repeated unavailability and large valid guard responses.
+An expired native request starts no guard work. Evaluation checks the original
+monotonic deadline before each next guard load and decision, including across
+batch members. Exhaustion retains decisions already obtained and marks remaining
+evaluation unavailable. This is cooperative between-guard cancellation, not
+preemption of an in-progress local guard or an extension of the client clock.
 
 The transport has one 500 ms allocation/connect/write/read budget. Pre-tool
 requests retain the existing 2 MiB newline-frame bound; post requests and typed

@@ -97,6 +97,10 @@ def decide_pre(
         for name in POLICY_SWITCHES
     ):
         return unavailable("native policy switches are invalid")
+    remaining = deadline - time.time()
+    if remaining <= 0:
+        return unavailable("native policy deadline exhausted")
+    monotonic_deadline = time.monotonic() + remaining
     environment = dict(os.environ)
     for name in POLICY_SWITCHES:
         value = forwarded[name]
@@ -121,7 +125,6 @@ def decide_pre(
         recovery_boundaries.add(boundary)
         return unavailable(boundary)
 
-    monotonic_deadline = time.monotonic() + max(0.0, deadline - time.time())
     for event in events:
         tool = event.get("toolName") or event.get("tool_name")
         if not isinstance(tool, str) or not tool:
@@ -130,7 +133,11 @@ def decide_pre(
             "statelessness_guard.py", "cross_repo_guard.py",
             "anchor_write_guard.py", "pr_supersede_guard.py",
         ):
+            if time.monotonic() >= monotonic_deadline:
+                return _bounded_result(merge(combined, recover("native policy deadline exhausted")))
             module = load_sibling(name)
+            if time.monotonic() >= monotonic_deadline:
+                return _bounded_result(merge(combined, recover("native policy deadline exhausted")))
             if module is None or not callable(getattr(module, "decide", None)):
                 combined = merge(combined, recover(f"{name} unavailable"))
                 continue
@@ -138,6 +145,10 @@ def decide_pre(
                 kwargs: dict[str, Any] = {"deadline": monotonic_deadline} if name in {
                     "cross_repo_guard.py", "pr_supersede_guard.py",
                 } else {}
+                if name == "cross_repo_guard.py":
+                    kwargs["caller_elevated"] = (
+                        isinstance(metadata, dict) and metadata.get("callerElevated") is True
+                    )
                 if name == "pr_supersede_guard.py":
                     # Native frames carry no qualified caller GitHub identity or observation owner.
                     kwargs.update(

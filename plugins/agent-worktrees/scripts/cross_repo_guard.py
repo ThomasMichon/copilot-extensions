@@ -451,7 +451,8 @@ def _hit_to_output(hit: dict, mode: str) -> dict | None:
 
 
 def decide(payload: dict, *, env=None, home=None,
-           guarded_roots=None, deadline: float | None = None) -> dict | None:
+           guarded_roots=None, deadline: float | None = None,
+           caller_elevated: bool | None = None) -> dict | None:
     """Return a hook-output decision dict, or None to allow. Pure/injectable."""
     env = env if env is not None else os.environ
     home = Path(home) if home is not None else Path.home()
@@ -489,7 +490,7 @@ def decide(payload: dict, *, env=None, home=None,
     if not guarded:
         return None
     if any(row.get("elevated") for row in guarded):
-        elevated = _is_elevated()
+        elevated = _is_elevated() if caller_elevated is None else caller_elevated
         guarded = [
             {**row, "posture": "elevated"}
             if row.get("elevated") and not elevated and row.get("posture") != "reference"

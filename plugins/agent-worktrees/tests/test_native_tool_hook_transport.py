@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import ctypes
 import json
 import os
 import shutil
@@ -165,7 +166,15 @@ def test_command_entry_never_launches_python(
         if case in {"warm", "large"}:
             assert len(seen) == 1
             assert seen[0][0] == kind
-            assert seen[0][1]["_agentWorktrees"]["nativePolicy"] == 1
+            metadata = seen[0][1]["_agentWorktrees"]
+            assert metadata["nativePolicy"] == 1
+            if kind == "preToolUse":
+                assert type(metadata["callerElevated"]) is bool
+                assert metadata["callerElevated"] == bool(
+                    getattr(ctypes, "windll").shell32.IsUserAnAdmin(),
+                )
+            else:
+                assert "callerElevated" not in metadata
             if case == "large":
                 response = json.loads(result.stdout)
                 assert "truncat" in response["additionalContext"]

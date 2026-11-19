@@ -103,6 +103,101 @@ def test_native_policy_preserves_batch_decisions_and_caller_switches(
     assert all("CROSS_REPO_GUARD" not in environment for _, _, environment in seen)
 
 
+@pytest.mark.parametrize(("caller", "resident"), [
+    (False, True), (True, False), (None, True), ("true", True),
+], ids=["caller-standard", "caller-elevated", "caller-missing", "caller-invalid"])
+def test_native_cross_repo_uses_caller_elevation_not_resident(
+    monkeypatch: pytest.MonkeyPatch, caller: Any, resident: bool,
+) -> None:
+    guard = load("cross_repo_guard.py")
+    resident_checks: list[bool] = []
+
+    def resident_elevation() -> bool:
+        resident_checks.append(resident)
+        return resident
+
+    monkeypatch.setattr(guard, "_is_elevated", resident_elevation)
+    monkeypatch.setattr(guard, "resolve_registry_root", lambda **_kwargs: Path("/fixture"))
+    monkeypatch.setattr(guard, "find_repo_root", lambda *_args: Path("/caller"))
+    monkeypatch.setattr(guard, "load_guarded_roots", lambda *_args, **_kwargs: [{
+        "name": "foreign", "path": "/foreign", "delegate": "none",
+        "elevated": True, "reason": "protected elevation posture",
+    }])
+    monkeypatch.setattr(guard, "active_break_glass", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(
+        guard, "evaluate", lambda _tool, _args, _cwd, roots, **_kwargs: roots[0] if roots else None,
+    )
+
+    def sibling(name: str) -> ModuleType:
+        if name in {"tool_call_forms.py", "hook_pre_policy.py"}:
+            return load(name)
+        if name == "cross_repo_guard.py":
+            return guard
+        module = ModuleType(name)
+        module.decide = lambda *_args, **_kwargs: None  # type: ignore[attr-defined]
+        return module
+
+    payload = event()
+    if caller is not None:
+        payload["_agentWorktrees"]["callerElevated"] = caller
+    result = decide_pre(
+        payload, load_sibling=sibling, merge=merge, deadline=time.time() + 0.5,
+    )
+    if caller is True:
+        assert result == {}
+    else:
+        assert result["permissionDecision"] == "deny"
+        assert result["permissionDecisionReason"] == "protected elevation posture"
+    assert not resident_checks, "native policy borrowed the resident's elevation"
+
+
+@pytest.mark.parametrize("case", ["expired", "between-guards", "between-events"])
+def test_native_batch_stops_starting_guards_at_its_deadline(
+    monkeypatch: pytest.MonkeyPatch, case: str,
+) -> None:
+    clock = {"monotonic": 10.0}
+    monkeypatch.setattr(_api, "time", SimpleNamespace(
+        time=lambda: 100.0, monotonic=lambda: clock["monotonic"],
+    ))
+    loaded: list[str] = []
+    calls: list[str] = []
+
+    def sibling(name: str) -> ModuleType:
+        loaded.append(name)
+        if name in {"tool_call_forms.py", "hook_pre_policy.py"}:
+            return load(name)
+        module = ModuleType(name)
+
+        def decide(*_args: Any, **_kwargs: Any) -> dict[str, str] | None:
+            calls.append(name)
+            if (
+                case == "between-guards" and name == "statelessness_guard.py"
+                or case == "between-events" and name == "pr_supersede_guard.py"
+            ):
+                clock["monotonic"] += 1.0
+            if name == "statelessness_guard.py":
+                return {"permissionDecision": "ask", "permissionDecisionReason": "protected"}
+            return None
+
+        module.decide = decide  # type: ignore[attr-defined]
+        return module
+
+    result = decide_pre(
+        event(toolCalls=[{"name": "edit"}, {"name": "edit"}]),
+        load_sibling=sibling, merge=load("hook_client.py")._merge_pre_decisions,
+        deadline=99.0 if case == "expired" else 100.5,
+    )
+    assert "deadline" in result["additionalContext"]
+    if case == "expired":
+        assert not loaded and not calls
+        assert "permissionDecision" not in result
+    else:
+        assert len(calls) == (1 if case == "between-guards" else 4)
+        assert len(loaded) == len(calls) + 2
+        assert result["permissionDecision"] == "ask"
+        assert result["permissionDecisionReason"] == "protected"
+
+
 @pytest.mark.parametrize("case", ["close", "api", "off"])
 def test_native_supersede_never_observes_with_resident_identity(
     monkeypatch: pytest.MonkeyPatch, case: str,

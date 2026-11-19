@@ -106,11 +106,16 @@ function Invoke-ResidentPostTool {
         $value = [Environment]::GetEnvironmentVariable($key)
         $forwarded[$key] = $value
     }
-    if ($payload -is [Collections.IDictionary]) {
-        $payload['_agentWorktrees'] = @{ nativePolicy = 1; environment = $forwarded }
-    } else {
-        $payload | Add-Member -Force -NotePropertyName '_agentWorktrees' -NotePropertyValue @{ nativePolicy = 1; environment = $forwarded }
+    $metadata = @{ nativePolicy = 1; environment = $forwarded }
+    if ($Kind -ceq 'preToolUse') {
+        $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+        try {
+            $metadata['callerElevated'] = ([Security.Principal.WindowsPrincipal]::new(
+                $identity)).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+        } finally { $identity.Dispose() }
     }
+    if ($payload -is [Collections.IDictionary]) { $payload['_agentWorktrees'] = $metadata }
+    else { $payload | Add-Member -Force -NotePropertyName '_agentWorktrees' -NotePropertyValue $metadata }
     $request = @{
         version = 1
         token = $Endpoint.hook_token
