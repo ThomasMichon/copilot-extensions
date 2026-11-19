@@ -55,6 +55,23 @@ release gates, or count unexecuted native coverage as passing.
 
 ## Coordination
 
+The finite #13294 Windows-native unit-collector attribution family enters
+the existing Phase 4 tools/shared-library wave through Phase 7
+migration-intake deduplication and domain-Plan review. Preserve the existing
+collector, runtime-loader, source-admission/audit, fixture, runner, native,
+release and resource custodians, OPEN #1303 and all incumbent obligations.
+This does not appoint an implementer, transfer a claim/resource, authorize
+execution or require a generic ACK. Empty assignees do not release custody.
+
+Normal review must actually deliver the complete P13294/V13294/G13294
+Plan, local and actual global Validation, Coordination, dated Journal and
+intake route before a separate source-specific tracking judgment. Permitted
+current receiving/source/custody readback must preserve genuine intervening
+holds and any actual physical-OPEN condition. Keep #13294 OPEN during this
+proposal; technical native acceptance remains unchecked after any separately
+qualified administrative consolidation. No unrelated whole-portfolio,
+every-host or new native execution prerequisite is added to that judgment.
+
 The finite #13278 offline-job continuation enters the existing Phase 4
 payload/harness/tools wave through Phase 7 migration-intake and domain-Plan
 review. Retain the current #13278 claimant and actual generic clean-room,
@@ -485,6 +502,55 @@ suites first.
   observable features per process launch.
 - [ ] Keep each plugin's contract map, inventory, and TESTING coverage summary
   current as its wave lands.
+
+#### Finite Windows-native unit-collector attribution from #13294
+
+- [ ] **P13294-1:** Retain the original explicit positively admitted
+  Windows-native unit collection abort, before selected watch-storage tests
+  execute, on BOTH CPython 3.11.9 AND 3.14.7. Preserve the reported chain:
+  tools/promotion_unit_tests/test_source_witness.py imports
+  tools/runtime_source_lock.py; libs/installer-engine/installer_engine.py
+  imports libs/versioned-runtime/versioned_runtime_source.py; its _runtime()
+  loads the co-located primitive through an extended-length Windows path;
+  tools/promotion_unit_effects.py canonicalizes the open-audit bytecode
+  path before importlib.util.source_from_cache rejects the bottom-level
+  __pycache__ association. Surfaced paths differ between versions. This
+  association boundary is suspected, not a fully diagnosed root cause.
+- [ ] **P13294-2:** Through the actual owning boundary, diagnose and correct
+  supported Windows source/bytecode attribution while retaining
+  unadmitted-source, unattributable-bytecode, mutation and actor refusals.
+  Preserve byte-identical admitted Git source, including LF bytes; do not
+  rewrite admission hashes for checkout-specific CRLF, waive the effect
+  guard or count a collection abort as test evidence. Preserve the original
+  source-lineage observation including
+  ed3f4a3629cc17bbd60c39f97418f7665b002934 without asserting a fresh
+  reproduction or current causal diagnosis.
+- [ ] **P13294-3:** Add focused native AND actor-free regression controls
+  at the owning boundary. Retain the original reproduction shape:
+  `python tools\run-promotion-unit-tests.py --source-sha <full-current-head>
+  --output-dir <new-test-owned-output> --windows-native`
+  with repository-declared pytest/coverage dependencies and byte-identical
+  admitted sources. This optional full Windows-native qualification is
+  separate from required Linux unit/PR CI; neither gate is waived.
+
+##### Local Validation
+
+- [ ] **V13294-1:** In the existing separately authorized bounded native
+  lane, qualify BOTH exact CPython versions against the actual extended-path
+  loader/open-audit/cache-association consumer and original reproduction
+  shape. Record exact admitted source and selected scope, collection outcome
+  and actual selected-test outcomes separately. Demonstrate progress past
+  the original attribution abort without replacing it with a different
+  selection; any unavailable or unexecuted case remains explicit non-proof.
+- [ ] **V13294-2:** Exercise focused actor-free positive attribution and
+  refusal controls for unadmitted source, unattributable bytecode, mutation
+  and actors, alongside the focused native controls at the actual boundary.
+  Preserve byte-identical LF admission, original effects, containment,
+  process/time/storage/resource limits and owning cleanup. #13295's 155-case
+  native storage packet and #13320's 358-case native/28-case actor-free
+  packets are distinct successes, not this collector's qualification.
+  Planning grants no import, collection, test, source/bytecode mutation,
+  native execution, dependency acquisition or resource authority.
 
 #### Finite bounded offline-job continuation from #13278
 
@@ -1078,6 +1144,13 @@ a different selection. Any changed controlled selection must be named as changed
   disposition.
 - [ ] Place each accepted public tracker item in exactly one existing phase,
   extending this plan before implementation when necessary.
+- [ ] **I13294:** Record deduplicated acceptance of the complete
+  P13294/V13294/G13294 family through existing migration-intake and
+  domain review into Phase 4 only. Existing #13294 supplies its tracker;
+  check this administrative row only after actual reviewed complete
+  receiving/intake delivery and permitted current readback. Technical
+  acceptance, source-specific tracking judgment and actual custody remain
+  separate; no new tracker or implementation appointment follows.
 - [x] **I13278:** Record deduplicated acceptance of the finite P13278/
   V13278/G13278 Phase 4 lane through the existing migration-intake and
   domain-review process, preserving the continuing source claimant and
@@ -2234,6 +2307,17 @@ Phase 7 intake; this is not #7643's already-attributed external mapping.
 
 ## Validation Plan
 
+- [ ] **G13294:** Resolve every P13294/V13294 and continuing Coordination
+  clause at the original finite Windows-native collector boundary:
+  BOTH CPython 3.11.9 AND 3.14.7, actual extended-path loader/open-audit/
+  source-cache attribution, focused native AND actor-free controls and
+  preserved source/bytecode/mutation/actor refusals. Keep the suspected
+  cause, original failed collection, byte-identical LF admission, distinct
+  passing selections and unavailable outcomes honest. Optional Windows
+  qualification does not replace required Linux CI. Documentary intake is
+  not repair, executed evidence or source/resource release; retain existing
+  hosted-Windows quiescence and separately authorized execution boundaries.
+
 - [ ] **G13278:** Resolve every P13278/V13278 clause at its original finite
   offline-job/scenario scope, preserving all three delivered source credits,
   unchanged defaults, no-fallback isolation/resource rules, exact-ID and
@@ -2547,6 +2631,24 @@ with another unbounded full-suite run. Portfolio reductions follow only after
 the inventory and evidence gates are available.
 
 ## Journal
+
+### 2026-11-19 UTC - Proposed finite Windows collector receiving
+
+Propose complete P13294/V13294/G13294 Phase 4 receiving through existing
+Phase 7 migration-intake and domain-Plan review. The original exact
+CPython 3.11.9 AND 3.14.7 extended-path loader/open-audit/cache-association
+abort, suspected-not-proved cause, byte-identical LF admission and all
+source/bytecode/mutation/actor refusals remain. #13295/#13320 explicitly
+leave this collector unchanged; their different successful selections
+remain credited only at their actual scopes.
+
+All six technical rows and administrative I13294 remain unchecked.
+Normal review, actual complete receiving/intake delivery and permitted
+current source/receiver/custody readback precede any separate tracking
+judgment. #13294 stays OPEN now. Preserve every incumbent obligation,
+checked state, owner, hold and historical result. No implementation,
+execution, admission change, source/bytecode mutation, technical completion,
+claim expiry or resource release occurred.
 
 ### 2026-11-19 UTC - Reviewed finite domain and intake acceptance recorded
 
