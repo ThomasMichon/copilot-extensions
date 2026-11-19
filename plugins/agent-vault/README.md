@@ -178,6 +178,12 @@ copy an installed provider. Complete closed-wheel input can also supply the
 current core and providers together. Windows closed-wheel selection retains the
 admitted provider roots when its installer persists dependency selection.
 
+Only unconditional distribution roots seed this names-and-extras declaration.
+A conditional dependency root is not promoted into unconditional provider intent,
+even when its distribution is present transitively. To retain a provider across
+updates, declare it explicitly and include its unconditional root in the complete
+incoming profile; the existing producer does this for the recorded selection.
+
 All canonical candidate paths, including POSIX and prepared applications, check
 the recorded provider roots before constructing or reusing a candidate. An
 ordinary update without complete matching inputs fails rather than silently

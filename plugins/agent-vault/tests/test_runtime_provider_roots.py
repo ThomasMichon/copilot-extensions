@@ -9,6 +9,7 @@ from importlib import import_module
 import os
 from pathlib import Path
 import subprocess
+import sys
 from types import ModuleType
 from typing import Any
 
@@ -22,6 +23,17 @@ def providers(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     import installer_provider_roots
 
     return installer_provider_roots
+
+
+@pytest.fixture
+def vault_profile(monkeypatch: pytest.MonkeyPatch, providers: ModuleType) -> ModuleType:
+    path = Path(__file__).resolve().parents[1] / "scripts" / "runtime_profile.py"
+    spec = importlib.util.spec_from_file_location("vault_provider_cli", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, "runtime_profile", module)
+    spec.loader.exec_module(module)
+    return module
 
 
 def test_provider_desire_survives_core_reconstruction(providers: ModuleType, tmp_path: Path) -> None:
@@ -114,7 +126,7 @@ def test_constructor_refuses_provider_loss_before_creating_candidate(
 
 
 def test_currentness_does_not_hide_an_unapplied_provider_selection(
-    providers: ModuleType, tmp_path: Path,
+    providers: ModuleType, vault_profile: ModuleType, tmp_path: Path,
 ) -> None:
     import runtime_source_target as target
 
@@ -197,13 +209,10 @@ def test_provider_only_selection_bypasses_unchanged_base_fast_exit(tmp_path: Pat
 
 
 def test_provider_cli_requires_explicit_persistence_and_excludes_core(
-    providers: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+    providers: ModuleType, vault_profile: ModuleType, tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    path = Path(__file__).resolve().parents[1] / "scripts" / "runtime_profile.py"
-    spec = importlib.util.spec_from_file_location("vault_provider_cli", path)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module = vault_profile
     arguments = ["--root", str(tmp_path), "providers"]
     assert module.main(arguments + ["--roots", '["example-provider"]']) == 0
     assert providers.read(tmp_path) is None
@@ -249,4 +258,22 @@ def test_repeated_profile_roots_union_only_inspected_extras(providers: ModuleTyp
     assert providers.from_profile(profile, core="agent-vault") == ["example-provider[a,b]"]
     profile["roots"] = ["example-provider==1; os_name=='nt'", "example-provider==1; os_name!='nt'"]
     profile["wheels"][0]["selected_extras"] = []
-    assert providers.from_profile(profile, core="agent-vault") == ["example-provider"]
+    assert providers.from_profile(profile, core="agent-vault") == []
+
+
+@pytest.mark.parametrize("marker", ['python_version < "3.0"', 'python_version >= "3.0"'])
+def test_conditional_transitive_roots_do_not_add_unconditional_provider_intent(
+    providers: ModuleType, tmp_path: Path, marker: str,
+) -> None:
+    profile: dict[str, Any] = {
+        "roots": ["agent-vault", "example-provider", "core-dependency; " + marker],
+        "wheels": [
+            {"name": name, "selected_extras": []}
+            for name in ("agent-vault", "example-provider", "core-dependency")
+        ],
+    }
+    providers.persist(tmp_path, ["example-provider"])
+    roots = providers.from_profile(profile, core="agent-vault")
+    assert roots == ["example-provider"]
+    providers.select(tmp_path, roots, write=True)
+    assert providers.read(tmp_path) == roots

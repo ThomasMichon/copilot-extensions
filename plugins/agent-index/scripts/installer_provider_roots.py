@@ -55,11 +55,15 @@ def normalize(roots: object, *, core: str | None = None) -> list[str]:
 
 
 def from_profile(profile: dict[str, object], *, core: str) -> list[str]:
-    """Derive provider selection from applicable, inspected distributions."""
+    """Derive unconditional provider intent from inspected distribution roots."""
     declared = profile.get("roots")
     if not isinstance(declared, list) or len(declared) > 256:
         raise ValueError("Runtime provider roots require a bounded list")
-    roots = [root for value in declared for root in normalize([value], core=core)]
+    roots: list[str] = []
+    for value in declared:
+        parsed = normalize([value], core=core)
+        if isinstance(value, str) and ";" not in value:
+            roots.extend(parsed)
     wheels = profile.get("wheels")
     if not isinstance(wheels, list):
         raise ValueError("Provider selection requires the inspected wheel closure")

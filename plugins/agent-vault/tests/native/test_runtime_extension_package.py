@@ -66,6 +66,14 @@ from agent_procutil import no_window_kwargs
 root = home / ".agent-vault"
 installer_provider_roots.persist(root, ["example-vault-provider"])
 desire = (root / installer_provider_roots.FILE).read_bytes()
+transitive = json.loads(profile.read_text())
+transitive["roots"].append('psutil; python_version < "3.0"')
+transitive_file = home / "conditional-transitive-profile.json"
+transitive_file.write_text(json.dumps(transitive))
+with install_source.wheel_inputs(transitive_file, wheels) as transitive_inputs:
+    transitive_selection = install_source.wheel_selection(payload, "agent-vault", transitive_inputs)
+    assert transitive_selection["provider_roots"] == ["example-vault-provider"]
+    runtime_profile.wheel_selection(root, payload, transitive_selection, "ssh")
 inactive = json.loads(profile.read_text())
 inactive["roots"] = [inactive["roots"][0], 'example-vault-provider; python_version < "3.0"']
 inactive["wheels"] = [row for row in inactive["wheels"] if row["name"] != "example-vault-provider"]
