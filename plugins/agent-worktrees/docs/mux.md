@@ -117,7 +117,8 @@ The canonical Windows creation owner checks the selected executable's native
 file-version resource before preparing a pane. An old or unknown version
 refuses new creation from that executable. When the PATH copy is old, the
 owner selects the newest side-by-side or WinGet package copy that passes the
-same 3.4.0 floor and puts its directory first on the new pane's PATH; no
+same 3.4.0 floor and puts its directory first on the new pane's PATH,
+including a PATH value that the launch plan sets for the pane; no
 fallback admits an older binary. If no copy passes, the refusal names the
 side-by-side update as the remedy. This read starts no provider process. An existing-session join returns before that check,
 so legacy reattachment does not acquire a new creation-version requirement.

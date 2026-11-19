@@ -1562,21 +1562,35 @@ function Resolve-AwPsmuxBin {
     return $src
 }
 
-# Put the selected client's directory first on this process PATH, so panes and
+# Return a PATH value with the selected client's directory first, so panes and
 # helpers that run a bare `psmux` use the same client as the launcher.
-function Set-AwPsmuxProcessPathFirst {
-    param([string]$Binary)
-    if (-not $Binary -or -not [IO.Path]::IsPathRooted($Binary)) { return }
+function Join-AwPsmuxPathFirst {
+    param([string]$Binary, [string]$PathValue)
+    if (-not $Binary -or -not [IO.Path]::IsPathRooted($Binary)) { return $PathValue }
     $dir = (Split-Path -Parent $Binary).TrimEnd('\', '/')
     $sep = [IO.Path]::PathSeparator
-    $entries = @(([string]$env:PATH) -split [regex]::Escape([string]$sep) | Where-Object { $_ })
+    $entries = @(([string]$PathValue) -split [regex]::Escape([string]$sep) | Where-Object { $_ })
     $rest = @($entries | Where-Object { $_.TrimEnd('\', '/') -ine $dir })
-    $env:PATH = (@($dir) + $rest) -join $sep
+    return (@($dir) + $rest) -join $sep
+}
+function Set-AwPsmuxProcessPathFirst {
+    param([string]$Binary)
+    $env:PATH = Join-AwPsmuxPathFirst $Binary ([string]$env:PATH)
+}
+# A launch plan can set its own pane PATH; keep the selected client first there too.
+function Set-AwPsmuxPlanPathFirst {
+    param([System.Collections.IDictionary]$Environment, [string]$Binary)
+    if (-not $Binary) { return }
+    foreach ($key in @($Environment.Keys | Where-Object { [string]$_ -ieq 'PATH' })) {
+        $Environment[$key] = Join-AwPsmuxPathFirst $Binary ([string]$Environment[$key])
+    }
 }
 $script:AwPsmuxBin = Resolve-AwPsmuxBin $psmuxCmd
+$script:AwPsmuxPathFirstBin = $null
 if ($psmuxCmd -and $script:AwPsmuxBin -ne $psmuxCmd.Source) {
     Write-SetupLog "psmux: selected $($script:AwPsmuxBin) instead of PATH $($psmuxCmd.Source)"
     Set-AwPsmuxProcessPathFirst $script:AwPsmuxBin
+    $script:AwPsmuxPathFirstBin = $script:AwPsmuxBin
 }
 
 # Detect nested invocation: if we're already inside a psmux/tmux session,
@@ -2027,6 +2041,7 @@ if (-not $noMux) {
     }
     $mergedEnv['WORKTREE_SETUP_LOG'] = [string]$script:SetupLog
     if ($script:LaunchId) { $mergedEnv['WORKTREE_LAUNCH_ID'] = [string]$script:LaunchId }
+    Set-AwPsmuxPlanPathFirst $mergedEnv $script:AwPsmuxPathFirstBin
 
     $envFlags = @()
     foreach ($kv in $mergedEnv.GetEnumerator()) {
