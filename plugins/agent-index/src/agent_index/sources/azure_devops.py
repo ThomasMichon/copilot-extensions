@@ -196,16 +196,27 @@ class AzureDevOpsConnector:
             result = self._http.post_json(
                 self._project_path("_apis", "wit", "workitemsbatch"),
                 params={"api-version": _DEFAULT_API_VERSION},
-                json={"ids": chunk, "$expand": "all"},
+                json={"ids": chunk, "$expand": "all", "errorPolicy": "fail"},
                 purpose="item_body",
             )
             self._observe_records(result.data, kind="workitems")
-            for item in _values(result.data):
-                if isinstance(item, dict):
-                    if since_dt and not self._work_item_in_window(item, since_dt):
-                        continue
-                    comments = self._work_item_comments(item.get("id"), cancel_check=cancel_check)
-                    entries.append(self._work_item_entry(item, comments))
+            items = _values(result.data)
+            expected, seen = set(chunk), set()
+            for item in items:
+                item_id = item.get("id") if isinstance(item, dict) else None
+                if (
+                    type(item_id) is not int or item_id not in expected or item_id in seen
+                    or not isinstance(item.get("fields"), dict)
+                ):
+                    raise ValueError("Azure DevOps work-item body batch has invalid records")
+                seen.add(item_id)
+            if seen != expected:
+                raise ValueError("Azure DevOps work-item body batch is incomplete")
+            for item in items:
+                if since_dt and not self._work_item_in_window(item, since_dt):
+                    continue
+                comments = self._work_item_comments(item["id"], cancel_check=cancel_check)
+                entries.append(self._work_item_entry(item, comments))
         return entries
 
     def _work_item_ids_in_window(self, ids: list[int], since: datetime) -> list[int]:
