@@ -127,6 +127,47 @@ def test_actual_bound_selection_and_legacy_requests_share_the_existing_owner(tmp
     asyncio.run(scenario())
 
 
+def test_original_request_is_recovered_over_unix_after_lost_local_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def scenario() -> None:
+        async with running(tmp_path) as host:
+            client = host.client()
+            support = await asyncio.to_thread(client.negotiate)
+            cutoff = int(host.store.clock()) + 10
+            assert support["request_recovery"]["protocol"] == (
+                "agent-pull-requests.repository-request-recovery/v1"
+            )
+            original = client._http
+            def lost(method: str, operation: str, value: Any = None) -> dict[str, Any]:
+                result = original(method, operation, value)
+                if operation == "subscribe":
+                    raise LocalClientError("accepted local result lost")
+                return result
+            with monkeypatch.context() as patch:
+                patch.setattr(client, "_http", lost)
+                with pytest.raises(LocalClientError, match="result lost"):
+                    await asyncio.to_thread(client.request, "subscribe", {
+                        "request_id": "lost-result", "ttl": 60, "not_after": cutoff,
+                    })
+            before = host.store.path.read_bytes()
+            recovered = await asyncio.to_thread(
+                host.client().request, "inspect-request", {"request_id": "lost-result"},
+            )
+            assert recovered["status"] == "active"
+            assert recovered["subscription"]["expires_at"] == cutoff
+            assert host.store.path.read_bytes() == before
+            assert sum(call["operation"] == "subscribe" for call in host.calls) == 1
+            await asyncio.to_thread(client.request, "cancel", {
+                "registration_id": recovered["subscription"]["registration_id"],
+            })
+            cancelled = await asyncio.to_thread(
+                client.request, "inspect-request", {"request_id": "lost-result"},
+            )
+            assert cancelled["status"] == "cancelled"
+    asyncio.run(scenario())
+
+
 @pytest.mark.parametrize("change", [
     {"namespace": "other"}, {"provider": "github"}, {"account": "other"},
     {"endpoint": "https://another.example"}, {"repo": "other/repository"},
