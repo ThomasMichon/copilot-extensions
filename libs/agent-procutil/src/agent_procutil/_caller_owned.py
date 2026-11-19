@@ -219,10 +219,20 @@ def _confirm_group(process: UnreapedChild, *, budget: OwnedExecutionBudget | Non
         raise OwnedCleanupError(process) from error
 
 
+def _zombie_only_group(process: UnreapedChild) -> bool:
+    """Confirm the group holds no live member besides its exited, unreaped leader."""
+    if sys.platform != "darwin":
+        return False
+    from agent_procutil._darwin_caller_owned import GroupCensus
+
+    return not GroupCensus().active(process.pid)
+
+
 def _posix_cleanup_error(
     process: _CleanupProcess, *, confirm_group: bool = False, inherit_process_group: bool = False,
     output: _PendingOutput | None = None, native_settled: bool = False,
     on_settled: Callable[[], None] | None = None,
+    group_settled: bool = False,
 ) -> OwnedCleanupError:
     """Retain the exact unreaped leader and remaining stream custody for retry."""
     def retry(deadline: float) -> None:
@@ -241,9 +251,10 @@ def _posix_cleanup_error(
             # closure from recording its own stage before the previous unwind.
             if process.returncode is None:
                 remaining()
-                _retire_posix_group(process, inherit_process_group=inherit_process_group)
-                if confirm_group:
-                    _confirm_group(process, budget=OwnedExecutionBudget(deadline, .01))
+                if not group_settled:
+                    _retire_posix_group(process, inherit_process_group=inherit_process_group)
+                    if confirm_group:
+                        _confirm_group(process, budget=OwnedExecutionBudget(deadline, .01))
                 process.wait(timeout=remaining())
             native_settled = True
         if output is not None:
@@ -271,6 +282,31 @@ def _settle_exited_group(
     except BaseException as error:
         raise _posix_cleanup_error(
             process, confirm_group=True, on_settled=on_settled,
+        ) from error
+
+
+def _finish_posix_process(
+    process: _CleanupProcess, *, confirm_group: bool, inherit_process_group: bool,
+    budget: OwnedExecutionBudget | None, group_settled: bool,
+    output: _PendingOutput | None, on_settled: Callable[[], None] | None,
+) -> None:
+    from agent_procutil.owned_process import _retire_posix_group
+
+    try:
+        if not group_settled:
+            _retire_posix_group(process, inherit_process_group=inherit_process_group)
+            if confirm_group:
+                if budget is None:
+                    _confirm_group(process)
+                else:
+                    _confirm_group(process, budget=budget)
+                group_settled = True
+        process.wait(timeout=budget.cleanup_timeout() if budget else 2.0)
+    except BaseException as error:
+        raise _posix_cleanup_error(
+            process, confirm_group=confirm_group, inherit_process_group=inherit_process_group,
+            output=output, native_settled=process.returncode is not None,
+            on_settled=on_settled, group_settled=group_settled,
         ) from error
 
 
@@ -588,7 +624,8 @@ def _main() -> None:
                 request["argv"], timeout=request["timeout"],
                 input_text=base64.b64decode(request["input_bytes"], validate=True)
                 if "input_bytes" in request else request["input_text"], capture=request["capture"],
-                inherit_process_group=True, capture_limits=(request["limits"][0], request["limits"][1]),
+                inherit_process_group=True, completion_supervisor=True,
+                capture_limits=(request["limits"][0], request["limits"][1]),
                 binary=request.get("binary", False),
                 budget=budget,
             )

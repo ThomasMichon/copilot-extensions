@@ -3,17 +3,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from contextlib import nullcontext
+from collections.abc import Callable
 import io
 import os
 import selectors
 import subprocess
 import sys
+import threading
 import time
 from types import SimpleNamespace, TracebackType
 
 import pytest
 
-from agent_procutil import owned_budget, owned_process
+from agent_procutil import _caller_owned, owned_budget, owned_process
 from agent_procutil.owned_budget import OwnedExecutionBudget
 from agent_procutil.owned_process import OwnedCleanupError, UnreapedChild
 
@@ -169,6 +172,7 @@ def test_posix_post_exit_drain_uses_original_cleanup_deadline(
             process, input_text=None, deadline=1, timeout=None, argv=["fixture"],
             capture_limits=(64, 64), on_root_exit=None if inherited else retire,
             cleanup_deadline=2,
+            handoff_on_root_exit=inherited,
         )
 
     if expired:
@@ -231,3 +235,145 @@ def test_windows_post_exit_settlement_uses_original_cleanup_deadline(
     finally:
         process.stdout.close()
         process.stderr.close()
+
+
+def test_borrowed_scope_waits_for_bounded_pipe_completion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = _Clock()
+
+    class BorrowedSelector(_Selector):
+        def select(self, timeout: float | None = None) -> list[tuple[selectors.SelectorKey, int]]:
+            assert timeout is not None and timeout > 0
+            clock.now = 1.1
+            return []
+
+    selector = BorrowedSelector(clock, 1.1)
+    process = SimpleNamespace(pid=123, returncode=None, stdin=None, stdout=_Pipe(), stderr=None)
+
+    def forbidden(root: UnreapedChild) -> object:
+        pytest.fail("borrowed output was handed off before EOF")
+
+    monkeypatch.setattr(owned_process, "time", clock)
+    monkeypatch.setattr(owned_process, "os", SimpleNamespace(set_blocking=lambda fd, value: None))
+    monkeypatch.setattr(owned_process, "_observe_unreaped", forbidden)
+    monkeypatch.setattr(owned_process, "selectors", SimpleNamespace(
+        DefaultSelector=lambda: selector,
+        EVENT_READ=selectors.EVENT_READ, EVENT_WRITE=selectors.EVENT_WRITE,
+    ))
+    with pytest.raises(subprocess.TimeoutExpired):
+        owned_process._communicate_unreaped(
+            process, input_text=None, deadline=1, timeout=None,
+            argv=["borrowed"], capture_limits=(64, 64), cleanup_deadline=2,
+        )
+
+
+@dataclass
+class _FailedRetirementProcess:
+    stdout: io.BytesIO
+    stdin: None = None
+    stderr: None = None
+    pid: int = 123
+    returncode: None = None
+    attempted: threading.Event = field(default_factory=threading.Event)
+    execution_waits: int = 0
+
+    def retire_job(self, job: object, timeout: float) -> None:
+        self.attempted.set()
+        raise OSError("fixture retirement is unconfirmed")
+
+    def poll(self) -> None:
+        assert self.attempted.wait(2)
+        return None
+
+    def wait(self, *, timeout: float) -> int:
+        if timeout < .1:
+            self.execution_waits += 1
+            if self.execution_waits >= 2:
+                raise AssertionError("execution waited after a recorded pipe failure")
+        raise subprocess.TimeoutExpired(["fixture"], timeout)
+
+
+@pytest.mark.parametrize("io_failure", [False, True])
+def test_pipe_failure_stops_execution_wait_even_when_retirement_fails(io_failure: bool) -> None:
+    class BrokenPipe(io.BytesIO):
+        def read(self, size: int | None = -1) -> bytes:
+            raise OSError("fixture stream failed")
+
+    stream = BrokenPipe() if io_failure else io.BytesIO(b"x" * 33)
+    process = _FailedRetirementProcess(stream)
+    job = object()
+    try:
+        with pytest.raises(OwnedCleanupError) as caught:
+            owned_process._communicate_windows_bounded(
+                process, job, input_text=None, deadline=None, timeout=None,
+                argv=["fixture"], capture_limits=(32, 32),
+            )
+        failure = caught.value
+        assert failure.process is process and failure.job is job
+        assert failure.diagnostics.job_settlement == "unconfirmed"
+        assert isinstance(
+            failure.operation_error, OSError if io_failure else owned_process.OutputLimitExceeded,
+        )
+        assert process.execution_waits == 0
+    finally:
+        stream.close()
+
+
+@dataclass
+class _PosixProcess:
+    stdin: None = None
+    stdout: None = None
+    stderr: None = None
+    pid: int = 123
+    returncode: int | None = None
+    waits: int = 0
+
+    def wait(self, *, timeout: float) -> int:
+        self.waits += 1
+        self.returncode = 7
+        return 7
+
+
+def test_confirmed_root_exit_reuses_its_two_scan_group_witness(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    process = _PosixProcess()
+    scans: list[bool] = []
+    signals: list[bool] = []
+    notifications: list[bool] = []
+
+    def scan(path: str) -> nullcontext[list[object]]:
+        assert path == "/proc" and process.returncode is None
+        scans.append(True)
+        return nullcontext([])
+
+    def retire(root: UnreapedChild, *, inherit_process_group: bool = False) -> None:
+        assert root is process and root.returncode is None and not inherit_process_group
+        signals.append(True)
+
+    def communicate(
+        root: object, *, on_root_exit: Callable[[], None] | None, **options: object,
+    ) -> tuple[str, str]:
+        assert root is process and on_root_exit is not None
+        on_root_exit()
+        return "root\n", ""
+
+    def spawn(argv: list[str], **options: object) -> tuple[_PosixProcess, None]:
+        return process, None
+
+    monkeypatch.setattr(owned_process, "os", SimpleNamespace(name="posix"))
+    monkeypatch.setattr(owned_process, "_require_posix_execution_support", lambda: None)
+    monkeypatch.setattr(owned_process, "spawn_sync_in_kill_on_close_job", spawn)
+    monkeypatch.setattr(owned_process, "_communicate_unreaped", communicate)
+    monkeypatch.setattr(owned_process, "_retire_posix_group", retire)
+    monkeypatch.setattr(_caller_owned, "sys", SimpleNamespace(platform="linux"))
+    monkeypatch.setattr(_caller_owned, "os", SimpleNamespace(scandir=scan))
+    monkeypatch.setattr(_caller_owned, "_observe_unreaped", lambda root: object())
+    result = owned_process._run_owned(
+        ["fixture"], timeout=None, capture_limits=(64, 64), confirm_posix_group=True,
+        on_settled=lambda: notifications.append(True),
+    )
+    assert result.returncode == 7 and result.stdout == "root\n"
+    assert scans == [True, True] and signals == [True] and process.waits == 1
+    assert notifications == [True]

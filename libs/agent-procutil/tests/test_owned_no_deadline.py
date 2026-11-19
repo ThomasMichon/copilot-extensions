@@ -386,3 +386,94 @@ def test_cancelling_active_no_deadline_query_confirms_its_original_tree(
         "pinned": outcome["pinned"], "attempts": 1,
     }
     assert outcome["pinned"] >= 3
+
+
+@pytest.mark.skipif(sys.platform not in {"linux", "darwin"}, reason="native borrowed POSIX scope")
+def test_borrowed_scope_does_not_report_success_for_a_quiet_live_descendant(
+    tmp_path: Path,
+) -> None:
+    marker = tmp_path / "borrowed-descendant.pid"
+    source = str(Path(_caller_owned.__file__).resolve().parents[1])
+    child = (
+        "import os,pathlib,time;"
+        f"pathlib.Path({str(marker)!r}).write_text(str(os.getpid()));time.sleep(25)"
+    )
+    root = (
+        "import pathlib,subprocess,sys,time;"
+        f"subprocess.Popen([sys.executable,'-I','-c',{child!r}]);"
+        f"marker=pathlib.Path({str(marker)!r})\n"
+        "while not marker.exists(): time.sleep(.01)\n"
+        "sys.exit(7)"
+    )
+    borrower = (
+        f"import subprocess,sys,time;sys.path.insert(0,{source!r});"
+        "from agent_procutil.owned_process import run_caller_owned;"
+        "from agent_procutil.owned_budget import OwnedExecutionBudget\n"
+        "try:\n"
+        f" run_caller_owned({[sys.executable, '-I', '-c', root]!r},"
+        "timeout=None,max_stdout_bytes=64,max_stderr_bytes=64,"
+        "borrow_parent_scope=True,budget=OwnedExecutionBudget(time.monotonic()+3,1))\n"
+        "except subprocess.TimeoutExpired: print('budget-expired')\n"
+        "else: raise AssertionError('borrowed capture returned with a live writer')"
+    )
+
+    def execute() -> subprocess.CompletedProcess[object]:
+        return run_caller_owned(
+            [sys.executable, "-I", "-c", borrower], timeout=10,
+            max_stdout_bytes=4096, max_stderr_bytes=4096,
+        )
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(execute)
+        deadline = time.monotonic() + 6
+        while not marker.exists() or not marker.read_text().isdigit():
+            if future.done():
+                future.result()
+                pytest.fail("borrowed child exited before its descendant was pinned")
+            assert time.monotonic() < deadline
+            time.sleep(.01)
+        with _pin_descendant(int(marker.read_text())) as confirm:
+            result = future.result(timeout=8)
+            assert result.returncode == 0 and result.stdout == "budget-expired\n"
+            confirm()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows unsupported interpreter capture grace")
+def test_no_deadline_unsupported_interpreter_stderr_capture_has_finite_grace(
+    tmp_path: Path, native_shell: Path,
+) -> None:
+    package = Path(__file__).resolve().parents[1] / "src" / "agent_procutil"
+    helper = tmp_path / "daemon_instances.ps1"
+    source = (package / helper.name).read_text(encoding="utf-8")
+    anchor = "import base64,json,sys\n"
+    assert source.count(anchor) == 1
+    source = source.replace(
+        anchor, anchor
+        + "import subprocess\n"
+        + "subprocess.Popen([sys.executable,'-I','-c','import time;time.sleep(20)'],"
+        "stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=sys.stderr,"
+        "creationflags=subprocess.CREATE_NO_WINDOW)\n"
+        + "sys.version_info=(3,9)\n",
+    )
+    helper.write_text(source, encoding="utf-8")
+    body = (
+        f"$ErrorActionPreference='Stop';. {_quoted(helper)};"
+        f"$script:DaemonInstanceRuntime={_quoted(package / 'daemon_instance_runtime.pyz')};"
+        f"$env:COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON={_quoted(sys.executable)};"
+        "$state=@{process=$null;worker=$null;job=$null;input=$null;output=$null;error=$null;"
+        "diagnostics=$null;nonce=$null;sequence=0;broken=$true;offerPermitted=$false};"
+        "$failure=$null;$cleanupError=$null;$clock=[Diagnostics.Stopwatch]::StartNew();"
+        "try{Start-DaemonInstanceWorker $state -NoTimeout}"
+        "catch{$failure=$_.Exception.Message};"
+        "$elapsed=$clock.ElapsedMilliseconds;$ended=$state.process.HasExited;"
+        "try{Close-DaemonInstanceWorker $state}catch{$cleanupError=$_.Exception.Message};"
+        "@{failure=$failure;cleanupError=$cleanupError;elapsed=$elapsed;ended=$ended}"
+        "|ConvertTo-Json -Compress"
+    )
+    outcome = _shell_result(native_shell, body)
+    assert isinstance(outcome, dict)
+    assert outcome["ended"] is True
+    assert "diagnostic capture is unconfirmed" in outcome["failure"]
+    assert "not retried" in outcome["failure"]
+    assert outcome["cleanupError"] and "unconfirmed" in outcome["cleanupError"]
+    assert 2500 <= outcome["elapsed"] < 10000

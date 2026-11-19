@@ -208,12 +208,9 @@ def _observe_unreaped(process: UnreapedChild) -> Any:
 
 
 def _zombie_only_group(process: UnreapedChild) -> bool:
-    """Confirm the group holds no live member besides its exited, unreaped leader."""
-    if sys.platform != "darwin":
-        return False
-    from agent_procutil._darwin_caller_owned import GroupCensus
+    from agent_procutil._caller_owned import _zombie_only_group as observe
 
-    return not GroupCensus().active(process.pid)
+    return observe(process)
 
 
 def _retire_posix_group(
@@ -243,6 +240,7 @@ def _communicate_unreaped(
     capture_timeout: bool = False,
     on_root_exit: Callable[[], None] | None = None,
     cleanup_deadline: float | None = None,
+    handoff_on_root_exit: bool = False,
 ) -> tuple[str | bytes | None, ...]:
     streams = (process.stdout, process.stderr)
     output = (bytearray(), bytearray())
@@ -281,7 +279,11 @@ def _communicate_unreaped(
                 process.stdin.close()
         while selector.get_map():
             remaining()
-            if timeout is None and not root_exited and _observe_unreaped(process) is not None:
+            if (
+                timeout is None and not root_exited
+                and (on_root_exit is not None or handoff_on_root_exit)
+                and _observe_unreaped(process) is not None
+            ):
                 root_exited = True
                 drain_deadline = (
                     cleanup_deadline if cleanup_deadline is not None else time.monotonic() + 2.0
@@ -419,6 +421,12 @@ def _communicate_windows_bounded(
         with error_lock:
             if not primary:
                 primary.append(error)
+
+    def check_workers() -> None:
+        with error_lock:
+            failure = primary[0] if primary else None
+        if failure is not None:
+            raise failure
 
     def cleanup_timeout(retry_deadline: float | None = None) -> float:
         if retry_deadline is None:
@@ -567,8 +575,10 @@ def _communicate_windows_bounded(
         if timeout is not None:
             for worker, _completed in workers:
                 while worker.is_alive():
+                    check_workers()
                     worker.join(min(0.05, _remaining(deadline, argv, timeout)))
         while process.poll() is None:
+            check_workers()
             remaining = _remaining(deadline, argv, timeout)
             try:
                 process.wait(timeout=min(0.05, remaining))
@@ -612,7 +622,7 @@ def _communicate_windows_bounded(
                 cleanup_error = error
                 cleanup_phase = "process-wait"
     if cleanup_error is not None:
-        raise OwnedCleanupError(
+        failure = OwnedCleanupError(
             process, job, cleanup_resources=[
                 ("pipe-worker", (worker, completed)) for worker, completed in attempted
             ] + [
@@ -622,7 +632,10 @@ def _communicate_windows_bounded(
             phase=cleanup_phase, cause=cleanup_error,
             process_settlement=settlement.process, job_settlement=settlement.job,
             output_settlement=settlement.output,
-        ) from cleanup_error
+        )
+        if primary:
+            failure.operation_error = primary[0]
+        raise failure from cleanup_error
     if primary:
         if isinstance(primary[0], subprocess.TimeoutExpired):
             # Readers have joined and retirement succeeded; preserve raw,
@@ -651,6 +664,7 @@ def _run_owned(
     borrow_parent_scope: bool = False,
     inactivity_timeout: float | None = None,
     output_fds: Mapping[str, int] | None = None,
+    completion_supervisor: bool = False,
 ) -> subprocess.CompletedProcess[Any]:
     streaming = inactivity_timeout is not None or output_fds is not None
     if timeout is None and not streaming and capture_limits is None or timeout is not None and (
@@ -658,6 +672,10 @@ def _run_owned(
     ):
         raise ValueError("native child timeout must be finite and positive")
     windows = os.name == "nt"
+    if type(completion_supervisor) is not bool or completion_supervisor and (
+        windows or not inherit_process_group or borrow_parent_scope
+    ):
+        raise ValueError("completion handoff requires its enclosing POSIX supervisor")
     if streaming and (windows or input_text is not None or inherit_process_group):
         raise ValueError("streaming owned execution requires an exclusive POSIX group without input")
     if inactivity_timeout is not None and (
@@ -685,7 +703,9 @@ def _run_owned(
         else:
             require_contained_worker()
     if not windows:
-        from agent_procutil._caller_owned import _posix_cleanup_error, _settle_exited_group
+        from agent_procutil._caller_owned import (
+            _finish_posix_process, _posix_cleanup_error, _settle_exited_group,
+        )
 
         _require_posix_execution_support()
     deadline = time.monotonic() + timeout if timeout is not None else None
@@ -733,6 +753,7 @@ def _run_owned(
     retained = False
     stream_capture = None
     settlement = _CleanupSettlement()
+    posix_group_settled = False
     stdout: Any
     stderr: Any
     try:
@@ -767,14 +788,18 @@ def _run_owned(
                 argv=argv, timeout=cast(float, timeout),
             )
         else:
+            def settle_exited_group() -> None:
+                nonlocal posix_group_settled
+                _settle_exited_group(process, budget=budget, on_settled=on_settled)
+                posix_group_settled = True
+
             stdout, stderr = _communicate_unreaped(
                 process, input_text=input_text, deadline=cast(float, deadline),
                 argv=argv, timeout=cast(float, timeout),
                 capture_limits=capture_limits,
                 binary=binary,
-                on_root_exit=(
-                    lambda: _settle_exited_group(process, budget=budget, on_settled=on_settled)
-                ) if timeout is None and not inherit_process_group else None,
+                on_root_exit=settle_exited_group if timeout is None and not inherit_process_group else None,
+                handoff_on_root_exit=completion_supervisor,
                 cleanup_deadline=budget.deadline if budget is not None else None,
                 **({"capture_timeout": True} if budget is not None else {}),
             )
@@ -801,29 +826,15 @@ def _run_owned(
                         output_settlement=settlement.output,
                     ) from error
             elif not windows and not retained:
-                if confirm_posix_group:
-                    from agent_procutil._caller_owned import _confirm_group
-
-                    try:
-                        _retire_posix_group(process)
-                        _confirm_group(process, **({"budget": budget} if budget else {}))
-                        process.wait(timeout=budget.cleanup_timeout() if budget else 2.0)
-                    except BaseException as error:
-                        retained = True
-                        raise _posix_cleanup_error(
-                            process, confirm_group=True, output=stream_capture,
-                            native_settled=process.returncode is not None, on_settled=on_settled,
-                        ) from error
-                else:
-                    try:
-                        _retire_posix_group(process, inherit_process_group=inherit_process_group)
-                        process.wait(timeout=budget.cleanup_timeout() if budget else 2.0)
-                    except BaseException as error:
-                        retained = True
-                        raise _posix_cleanup_error(
-                            process, inherit_process_group=inherit_process_group,
-                            native_settled=process.returncode is not None, on_settled=on_settled,
-                        ) from error
+                try:
+                    _finish_posix_process(
+                        process, confirm_group=confirm_posix_group,
+                        inherit_process_group=inherit_process_group, budget=budget,
+                        group_settled=posix_group_settled, output=stream_capture, on_settled=on_settled,
+                    )
+                except OwnedCleanupError:
+                    retained = True
+                    raise
         finally:
             if not retained:
                 if streaming and stream_capture is None:
@@ -958,18 +969,11 @@ def run_caller_owned(
     """Execute with caller lifetime/stream bounds and an optional execution deadline."""
     from agent_procutil._caller_owned import run
 
-    options: dict[str, Any] = {
-        **({"input_bytes": input_bytes} if input_bytes is not None else {}),
-        **({"cwd": cwd} if cwd is not None else {}),
-        **({"env": env} if env is not None else {}),
-        **({"binary": binary} if binary is not False else {}),
-        **({"budget": budget} if budget is not None else {}),
-        **({"borrow_parent_scope": borrow_parent_scope} if borrow_parent_scope is not False else {}),
-    }
     return run(
         argv, timeout=timeout, max_stdout_bytes=max_stdout_bytes,
         max_stderr_bytes=max_stderr_bytes, input_text=input_text, capture=capture,
-        on_settled=on_settled, **options,
+        on_settled=on_settled, input_bytes=input_bytes, cwd=cwd, env=env,
+        binary=binary, budget=budget, borrow_parent_scope=borrow_parent_scope,
     )
 
 
@@ -987,13 +991,9 @@ def run_installation_owned(
     from agent_procutil import contained_test_mode
     from agent_procutil._caller_owned import run
 
-    options: dict[str, Any] = {
-        **({"cwd": cwd} if cwd is not None else {}),
-        **({"env": env} if env is not None else {}),
-    }
     return run(
         argv, timeout=timeout, max_stdout_bytes=max_stdout_bytes,
         max_stderr_bytes=max_stderr_bytes, input_text=None, capture=True,
         on_settled=on_settled, allow_daemon_breakaway=not contained_test_mode(),
-        **options,
+        cwd=cwd, env=env,
     )

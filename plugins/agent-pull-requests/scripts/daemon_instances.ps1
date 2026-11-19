@@ -160,13 +160,17 @@ sys.exit(main(packet))
         $qualification = $State.output.ReadLineAsync()
         Wait-DaemonInstanceTask $qualification $clock $startupSeconds
         if ($qualification.Result -ceq 'daemon-python-unsupported') {
-            $remaining = if ($NoTimeout) { 3000 } else {
-                [Math]::Max(0, [Math]::Min(3000, 30000 - $clock.ElapsedMilliseconds))
+            $refusalClock = [Diagnostics.Stopwatch]::StartNew()
+            $refusalSeconds = if ($NoTimeout) { 3.0 } else {
+                [Math]::Max(0, [Math]::Min(3.0, 30.0 - $clock.Elapsed.TotalSeconds))
             }
-            if (-not $State.process.WaitForExit([int]$remaining)) {
+            if (-not $State.process.WaitForExit([int](1000 * $refusalSeconds))) {
                 throw 'Unsupported Python process exit is unconfirmed; selection was not retried.'
             }
-            Wait-DaemonInstanceTask $State.diagnostics $clock $startupSeconds
+            $captureClock = if ($NoTimeout) { $refusalClock } else { $clock }
+            $captureSeconds = if ($NoTimeout) { $refusalSeconds } else { $startupSeconds }
+            try { Wait-DaemonInstanceTask $State.diagnostics $captureClock $captureSeconds }
+            catch { throw 'Unsupported Python diagnostic capture is unconfirmed; selection was not retried.' }
             if ($State.process.ExitCode -ne 1) {
                 throw 'Unsupported Python returned an unexpected outcome; selection was not retried.'
             }

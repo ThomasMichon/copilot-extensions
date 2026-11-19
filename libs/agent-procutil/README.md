@@ -564,6 +564,10 @@ transient custody. Transient requests have independent helper state and monitors
 they cannot block unrelated finite requests behind the shared-helper lock.
 Shared-helper requests remain serialized. Actual child-tree settlement is required;
 timeout, output overflow and unknown cleanup cannot become successful output.
+An unsupported interpreter still has a finite refusal grace: without an
+execution deadline, its exit and diagnostic EOF share three seconds.
+Unconfirmed diagnostic capture refuses selection rather than waiting forever
+or trying another interpreter.
 The caller still owns applicability and capability interpretation. This
 operation does not authorize installation or target effects.
 
@@ -883,6 +887,12 @@ with an aggregate budget, observing root exit switches draining and settlement
 to that budget's original cleanup deadline; crossing the execution cutoff
 during confirmed retirement does not turn a completed execution into a timeout.
 The cleanup deadline is never renewed or disabled.
+Borrowed parent scopes keep waiting for bounded pipe completion; only the
+actual completion-frame supervisor may hand off an idle inherited pipe at root
+exit. An exclusive owner reuses its confirmed group witness until root reap,
+without repeating the census. Recorded Windows pipe failures stop execution
+waiting even if retirement fails; unconfirmed cleanup retains the original
+process and Job.
 
 ### Aggregate execution and settlement budget
 
