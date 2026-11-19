@@ -161,9 +161,10 @@ class ServingWatchdog:
         declines with no healthy probe in between, the hard-exit action runs so
         a truly wedged process cannot hold the singleton lock forever.
         """
-        if not self._await_startup():
+        declined = self._await_startup()
+        if declined is None:
             return
-        self._supervise_serving()
+        self._supervise_serving(declined)
 
     def _hand_off(self, reason: str, declined: int) -> bool:
         """Offer ``reason`` to ``on_dead``; return True to keep supervising."""
@@ -177,12 +178,13 @@ class ServingWatchdog:
     def _next_grace(self, grace: float, floor: float) -> float:
         return min(grace * 2, max(_MAX_RETRY_GRACE, floor))
 
-    def _await_startup(self) -> bool:
-        """Return True once the server has started; False (terminal) otherwise.
+    def _await_startup(self) -> int | None:
+        """Return the decline count once started; None (terminal) otherwise.
 
         Fires ``on_dead`` if the server neither starts nor requests shutdown
         within the startup grace -- the "acquired the lock but never served"
-        wedge. A graceful shutdown before startup is a clean no-op.
+        wedge. A graceful shutdown before startup is a clean no-op. Declines
+        carry into serving supervision: only a healthy probe resets them.
         """
         grace = self._startup_grace
         deadline = self._monotonic() + grace
@@ -190,7 +192,7 @@ class ServingWatchdog:
         while not self._is_started():
             if self._is_shutting_down():
                 self._await_shutdown()
-                return False
+                return None
             now = self._monotonic()
             if now >= deadline:
                 if not self._hand_off(
@@ -198,24 +200,24 @@ class ServingWatchdog:
                     "while holding the singleton lock",
                     declined,
                 ):
-                    return False
+                    return None
                 declined += 1
                 grace = self._next_grace(grace, self._startup_grace)
                 deadline = self._monotonic() + grace
             self._sleep(self._interval)
-        return True
+        return declined
 
-    def _supervise_serving(self) -> None:
+    def _supervise_serving(self, declined: int = 0) -> None:
         """After startup, exit if the serving probe fails past the grace window.
 
         A single failed probe is tolerated (transient loop stall); only a
         *sustained* failure -- ``serving_grace`` seconds with no successful probe
-        and no graceful-shutdown request -- is treated as a wedge.
+        and no graceful-shutdown request -- is treated as a wedge. ``declined``
+        carries startup declines; only a healthy probe resets it.
         """
         failing_since: float | None = None
         window_start = 0.0
         grace = self._serving_grace
-        declined = 0
         while True:
             self._sleep(self._interval)
             if self._is_shutting_down():

@@ -96,7 +96,7 @@ def test_unavailable_watchdog_diagnostic_path_does_not_prevent_terminal_action(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     event_writer: tuple[BufferedSink, threading.Event],
 ) -> None:
-    from agent_bridge import install_paths, service_process_cli, watchdog
+    from agent_bridge import install_paths, service_process_cli
 
     writer, _release = event_writer
     monkeypatch.setattr(install_paths, "effective_config_dir", lambda: tmp_path / "absent")
@@ -468,6 +468,21 @@ def test_slow_declined_startup_handoff_does_not_consume_retry_wait() -> None:
     wd._on_dead = on_dead
     wd.run()
     assert [b - a for a, b in zip(times, times[1:])] == [30.0 + 240.0]
+
+
+def test_startup_declines_carry_into_serving_budget() -> None:
+    # Declines before startup still count: a server that starts after three
+    # declined hand-offs but never answers a probe exits on the fourth.
+    dead: list[str] = []
+    exits: list[str] = []
+    wd, _, _ = _make(
+        is_started=lambda: len(dead) >= 3, probe_serving=lambda: False,
+        on_dead=_declining(dead), on_shutdown_stuck=exits.append, max_declined=4,
+    )
+    wd.run()
+    assert len(dead) == 4
+    assert "stopped serving" in dead[-1]
+    assert len(exits) == 1
 
 
 def test_declined_startup_handoff_retries_then_hard_exits() -> None:
