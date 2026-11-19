@@ -73,6 +73,7 @@ def api(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     scope = load("observation_progress")
     load("monitor_projection_cache")
     content = load("status_monitor_content")
+    load("segment_render_observation")
     cache = load("status_segment_cache")
     formatter = load("mux_state_projection")
     projects = load("status_monitor_roster_demand")
@@ -238,6 +239,169 @@ def test_tmux_uses_read_only_view_of_the_original_owner(api: SimpleNamespace) ->
             ],
         },
     ) == len(warm_paths)
+
+
+def test_active_projection_retains_subject_bound_advisory_content(
+    api: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = [100.0]
+    monkeypatch.setattr(api.cache, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    path = "/synthetic/one"
+    api.package.status_bar_cli._find_record_for_path = lambda value: SimpleNamespace(
+        worktree_path=path, worktree_id="one",
+    )
+    content = ["DIRTY"]
+    renders: list[str] = []
+
+    def render(*args: Any, **kwargs: Any) -> str:
+        renders.append(content[0])
+        record = api.package.status_bar_cli._find_record_for_path(path)
+        observation = api.package.segment_render_observation
+        rendered = observation.record_render(observation.render_subject(
+            "project", record.worktree_path, getattr(record, "worktree_id", None),
+            getattr(record, "creation_nonce", ""),
+        ), content[0])
+        assert isinstance(rendered, str)
+        return rendered
+
+    api.package.status_bar_cli._render_status_segment = render
+    owner = api.cache._StatusSegmentCache(ttl=60)
+    assert owner.get(path) == "DIRTY"
+    collect = api.scope.capture_inventory(lambda mux: {"wt-one": (1, "$7:100")})
+    writes: list[str] = []
+
+    def publish(**options: Any) -> dict[str, bool]:
+        writes.append(options["values"]["@aw_seg"])
+        return {"context_published": True}
+
+    api.package.mux_status_link.publish_managed_session_status = publish
+
+    def sweep(*args: Any, **options: Any) -> int:
+        assert collect(args[0]) is not None
+        options["catalog_observer"]({"wt-one"})
+        return 1
+
+    for phase in ("fresh", "expired", "invalidated", "refreshed"):
+        if phase == "expired":
+            clock[0] += 61
+            assert owner.get_cached(path) is None
+        elif phase == "invalidated":
+            owner.invalidate(path)
+            assert owner.get_cached(path) is None
+        elif phase == "refreshed":
+            content[0] = "CONVO"
+            owner.get(path)
+        assert api.presentation.run_monitor_sweep(
+            sweep, "psmux.exe", "monitor", "fixture", set(),
+            managed_mux_cache=object(), segment_cache=owner,
+            state_snapshot=lambda project: {
+                "ok": True, "projection": {"quality": "current"},
+                "availability": {"status": "stale"}, "worktrees": [{
+                    "id": "one", "path": path, "state": "active",
+                    "closure": {"supported": True, "style": "active", "compact": "ACTIVE"},
+                }],
+            },
+        ) == 1
+        assert "STATE(?)" not in writes[-1] and "ACTIVE" not in writes[-1]
+        assert ("(stale)" in writes[-1]) is (phase in {"expired", "invalidated"})
+        assert ("CONVO" if phase == "refreshed" else "DIRTY") in writes[-1]
+    assert renders == ["DIRTY", "CONVO"]
+    assert owner.get_advisory("other", path, "one") is None
+    assert owner.get_advisory("project", path, "other") is None
+    assert owner.get_advisory("project", "/synthetic/other", "one") is None
+    assert api.presentation.run_monitor_sweep(
+        sweep, "psmux.exe", "monitor", "fixture", set(),
+        managed_mux_cache=object(), segment_cache=owner,
+        state_snapshot=lambda project: {
+            "ok": True, "projection": {"quality": "current"}, "worktrees": [{
+                "id": "one", "path": "/synthetic/moved", "state": "active",
+                "closure": {"supported": True, "style": "active", "compact": "ACTIVE"},
+            }],
+        },
+    ) == 1
+    assert "STATE(?)" in writes[-1] and "CONVO" not in writes[-1]
+    api.package.status_bar_cli._find_record_for_path = lambda value: SimpleNamespace(
+        worktree_path=path, worktree_id="one", creation_nonce="first",
+    )
+    owner.invalidate(path)
+    assert owner.get(path) == "CONVO"
+    owner.invalidate(path)
+    assert api.presentation.run_monitor_sweep(
+        sweep, "psmux.exe", "monitor", "fixture", set(),
+        managed_mux_cache=object(), segment_cache=owner,
+        state_snapshot=lambda project: {
+            "ok": True, "projection": {"quality": "current"}, "worktrees": [{
+                "id": "one", "path": path, "state": "active", "creation_nonce": "second",
+                "closure": {"supported": True, "style": "active", "compact": "ACTIVE"},
+            }],
+        },
+    ) == 1
+    assert "STATE(?)" in writes[-1] and "CONVO" not in writes[-1]
+    api.package.status_bar_cli._find_record_for_path = lambda value: SimpleNamespace(
+        worktree_path=path,
+    )
+    owner.invalidate(path)
+    assert owner.get(path) == "CONVO"
+    assert owner.get_advisory("project", path, "one") is None
+    api.package.status_bar_cli._find_record_for_path = lambda value: SimpleNamespace(
+        worktree_path=path, worktree_id="one",
+    )
+    owner.invalidate(path)
+    assert owner.get(path) == "CONVO"
+    ticket = owner.begin_observation("project", "/synthetic", path)
+    assert "(stale)" in owner.get_advisory("project", path, "one")
+    owner.retain_cleanup(ticket, api.package.push_timeout.ObservationCleanupError("held"))
+    assert owner.get_advisory("project", path, "one") is None
+    owner.close_observation_admission()
+    assert owner.get_advisory("project", path, "one") is None
+
+
+@pytest.mark.parametrize("evidence", ["missing", "value", "path", "project", "multiple"])
+def test_segment_advisory_requires_one_matching_renderer_result(
+    api: SimpleNamespace, evidence: str,
+) -> None:
+    observation = api.package.segment_render_observation
+    path = "/synthetic/one"
+    api.package.status_bar_cli._find_record_for_path = lambda value: SimpleNamespace(
+        worktree_path=path, worktree_id="old", creation_nonce="old",
+    )
+
+    def render(*args: Any, **kwargs: Any) -> str:
+        if evidence != "missing":
+            subject = observation.render_subject(
+                "other" if evidence == "project" else "project",
+                "/synthetic/other" if evidence == "path" else path, "new", "new",
+            )
+            observation.record_render(subject, "different" if evidence == "value" else "DIRTY")
+            if evidence == "multiple":
+                observation.record_render(subject, "DIRTY")
+        return "DIRTY"
+
+    api.package.status_bar_cli._render_status_segment = render
+    owner = api.cache._StatusSegmentCache()
+    assert owner.get(path) == "DIRTY"
+    assert owner.get_cached(path) == "DIRTY"
+    owner.invalidate(path)
+    assert owner.get_advisory("project", path, "old", "old") is None
+    assert owner.get_advisory("project", path, "new", "new") is None
+
+
+def test_render_capture_restores_outer_subject_after_failure(api: SimpleNamespace) -> None:
+    observation = api.package.segment_render_observation
+    subject = observation.render_subject("project", "/synthetic/one", "one", "")
+    with observation.capture_render() as outer:
+        with pytest.raises(RuntimeError, match="failed"):
+            with observation.capture_render() as inner:
+                observation.record_render(None, "unknown")
+                raise RuntimeError("failed")
+        assert inner.completed is None
+        assert observation.record_render(subject, "DIRTY") == "DIRTY"
+        assert outer.completed.subject == subject
+    assert observation.record_render(subject, "unscoped") == "unscoped"
+    assert outer.completed.value == "DIRTY"
+    for fields in (("", "/path", "one", ""), ("project", None, "one", ""),
+                   ("project", "/path", None, ""), ("project", "/path", "one", None)):
+        assert observation.render_subject(*fields) is None
 
 
 def test_content_producer_retains_cleanup_and_propagates_governance(api: SimpleNamespace) -> None:

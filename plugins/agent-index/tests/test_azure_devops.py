@@ -51,7 +51,7 @@ def _work_item_payload(
 def test_ado_discovers_work_items_and_pull_requests_with_pagination() -> None:
     auth_header = "Basic " + base64.b64encode(b":pat-token").decode("ascii")
     seen_paths: list[str] = []
-    seen_tokens: list[str | None] = []
+    seen_offsets: list[int] = []
     operator_wiql = (
         "SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = 'widgets' "
         "AND [System.AreaPath] UNDER 'widgets\\service'"
@@ -84,9 +84,11 @@ def test_ado_discovers_work_items_and_pull_requests_with_pagination() -> None:
         if path.endswith("/_apis/git/pullrequests"):
             assert request.url.params["searchCriteria.repositoryId"] == "repo-1"
             assert request.url.params["searchCriteria.status"] == "all"
-            token = request.url.params.get("continuationToken")
-            seen_tokens.append(token)
-            if token is None:
+            offset = int(request.url.params["$skip"])
+            seen_offsets.append(offset)
+            if offset == 2:
+                return _json_response(200, {"value": []})
+            if offset == 0:
                 return _json_response(
                     200,
                     {
@@ -104,7 +106,6 @@ def test_ado_discovers_work_items_and_pull_requests_with_pagination() -> None:
                             }
                         ]
                     },
-                    headers={"x-ms-continuationtoken": "next"},
                 )
             return _json_response(
                 200,
@@ -158,6 +159,7 @@ def test_ado_discovers_work_items_and_pull_requests_with_pagination() -> None:
         min_interval_s=0,
         work_item_queries=[{"name": "team-backlog", "wiql": operator_wiql}],
         pull_request_queries=[{"name": "repo-prs", "status": "all", "repository_id": "repo-1"}],
+        page_size=1,
     )
 
     entries = connector.discover()
@@ -199,7 +201,7 @@ def test_ado_discovers_work_items_and_pull_requests_with_pagination() -> None:
     assert "Thread comment" in pull.content
     assert "Pull request body" in pull.content
     assert sum(path.endswith(("/pullrequests/7", "/pullrequests/8")) for path in seen_paths) == 2
-    assert seen_tokens == [None, "next"]
+    assert seen_offsets == [0, 1, 2]
     assert any(path.endswith("/_apis/wit/workitemsbatch") for path in seen_paths)
 
 
@@ -335,7 +337,9 @@ def test_ado_config_file_loading_from_env(monkeypatch: pytest.MonkeyPatch) -> No
             if path.endswith("/_apis/git/pullrequests"):
                 assert request.url.params["searchCriteria.status"] == "active"
                 assert request.url.params["searchCriteria.creatorId"] == "creator-id"
-                return _json_response(200, {"value": [{"pullRequestId": 12}]})
+                return _json_response(200, {
+                    "value": [] if int(request.url.params["$skip"]) else [{"pullRequestId": 12}],
+                })
             raise AssertionError(f"unexpected request: {request.url}")
 
         connector = AzureDevOpsConnector(
@@ -418,7 +422,9 @@ def test_ado_list_paths_returns_ids_only() -> None:
         if request.url.path.endswith("/_apis/git/pullrequests"):
             return _json_response(
                 200,
-                {"value": [{"pullRequestId": 10}, {"pullRequestId": 11}]},
+                {"value": [] if int(request.url.params["$skip"]) else [
+                    {"pullRequestId": 10}, {"pullRequestId": 11},
+                ]},
             )
         raise AssertionError(f"unexpected request: {request.url}")
 
@@ -857,17 +863,17 @@ def test_ado_parsed_empty_query_pages_differ_from_unrecognized_envelopes(
 
 @pytest.mark.parametrize("failure", ["http", "json"])
 def test_ado_parsed_pull_pages_remain_counted_after_later_request_failure(failure: str) -> None:
-    seen_tokens: list[str | None] = []
+    seen_offsets: list[int] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path.endswith("/pullrequests")
-        token = request.url.params.get("continuationToken")
-        seen_tokens.append(token)
-        if token is None:
+        offset = int(request.url.params["$skip"])
+        seen_offsets.append(offset)
+        if offset == 0:
             return _json_response(200, {"value": [
                 {"pullRequestId": 1, "description": "First page"},
                 {"pullRequestId": 1, "description": None},
-            ]}, headers={"x-ms-continuationtoken": "next"})
+            ]})
         if failure == "http":
             return _json_response(404, {"description": "Not a PR record"})
         return httpx.Response(200, content=b"invalid json")
@@ -876,6 +882,7 @@ def test_ado_parsed_pull_pages_remain_counted_after_later_request_failure(failur
         "ado:acme/widgets", token="pat-token", min_interval_s=0,
         transport=httpx.MockTransport(handler),
         work_item_queries=[], pull_request_queries=[{"status": "all"}],
+        page_size=2,
     )
 
     @measure_reindex
@@ -896,4 +903,4 @@ def test_ado_parsed_pull_pages_remain_counted_after_later_request_failure(failur
         },
     }
     assert counts["http_by_purpose"]["identity_page"]["attempts"] == 2
-    assert seen_tokens == [None, "next"]
+    assert seen_offsets == [0, 2]

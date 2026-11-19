@@ -5,31 +5,53 @@ from __future__ import annotations
 from . import finalized_checkout
 
 import argparse
+from collections.abc import Callable
 import dataclasses
 import os
 import subprocess
 from pathlib import Path
+from types import ModuleType
+from typing import Any, ParamSpec, Protocol, TypedDict, TypeVar, cast
 
 from . import config as cfg
-from . import git_ops, prune, sessions, tracking
+from . import closure_descriptor, git_ops, prune, push_timeout, sessions, tracking
+from . import tracking_claims, tracking_session_registry
 from . import output
 from . import worktree_identity
+from . import segment_render_observation
+from .git_state_types import _GitProbeOptions
+from machine_transport import MachineEntry
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+_ObservationResult = tuple[tracking.WorktreeRecord | None, str, git_ops.WorktreeStateInfo]
 
 
-def _core():
+class _CleanupOwner(Protocol):
+    def run_observation(
+        self, project: str, anchor: str | None, path: str | None, compute: Callable[[], _R],
+    ) -> _R: ...
+
+
+class _RenderOptions(TypedDict, total=False):
+    observation_deadline: float
+    cleanup_owner: _CleanupOwner
+
+
+def _core() -> ModuleType:
     from . import __main__ as core
 
     return core
 
 
-def _core_helper(name: str, local):
+def _core_helper(name: str, local: Callable[_P, _R]) -> Callable[_P, _R]:
     candidate = vars(_core()).get(name)
     if callable(candidate) and candidate is not local:
-        return candidate
+        return cast(Callable[_P, _R], candidate)
     return local
 
 
-def add_parsers(sub) -> None:
+def add_parsers(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     p = sub.add_parser(
         "status-segment",
         help="Print a tmux/psmux status-bar segment for the worktree at cwd",
@@ -74,16 +96,18 @@ def add_parsers(sub) -> None:
     )
 
 
-def _apply_tracking_override(record, info):
-    return _core()._apply_tracking_override(record, info)
+def _apply_tracking_override(
+    record: tracking.WorktreeRecord, info: git_ops.WorktreeStateInfo,
+) -> git_ops.WorktreeStateInfo:
+    return _core_helper("_apply_tracking_override", _apply_tracking_override)(record, info)
 
 
 def _sync_status_tag(info: git_ops.WorktreeStateInfo) -> str:
-    return _core()._sync_status_tag(info)
+    return _core_helper("_sync_status_tag", _sync_status_tag)(info)
 
 
 def _local_claimant_alive(owner_ref: str) -> bool | None:
-    return _core()._local_claimant_alive(owner_ref)
+    return _core_helper("_local_claimant_alive", _local_claimant_alive)(owner_ref)
 
 
 # status-segment -- one styled line for a tmux/psmux status bar
@@ -175,7 +199,7 @@ def _resolve_remote_default_branch(
     callers stay cheap and offline by leaving it ``False``. See dotfiles#1046.
     """
     if observation_deadline is not None and not git_ops._windows_observation():
-        raise git_ops.push_timeout.ObservationUnavailable("bounded observation is Windows-only")
+        raise push_timeout.ObservationUnavailable("bounded observation is Windows-only")
     override = _core_helper("_resolve_remote_default_branch", _resolve_remote_default_branch)
     if override is not _resolve_remote_default_branch:
         return override(
@@ -191,9 +215,10 @@ def _resolve_remote_default_branch(
         if git_ops._windows_observation() else None
     )
 
-    def _options(cap=None):
+    def _options(cap: float | None = None) -> _GitProbeOptions:
         return (
-            git_ops._observation_options(deadline, cap=cap) if deadline is not None
+            cast(_GitProbeOptions, git_ops._observation_options(deadline, cap=cap))
+            if deadline is not None
             else {"timeout": cap} if cap is not None else {}
         )
 
@@ -225,8 +250,8 @@ def _resolve_remote_default_branch(
                 raise
             ls = None
         except (
-            git_ops.push_timeout.ObservationUnavailable,
-            git_ops.push_timeout.ObservationCleanupError,
+            push_timeout.ObservationUnavailable,
+            push_timeout.ObservationCleanupError,
         ):
             raise
         except Exception:
@@ -264,7 +289,7 @@ def _detect_upstream_branch(
     resolves.
     """
     if observation_deadline is not None and not git_ops._windows_observation():
-        raise git_ops.push_timeout.ObservationUnavailable("bounded observation is Windows-only")
+        raise push_timeout.ObservationUnavailable("bounded observation is Windows-only")
     override = _core_helper("_detect_upstream_branch", _detect_upstream_branch)
     if override is not _detect_upstream_branch:
         return override(
@@ -355,7 +380,9 @@ def _persist_segment_title(
         pass
 
 
-def _segment_git_observation(target: str, fetch: bool, deadline, cleanup_owner=None):
+def _segment_git_observation(
+    target: str, fetch: bool, deadline: float | None, cleanup_owner: _CleanupOwner | None = None,
+) -> _ObservationResult:
     remote, config_default, anchor = "origin", None, None
     try:
         repo = cfg.load_config(include_control_plane_related_pr=False).default_repo
@@ -365,7 +392,7 @@ def _segment_git_observation(target: str, fetch: bool, deadline, cleanup_owner=N
         pass
     rec = _find_record_for_path(target)
 
-    def observe():
+    def observe() -> _ObservationResult:
         branch = rec.branch if rec else "HEAD"
         try:
             deadline_arg = {"observation_deadline": deadline} if deadline is not None else {}
@@ -380,7 +407,7 @@ def _segment_git_observation(target: str, fetch: bool, deadline, cleanup_owner=N
                 target, branch, fetch=bool(fetch), remote=remote,
                 default_branch=default_branch, active_paths=None, **deadline_arg,
             )
-        except (subprocess.TimeoutExpired, git_ops.push_timeout.ObservationUnavailable):
+        except (subprocess.TimeoutExpired, push_timeout.ObservationUnavailable):
             state = (
                 git_ops.WorktreeState.UNKNOWN
                 if (Path(target) / ".git").exists() else git_ops.WorktreeState.GONE
@@ -400,7 +427,7 @@ def _render_status_segment(
     no_title: bool = False,
     persist_title: bool = False,
     observation_deadline: float | None = None,
-    cleanup_owner=None,
+    cleanup_owner: _CleanupOwner | None = None,
 ) -> str:
     """Render one styled status-bar segment for the worktree at the path/cwd.
 
@@ -452,30 +479,39 @@ def _render_status_segment(
     errors into the bar.
     """
     if observation_deadline is not None and not git_ops._windows_observation():
-        raise git_ops.push_timeout.ObservationUnavailable("bounded observation is Windows-only")
+        raise push_timeout.ObservationUnavailable("bounded observation is Windows-only")
     override = _core_helper("_render_status_segment", _render_status_segment)
     if override is not _render_status_segment:
+        override_options: _RenderOptions = {}
+        if observation_deadline is not None:
+            override_options["observation_deadline"] = observation_deadline
+        if cleanup_owner is not None:
+            override_options["cleanup_owner"] = cleanup_owner
         return override(
             path,
             fetch=fetch,
             plain=plain,
             no_title=no_title,
             persist_title=persist_title,
-            **({"observation_deadline": observation_deadline} if observation_deadline is not None else {}),
-            **({"cleanup_owner": cleanup_owner} if cleanup_owner is not None else {}),
+            **override_options,
         )
     target = str(Path(path).resolve()) if path else os.getcwd()
     deadline = git_ops._observation_deadline(observation_deadline) if git_ops._windows_observation() else None
     try:
         options = {"cleanup_owner": cleanup_owner} if cleanup_owner is not None else {}
         rec, _branch, info = _segment_git_observation(target, fetch, deadline, **options)
-    except (git_ops.push_timeout.ObservationCleanupError, git_ops.push_timeout.ObservationCleanupPending):
+    except (push_timeout.ObservationCleanupError, push_timeout.ObservationCleanupPending):
         raise
     except Exception:
         return ""  # not a worktree / git failure -> empty bar, no noise
 
     if info.state == git_ops.WorktreeState.GONE:
         return ""
+
+    subject = segment_render_observation.render_subject(
+        cfg.active_project() or cfg.project_name(),
+        rec.worktree_path, getattr(rec, "worktree_id", None), getattr(rec, "creation_nonce", ""),
+    ) if rec is not None and segment_render_observation.is_capturing() else None
 
     if rec is not None and (
         info.state != git_ops.WorktreeState.UNKNOWN or not git_ops._windows_observation()
@@ -519,7 +555,7 @@ def _render_status_segment(
         # before ever reaching the fetch step must not be treated as
         # authoritative current-state evidence either.
         held_claims = sum(1 for c in rec.resources if c.is_live)
-        open_follow_ups = tracking.effective_open_follow_up_count(rec)
+        open_follow_ups = tracking_claims.effective_open_follow_up_count(rec)
         disposition = prune.cleanup_disposition(
             rec, refined_info, turn_count=turns,
             claimant_alive=_local_claimant_alive,
@@ -529,13 +565,13 @@ def _render_status_segment(
         if _fetch_fresh:
             # Phase 9: share this fetch's freshness with every other
             # worktree of this repo via the repo-scoped ledger.
-            tracking.record_repo_fetch_confirmed(rec.repo)
-        descriptor = prune.assemble_closure_descriptor(
+            tracking_session_registry.record_repo_fetch_confirmed(rec.repo)
+        descriptor = closure_descriptor.assemble_closure_descriptor(
             rec, refined_info, disposition,
             held_claims=held_claims, open_follow_ups=open_follow_ups,
             evidence_mode="refreshed" if _fetch_fresh else "cached",
             turn_count=turns,
-            repo_fetch_fresh=tracking.is_repo_fetch_fresh(rec.repo),
+            repo_fetch_fresh=tracking_session_registry.is_repo_fetch_fresh(rec.repo),
             cross_machine_claims=prune.cross_machine_claim_count(rec),
             finalized_checkout_current=(
                 (info.state != git_ops.WorktreeState.UNKNOWN or not git_ops._windows_observation())
@@ -579,14 +615,14 @@ def _render_status_segment(
         if title:
             parts.append(title)
     parts.append(block)
-    return " ".join(parts)
+    return segment_render_observation.record_render(subject, " ".join(parts))
 
 
 def _status_segment_json(
     path: str | None = None, fetch: bool = False,
     observation_deadline: float | None = None,
-    cleanup_owner=None,
-) -> dict | None:
+    cleanup_owner: _CleanupOwner | None = None,
+) -> dict[str, Any] | None:
     """Cheap, single-worktree JSON snapshot of the status-segment's own facts.
 
     Mirrors :func:`_render_status_segment`'s classify pass -- the same
@@ -603,20 +639,24 @@ def _status_segment_json(
     Returns ``None`` outside a git worktree, like the rendered empty segment.
     """
     if observation_deadline is not None and not git_ops._windows_observation():
-        raise git_ops.push_timeout.ObservationUnavailable("bounded observation is Windows-only")
+        raise push_timeout.ObservationUnavailable("bounded observation is Windows-only")
     override = _core_helper("_status_segment_json", _status_segment_json)
     if override is not _status_segment_json:
+        override_options: _RenderOptions = {}
+        if observation_deadline is not None:
+            override_options["observation_deadline"] = observation_deadline
+        if cleanup_owner is not None:
+            override_options["cleanup_owner"] = cleanup_owner
         return override(
             path, fetch=fetch,
-            **({"observation_deadline": observation_deadline} if observation_deadline is not None else {}),
-            **({"cleanup_owner": cleanup_owner} if cleanup_owner is not None else {}),
+            **override_options,
         )
     target = str(Path(path).resolve()) if path else os.getcwd()
     deadline = git_ops._observation_deadline(observation_deadline) if git_ops._windows_observation() else None
     try:
         options = {"cleanup_owner": cleanup_owner} if cleanup_owner is not None else {}
         rec, branch, info = _segment_git_observation(target, fetch, deadline, **options)
-    except (git_ops.push_timeout.ObservationCleanupError, git_ops.push_timeout.ObservationCleanupPending):
+    except (push_timeout.ObservationCleanupError, push_timeout.ObservationCleanupPending):
         raise
     except Exception:
         return None
@@ -646,7 +686,7 @@ def _status_segment_json(
     closure = None
     if rec is not None:
         held_claims = sum(1 for c in rec.resources if c.is_live)
-        open_follow_ups = tracking.effective_open_follow_up_count(rec)
+        open_follow_ups = tracking_claims.effective_open_follow_up_count(rec)
         disposition = prune.cleanup_disposition(
             rec, refined_info, turn_count=turns,
             claimant_alive=_local_claimant_alive,
@@ -656,13 +696,13 @@ def _status_segment_json(
         if _fetch_fresh:
             # Phase 9: share this fetch's freshness with every other
             # worktree of this repo via the repo-scoped ledger.
-            tracking.record_repo_fetch_confirmed(rec.repo)
-        descriptor = prune.assemble_closure_descriptor(
+            tracking_session_registry.record_repo_fetch_confirmed(rec.repo)
+        descriptor = closure_descriptor.assemble_closure_descriptor(
             rec, refined_info, disposition,
             held_claims=held_claims, open_follow_ups=open_follow_ups,
             evidence_mode="refreshed" if _fetch_fresh else "cached",
             turn_count=turns,
-            repo_fetch_fresh=tracking.is_repo_fetch_fresh(rec.repo),
+            repo_fetch_fresh=tracking_session_registry.is_repo_fetch_fresh(rec.repo),
             cross_machine_claims=prune.cross_machine_claim_count(rec),
             finalized_checkout_current=(
                 (info.state != git_ops.WorktreeState.UNKNOWN or not git_ops._windows_observation())
@@ -739,14 +779,16 @@ def _resolve_machine_alias(machine: str, repo: str | None, platform: str) -> str
 
         repo_dir = repos_mod.resolve_path(repo) if repo else None
         if not repo_dir:
-            repo_dir = worktree_identity._find_repo_dir()
+            detected_dir = worktree_identity._find_repo_dir()
+            repo_dir = str(detected_dir) if detected_dir is not None else None
         if not repo_dir:
             return machine
         entries = cfg.load_machines_yaml(repo_dir)
         entry = cfg.find_machine_entry(entries, machine, execution_platform=platform)
         if entry is None:
             return machine
-        return entry.physical_host or cfg.machine_name(entry)
+        name_of: Callable[[MachineEntry], str] = getattr(cfg, "machine_name")
+        return entry.physical_host or name_of(entry)
     except Exception:
         return machine
 
@@ -779,7 +821,8 @@ def _render_status_context(path: str | None = None, plain: bool = False) -> str:
     target = str(Path(path).resolve()) if path else os.getcwd()
     rec = _find_record_for_path(target)
 
-    platform = (rec.platform if rec and rec.platform else "") or cfg.detect_platform()
+    platform_detector: Callable[[], str] = getattr(cfg, "detect_platform")
+    platform = (rec.platform if rec and rec.platform else "") or platform_detector()
     machine = (rec.machine if rec and rec.machine else "") or cfg.detect_machine()
     machine = _resolve_machine_alias(machine, rec.repo if rec else None, platform)
     env = _platform_short(platform)

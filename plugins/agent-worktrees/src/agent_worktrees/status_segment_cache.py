@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from collections.abc import Callable, Iterator
 from typing import Any, Protocol, TypeVar
 
-from . import config as cfg, git_ops, push_timeout
+from . import config as cfg, git_ops, push_timeout, segment_render_observation
 
 _T = TypeVar("_T")
 
@@ -31,10 +31,19 @@ class _ObservationTicket:
     revision: int = 0
 
 
+@dataclass(frozen=True)
+class _CompletedSegment:
+    project: str
+    worktree_id: str
+    creation_nonce: str
+    value: str
+
+
 class _StatusSegmentCache:
     def __init__(self, ttl: float = 60.0) -> None:
         self.ttl = max(15.0, float(ttl))
         self._entries: dict[str, tuple[float, str]] = {}
+        self._completed: dict[str, _CompletedSegment] = {}
         self._aliases: dict[str, str] = {}
         self._entry_projects: dict[str, str] = {}
         self._lock = threading.RLock()
@@ -343,6 +352,23 @@ class _StatusSegmentCache:
             return self.pending_segment_for_path(path)
         return None
 
+    def get_advisory(
+        self, project: str, path: str, worktree_id: str, creation_nonce: str | None = None,
+    ) -> str | None:
+        """Retain subject-bound presentation, never fresh observation evidence."""
+        key = self._key(path)
+        with self._lock:
+            if self._closing_observations or self._blocked(project, path, cleanup_only=True):
+                return None
+            completed = self._completed.get(key)
+            if (
+                completed is None or completed.project != project
+                or completed.worktree_id != worktree_id
+                or completed.creation_nonce != (creation_nonce or "")
+            ):
+                return None
+            return completed.value + " #[fg=colour244](stale)#[default]"
+
     def get(self, path: str) -> str:
         from . import __main__ as core
         from . import status_bar_cli
@@ -352,6 +378,7 @@ class _StatusSegmentCache:
             if completed is not None:
                 return completed
         project = cfg.project_name() if git_ops._windows_observation() else ""
+        subject_project = cfg.active_project() or project
         input_key = self._key(path)
         with self._lock:
             if self.observation_blocked(project, path):
@@ -383,12 +410,13 @@ class _StatusSegmentCache:
                     anchor = cfg.load_config(include_control_plane_related_pr=False).default_repo.anchor
                 except Exception:
                     pass
-            value = self.run_observation(
-                project, anchor, target,
-                lambda: render(
-                    target, fetch=False, plain=False, no_title=False, persist_title=True,
-                ),
-            )
+            with segment_render_observation.capture_render() as capture:
+                value = self.run_observation(
+                    project, anchor, target,
+                    lambda: render(
+                        target, fetch=False, plain=False, no_title=False, persist_title=True,
+                    ),
+                )
         except push_timeout.ObservationCleanupError as error:
             self.retain_unclaimed_cleanup(project, target, error)
             return self.pending_segment_for_path(target, project=project)
@@ -400,6 +428,18 @@ class _StatusSegmentCache:
             self._aliases[input_key] = key
             self._entries[key] = (time.monotonic(), value)
             self._entry_projects[key] = project
+            observed = capture.completed
+            if (
+                observed is not None and value and observed.value == value
+                and observed.subject.project == subject_project
+                and observed.subject.path == key
+            ):
+                self._completed[key] = _CompletedSegment(
+                    observed.subject.project, observed.subject.worktree_id,
+                    observed.subject.creation_nonce, value,
+                )
+            else:
+                self._completed.pop(key, None)
         return value
 
     def _invalidate_keys(self, keys: set[str]) -> None:
