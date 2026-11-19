@@ -738,3 +738,25 @@ support a separate administrative supersession judgment. No automatic closure,
 generic owner-ACK or technical-completion claim follows. No implementation,
 native/authentication operation, live migration, owner appointment or
 claim/resource release follows.
+
+## Finite tool and qualification intake (2026-11-19 UTC)
+
+This proposes `routed`; it takes effect only when normal review accepts and
+merges the accompanying complete direct domain amendment. Ledger publication
+alone is not domain acceptance. Prior rows and unresolved residuals remain
+unchanged.
+
+| Candidate | Source | Disposition | Primary canonical owner | Tracker outcome |
+|-----------|--------|-------------|-------------------------|-----------------|
+| Complete bounded offline-job continuation, including separately authorized native/scenario qualification and retained private-workspace custody | Public #13278, complete original and both eligible comments; source foundations credited to #13281/#13304/#13312 | routed (proposed; effective after reviewed complete domain acceptance) | [test-portfolio-rationalization](../test-portfolio-rationalization/README.md), Phase 4 P13278/V13278/G13278 only | Existing #13278 remains OPEN pending actual reviewed receiving delivery, current permitted receiving/source/custody readback and separate source-specific judgment; no new issue or umbrella |
+| Complete receiving-ledger/reporter fixture correction, original twelve-file packet, independent authority negatives and four exact prune/pair selectors | Public #13300, complete original and eligible refinement; #13314 is not whole packet fulfillment | routed (proposed; effective after reviewed complete domain acceptance) | [test-portfolio-rationalization](../test-portfolio-rationalization/README.md), Phase 4 P13300/V13300/G13300 only | Existing #13300 remains OPEN pending actual reviewed receiving delivery, current permitted source/receiver/custody readback and separate administrative judgment; technical work unchecked, no new issue, execution or custody transfer |
+| Complete finite hosted-Windows containment/build-tooling/standalone qualification packet | Public #13334, complete original and reported candidate/baseline context; different #13314 controls are not packet acceptance | routed (proposed; effective after reviewed complete domain acceptance) | [test-portfolio-rationalization](../test-portfolio-rationalization/README.md), Phase 4 P13334/V13334/G13334 only | Existing #13334 remains OPEN pending actual reviewed receiving delivery, current permitted source/receiver/custody readback and separate administrative judgment; Windows evidence and execution boundaries retained, no new issue or resource release |
+
+Phase 7 I13278/I13300/I13334 record deduplication and each single Phase 4
+domain placement, not another primary owner. Preserve the continuing source
+claimants, independent clean-room contracts and actual fixture, runner,
+platform, container/output/workspace and cleanup custodians.
+Neither this record nor the domain amendment appoints an executor, authorizes
+execution or cleanup, releases a claim/resource, or establishes native
+technical acceptance. All technical P13278/V13278/G13278, P13300/V13300/G13300
+and P13334/V13334/G13334 rows remain unchecked.

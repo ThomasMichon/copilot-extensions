@@ -374,6 +374,14 @@ the non-public approval conversation.
 
 ## Plan
 
+The [complete terminal, offline-job and fixture receiving proposal](journal/2026/11.18-terminal-and-offline-receiving.md)
+directly preserves #13209/#13278/#13300/#13334 in existing domain Plan/local
+and global Validation, with the three portfolio lanes' actual migration-intake
+route recorded separately. All thirty new rows remain unchecked; normal
+reviewed delivery/readback precedes any separate tracker judgment. The complete
+05:39:32 UTC census is 915 whole open, 186 above fixed 729. No implementation
+or source effect follows.
+
 The [selected-PR receiving and source-closeout record](journal/2026/11.18-selected-pr-receiving-and-source-closeout.md)
 records #6467's separately audited planned-tracking retirement and the whole
 finite source completions of #13218/#13321 through merged #13238/#13324.
