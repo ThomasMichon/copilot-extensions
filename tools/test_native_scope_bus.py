@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import socket
 import stat
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -14,7 +15,7 @@ from agent_procutil import linux_daemon_scope
 import plugin_test_lifecycle as lifecycle
 
 
-@pytest.mark.skipif(os.name == "nt", reason="Linux native scope uses Unix socket aliases")
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux native scope uses Unix socket aliases")
 def test_native_scope_bus_keeps_runtime_private_and_connects_to_the_selected_socket(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
