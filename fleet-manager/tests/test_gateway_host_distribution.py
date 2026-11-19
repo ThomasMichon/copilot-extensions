@@ -65,6 +65,21 @@ project_at = cast(Callable[[Path], tuple[Path, Path]], legacy_project_at)
 select_host = cast(Callable[[Path], Document], legacy_select_host)
 
 
+def unavailable_source(snapshot: Path) -> Path:
+    destination = snapshot.with_name("unavailable-snapshot")
+    if destination.exists():
+        raise FileExistsError(destination)
+    deadline = time.monotonic() + 2
+    while True:
+        try:
+            return snapshot.rename(destination)
+        except PermissionError as error:
+            remaining = deadline - time.monotonic()
+            if getattr(error, "winerror", None) not in (5, 32, 33) or remaining <= 0:
+                raise
+            time.sleep(min(0.05, remaining))
+
+
 def _installed_wheel(distribution: importlib.metadata.Distribution, output: Path) -> Path:
     """Keep actual installed public dependency bytes; replace only wheel RECORD."""
     wheel_metadata = distribution.read_text("WHEEL")
@@ -420,6 +435,43 @@ def test_manager_activation_diagnostic_bounds_the_actual_startup_log(tmp_path: P
     assert diagnostic.endswith("\nactual-startup-failure\n")
     assert "old-startup-entry" not in diagnostic
     assert len(diagnostic.removeprefix("Manager passive startup log:\n")) == 16_384
+
+
+@pytest.mark.parametrize("failure", ["transient", "ordinary", "expired"])
+def test_source_denial_retries_only_bounded_windows_sharing_failures(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str,
+) -> None:
+    from types import SimpleNamespace
+
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+    (snapshot / "payload").write_bytes(b"actual-source")
+    rename = Path.rename
+    attempts = 0
+
+    def sharing(path: Path, destination: Path) -> Path:
+        nonlocal attempts
+        attempts += 1
+        if attempts <= 2:
+            error = PermissionError("fixture source sharing")
+            if failure != "ordinary":
+                setattr(error, "winerror", 5)
+            raise error
+        return rename(path, destination)
+
+    monkeypatch.setattr(Path, "rename", sharing)
+    if failure == "expired":
+        clock = iter((0.0, 3.0))
+        monkeypatch.setitem(unavailable_source.__globals__, "time", SimpleNamespace(monotonic=lambda: next(clock)))
+    if failure == "transient":
+        moved = unavailable_source(snapshot)
+        assert not snapshot.exists() and (moved / "payload").read_bytes() == b"actual-source"
+        assert attempts == 3
+    else:
+        with pytest.raises(PermissionError):
+            unavailable_source(snapshot)
+        assert snapshot.is_dir() and not snapshot.with_name("unavailable-snapshot").exists()
+        assert attempts == 1
 
 
 def test_native_manager_launcher_uses_fixture_root_despite_runner_override(
@@ -870,8 +922,7 @@ def test_selected_gateway_application_first_touch_repeat_update_and_stop(
         assert installed.returncode == 0, installed.stdout + installed.stderr
         initial = status(first)
         assert initial["ready"] and initial["selected"]
-        unavailable = snapshot.with_name("unavailable-snapshot")
-        snapshot.rename(unavailable)
+        unavailable_source(snapshot)
         assert status(first)["pid"] == initial["pid"]
         repeated = invoke(first, "install")
         assert repeated.returncode == 0, repeated.stdout + repeated.stderr
@@ -1026,7 +1077,7 @@ def test_selected_continuity_ssh_application_first_touch_repeat_update_and_stop(
             assert initial["ready"] and initial["selected"] and initial["revision"] == directory["revision"]
             authorized = Path(value["authorization_dir"]) / "authorized_keys.gateway"
             assert key(2) in authorized.read_text()
-            snapshot.rename(snapshot.with_name("unavailable-snapshot"))
+            unavailable_source(snapshot)
             repeated = await invoke(slots[0], "install")
             assert repeated.returncode == 0, repeated.stdout + repeated.stderr
             assert (await status(slots[0]))["pid"] == initial["pid"]
@@ -1188,7 +1239,7 @@ def test_selected_ssh_application_first_touch_repeat_update_and_stop(
             authorized = Path(value["authorization_dir"], "authorized_keys.gateway")
             assert key(2) in authorized.read_text()
             before = authorized.read_bytes(), authorized.stat().st_mtime_ns
-            snapshot.rename(snapshot.with_name("unavailable-snapshot"))
+            unavailable_source(snapshot)
             repeated = await invoke(first, "install")
             assert repeated.returncode == 0, repeated.stdout + repeated.stderr
             assert (await status(first))["pid"] == initial["pid"]

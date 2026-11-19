@@ -2081,6 +2081,15 @@ fixture Manager's passive-startup log; missing or linked logs remain explicit.
 The workflow forwards native lifecycle stdout/stderr explicitly through its
 headless Windows parent. A real nested-subprocess control exercises that
 workflow call, rather than only checking creation flags.
+The Linux native owner validates both existing same-user bus sockets and
+aliases only the private systemd socket beneath its sandbox runtime directory.
+Applications keep their private `XDG_RUNTIME_DIR`; no user manager is started
+and no host runtime directory is changed. The fixture's real socket control
+exercises the alias, while missing, non-socket, foreign, escaped and pre-existing
+paths remain refusals.
+Source-independent repeat still requires renaming the actual Source snapshot.
+Only Windows access/sharing errors 5, 32 and 33 retry for at most two seconds
+inside the original runner deadline; exhaustion or other errors still fail.
 The fixture explicitly selects its Manager root as well as its private homes;
 a real generated-launcher control retains an inherited runner root override and
 verifies that the fixture still reaches its own selected slot.
