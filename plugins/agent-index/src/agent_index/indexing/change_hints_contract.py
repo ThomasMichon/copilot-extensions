@@ -40,7 +40,7 @@ def intake_contract() -> dict[str, Any]:
     """Describe durable intake independently of available engine support."""
     return {
         "id": CONTRACT_ID,
-        "intake_versions": [1],
+        "intake_versions": [1, 2],
         "execution_versions": current_execution_versions(),
     }
 
