@@ -14,6 +14,7 @@ import yaml
 
 from agent_containers import config as config_mod
 from agent_containers import fleet as fleet_mod
+from agent_containers import fleet_growth
 from agent_containers import lease as lease_mod
 from agent_containers import plugin_config
 from agent_containers.config import ContainersConfig, FleetConfig, load_config
@@ -26,6 +27,7 @@ class FakeProvisioner:
     """Stands in for the ``up`` path; records each requested target count."""
 
     members: list[DockerContainerInfo]
+    state_dir: Path
     calls: list[int | None] = field(default_factory=list)
     fail: str | None = None
     delay: float = 0.0
@@ -74,6 +76,7 @@ def fake(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> FakeProvisioner:
     _redirect_lease_state(monkeypatch, tmp_path)
     provisioner = FakeProvisioner(
         [DockerContainerInfo("example-1", "i1", "img", "running", "", fleet="example")],
+        tmp_path,
     )
 
     def members(config: ContainersConfig, name: str) -> list[DockerContainerInfo]:
@@ -163,7 +166,7 @@ def test_member_being_provisioned_is_hidden_until_the_grower_leases_it(
 
     assert checked == ["during"]
     assert (grown.container, grown.effort) == ("example-2", "b")
-    assert lease_mod.fleet_growth._read_markers(lease_mod.STATE_DIR) == {}
+    assert fleet_growth._read_markers(fake.state_dir) == {}
     with lease_mod.session_admission("example-2"):
         pass
 
@@ -183,7 +186,7 @@ def test_provisioning_failure_leaves_no_lease_and_reports_the_error(
     assert "out of memory" in message
     assert fake.calls == [2]
     assert [lease.effort for lease in lease_mod.list_leases()] == ["a"]
-    assert lease_mod.fleet_growth._read_markers(lease_mod.STATE_DIR) == {}
+    assert fleet_growth._read_markers(fake.state_dir) == {}
 
 
 def test_concurrent_borrows_never_overshoot_max_size(fake: FakeProvisioner) -> None:
