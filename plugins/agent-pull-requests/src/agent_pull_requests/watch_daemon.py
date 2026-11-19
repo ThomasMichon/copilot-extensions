@@ -135,6 +135,7 @@ class WatchDaemon:
         self._persistence_error: str | None = None
         self._observation_errors: dict[str, str] = {}
         self._persist_lock = threading.RLock()
+        self._persistence_guard: Callable[[], None] | None = None
         self._pollers: dict[WatchKey, threading.Thread] = {}
         self._native_pollers: set[threading.Thread] = set()
         self._pollers_lock = threading.Lock()
@@ -175,6 +176,17 @@ class WatchDaemon:
     def _read_state(self) -> list[dict[str, Any]]:
         return read_watch_state(self._state_root)
 
+    def set_persistence_guard(
+        self, guard: Callable[[], None] | None, *, timeout: float,
+    ) -> None:
+        """Retain preparation's rejection boundary until workers or the owner settle."""
+        if not self._persist_lock.acquire(timeout=positive_seconds(timeout)):
+            raise TimeoutError("PR watch persistence boundary is busy")
+        try:
+            self._persistence_guard = guard
+        finally:
+            self._persist_lock.release()
+
     def _persist(
         self, entries: list[dict[str, Any]] | None = None, *,
         before_replace: Callable[[], None] | None = None,
@@ -191,11 +203,20 @@ class WatchDaemon:
             return
         with self._persist_lock:
             try:
+                guard = self._persistence_guard
+                if guard is not None:
+                    guard()
                 snapshot = self._registry.snapshot_state() if entries is None else entries
-                if before_replace is not None:
+                if before_replace is not None or guard is not None:
+                    def check() -> None:
+                        if guard is not None:
+                            guard()
+                        if before_replace is not None:
+                            before_replace()
+
                     _write_subscriptions_state(
                         snapshot, self._state_root, validate=validate_versioned_entries,
-                        before_replace=before_replace,
+                        before_replace=check, create_parent=False, require_plain=True,
                     )
                 elif self._state_root is None:
                     write_subscriptions_state(snapshot)
@@ -473,6 +494,11 @@ class WatchDaemon:
                     raise TimeoutError("PR watch admitted mutation handlers did not drain")
                 self._admission.wait(remaining)
 
+    def stop_admission(self) -> None:
+        with self._admission:
+            self._accepting_mutations = False
+            self._shutdown_event.set()
+
     @staticmethod
     def _check_lifecycle_deadline(deadline: float) -> None:
         if time.monotonic() >= deadline:
@@ -481,6 +507,7 @@ class WatchDaemon:
     def quiesce(
         self, timeout: float = _SHUTDOWN_REQUEST_DEADLINE_S, *,
         before_persist: Callable[[], None] | None = None,
+        persist: bool = True,
     ) -> None:
         """Retain ownership until admitted writes and accepted callbacks have stopped."""
         with self._lifecycle_operation(timeout) as deadline:
@@ -492,7 +519,7 @@ class WatchDaemon:
             self._check_lifecycle_deadline(deadline)
             if self._lifecycle_shutdown_event.is_set():
                 raise RuntimeError("PR watch shutdown interrupted quiescence")
-            if self._state_loaded:
+            if self._state_loaded and persist:
                 if before_persist is None:
                     self._persist()
                 else:

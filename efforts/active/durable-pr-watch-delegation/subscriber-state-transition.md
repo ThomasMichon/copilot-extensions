@@ -107,6 +107,7 @@ configuration or caller-selected paths:
 | Purpose | Proposed location under the existing state root |
 |---|---|
 | Historical admission barrier | `agent-pull-requests-watch.lock` as an ordinary directory |
+| Original-inode preparation pin | `watch-state-transition.pin`, a retained hardlink, never a writer lease or staged barrier |
 | Retained original lease inode | `watch-state-transition.legacy.lock`; on POSIX this initially holds the staged barrier directory and is exchanged atomically with the historical path |
 | Windows staged barrier | `watch-state-transition.barrier` before its no-replace installation |
 | New native writer lease | `agent-pull-requests-watch.lock/writer.lock` |
@@ -234,6 +235,35 @@ Measure transition work once per phase and keep ordinary reads on the
 existing owner path; no process, filesystem scan or boot probe per callback.
 
 ### Guarded preparation candidate
+
+The prepared record requires a retained hardlink at the fixed pin path.
+Create it under the original held lease and confirm the file and parent through
+the existing platform persistence policy before publishing the record.
+Recovery compares that pin, the historical pathname and the recorded inode
+before acquisition. The retained reference prevents unlink/recreate inode
+reuse; a numeric device/inode pair alone is insufficient. Missing, foreign or
+symlink/reparse pin evidence refuses. An unjournaled pin remains retained,
+blocking interruption evidence, with no automatic deletion or inferred record
+reconstruction. Never use the pin as another lease. It does not occupy the
+retained pathname needed for POSIX atomic exchange, or qualify sealing/boot.
+
+Selected state and marker writes require an existing parent; moving the
+historical root cannot cause an empty replacement directory to be created.
+Legacy state uses stable regular-file descriptor reads, preserving its
+existing size policy while rejecting links and reparses before adoption or
+replacement. The ordinary receiver also rejects an unjournaled pin; its
+absent-transition path adds one fixed metadata lookup, not a scan.
+
+Install the preparation source/custody guard before validating an active
+owner's evidence. It protects all in-flight persistence and final replacements
+until workers settle or a newly authorized owner boundary revalidates state.
+Validation failure closes admission and drains without persisting rejected
+state, retaining the native lease for unfinished work. Safe timeout abort
+requires another descriptor/path check, both after the failed drain and before
+resume. A storage validation refusal invalidates readiness even when it occurs
+before the final callback; repaired state must be strictly readopted, not
+overwritten from the old registry. Successful readoption or safe resume clears
+this preparation-only guard.
 
 Preparation pins the prechecked historical inode through existing-only native
 acquisition, including descriptor/path comparison before PID publication.

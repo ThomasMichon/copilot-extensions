@@ -602,7 +602,7 @@ replacement. Its internal version-1 header uses schema
 neither sealing nor custody. This groundwork refuses **every** present
 transition rather than selecting the legacy file or isolated candidate.
 Malformed, linked, oversized or unreadable markers also refuse. An
-unjournaled historical-lock directory, retained transition lock, staged
+unjournaled historical-lock directory, original-inode pin, retained transition lock, staged
 barrier or `watch-state` path is not ordinary absence. Missing transition
 evidence preserves existing legacy behavior, including a regular historical
 lease file; inspecting an empty root does not create it.
@@ -621,8 +621,29 @@ read readiness for authorized same-owner abort; lost custody or malformed
 legacy state instead invalidates that readiness. Failed drain, authority
 checks or durability acknowledgement never grant a later phase.
 Prepared-only recovery validates that same root, installation and original
-inode before acquiring the historical lease, then confirms journal durability;
-it never selects or opens a retained/new writer inode.
+inode before acquiring the historical lease, then confirms journal durability.
+Preparation hardlinks the original lease at `watch-state-transition.pin` and
+confirms file/directory persistence through the existing platform policy before
+publishing the prepared record. The retained link prevents inode recycling
+after release; device/inode numbers alone are not recovery evidence. A missing,
+foreign or non-regular pin refuses recovery. The pin is never acquired as a
+writer lease and is not the later retained-path exchange or admission barrier.
+
+An unjournaled pin is retained interruption evidence, not legacy absence or
+permission to erase it or recreate a record. Preparation's state and marker
+writes require an existing parent and never recreate a moved historical root.
+Legacy source validation uses a stable, plain-file descriptor read, rejecting
+symlinks/reparse points without imposing a new legacy-state size cap.
+
+While preparation owns a drain, its source/custody guard protects every
+in-flight persistence attempt and final replacement. On invalid evidence it
+closes admission and drains without persisting rejected state; an unfinished
+worker retains the lease and the guard. Safe timeout abort rechecks actual
+descriptor/path custody again before resume. Storage validation failures
+invalidate readiness, so a later repair requires strict state readoption
+instead of resuming a stale registry. Successful readoption or safe authorized
+resume clears the preparation-only guard; ordinary operation does not retain
+its repeated validation work.
 
 No CLI or control-plane operation invokes preparation yet, and ordinary
 startup/restart still refuses every present phase. Do not write markers by

@@ -48,6 +48,7 @@ class WatchWriter:
         self._creating_pid = os.getpid()
         self._read_ready = False
         self._drain_started = False
+        self._preparation_guard: Callable[[], None] | None = None
         self._closed = False
 
     @property
@@ -95,9 +96,12 @@ class WatchWriter:
         self._read_ready = False
         if not self.writer_held:
             self._lease.acquire()
+        self._lease.held_file_identity()
         self._remaining(deadline)
         self.daemon.reload_state(timeout=self._remaining(deadline))
         self._remaining(deadline)
+        self.daemon.set_persistence_guard(None, timeout=self._remaining(deadline))
+        self._preparation_guard = None
         self._read_ready = True
 
     def adopt(self, *, timeout: float) -> None:
@@ -128,37 +132,40 @@ class WatchWriter:
 
         with self._operation(timeout) as deadline:
             binding: dict[str, Any] = {"kind": "legacy", "stateRoot": str(self.root)}
+            identity: tuple[int, int] | None = None
+            prior: dict[str, Any] | None = None
+            inspected = False
 
             def check_deadline() -> None:
                 self._remaining(deadline)
 
-            def validate_custody() -> None:
+            def guard_source() -> None:
+                try:
+                    held = self._lease.held_file_identity()
+                    if held != _historical_identity(self.root) or (
+                        identity is not None and held != identity
+                    ):
+                        raise PermissionError("watch preparation historical lease identity changed")
+                    current = read_preparation(self.root, binding)
+                    if inspected and current != prior:
+                        raise PermissionError("watch preparation journal changed during drain")
+                    WatchRegistry().restore_state(
+                        _read_subscriptions_state(
+                            watch_state_paths(self.root).legacy_subscriptions, require_plain=True,
+                        ),
+                        strict=True,
+                    )
+                except Exception:
+                    self._read_ready = False
+                    self.daemon.stop_admission()
+                    raise
+
+            def validate_legacy() -> None:
                 self._validate("prepare-state-transition", deadline)
                 if installation is not None:
                     installation.require_current()
-                    if installation.state_root != self.root:
-                        raise PermissionError("watch preparation installation state root differs")
-                try:
-                    if self._lease.held_file_identity() != identity:
-                        raise PermissionError("watch preparation historical lease identity changed")
-                except PermissionError:
-                    self._read_ready = False
-                    raise
-                if read_preparation(self.root, binding) != prior:
-                    raise PermissionError("watch preparation journal changed during drain")
+                guard_source()
                 check_deadline()
-
-            def validate_legacy() -> None:
-                validate_custody()
-                try:
-                    WatchRegistry().restore_state(
-                        _read_subscriptions_state(watch_state_paths(self.root).legacy_subscriptions),
-                        strict=True,
-                    )
-                except ValueError:
-                    self._read_ready = False
-                    raise
-                validate_custody()
 
             def validate() -> None:
                 self._validate("prepare-state-transition", deadline)
@@ -176,20 +183,38 @@ class WatchWriter:
                 if installation.state_root != self.root:
                     raise PermissionError("watch preparation installation state root differs")
                 binding.update(kind="installation", installation=installation.evidence())
-            identity = _historical_identity(self.root)
-            prior = read_preparation(self.root, binding)
-            if not self.writer_held:
-                self._lease.acquire(expected_file_identity=identity)
-            validate_legacy()
-            self._drain_started = True
-            if not self.daemon.quiescent:
-                self.daemon.quiesce(
-                    timeout=self._remaining(deadline), before_persist=validate_legacy,
+            self.daemon.set_persistence_guard(guard_source, timeout=self._remaining(deadline))
+            self._preparation_guard = guard_source
+            try:
+                identity = _historical_identity(self.root)
+                prior = read_preparation(self.root, binding)
+                inspected = True
+                if not self.writer_held:
+                    self._lease.acquire(expected_file_identity=identity)
+                guard_source()
+                self._drain_started = True
+                if not self.daemon.quiescent:
+                    self.daemon.quiesce(
+                        timeout=self._remaining(deadline), before_persist=validate_legacy,
+                    )
+                self._read_ready = False
+                return prepare(
+                    self.root, binding, self._lease, validate=validate, check_deadline=check_deadline,
                 )
-            self._read_ready = False
-            return prepare(
-                self.root, binding, self._lease, validate=validate, check_deadline=check_deadline,
-            )
+            except BaseException as error:
+                self.daemon.stop_admission()
+                self._drain_started = True
+                if not isinstance(error, TimeoutError):
+                    self._read_ready = False
+                try:
+                    guard_source()
+                except Exception:
+                    self._read_ready = False
+                try:
+                    self.daemon.quiesce(timeout=self._remaining(deadline), persist=False)
+                except BaseException as drain_error:
+                    raise error from drain_error
+                raise
 
     def drain_and_release(self, *, timeout: float) -> None:
         """Never release on incomplete drain or failed post-drain authorization."""
@@ -218,8 +243,18 @@ class WatchWriter:
                 self._acquire_and_reload(deadline)
             if not self.read_ready:
                 raise RuntimeError("watch writer must be read-ready before resumption")
+            try:
+                self._lease.held_file_identity()
+                if self._preparation_guard is not None:
+                    self._preparation_guard()
+            except Exception:
+                self._read_ready = False
+                self.daemon.stop_admission()
+                raise
             self.daemon.resume_effects(timeout=self._remaining(deadline))
             self._remaining(deadline)
+            self.daemon.set_persistence_guard(None, timeout=self._remaining(deadline))
+            self._preparation_guard = None
             self._drain_started = False
 
     def compute(self, kind: str, payload: dict[str, Any]) -> dict[str, Any]:

@@ -813,7 +813,9 @@ phase header through shared storage, preserving absent-transition legacy behavio
 refusing every present or orphaned transition before legacy reads/writes.
 The current internal preparation candidate validates binding and original
 descriptor custody, drains without releasing the writer and records only
-`prepared`, with same-inode recovery and final-publication guards. It is not
+`prepared`, with a retained original-inode pin, same-inode recovery and
+final-publication guards. Preparation rejection closes admission and protects
+in-flight persistence; unsafe repair requires strict readoption. It is not
 connected to ordinary CLI/control entry. Physical sealing, post-seal recovery
 and authority selection remain unimplemented; no map/cwd capability or
 isolated subscription publisher is activated.

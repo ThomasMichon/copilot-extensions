@@ -11,7 +11,9 @@ from typing import Any
 
 from single_instance_lease import SingleInstance
 
-from .watch_private import confirm_private, require_private, write_private as write_private
+from .watch_private import (
+    _sync_directory, confirm_private, require_private, write_private as write_private,
+)
 from .watch_registry import WatchRegistry
 from .watch_storage import (
     _read_subscriptions_state,
@@ -39,7 +41,47 @@ def _historical_identity(root: Path) -> tuple[int, int]:
     return info.st_dev, info.st_ino
 
 
-def read_preparation(root: Path, binding: Document) -> Document | None:
+def _pin_identity(root: Path) -> tuple[int, int]:
+    try:
+        info = watch_state_paths(root).preparation_pin.lstat()
+    except OSError as error:
+        raise PermissionError("watch preparation original inode pin is unavailable") from error
+    if (
+        not stat.S_ISREG(info.st_mode) or info.st_nlink < 2
+        or getattr(info, "st_file_attributes", 0) & 0x400
+    ):
+        raise PermissionError("watch preparation requires its original non-link inode pin")
+    return info.st_dev, info.st_ino
+
+
+def _confirm_pin(root: Path, identity: tuple[int, int]) -> None:
+    if _pin_identity(root) != identity:
+        raise PermissionError("watch preparation inode pin differs from the original lease")
+    descriptor = os.open(
+        watch_state_paths(root).preparation_pin,
+        os.O_RDWR | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0),
+    )
+    try:
+        opened = os.fstat(descriptor)
+        if (opened.st_dev, opened.st_ino) != identity:
+            raise PermissionError("watch preparation inode pin changed before confirmation")
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    _sync_directory(root)
+    if _pin_identity(root) != identity:
+        raise PermissionError("watch preparation inode pin changed during confirmation")
+
+
+def _create_pin(root: Path, identity: tuple[int, int]) -> None:
+    paths = watch_state_paths(root)
+    os.link(paths.historical_lock, paths.preparation_pin, follow_symlinks=False)
+    _confirm_pin(root, identity)
+
+
+def read_preparation(
+    root: Path, binding: Document, *, preparing_pin: bool = False,
+) -> Document | None:
     """Validate a pre-move record before opening the original historical lease."""
     identity = _historical_identity(root)
     if (
@@ -58,8 +100,13 @@ def read_preparation(root: Path, binding: Document) -> Document | None:
     ):
         raise PermissionError("watch preparation binding differs from its state root")
     paths = watch_state_paths(root)
-    phase = read_transition_phase(root)
+    phase = (
+        read_transition_phase(root, allow_preparation_pin=True) if preparing_pin
+        else read_transition_phase(root)
+    )
     if phase == "absent":
+        if preparing_pin and _pin_identity(root) != identity:
+            raise PermissionError("watch preparation inode pin differs from the original lease")
         return None
     if phase != "prepared":
         raise PermissionError("watch preparation cannot recover a physical transition")
@@ -84,6 +131,8 @@ def read_preparation(root: Path, binding: Document) -> Document | None:
         raise PermissionError("watch preparation journal binding or evidence is invalid")
     if identity != (document["lease"]["device"], document["lease"]["inode"]):
         raise PermissionError("watch preparation no longer names the original lease inode")
+    if _pin_identity(root) != identity:
+        raise PermissionError("watch preparation inode pin differs from the original lease")
     return document
 
 
@@ -104,24 +153,31 @@ def prepare(
         raise PermissionError("watch preparation does not hold the original lease inode")
     prior = read_preparation(root, binding)
     # Strict restoration validates all legacy outcomes without adopting effects.
-    WatchRegistry().restore_state(_read_subscriptions_state(paths.legacy_subscriptions), strict=True)
+    WatchRegistry().restore_state(
+        _read_subscriptions_state(paths.legacy_subscriptions, require_plain=True), strict=True,
+    )
     document = prior or {
         "schema": _SCHEMA, "version": 1, "phase": "prepared", "binding": binding,
         "lease": {"device": identity[0], "inode": identity[1]},
     }
 
-    def recheck() -> None:
+    def recheck(*, preparing_pin: bool = False) -> None:
         validate()
         if lease.held_file_identity() != identity or _historical_identity(root) != identity:
             raise PermissionError("watch preparation native custody changed")
-        if read_preparation(root, binding) != prior:
+        if read_preparation(root, binding, preparing_pin=preparing_pin) != prior:
             raise PermissionError("watch preparation changed before publication")
         check_deadline()
 
     recheck()
     if prior is None:
-        write_private(paths.journal, document, replace=False, before_publish=recheck)
+        _create_pin(root, identity)
+        write_private(
+            paths.journal, document, replace=False,
+            before_publish=lambda: recheck(preparing_pin=True), create_parent=False,
+        )
     else:
+        _confirm_pin(root, identity)
         # An interrupted durability acknowledgement is not proof of persistence.
         confirm_private(paths.journal)
         recheck()

@@ -2,6 +2,9 @@
     "profile": "copilot-extensions.promotion-units/v1",
     "max_seconds": 300,
     "nodes": [
+        "tools/promotion_unit_tests/test_watch_storage_contract.py::test_unjournaled_transition_is_not_legacy_absence[pin]",
+        "tools/promotion_unit_tests/test_watch_preparation.py::test_prepared_pin_is_required_even_when_recorded_device_inode_matches[missing]",
+        "tools/promotion_unit_tests/test_watch_preparation.py::test_prepared_pin_is_required_even_when_recorded_device_inode_matches[different]",
         "tools/promotion_unit_tests/test_watch_preparation.py::test_inherited_lease_release_closes_without_unlocking_parent[False]",
         "tools/promotion_unit_tests/test_watch_preparation.py::test_inherited_lease_release_closes_without_unlocking_parent[True]",
         "tools/promotion_unit_tests/test_watch_preparation.py::test_preparation_checks_deadline_after_the_last_journal_read",
@@ -6028,8 +6031,8 @@
         "plugins/agent-index/src/agent_index/indexing/acquisition_requirement.py": "c04cac55a9dd6682eb7d3e354c450b8488cdef6e0905f0a80874e781d124207c",
         "tools/promotion_unit_tests/test_checkout_disposition.py": "6fb76b462dbf84919ededfe62ecc181aa51533c61d71489b6d7dc140c70c8bc9",
         "plugins/agent-worktrees/src/agent_worktrees/prune.py": "933a34e607f4eebb34e967d8920132bf4695842f6e0897e19ff718daadcfe049",
-        "plugins/agent-pull-requests/src/agent_pull_requests/watch_storage.py": "04fdfaa78089ac14792490d8b36723b14f89f0de9fecf3a1d4692574298ecc32",
-        "tools/promotion_unit_tests/test_watch_storage_contract.py": "ec615a7b615ef20546b79283e31b437e8917dfdfb9621b9a59dad2fa39556246",
+        "plugins/agent-pull-requests/src/agent_pull_requests/watch_storage.py": "c549fe17354d7420346ca92e34f80caa35a88f8c0862c0b53bc3415e5c9956af",
+        "tools/promotion_unit_tests/test_watch_storage_contract.py": "92238ddd8ca9564b04ba1cc2b48807815c8203d1a727d1a19463ecbb81842302",
         "plugins/agent-worktrees/src/agent_worktrees/git_process.py": "6cc675a4d988e7d1fd6b0d76a48fde5909f78f085ef194ec69625c6334b4f80f",
         "plugins/agent-worktrees/src/agent_worktrees/daemon_launch_context.py": "b8250e9aaef5fdc70f881b979d52d164c408aa08cf8322278be11569a01c3d30",
         "tools/promotion_unit_tests/test_git_launch_composition.py": "13cc8825da50b3d667d10ef7d38dedd9d52d98bcbef961535c9cc53834e76531",
@@ -6936,7 +6939,7 @@
         "libs/agent-procutil/src/agent_procutil/async_foreground.py": "ec3c91e2da4fb394da6bad935a6dea98dd7037f5de7b59091e94a90d0107b7a1",
         "libs/agent-procutil/src/agent_procutil/python_cache_legacy.py": "258d2046cbdebb005cbb65cdbce0827121b896f17234d97b6585eafef3a6d14c",
         "libs/agent-procutil/src/agent_procutil/scratch.py": "3d4f488761f75b4e743feb22bbffaf8de903b39ed34be6a6bc2bc7c84a6af58f",
-        "plugins/agent-pull-requests/src/agent_pull_requests/watch_transition.py": "e4c77d5cfafdd1a629295cd0d6872a9a52bede695079bffd265ea1668d3403aa",
-        "tools/promotion_unit_tests/test_watch_preparation.py": "cc54e2062a6f3bf98d5f11242f3eb490174f68f6252582484dbc3a93bca10379"
+        "plugins/agent-pull-requests/src/agent_pull_requests/watch_transition.py": "17c61b2a4e65cd2de4834c2b99bbf7fc73f0aacf30906e563d8c387a01b40c88",
+        "tools/promotion_unit_tests/test_watch_preparation.py": "06ac647e04e727145c8c88a176e3eac02c8b3de1bc3cefca11c7ad94c607b499"
     }
 }

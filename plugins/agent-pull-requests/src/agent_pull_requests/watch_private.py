@@ -167,9 +167,11 @@ def confirm_private(path: Path) -> None:
 def write_private(
     path: Path, document: dict[str, Any], *, replace: bool = True,
     before_publish: Callable[[], None] | None = None,
+    create_parent: bool = True,
 ) -> None:
     """Protect before writing secrets, then publish without a partial visible file."""
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if create_parent:
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     parent = path.parent.stat(follow_symlinks=False)
     if (
         not stat.S_ISDIR(parent.st_mode)

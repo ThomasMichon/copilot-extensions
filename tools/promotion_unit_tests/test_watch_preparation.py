@@ -30,7 +30,7 @@ def preparation(monkeypatch: pytest.MonkeyPatch) -> Any:
             assert spec and spec.loader
             spec.loader.exec_module(module)
         elif name == "watch_private":
-            for operation in ("confirm_private", "require_private", "write_private"):
+            for operation in ("_sync_directory", "confirm_private", "require_private", "write_private"):
                 setattr(module, operation, lambda *_a, **_kw: pytest.fail("unselected storage effect"))
         else:
             setattr(module, "WatchRegistry", lambda: SimpleNamespace(restore_state=lambda *_a, **_kw: None))
@@ -43,20 +43,44 @@ def preparation(monkeypatch: pytest.MonkeyPatch) -> Any:
     assert spec and spec.loader
     result = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(result)
-    state: dict[str, Any] = {"document": None, "writes": 0, "confirmed": 0}
+    state: dict[str, Any] = {"document": None, "writes": 0, "confirmed": 0, "pin": None}
     monkeypatch.setattr(result, "_historical_identity", lambda _root: (2, 3))
-    monkeypatch.setattr(result, "read_transition_phase", lambda _root: (
-        "absent" if state["document"] is None else state["document"]["phase"]
-    ))
+    def phase(_root: Path, *, allow_preparation_pin: bool = False) -> str:
+        if state["document"] is None:
+            if state["pin"] is not None and not allow_preparation_pin:
+                raise ValueError("orphaned pin")
+            return "absent"
+        return str(state["document"]["phase"])
+
+    monkeypatch.setattr(result, "read_transition_phase", phase)
     monkeypatch.setattr(result, "_regular_bytes", lambda _path: json.dumps(state["document"]).encode())
     monkeypatch.setattr(result, "require_private", lambda _path: None)
     monkeypatch.setattr(result.os.path, "lexists", lambda _path: False)
-    monkeypatch.setattr(result, "_read_subscriptions_state", lambda _path: [])
+    monkeypatch.setattr(result, "_read_subscriptions_state", lambda _path, **_kw: [])
+
+    def pin_identity(_root: Path) -> tuple[int, int]:
+        if state["pin"] is None:
+            raise PermissionError("missing pin")
+        return state["pin"][0], state["pin"][1]
+
+    def pin(_root: Path, identity: tuple[int, int]) -> None:
+        assert state["pin"] is None
+        state["pin"] = identity
+
+    def confirm_pin(_root: Path, identity: tuple[int, int]) -> None:
+        if pin_identity(_root) != identity:
+            raise PermissionError("changed pin")
+
+    monkeypatch.setattr(result, "_pin_identity", pin_identity)
+    monkeypatch.setattr(result, "_create_pin", pin)
+    monkeypatch.setattr(result, "_confirm_pin", confirm_pin)
 
     def publish(
         _path: Path, document: dict[str, Any], *, replace: bool, before_publish: Any,
+        create_parent: bool,
     ) -> None:
         assert replace is False
+        assert create_parent is False
         before_publish()
         state["document"] = json.loads(json.dumps(document))
         state["writes"] += 1
@@ -117,6 +141,19 @@ def test_preparation_rechecks_every_custody_boundary(
     with pytest.raises((ValueError, PermissionError)):
         module.prepare(root, binding, lease, validate=validate, check_deadline=lambda: None)
     assert state["writes"] == 0
+
+
+@pytest.mark.parametrize("change", ["missing", "different"])
+def test_prepared_pin_is_required_even_when_recorded_device_inode_matches(
+    preparation: Any, change: str,
+) -> None:
+    module, state = preparation
+    root, binding, lease = fixture_owner(module)
+    module.prepare(root, binding, lease, validate=lambda: None, check_deadline=lambda: None)
+    state["pin"] = None if change == "missing" else (2, 4)
+    with pytest.raises(PermissionError):
+        module.read_preparation(root, binding)
+    assert state["writes"] == 1 and state["confirmed"] == 0
 
 
 @pytest.mark.parametrize("corruption", ["binding", "boolean-inode", "extra", "orphan"])
