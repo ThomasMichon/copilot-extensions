@@ -168,6 +168,8 @@ Worktrees' pending project uses the build checker pins plus CommonMark and its
 third-party declarations in `typecheck-worktrees-requirements.txt`, so selected
 metadata/source-attribution files are checked against the real Markdown parser.
 This does not admit the unchanged Worktrees project.
+Focused artifact-consumer tests also resolve their repository runner helpers
+through the actual `tools` import root; physical file ownership is unchanged.
 
 `--prepare` explicitly installs the checked-in hash-locked checker dependencies
 using the existing seven-day seasoning policy and environment-scoped admission.
