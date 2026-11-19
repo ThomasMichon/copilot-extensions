@@ -374,15 +374,17 @@ the non-public approval conversation.
 
 ## Plan
 
-The [liveness, reaper and publisher receiving proposal](journal/2026/11.18-liveness-reaper-and-publication-receiving.md)
-directly preserves #13203/#13207/#13208 in three existing owning efforts'
-Plan/local AND actual global Validation/Coordination, with fifteen new
-unchecked rows and the two applicable conditional intake routes. #13204
-remains an explicitly unadopted alternative because its allocation semantics
-conflict with qualified standing vision; no vision or Request is rewritten.
-All three proposed receiving sources stay OPEN pending actual reviewed
-delivery, permitted current readback and separate judgments. Existing
-keepers, reservations and execution/resource holds remain.
+The [accepted liveness, reaper and publisher record](journal/2026/11.19-keeper-continuation-and-liveness-receipts.md)
+records #13402's actual reviewed delivery, full current readback and the
+three separately audited #13203/#13207/#13208 redundant-tracking retirements.
+All fifteen receiving rows remain unchecked; the latest complete census is
+911 whole open, 182 above fixed 729. #13204 remains OPEN as an explicitly
+unadopted allocation alternative; no vision or Request is rewritten.
+The same record proposes explicit #6236 keeper continuation in existing
+Fleet Coordination. Its actual reviewed merge, still-OPEN reflection, fresh
+complete permitted readback and separate judgment remain future conditions;
+the withdrawn judgment is not replayed. Existing technical, keeper,
+reservation, execution and resource boundaries remain.
 
 The [complete terminal, offline-job and fixture receiving proposal](journal/2026/11.18-terminal-and-offline-receiving.md)
 directly preserves #13209/#13278/#13300/#13334 in existing domain Plan/local

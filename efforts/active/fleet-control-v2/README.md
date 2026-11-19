@@ -80,6 +80,24 @@ neither live enrollment nor deployment, destructive retirement or capacity acces
   Concrete source/interface agreements remain required before affected wiring;
   no universal ACK or whole-parent completion prerequisite is added.
 
+**Proposed campaign-owned keeper continuation.** Upon actual normal reviewed
+merge, this tracking-only continuation will explicitly revise the campaign's
+representation in #6804 comment 6899025715 that "The canonical parent #6236
+and these technical acceptance rows remain open." The active Fleet Control V2
+effort and its direct retained contracts will continue as the canonical parent
+for the complete unfinished work; every unfinished technical acceptance row
+remains open at its existing scope, with checked prerequisite credit preserved.
+After that merge, #6236 must receive reflection while still OPEN, followed
+by fresh complete permitted source/discussion/history, inherited-receipt,
+receiving Plan/local-and-global Validation/Coordination/Request, eligibility
+and actual-custody readback. Only a subsequent separately supported judgment
+may retire redundant tracking as NOT_PLANNED; any independent condition or
+unresolved applicability keeps #6236 OPEN. Preserve the withdrawn judgment and
+correction, original Requests and Scope, assignments, check states, finite
+prerequisite credit and actual ownership/claim boundaries. This proposal grants
+no implementation, technical completion, credential operation, native execution,
+deployment, reassignment or source/resource release.
+
 ## Context
 
 The completed finite [Gateway Role Tunnels](../../2026/10/19%20gateway-role-tunnels/README.md)
