@@ -235,6 +235,30 @@ def test_cli_requires_explicit_dev_seed_only_for_frozen_wip(
     assert not (tmp_path / "output").exists()
 
 
+def test_source_line_classifies_ancestors_not_checkout_names(tmp_path: Path) -> None:
+    import prepare_runtime_source as source
+
+    deadline = time.monotonic() + 60
+    def git(*args: str) -> str:
+        return source._git(tmp_path, "-c", "user.name=Fixture", "-c",
+                           "user.email=fixture@example.invalid", *args, deadline=deadline)
+
+    git("init", "--quiet")
+    tree = git("write-tree")
+    base = git("commit-tree", tree, "-m", "shared base")
+    main = git("commit-tree", tree, "-p", base, "-m", "release")
+    main_tip = git("commit-tree", tree, "-p", main, "-m", "later release")
+    dev = git("commit-tree", tree, "-p", base, "-m", "development")
+    unrelated = git("commit-tree", tree, "-m", "local only")
+    git("update-ref", "refs/remotes/origin/main", main_tip)
+    git("update-ref", "refs/remotes/origin/dev", dev)
+    assert footprint.source_line(tmp_path, main, deadline=deadline) == ("main", main_tip)
+    assert footprint.source_line(tmp_path, dev, deadline=deadline) == ("dev", main_tip)
+    for unknown in (base, unrelated):
+        with pytest.raises(ValueError, match="does not uniquely identify"):
+            footprint.source_line(tmp_path, unknown, deadline=deadline)
+
+
 def test_isolated_cli_help_loads_owned_tools_without_caller_imports(tmp_path: Path) -> None:
     (tmp_path / "local_install_source.py").write_text('raise AssertionError("foreign caller")\n')
     result = subprocess.run(

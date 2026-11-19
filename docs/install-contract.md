@@ -61,7 +61,12 @@ come from its verified first-party wheel, not mutable tooling-checkout helpers
 or helper bytes in a reused profile. Output paths are normalized before
 preparation/export receipts are returned.
 
-Run the entry with the repository's prepared tooling Python and PATH `uv`,
+For a bare commit pin, omit `--branch` and `--main-head` to select by ancestry
+in the fetched `origin/main` and `origin/dev` histories. Automatic mode requires
+a full commit ID and a non-shallow clone. If both histories contain the commit
+or neither does, select an explicit mode instead; no branch is guessed.
+
+For explicit selection run the entry with the repository's prepared tooling Python and PATH `uv`,
 supplying `--source-checkout`, `--source-commit`, `--main-head`, `--branch`,
 and a new `--output` outside the selected checkout. `--branch main` or `dev`
 retains the existing preparer's clean standalone-checkout and fetched-branch

@@ -230,6 +230,7 @@ service-supervision ownership changes.
 | Fresh recovery dispatcher implementer | Owns the bounded fresh-bootstrap/selected-source composition and disposable entry qualification | #7028; source handle `greased-latch`; existing application, footprint and execution owners retain their scopes |
 | Native application consumer implementer | Owns the bounded standard-environment discovery, command/readiness and cache-adapter slice, not the remaining application portfolio | #7030; source handle `weathered-diode`; [bounded plan](native-application-consumers.md) |
 | Bootstrap configuration implementer | Owns early declarative adopter configuration and its standard bootstrap/setup consumers | #13409; [bounded plan](bootstrap-toolchain-configuration.md); existing prerequisite, feed, source-profile and app-footprint owners retained |
+| Protected installation implementer | Owns the bounded protected native bootstrap/admission source contract through existing installation/runtime libraries | #13504; [bounded plan](protected-native-installation.md); Manager, provider/profile and live installation owners retained |
 
 ## Coordination
 
@@ -242,6 +243,13 @@ existing source reservations and current holds; reconcile actual source
 overlaps before edits. Vault remains illustrative. Historical bounded app
 releases do not establish this reference under the new contract. No installed
 resource custody or rollout authority transfers with the assignment.
+
+The [protected native installation handoff](protected-native-installation.md)
+adds a bounded #13504 source/admission slice through the existing installer
+and runtime libraries. It preserves #12905's complete Manager reference and
+#12900's provider/profile persistence work. Its incoming trust boundary is not
+an incumbent-provenance veto, a competing installer or live elevation authority;
+review the proposal before implementation.
 
 The [reviewed scope amendment](finite-scope.md) consolidates the parent completion
 gate. Historical #2822/#4010/#4015/#4058/#5353 intake and the
@@ -695,6 +703,11 @@ Existing checked rows below retain only their historical scope.
   through the standard bootstrap/setup owners, without adopter initialization
   scripts or changed no-configuration defaults; review this contract before code.
 
+- [ ] N1: Review, implement and qualify the bounded
+  [protected native installation handoff](protected-native-installation.md)
+  through existing installation/runtime owners, preserving ordinary defaults,
+  independent incoming trust and separately authorized native/adoption gates.
+
 - [x] S1: Complete the next independent deadline and Git-isolation source
   increments, keeping each bug class, affected canonical copies and focused
   regressions together under the existing owners. Deadline acquisition merged
@@ -858,6 +871,11 @@ adoption. Other completed source slices remain credited in the
   the effort Done or releases another owner's obligation.
 
 ## Validation Plan
+
+The [protected native handoff controls](protected-native-installation.md#validation-plan)
+add incoming trust/custody, pre-write refusal, substitution, finite outcome and
+mixed-version cases. Inert source fixtures do not qualify privileged native
+protection, deployment or provider adoption.
 
 The [bootstrap configuration cases](bootstrap-toolchain-configuration.md#validation-plan)
 add first-consumer ordering, native configuration precedence/preservation and
@@ -1165,7 +1183,7 @@ keeps the failed 300-second attempt distinct from the separately authorized
 passing attempt. Phase 4a recurring maintenance, Manager-first setup and
 installed/native-lifecycle acceptance remain open under their existing owners.
 
-- [2026-11-01 - asynchronous Worktrees predecessor drain](<journal/2026/11.01 asynchronous-installer-drain.md>). Bounded #9919 source adoption; complete construction, other adapters and installed acceptance remain separate.
+- [2026-11-01 - asynchronous Worktrees predecessor drain](journal/2026/11.01%20asynchronous-installer-drain.md). Bounded #9919 source adoption; complete construction, other adapters and installed acceptance remain separate.
 
 ### 2026-11-02 - Contributor-ready fast-install and cutover map
 
@@ -1722,12 +1740,12 @@ environment and custody contracts remain unchanged apart from the cache flags.
 The new exact head still needs both complete hosted modes and actual review;
 the historical writer is not claimed to be uniquely attributed.
 
-The [October 31 review-correction record](<journal/2026/10.31 review-corrections.md>)
+The [October 31 review-correction record](journal/2026/10.31%20review-corrections.md)
 captures the reconciled source history, all six fixes, actual bounded local
 results and the remaining exact-head Windows/POSIX/review gates. No local result
 or earlier hosted head substitutes for qualification of the integrated changes.
 
-The [November 1 qualification correction](<journal/2026/11.01 replacement-qualification.md>)
+The [November 1 qualification correction](journal/2026/11.01%20replacement-qualification.md)
 records the new review fixes and the dependency-free Index activation diagnosis.
 The corrected integrated head still requires exact-head whole-suite acceptance
 and actual review; the earlier passing packets do not close those gates.
@@ -1739,7 +1757,7 @@ exact-head Copilot review recognized all three final corrections as resolved,
 with no new inline findings, and all required checks passed. Both complete
 Windows modes at `dac675ad9972` pass preparation, exercise, strict assertions
 and final settlement in run `41323397699`. The
-[qualification record](<journal/2026/11.01 replacement-qualification.md>)
+[qualification record](journal/2026/11.01%20replacement-qualification.md)
 retains the actual evidence and its limits.
 
 Only the contained independent ordinary/repair replacement and external-cache
@@ -1761,7 +1779,7 @@ rollout occurred.
 ### 2026-11-01 - Worktrees installation and resident retirement separation
 
 #9919 / #9935 implement the bounded Worktrees incoming-start-first slice.
-The [source and qualification record](<journal/2026/11.01 asynchronous-installer-drain.md>)
+The [source and qualification record](journal/2026/11.01%20asynchronous-installer-drain.md)
 retains the resident-owned custody, review corrections and source-process proof.
 Review and required CI still gate merge; parent acceptance and rollout remain open.
 

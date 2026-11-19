@@ -6,10 +6,10 @@ import hmac
 import json
 import os
 import secrets
-import stat
 import threading
 from collections.abc import Callable, Mapping
 from pathlib import Path
+from typing import Any, Protocol, cast
 from uuid import UUID, uuid4
 
 from zdd import diagnostics, publication_history
@@ -17,13 +17,25 @@ from zdd.routing import Endpoint
 from zdd.cutover_lock import CutoverLock, CutoverLockedError, lock_path
 from zdd.process_exit import ProcessExitReference
 
-from . import _installation_context as api
+from . import _installation_context as _api
 from .watch_installation import PLUGIN_ID, WatchInstallation
 from .watch_custody import endpoint_tuple, endpoint_value, read_launch, require_absent
 from .watch_exit import observe_cleanup_exit, observe_exit, record_exit
 from .watch_private import confirm_private, require_private, write_private
 from .watch_runtime import WatchInstance, WatchRuntime, capture_completed_pair, native_start_time
 from .watch_rollback import require_rollback_selection, restore_route, validate_restoration
+from .watch_storage import _regular_bytes as _regular_bytes
+
+
+class _InstallationAPI(Protocol):
+    CURRENT_VERSION_FILE: str
+    LAST_KNOWN_GOOD_FILE: str
+
+    def paths_equal(self, left: str | Path, right: str | Path) -> bool: ...
+
+
+api = cast(_InstallationAPI, _api)
+Document = dict[str, Any]
 
 _FILE = "watch-owner-transaction.json"
 _PHASES = {
@@ -42,45 +54,9 @@ _CONTROL_PHASES = {
 _CLEANUP_PHASES = {"prepared", "passive", "draining", "released", "rolling-back"}
 
 
-def _regular_bytes(path: Path) -> bytes | None:
-    try:
-        info = path.stat(follow_symlinks=False)
-    except FileNotFoundError:
-        return None
-    if (
-        not stat.S_ISREG(info.st_mode)
-        or getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
-    ):
-        raise PermissionError("watch journal metadata must be a regular non-link file")
-    if info.st_size > 1_048_576:
-        raise ValueError("watch journal metadata exceeds its bounded size")
-    with path.open("rb") as handle:
-        opened = os.fstat(handle.fileno())
-        content = handle.read(1_048_577)
-        finished = os.fstat(handle.fileno())
-    current = path.stat(follow_symlinks=False)
-    identities = [
-        (item.st_dev, item.st_ino, item.st_size, item.st_mtime_ns)
-        for item in (info, opened, finished, current)
-    ]
-    # Windows can expose creation time via lstat and change time via fstat.
-    metadata_stable = all(
-        (before.st_mode, before.st_ctime_ns) == (after.st_mode, after.st_ctime_ns)
-        for before, after in ((info, current), (opened, finished))
-    )
-    if (
-        len(content) > 1_048_576 or any(item != identities[0] for item in identities[1:])
-        or not metadata_stable
-        or not stat.S_ISREG(current.st_mode)
-        or getattr(current, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
-    ):
-        raise PermissionError("watch journal metadata changed during its bounded read")
-    return content
-
-
-def _json_object(raw: bytes) -> dict:
-    def unique(items):
-        result = {}
+def _json_object(raw: bytes) -> Document:
+    def unique(items: list[tuple[str, Any]]) -> Document:
+        result: Document = {}
         for key, value in items:
             if key in result:
                 raise ValueError("watch journal contains duplicate fields")
@@ -109,7 +85,7 @@ def _private_bytes(path: Path) -> bytes | None:
     return raw
 
 
-def _persist(path: Path, document: dict, *, replace: bool = True) -> None:
+def _persist(path: Path, document: Document, *, replace: bool = True) -> None:
     if len(json.dumps(document, allow_nan=False).encode("utf-8")) > 1_048_576:
         raise ValueError("watch owner transaction exceeds its bounded recovery size")
     write_private(path, document, replace=replace)
@@ -151,7 +127,7 @@ def _route(raw: bytes, instance: WatchInstance) -> None:
         raise PermissionError("watch target route does not match exact successor")
 
 
-def _target_selection(installation: WatchInstallation, document: dict) -> None:
+def _target_selection(installation: WatchInstallation, document: Document) -> None:
     selected = _selection(installation)
     version = document["target"]["runtimeVersion"]
     expected_route = document["targetRoute"]
@@ -185,7 +161,7 @@ def _controller() -> dict[str, object]:
 
 
 def _controller_held(
-    installation: WatchInstallation, controller: dict, guard: CutoverLock | None,
+    installation: WatchInstallation, controller: Document, guard: CutoverLock | None,
 ) -> None:
     if guard is not None:
         if (
@@ -212,14 +188,14 @@ def _controller_held(
 
 def _read_identity(
     installation: WatchInstallation, *, environment: Mapping[str, str] | None,
-) -> dict:
+) -> Document:
     return _read_evidence(installation, environment=environment)[0]
 
 
 def _read_evidence(
     installation: WatchInstallation, *, environment: Mapping[str, str] | None,
-    expected_document: dict | None = None,
-) -> tuple[dict, WatchRuntime, dict[str, WatchInstance]]:
+    expected_document: Document | None = None,
+) -> tuple[Document, WatchRuntime, dict[str, WatchInstance]]:
     installation.read_identity(environment=environment)
     raw = _private_bytes(installation.run_root / _FILE)
     if raw is None:
@@ -236,9 +212,9 @@ def _read_evidence(
 
 
 def _validate_document(
-    installation: WatchInstallation, document: dict, *, environment: Mapping[str, str] | None,
+    installation: WatchInstallation, document: Document, *, environment: Mapping[str, str] | None,
     concurrent_runtimes: bool = False,
-) -> tuple[dict, WatchRuntime, dict[str, WatchInstance]]:
+) -> tuple[Document, WatchRuntime, dict[str, WatchInstance]]:
     if set(document) != {
         "schema", "transactionId", "authorization", "installation", "phase", "revision",
         "controller", "prior", "target", "targetManifest", "predecessor", "successor",
@@ -297,7 +273,8 @@ def _validate_document(
                 if not isinstance(value, dict):
                     raise ValueError("watch successor evidence must be an object")
                 instance = WatchInstance(
-                    target, value.get("pid"), value.get("startTime"), value.get("instanceId"),
+                    target, cast(int, value.get("pid")), cast(str, value.get("startTime")),
+                    cast(str, value.get("instanceId")),
                 )
                 if instance.evidence() != value:
                     raise PermissionError("watch successor does not match the completed target")
@@ -407,7 +384,7 @@ def _validate_document(
     return document, target, instances
 
 
-def _cleanup_document(installation: WatchInstallation, document: dict) -> None:
+def _cleanup_document(installation: WatchInstallation, document: Document) -> None:
     if (
         document["phase"] not in _CLEANUP_PHASES
         or _selection(installation) != document["prior"]
@@ -424,7 +401,7 @@ def _passive_health(instance: WatchInstance, health: Mapping[str, object]) -> No
         raise PermissionError("watch cleanup requires an exact effect-free passive instance")
 
 
-def _terminal_custody(document: dict) -> dict:
+def _terminal_custody(document: Document) -> Document:
     # Recovery may rotate only controller capability, not completed custody.
     return {
         key: value for key, value in document.items()
@@ -450,7 +427,7 @@ def _require_cell_history(installation: WatchInstallation, historical: object) -
 
 def _archived_terminal(
     installation: WatchInstallation, *, environment: Mapping[str, str] | None,
-) -> dict:
+) -> Document:
     """Only already-archived terminal history may cross a management receipt update."""
     installation.require_current(environment=environment)
     raw = _private_bytes(installation.run_root / _FILE)
@@ -472,7 +449,7 @@ def _archived_terminal(
 
 def read_known_owner(
     installation: WatchInstallation, *, environment: Mapping[str, str] | None,
-) -> dict:
+) -> Document:
     """Read current custody or already-archived terminal history in this exact cell."""
     installation.read_identity(environment=environment)
     raw = _private_bytes(installation.run_root / _FILE)
@@ -487,7 +464,7 @@ class WatchJournal:
     """A controller journal; every write validates custody of the exact guard."""
 
     def __init__(
-        self, installation: WatchInstallation, guard: CutoverLock, document: dict, *,
+        self, installation: WatchInstallation, guard: CutoverLock, document: Document, *,
         environment: Mapping[str, str] | None,
     ) -> None:
         self.installation = installation
@@ -578,7 +555,7 @@ class WatchJournal:
     def recover(
         cls, installation: WatchInstallation, guard: CutoverLock, *,
         environment: Mapping[str, str] | None = None,
-        expected_document: dict | None = None,
+        expected_document: Document | None = None,
     ) -> WatchJournal:
         journal = cls(installation, guard, {}, environment=environment)
         journal._guard()
@@ -609,16 +586,16 @@ class WatchJournal:
 
     @property
     def transaction_id(self) -> str:
-        return self._document["transactionId"]
+        return cast(str, self._document["transactionId"])
 
     @property
     def authorization(self) -> str:
-        return self._document["authorization"]
+        return cast(str, self._document["authorization"])
 
-    def _current(self) -> dict:
+    def _current(self) -> Document:
         return self._current_evidence()[0]
 
-    def _current_evidence(self) -> tuple[dict, WatchRuntime, dict[str, WatchInstance]]:
+    def _current_evidence(self) -> tuple[Document, WatchRuntime, dict[str, WatchInstance]]:
         self.installation.require_current(environment=self.environment)
         self._guard()
         evidence = _read_evidence(
@@ -628,23 +605,23 @@ class WatchJournal:
             raise PermissionError("watch owner journal changed; reconcile before continuing")
         return evidence
 
-    def _current_identity(self) -> dict:
+    def _current_identity(self) -> Document:
         self._guard()
         current = _read_identity(self.installation, environment=self.environment)
         if current != self._document:
             raise PermissionError("watch owner journal changed; reconcile before continuing")
         return current
 
-    def _write(self, document: dict) -> None:
+    def _write(self, document: Document) -> None:
         self.installation.require_current(environment=self.environment)
         self._persist_current(document)
 
-    def _write_cleanup(self, document: dict) -> None:
+    def _write_cleanup(self, document: Document) -> None:
         self.installation.require_cleanup(environment=self.environment)
         _cleanup_document(self.installation, document)
         self._persist_current(document)
 
-    def _persist_current(self, document: dict) -> None:
+    def _persist_current(self, document: Document) -> None:
         self._guard()
         self.installation.read_identity(environment=self.environment)
         raw = _private_bytes(self.installation.run_root / _FILE)

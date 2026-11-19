@@ -10,7 +10,7 @@ from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
-from typing import Any, TypeVar
+from typing import Any, TypeVar, cast
 
 import pytest
 
@@ -23,7 +23,7 @@ def complete_inline(coroutine: Coroutine[Any, Any, T]) -> T:
     try:
         coroutine.send(None)
     except StopIteration as result:
-        return result.value
+        return cast(T, result.value)
     finally:
         coroutine.close()
     raise AssertionError("namespace unit attempted to suspend or start an actor")
@@ -170,6 +170,47 @@ def contract(monkeypatch: pytest.MonkeyPatch, capsys: Any) -> NamespaceContract:
         inventory, config, leases, holds, calls, wire, lifecycle, reader,
         consumer.NamespaceListIncomplete,
     )
+
+
+@pytest.mark.parametrize(
+    "support", [True, False, None, "omitted"],
+    ids=["supported", "unsupported", "unknown", "legacy"],
+)
+def test_nullable_capability_survives_namespace_wire(
+    contract: NamespaceContract, monkeypatch: pytest.MonkeyPatch,
+    support: bool | None | str,
+) -> None:
+    row: dict[str, Any] = {"name": "example"}
+    if support != "omitted":
+        row["supports_worktrees"] = support
+
+    async def output(*_args: Any, **_kwargs: Any) -> tuple[int, str, str]:
+        return 0, json.dumps([row]), ""
+
+    monkeypatch.setattr(contract.reader, "_run", output)
+    agents = complete_inline(contract.reader._enumerate_once(timeout=2.5, ttl=12.0))
+    expected = None if support == "omitted" else support
+    assert agents[0].supports_worktrees is expected
+    common = sys.modules["promotion_namespace_consumer.agent_registry_common"]
+    assert common.AgentConfig(name="example", supports_worktrees=expected).supports_worktrees is expected
+
+
+@pytest.mark.parametrize(
+    "invalid", [0, 1, "true", "false", [], {}],
+    ids=["zero", "one", "true-string", "false-string", "list", "mapping"],
+)
+def test_invalid_capability_is_incomplete_not_supported(
+    contract: NamespaceContract, monkeypatch: pytest.MonkeyPatch, invalid: Any,
+) -> None:
+    async def output(*_args: Any, **_kwargs: Any) -> tuple[int, str, str]:
+        return 0, json.dumps([{"name": "example", "supports_worktrees": invalid}]), ""
+
+    monkeypatch.setattr(contract.reader, "_run", output)
+    with pytest.raises(contract.incomplete):
+        complete_inline(contract.reader._enumerate_once(timeout=2.5, ttl=12.0))
+    common = sys.modules["promotion_namespace_consumer.agent_registry_common"]
+    with pytest.raises(ValueError, match="supports_worktrees"):
+        common.AgentConfig(name="example", supports_worktrees=invalid)
 
 
 @pytest.mark.parametrize(
