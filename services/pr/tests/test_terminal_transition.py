@@ -11,11 +11,12 @@ import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 from single_instance_lease import SingleInstance
 
+from agent_pull_requests.generation_cache import CacheFull, CacheInvalid, _plain
 from agent_pull_requests.review_workspace import build_generation
 from agent_pull_requests.terminal_recovery import TerminalRecoveryStore
 from agent_pull_requests.watch_contract import PRSnapshot
@@ -57,30 +58,28 @@ def command(path: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
-def test_actual_cli_preserves_populated_cache_replay_and_unknown_effect(
+def generation(title: str | None = None) -> dict[str, Any]:
+    path = (
+        Path(__file__).resolve().parents[3]
+        / "plugins/agent-pull-requests/docs/review-evidence.example.json"
+    )
+    evidence = json.loads(path.read_text())
+    if title is not None:
+        evidence["sections"]["pull_request"]["data"]["title"] = title
+    return cast(dict[str, Any], build_generation(evidence)["generation"])
+
+
+def test_actual_cli_preserves_populated_cache_and_pending_replay(
     configuration: Configuration,
 ) -> None:
     path, _, selected = retained(configuration)
     assert selected.workspaces is not None
     baseline = load_config(configuration[0])
     store = baseline.store()
-    evidence_path = (
-        Path(__file__).resolve().parents[3]
-        / "plugins/agent-pull-requests/docs/review-evidence.example.json"
-    )
-    generation = build_generation(json.loads(evidence_path.read_text()))["generation"]
+    selected_generation = generation()
     cache = selected.workspaces.cache(store)
-    cache.publish(generation, expected_current=None)
-    intent = {
-        "schema": "agent-pull-requests.review-intent", "version": 1,
-        "operation_id": "original-unknown-verdict", "scope": generation["scope"],
-        "generation_id": generation["id"], "source_id": "a" * 64,
-        "revision": {name: generation["revision"][name] for name in ("head_sha", "common_sha", "iteration")},
-        "actions": [{"id": "verdict", "kind": "verdict", "verdict": "APPROVED"}],
-    }
+    cache.publish(selected_generation, expected_current=None)
     expires_at = int(time.time()) + 60
-    store.admit_review(intent, expires_at=expires_at)
-    store.begin_review_action(intent["operation_id"], intent["scope"], "verdict", expires_at=expires_at)
     scope = selected.bindings[0].scope
     receipt = store.execute(scope, "register", {
         "request_id": "retained-reader", "issued_at": time.time(),
@@ -95,7 +94,6 @@ def test_actual_cli_preserves_populated_cache_replay_and_unknown_effect(
     assert len(pending["events"]) == 1
     before = json.loads(store.path.read_bytes())
     objects = cache_bytes(selected)
-    assert before["reviews"][0]["actions"][0]["state"] == "unknown"
     result = command(path)
     assert result.returncode == 0, result.stderr
     assert not result.stdout and not result.stderr
@@ -105,7 +103,7 @@ def test_actual_cli_preserves_populated_cache_replay_and_unknown_effect(
         assert after[field] == before[field]
     assert reopened.store().execute(scope, "pending", {}, expires_at=expires_at) == pending
     assert cache_bytes(reopened) == objects
-    assert cache.lookup(generation["scope"])["generation"] == generation
+    assert cache.lookup(selected_generation["scope"])["generation"] == selected_generation
     assert all(after[field + "_version"] == 1 for field in (
         "terminal_retention", "terminal_recovery", "terminal_cache_retirement",
     ))
@@ -117,6 +115,43 @@ def test_actual_cli_preserves_populated_cache_replay_and_unknown_effect(
     assert command(path).returncode == 0
     assert json.loads(reopened.store().path.read_bytes()) == after
     assert main(["provision", "--config", str(path)]) == 1
+
+
+def test_unknown_active_operation_refuses_and_preserves_original_workspace_inspection(
+    configuration: Configuration,
+) -> None:
+    path, value, _ = retained(configuration)
+    selected_generation = generation()
+    value["workspaces"]["terminal_reads"] = False
+    value["workspaces"]["bindings"][0]["scope"] = {
+        name: selected for name, selected in selected_generation["scope"].items() if name != "number"
+    }
+    path.write_text(json.dumps(value))
+    baseline = load_config(path)
+    store = baseline.store()
+    expires_at = int(time.time()) + 60
+    intent = {
+        "schema": "agent-pull-requests.review-intent", "version": 1,
+        "operation_id": "original-unknown-verdict", "scope": selected_generation["scope"],
+        "generation_id": selected_generation["id"], "source_id": "a" * 64,
+        "revision": {
+            name: selected_generation["revision"][name] for name in ("head_sha", "common_sha", "iteration")
+        },
+        "actions": [{"id": "verdict", "kind": "verdict", "verdict": "APPROVED"}],
+    }
+    store.admit_review(intent, expires_at=expires_at)
+    store.begin_review_action(intent["operation_id"], intent["scope"], "verdict", expires_at=expires_at)
+    assert baseline.workspaces is not None
+    operations = baseline.workspaces.operations(store, lambda: None, 60)[("caller-a", "repository-a")]
+    payload = {"number": intent["scope"]["number"], "operation_id": intent["operation_id"]}
+    original = operations.execute("inspect", payload, expires_at=expires_at, checkpoint=lambda: None)
+    before = store.path.read_bytes(), cache_bytes(baseline)
+    assert json.loads(before[0])["reviews"][0]["actions"][0]["state"] == "unknown"
+    value["workspaces"]["terminal_reads"] = True
+    path.write_text(json.dumps(value))
+    assert command(path).returncode == 1
+    assert (store.path.read_bytes(), cache_bytes(baseline)) == before
+    assert operations.execute("inspect", payload, expires_at=expires_at, checkpoint=lambda: None) == original
 
 
 def test_actual_cli_refuses_competing_service_lease_without_mutation(
@@ -304,3 +339,89 @@ def test_missing_volume_and_unselected_profile_never_provision(configuration: Co
     before = config.store().path.read_bytes()
     assert main(["adopt-terminal", "--config", str(path)]) == 1
     assert config.store().path.read_bytes() == before
+
+
+@pytest.mark.parametrize("linked", ["symbolic", "hard"])
+def test_unsafe_service_lock_never_overwrites_retained_bytes(
+    configuration: Configuration, linked: str,
+) -> None:
+    path, _, config = retained(configuration)
+    store = config.store()
+    lease = SingleInstance(config.root, service="agent-pull-requests-watch")
+    before = store.path.read_bytes()
+    try:
+        if linked == "symbolic":
+            lease.lock_path.symlink_to(store.path)
+        else:
+            os.link(store.path, lease.lock_path)
+    except OSError as error:
+        pytest.skip(f"native link creation unavailable: {type(error).__name__}")
+    assert main(["adopt-terminal", "--config", str(path)]) == 1
+    assert store.path.read_bytes() == before
+
+
+def test_native_state_coexistence_refuses_before_adoption(configuration: Configuration) -> None:
+    path, _, config = retained(configuration)
+    native = config.root / "watch-subscriptions.json"
+    native.write_text("retained native state")
+    before = config.store().path.read_bytes(), native.read_bytes()
+    assert main(["adopt-terminal", "--config", str(path)]) == 1
+    assert (config.store().path.read_bytes(), native.read_bytes()) == before
+
+
+@pytest.mark.parametrize("failure", ["generation", "dangling", "pointer-scope", "bytes", "count"])
+def test_committed_cache_corruption_and_capacity_refuse_before_adoption(
+    configuration: Configuration, failure: str,
+) -> None:
+    _, _, config = retained(configuration)
+    assert config.workspaces is not None
+    cache = config.workspaces.cache(config.store())
+    selected = generation()
+    cache.publish(selected, expected_current=None)
+    if failure == "generation":
+        (cache.generations / (selected["id"] + ".json")).write_text("{}")
+    elif failure == "dangling":
+        pointer = next(cache.targets.iterdir())
+        document = json.loads(pointer.read_bytes())
+        document["generation_id"] = "f" * 64
+        pointer.write_text(json.dumps(document))
+    elif failure == "pointer-scope":
+        next(cache.targets.iterdir()).rename(cache.targets / ("f" * 64 + ".json"))
+    elif failure == "bytes":
+        (cache.generations / ("f" * 64 + ".json")).write_bytes(b" " * (cache.max_bytes + 1))
+    else:
+        for index in range(cache.max_generations):
+            extra = generation(f"retained generation {index}")
+            (cache.generations / (extra["id"] + ".json")).write_text(json.dumps(extra))
+    before = config.store().path.read_bytes(), cache_bytes(config)
+    expected = CacheFull if failure in ("bytes", "count") else (CacheInvalid, ValueError)
+    with pytest.raises(expected):
+        terminal_transition.adopt(config)
+    assert (config.store().path.read_bytes(), cache_bytes(config)) == before
+
+
+def test_deadline_expires_during_cache_scan_without_visiting_later_entries(
+    configuration: Configuration, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, _, config = retained(configuration)
+    assert config.workspaces is not None
+    config.workspaces.cache(config.store()).publish(generation(), expected_current=None)
+    before = config.store().path.read_bytes(), cache_bytes(config)
+    clock = [0.0]
+    visited: list[Path] = []
+    original = _plain
+
+    def plain(path: Path) -> None:
+        original(path)
+        if path.suffix == ".json":
+            visited.append(path)
+            clock[0] = config.operation_seconds + 1.0
+
+    monkeypatch.setattr(terminal_transition, "_plain", plain)
+    monkeypatch.setattr(terminal_transition, "time", SimpleNamespace(
+        monotonic=lambda: clock[0], time=time.time,
+    ))
+    with pytest.raises(ValueError, match="lifecycle"):
+        terminal_transition.adopt(config)
+    assert len(visited) == 1
+    assert (config.store().path.read_bytes(), cache_bytes(config)) == before

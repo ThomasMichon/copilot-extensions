@@ -43,6 +43,16 @@ prepared intents, acquired mappings, selections or any other adopted extension.
 Unsupported combinations refuse before the first change. Existing terminal
 mapping selection may compose only its already supported prerequisites.
 
+The first finite implementation admits only volumes whose active review
+operation journal is empty. Source review showed that retaining an unknown
+attempt's bytes would not preserve its original recovery interface after
+terminal-reader selection. Refuse such volumes unchanged and retain their
+original reader; a recovery-compatible positive transition remains T3 work,
+not an implicit new recovery route or permission to settle accepted work.
+Validate plain lease files before PID writes and reject native callback state.
+Validate committed cache contents, pointer references and configured capacity
+with lifecycle checkpoints between entries, not a filename-only inventory.
+
 Use the original command's finite operation deadline and PID/held-lease
 checkpoint at every existing adoption boundary. Select the same terminal
 retention, recovery and cache-retirement contracts and bounded capacity used
@@ -85,8 +95,11 @@ probe followed by a legacy provisioning fallback.
   host adoption (#13488; current-head Copilot approval and required green CI).
 - [x] Implement the local existing-owner transition without changing baseline
   provisioning, serving, remote workspace contracts or physical retirement.
-- [x] Qualify a populated baseline volume, preserving original replay/cache and
+- [ ] Qualify a populated baseline volume, preserving original replay/cache and
   unknown-effect identities through transition and fresh-reader restart.
+  The finite eligible-volume path qualifies populated cache/pending replay;
+  active-operation volumes refuse unchanged with original inspection preserved.
+  Positive active-operation recovery compatibility remains with full T3.
 - [x] Cover actual competing service/transition lease ownership, failed drain,
   operation expiry, unsupported core/layout/binding/capacity, partial adoption,
   uncertain replacement and explicit retry. Refusal before adoption must

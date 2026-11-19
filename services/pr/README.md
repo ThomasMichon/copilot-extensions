@@ -490,6 +490,13 @@ lease; a running or unconfirmed drain refuses without stopping the service.
 It preserves the original service/namespace binding, replay/delivery positions,
 cache objects and recovery identities, and performs no acquisition, compaction
 or cache retirement. It neither provisions missing state nor repairs it.
+Volumes with active review-operation records refuse unchanged, including
+unknown attempts: preserving their JSON would not preserve their recovery
+interface after switching to a terminal-only reader. Keep their original
+reader/owner until a separately qualified recovery-compatible transition exists.
+Native callback state, unsafe linked lease files, corrupt or dangling cache
+objects/pointers and cache-capacity violations also refuse before adoption.
+Cache validation checks the original operation deadline between entries.
 The host-local lease does not fence another host or unsupported direct volume
 users; their exclusion remains with the deployment owner.
 The command returns zero after adoption and one with a sanitized unavailable
