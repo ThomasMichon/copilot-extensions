@@ -910,7 +910,8 @@ publication is not domain acceptance.
 
 Retain the historical partial passes, combined 900-second timeout and
 unexecuted removal, all six intended-contract decisions and independently
-bounded scheduling without deadline inflation or dropped assertions.
+bounded scheduling without deadline inflation or lost assertion coverage;
+justified scheduling-shape expectation changes retain the underlying checks.
 Existing owners, claims, resource/cleanup limits, unit-only required CI,
 hosted-Windows quiescence and OPEN #1303 remain. No implementation, native
 execution, installer acceptance, source/resource transfer or custody release

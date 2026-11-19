@@ -1103,8 +1103,11 @@ an assertion that the historical source defect remains current._
   or current full qualification.
 - [ ] **P9568-2:** Give optional Windows consumer, retention and removal
   independently bounded scheduling at the existing workflow/runner boundary.
-  Preserve assertions, group/job/process/storage/cleanup/resource limits and
-  truthful cancellation/not-run outcomes. Do not solve the combined timeout
+  Preserve underlying assertion coverage, group/job/process/storage/cleanup/
+  resource limits and truthful cancellation/not-run outcomes. Justified
+  scheduling-shape assertion updates must retain their intended checks,
+  including finite-removal coverage, rather than preserve obsolete topology.
+  Do not solve the combined timeout
   by enlarging deadlines or dropping controls; its 900-second failure is
   evidence, not an invented universal cap for every independent job.
 - [ ] **P9568-3:** Revalidate the actual current candidate and intended
@@ -1129,8 +1132,9 @@ an assertion that the historical source defect remains current._
   or unexecuted removal as passing; retain all three retention controls.
 - [ ] **V9568-2:** Verify independent consumer/retention/removal selection,
   finite scheduling and truthful timeout/cancellation/not-run reporting with
-  bounded workflow/runner fixtures, preserving existing assertions and
-  resource/cleanup limits rather than increasing deadlines.
+  bounded workflow/runner fixtures, preserving underlying contract coverage
+  and resource/cleanup limits rather than increasing deadlines. Verify
+  justified assertion updates still exercise the moved finite-removal work.
 - [ ] **V9568-3:** Resolve all six reported assertion contracts against the
   current intended behavior before any expectation change, with justified
   regression coverage and accurate credit for existing delivery.
@@ -2374,7 +2378,7 @@ Phase 7 intake; this is not #7643's already-attributed external mapping.
   through V9568-4 and continuing Coordination condition: independently
   bounded optional Windows consumer/retention/removal, accurate historical
   partial results, all six intended-contract decisions before expectation
-  edits and unchanged assertions, tiers, deadlines and resource custody.
+  edits and preserved assertion coverage, tiers, deadlines and resource custody.
   Preserve Phase 7 deduplication/domain acceptance, OPEN #1303, unit-only
   required CI and hosted-Windows quiescence. No combined-timeout green claim,
   enlarged deadlines, native execution grant or unrelated whole-parent gate.

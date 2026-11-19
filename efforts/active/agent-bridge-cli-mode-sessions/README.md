@@ -786,9 +786,12 @@ allocation-failure fallback or a change to ordinary CLI-mode defaults._
   do not fabricate worktree ownership or bypass source/repository/hosting
   admission because the requested category is read-only.
 - [ ] **P9056-R5:** Retain exact-conversation selection, concurrent-turn
-  fencing and truthful interrupted/unknown resume acceptance. Never report
-  a replacement conversation or workspace allocation as successful recovery;
-  native-owned lifecycle and replay remain native-owned.
+  fencing and truthful interrupted/unknown resume acceptance and follow-up
+  delivery. Reconcile lost acknowledgements against authoritative host
+  evidence on the original conversation; resolve accepted/rejected outcomes
+  when evidence permits, otherwise retain unknown without unsafe replay.
+  Never report a replacement conversation or workspace allocation as
+  successful recovery; native-owned lifecycle and replay remain native-owned.
 - [ ] **P9056-R6:** Cover actual client/backend create/resume, denied effects,
   unchanged context, zero allocation, unavailable enforcement, interrupted/
   unknown outcomes and concurrent callers with synthetic fixtures. Separate
@@ -893,7 +896,9 @@ or a claim that the historical failure was newly reproduced._
   obligations survive reconnect/follow-up without fabricated worktree
   ownership or relaxed repository/source/hosting admission.
 - [ ] **V9056-R5:** Exercise concurrent-turn exclusion and interrupted/
-  unknown resume outcomes without replacement conversations, duplicate
+  unknown resume and follow-up outcomes on the original conversation.
+  Cover authoritative accepted/rejected reconciliation and still-unknown
+  evidence without unsafe replay, replacement conversations, duplicate
   effects, new allocation or appropriation of native lifecycle/replay.
 - [ ] **V9056-R6:** Resolve every P9056-R1 through R6 at its stated synthetic
   client/backend tier and separately report any installed qualification.
