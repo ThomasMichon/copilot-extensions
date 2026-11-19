@@ -1,5 +1,6 @@
 """Explicit native consumers of owned disposable command allocations."""
 
+import errno
 import json
 from contextlib import nullcontext
 from copy import deepcopy
@@ -25,6 +26,23 @@ pytestmark = [
 ]
 
 ProducerOwner = tuple[ModuleType, str, Path, Path, Path]
+
+
+def _require_child_payload(
+    runner: ModuleType, monkeypatch: pytest.MonkeyPatch, name: str, payload: bytes,
+) -> None:
+    from owned_producer import OwnedProducerSandbox
+
+    class StartedScope(OwnedProducerSandbox):
+        def __exit__(
+            self, exc_type: type[BaseException] | None, exc_value: BaseException | None,
+            traceback: TracebackType | None,
+        ) -> Literal[False]:
+            assert self.allocation is not None
+            assert (Path(self.allocation["path"]) / "work" / name).read_bytes() == payload
+            return super().__exit__(exc_type, exc_value, traceback)
+
+    monkeypatch.setattr(runner, "OwnedProducerSandbox", StartedScope)
 
 
 @pytest.fixture
@@ -172,12 +190,13 @@ flags = {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)}
     assert not list(selected.glob("*/work"))
 
 
-@pytest.mark.timeout(45)
+@pytest.mark.timeout(60)
 @pytest.mark.parametrize("times_out", [False, True])
 def test_real_failure_or_timeout_retains_only_bounded_diagnostics(
-    producer_owner: ProducerOwner, times_out: bool,
+    producer_owner: ProducerOwner, monkeypatch: pytest.MonkeyPatch, times_out: bool,
 ) -> None:
     runner, owner, selected, _, ledger = producer_owner
+    _require_child_payload(runner, monkeypatch, "private-payload.bin", b"not retained evidence")
     program = (
         "from pathlib import Path; import time; "
         "Path('private-payload.bin').write_bytes(b'not retained evidence'); "
@@ -185,7 +204,7 @@ def test_real_failure_or_timeout_retains_only_bounded_diagnostics(
     )
     expected = 124 if times_out else 7
     assert runner.main([
-        "--owner", owner, "--kind", "spike", "--timeout", "2" if times_out else "20",
+        "--owner", owner, "--kind", "spike", "--timeout", "5" if times_out else "20",
         "--", sys.executable, "-c", program,
     ]) == expected
     claim, = tracking.load_record(ledger).resources
@@ -242,6 +261,8 @@ def test_target_disposition_preserves_an_unrelated_sibling_allocation(
             raise UnreapedProcessError("fixture-only unknown target cleanup")
 
         monkeypatch.setattr(runner, "run_contained", unknown)
+    else:
+        _require_child_payload(runner, monkeypatch, "payload.bin", b"target")
     expected = {"success": 0, "failure": 7, "timeout": 124, "unknown": 125}[disposition]
     program = "from pathlib import Path; import time; Path('payload.bin').write_bytes(b'target'); "
     program += "time.sleep(30)" if disposition == "timeout" else f"raise SystemExit({7 if disposition == 'failure' else 0})"
@@ -262,7 +283,7 @@ def test_target_disposition_preserves_an_unrelated_sibling_allocation(
             assert initial_claim.ref == bound_ref and initial_claim.producer == bound_producer
             assert runner.main([
                 "--owner", owner, "--kind", "spike",
-                "--timeout", "2" if disposition == "timeout" else "20",
+                "--timeout", "5" if disposition == "timeout" else "20",
                 "--", sys.executable, "-c", program,
             ]) == expected
             current = sibling_path.stat()
@@ -298,3 +319,65 @@ def test_target_disposition_preserves_an_unrelated_sibling_allocation(
         assert sibling_path.exists() and sentinel.read_bytes() == b"sibling-owned"
     else:
         assert not sibling_path.exists()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="native Windows component-length boundary")
+@pytest.mark.timeout(60)
+@pytest.mark.parametrize("stage", ["root", "child"])
+def test_native_windows_overlong_path_refuses_without_losing_custody(
+    producer_owner: ProducerOwner, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], stage: str,
+) -> None:
+    runner, owner, selected, _, ledger = producer_owner
+    if stage == "root":
+        valid = selected.parent / ("r" * 240)
+        valid.mkdir()
+        valid.rmdir()
+        overlong = selected.parent / ("r" * 256)
+        with pytest.raises(OSError) as failure:
+            overlong.mkdir()
+        native_error = getattr(failure.value, "winerror", None)
+        assert native_error in {123, 206}
+        assert failure.value.errno in {errno.EINVAL, errno.ENAMETOOLONG}
+        monkeypatch.setenv("AGENT_SCRATCH_ROOT", str(overlong))
+
+        def unexpected(*args: object, **kwargs: object) -> int:
+            raise AssertionError("an invalid root must refuse before child execution")
+
+        monkeypatch.setattr(runner, "run_contained", unexpected)
+        assert runner.main([
+            "--owner", owner, "--kind", "spike", "--", sys.executable, "-c", "pass",
+        ]) == 125
+        assert str(native_error) in capsys.readouterr().err
+        assert tracking.load_record(ledger).resources == []
+        assert overlong.name not in {entry.name for entry in selected.parent.iterdir()}
+        return
+
+    valid_component = "v" * 240
+    _require_child_payload(runner, monkeypatch, valid_component, b"child started")
+    program = """
+import errno
+from pathlib import Path
+Path("v" * 240).write_bytes(b"child started")
+try:
+    Path("x" * 256).write_bytes(b"must refuse")
+except OSError as error:
+    assert error.errno in {errno.EINVAL, errno.ENAMETOOLONG}, error
+    assert getattr(error, "winerror", None) in {None, 123, 206}, error
+    raise SystemExit(7)
+raise AssertionError("the native overlong component unexpectedly succeeded")
+"""
+    assert runner.main([
+        "--owner", owner, "--kind", "spike", "--timeout", "20",
+        "--", sys.executable, "-c", program,
+    ]) == 7
+    claim, = tracking.load_record(ledger).resources
+    producer = claim.producer
+    assert isinstance(producer, dict)
+    allocation = selected / artifact_scratch._name(producer["recovery"])
+    assert producer["phase"] == "retained" and not claim.is_unsettled
+    assert {entry.name for entry in allocation.iterdir()} == {
+        "scratch-owner.json", "runner-diagnostic.txt",
+    }
+    diagnostic = json.loads((allocation / "runner-diagnostic.txt").read_bytes())
+    assert diagnostic["results_tail"] == [{"group": 0, "exit_code": 7}]

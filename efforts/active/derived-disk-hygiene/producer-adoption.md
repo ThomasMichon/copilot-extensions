@@ -146,7 +146,9 @@ not a claim that every negative was newly executed through every command kind.
 Unknown-cleanup fault injection preserves the full payload and open
 responsibility. Actual command failure and timeout retain only bounded
 diagnostics; successful consumers close the exact allocation and preserve
-the independent cache sentinel.
+the independent cache sentinel. Failure and timeout controls read the actual
+child-written payload inside the target scope before the owner can prune it.
+Setup exhausting the deadline before launch cannot satisfy those controls.
 
 The explicit two-allocation control is
 `test_owned_producer.py::test_target_disposition_preserves_an_unrelated_sibling_allocation`.
@@ -156,8 +158,27 @@ owner-marker bytes, payload and open ledger state must remain unchanged across
 the target's disposition. Unknown target cleanup also preserves the enclosing
 scope instead of treating it as settled. The other cases separately close
 only the consumed sibling after that identity check.
-All four cases passed on Windows x64 in 17.73 seconds and Linux in
-6.11 seconds. The changed test file also passed the strict target matrix.
+The initial four-case control passed on Windows x64 in 17.73 seconds and Linux
+in 6.11 seconds. Exact-exception and complete-ledger-identity corrections then
+passed in 17.11 and 5.44 seconds. These earlier timings do not qualify the
+subsequent child-start and path-length controls.
+
+The explicit native path-length control is
+`test_owned_producer.py::test_native_windows_overlong_path_refuses_without_losing_custody`.
+It checks native refusal of an overlong component in the selected root,
+refusal before child execution and no allocation, with a nearby valid
+component as a positive control. Its separate child case writes and observes
+a valid long component, encounters the native overlong-component refusal,
+and verifies bounded retained diagnostics with settled custody. Windows APIs
+can report errors 123/206; Python's file API can instead expose `EINVAL`
+without a Windows error attribute.
+This tests component-length refusal, not every possible Windows total-path
+limit or filesystem policy. The 12 existing producer cases, now including
+positive child-start checks, passed on Windows x64. The first path-control
+attempt failed because it expected only error 206; after the native error
+normalization above, both path cases passed in 6.47 seconds. The Linux file
+passed 12 cases with two Windows-only skips in 22.17 seconds. The final
+six-file whole-file strict matrix passes both declared targets.
 
 The parser rejects long-option abbreviations. Three actor-free regressions
 and actual Windows CLI calls cover `--own`, `--ki` and `--time`, each refused
