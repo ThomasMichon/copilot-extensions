@@ -75,6 +75,45 @@ def test_completed_hook_response_retains_demand_until_monotonic_expiry(api, kind
 
 
 @pytest.mark.parametrize("case", [
+    "current", "large-pre", "generation", "closed", "flag", "deadline", "oversized", "post-oversized",
+])
+def test_native_policy_request_retains_generation_and_bounded_admission(api, case):
+    def change(request, server, handler):
+        request["kind"] = "preToolUse"
+        request["hook_generation"] = api.owner.generation
+        request["payload"]["_agentWorktrees"] = {"nativePolicy": 1}
+        if case == "generation":
+            request["hook_generation"] = "b" * 32
+        elif case == "closed":
+            server.admission_closed = True
+        elif case == "flag":
+            request["payload"]["_agentWorktrees"]["nativePolicy"] = True
+        elif case == "deadline":
+            request["deadline"] = float("nan")
+        elif case == "oversized":
+            request["payload"]["padding"] = "x" * (2 * 1024 * 1024)
+        elif case == "large-pre":
+            request["payload"]["padding"] = "x" * 65536
+        elif case == "post-oversized":
+            request["kind"] = "postToolUse"
+            request["payload"]["padding"] = "x" * 65536
+        if case not in {"current", "large-pre"}:
+            server.decide = lambda *_a: pytest.fail("unavailable request reached policy")
+
+    response = api.dispatch(change)
+    if case == "oversized":
+        assert response is None
+        assert not api.owner.has_recent_hook_demand()
+    elif case in {"current", "large-pre"}:
+        assert response["result"] == {"additionalContext": "handled"}
+        assert "native-tool-policy-v1" in response["capabilities"]
+        assert api.owner.has_recent_hook_demand()
+    else:
+        assert response["fallback"] is True
+        assert not api.owner.has_recent_hook_demand()
+
+
+@pytest.mark.parametrize("case", [
     "current", "generation", "closed", "revoked", "legacy", "deadline", "extra", "version",
 ])
 def test_send_only_read_demand_keeps_original_admission_and_expiry(api, case):

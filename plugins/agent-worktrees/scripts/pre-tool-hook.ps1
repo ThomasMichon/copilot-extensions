@@ -1,7 +1,8 @@
-# Native event entry; Python remains the policy path for uncertain input/cell admission.
+# Native event entry; uncertain input is evaluated only by the selected resident.
 if ($env:AGENT_WORKTREES_PRE_TOOL_IMPLEMENTATION -ceq 'resident') { exit 0 }
 $ErrorActionPreference = 'Stop'
 $utf8 = [Text.UTF8Encoding]::new($false, $true)
+[Console]::OutputEncoding = $utf8
 
 $script:preToolBoundary = 'entry'
 
@@ -461,129 +462,26 @@ function Test-NativePreToolWrite([object]$Payload, [object]$Facts) {
     } catch { return $false }
 }
 
-function Invoke-PreToolPolicy([string]$Python, [string]$Payload, [ref]$Diagnostic) {
-    $worker = Join-Path $PSScriptRoot 'hook_policy_process.py'
-    $info = [Diagnostics.ProcessStartInfo]::new()
-    $info.FileName = $Python
-    $info.Arguments = '-X utf8 -B "' + $worker + '" --base64-input'
-    $info.UseShellExecute = $false
-    $info.CreateNoWindow = $true
-    $info.RedirectStandardInput = $true
-    $info.RedirectStandardOutput = $true
-    $info.RedirectStandardError = $true
-    $info.StandardOutputEncoding = $utf8
-    $info.StandardErrorEncoding = $utf8
-    $clock = [Diagnostics.Stopwatch]::StartNew()
-    $proc = [Diagnostics.Process]::Start($info)
-    try {
-        $stdout = $proc.StandardOutput.ReadToEndAsync()
-        $stderr = $proc.StandardError.ReadToEndAsync()
-        $frame = [Convert]::ToBase64String($utf8.GetBytes($Payload)) + "`n"
-        $bytes = $utf8.GetBytes($frame)
-        $writing = $proc.StandardInput.BaseStream.WriteAsync($bytes, 0, $bytes.Length)
-        if (-not $writing.Wait([Math]::Max(0, 28000 - [int]$clock.ElapsedMilliseconds)) -or
-            -not $proc.StandardInput.BaseStream.FlushAsync().Wait([Math]::Max(0, 28000 - [int]$clock.ElapsedMilliseconds)) -or
-            -not $proc.WaitForExit([Math]::Max(0, 28000 - [int]$clock.ElapsedMilliseconds)) -or
-            -not [Threading.Tasks.Task]::WaitAll(@($stdout, $stderr), [Math]::Max(0, 28000 - [int]$clock.ElapsedMilliseconds))) {
-            throw 'Pre-tool policy exceeded its owned deadline'
-        }
-        $global:LASTEXITCODE = $proc.ExitCode
-        $Diagnostic.Value = $stderr.Result
-        return $stdout.Result
-    } finally {
-        # EOF cancels the real SDK worker even behind a virtual-environment launcher.
-        try { $proc.StandardInput.Close() } finally {
-            if (-not $proc.HasExited) { $proc.Kill() }
-            $proc.Dispose()
-        }
-    }
-}
-
 try {
     $reader = [IO.StreamReader]::new([Console]::OpenStandardInput(), $utf8, $false)
     try { $raw = $reader.ReadToEnd() } finally { $reader.Dispose() }
     $admission = [IO.Path]::Combine($PSScriptRoot, 'managed-session.ps1')
-    if (-not [IO.File]::Exists($admission)) { exit 0 }
+    if (-not [IO.File]::Exists($admission)) { throw 'Native admission reader is unavailable' }
     . $admission
     $preparedMembership = $false
     $membershipFacts = $null
-    $supportsFacts = $false
-    foreach ($parameter in ${function:Test-ManagedWorktreesSession}.Ast.Body.ParamBlock.Parameters) {
-        if ($parameter.Name.VariablePath.UserPath -ceq 'Facts') { $supportsFacts = $true; break }
-    }
-    $admitted = if ($supportsFacts) {
-        Test-ManagedWorktreesSession -Raw $raw -Prepared ([ref]$preparedMembership) -Facts ([ref]$membershipFacts)
-    } else {
-        Test-ManagedWorktreesSession -Raw $raw -Prepared ([ref]$preparedMembership)
-    }
-    if (-not $admitted) { exit 0 }
+    $preparedMembership = Test-PreparedManagedWorktreesSession -Raw $raw -Facts ([ref]$membershipFacts)
     $stop = Get-NativePreToolStop
     if ($stop -eq $true) { exit 0 }
     $script:preToolBoundary = 'event JSON'
     $payload = ConvertFrom-PreToolJson $raw
     if ($payload -isnot [Collections.IDictionary]) { throw 'Expected an event object' }
-    if ($stop -eq $false -and (Test-NativePreToolRead $payload $preparedMembership)) { exit 0 }
+    if ($stop -eq $false -and $preparedMembership -and (Test-NativePreToolRead $payload $preparedMembership)) { exit 0 }
     if ($stop -eq $false -and $preparedMembership -and (Test-NativePreToolWrite $payload $membershipFacts)) { exit 0 }
-    try { Set-Location -LiteralPath $env:USERPROFILE -ErrorAction Stop }
-    catch { Set-Location -LiteralPath ([IO.Path]::GetPathRoot($PSScriptRoot)) -ErrorAction Stop }
-    [IO.Directory]::SetCurrentDirectory((Get-Location).Path)
-    $script:preToolBoundary = 'runtime selection'
-    $python = $null
-    $resolver = Join-Path $PSScriptRoot 'resolve-runtime.ps1'
-    $runtimeRoot = Join-Path $env:USERPROFILE '.agent-worktrees'
-    if ($env:COPILOT_EXTENSIONS_CONTEXT) {
-        $script:preToolBoundary = 'installation-context validation'
-        $validator = Join-Path $PSScriptRoot 'installation-context\installation-context.ps1'
-        if (-not [IO.File]::Exists($validator)) { throw 'Required installation-context validator is unavailable' }
-        $owner = if ($env:AGENT_WORKTREES_PAYLOAD_ROOT) { $env:AGENT_WORKTREES_PAYLOAD_ROOT }
-                 elseif ($env:COPILOT_PLUGIN_ROOT) { $env:COPILOT_PLUGIN_ROOT }
-                 else { Split-Path -Parent $PSScriptRoot }
-        $durableHome = $env:COPILOT_EXTENSIONS_CONTEXT
-        1..5 | ForEach-Object { $durableHome = Split-Path -Parent $durableHome }
-        $validation = @(& $validator -Action validate -Context $env:COPILOT_EXTENSIONS_CONTEXT `
-            -DurableHome $durableHome -ExpectedPluginId 'agent-worktrees' -ExpectedPayloadRoot $owner)
-        if ($LASTEXITCODE -ne 0) { throw 'Required installation context is invalid' }
-        $context = ConvertFrom-PreToolJson ($validation -join "`n")
-        if ($context -isnot [Collections.IDictionary] -or $context.pluginRoot -isnot [string] -or
-            -not [IO.Path]::IsPathRooted($context.pluginRoot)) { throw 'Invalid installation-context runtime root' }
-        $runtimeRoot = $context.pluginRoot
-    }
-    $script:preToolBoundary = 'runtime selection'
-    if ([IO.File]::Exists($resolver)) {
-        $previousRoot = $env:AGENT_RT_ROOT
-        try {
-            $env:AGENT_RT_ROOT = $runtimeRoot
-            . $resolver -TraceMode read-only
-            $python = $AwPy
-        } finally {
-            if ($null -eq $previousRoot) { Remove-Item Env:AGENT_RT_ROOT -ErrorAction SilentlyContinue }
-            else { $env:AGENT_RT_ROOT = $previousRoot }
-        }
-    }
-    if (-not $python -and $env:COPILOT_EXTENSIONS_CONTEXT) {
-        throw 'Required installation-context runtime is unavailable'
-    }
-    if (-not $python) {
-        $python = Get-Command python -CommandType Application -All -ErrorAction SilentlyContinue |
-            Where-Object { $_.Source -notlike '*\WindowsApps\*' } |
-            Select-Object -First 1 -ExpandProperty Source
-    }
-    $client = Join-Path $PSScriptRoot 'hook_policy_process.py'
-    $script:preToolBoundary = 'policy interpreter or hook_policy_process.py'
-    if (-not $python -or -not [IO.File]::Exists($client)) {
-        throw 'Required pre-tool policy interpreter/client/runner is unavailable'
-    }
-    $script:preToolBoundary = 'policy worker execution'
-    $diagnostic = ''
-    $previousPythonEncoding = [Environment]::GetEnvironmentVariable('PYTHONIOENCODING', 'Process')
-    try {
-        [Environment]::SetEnvironmentVariable('PYTHONIOENCODING', 'utf-8', 'Process')
-        $result = Invoke-PreToolPolicy $python $raw ([ref]$diagnostic)
-    } finally {
-        [Environment]::SetEnvironmentVariable('PYTHONIOENCODING', $previousPythonEncoding, 'Process')
-    }
-    if ($LASTEXITCODE -ne 0) { throw "Pre-tool policy client exited $LASTEXITCODE" }
-    $script:preToolBoundary = 'policy worker response'
+    $script:preToolBoundary = 'selected native policy resident'
+    . ([IO.Path]::Combine($PSScriptRoot, 'post-tool-hook.ps1'))
+    $result = Invoke-SelectedResidentToolHook -Kind preToolUse -Raw $raw -PreparedMembership $preparedMembership
+    $script:preToolBoundary = 'resident policy response'
     if (-not $result -or -not $result.Trim() -or $utf8.GetByteCount($result) -gt 65536) {
         throw 'Strict pre-tool policy returned no bounded response'
     }
@@ -603,7 +501,6 @@ try {
             throw 'Invalid pre-tool policy response'
         }
     }
-    if ($diagnostic) { [Console]::Error.Write($diagnostic) }
     [Console]::Out.Write($result)
 } catch {
     [Console]::Error.WriteLine('agent-worktrees preToolUse: ' + $script:preToolBoundary + ' unavailable')

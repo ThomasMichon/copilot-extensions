@@ -1,0 +1,190 @@
+from __future__ import annotations
+
+import importlib.util
+import time
+from pathlib import Path
+from types import ModuleType, SimpleNamespace
+from typing import Any, NoReturn
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[2]
+SCRIPTS = ROOT / "plugins/agent-worktrees/scripts"
+_spec = importlib.util.spec_from_file_location(
+    "promotion_native_tool_policy",
+    ROOT / "plugins/agent-worktrees/src/agent_worktrees/native_tool_policy.py",
+)
+assert _spec and _spec.loader
+_api = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_api)
+POLICY_SWITCHES = _api.POLICY_SWITCHES
+decide_pre = _api.decide_pre
+
+
+def load(name: str) -> ModuleType:
+    spec = importlib.util.spec_from_file_location(name, SCRIPTS / name)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def merge(current: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
+    return load("hook_client.py")._merge_pre_decisions(current, new)
+
+
+def event(**values: Any) -> dict[str, Any]:
+    return {
+        "toolName": "edit", "cwd": "/example",
+        "_agentWorktrees": {"nativePolicy": 1, "environment": dict.fromkeys(POLICY_SWITCHES)},
+        **values,
+    }
+
+
+@pytest.mark.parametrize("flag", [True, 2, "1"])
+def test_unsupported_native_dispatch_never_uses_legacy_policy(flag: Any) -> None:
+    policy = SimpleNamespace(
+        hook_client=None,
+        pre=lambda *_args: pytest.fail("native dispatch entered legacy policy"),
+    )
+    result = _api.dispatch_pre(policy, event(_agentWorktrees={"nativePolicy": flag}), time.time() + 0.5)
+    assert "permissionDecision" not in result
+    assert "not authorization" in result["additionalContext"]
+
+
+def test_legacy_dispatch_keeps_the_existing_operation() -> None:
+    payload = {"toolName": "edit"}
+    calls = []
+
+    def pre(value: dict[str, Any]) -> dict[str, str]:
+        calls.append(value)
+        return {"permissionDecision": "deny", "permissionDecisionReason": "legacy guard"}
+
+    assert _api.dispatch_pre(SimpleNamespace(pre=pre), payload, None)["permissionDecision"] == "deny"
+    assert calls == [payload]
+
+
+def test_native_policy_preserves_batch_decisions_and_caller_switches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CROSS_REPO_GUARD", "off")
+    seen: list[tuple[str, str, dict[str, str]]] = []
+
+    def sibling(name: str) -> ModuleType:
+        if name in {"tool_call_forms.py", "hook_pre_policy.py"}:
+            return load(name)
+        module = ModuleType(name)
+
+        def decide(payload: dict[str, Any], **kwargs: Any) -> dict[str, str] | None:
+            seen.append((name, payload["toolName"], kwargs["env"]))
+            if name == "anchor_write_guard.py" and payload["toolName"] == "edit":
+                return {"permissionDecision": "deny", "permissionDecisionReason": "protected"}
+            return None
+
+        module.decide = decide  # type: ignore[attr-defined]
+        return module
+
+    result = _api.dispatch_pre(
+        SimpleNamespace(
+            hook_client=SimpleNamespace(_merge_pre_decisions=merge),
+            _module=sibling,
+            pre=lambda *_args: pytest.fail("native dispatch entered legacy policy"),
+        ),
+        event(toolCalls=[{"name": "view"}, {"name": "edit", "args": {"path": "target"}}]),
+        time.time() + 0.5,
+    )
+    assert result["permissionDecision"] == "deny"
+    assert result["permissionDecisionReason"] == "protected"
+    assert [name for name, tool, _ in seen if tool == "view"] == [
+        "statelessness_guard.py", "cross_repo_guard.py",
+        "anchor_write_guard.py", "pr_supersede_guard.py",
+    ]
+    assert all("CROSS_REPO_GUARD" not in environment for _, _, environment in seen)
+
+
+@pytest.mark.parametrize("failure", ["missing", "raises", "invalid"])
+def test_unavailable_guard_does_not_suppress_independent_deny(failure: str) -> None:
+    def sibling(name: str) -> ModuleType | None:
+        if name in {"tool_call_forms.py", "hook_pre_policy.py"}:
+            return load(name)
+        if name == "statelessness_guard.py" and failure == "missing":
+            return None
+        module = ModuleType(name)
+
+        def decide(payload: dict[str, Any], **kwargs: Any) -> dict[str, Any] | None:
+            if name == "statelessness_guard.py":
+                if failure == "raises":
+                    raise OSError("private diagnostic")
+                return {"permissionDecision": ["allow"]}
+            if name == "cross_repo_guard.py":
+                return {"permissionDecision": "deny", "permissionDecisionReason": "protected"}
+            return None
+
+        module.decide = decide  # type: ignore[attr-defined]
+        return module
+
+    result = decide_pre(
+        event(), load_sibling=sibling, merge=merge, deadline=time.time() + 0.5,
+    )
+    assert result["permissionDecision"] == "deny"
+    assert "not authorization" in result["additionalContext"]
+    assert "private diagnostic" not in str(result)
+
+
+@pytest.mark.parametrize("payload", [
+    event(toolCalls=[]),
+    event(toolCalls=[{"name": "edit", "cwd": "other"}]),
+    event(_agentWorktrees={"nativePolicy": 1, "environment": {}}),
+])
+def test_incomplete_native_input_is_explicitly_unavailable(payload: dict[str, Any]) -> None:
+    result = decide_pre(
+        payload, load_sibling=load, merge=merge, deadline=time.time() + 0.5,
+    )
+    assert "permissionDecision" not in result
+    assert "not authorization" in result["additionalContext"]
+
+
+@pytest.mark.parametrize("command", [
+    "Get-Content -LiteralPath 'source.py'", "Get-Date", "",
+], ids=["content-read", "clock-read", "empty"])
+def test_original_anchor_read_predicate_needs_no_inventory(
+    monkeypatch: pytest.MonkeyPatch, command: str,
+) -> None:
+    guard = load("anchor_write_guard.py")
+
+    def forbidden(*args: Any, **kwargs: Any) -> NoReturn:
+        pytest.fail("a fact-independent read acquired the anchor inventory")
+
+    monkeypatch.setattr(guard, "resolve_registry_root", forbidden)
+    monkeypatch.setattr(guard, "load_worktree_anchors", forbidden)
+    assert guard.decide(
+        {"toolName": "powershell", "toolArgs": {"command": command}},
+        env={}, home=Path("/fixture"),
+    ) is None
+
+
+@pytest.mark.parametrize("command", [
+    "Set-Content -LiteralPath 'target.py' -Value 'data'",
+    "Get-Content source.py > target.py",
+], ids=["write-verb", "redirect"])
+def test_original_anchor_write_predicate_keeps_inventory(
+    monkeypatch: pytest.MonkeyPatch, command: str,
+) -> None:
+    guard = load("anchor_write_guard.py")
+    calls: list[str] = []
+
+    def registry(**kwargs: Any) -> Path:
+        calls.append("root")
+        return Path("/fixture")
+
+    def inventory(root: Path) -> list[dict[str, str]]:
+        calls.append("inventory")
+        return []
+
+    monkeypatch.setattr(guard, "resolve_registry_root", registry)
+    monkeypatch.setattr(guard, "load_worktree_anchors", inventory)
+    assert guard.decide(
+        {"toolName": "powershell", "toolArgs": {"command": command}},
+        env={}, home=Path("/fixture"),
+    ) is None
+    assert calls == ["root", "inventory"]

@@ -11,6 +11,7 @@ import subprocess
 import sys
 import time
 import uuid
+from collections.abc import Callable
 
 import pytest
 
@@ -23,7 +24,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def _pin_descendant(pid: int, expected_birth: str):
+def _pin_descendant(pid: int, expected_birth: str) -> tuple[Callable[[], bool], Callable[[], bool]]:
     from ctypes import wintypes
 
     kernel = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -59,15 +60,14 @@ def _pin_descendant(pid: int, expected_birth: str):
         raise
     return (
         lambda: kernel.WaitForSingleObject(handle, 5000) == 0,
-        lambda: kernel.CloseHandle(handle),
+        lambda: bool(kernel.CloseHandle(handle)),
     )
 
 
 @pytest.mark.parametrize("termination", ["timeout", "caller-exit"])
 @pytest.mark.parametrize("consumer", ["resident", "powershell.exe", "pwsh"])
-def test_policy_scope_retires_descendant(tmp_path, termination, consumer):
+def test_policy_scope_retires_descendant(tmp_path: Path, termination: str, consumer: str) -> None:
     node = shutil.which("node")
-    assert node
     interpreter = os.environ.get("COPILOT_TEST_HOOK_PRE_PYTHON", sys.executable)
     assert Path(interpreter).is_absolute() and Path(interpreter).is_file()
     scripts = tmp_path / "scripts"
@@ -78,23 +78,28 @@ def test_policy_scope_retires_descendant(tmp_path, termination, consumer):
         PLUGIN / "scripts" / "hook-read-policy.json", scripts / "hook-read-policy.json"
     )
     if consumer != "resident":
-        for name in ("pre-tool-hook.ps1", "versioned_runtime_native.ps1"):
+        for name in ("pre-tool-hook.ps1", "post-tool-hook.ps1", "hook-facts.ps1", "managed-session.ps1"):
             shutil.copyfile(PLUGIN / "scripts" / name, scripts / name)
         (scripts / "resolve-runtime.ps1").write_text(
-            "param([string]$TraceMode)\n$AwPy = '"
-            + interpreter.replace("'", "''") + "'\n",
+            "throw 'native hook attempted runtime lookup'\n",
             encoding="utf-8-sig",
         )
-        (scripts / "managed-session.ps1").write_text(
-            "function Test-ManagedWorktreesSession { return $true }\n", encoding="utf-8"
-        )
+        with (scripts / "managed-session.ps1").open("a", encoding="utf-8") as output:
+            output.write(
+                "\nfunction Test-PreparedManagedWorktreesSession { return $false }\n"
+                "function Test-ManagedWorktreesSession { throw 'compatibility admission requested' }\n"
+                "function Get-ManagedWorktreesPython { throw 'interpreter lookup requested' }\n"
+            )
     home = tmp_path / "home"
     home.mkdir()
     marker = tmp_path / "descendant.json"
+    worker_started = tmp_path / "worker-started"
     published = marker.with_suffix(".published")
     nonce = uuid.uuid4().hex
     (scripts / "hook_client.py").write_text(
-        "import json,os,subprocess,sys,time\nfrom pathlib import Path\n"
+        "from pathlib import Path\n"
+        + f"Path({str(worker_started)!r}).touch()\n"
+        + "import json,os,subprocess,sys,time\n"
         "from agent_procutil import direct_python,no_window_kwargs\n"
         "python,overrides=direct_python(sys.executable)\n"
         "env=dict(os.environ);env.update(overrides)\n"
@@ -133,11 +138,12 @@ console.log("policy timeout reported after its owned scope was retired");
         encoding="utf-8",
     )
     module = PLUGIN / "extensions" / "agent-worktrees" / "resident-pre-tool.mjs"
-    environment = dict(os.environ, HOME=str(home), USERPROFILE=str(home))
+    environment = dict(os.environ, HOME=str(home), USERPROFILE=str(home), AGENT_HOME=str(home))
     environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
     environment["AGENT_WORKTREES_PRE_TOOL_IMPLEMENTATION"] = "command"
     environment["PRETOOL_KILLSWITCH_STATE_FILE"] = str(tmp_path / "absent-stop.json")
     if consumer == "resident":
+        assert node
         command = [node, str(driver), str(module), str(scripts), interpreter, str(home)]
     else:
         shell = shutil.which(consumer)
@@ -162,12 +168,23 @@ console.log("policy timeout reported after its owned scope was retired");
         stderr=subprocess.PIPE,
         creationflags=subprocess.CREATE_NO_WINDOW,
     )
+    assert job is not None
     close_observer = None
     try:
         if consumer != "resident":
+            assert process.stdin is not None
             process.stdin.write(b'{"toolName":"edit","toolArgs":{}}')
             process.stdin.close()
             process.stdin = None
+            stdout, stderr = process.communicate(timeout=10)
+            assert process.returncode == 0, (stdout, stderr)
+            decision = json.loads(stdout)
+            assert "permissionDecision" not in decision
+            assert "not authorization" in decision["additionalContext"]
+            assert not worker_started.exists(), "native hook started the compatibility worker"
+            assert not marker.exists() and not published.exists()
+            assert time.monotonic() - started < 30, "native hook exceeded the original host deadline"
+            return
         deadline = time.monotonic() + 15
         # The renamed path can be visible before Windows closes its rename handle.
         while not published.is_file():
@@ -180,7 +197,8 @@ console.log("policy timeout reported after its owned scope was retired");
             native_error = ctypes.GetLastError()
             dos_error = ctypes.c_ulong()
             crt_result = crt._get_doserrno(ctypes.byref(dos_error))
-            error.add_note(json.dumps({
+            add_note = getattr(error, "add_note", lambda _note: None)
+            add_note(json.dumps({
                 "phase": "first-marker-read-before-pin",
                 "consumer": consumer, "termination": termination,
                 "errno": error.errno, "winerror": getattr(error, "winerror", None),
@@ -191,9 +209,9 @@ console.log("policy timeout reported after its owned scope was retired");
                 "prepared_exists": marker.with_suffix(".prepared").exists(),
             }))
             try:
-                error.add_note(f"file_stat={tuple(marker.stat())!r}")
+                add_note(f"file_stat={tuple(marker.stat())!r}")
             except OSError as inspection_error:
-                error.add_note(f"file_stat_unavailable={inspection_error.errno}")
+                add_note(f"file_stat_unavailable={inspection_error.errno}")
             raise
         assert record["nonce"] == nonce
         retired, close_observer = _pin_descendant(record["pid"], record["birth"])
@@ -204,10 +222,6 @@ console.log("policy timeout reported after its owned scope was retired");
         else:
             stdout, stderr = process.communicate(timeout=40)
             assert process.returncode == 0, (stdout, stderr)
-            if consumer != "resident":
-                decision = json.loads(stdout)
-                assert "permissionDecision" not in decision
-                assert "policy worker execution" in decision["additionalContext"]
             assert time.monotonic() - started < 30, "policy exceeded the host hook deadline"
         assert retired(), "policy descendant survived its invocation/caller"
     finally:
@@ -218,7 +232,7 @@ console.log("policy timeout reported after its owned scope was retired");
 
 
 @pytest.mark.parametrize("consumer", ["powershell.exe", "pwsh"])
-def test_legacy_venv_redirector_does_not_outlive_original_caller(tmp_path, consumer):
+def test_legacy_venv_redirector_does_not_outlive_original_caller(tmp_path: Path, consumer: str) -> None:
     from agent_procutil._daemon_instance_identity import _windows_birth
 
     interpreter = Path(sys.prefix) / "Scripts" / "python.exe"
@@ -301,6 +315,7 @@ raise AssertionError('unconfirmed cleanup must not return a decision')
         stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         creationflags=subprocess.CREATE_NO_WINDOW,
     )
+    assert job is not None
     observers = []
     try:
         observers.append(_pin_descendant(process.pid, _windows_birth(int(process._handle))))

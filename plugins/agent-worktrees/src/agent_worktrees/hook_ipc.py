@@ -23,8 +23,10 @@ SHELL_MUTATION_CAPABILITY = "shell-hook-mutation-v1"
 WORKTREE_CHANGE_CAPABILITY = "worktree-change-v1"
 WORKTREE_CHANGE_KIND = "worktreeChanged"
 MIXED_BATCH_MUTATION_CAPABILITY = "mixed-hook-batch-mutation-v1"
+NATIVE_TOOL_POLICY_CAPABILITY = "native-tool-policy-v1"
 _CAPABILITIES = [
     "session-lifecycle-v1", "session-start-source-v1", "session-end-source-v1",
+    NATIVE_TOOL_POLICY_CAPABILITY,
 ]
 
 
@@ -113,6 +115,18 @@ class _Handler(socketserver.StreamRequestHandler):
             payload_valid = isinstance(payload, dict)
             if not payload_valid:
                 payload = {}
+            metadata = payload.get("_agentWorktrees")
+            if isinstance(metadata, dict) and "nativePolicy" in metadata:
+                if (
+                    type(metadata["nativePolicy"]) is not int
+                    or metadata["nativePolicy"] != 1
+                    or kind not in {"preToolUse", "postToolUse"}
+                    or request.get("hook_generation") != self.server.owner.generation
+                    or len(raw) > (2 * 1024 * 1024 if kind == "preToolUse" else 65536)
+                    or not raw.endswith(b"\n")
+                    or not math.isfinite(deadline) or deadline - time.time() > 1.0
+                ):
+                    raise HookUnavailable
             if deadline <= time.time():
                 raise HookUnavailable
             if self.server.admission_closed:

@@ -1,6 +1,12 @@
 function ConvertFrom-PostToolJson {
     param([string]$Text)
-    if ($PSVersionTable.PSVersion.Major -ge 6 -or $script:postToolLegacyJson) {
+    if ($PSVersionTable.PSVersion.Major -ge 6) {
+        if (-not ${function:ConvertFrom-ManagedWorktreesJson}) {
+            . ([IO.Path]::Combine($PSScriptRoot, 'managed-session.ps1'))
+        }
+        return ,(ConvertFrom-ManagedWorktreesJson $Text)
+    }
+    if ($script:postToolLegacyJson) {
         return ConvertFrom-Json -InputObject $Text -ErrorAction Stop
     }
     if (-not $script:postToolJson) {
@@ -20,7 +26,13 @@ function ConvertFrom-PostToolJson {
 
 function ConvertTo-PostToolJson {
     param([object]$Value)
-    if ($PSVersionTable.PSVersion.Major -ge 6 -or $script:postToolLegacyJson) {
+    if ($PSVersionTable.PSVersion.Major -ge 6) {
+        if (-not ${function:ConvertTo-PreparedWorktreesJson}) {
+            . ([IO.Path]::Combine($PSScriptRoot, 'managed-session.ps1'))
+        }
+        return ConvertTo-PreparedWorktreesJson -InputObject $Value -Depth 100
+    }
+    if ($script:postToolLegacyJson) {
         return ConvertTo-Json -InputObject $Value -Depth 100 -Compress
     }
     try {
@@ -34,13 +46,19 @@ function ConvertTo-PostToolJson {
 function Invoke-ResidentPostTool {
     param(
         [Parameter(Mandatory = $true)][System.Collections.IDictionary]$Endpoint,
-        [Parameter(Mandatory = $true)][string]$PayloadJson
+        [Parameter(Mandatory = $true)][string]$PayloadJson,
+        [ValidateSet('preToolUse', 'postToolUse')][string]$Kind = 'postToolUse',
+        [switch]$ValidatedContext
     )
+    $timer = [Diagnostics.Stopwatch]::StartNew()
     if ($Endpoint.hook_transport -cne 'tcp' -or
         $Endpoint.hook_endpoint -cnotmatch '^127\.0\.0\.1:([0-9]+)$' -or
         $Endpoint.hook_token -isnot [string] -or
         [string]::IsNullOrEmpty($Endpoint.hook_token) -or
-        $Endpoint.installReceipt -or $Endpoint.marketplaceId -or $Endpoint.pluginRoot) {
+        $Endpoint.hook_generation -isnot [string] -or -not $Endpoint.hook_generation -or
+        $Endpoint.hook_capabilities -isnot [Collections.IList] -or
+        $Endpoint.hook_capabilities -cnotcontains 'native-tool-policy-v1' -or
+        (-not $ValidatedContext -and ($Endpoint.installReceipt -or $Endpoint.marketplaceId -or $Endpoint.pluginRoot))) {
         return $null
     }
     $port = 0
@@ -50,39 +68,55 @@ function Invoke-ResidentPostTool {
     $payload = ConvertFrom-PostToolJson $PayloadJson
     if ($null -eq $payload -or
         ($payload -isnot [pscustomobject] -and $payload -isnot [Collections.IDictionary])) {
-        $payload = @{}
+        return $null
     }
-    # Forward this session's nudge switches; the resident's environment is not ours.
+    if ($Kind -ceq 'postToolUse') {
+        # Accounting and target invalidation consume the invocation, never its output.
+        foreach ($key in @('toolResult', 'tool_result')) {
+            if ($payload -is [Collections.IDictionary]) { [void]$payload.Remove($key) }
+            else { [void]$payload.PSObject.Properties.Remove($key) }
+        }
+    }
+    # Forward only event policy switches; the selected resident still owns installation roots.
     $forwarded = @{}
     foreach ($key in @('AGENT_WORKTREES_NUDGE', 'AGENT_WORKTREES_AGENDA_NUDGE',
-            'AGENT_WORKTREES_NUDGE_CALLS', 'AGENT_WORKTREES_NUDGE_MINUTES')) {
+            'AGENT_WORKTREES_NUDGE_CALLS', 'AGENT_WORKTREES_NUDGE_MINUTES',
+            'AGENT_WORKTREES_STATELESS_GUARD', 'CROSS_REPO_GUARD', 'CROSS_REPO_GUARD_MODE',
+            'ANCHOR_WRITE_GUARD', 'ANCHOR_WRITE_GUARD_MODE', 'PR_SUPERSEDE_GUARD', 'PR_SUPERSEDE_GUARD_MODE')) {
         $value = [Environment]::GetEnvironmentVariable($key)
-        if ($null -ne $value) { $forwarded[$key] = $value }
+        $forwarded[$key] = $value
     }
     if ($payload -is [Collections.IDictionary]) {
-        if (-not $payload.ContainsKey('_agentWorktrees')) { $payload['_agentWorktrees'] = @{ environment = $forwarded } }
-    } elseif ($null -eq $payload.PSObject.Properties['_agentWorktrees']) {
-        $payload | Add-Member -NotePropertyName '_agentWorktrees' -NotePropertyValue @{ environment = $forwarded }
+        $payload['_agentWorktrees'] = @{ nativePolicy = 1; environment = $forwarded }
+    } else {
+        $payload | Add-Member -Force -NotePropertyName '_agentWorktrees' -NotePropertyValue @{ nativePolicy = 1; environment = $forwarded }
     }
     $request = @{
         version = 1
         token = $Endpoint.hook_token
-        kind = 'postToolUse'
+        kind = $Kind
+        hook_generation = $Endpoint.hook_generation
         payload = $payload
-        deadline = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() / 1000.0 + 0.5
+        deadline = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() / 1000.0 +
+            [Math]::Max(0, 500 - [int]$timer.ElapsedMilliseconds) / 1000.0
     }
     $utf8 = [Text.UTF8Encoding]::new($false, $true)
     $bytes = $utf8.GetBytes((ConvertTo-PostToolJson $request) + "`n")
+    $requestLimit = if ($Kind -ceq 'preToolUse') { 2 * 1024 * 1024 } else { 65536 }
+    if ($bytes.Length -gt $requestLimit) { return $null }
     $client = [Net.Sockets.TcpClient]::new()
     $response = [IO.MemoryStream]::new()
     try {
+        $remaining = 500 - [int]$timer.ElapsedMilliseconds
+        if ($remaining -le 0) { return $null }
         $connect = $client.ConnectAsync('127.0.0.1', $port)
-        if (-not $connect.Wait(500)) { return $null }
+        if (-not $connect.Wait($remaining)) { return $null }
         $stream = $client.GetStream()
-        $stream.ReadTimeout = 500
-        $stream.WriteTimeout = 500
+        $remaining = 500 - [int]$timer.ElapsedMilliseconds
+        if ($remaining -le 0) { return $null }
+        $stream.ReadTimeout = $remaining
+        $stream.WriteTimeout = $remaining
         $stream.Write($bytes, 0, $bytes.Length)
-        $timer = [Diagnostics.Stopwatch]::StartNew()
         $buffer = [byte[]]::new(4096)
         $complete = $false
         while ($response.Length -lt 65536 -and -not $complete) {
@@ -102,10 +136,22 @@ function Invoke-ResidentPostTool {
         }
         if (-not $complete) { return $null }
         $reply = ConvertFrom-PostToolJson $utf8.GetString($response.ToArray())
-        if ($reply.version -ne 1 -or $reply.fallback -eq $true -or
+        if (($reply.version -isnot [int] -and $reply.version -isnot [long]) -or
+            $reply.version -ne 1 -or $reply.fallback -eq $true -or
+            $reply.capabilities -isnot [Collections.IList] -or
+            $reply.capabilities -cnotcontains 'native-tool-policy-v1' -or
             ($reply.result -isnot [pscustomobject] -and
              $reply.result -isnot [Collections.IDictionary])) {
             return $null
+        }
+        if ($Kind -ceq 'postToolUse') {
+            if ($reply.result -is [Collections.IDictionary]) {
+                if ($reply.result.ContainsKey('additionalContext') -and
+                    $reply.result['additionalContext'] -isnot [string]) { return $null }
+            } else {
+                $context = $reply.result.PSObject.Properties['additionalContext']
+                if ($null -ne $context -and $context.Value -isnot [string]) { return $null }
+            }
         }
         return ConvertTo-PostToolJson $reply.result
     } finally {
@@ -114,13 +160,42 @@ function Invoke-ResidentPostTool {
     }
 }
 
+function Invoke-SelectedResidentToolHook {
+    param(
+        [ValidateSet('preToolUse', 'postToolUse')][string]$Kind,
+        [AllowEmptyString()][string]$Raw,
+        [bool]$PreparedMembership = $false
+    )
+    . ([IO.Path]::Combine($PSScriptRoot, 'hook-facts.ps1'))
+    if ($env:COPILOT_EXTENSIONS_CONTEXT -and -not $PreparedMembership) {
+        throw 'Prepared installation-context admission is unavailable'
+    }
+    $runtime = Get-PostToolRuntimeRoot
+    $snapshot = $null
+    $endpoint = Read-PostToolBoundedJson ([IO.Path]::Combine($runtime, 'status-monitor.lock')) 16384 ([ref]$snapshot)
+    if ($null -eq $endpoint) { throw 'Selected resident rendezvous is unavailable' }
+    $endpoint = ConvertFrom-ManagedWorktreesJson $snapshot
+    if (-not (Test-PostToolDiscoveryContext -Discovery $endpoint -RuntimeRoot $runtime)) {
+        throw 'Selected resident installation does not match'
+    }
+    $payload = if ([string]::IsNullOrWhiteSpace($Raw)) { '{}' } else { $Raw }
+    return Invoke-ResidentPostTool -Endpoint $endpoint -PayloadJson $payload -Kind $Kind -ValidatedContext
+}
+
 function Invoke-PostToolHook {
     param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Raw)
+    $utf8 = [Text.UTF8Encoding]::new($false, $true)
+    $OutputEncoding = $utf8
+    [Console]::OutputEncoding = $utf8
     $admission = [IO.Path]::Combine($PSScriptRoot, 'managed-session.ps1')
-    if (-not [IO.File]::Exists($admission)) { return }
+    if (-not [IO.File]::Exists($admission)) {
+        [Console]::Error.WriteLine('agent-worktrees postToolUse: native admission reader unavailable; completion is unconfirmed')
+        return
+    }
     . $admission
+    $prepared = Test-PreparedManagedWorktreesSession -Raw $Raw
     $factsReader = [IO.Path]::Combine($PSScriptRoot, 'hook-facts.ps1')
-    if ([IO.File]::Exists($factsReader)) {
+    if ($prepared -and [IO.File]::Exists($factsReader)) {
         . $factsReader
         $readResult = Invoke-PreparedPostToolRead -Raw $Raw
         if ($null -ne $readResult) {
@@ -128,56 +203,14 @@ function Invoke-PostToolHook {
             return
         }
     }
-    $utf8 = [Text.UTF8Encoding]::new($false, $true)
-    $OutputEncoding = $utf8
-    [Console]::OutputEncoding = $utf8
     try {
-        Set-Location -LiteralPath $env:USERPROFILE -ErrorAction Stop
-    } catch {
-        Set-Location -LiteralPath ([IO.Path]::GetPathRoot($PSScriptRoot)) -ErrorAction Stop
-    }
-    [IO.Directory]::SetCurrentDirectory((Get-Location).Path)
-    if (-not (Test-ManagedWorktreesSession -Raw $Raw)) { return }
-    $contextual = -not [string]::IsNullOrWhiteSpace($env:COPILOT_EXTENSIONS_CONTEXT)
-    if (-not $contextual) {
-        try {
-            $path = Join-Path $env:USERPROFILE '.agent-worktrees\status-monitor.lock'
-            $value = ConvertFrom-PostToolJson ([IO.File]::ReadAllText($path))
-            if ($value -is [Collections.IDictionary]) {
-                $endpoint = $value
-            } elseif ($value -is [pscustomobject]) {
-                $endpoint = @{}
-                foreach ($property in $value.PSObject.Properties) {
-                    $endpoint[$property.Name] = $property.Value
-                }
-            } else {
-                throw 'invalid resident rendezvous'
-            }
-            $payload = if ([string]::IsNullOrWhiteSpace($Raw)) { '{}' } else { $Raw }
-            $result = Invoke-ResidentPostTool -Endpoint $endpoint -PayloadJson $payload
-            if ($null -ne $result) {
-                if ($result -ne '{}') {
-                    [Console]::Out.Write($result)
-                }
-                return
-            }
-        } catch {
-            [Console]::Error.WriteLine('agent-worktrees postToolUse: resident request unavailable; using local advisory fallback')
+        $result = Invoke-SelectedResidentToolHook -Kind postToolUse -Raw $Raw -PreparedMembership $prepared
+        if ($null -ne $result) {
+            if ($result -ne '{}') { [Console]::Out.Write($result) }
+            return
         }
+    } catch {
+        # A timed-out request may have been delivered; never replay it.
     }
-    $script = Join-Path $PSScriptRoot 'hook_client.py'
-    $python = Get-Command python -CommandType Application -All -ErrorAction SilentlyContinue |
-        Where-Object { $_.Source -notlike '*\WindowsApps\*' } |
-        Select-Object -First 1 -ExpandProperty Source
-    if (-not $python -or -not (Test-Path -LiteralPath $script)) {
-        [Console]::Error.WriteLine('agent-worktrees postToolUse: advisory fallback unavailable')
-        return
-    }
-    $env:PYTHONDONTWRITEBYTECODE = '1'
-    if ($contextual) {
-        $Raw | & $python $script postToolUse
-    } else {
-        # The advisory fallback must not resend a possibly delivered request.
-        $Raw | & $python $script postToolUse --local-fallback
-    }
+    [Console]::Error.WriteLine('agent-worktrees postToolUse: selected native resident unavailable; advisory/accounting completion is unconfirmed; no local fallback or retry was run')
 }
