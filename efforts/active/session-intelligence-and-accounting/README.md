@@ -58,6 +58,16 @@ current receiving/source/custody readback precede a separate source judgment.
 This amendment grants no sync, corpus, publication, retirement or rollout
 authority and appoints no replacement implementer.
 
+The finite #6819 selected-PR reporting contract continues through this SAME
+canonical driver and existing backend/accounting lanes. Preserve #7245's
+contributor ownership and earlier accepted bounded-initial-design dispositions;
+credit neither its unmerged implementation nor outstanding corrections as
+delivered. Its current recovery proposal remains subject to ordinary readiness
+and review, not another generic ACK for decisions already accepted. Complete
+reviewed receiving content precedes a separate tracking disposition; no source,
+resource or implementation custody transfers. Independent preservation,
+fleet/adoption and #5676 handoff conditions are not new #6819 prerequisites.
+
 - **Topology:** Serial independently reviewable phase PRs; shared contracts stay
   coordinator-owned, and implementation delegates receive disjoint scopes.
 - **Host (owns PRs):** Primary contributor.
@@ -225,6 +235,16 @@ validation gates are in [process-log reclamation](process-log-reclamation.md).
 - [ ] Keep consumer-specific pricing policy injectable and transcript contents
   out of accounting stores and exports.
 
+- [ ] **P6819:** Deliver on-demand/configured retrospective reporting inside
+  agent-logger for an explicitly selected PR, correlating attributable session
+  activity through existing PR/session markers to derive supported elapsed time
+  and turn counts. Distinguish kickoff-to-publication, subsequent review work
+  and idle/wait intervals; handle resumed/continued sessions, multiple PRs and
+  incomplete history/provenance without double counting. Prefer existing
+  evidence; add metadata only for inputs that cannot otherwise be recovered.
+  Keep PR metadata with existing provider surfaces. Introduce no separate
+  skill/plugin, ambient standing collector or mandatory PR-description mutation.
+
 ### Phase 4 - Assignable fleet daily aggregation
 - [ ] **P5678:** Retain the complete claimed Phases 4/5 elected-role,
   adjacent versioned daily-product, late/corrected-day revision, catch-up/
@@ -357,6 +377,15 @@ retain only the actual unfinished boundary; documentation is not remediation.
   truthful historical/later evidence. Intake is not source repair or native/
   released adoption; independent accounting, compaction and consumer gates
   remain without becoming new prerequisites for this finite residual.
+
+- [ ] **G6819:** Resolve P6819 using provider-offline synthetic event/reference
+  fixtures for one selected PR, continued sessions, two PRs within one session,
+  missing timestamps and incomplete provenance. Verify elapsed/turn attribution,
+  kickoff/publication/review/idle separation, deduplication and explicit measured,
+  inferred and unavailable results. Preserve privacy and source-access boundaries;
+  require no transcript publication, execution receipt or private environment
+  inventory. This finite acceptance does not require completion of unrelated
+  parent phases, fleet aggregation or consumer adoption.
 
 ## Proposal
 
