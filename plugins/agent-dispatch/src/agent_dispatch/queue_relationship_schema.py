@@ -27,7 +27,11 @@ def bound_relationship_condition(task: Literal["t", "NEW"], *, finalized_submiss
             " AND json_extract(c.acknowledgement,'$.binding')=json(c.resource_binding)"
             " AND json_extract(c.acknowledgement,'$.arguments.request_id')=c.request_id"
             " AND json_extract(c.acknowledgement,'$.at')=NEW.completed_at"
-            " AND NEW.result_ref='relevance-closeout:'||c.request_id"
+            " AND NEW.result_ref IS json_extract(c.acknowledgement,'$.submission_result_ref')"
+            " AND EXISTS (SELECT 1 FROM task_events p WHERE p.task_id=NEW.id"
+            " AND p.id=json_extract(c.acknowledgement,'$.preparation_id')"
+            " AND json_extract(p.submission_preparation,'$.advancement.state')='admitting'"
+            " AND json_extract(p.submission_preparation,'$.request.assignment_event_id')=e.id)"
             " AND json_extract(c.acknowledgement,'$.observation.status')='finalized'"
             " AND json_extract(c.acknowledgement,'$.observation.creation_nonce')="
             " json_extract(e.task_relationship,'$.request.workspace.creation_nonce'))"
@@ -126,7 +130,7 @@ def migrate_relationships(conn: sqlite3.Connection) -> None:
     # These guards survive a provider rollback. Older queue code cannot admit
     # a governed assignment by forgetting an optional Python field.
     conn.execute(
-        "CREATE TRIGGER IF NOT EXISTS task_relationship_execution_guard_v5"  # noqa: S608 -- fixed predicate
+        "CREATE TRIGGER IF NOT EXISTS task_relationship_execution_guard_v6"  # noqa: S608 -- fixed predicate
         " BEFORE UPDATE OF status, generation, owner, owner_session_id ON tasks"
         " WHEN (EXISTS (SELECT 1 FROM task_events e WHERE e.task_id=NEW.id"
         " AND e.task_relationship IS NOT NULL) OR EXISTS (SELECT 1 FROM spawn_reservations s"
@@ -148,6 +152,7 @@ def migrate_relationships(conn: sqlite3.Connection) -> None:
     )
     # Recovery metadata and submitted-result acceptance do not admit execution.
     # Install the admission guard before removing its stricter predecessors.
+    conn.execute("DROP TRIGGER IF EXISTS task_relationship_execution_guard_v5")
     conn.execute("DROP TRIGGER IF EXISTS task_relationship_execution_guard_v4")
     conn.execute("DROP TRIGGER IF EXISTS task_relationship_execution_guard_v3")
     conn.execute("DROP TRIGGER IF EXISTS task_relationship_execution_guard_v2")

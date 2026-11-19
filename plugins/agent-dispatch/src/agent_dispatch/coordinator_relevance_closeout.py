@@ -8,6 +8,7 @@ from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 from typing import Any, Literal
 from .queue_relevance_acknowledgement import finish as finish_closeout
+from .review_closeout_submission import ABANDON, SUBMIT
 
 from .queue import TaskQueue
 from .queue_records import TaskError
@@ -27,7 +28,7 @@ class CloseoutBody(BaseModel):
     worker_id: str = Field(min_length=1, max_length=4096)
     native_id: str = Field(min_length=1, max_length=4096)
     expected_generation: int = Field(strict=True, ge=0, le=2**63 - 1)
-    finish_action: Literal["submit-finalized-review/v1"] | None = None
+    finish_action: Literal["submit-finalized-review/v1", "abandon-finalized-source/v1"] | None = None
 
 
 def register_closeout_routes(
@@ -55,12 +56,12 @@ def register_closeout_routes(
         current = authorize(request, task_id)
         if current.get("finish_action") and request.headers.get("X-Dispatch-Closeout-Action") != current["finish_action"]:
             raise HTTPException(409, detail="original review closeout requires a submission-aware caller")
+        if request.headers.get("X-Dispatch-Closeout-Action") == SUBMIT:
+            current.setdefault("finish_action", ABANDON)
         return envelope(current)
 
     def mutate(task_id: str, body: CloseoutBody, request: Request, *, finish: bool) -> dict[str, Any]:
         arguments = body.model_dump(exclude={"version", "finish_action"})
-        if not finish and body.finish_action is not None:
-            raise HTTPException(422, detail="finish action is valid only on finish")
         gate = app.state.drain_gate
 
         def authority_guard() -> None:
@@ -70,9 +71,11 @@ def register_closeout_routes(
             with gate.track_claim():
                 if gate.draining:
                     raise TaskError("relevance closeout is inhibited while draining")
-                authorize(request, task_id, arguments)
+                current = authorize(request, task_id, arguments)
+                if (body.finish_action or ABANDON) != current.get("finish_action", ABANDON):
+                    raise TaskError("negotiated closeout action changed; custody retained")
                 if finish:
-                    if body.finish_action is None:
+                    if body.finish_action != SUBMIT:
                         result = guard(lambda: queue.finish_relevance_closeout(
                             task_id, authority_guard=authority_guard, **arguments,
                         ))

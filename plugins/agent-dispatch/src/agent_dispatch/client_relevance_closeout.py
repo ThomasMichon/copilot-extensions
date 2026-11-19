@@ -8,7 +8,7 @@ from urllib.parse import quote
 
 from .client_errors import DispatchError, DispatchUpgradeRequired
 from .task_relevance_contract import CLOSEOUT_PROTOCOL
-from .review_closeout_submission import SUBMIT
+from .review_closeout_submission import ABANDON, SUBMIT
 
 if TYPE_CHECKING:
     import httpx
@@ -53,6 +53,9 @@ class RelevanceCloseoutClientMixin:
 
     def _mutate_relevance_closeout(self, task_id: str, arguments: dict[str, Any], operation: str) -> dict[str, Any]:
         current = self.relevance_closeout(task_id)
+        if (arguments.get("finish_action") not in (ABANDON, SUBMIT)
+                or arguments["finish_action"] != current.get("finish_action")):
+            raise DispatchUpgradeRequired("receiver does not confirm the requested closeout action; no mutation")
         expected = {
             "task_id": task_id,
             "request_id": arguments["request_id"],

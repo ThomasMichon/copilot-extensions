@@ -11,11 +11,13 @@ from typing import TYPE_CHECKING, Any
 from .queue_common import CompletionOutcome, Task
 from .queue_records import Status, TaskError
 from .queue_submission_preparation import _encoded, _latest
+from .queue_submission_resubmission import retained_lineage
 
 if TYPE_CHECKING:
     from .queue import TaskQueue
 
 SUBMIT = "submit-finalized-review/v1"
+ABANDON = "abandon-finalized-source/v1"
 
 
 def eligible(task: Task | None) -> bool:
@@ -38,6 +40,16 @@ def _proposal(state: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _same_proposal(conn: sqlite3.Connection, state: dict[str, Any], value: dict[str, Any]) -> bool:
+    expected = _proposal(state)
+    request = value["request"]
+    retained_lineage(conn, request)
+    return (value.get("advancement") is None
+            and all(_encoded(request.get(k)) == _encoded(v) for k, v in expected.items()
+                    if k not in {"request_id", "result", "result_ref"})
+            and request.get("expected_status", state["status"]) == state["status"])
+
+
 def prepare(queue: TaskQueue, conn: sqlite3.Connection, state: dict[str, Any]) -> None:
     """Retain the original worker's proposal before its independently checked claim is settled."""
     task = queue._fetch(conn, state["relationship"]["request"]["task_id"])
@@ -47,11 +59,15 @@ def prepare(queue: TaskQueue, conn: sqlite3.Connection, state: dict[str, Any]) -
     prior = _latest(conn, task.id)
     if prior is not None:
         value = json.loads(prior["submission_preparation"])
-        if value["request"] == proposal and value.get("advancement") is None:
+        if _same_proposal(conn, state, value):
             return
         raise TaskError("another retained submission exists; reconcile before review closeout")
-    if state["relationship"]["state"] != "bound":
-        raise TaskError("review closeout requires a retained proposal before assignment settlement")
+    if state["relationship"]["state"] == "closed":
+        saved = conn.execute("SELECT readiness FROM task_relevance_closeouts WHERE task_id=?", (task.id,)).fetchone()
+        ready = json.loads(saved["readiness"]) if saved and saved["readiness"] else {}
+        if (ready.get("arguments") != state["arguments"] or ready.get("binding") != state["binding"]
+                or ready.get("observation", {}).get("ready") is not True):
+            raise TaskError("legacy closed assignment lacks its original readiness receipt")
     conn.execute(
         "INSERT INTO task_events(task_id,ts,from_status,to_status,worker,note,submission_preparation)"
         " VALUES (?,?,?,?,?,?,?)", (task.id, queue._now(None), task.status, task.status, task.owner,
@@ -69,12 +85,13 @@ def submit(queue: TaskQueue, task_id: str, *, worker_id: str, ts: float, origina
         retain(conn)
         prior = _latest(conn, task_id)
         value = json.loads(prior["submission_preparation"]) if prior else {}
-        if prior is None or value.get("request") != _proposal(original) or value.get("advancement") is not None or task.awaiting_steer:
+        if prior is None or not _same_proposal(conn, original, value) or task.awaiting_steer:
             raise TaskError("finalized review submission lacks its original pending proposal")
-        value["advancement"] = {"version": 1, "state": "admitting", "at": ts, "encoded_result": None}
+        encoded_result = queue._encode_result(value["request"]["result"])
+        value["advancement"] = {"version": 1, "state": "admitting", "at": ts, "encoded_result": encoded_result}
         conn.execute("UPDATE task_events SET submission_preparation=? WHERE id=?", (_encoded(value), prior["id"]))
         outcome, wake = queue._write_submission(
-            conn, task, worker_id=worker_id, encoded_result=None,
+            conn, task, worker_id=worker_id, encoded_result=encoded_result,
             result_ref=value["request"]["result_ref"], ts=ts,
         )
         saved = _latest(conn, task_id)

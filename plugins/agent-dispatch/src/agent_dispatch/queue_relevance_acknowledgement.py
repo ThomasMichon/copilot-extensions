@@ -13,6 +13,7 @@ from .queue_records import Status, TaskError
 from .queue_relevance_readiness import _state
 from .queue_task_relationships import _encoded
 from . import review_closeout_submission as submission
+from .queue_submission_preparation import _latest
 
 if TYPE_CHECKING:
     from .queue import TaskQueue
@@ -41,7 +42,7 @@ def _replay(
         or (not submitted and (task.status != Status.ABANDONED or task.updated_at != receipt["at"]))
         or (submitted and (task.status not in {Status.SUBMITTED, Status.COMPLETED, Status.ABANDONED}
                            or task.completed_at != receipt["at"] or task.completed_by != arguments["worker_id"]
-                           or task.result_ref != f"relevance-closeout:{arguments['request_id']}"))
+                           or task.result_ref != receipt.get("submission_result_ref", f"relevance-closeout:{arguments['request_id']}")))
     ):
         raise TaskError("relevance closeout acknowledgement incarnation changed; custody retained")
     return CompletionOutcome(task, None)
@@ -65,7 +66,9 @@ def _prepared(queue: TaskQueue, conn: sqlite3.Connection, task_id: str, argument
         "last_seen_at", "latest_progress",
     ):
         task.pop(key, None)
-    return {**state, "readiness": ready, "task": task}
+    proposal = _latest(conn, task_id)
+    return {**state, "readiness": ready, "task": task, "preparation_id": proposal["id"] if proposal else None,
+            "submission_result_ref": json.loads(proposal["submission_preparation"])["request"]["result_ref"] if proposal else None}
 
 
 def finish(
@@ -114,6 +117,8 @@ def finish(
 
     if submit_review:
         receipt["finish_action"] = submission.SUBMIT
+        receipt["preparation_id"] = original["preparation_id"]
+        receipt["submission_result_ref"] = original["submission_result_ref"]
 
     def retain(conn: sqlite3.Connection) -> None:
         if authority_guard is not None:

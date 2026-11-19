@@ -1,7 +1,7 @@
 """Let the original worker finalize before Dispatch acknowledges source closeout."""
 
 from __future__ import annotations
-from .review_closeout_submission import SUBMIT
+from .review_closeout_submission import ABANDON, SUBMIT
 
 import argparse
 import os
@@ -161,24 +161,28 @@ def closeout(client: DispatchClient, task_id: str, worker_id: str) -> dict[str, 
     current = client.relevance_closeout(task_id)
     arguments, binding = _captured(current, task_id, worker_id, native)
     action = current.get("finish_action")
-    if action not in (None, SUBMIT):
-        raise DispatchError(409, "unsupported closeout finish action; custody retained")
-    status = "submitted" if action == SUBMIT else "abandoned"
-    if not _acknowledged(current, task_id, arguments, binding):
-        prepared = client.prepare_relevance_closeout(task_id, arguments)
+    if _acknowledged(current, task_id, arguments, binding):
+        action = current["acknowledgement"].get("finish_action", ABANDON)
+    else:
+        if action not in (ABANDON, SUBMIT):
+            raise DispatchError(409, "receiver has not advertised a closeout finish action; custody retained")
+        finish_arguments = {**arguments, "finish_action": action}
+        prepared = client.prepare_relevance_closeout(task_id, finish_arguments)
         original_key = _allocation(prepared, task_id, arguments, binding)
+        fresh = client.relevance_closeout(task_id)
+        if fresh.get("finish_action") != action or _captured(fresh, task_id, worker_id, native) != (arguments, binding):
+            raise DispatchError(409, "closeout action or original binding changed before finalization")
         _finalize(
             {"task_id": task_id, "native_id": native, "reservation_key": original_key},
             binding["workspace"]["worktree"],
             expected_creation_nonce=binding["workspace"]["creation_nonce"],
         )
-        finish_arguments = {**arguments, "finish_action": action} if action else arguments
         finished = client.finish_relevance_closeout(task_id, finish_arguments)
         if not _matches(
             finished,
             {
                 "id": task_id,
-                "status": status,
+                "status": "submitted" if action == SUBMIT else "abandoned",
                 "generation": arguments["expected_generation"],
             },
         ):
@@ -187,7 +191,7 @@ def closeout(client: DispatchClient, task_id: str, worker_id: str) -> dict[str, 
             )
     return {
         "id": task_id,
-        "status": status,
+        "status": "submitted" if action == SUBMIT else "abandoned",
         "generation": arguments["expected_generation"],
         "workspace_closeout": "finalized",
         "task_relationship": "closed",
