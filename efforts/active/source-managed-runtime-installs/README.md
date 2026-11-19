@@ -176,6 +176,44 @@ checklists, delivered credit, independent objectives and reasons for consolidati
 No item is newly passed, no tracker is closed, no custody changes and no native
 or installed operation is authorized by this proposal. The effort remains Active.
 
+## Completion charter
+
+**Kind:** completion.
+
+**Root goal:** the complete outcome in [Goal](#goal), including its construction,
+managed-Python, lifetime, cutoff and finite-scope amendments. The addressed
+installation reaches its required incoming ready/current state while preserving
+configuration, data, sessions and source custody; completing a fixture or PR is
+not this end state.
+
+**Root source:** the existing reviewed Goal and [Request](#request). Original
+operator wording remains verbatim in Request and its linked refinement records;
+this charter does not replace, paraphrase or expand those instructions.
+
+**Acceptance:** resolve the direct [Plan](#plan) and global
+[Validation Plan](#validation-plan) against attributable source, native,
+containing-release and authorized installed evidence. Preserve independently
+owned adopter conditions and every current approval, hold and effect boundary.
+Do not recursively revive retired historical checklists.
+
+**Finalization criterion:** mark the effort Done only after every direct Plan
+and global Validation item is resolved or explicitly transferred to a named
+tracked objective. Record the actual accepted outcomes, settle owned obligations
+and use the normal worktree finalization flow; a merged child is insufficient.
+
+**Now:** qualify the authentic legacy consumer after correcting its Git
+transport preparation. The tenth hosted attempt passed preparation, then its
+local Git HTTP backend exceeded the unchanged 20-second request limit during
+the ordinary update. Settlement left no fixture tasks or processes. Prepare
+reusable full-history packs before installed effects, retain the same frozen
+objects and request bounds, and validate the correction. Another native attempt
+remains held until focused validation, fresh review and required CI pass; no
+update, survival or adoption pass is inferred.
+
+**Return:** after this bounded fixture slice, select the next unmet criterion
+from the complete Plan and global Validation Plan, retaining the addressed-suite,
+staging-barrier, managed-Python, lifetime and authorized-adoption obligations.
+
 ## Guiding Intent
 
 The [foreground-update/service-startup amendment](update-service-lifetimes.md)
@@ -1134,7 +1172,7 @@ owners, holds and rollout boundaries remain unchanged; technical acceptance
 stays open.
 
 - [2026-11-15 - Fast construction and bounded service cutoff reviewed](fast-construction-and-outgoing-cutoff.md#journal)
-- [2026-11-15 - Bounded Manager/Worktrees consumer qualification accepted](manager-worktrees-native-consumer.md#journal)
+- [2026-11-15 - Manager/Worktrees qualification accepted; selected-slot fixture prerequisite merged](manager-worktrees-native-consumer.md#journal)
 - [2026-11-13 - Foreground update and service-start lifetime clarification](journal/2026/11.13%20foreground-update-service-startup.md)
 
 - [2026-11-13 - Original canonical application integration merged](journal/2026/11.13%20canonical-application-integration.md)
