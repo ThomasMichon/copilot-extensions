@@ -181,8 +181,13 @@ class PendingCrawls(PollRefreshJournal):
                 row is not None and (row["scope"] != scope or row["payload"] != expected)
             ):
                 raise PendingCrawlConflict("Pending acquisition changed before progress publication")
-            if expected_components and data.get("version") != 8:
-                raise ValueError("Component pending work cannot be downgraded")
+            if expected_components:
+                if payload != expected:
+                    raise ValueError(
+                        "Component pending work cannot be downgraded or replaced "
+                        "before ordered completion"
+                    )
+                return
             if row is None:
                 conn.execute(
                     "INSERT INTO pending_crawls (source, scope, payload) VALUES (?, ?, ?)",

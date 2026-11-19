@@ -7,7 +7,7 @@ This is an **agent-recommended contract**. Shared typed-target intake now retain
 parked v2 claims with v1-only queue selection; component execution, application
 and read isolation remain unimplemented. The shared
 [component recovery carrier](../../../plugins/agent-index/docs/architecture.md#component-recovery-carrier-application-unsupported)
-retains per-mutation ordering inputs and refuses legacy downgrade, premature
+retains per-mutation ordering inputs and refuses changed replacement, premature
 completion and application. Pure version/content comparison supplies no durable
 applied-version or deletion proof. The
 [provider evidence matrix](azure-devops-acquisition.md#work-item-target-coverage-evidence)

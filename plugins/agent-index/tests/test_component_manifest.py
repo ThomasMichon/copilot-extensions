@@ -231,3 +231,35 @@ def test_component_parent_cannot_be_cleared_before_ordered_completion(
             journal.clear(manifest.source)
     reopened = PendingCrawls(PathIndex(tmp_path / "paths.db"))
     assert reopened.read_payload(manifest.source, "scope") == original
+
+
+def test_component_parent_allows_exact_retry_but_not_partial_v8_replacement(tmp_path: Path) -> None:
+    paths = PathIndex(tmp_path / "paths.db")
+    journal = PendingCrawls(paths)
+    manifest = component_manifest()
+    journal.save(manifest, scope="scope", full=False)
+    original = journal.read_payload(manifest.source, "scope")
+    assert original is not None
+    with closing(paths._connect()) as observer:
+        before = observer.execute("PRAGMA data_version").fetchone()[0]
+        journal.compare_and_save(
+            manifest.source, scope="scope", payload=original, expected=original,
+            family="sample:components",
+        )
+        assert observer.execute("PRAGMA data_version").fetchone()[0] == before
+    assert manifest.component_versions is not None
+    partial = replace(
+        manifest, deletions=[], component_versions=manifest.component_versions[:1],
+    )
+    replacement = json.dumps({
+        "version": 8, "full": False, "manifest": journal.manifest_data(partial),
+    })
+    assert journal.decode_pending(replacement, manifest.source) == (partial, False)
+    with pytest.raises(ValueError, match="before ordered completion"):
+        journal.compare_and_save(
+            manifest.source, scope="scope", payload=replacement, expected=original,
+            family="sample:components",
+        )
+    reopened = PendingCrawls(PathIndex(tmp_path / "paths.db"))
+    assert reopened.load(manifest.source, "scope") == (manifest, False)
+    assert reopened.read_payload(manifest.source, "scope") == original

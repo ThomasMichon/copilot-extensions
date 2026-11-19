@@ -146,8 +146,8 @@ After the reviewed proposal, the operator admitted execution:
   separates named target coverage from combined-document replacement (#13386);
   typed intake now retains parked v2 claims with v1-only dequeue isolation.
   A [retained component carrier](../../../plugins/agent-index/docs/architecture.md#component-recovery-carrier-application-unsupported)
-  preserves ordering inputs behind pre-application refusal, including legacy
-  downgrade and premature-completion refusal. Pure content/version comparison
+  preserves ordering inputs behind pre-application refusal, including changed
+  replacement and premature-completion refusal. Pure content/version comparison
   does not qualify durable application or deletion evidence. Representation,
   v2 execution, ordered application and read isolation remain unimplemented.
 - [ ] Persist acquisition progress so retry/restart does not restart a

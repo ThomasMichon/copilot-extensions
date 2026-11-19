@@ -1210,8 +1210,9 @@ the evidence without translating it into legacy work.
 
 Recovery and direct prepared/application entrypoints refuse these manifests
 before publication, embedding or store mutation. The pending owner also refuses
-v8-to-legacy replacement and premature completion in the same SQLite transaction
-that would change the parent; refusal retains the original payload.
+v8-to-legacy or changed-v8 replacement and premature completion in the same
+SQLite transaction that would change the parent; refusal retains the original
+payload. An identical v8 retry is accepted without rewriting the retained row.
 
 `ComponentContent.covered_by` is a pure ordering comparison, not stored evidence.
 It compares matching source/path identities, considers lower versions covered,

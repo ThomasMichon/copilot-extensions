@@ -1,5 +1,5 @@
 {
-  "comment": "Define component content ordering and preserve ordered pending work against legacy downgrade or premature completion; store application remains unsupported.",
+  "comment": "Define component content ordering and preserve acquired component work against replacement or premature completion; identical retries remain supported and store application remains unsupported.",
   "changes": [
     {
       "plugin": "agent-index",
