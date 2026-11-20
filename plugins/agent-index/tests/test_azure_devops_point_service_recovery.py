@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import closing
+from dataclasses import replace
 from typing import Any
 
 import httpx
@@ -16,6 +17,7 @@ from agent_index.indexing.component_application import PreparedComponentApplicat
 from agent_index.indexing.component_publication import reconcile_component_publication
 from agent_index.indexing.path_index import PathIndex
 from agent_index.indexing.pending_crawl import PendingCrawls
+from agent_index.indexing.point_hints import CommentVersionTarget, WorkItemRevisionTarget
 from agent_index.indexing.prepared_journal import PreparedJournal
 from agent_index.indexing.prepared_points import PreparedPoints
 from agent_index.indexing.source_ownership import source_writer
@@ -156,5 +158,69 @@ def test_reconstructed_service_does_not_infer_native_recovery(
         assert clients == ["open", "closed"] and f.connector._http.client.is_closed
         assert PendingCrawls(f.paths).read_payload(f.claim.hints.source, worker.SCOPE) is None
         assert f.config.state_file.read_bytes() == poll
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("deleted", [False, True])
+def test_http_superseded_claim_completes_and_retries_without_body_or_native_work(
+    application: worker.Fixture, monkeypatch: pytest.MonkeyPatch, deleted: bool,
+) -> None:
+    f = application
+    if deleted:
+        f.provider.comment = {"id": 5, "version": 2, "isDeleted": True}
+    original = f.run()
+    f.reopen()
+    before = worker._projection(f)
+    hints = replace(f.claim.hints, targets=(
+        WorkItemRevisionTarget("7", 1, ("older-first",)),
+        WorkItemRevisionTarget("7", 2, ("older-second",)),
+        CommentVersionTarget("7", "5", 1, ("older-comment",)),
+    ))
+    app, clients = runtime._point_service_app(f, monkeypatch)
+
+    async def exercise() -> None:
+        async with app.router.lifespan_context(app):
+            runner = app.state.task_runner
+            assert runner.point_service.status()["paused"] and clients == ["open"]
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app), base_url="http://fixture",
+            ) as client:
+                response = await client.post("/reindex/hints", json={
+                    "source": hints.source, "change_hints": hints.to_dict(),
+                })
+                assert response.status_code == 200 and response.json()["accepted"]
+                task_id = response.json()["task"]["id"]
+                assert runner.store.get_task(task_id) is None
+                await asyncio.sleep(2.1)
+                parked = await asyncio.to_thread(f.tasks.get_task, task_id)
+                assert parked is not None and parked.status == TaskStatus.QUEUED_HINTS_V2
+                assert not f.provider.requests and not f.calls
+                await runner.point_service.activate()
+                runner.notify()
+                await runtime._wait_point_state(lambda: bool(
+                    (task := f.tasks.get_task(task_id)) and task.status == TaskStatus.COMPLETE
+                ))
+                completed = await asyncio.to_thread(f.tasks.get_task, task_id)
+                assert completed is not None and completed.change_hints == hints
+                assert completed.result_stats is not None
+                outcome = completed.result_stats["point_completion"]
+                assert outcome["version"] == 2 and outcome["mode"] == "higher-covered"
+                assert f.provider.body_reads == 0 and not f.calls and len(f.provider.requests) == 2
+                assert await asyncio.to_thread(worker._projection, f) == before
+                assert await asyncio.to_thread(f.retained_count) == 0
+                assert await asyncio.to_thread(f.tasks.get_task, original.id) == original
+                assert 2 not in (await client.get("/health")).json()[
+                    "indexing_contract"
+                ]["execution_versions"]
+        assert clients == ["open", "closed"] and f.connector._http.client.is_closed
+        await asyncio.to_thread(f.reopen)
+        f.provider.selected = False
+        assert await asyncio.to_thread(
+            runtime.run, f, completed, expected_hints=hints, clients={},
+        ) == completed
+        assert not f.provider.requests and not f.calls
+        assert await asyncio.to_thread(worker._projection, f) == before
+        assert PendingCrawls(f.paths).read_payload(hints.source, worker.SCOPE) is None
 
     asyncio.run(exercise())
