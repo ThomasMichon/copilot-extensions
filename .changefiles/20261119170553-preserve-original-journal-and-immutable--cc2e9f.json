@@ -1,0 +1,13 @@
+{
+  "comment": "Preserve original journal and immutable live-cache reads during explicit terminal reader adoption.",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    },
+    {
+      "plugin": "services/pr",
+      "type": "patch"
+    }
+  ]
+}

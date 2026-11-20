@@ -33,6 +33,21 @@ provided. The optional read-only serving contract below does not adopt state
 or expose retirement as an HTTP/CLI operation. Installed reader/lifecycle
 transition and consumer qualification remain separate.
 
+The optional executing-core declaration
+`agent-pull-requests.retained-live-cache-adoption/v1` supports an existing-owner
+transition through that same adoption transaction. Its optional `retained_cache`
+and `retained_targets` inputs must be supplied together and retain the original
+root, namespace and service identity. Complete nonterminal generations are
+validated once under their cache lock and bound to the existing journal's open
+first epoch, without adding an observation or changing cache bytes. Adoption
+reserves the complete terminal-reader envelope before its first commit; explicit
+retry reconciles compatible partial metadata under the caller's original
+lifecycle/deadline. Active or compact operations, terminal/reopened histories and
+unsupported cache contents refuse unchanged. This API creates no serving,
+acquisition, recovery or cleanup authority. The standalone
+[retained-reader command](../../../services/pr/README.md#optional-terminal-read-hosting)
+owns host selection, finite admission and missing-core bootstrap compatibility.
+
 ## Optional executing read-only receiver
 
 A trusted embedding may construct `WorkspaceOperations(...,

@@ -1,4 +1,4 @@
-"""Optional terminal reader selection; lifecycle adoption is fresh-only."""
+"""Optional terminal reader selection and explicit existing-owner adoption."""
 
 from __future__ import annotations
 
@@ -49,11 +49,31 @@ def core() -> tuple[Any, Any, Any]:
         raise ValueError("selected terminal read core unsupported") from None
 
 
-def adopt(store: ReplayStore, checkpoint: Callable[[], None], expires_at: int) -> None:
-    for selected in core():
+def retained_cache_supported() -> bool:
+    """Unknown optional support keeps the existing bootstrap-only contract."""
+    try:
+        from agent_pull_requests.retained_live_cache import contract
+        return contract() == {
+            "protocol": "agent-pull-requests.retained-live-cache-adoption/v1",
+            "source": "original_first_epoch", "effects": "compatibility_metadata_only",
+        }
+    except (ImportError, AttributeError, TypeError, ValueError, RuntimeError):
+        return False
+
+
+def adopt(
+    store: ReplayStore, checkpoint: Callable[[], None], expires_at: int, *,
+    retained_cache: Any = None, retained_targets: list[dict[str, Any]] | None = None,
+) -> None:
+    for index, selected in enumerate(core()):
         checkpoint()
+        options = (
+            {"retained_cache": retained_cache, "retained_targets": retained_targets}
+            if index == 0 and retained_cache is not None else {}
+        )
         selected(store).adopt(
             lifecycle_checkpoint=checkpoint, expires_at=expires_at, checkpoint=checkpoint,
+            **options,
         )
     checkpoint()
 

@@ -123,7 +123,7 @@ probe followed by a legacy provisioning fallback.
 
 ## Serial delivery and acceptance
 
-- [ ] Review and then implement the [populated live-cache refinement](#populated-live-cache-refinement)
+- [x] Review and implement the [populated live-cache refinement](#populated-live-cache-refinement)
   before relaxing the bootstrap refusal. This does not admit operation recovery.
 - [x] Review this contract before implementing the command or changing retained
   host adoption (#13488; current-head Copilot approval and required green CI).
@@ -215,20 +215,20 @@ pre-transition executable still refuses expanded state without rewriting it.
 
 ### Finite acceptance
 
-- [ ] Land this refinement through normal plan review before changing runtime
-  eligibility or binding behavior.
-- [ ] Transition a populated baseline through the actual CLI, then serve current
+- [x] Land this refinement through normal plan review before changing runtime
+  eligibility or binding behavior (#13560; current-head approval and required CI).
+- [x] Transition a populated baseline through the actual CLI, then serve current
   and explicit noncurrent `lookup`/all `chunk` reads after a fresh-reader restart.
   Compare original descriptors, reconstructed bytes, pointers, journal/events,
   replay identities/deadlines/delivery positions and cache freshness.
-- [ ] Exercise the actual selected workspace `sync` comparison against a retained
+- [x] Exercise the actual selected workspace `sync` comparison against a retained
   generation, with new synthetic acquisition and existing CAS/epoch fences.
   Transition itself performs no acquisition, write, ACK or cache retirement.
-- [ ] Qualify missing/skewed core declarations, absent/closed/reopened conversations,
+- [x] Qualify missing/skewed core declarations, absent/closed/reopened conversations,
   unsupported operations/extensions, corrupt/dangling/staged objects, scopes,
   null pointers, capacity and deadline refusal. Original readers and bytes remain
   usable on refusal; no predicate is silently dropped.
-- [ ] Interrupt before and after each durable boundary, lose a replace result and
+- [x] Interrupt before and after each durable boundary, lose a replace result and
   explicitly retry under the same lease/budget contract. Prove complete recoverable
   envelopes, no duplicate events, exact binding continuity, competing-owner
   exclusion and old/new-reader rollback refusal.

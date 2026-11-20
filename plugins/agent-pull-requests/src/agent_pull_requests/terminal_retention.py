@@ -17,6 +17,7 @@ from .watch_replay import ConsumerScope, ObservationTarget, WatchReplay
 from .workspace_conversation import conversation_key
 
 if TYPE_CHECKING:
+    from .generation_cache import GenerationCache
     from .watch_replay_store import ReplayStore
 
 PROTOCOL = "agent-pull-requests.terminal-retention/v1"
@@ -383,9 +384,12 @@ class TerminalRetentionStore:
     def adopt(
         self, *, lifecycle_checkpoint: Callable[[], None], expires_at: int,
         checkpoint: Callable[[], None] | None = None, retention_bytes: int = 8 * 1024 * 1024,
+        retained_cache: GenerationCache | None = None, retained_targets: list[Document] | None = None,
     ) -> Document:
         if not callable(lifecycle_checkpoint):
             raise ValueError("actual reader lifecycle checkpoint required")
+        if (retained_cache is None) != (retained_targets is None):
+            raise ValueError("retained cache and original target bindings are required together")
 
         def current() -> None:
             if checkpoint is not None:
@@ -394,20 +398,40 @@ class TerminalRetentionStore:
 
         def adopt(document: Document) -> Document:
             lifecycle_checkpoint()
+            if retained_cache is not None and (
+                retained_cache.owner_root != self.owner.root
+                or retained_cache.expected_descriptor["namespace"] != document["namespace"]
+                or retained_cache.expected_descriptor["service"] != document["service"]
+            ):
+                raise ValueError("retained cache must belong to the original replay owner")
             if document["version"] not in (3, 4, 5, 6):
                 raise ValueError("terminal retention requires conversation adoption")
-            if "terminal_retention" in document:
+            adopted = "terminal_retention" in document
+            if adopted:
                 if document["capacities"]["terminal_retention_bytes"] != retention_bytes:
                     raise ValueError("terminal capacity differs from adopted layout")
-                return {"status": "already_adopted", "protocol": PROTOCOL}
-            document["terminal_retention_version"] = 1
-            document["terminal_retention"] = {
-                "protocol": PROTOCOL, "records": [], "generations": [], "admissions": [],
-            }
-            document["capacities"]["terminal_retention_bytes"] = retention_bytes
+            else:
+                document["terminal_retention_version"] = 1
+                document["terminal_retention"] = {
+                    "protocol": PROTOCOL, "records": [], "generations": [], "admissions": [],
+                }
+                document["capacities"]["terminal_retention_bytes"] = retention_bytes
+            if retained_cache is not None and retained_targets is not None:
+                from .retained_live_cache import bind
+                bind(document, retained_cache, retained_targets, current)
+                from .terminal_recovery import PROTOCOL as RECOVERY
+                from .terminal_cache_retirement import PROTOCOL as CACHE
+                complete = copy.deepcopy(document)
+                complete.setdefault("terminal_recovery_version", 1)
+                complete.setdefault("terminal_recovery", {"protocol": RECOVERY, "operations": []})
+                complete.setdefault("terminal_cache_retirement_version", 1)
+                complete.setdefault("terminal_cache_retirement", {"protocol": CACHE, "records": []})
+                if self.owner.terminal_comment_mapping:
+                    complete["terminal_comment_mapping_version"] = 1
+                self.owner._validate_owner(complete)
             self.owner._validate_owner(document)
             lifecycle_checkpoint()
-            return {"status": "adopted", "protocol": PROTOCOL}
+            return {"status": "already_adopted" if adopted else "adopted", "protocol": PROTOCOL}
 
         return self.owner._review_transaction(adopt, expires_at=expires_at, checkpoint=current)
 

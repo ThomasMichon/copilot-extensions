@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from collections.abc import Callable, Iterator
 import copy
 import json
 from pathlib import Path
 import re
 import stat
+from typing import Any
 
 from single_instance_lease import OperationLock
 
@@ -18,6 +20,7 @@ from .watch_storage import StateCommitUncertain, _atomic_write_json
 SCHEMA = "agent-pull-requests.generation-cache"
 POINTER_SCHEMA = "agent-pull-requests.generation-cache-current"
 MAX_POINTER_BYTES = 16384
+Document = dict[str, Any]
 
 
 class CacheUnavailable(RuntimeError):
@@ -63,8 +66,9 @@ class GenerationCache:
 
     def __init__(
         self, owner_root: Path, namespace: str, *, max_bytes: int, max_generations: int,
-        service_identity: ReplayServiceIdentity | None = None, checkpoint=None,
-    ):
+        service_identity: ReplayServiceIdentity | None = None,
+        checkpoint: Callable[[], None] | None = None,
+    ) -> None:
         self.owner_root = Path(owner_root)
         if (
             not self.owner_root.is_absolute() or self.owner_root.resolve() != self.owner_root
@@ -94,7 +98,7 @@ class GenerationCache:
         }
 
     @staticmethod
-    def contract() -> dict:
+    def contract() -> Document:
         """Executing component support, not store provisioning or authority."""
         return {
             "schema": "agent-pull-requests.generation-cache-contract", "version": 1,
@@ -104,13 +108,13 @@ class GenerationCache:
             "capacity_scope": "committed_cache_objects",
         }
 
-    def _check(self, lock=None):
+    def _check(self, lock: OperationLock | None = None) -> None:
         if lock is not None:
             lock.assert_owned()
         if self.checkpoint is not None:
             self.checkpoint()
 
-    def _read(self, path: Path, limit: int) -> dict:
+    def _read(self, path: Path, limit: int) -> Document:
         try:
             _plain(path)
             with path.open("rb") as stream:
@@ -121,7 +125,7 @@ class GenerationCache:
         except (FileNotFoundError, UnicodeError, RecursionError, ValueError):
             raise CacheInvalid("cache object is missing, malformed or unsafe") from None
 
-    def _existing(self):
+    def _existing(self) -> None:
         try:
             _plain(self.owner_root, directory=True)
             _plain(self.root, directory=True)
@@ -132,14 +136,15 @@ class GenerationCache:
                 _plain(path, directory=True)
             except FileNotFoundError:
                 raise CacheInvalid("cache directory is missing") from None
-        if any(path.name not in {"descriptor.json", "cache.lock", "generations", "targets"}
-               for path in self.root.iterdir()):
-            raise CacheInvalid("unexpected cache root entry")
+        for path in self.root.iterdir():
+            self._check()
+            if path.name not in {"descriptor.json", "cache.lock", "generations", "targets"}:
+                raise CacheInvalid("unexpected cache root entry")
         if self.lock_path.exists() or self.lock_path.is_symlink():
             _plain(self.lock_path)
 
     @contextmanager
-    def _transaction(self):
+    def _transaction(self) -> Iterator[OperationLock]:
         self._check()
         self._existing()
         with OperationLock(self.lock_path) as lock:
@@ -169,12 +174,14 @@ class GenerationCache:
             self._check(lock)
             _atomic_write_json(self.descriptor, self.expected_descriptor)
 
-    def _inventory(self, *, include_staging=False) -> tuple[list[Path], list[Path], int, list[Path]]:
+    def _inventory(self, *, include_staging: bool = False) -> tuple[list[Path], list[Path], int, list[Path]]:
         for path in self.root.iterdir():
             if path.name not in {"descriptor.json", "cache.lock", "generations", "targets"}:
                 raise CacheInvalid("unexpected cache root entry")
             _plain(path, directory=path.name in {"generations", "targets"})
-        generations, pointers, staging = [], [], []
+        generations: list[Path] = []
+        pointers: list[Path] = []
+        staging: list[Path] = []
         total = self.descriptor.stat().st_size
         for directory, output in ((self.generations, generations), (self.targets, pointers)):
             for path in directory.iterdir():
@@ -192,7 +199,7 @@ class GenerationCache:
                 total += path.stat().st_size
         return generations, pointers, total, staging
 
-    def _load_generation(self, identifier: str, scope: dict) -> dict:
+    def _load_generation(self, identifier: str, scope: Document) -> Document:
         value = self._read(self.generations / (_identifier(identifier) + ".json"), MAX_GENERATION_BYTES)
         try:
             _generation(value, scope)
@@ -202,7 +209,7 @@ class GenerationCache:
             raise CacheInvalid("cached generation filename does not match its content")
         return value
 
-    def _current(self, scope: dict) -> str | None:
+    def _current(self, scope: Document) -> str | None:
         path = self.targets / (_digest(scope) + ".json")
         if not path.exists() and not path.is_symlink():
             return None
@@ -226,7 +233,7 @@ class GenerationCache:
         self._load_generation(identifier, scope)
         return identifier
 
-    def lookup(self, scope: dict, *, generation_id: str | None = None) -> dict:
+    def lookup(self, scope: Document, *, generation_id: str | None = None) -> Document:
         scope = _scope(scope)
         if generation_id is not None:
             _identifier(generation_id)
@@ -245,12 +252,69 @@ class GenerationCache:
                 "current_id": current, "freshness": "retained", "effects": "none",
             }
 
-    def _retire_scope(self, scope, progress, *, capture, checkpoint):
+    def inspect_retained(
+        self, visit: Callable[[Document], None], visit_pointer: Callable[[Document], None],
+    ) -> None:
+        """Validate committed cache objects once under the original finite owner."""
+        with self._transaction() as lock:
+            total = self.descriptor.stat().st_size
+            scopes: dict[str, Document] = {}
+            if total > self.max_bytes:
+                raise CacheFull("retained cache exceeds its configured capacity")
+            for path in self.generations.iterdir():
+                self._check(lock)
+                _plain(path)
+                if path.suffix != ".json":
+                    raise CacheInvalid("unexpected cache object name")
+                identity = _identifier(path.stem)
+                if len(scopes) >= self.max_generations:
+                    raise CacheFull("retained cache exceeds its generation capacity")
+                total += path.stat().st_size
+                if total > self.max_bytes:
+                    raise CacheFull("retained cache exceeds its configured capacity")
+                generation = self._read(path, MAX_GENERATION_BYTES)
+                scope = _scope(generation.get("scope"))
+                _generation(generation, scope)
+                if generation["id"] != identity:
+                    raise CacheInvalid("cached generation filename does not match its content")
+                scopes[identity] = scope
+                visit(generation)
+                self._check(lock)
+            for path in self.targets.iterdir():
+                self._check(lock)
+                _plain(path)
+                if path.suffix != ".json":
+                    raise CacheInvalid("unexpected cache object name")
+                _identifier(path.stem)
+                total += path.stat().st_size
+                if total > self.max_bytes:
+                    raise CacheFull("retained cache exceeds its configured capacity")
+                pointer = self._read(path, MAX_POINTER_BYTES)
+                scope = _scope(pointer.get("scope"))
+                if (
+                    set(pointer) != {"schema", "version", "scope", "generation_id"}
+                    or pointer["schema"] != POINTER_SCHEMA or type(pointer["version"]) is not int
+                    or pointer["version"] != 1 or scope != pointer["scope"]
+                    or path.stem != _digest(scope)
+                ):
+                    raise CacheInvalid("cache pointer does not match its scope")
+                selected = pointer["generation_id"]
+                if selected is not None and scopes.get(_identifier(selected)) != scope:
+                    raise CacheInvalid("cache pointer references an unavailable generation")
+                visit_pointer(pointer)
+                self._check(lock)
+            self._check(lock)
+
+    def _retire_scope(
+        self, scope: Document, progress: Document | None, *,
+        capture: Callable[[list[str], str | None], Document], checkpoint: Callable[[], None],
+    ) -> Document:
         """Internal lifecycle-owned retirement, never a cache repair operation."""
         from .generation_retirement import retire_scope
-        return retire_scope(self, scope, progress, capture=capture, checkpoint=checkpoint)
+        result: Document = retire_scope(self, scope, progress, capture=capture, checkpoint=checkpoint)
+        return result
 
-    def publish(self, generation: dict, *, expected_current: str | None) -> dict:
+    def publish(self, generation: Document, *, expected_current: str | None) -> Document:
         """CAS one target; contention retains the existing OperationLock error."""
         if not isinstance(generation, dict):
             raise ValueError("publication requires a generation object")
@@ -268,7 +332,9 @@ class GenerationCache:
         with self._transaction() as lock:
             current = self._current(scope)
 
-            def outcome(status, *, visible=current, stage=None):
+            def outcome(
+                status: str, *, visible: str | None = current, stage: str | None = None,
+            ) -> Document:
                 return {
                     "schema": "agent-pull-requests.generation-cache-publication", "version": 1,
                     "status": status, "observed_generation_id": identifier,
@@ -296,7 +362,7 @@ class GenerationCache:
             if len(generations) + (0 if existing else 1) > self.max_generations or projected > self.max_bytes:
                 return outcome("full")
 
-            def write(path, value, stage):
+            def write(path: Path, value: Document, stage: str) -> Document | None:
                 try:
                     _atomic_write_json(path, value)
                 except StateCommitUncertain:

@@ -31,7 +31,7 @@ def _validate_cache(cache: GenerationCache, checkpoint: Callable[[], None]) -> N
 
 
 def adopt(config: HostConfig) -> None:
-    """Bootstrap an eligible owner without excluding readers of retained work."""
+    """Adopt eligible retained work without losing its original usable reader."""
     workspace = config.workspaces
     if workspace is None or not workspace.terminal_targets:
         raise ValueError("retained transition requires explicit terminal workspace selection")
@@ -53,6 +53,7 @@ def adopt(config: HostConfig) -> None:
     ):
         raise ValueError("retained transition requires an existing owner volume")
     mapping = terminal.mapping_core() if workspace.terminal_mapping_reads else None
+    retained = terminal.retained_cache_supported()
     lease = SingleInstance(config.root, service="agent-pull-requests-watch")
     if lease.lock_path.exists() or lease.lock_path.is_symlink():
         _plain(lease.lock_path)
@@ -73,10 +74,10 @@ def adopt(config: HostConfig) -> None:
         if document.get("terminal_recovery", {}).get("operations"):
             raise ValueError("compact recovery operations require their original recovery reader")
         if any(document.get("terminal_retention", {}).get(name) for name in (
-            "records", "generations", "admissions",
+            ("records",) if retained else ("records", "generations", "admissions")
         )):
             raise ValueError("populated terminal state requires its original lifecycle transition")
-        if document["conversations"]["records"]:
+        if not retained and document["conversations"]["records"]:
             raise ValueError("retained conversations require their original lifecycle transition")
         admitted = [vars(binding.scope) for binding in config.bindings]
         for record in document["replay"]["records"]:
@@ -99,8 +100,17 @@ def adopt(config: HostConfig) -> None:
         )
         cache = workspace.cache(store)
         cache.checkpoint = lifecycle
-        _validate_cache(cache, lifecycle)
-        terminal.adopt(store, lifecycle, expires_at)
+        if retained:
+            terminal.adopt(
+                store, lifecycle, expires_at, retained_cache=cache,
+                retained_targets=[
+                    {"scope": scope, "account": account, "repo": repo}
+                    for (account, repo), scope in scopes.items()
+                ],
+            )
+        else:
+            _validate_cache(cache, lifecycle)
+            terminal.adopt(store, lifecycle, expires_at)
         if mapping is not None:
             mapping(store).adopt(
                 lifecycle_checkpoint=lifecycle, expires_at=expires_at, checkpoint=lifecycle,
