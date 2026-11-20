@@ -1316,6 +1316,18 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The [Windows fixture and native-profile unit](journal/2026/11.20-windows-fixture-and-profile-receiving.md)
+records #13611's actual reviewed delivery and parent return, complete current
+receiving readback and two separately audited redundant-tracking retirements
+of #11995/#12111. All eleven earlier technical rows and the OPEN keepers remain.
+Four complete finite fixture/profile families are proposed directly in the
+existing Portfolio Phase 4/5 waves through Phase 7; all twenty-three new
+technical rows remain unchecked. Ten other complete outcomes preserve actual
+claimants, combined keepers, source/copy gaps and live-consumer boundaries.
+No implementation, native/hosted test, changed policy or resource effect is
+claimed. The complete 05:47:50 UTC census is 901 whole open, 172 above fixed
+729; two arrivals offset the two retirements and every parent gate remains.
+
 The [native-readiness and Vault boundary audit](journal/2026/11.19-native-readiness-and-vault-boundaries.md)
 records #13456's reviewed delivery and parent return, the whole finite #13020
 source completion through #13027, and distinct #12900/#12920 adoption/context
