@@ -328,7 +328,7 @@ def _compact_terminal_mapping(
             checkpoint=current, deadline=deadline, lifecycle_checkpoint=current,
         )
         assert not list(operations.cache.generations.glob("*.json"))
-        return cast(dict[str, Any], result)
+        return result
 
 
 @pytest.mark.parametrize("workspace_enabled,preparation_enabled,missing_preparer,mapping_enabled,terminal_enabled,terminal_mapping_enabled,terminal_state", [
