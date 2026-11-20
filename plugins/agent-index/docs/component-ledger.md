@@ -574,6 +574,22 @@ point executor. That context owns the configured connector and all model
 clients, and remains entered until native dispatch and runner shutdown settle.
 No callback or new configuration form is serialized.
 
+`sources.azure_devops_point_executor.configured_azure_devops_point_executor(...)`
+supplies that context for the configured Azure DevOps caller. Pass the explicit
+configuration, legacy directory, point scope, query/recovery scope, finite
+`max_rows`, fresh `create_connector` factory and `EmbeddingRuntime`. Entry
+opens owned connector/model clients off-loop, closes partial construction on
+failure, and joins opening/cleanup even if the caller is cancelled. Borrowed
+connector HTTP clients are refused without closing them. Existing direct
+`run_configured_azure_devops_points(...)` callers keep owning their resources.
+Opening does not fetch provider data, register models in a native store or
+request engine readiness. Readiness runs once per needed model in each execution,
+immediately before actual missing embeddings, so an engine that expires between
+tasks is prepared again when needed. Exit stops only engines reported as started
+by this context, once per model, then closes its clients. Higher-covered execution
+still qualifies provider eligibility but acquires no bodies and requests no model
+work; a completed-task retry stays entirely local.
+
 The point state must already exist in its selected directory, wholly disjoint
 from the legacy runner's directory. Invalid explicit configuration fails startup
 or promotion instead of silently falling back to legacy execution. There is no

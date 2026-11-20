@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Callable
-from contextlib import asynccontextmanager, suppress
+from collections.abc import Callable
+from contextlib import AbstractAsyncContextManager, suppress
+from contextvars import ContextVar
 from dataclasses import replace
 from pathlib import Path
 import threading
@@ -14,14 +15,19 @@ import httpx
 import pytest
 
 import test_azure_devops_point_worker as worker
+import test_azure_devops_points as named
 
 from agent_index.engine.client import EngineClient
+from agent_index.index_config import ModelProfile
+from agent_index.indexing.embedding_runtime import EmbeddingRuntime
 from agent_index.indexing.point_hints import WorkItemRevisionTarget
 from agent_index.indexing.point_queue_consumer import PointQueueConsumer
 from agent_index.indexing.point_service import PointExecutor, PointService
 from agent_index.indexing.point_worker_host import PointWorkerHost
 from agent_index.indexing.task_store import TaskRecord, TaskStatus, TaskStore
 from agent_index.indexing.worker import run_worker
+from agent_index.sources.azure_devops import AzureDevOpsConnector
+from agent_index.sources.azure_devops_point_executor import configured_azure_devops_point_executor
 from agent_index.sources.azure_devops_point_runtime import run_configured_azure_devops_points
 from agent_index.store.source_layout import SourceLayoutError
 
@@ -44,8 +50,52 @@ def run(f: worker.Fixture, task: TaskRecord, **kwargs: Any) -> TaskRecord:
     return run_configured_azure_devops_points(f.connector, task.id, **(options | kwargs))
 
 
+def _owned_executor_context(
+    f: worker.Fixture, lifetime: list[str], events: list[tuple[str, str]],
+    *, embedding_runtime: EmbeddingRuntime | None = None,
+) -> AbstractAsyncContextManager[PointExecutor]:
+    class Transport(httpx.MockTransport):
+        def close(self) -> None:
+            super().close()
+            lifetime.append("closed")
+
+    def create_connector() -> AzureDevOpsConnector:
+        lifetime.append("open")
+        f.connector = AzureDevOpsConnector(
+            "ado:acme/widgets", token="fixture-token", min_interval_s=0,
+            work_item_queries=[{"wiql": named._QUERY}], pull_request_queries=[],
+            transport=Transport(f.provider.handle),
+        )
+        f.connector._http._max_retries = 0
+        return f.connector
+
+    class Client(worker.Client):
+        def embed_texts(self, texts: list[str]) -> Any:
+            assert lifetime == ["open"] and not f.connector._http.client.is_closed
+            assert ("ensure", self.model) in events
+            return super().embed_texts(texts)
+
+        def close(self) -> None:
+            events.append(("close", self.model))
+
+    def ensure(profile: ModelProfile, _: EngineClient) -> bool:
+        events.append(("ensure", profile.model_id))
+        return profile.model_id == "first"
+
+    runtime = embedding_runtime or EmbeddingRuntime(
+        lambda profile: cast(EngineClient, Client(f, profile.model_id)),
+        ensure, lambda profile: events.append(("stop", profile.model_id)),
+    )
+    return configured_azure_devops_point_executor(
+        config=f.config, legacy_data_dir=f.config.data_dir.parent / "legacy",
+        point_scope=f.claim.hints.scope, scope=worker.SCOPE, max_rows=32,
+        create_connector=create_connector, embedding_runtime=runtime,
+    )
+
+
 def _point_service_app(
     f: worker.Fixture, monkeypatch: pytest.MonkeyPatch, *, passive: bool = False,
+    model_events: list[tuple[str, str]] | None = None,
 ) -> tuple[FastAPI, list[str]]:
     pytest.importorskip("fastapi")
     from agent_index import server
@@ -69,28 +119,13 @@ def _point_service_app(
     monkeypatch.setattr(server, "_create_task_runner", create)
     monkeypatch.setattr(TaskRunner, "_spawn_worker", no_spawn)
     lifetime: list[str] = []
-
-    @asynccontextmanager
-    async def executor_context() -> AsyncIterator[PointExecutor]:
-        lifetime.append("open")
-        clients = {
-            model: cast(EngineClient, worker.Client(f, model)) for model in f.config.model_profiles
-        }
-
-        def execute(task: TaskRecord) -> TaskRecord:
-            assert lifetime == ["open"] and not f.connector._http.client.is_closed
-            return run(f, task, expected_hints=task.change_hints, clients=clients)
-
-        try:
-            yield execute
-        finally:
-            f.connector._http.client.close()
-            lifetime.append("closed")
+    events = model_events if model_events is not None else []
 
     return server.build_app(
         passive=passive,
         point_service_factory=lambda: PointService(
-            config=f.config, point_scope=f.claim.hints.scope, executor_context=executor_context,
+            config=f.config, point_scope=f.claim.hints.scope,
+            executor_context=lambda: _owned_executor_context(f, lifetime, events),
         ),
     ), lifetime
 
@@ -100,6 +135,130 @@ async def _wait_point_state(predicate: Callable[[], bool]) -> None:
     while not await asyncio.to_thread(predicate):
         assert asyncio.get_running_loop().time() < deadline, "point service did not settle"
         await asyncio.sleep(0.01)
+
+
+@pytest.mark.parametrize("phase", ["opening", "closing"])
+@pytest.mark.parametrize("cancelled_owner", ["caller", "loop"])
+def test_owned_executor_cancelled_open_and_close_join_resource_cleanup(
+    application: worker.Fixture, phase: str, cancelled_owner: str,
+) -> None:
+    f = application
+    entered, release = threading.Event(), threading.Event()
+    closed: list[str] = []
+    selection: ContextVar[str] = ContextVar("executor_selection", default="unselected")
+
+    def block() -> None:
+        entered.set()
+        assert release.wait(timeout=8)
+
+    class Transport(httpx.MockTransport):
+        def close(self) -> None:
+            assert selection.get() == "selected"
+            if phase == "closing":
+                block()
+            super().close()
+            closed.append("connector")
+
+    def create_connector() -> AzureDevOpsConnector:
+        assert selection.get() == "selected"
+        connector = AzureDevOpsConnector(
+            "ado:acme/widgets", token="fixture-token", min_interval_s=0,
+            work_item_queries=[{"wiql": named._QUERY}], pull_request_queries=[],
+            transport=Transport(f.provider.handle),
+        )
+        if phase == "opening":
+            block()
+        return connector
+
+    class Client(worker.Client):
+        def close(self) -> None:
+            closed.append(self.model)
+
+    def no_readiness(*_: Any) -> Any:
+        pytest.fail("inert context must not ensure or stop engines")
+
+    async def use() -> None:
+        selection.set("selected")
+        async with configured_azure_devops_point_executor(
+            config=f.config, legacy_data_dir=f.config.data_dir.parent / "legacy",
+            point_scope=f.claim.hints.scope, scope=worker.SCOPE, max_rows=32,
+            create_connector=create_connector,
+            embedding_runtime=EmbeddingRuntime(
+                lambda profile: cast(EngineClient, Client(f, profile.model_id)),
+                no_readiness, no_readiness,
+            ),
+        ):
+            assert not f.provider.requests and not f.calls
+
+    async def exercise() -> None:
+        task = asyncio.create_task(use())
+        try:
+            assert await asyncio.to_thread(entered.wait, 5)
+            for _ in range(2):
+                if cancelled_owner == "loop":
+                    for owned in asyncio.all_tasks():
+                        if owned is not asyncio.current_task():
+                            owned.cancel()
+                else:
+                    task.cancel()
+                await asyncio.sleep(0.02)
+                assert not task.done()
+        finally:
+            release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert closed == ["second", "first", "connector"]
+        assert not f.provider.requests and not f.calls
+
+    asyncio.run(exercise())
+
+
+def test_owned_executor_rechecks_expired_engines_for_a_second_missing_target(
+    application: worker.Fixture,
+) -> None:
+    f = application
+    available = {model: False for model in f.config.model_profiles}
+    ensured: list[str] = []
+    stopped: list[str] = []
+    closed: list[str] = []
+    lifetime: list[str] = []
+
+    class Client(worker.Client):
+        def embed_texts(self, texts: list[str]) -> Any:
+            assert available[self.model], "expired engine was not prepared again"
+            return super().embed_texts(texts)
+
+        def close(self) -> None:
+            closed.append(self.model)
+
+    def ensure(profile: ModelProfile, _: EngineClient) -> bool:
+        model = profile.model_id
+        ensured.append(model)
+        started = not available[model]
+        available[model] = True
+        return started
+
+    async def exercise() -> None:
+        async with _owned_executor_context(
+            f, lifetime, [], embedding_runtime=EmbeddingRuntime(
+                lambda profile: cast(EngineClient, Client(f, profile.model_id)),
+                ensure, lambda profile: stopped.append(profile.model_id),
+            ),
+        ) as execute:
+            for target in f.claim.hints.targets:
+                task = f.tasks.enqueue(
+                    f.claim.hints.source, change_hints=replace(f.claim.hints, targets=(target,)),
+                )
+                completed = await asyncio.to_thread(execute, task)
+                assert isinstance(completed, TaskRecord) and completed.status == TaskStatus.COMPLETE
+                assert all(available.values()) and not stopped and not closed
+                for model in available:
+                    available[model] = False
+            assert ensured == ["first", "second", "first", "second"]
+        assert sorted(stopped) == sorted(closed) == ["first", "second"]
+        assert lifetime == ["open", "closed"] and f.provider.body_reads == 2
+
+    asyncio.run(exercise())
 
 
 def test_selected_service_refuses_legacy_overlap_before_opening_clients(
@@ -122,7 +281,8 @@ def test_service_promotes_inert_binding_and_routes_only_exact_point_intake(
     application: worker.Fixture, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     f = application
-    app, lifetime = _point_service_app(f, monkeypatch, passive=True)
+    events: list[tuple[str, str]] = []
+    app, lifetime = _point_service_app(f, monkeypatch, passive=True, model_events=events)
     other_hints = replace(f.claim.hints, account_id="another-account")
 
     async def exercise() -> None:
@@ -136,6 +296,7 @@ def test_service_promotes_inert_binding_and_routes_only_exact_point_intake(
                 assert (await client.post("/promote")).json()["promoted"]
                 runner = app.state.task_runner
                 assert lifetime == ["open"] and runner.point_service.status()["paused"]
+                assert events == []
                 assert 2 not in (await client.get("/health")).json()[
                     "indexing_contract"
                 ]["execution_versions"]
@@ -162,6 +323,9 @@ def test_service_promotes_inert_binding_and_routes_only_exact_point_intake(
                 assert unselected is not None and unselected.status == TaskStatus.QUEUED_HINTS_V2
                 assert f.provider.body_reads == 4
         assert lifetime == ["open", "closed"] and f.connector._http.client.is_closed
+        assert events.count(("ensure", "first")) == events.count(("ensure", "second")) == 1
+        assert [model for action, model in events if action == "stop"] == ["first"]
+        assert sorted(model for action, model in events if action == "close") == ["first", "second"]
 
     asyncio.run(exercise())
 
@@ -169,12 +333,20 @@ def test_service_promotes_inert_binding_and_routes_only_exact_point_intake(
 def test_service_rechecks_governance_after_blocked_point_selection(
     application: worker.Fixture, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from agent_index.indexing.runner import TaskRunner
+
     f = application
     app, lifetime = _point_service_app(f, monkeypatch)
     entered, release = threading.Event(), threading.Event()
     select = TaskStore.next_point_task
     original = f.tasks.get_task(f.claim.task_id)
     governance = {"status": "ready"}
+    waiting = asyncio.Event()
+    wait_for_wake = TaskRunner._wait_for_wake
+
+    async def observe_wait(self: TaskRunner, timeout: float) -> None:
+        waiting.set()
+        await wait_for_wake(self, timeout)
 
     def blocked_select(self: TaskStore, **kwargs: Any) -> TaskRecord | None:
         selected = select(self, **kwargs)
@@ -184,6 +356,7 @@ def test_service_rechecks_governance_after_blocked_point_selection(
         return selected
 
     monkeypatch.setattr(TaskStore, "next_point_task", blocked_select)
+    monkeypatch.setattr(TaskRunner, "_wait_for_wake", observe_wait)
 
     async def exercise() -> None:
         async with app.router.lifespan_context(app):
@@ -204,6 +377,7 @@ def test_service_rechecks_governance_after_blocked_point_selection(
                 assert f.tasks.get_task(f.claim.task_id) == original
                 assert not f.provider.requests and not f.calls
                 assert not runner.point_service.status()["failed"] and lifetime == ["open"]
+                await asyncio.wait_for(waiting.wait(), timeout=8)
                 governance["status"] = "ready"
                 runner.notify()
                 await _wait_point_state(lambda: bool(
