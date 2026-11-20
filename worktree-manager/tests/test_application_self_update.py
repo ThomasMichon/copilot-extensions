@@ -593,6 +593,22 @@ def test_packaged_footprint_producer_composes_without_checkout_tool_imports(tmp_
     )
     assert profile.returncode == 0, profile.stdout + profile.stderr
     assert "--application-components" in profile.stdout
+    closed = subprocess.run(
+        [
+            sys.executable, "-I", "-B", "-c",
+            "import sys; from pathlib import Path; "
+            "sys.path.insert(0,sys.argv[1]); import local_install_closed_wheels as owner; "
+            "assert Path(owner.__file__).parent == Path(sys.argv[1]); "
+            "assert owner.CONTRACT == {"
+            "'schema':'copilot-extensions.closed-wheel-source-preparation','version':1}; "
+            "assert 'closed-wheel-source/v1' in "
+            "owner.profiles.source_inputs.APPLICATION_INSTALL_CAPABILITIES",
+            str(bundle / "tools"),
+        ],
+        capture_output=True, text=True, timeout=30, cwd=tmp_path,
+        **no_window_kwargs(),
+    )
+    assert closed.returncode == 0, closed.stdout + closed.stderr
     assert not list(bundle.rglob("*.pyc"))
 
 

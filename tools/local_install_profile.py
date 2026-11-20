@@ -288,11 +288,16 @@ def _write_snapshot(
     component = selected.identity.plugin
     relative = "source/worktree-manager" if component == "worktree-manager" else selected.project["payload"]
     payload = prepared / relative
-    packages = engine._package_roots(selected.payload)
+    packages = engine._package_roots(
+        selected.payload, **({"closed_wheels": True} if selected.closed_wheel_source else {}),
+    )
     common = Path(os.path.commonpath(packages))
     layout = selected.payload.relative_to(common)
     payload_destination = payload.parents[len(layout.parts) - 1] if layout.parts else payload
-    frozen = engine.freeze_inputs(selected.payload, payload_destination, deadline=deadline)
+    frozen = engine.freeze_inputs(
+        selected.payload, payload_destination, deadline=deadline,
+        closed_wheel_source=selected.closed_wheel_source,
+    )
     if frozen.plugin != payload:
         raise ProfileError("prepared project payload does not match its selected layout")
     if sources.read_source_identity(
@@ -342,9 +347,9 @@ def _write_snapshot(
             primary, extras=tuple(construction["extras"]), metadata=project_metadata,
         )
         emit(
-            application, distribution=metadata["name"], version=metadata["version"],
+            application, distribution=canonicalize_name(metadata["name"]), version=metadata["version"],
             requires_python=f">={environment['python_full_version']},<{major}.{int(minor) + 1}",
-            commands=commands, setup=setup, start=start,
+            commands=commands, primary=primary, setup=setup, start=start,
             callback_timeout_seconds=project_metadata.get("tool", {}).get(
                 "copilot-extensions", {},
             ).get("application", {}).get("callback_timeout_seconds"),
@@ -371,6 +376,8 @@ def _write_snapshot(
 
 
 def _lock_application(application: Path, *, uv: str, deadline: float) -> None:
+    from source_preparation_process import run
+
     isolated = {
         key: value for key, value in os.environ.items()
         if key not in {
@@ -384,10 +391,10 @@ def _lock_application(application: Path, *, uv: str, deadline: float) -> None:
         project = str(application)
         project = "\\\\" + project[8:] if project.startswith("\\\\?\\UNC\\") else project.removeprefix("\\\\?\\")
         command.extend(["--project", project])
-    result = subprocess.run(
+    result = run(
         command, cwd=Path(application.anchor) if os.name == "nt" else application,
         env=isolated, capture_output=True, text=True,
-        timeout=max(0.1, deadline - time.monotonic()), creationflags=_HEADLESS,
+        deadline=deadline,
     )
     if result.returncode:
         raise ProfileError(f"application uv lock failed: {result.stderr}")
