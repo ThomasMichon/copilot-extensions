@@ -1,26 +1,27 @@
 <#
 .SYNOPSIS
-    OPTIONAL psmux keystroke-passthrough keybinds (Windows). Opt-in.
+    OPTIONAL host-wide PSMux passthrough tuning (Windows). Opt-in.
 
 .DESCRIPTION
-    These settings cannot be scoped to a single psmux session: the prefix and
-    the keystroke-passthrough root key table (there is no per-session key table)
-    are server-global. Applying them automatically would leak onto your personal
-    / ad-hoc psmux sessions, so agent-worktrees does NOT apply them for you, and
-    its installer never owns ~/.psmux.conf. Run this yourself -- once per machine,
-    or from a machine-restore flow -- if you want the keystroke-passthrough
-    behavior the worktree panes were designed around.
+    Ordinary worktree create/join applies passthrough automatically to its
+    private PSMux server through session-options.ps1. This optional helper is
+    different: invoke it deliberately to persist user-level defaults and apply
+    the sibling fragment to EVERY listed live session's server, including
+    personal/ad-hoc sessions. Prefix and root key tables are server-global;
+    a private worktree server contains their scope.
 
     By default this is a ONE-TIME action: it persists a clearly-marked managed
     block in ~/.psmux.conf (read by psmux at server startup, so it survives
     server restarts) AND applies the same settings to the running server. The
     block is the ONLY thing it manages in that file -- the rest is left
-    untouched, and deleting the marked block removes the settings. Re-running is
-    idempotent. Pass -NoPersist to only tune the running server.
+    untouched. Deleting the marked block removes persisted defaults, not settings
+    already applied to live servers. Re-running is idempotent. Pass -NoPersist
+    to tune live servers without writing the file.
 
-    The per-session status bar + behaviors are applied automatically by the
-    launcher (see session-options.ps1); this script is only the server-global
-    part. Mirrors the Linux/WSL apply-mux-keybinds.sh.
+    Wheel input uses PSMux's native mouse handling, not tmux mouse-key binds.
+    The receiving application must satisfy the target's mouse capability
+    rules; see plugins/agent-worktrees/docs/mux.md in the source repository.
+    Ordinary tmux keeps its own opt-in apply-mux-keybinds.sh mechanism.
 
 .PARAMETER NoPersist
     Tune the running psmux server only; do not write ~/.psmux.conf.
@@ -46,13 +47,13 @@ $BlockBody = @'
 # these by running that script. Delete this whole block (markers included) to
 # remove them, or re-run the script to refresh it.
 #
-# Opt-in intercept: every unprefixed key/mouse event passes straight through to
-# the inner application; only the prefix (Ctrl+B) is intercepted by psmux.
+# Only the prefix (Ctrl+B) is intercepted; unbound keys reach the application.
 set -g prefix C-b
 unbind-key -a -T root
-# Re-add mouse-wheel passthrough (cleared by the unbind above).
-bind-key -T root WheelUpPane   send-keys -M
-bind-key -T root WheelDownPane send-keys -M
+# PSMux handles wheel events natively, independently of the root key table.
+# Its application-capability gate decides forwarding versus scrollback.
+set -g mouse on
+set -g scroll-enter-copy-mode off
 # Disable Windows Ctrl+V paste interception (psmux fires this outside the key
 # binding system, so clearing the root table alone does not stop it).
 set -g paste-detection off

@@ -55,7 +55,7 @@ def test_membership_is_exact_and_full_retains_every_parameter(
     changed = [node.replace("[case-", "[changed-") for node in original]
     assert membership_digest(mapping) != membership_digest(membership(changed))
     assert sum(PARAMETER_COUNTS.values()) == (
-        236 + 6 + 18 + 7 + 46 + 3 + 10 + 28 + 6 + 21 + 3 + 1 + 2 + 1 + 8
+        236 + 7 + 18 + 7 + 46 + 3 + 10 + 28 + 6 + 21 + 3 + 1 + 2 + 1 + 8
         + 10 + 4 + 11 + 10 + 9 + 14 + 2 + 6 + 14 + 2 + 8 + 4 + 8 + 2 + 4 + 1
     )
     for profile in ("acceptance", "full"):

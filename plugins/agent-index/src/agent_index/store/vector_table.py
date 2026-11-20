@@ -13,6 +13,7 @@ import time
 from contextlib import nullcontext
 from dataclasses import dataclass
 from importlib import import_module
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
@@ -112,12 +113,12 @@ class VectorTable:
                 "Bounded vector provenance requires a participating source store",
             )
         self._validate(chunks, vectors)
-        if not chunks:
-            return 0
         if len({chunk.chunk_id for chunk in chunks}) != len(chunks):
             raise ValueError("Bounded vector provenance requires unique chunk IDs")
         content = ContentStore(domain.path, table_name=self._content_table)
         with domain.read(self._db):
+            if not chunks:
+                return 0
             projection_records(
                 self._db, self._content_table, chunks, bounded_content=content,
                 require_current_input=bounded_input,
@@ -134,6 +135,60 @@ class VectorTable:
             else:
                 return self._write_vectors(chunks, vectors, canonical=canonical)
         raise refusal
+
+    def preflight_point_upsert(
+        self, chunks: list[Chunk], vectors: np.ndarray[Any, Any], *,
+        point_scope: PointScope | None,
+    ) -> dict[str, dict[str, Any]]:
+        """Read current canonical input only; never authorize or execute a point write."""
+        from .content_store import ContentStore
+        from .source_projection import projection_records
+
+        domain = self._source_domain
+        if point_scope is None or domain is None or not domain.writing:
+            raise SourceLayoutError("Point vector preflight requires the owning source writer and scope")
+        with domain.read(self._db, point_scope=point_scope):
+            if any(chunk.source != point_scope[1] for chunk in chunks):
+                raise SourceLayoutError("Vector input is outside its selected family")
+            self._validate(chunks, vectors)
+            if len({chunk.chunk_id for chunk in chunks}) != len(chunks):
+                raise ValueError("Point vector preflight requires unique chunk IDs")
+            canonical_table = self._require_point_binding(reserve_segment=bool(chunks))
+            content = ContentStore(
+                domain.path, table_name=self._content_table, point_scope=point_scope,
+            )
+            content._table = canonical_table
+            return projection_records(
+                self._db, self._content_table, chunks, bounded_content=content,
+                require_current_input=True, point_scope=point_scope,
+            )
+
+    def _require_point_binding(self, *, reserve_segment: bool) -> Any:
+        from .content_store import _CONTENT_SCHEMA
+        from .scalar_index import MAX_SEGMENTS, ScalarIndexPreparationRequired, inspect_index, require_budget
+
+        domain = self._source_domain
+        assert domain is not None
+        for db in (self._db, getattr(domain._local, "db", None)):
+            uri = getattr(db, "uri", None)
+            if not isinstance(uri, (str, Path)) or Path(uri).resolve() != domain.path.resolve():
+                raise SourceLayoutError("Point vector connection differs from its owning source writer")
+        names = {self._table_name, self._content_table}
+        if (len(names) != 2 or not names <= set(self._db.list_tables().tables)
+                or not names <= domain.receipt()["versions"].keys()):
+            raise SourceLayoutError("Point vectors require distinct prepared content and vector tables")
+        canonical = self._db.open_table(self._content_table)
+        vector = self._db.open_table(self._table_name)
+        if (not canonical.schema.equals(_CONTENT_SCHEMA)
+                or not vector.schema.equals(self._schema)):
+            raise SourceLayoutError("Point vector content or model schema is incompatible")
+        state, _ = inspect_index(vector, column="chunk_id")
+        if not state.prepared:
+            raise ScalarIndexPreparationRequired("Point vectors require a prepared chunk-ID index")
+        require_budget(state, 0)
+        if reserve_segment and state.segments >= MAX_SEGMENTS:
+            raise ScalarIndexPreparationRequired("Point vector preflight needs a reserved index segment")
+        return canonical
 
     @source_write
     def _upsert(self, chunks: list[Chunk], vectors: np.ndarray[Any, Any]) -> int:

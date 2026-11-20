@@ -57,3 +57,31 @@ def test_relative_paths_survive_caller_directory_change(tmp_path: Path, monkeypa
     after = ProposalIntake.recover(Path("lane/proposal.records"), Path("after"))
     monkeypatch.chdir(tmp_path.parent)
     assert after.steer("first", {"decision": "yes"}) == receipt
+
+
+@pytest.mark.parametrize("reason", ["compatible-import", "unavailable-cache", "incompatible-format"])
+def test_offered_generation_is_used_only_by_matching_reader(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                          reason: str) -> None:
+    from agent_dispatch import proposal_transfer as transfer
+
+    a = ProposalIntake.create(tmp_path / "lane", title="task", repo="https://example.invalid/o/r",
+                              payload="fixture line\r\n" * 100)
+    original = a.queue.read_payload(a.identity)
+    receipt = a.steer("first", {"extension": {"unknown": [1, 2, 3]}})
+    previous = Path(a.queue.db_path).parent
+    transfer.offer(a)
+    if reason != "compatible-import":
+        previous.rename(tmp_path / "withheld")
+    if reason == "incompatible-format":
+        monkeypatch.setattr(transfer, "CACHE_FORMAT", 2)
+    target = tmp_path / "incoming"
+    with pytest.raises(ValueError, match="current offer"):
+        transfer.receive(a.records, target, outgoing=tmp_path / "unrelated")
+    b, selected = transfer.receive(a.records, target, outgoing=previous)
+    assert selected == reason and b.queue.steer_receipt(a.identity, "first") == receipt
+    assert b.queue.read_payload(b.identity) == original
+    with pytest.raises(ValueError):
+        a.steer("late", {"decision": "no"})
+    assert b.steer("first", {"extension": {"unknown": [1, 2, 3]}}) == receipt
+    with pytest.raises(ValueError, match="current offer"):
+        transfer.receive(a.records, tmp_path / "duplicate", outgoing=previous)

@@ -32,6 +32,8 @@ _BOOTSTRAP = {
     "versioned_runtime_construction.py": "versioned_runtime_construction.py",
     "versioned_runtime_publication.py": "versioned_runtime_publication.py",
     "versioned_runtime_source.py": "versioned_runtime_source.py",
+    "versioned_runtime_identity.py": "versioned_runtime_identity.py",
+    "versioned_runtime_fingerprint.py": "versioned_runtime_fingerprint.py",
     "runtime_launcher.py": "runtime_launcher.py",
 }
 
@@ -53,6 +55,7 @@ def _engine() -> ModuleType:
             "versioned_runtime", "versioned_runtime_source",
             "installer_engine_process", "installer_dependency_policy",
             "installer_wheel_inputs", "installer_wheel_snapshot",
+            "installer_provider_roots",
             "installer_source_wheel_cache", "installer_source_build", "installer_engine_health",
         )
         if any(name in sys.modules for name in names):

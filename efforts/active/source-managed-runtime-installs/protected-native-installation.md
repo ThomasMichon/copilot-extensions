@@ -3,7 +3,7 @@
 Back to [Source-Managed Runtime Installs](README.md).
 Tracked by [#13504](https://github.com/ThomasMichon/copilot-extensions/issues/13504).
 
-**Status: proposed source contract, not implemented or natively qualified.**
+**Status: Linux root-owned source implementation; not natively qualified.**
 This bounded slice complements #12905's Manager reference and #12900's
 provider/profile reconstruction. It takes neither program nor live installation
 custody. It targets the installer's
@@ -108,9 +108,9 @@ Automatic inhibition remains automatic-only.
 
 ## Plan
 
-- [ ] P1: Review this handoff contract and retain the existing source,
+- [x] P1: Review this handoff contract and retain the existing source,
   construction, Manager, provider/profile and native lifecycle owners.
-- [ ] P2: Implement the smallest protected provider/admission seam in the
+- [x] P2: Implement the smallest protected provider/admission seam in the
   existing installation/runtime libraries, with a trustworthy native bootstrap
   entry and unchanged ordinary defaults. Document its actual platform support
   and the source of independent administrative trust.
@@ -152,3 +152,28 @@ The source deliverable ends at reviewed implementation and release with honest
 native/adoption limits. The parent effort's full Plan and Validation Plan remain
 the installation completion gate; neither this proposal nor a contained witness
 completes F1-F3 or provider reconstruction.
+
+## Source implementation
+
+The implementation uses the canonical installer library's
+[protected entry](../../../libs/installer-engine/protected-installation.md):
+an independently installed native bootstrap loads a protected packaged seed,
+never an elevated controller-owned Python program.
+
+The first provider is explicitly Linux root-only and requires independently
+admitted, already protected source/toolchain and addressed output roles.
+It composes the existing Source/application entry, leaves ordinary callers
+unchanged and refuses unsupported selected-owner contracts. It does not supply
+an installer for its own privileged seed or establish that a native deployment
+is qualified. P3's source review/CI/merge/release and P4's capable-consumer
+adoption remain open, as do the full parent and native acceptance gates.
+
+## Journal
+
+### 2026-11-19 - Contract proposal
+
+The contract proposal merged in
+[13506](https://github.com/ThomasMichon/copilot-extensions/pull/13506) as
+`62693117778137089298374d4dcb506c2185532f` after accepted current-head review
+and required CI. Its protection-before-import boundary and independently owned
+construction/lifecycle requirements govern the source implementation.

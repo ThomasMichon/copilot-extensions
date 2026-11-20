@@ -14,6 +14,22 @@ A read-only, steering, answer or dormant-correction grant does not authorize
 repair. A repair grant does not authorize steering, answering or editing a
 worker's plan. Each mode needs its own grant.
 
+## Every blocker has an owner
+
+Do not let a blocker wait for someone to notice it. Each blocker record names
+an owner who diagnoses its root cause and drives the fix through the normal
+issue and pull-request flow, rather than waiting. The owner is the blocked
+worker itself, a repair delegate under this scope, the assigned
+`maintain-agent-infrastructure` owner for a host-wide fault, or the operator.
+File a tooling or guidance defect in the consuming harness's own issue
+tracker, not an upstream tracker chosen by provenance.
+
+Filing and fixing need the charter's recorded source-change and publication
+authority, or the owner's own grants. Without them, report an issue draft with
+the evidence and the recommended owner. Under relentless
+[drive posture](watchdog-checks.md#drive-posture), an unowned blocker is
+waste; under either posture, report it with a recommended owner.
+
 ## Classify the blocker first
 
 | Symptom | Evidence that distinguishes it |
@@ -49,7 +65,7 @@ operation.
 | R0 Observe | Classify from the passive [fabric readers](fabric-readers.md) | None |
 | R1 Diagnose directly | Reach the target's host through its declared SSH profile or transport. Read service and session status, logs, receipts, process lists and the owners' doctors in read-only mode. Load the owning troubleshooting skills (for example `agent-bridge-troubleshooting`, `repairing-worktrees`, `agent-ssh`) | Reads only. A command that self-heals, resumes or restarts is not a diagnostic |
 | R2 Doctor records | Correct one diagnosed identity or state finding through the owner's supported repair verb: re-bind a session to its workspace, settle a stale claim, reconcile a registry entry or a projection | Reversible, owner-mediated writes scoped to the target, followed by the owner's readback |
-| R3 Recover transport or session | Restart the one bridge or session-hosting service, or resume the target's own session through its supported lifecycle. Resume it; never reseed it | Only for the named target. Restarting a host-shared service requires the grant to name that service, because it affects every agent on the host |
+| R3 Recover transport or session | Restart the one bridge or session-hosting service, or resume the target's own session through its supported lifecycle. Resume it; never reseed it. To reactivate an inactive head, see [dormant correction](dormant-correction.md#reactivating-an-inactive-head) | Only for the named target. Restarting a host-shared service requires the grant to name that service, because it affects every agent on the host |
 | R4 Disruptive | Terminate the target's wedged process, replace its session, or change its credentials. Runtime updates and reinstalls are maintenance, never a repair rung | Only when the grant names this effect. Otherwise prepare one operator decision packet with evidence and a recommended default |
 
 A rung ceiling in the charter is a maximum, not a target. Most blockers end at

@@ -46,10 +46,26 @@ replace a different binding.
 `initialize_source_store(config, point_scope=hints.scope)` additionally
 bootstraps the configured empty content/model schemas through the existing
 writer and dirty/effect/clean protocol. It requires distinct configured tables
-and matching model IDs. Receipt decisions, native schema validation and creation
+and matching model IDs. The same receipt retains a versioned `point_models` map:
+the content table and each configured model ID's distinct vector table and
+positive integer dimension. This map is first saved only under the existing
+writer while both retained and native table inventories are empty. Receipt saves
+hold the same existing exclusion across the current-ownership read and atomic
+publication and cannot drop or replace a retained map. A bare
+`initialize_source_layout` has no model configuration and retains no map.
+Prepared point tables missing that map are not adopted.
+
+Receipt decisions, native schema validation and creation
 share one existing source-domain operation, so a concurrent initializer cannot
 lend it a stale empty-state decision. Reopening retains the same receipt and
-tables; missing configured tables in an already prepared domain, changed vector
+tables and requires the complete same model/table/dimension mapping, including
+same-dimension model swaps. Registration through any `MultiModelStore` facade
+checks the retained content/model binding before returning even a cached model.
+Unknown IDs, aliases, changed dimensions and content-table collisions refuse.
+Model name/revision, query policy and engine placement do not define this table
+ownership; embedding coverage and profile-policy owners still qualify their
+changes. No model addition, table rebinding or legacy conversion is implied.
+Missing configured tables in an already prepared domain, changed vector
 schemas or a content table with the wrong schema/role refuse rather than being
 added or converted. An interrupted bootstrap remains
 dirty and requires its existing recovery owner; initialization does not replay
@@ -80,7 +96,30 @@ private schema writer. Explicit scoped reads support the
 through applied-version qualification. Explicit
 [ledger/index preparation](component-ledger.md) now forwards that same exact
 selection through its existing owners and budgets, without admitting ordinary
-data writers. Qualified point application and every v2 executor/producer remain unsupported.
+data writers.
+
+`VectorTable.preflight_point_upsert` and
+`MultiModelStore.preflight_point_vectors` inspect current canonical input only,
+under an already-owned matching source writer and explicit `point_scope`.
+They reject another family/scope, including empty input; both connection URIs
+must resolve to the domain, and distinct prepared content/vector tables must
+match their expected schemas. The vector chunk-ID index needs zero uncovered
+physical rows; nonempty input also reserves room below the existing segment cap.
+Canonical fields are compared once through the prepared chunk-ID index.
+The canonical table handle opened during binding is reused for that lookup;
+an open failure propagates without the generic create-table fallback.
+
+Preflight returns selected raw canonical fields at that read boundary, not a
+durable receipt, model-to-table ownership proof or permission to write.
+It performs no content/vector mutation, index preparation or writer acquisition.
+The existing mutation APIs still refuse point domains. Durable model ownership
+and the nested post-effect failure latch are prerequisites, not point-write
+admission. Any future selected mutator must recheck the configured model/table
+binding at its actual effect boundary as well as current canonical input,
+coverage and publication ownership; this read-only preflight is not that check.
+Selected reads retain their separate explicit prepared-index path.
+
+Qualified point application and every v2 executor/producer remain unsupported.
 The binding is not
 acquisition, application, completion or deployment authority. There is no live
 directory allocation, migration, new service, HTTP parameter, CLI flag or MCP
@@ -107,6 +146,13 @@ operation itself is not a transaction and does not roll back or reclassify
 uncertain effects. A read/guard refusal before mutation remains clean, and a
 later retry retains already completed writes. Ordinary indexing is not fenced
 for a backfill job's lifetime.
+
+A nested participating write that raises after marking a new irreversible
+effect or reconciliation seal latches the outer writer as failed. Catching
+that exception, or completing a later nested no-op, cannot publish the source
+clean or clear its uncertainty. The existing recovery/reconciliation owner is
+still required; this is not rollback or new repair authority. A caught
+pre-effect refusal does not invalidate earlier successfully completed writes.
 
 Ordinary shared-engine ingestion uses [prepared source application](prepared-application.md):
 embedding finishes outside exclusion, then one outer writer contains the

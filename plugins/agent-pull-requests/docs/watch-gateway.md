@@ -85,6 +85,44 @@ core's 24 KiB/16-event bound. Responses are JSON with `Cache-Control: no-store`.
 Pending reads first durably sweep elapsed deadlines; they never ACK events.
 All other replay, retention and exact-completion semantics are unchanged.
 
+### Optional terminal admission profile
+
+An explicitly selected terminal host can restrict **new** registrations to
+finite original deadlines and `merged`, `closed` or `head_changed` predicates.
+Its trusted store sets `registration_admission` to the shared
+`TERMINAL_ADMISSION` declaration. Every affected watch binding, including a
+watch-only binding, advertises
+`Content-Type: application/json; profile="urn:agent-pull-requests:terminal-watch-admission:v1"`
+on its existing capabilities response. The strict v1/v2 JSON fields and
+receipt bodies do not change; the existing SDK preserves this standard
+response header without adding another endpoint or policy request.
+
+The current `ReplayClient.capabilities()` returns optional typed
+`registration_admission`. A missing profile retains the documented baseline;
+an unknown, malformed or duplicate profile refuses discovery before mutation.
+New delegation owners validate requested criteria/deadline against that
+declaration **before** suspending work. Ordinary receipt reconciliation must
+remain available and does not become a new registration.
+An older optional client without the `registration_admission` capability
+attribute is unsupported for new preparation; absence of that client API is
+not the same as an admission-aware client reporting a baseline `None` policy.
+Existing receipt reconciliation remains available across that client skew.
+The bounded consumer cycle rechecks live preparations against the current
+policy before emission. A preparation made before policy transition can
+therefore wake for external-state reinspection even if no remote registration
+exists. Unattempted work settles locally; attempted/uncertain work retains its
+original reconciliation identity and does not retransmit a now-incompatible
+registration. A real existing receipt still reconciles or cancels normally.
+
+Legacy direct requests with supported finite criteria retain their semantics.
+Unaware delegation clients are not qualified for a new restricted profile:
+the deployment owner must retain the baseline host or select the capable
+consumer before enabling it. This source declaration does not upgrade live
+consumers or authorize activation. The standalone bootstrap refuses **all**
+incompatible retained receipts, including acknowledged/cancelled ones, before
+expansion, so their original owner can still replay the exact request.
+No deadline is invented and no richer predicate is silently converted.
+
 ### Opt-in scoped v2
 
 The same adapter also serves `agent-pull-requests.watch/v2` at

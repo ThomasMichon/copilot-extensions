@@ -1210,9 +1210,12 @@ def test_retained_guardian_startup_cannot_renew_an_absolute_deadline(
     source = Path(guardian.__file__)
     delayed = tmp_path / "delayed-guardian.py"
     guardian_marker = tmp_path / "guardian-started"
-    delayed.write_text(source.read_text().replace(
-        "def _supervise_windows(args, argv):",
-        "def _supervise_windows(args, argv):\n"
+    signature = "def _supervise_windows(args: Namespace, argv: list[str]) -> dict[str, Any]:"
+    original = source.read_text()
+    assert original.count(signature) == 1
+    delayed.write_text(original.replace(
+        signature,
+        signature + "\n"
         "    Path(" + repr(str(guardian_marker)) + ").write_text('entered')\n    time.sleep(1.5)",
     ))
     spec = cast(ModuleSpec, importlib.util.spec_from_file_location("absolute_deadline_guardian", delayed))
@@ -1224,7 +1227,7 @@ def test_retained_guardian_startup_cannot_renew_an_absolute_deadline(
     root.mkdir()
     slot = runtime.slot(root, "probe")
     marker = tmp_path / "must-not-start"
-    procutil = cast(Callable[[], ModuleType], worker_procutil)()
+    procutil = worker_procutil()
     with runtime.construction_lease(root, "probe") as descriptor:
         started = time.monotonic()
         with pytest.raises(selected.ChildTimeoutExpired):

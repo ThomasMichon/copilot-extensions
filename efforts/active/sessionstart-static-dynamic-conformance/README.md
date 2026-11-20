@@ -44,6 +44,22 @@ header/sub-text needed to frame them (e.g. "State-root: X" or a JSON schema
 label) — never restatable prose, command syntax, or policy that could instead
 live in a static, checked-in `instructions/*.instructions.md` file.
 
+## Coordination
+
+The proposed finite #11239 guidance-floor and separate #11240 writer/
+interpreter lanes below remain with the existing Worktrees startup,
+exact-session guidance, runtime/interpreter, launch/write-claim, fixture and
+source/resource owners. They qualify truthful dynamic-fact delivery without
+moving standing policy back into hooks or reviving aggregation. Preserve
+all incumbent classification, platform and consumer acceptance.
+
+Ordinary review must deliver every applicable P11239/V11239/G11239 and
+P11240/V11240/G11240 clause plus this Coordination and dated Journal.
+Keep both sources OPEN during the proposal; current permitted whole
+receiving/source/custody readback precedes separate source-specific tracking
+judgments. No implementation appointment, generic ACK, hook execution,
+runtime repair, rollout or source/resource transfer follows.
+
 ## Context
 
 This surfaced mid-session while closing the `copilot-context-injection-decontamination`
@@ -214,6 +230,71 @@ was "the point of this effort, or so I thought":
   since this is the follow-through the operator expected that effort to have
   covered — without reopening the archived effort itself.
 
+### Finite truthful Worktrees guidance floor from #11239
+
+Agent-recommended correctness lane under the existing startup/conformance owner.
+
+- [ ] **P11239-1:** On session-start enrichment failure for any reason,
+  including import/unsupported-interpreter and runtime-helper-unavailable
+  paths, retain the exact-session minimal truthful guidance floor and one
+  bounded provider/reason warning without a stack trace. Name direct
+  `get worktree-dir` and `state-root --pair --json` lifecycle-fact reads and
+  explicitly report that this session's command catalog is unavailable.
+- [ ] **P11239-2:** Degrade catalog construction to an empty catalog with
+  its diagnostic on import-time failures rather than aborting enrichment
+  and both guidance writes. Prefer a non-WindowsApps Python >=3.10 for
+  Windows sessionStart; when none is supported, retain the first non-
+  WindowsApps candidate fallback and truthful floor rather than silent success.
+- [ ] **P11239-3:** Preserve healthy-path output unchanged. Credit the
+  earlier six-object Dev/Main old-Python/ParamSpec source alignment and
+  defined regressions without claiming Windows execution. The identified
+  runtime-helper-unavailable floor gap and before/after healthy-output
+  comparison remain explicit unfinished acceptance, not delivered fixes.
+
+#### Local Validation for #11239
+
+- [ ] **V11239-1:** Exercise actual session-start enrichment, catalog import
+  failure, unsupported interpreter and unavailable runtime-helper paths;
+  assert the exact-session truthful floor, bounded warning, empty/unavailable
+  catalog and usable direct-fact directions rather than only exit zero.
+- [ ] **V11239-2:** Cover older Python before supported Python, WindowsApps
+  exclusion and no-supported-candidate fallback through the real selected
+  hook/interpreter boundary; record Windows execution versus skips honestly.
+- [ ] **V11239-3:** Compare healthy guidance before/after at equivalent
+  session inputs, preserving current output and launch/write-claim behavior.
+  Keep source assertions distinct from executed native/installed evidence.
+
+### Finite independent guidance writer and hook interpreters from #11240
+
+This is the separate failure-isolation and remaining-hook continuation,
+not proof that #11239's narrower catalog correction supplies it.
+
+- [ ] **P11240-1:** Publish exact-session Worktrees guidance through an
+  independent provider-owned writer that survives lifecycle-hook failure
+  OR timeout. Reconcile hook declarations, generator/contract and actual
+  launch/write-claim arbitration while preserving healthy output; the
+  separate Bridge writer is a comparison pattern, not isolation proof.
+- [ ] **P11240-2:** Make ALL remaining Windows paths that run `hook_client.py`
+  use a supported interpreter: postToolUse inline/script fallback, preToolUse
+  inline last resort including WindowsApps exclusion, and pre-tool/managed-
+  session fallback lookups. Reuse an existing resolved/cached interpreter
+  without adding a version-probe subprocess on every tool call.
+- [ ] **P11240-3:** Keep package-slot selection separate from interpreter
+  version/cache guarantees. Earlier complete/current/last-good/newest slot
+  resolver findings are only package/path facts; uninspected caller caching
+  remains unknown. Preserve valid runtime/source resolution and existing
+  writer custody rather than substituting a second selector or supervisor.
+
+#### Local Validation for #11240
+
+- [ ] **V11240-1:** Fault-inject lifecycle failure AND timeout through the
+  independent writer's actual boundary, proving delivered exact-session
+  guidance, healthy-output equivalence and noncompeting launch/write claims.
+- [ ] **V11240-2:** Cover every P11240-2 Windows hook path with supported,
+  older/unsupported and unavailable candidates as applicable; prove the
+  supported-interpreter guarantee without per-tool-call probes. Record
+  cache/reuse, fallback/refusal and native-versus-source evidence separately.
+
 ### Bug sweep — linked open bugs (2026-09-24)
 
 _Correlated via a facility-driven sweep of open `bug`-labeled issues against active efforts (VEI + direct review). Not yet triaged into a numbered phase — listed here as upcoming work for whoever picks this effort back up._
@@ -267,6 +348,17 @@ not behavioral completion, a new driver or permission to execute a native probe.
 
 ## Validation Plan
 
+- [ ] **G11239:** Resolve every P11239/V11239 and continuing Coordination
+  clause, including the any-enrichment-failure truthful floor, import-time
+  catalog degradation, Windows interpreter/fallback behavior and actual
+  healthy-output comparison. Retain credited source fixes and remaining
+  evidence tiers; documentary acceptance is not execution or runtime repair.
+- [ ] **G11240:** Resolve every P11240/V11240 and continuing Coordination
+  clause: independent failure/timeout survival, healthy-output and write-
+  claim compatibility, ALL remaining supported-Python hook paths and no
+  per-call probe. Preserve existing source/runtime owners and distinguish
+  package resolution from version/cache proof; no rollout or custody release.
+
 - [ ] Complete every directly retained #1946 Plan/Validation clause above at its original evidence tier and bounds; preserve current owners, holds and unfinished acceptance. Tracker consolidation is not implementation.
 
 - [ ] Every plugin in the Phase 0 roster has a recorded classification in
@@ -292,6 +384,16 @@ _Pending — to be filled in during Phase 0/1 once the umbrella issue and
 initial sweep exist._
 
 ## Journal
+
+### 2026-11-19 - Proposed distinct guidance-floor and writer receiving
+
+Complete qualified #11239/#11240 originals and discussions were compared
+with this entire current ROOT. Separate unchecked Plan/local and actual
+global Validation retain all floor/catalog/interpreter and independent-
+writer/remaining-hook obligations, including healthy-output and actual
+write-claim proof. The [six-source receiving record](../backlog-reconciliation/journal/2026/11.19-bounded-readers-guidance-and-recipes-receiving.md)
+preserves credited source findings and separate disposition gates. Neither
+source is declared fixed; no hook, runtime, native test or rollout ran.
 
 ### 2026-10-22 - Complete retained acceptance from #1946
 

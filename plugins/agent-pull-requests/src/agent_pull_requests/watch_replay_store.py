@@ -16,6 +16,7 @@ from typing import Any, Literal, Protocol, TypeVar, cast, overload
 from single_instance_lease import OperationLock, OperationLockedError
 
 from .watch_contract import PRSnapshot
+from .watch_admission import ReplayAdmission
 from .watch_replay import ConsumerScope, ObservationTarget, WatchReplay
 from .watch_storage import _atomic_write_json as _atomic_write_json
 from . import review_intent as _review_intent
@@ -102,6 +103,9 @@ class ReplayStore:
     transaction finishes. Reconcile its original identity, never assume absence.
     This is not a daemon lease or placement/update authority.
     """
+
+    registration_admission: ReplayAdmission | None = None
+    terminal_native_watches: bool = False
 
     def __init__(
         self, root: Path, namespace: str, *, clock: Callable[[], float] = time.time,
@@ -812,14 +816,28 @@ class ReplayStore:
         selected_snapshot: PRSnapshot | None = snapshot
         def prepare(document: Document) -> None:
             nonlocal selected_snapshot
-            from .terminal_retention import replay_observation
-            selected_snapshot = replay_observation(document, target, snapshot)
+            from .terminal_retention import replay_epoch, replay_observation
+            if self.terminal_native_watches:
+                selected_snapshot = (
+                    snapshot if target.retention_epoch == replay_epoch(document, target) else None
+                )
+            else:
+                selected_snapshot = replay_observation(document, target, snapshot)
 
-        return self._transaction(
-            lambda core: core.observe(
+        def apply(core: WatchReplay) -> Document:
+            if selected_snapshot is None:
+                return {"status": "stale_observation"}
+            if self.terminal_native_watches:
+                swept = core.sweep_timeouts()
+                if swept["status"] == "uncertain":
+                    return cast(Document, swept)
+            return cast(Document, core.observe(
                 target.account, target.repo, target.number, selected_snapshot,
                 registration_ids=target.registration_ids,
-            ) if selected_snapshot is not None else {"status": "stale_observation"},
+            ))
+
+        return self._transaction(
+            apply,
             expires_at=expires_at, checkpoint=checkpoint,
             prepare=prepare if self.terminal_retention else None,
         )

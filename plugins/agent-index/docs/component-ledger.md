@@ -22,7 +22,9 @@ configured data or reset missing history. An interrupted native preparation
 retains the existing dirty/uncertain latch; retry cannot replay or repair it.
 Omitted, mismatched and legacy-domain point selections refuse, including nested
 calls inside an explicitly selected operation. Preparation neither admits
-`ledger.put`/consolidation nor ordinary data mutation or point application.
+an ordinary ledger write/consolidation nor ordinary data mutation or point
+application. Explicit subordinate ledger retention has the separate
+already-owned-writer requirement below.
 
 The table lives in `config.lance_dir`, alongside the source-layout receipt and
 data included by the existing native-directory backup. Arrow schema metadata
@@ -72,6 +74,15 @@ Equal-version conflicts refuse; matching duplicates and older versions return
 matches native data. A newer record returns `True`. A deletion record requires
 empty canonical rows and empty registered-model points for all retained IDs.
 Unknown vector orphans remain outside this evidence, not silently certified.
+
+For a protocol-2 point domain, `put(..., point_scope=hints.scope)` forwards that
+exact explicit selection through the existing prior-record read, raw projection
+capture and single-row index preparation. The caller must already own the matching
+domain writer; the method never enters one. Omitted or mismatched scope and
+foreign canonical families refuse before ledger effects, including inside an
+already-owned writer. Reopening retains typed identities and tombstone ordering.
+Ordinary point writers, ledger consolidation, native point application and queue
+completion remain disabled; subordinate observations do not authorize any of them.
 
 The ledger uses the existing scalar-index owner and its physical-tail/segment
 budgets. Point capture and index preflight must succeed before the ledger

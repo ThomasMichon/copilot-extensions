@@ -105,7 +105,17 @@ def _creation_env(argv: list[str]) -> dict[str, str] | None:
         "TMUX", "TMUX_PANE", "PSMUX_SESSION", "PSMUX_TARGET_SESSION",
         "PSMUX_CLAUDE_TEAMMATE_MODE",
     }
-    return {key: value for key, value in os.environ.items() if key.upper() not in nesting}
+    env = {key: value for key, value in os.environ.items() if key.upper() not in nesting}
+    if os.path.isabs(argv[0]):
+        # A side-by-side PSMux selected by the creation gate must also be the
+        # one that the new pane resolves, even when PATH still lists an older one.
+        selected_dir = os.path.dirname(argv[0])
+        path_key = next((key for key in env if key.upper() == "PATH"), "PATH")
+        parts = [part for part in env.get(path_key, "").split(os.pathsep) if part]
+        wanted = os.path.normcase(os.path.normpath(selected_dir))
+        kept = [part for part in parts if os.path.normcase(os.path.normpath(part)) != wanted]
+        env[path_key] = os.pathsep.join([selected_dir, *kept])
+    return env
 
 
 def run(argv: list[str]) -> subprocess.CompletedProcess[str]:

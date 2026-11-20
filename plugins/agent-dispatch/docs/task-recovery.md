@@ -23,6 +23,25 @@ An exact steer retry remains idempotent and a conflicting key refuses.
 No HTTP endpoint, ordinary queue, existing proposal, executable claim,
 consumption, provider wake, or full production history is migrated by this API.
 
+For a quiescent handoff, the current intake owner calls `proposal_transfer.offer`
+after its last acknowledged operation. This relinquishes the intake handle.
+The incoming build calls `receive(records, new_generation, outgoing=current_path)`.
+The records bind the format and path to the outgoing epoch; a different path
+is not an alternate source. Compatible import uses SQLite online backup and
+payload files; an incompatible offer or absent cache DB instead replays logical
+creation and steer records into the new generation. Observe the returned route
+before selecting the incoming generation. This opt-in data handoff does not
+implement uninterrupted service/lease cutover.
+
+`tools/dispatch_installed_handoff.py` takes distinct installed baseline and
+candidate Python executables. For the negative control build a **disposable
+copy** of the candidate project with `CACHE_FORMAT = 2` instead of `1` and a
+distinct fixture-local package version before building its wheel. Install
+each wheel non-editably in its own empty environment, then run with
+`--expect-incompatible`. The driver withholds the outgoing DB and payloads
+in both directions. The positive control keeps both formats at 1. Never
+change the production constant or edit an installed slot to select a test.
+
 ## Inspect before choosing an action
 
 `agent-dispatch task-diagnostics <task-id>` reads one bounded coordinator

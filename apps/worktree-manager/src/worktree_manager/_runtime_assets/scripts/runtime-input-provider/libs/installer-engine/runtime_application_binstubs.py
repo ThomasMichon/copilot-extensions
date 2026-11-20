@@ -81,7 +81,7 @@ def slot_binstubs(
                 )
                 sh_prepare = (
                     'if [ ! -f "$slot/uv.lock" ]; then\n'
-                    '    uv lock --managed-python --project "$slot" || exit\n'
+                    '    "$installer_uv" lock --managed-python --project "$slot" || exit\n'
                     "fi\n"
                 )
             else:
@@ -141,6 +141,12 @@ def slot_binstubs(
         )
         shell = (
             "#!/bin/sh\n"
+            + (
+                "# installer-uv-selection: absolute/v1\n"
+                'installer_uv="${COPILOT_INSTALLER_UV:-uv}"\n'
+                if command == "install" else 'installer_uv=uv\n'
+            )
+            +
             'slot=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd) || exit\n'
             "unset " + " ".join(_CLEAR) + "\n"
             'if [ -z "${UV_CACHE_DIR:-}" ]; then\n'
@@ -154,7 +160,7 @@ def slot_binstubs(
             "fi\n"
             "export UV_CACHE_DIR\n"
             + sh_prepare
-            + f'exec uv {selected_flags} --project "$slot" python {sh_target} "$@"\n'
+            + f'exec "$installer_uv" {selected_flags} --project "$slot" python {sh_target} "$@"\n'
         )
         result[command + ".sh"] = shell
         result[command] = shell

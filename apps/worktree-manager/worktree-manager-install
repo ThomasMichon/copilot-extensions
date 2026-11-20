@@ -1,4 +1,5 @@
 #!/bin/sh
+installer_uv=uv
 slot=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd) || exit
 unset UV_PROJECT UV_PROJECT_ENVIRONMENT UV_NO_SYNC UV_NO_PROJECT UV_WORKING_DIR UV_FROZEN PYTHONPATH PYTHONHOME VIRTUAL_ENV
 if [ -z "${UV_CACHE_DIR:-}" ]; then
@@ -16,4 +17,4 @@ if command -v cygpath >/dev/null 2>&1; then
     UV_CACHE_DIR=$(cygpath -w "$UV_CACHE_DIR") || exit
 fi
 export UV_CACHE_DIR
-exec uv run --locked --no-dev --no-editable --link-mode hardlink --managed-python --no-sync --no-python-downloads --project "$slot" python -I -X utf8 -B "$slot/worktree-manager-install.py" "$@"
+exec "$installer_uv" run --locked --no-dev --no-editable --link-mode hardlink --managed-python --no-sync --no-python-downloads --project "$slot" python -I -X utf8 -B "$slot/worktree-manager-install.py" "$@"
