@@ -16,6 +16,7 @@ from zdd.cutover_lock import CutoverLock
 
 from agent_pull_requests import watch_transition_recovery, watch_windows_sealing
 from agent_pull_requests.watch_installation import WatchInstallation
+from agent_pull_requests.watch_private import write_private
 from agent_pull_requests.watch_storage import (
     StateCommitUncertain, read_subscriptions_state, read_transition_phase, watch_state_paths,
     write_subscriptions_state,
@@ -103,6 +104,73 @@ def test_current_sealed_receiver_keeps_origin_and_native_barrier_without_old_exe
             ) == result
         assert paths.journal.read_bytes() == serialized
         assert successor.writer_held and not successor.read_ready
+    finally:
+        successor.close(timeout=3)
+
+
+@pytest.mark.parametrize("origin_kind", ["prepared", "staged"])
+def test_phase_progression_preserves_actual_prepared_receipt_under_current_native_control(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, origin_kind: str,
+) -> None:
+    original = _installation(tmp_path)
+    original.state_root.mkdir(parents=True)
+    owner = _writer(original.state_root)
+    origins: dict[str, Document] = {}
+    publish = write_private
+
+    def capture(*args: Any, **kwargs: Any) -> None:
+        publish(*args, **kwargs)
+        if args[1]["phase"] == "prepared":
+            origins["staged"] = json.loads(json.dumps(args[1]))
+
+    try:
+        owner.adopt(timeout=3)
+        origins["prepared"] = owner.prepare_state_transition(timeout=3, installation=original)
+        with monkeypatch.context() as recorded:
+            recorded.setattr(watch_windows_sealing, "write_private", capture)
+            sealed = owner.seal_state_transition(timeout=3, installation=original)
+    finally:
+        owner.close(timeout=3)
+    origin = origins[origin_kind]
+    paths = watch_state_paths(original.state_root)
+    progressed = {**sealed, "version": 2, "origin": origin, "controller": origin["binding"]}
+    write_private(paths.journal, progressed, create_parent=False, before_publish=lambda: None)
+    advance = cast(Callable[[WatchInstallation, Path], WatchInstallation], _advance_installation)
+    current = advance(original, tmp_path)
+    original.payload_root.rmdir()
+    legacy = b" [] \n"
+    paths.legacy_subscriptions.write_bytes(legacy)
+    receiver = _writer(current.state_root)
+    try:
+        with current.transaction(timeout=3, environment={}) as guard:
+            result = receiver.recover_sealed_state_transition(
+                timeout=10, installation=current, guard=guard,
+            )
+        assert result["origin"] == origin and result["origin"]["phase"] == "prepared"
+        assert all(result[field] == progressed[field] for field in ("binding", "lease", "seal", "phase"))
+        assert result["controller"]["installation"] == current.evidence()
+        assert receiver._lease.lock_path == paths.writer_lock and receiver.writer_held
+        assert not receiver.read_ready and not receiver.daemon.effects_enabled
+        assert receiver.daemon.quiescent and not paths.isolated_subscriptions.parent.exists()
+        assert paths.legacy_subscriptions.read_bytes() == legacy and not original.payload_root.exists()
+        prior = paths.journal.read_bytes()
+        with pytest.raises(PermissionError):
+            watch_windows_sealing.read_sealing(current.state_root, origin["binding"])
+        with pytest.raises(ValueError, match="guarded recovery"):
+            read_subscriptions_state(current.state_root)
+        with pytest.raises(OSError, match="guarded recovery"):
+            write_subscriptions_state([], current.state_root)
+        assert paths.journal.read_bytes() == prior
+    finally:
+        receiver.close(timeout=3)
+    successor = _writer(current.state_root)
+    try:
+        with current.transaction(timeout=3, environment={}) as guard:
+            assert successor.recover_sealed_state_transition(
+                timeout=10, installation=current, guard=guard,
+            ) == result
+        assert successor._lease.lock_path == paths.writer_lock and successor.writer_held
+        assert paths.journal.read_bytes() == prior
     finally:
         successor.close(timeout=3)
 

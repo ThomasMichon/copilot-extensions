@@ -866,8 +866,13 @@ entry. The unwired native-domain/boot API merged in #13654 under the existing
 boot-evidence owner, with a Windows VM Generation Counter source and strict
 version-1 observations. Actor-free source proof is not native qualification;
 Linux/WSL and macOS still have no implemented continuity provider.
-Version-2 sealing/recovery, native domain/boot qualification and every
-remaining gate still follow under the existing source-only authority.
+The [Windows sealed receiver](subscriber-state-transition.md#windows-sealed-version-2-receiver)
+merged in #13662, preserving complete immutable origin and separately admitted
+current control under the qualified inner barrier lease. Actor-free and
+contained Windows receiver cases pass; this is not final import or ordinary
+entry. Version-2 sealing writers, POSIX epoch/recovery, native domain/boot
+qualification and every remaining gate still follow under the existing
+source-only authority.
 
 #6019 already delivered outage-independent expiry and the acknowledged-delivery
 foundation. Preserve that positive credit; the unchecked rows below retain
@@ -1925,6 +1930,7 @@ callback an implicit credential store.
 
 ## Journal
 
+- [2026-11-20 - Windows sealed receiver](journal/2026/11.20%20Windows%20sealed%20receiver.md)
 - [2026-11-20 - Native domain/boot source prerequisite](journal/2026/11.20%20Native%20domain%20boot%20source.md)
 - [2026-11-20 - Windows abrupt-controller qualification](journal/2026/11.20%20Windows%20abrupt-controller%20qualification.md)
 - **2026-11-20 - Proposed finite M1 source-claim acknowledgment.** The

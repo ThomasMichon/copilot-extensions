@@ -58,6 +58,15 @@ def recovery(sealing: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
 @pytest.fixture
 def sealed_recovery(windows_sealing: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
     windows, state, root, binding, lease = windows_sealing
+    state["prepared_origin"] = json.loads(json.dumps(state["document"]))
+    publish = windows.write_private
+
+    def capture(*args: Any, **kwargs: Any) -> None:
+        publish(*args, **kwargs)
+        if state["document"]["phase"] == "prepared":
+            state["staged_origin"] = json.loads(json.dumps(state["document"]))
+
+    monkeypatch.setattr(windows, "write_private", capture)
     windows.seal(root, binding, lease, validate=lambda: None, check_deadline=lambda: None)
     state["writes"].clear()
     state["acquisitions"].clear()
@@ -147,6 +156,64 @@ def test_sealed_adapter_retry_confirms_without_rewriting_or_reopening_retained(s
     assert state["writes"] == ["sealed-legacy"]
     assert state["confirmations"] == [module.watch_state_paths(root).journal]
     assert state["acquisitions"] == [module.watch_state_paths(root).writer_lock] * 2
+
+
+@pytest.mark.parametrize("origin_kind", ["prepared_origin", "staged_origin"])
+def test_sealed_phase_progression_retains_actual_prepared_origin(
+    sealed_recovery: Any, origin_kind: str,
+) -> None:
+    module, state, root, binding, lease = sealed_recovery
+    origin = state[origin_kind]
+    state["document"].update(version=2, origin=origin, controller=binding)
+    prior = json.dumps(state["document"])
+    result = _recover_sealed(sealed_recovery)
+    assert result["phase"] == "sealed-legacy" and result["origin"] == origin
+    assert result["origin"]["phase"] == "prepared"
+    assert json.dumps(state["document"]) == prior and state["writes"] == []
+    assert lease.held and state["acquisitions"] == [module.watch_state_paths(root).writer_lock]
+    assert state["confirmations"] == [module.watch_state_paths(root).journal]
+    with pytest.raises(PermissionError):
+        sys.modules[f"{module.__package__}.watch_windows_sealing"].read_sealing(root, binding)
+    lease.held = False
+    assert _recover_sealed(sealed_recovery) == result
+    assert json.dumps(state["document"]) == prior
+
+
+@pytest.mark.parametrize("change", [
+    "origin-version", "origin-phase", "origin-schema", "origin-extra", "origin-seal",
+    "current-schema", "current-binding", "current-lease", "current-phase", "current-seal",
+])
+def test_sealed_phase_progression_refuses_changed_origin_or_unqualified_current_evidence(
+    sealed_recovery: Any, change: str,
+) -> None:
+    _module, state, _root, binding, lease = sealed_recovery
+    origin = state["staged_origin"]
+    state["document"].update(version=2, origin=origin, controller=binding)
+    if change == "origin-version":
+        origin["version"] = 2
+    elif change == "origin-phase":
+        origin["phase"] = "import-ready"
+    elif change == "origin-schema":
+        origin["schema"] += "-foreign"
+    elif change == "origin-extra":
+        origin["unexpected"] = True
+    elif change == "origin-seal":
+        origin["seal"]["barrier"]["inode"] = 8
+    elif change == "current-schema":
+        state["document"]["schema"] += "-foreign"
+    elif change == "current-binding":
+        state["document"]["binding"] = {**binding, "stateRoot": str(_root) + "-foreign"}
+    elif change == "current-lease":
+        state["document"]["lease"]["inode"] = 8
+    elif change == "current-phase":
+        state["document"]["phase"] = "prepared"
+    else:
+        state["document"]["seal"]["boot"] = "unqualified-domain"
+    prior = json.dumps(state["document"])
+    with pytest.raises(PermissionError):
+        _recover_sealed(sealed_recovery)
+    assert not lease.held and state["acquisitions"] == [] and state["writes"] == []
+    assert json.dumps(state["document"]) == prior
 
 
 @pytest.mark.parametrize("change", [
