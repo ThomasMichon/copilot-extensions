@@ -1119,6 +1119,11 @@ for source/account admission, acquisition, checkpoints and all index mutations.
 `agent-index.change-hints`, `intake_versions: [1, 2]`, and separately computed
 `execution_versions` (`[]` unless the selected callable advertises v1).
 Advertising durable intake is not a claim that hinted execution is available.
+The independent
+[`point_service_contract`](component-ledger.md#running-point-service-declaration)
+describes only the running service's explicitly selected qualified point pair,
+scope and current admission. It does not expand ordinary v2 execution or HTTP
+read support, and existing clients do not require it.
 `POST /reindex/hints` accepts only `source`, optional `full: false`, and required
 `change_hints` containing a complete v1 or point-only v2 envelope. It refuses unknown fields,
 versions, duplicate JSON keys, mismatched scopes and oversized bodies before

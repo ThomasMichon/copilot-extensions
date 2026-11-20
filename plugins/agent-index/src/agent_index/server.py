@@ -427,9 +427,11 @@ def build_app(
 
     @app.get("/health")
     def health(request: Request) -> dict[str, Any]:
+        from .indexing.point_service_contract import point_service_contract
         from .sources.credentials import source_credentials_contract
 
         gate: DrainGate = request.app.state.drain_gate
+        runner = getattr(request.app.state, "task_runner", None)
         return {
             "status": (
                 "draining"
@@ -441,6 +443,10 @@ def build_app(
             "passive": request.app.state.passive,
             "promoted": request.app.state.promoted,
             "indexing_contract": intake_contract(),
+            "point_service_contract": point_service_contract(
+                getattr(runner, "point_service", None),
+                passive=request.app.state.passive, draining=gate.draining,
+            ),
             "source_credentials_contract": source_credentials_contract(),
             **service_identity(request),
         }

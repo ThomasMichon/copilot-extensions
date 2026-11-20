@@ -393,16 +393,18 @@ acquisition of a point claim or reinterpret component data as combined content.
 
 ### Running-service declaration and provider rollback
 
-This **agent-recommended, review-first refinement** proposes provider expansion
-only. It follows the
+This **agent-recommended refinement**, reviewed in PR #13707, expands the
+receiver only. It follows the
 [service-contract evolution pattern](../../../docs/patterns/service-contract-evolution.md)
 and uses the existing `/health` response from the actual running application,
-not another discovery command, registry or preflight process. It is not
-implemented by the paired runtime above. No new caller, request field, read
+not another discovery command, registry or preflight process. The
+[receiver implementation](../../../plugins/agent-index/docs/component-ledger.md#running-point-service-declaration)
+adds the declaration and a pure optional requirement validator, without
+opting an existing client into it. No new caller, request field, read
 route, activation endpoint or automatic recovery is admitted by this step.
 
 Keep `indexing_contract` and its v1 execution meaning unchanged. Its v2 intake
-list means durable retention, not point execution. Propose one independent,
+list means durable retention, not point execution. Use one independent,
 optional `point_service_contract` object with stable identity
 `agent-index.point-service` and integer `version: 1`. Version 1 describes only
 the selected in-process paired executor and named-component reader:
@@ -485,7 +487,7 @@ peer/scope and stale positive observations. Pure lifecycle/reader-selection
 contracts and small HTTP fixtures belong in required unit CI; reuse the existing
 opt-in native service/reopen lane to prove retained-state and per-read guards.
 Do not repeat the corpus-size matrix, introduce live-provider calls or move
-native work into unit CI. Review and merge this contract before implementation;
+native work into unit CI. The contract was reviewed before implementation;
 wire callers, broader paged acquisition, activation and rollout remain separate.
 
 ## Implementation and validation gate
