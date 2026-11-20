@@ -369,6 +369,7 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
         state = tmp_path / "replay"
         status = state / "service-status.json"
         calls = tmp_path / "native-calls"
+        terminal_snapshot = tmp_path / "native-terminal.json"
         proof, access = tmp_path / "service.pem", tmp_path / "access"
         evidence_path = tmp_path / "workspace-evidence.json"
         generation_id = ""
@@ -398,9 +399,12 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
             "assert sys.argv[5]=='--json';"
             "assert sys.argv[6]=='--credential-command';"
             f"pathlib.Path({str(calls)!r}).open('a').write('read\\n');"
+            f"terminal=pathlib.Path({str(terminal_snapshot)!r});"
+            "terminal=json.loads(terminal.read_text()) if terminal.exists() else {};"
             f"value=dict({snapshot!r});"
             "number=int(sys.argv[4]);"
             "value.update(pr=number,pr_state='closed' if number==1 else 'open',merged=number==1);"
+            "value.update(terminal if number==42 else {});"
             "print(json.dumps(value))"
         )
         flags: ProcessFlags = {
@@ -785,6 +789,30 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
                         assert terminal_result["descriptor"] is None
                         cursor = terminal_result["conversation"]["cursor"]
                         pending = await send("pending")
+                        # Workspace evidence cannot complete a native-only watch.
+                        assert not any(
+                            value["registration_id"] == terminal_receipt["registration_id"]
+                            for value in pending["events"]
+                        )
+                        staged_terminal = terminal_snapshot.with_suffix(".tmp")
+                        staged_terminal.write_text(json.dumps({
+                            "pr_state": "closed", "merged": terminal_state == "completed",
+                        }))
+                        staged_terminal.replace(terminal_snapshot)
+
+                        async def observed_terminal() -> dict[str, Any]:
+                            while True:
+                                value = await send("pending")
+                                if any(
+                                    event["registration_id"] == terminal_receipt["registration_id"]
+                                    for event in value["events"]
+                                ):
+                                    return value
+                                await asyncio.sleep(.01)
+
+                        pending = await asyncio.wait_for(
+                            observed_terminal(), max(0, cast(float, terminal_original["deadline_at"]) - time.time()),
+                        )
                         terminal_event = next(
                             value for value in pending["events"]
                             if value["registration_id"] == terminal_receipt["registration_id"]
