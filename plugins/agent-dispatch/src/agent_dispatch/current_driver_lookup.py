@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 
 from .bridge_remote import normalize_host
@@ -36,16 +36,19 @@ class _Probe:
 
     @property
     def key(self) -> str:
-        # ASCII printable spellings have SQLite/Python-compatible lower and strip.
+        # Printable ASCII lower agrees with casefold. Only routing trims spaces.
         # Keep every other raw spelling intact for the actual Python comparator.
+        host = f"COALESCE({self.host},'')"
+        if not self.pin:
+            host = f"trim({host})"
         return (
             f"(CASE WHEN {self.host} GLOB '*[^ -~]*' THEN 'u'||{self.host} "
-            f"ELSE 'a'||lower(trim(COALESCE({self.host},''))) END)"
+            f"ELSE 'a'||lower({host}) END)"
         )
 
     @property
     def index(self) -> str:
-        return "idx_current_driver_v1_" + self.name
+        return ("idx_current_driver_v2_" if self.pin else "idx_current_driver_v1_") + self.name
 
 
 def _owner_probes(table: str, owner: str, retained: str) -> list[_Probe]:
@@ -80,13 +83,24 @@ _PROBES = (
 )
 
 
+def _install_index(conn: sqlite3.Connection, probe: _Probe) -> None:
+    task = "id" if probe.table == "tasks" else "task_id"
+    conn.execute(
+        f"CREATE INDEX IF NOT EXISTS {probe.index} ON {probe.table}"
+        f"({probe.target},{probe.key},{task}) WHERE {probe.predicate}"
+    )
+
+
+def install_pin_indexes(conn: sqlite3.Connection) -> None:
+    for probe in _PROBES:
+        if probe.pin:
+            _install_index(conn, probe)
+
+
 def install_indexes(conn: sqlite3.Connection) -> None:
     for probe in _PROBES:
-        task = "id" if probe.table == "tasks" else "task_id"
-        conn.execute(
-            f"CREATE INDEX IF NOT EXISTS {probe.index} ON {probe.table}"
-            f"({probe.target},{probe.key},{task}) WHERE {probe.predicate}"
-        )
+        # Older readers use INDEXED BY, including when opening a fresh database.
+        _install_index(conn, replace(probe, pin=False) if probe.pin else probe)
     conn.execute(
         f"CREATE INDEX IF NOT EXISTS idx_current_driver_v1_waiter_task "
         f"ON run_waiters(task_id) WHERE {_WAITER}"
@@ -125,8 +139,8 @@ def _probe(conn: sqlite3.Connection, p: _Probe, target: str, machine: str,
         if row is None:
             return DriverMatch.UNKNOWN if unknown else DriverMatch.CLEAR
         params["key"] = row[0]
-        raw = params["key"][1:].strip()
-        if not raw:
+        raw = params["key"][1:]
+        if not (raw if p.pin else normalize_host(raw)):
             unknown = True
         elif (machine_matches(raw, machine) if p.pin
               else normalize_host(raw) == normalize_host(machine)):
@@ -151,7 +165,7 @@ def current_driver_match(conn: sqlite3.Connection, *, task_id: str, machine: str
     for probe in _PROBES:
         target = native_id if probe.native else worktree
         if target:
-            result = _probe(conn, probe, target, machine.strip(), task_id)
+            result = _probe(conn, probe, target, machine, task_id)
             if result is DriverMatch.MATCH:
                 return result
             if result is DriverMatch.UNKNOWN:

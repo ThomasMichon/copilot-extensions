@@ -40,7 +40,10 @@ queue implementation. No writer needs a custom collation, function or second wri
 
 The indexes fold only printable ASCII in SQLite. Lookup compares other host
 spellings in Python using the routing normalizer or the pin matcher, seeking over
-duplicates rather than scanning history. For each matching tree or native probe,
+duplicates rather than scanning history. A pin comparison case-folds both machine
+names without trimming whitespace; routing comparisons still trim. New pin indexes
+coexist with the original indexes so older readers can finish using their own
+comparison semantics. For each matching tree or native probe,
 more than 32 distinct unusual spellings without a proven match yields `UNKNOWN`,
 not `CLEAR`. Consumers must use a fresh snapshot after independent I/O and treat
 anything other than `CLEAR` as a blocker when establishing absence.

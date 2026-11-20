@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from .current_driver_lookup import install_indexes
+from .current_driver_lookup import install_indexes, install_pin_indexes
 
 _TABLE = "current_driver_pool_v1"
 _SOURCE = "current_driver_pool_source_v1"
@@ -17,6 +17,7 @@ def migrate(conn: sqlite3.Connection) -> None:
             "SELECT 1 FROM sqlite_schema WHERE type='table' AND name=?", (_TABLE,),
         ).fetchone() is None:
             _install(conn)
+        install_pin_indexes(conn)
         conn.commit()
     except BaseException:
         conn.rollback()

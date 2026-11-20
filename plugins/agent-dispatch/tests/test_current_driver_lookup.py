@@ -28,7 +28,7 @@ def read(conn: sqlite3.Connection, machine: str = "münchen", tree: str = "tree"
     ("MÜNCHEN/tree", None, None, DriverMatch.MATCH),
     ("foreign/tree", "MÜNCHEN", "tree", DriverMatch.CLEAR),
     ("tree", None, None, DriverMatch.UNKNOWN),
-    ("legacy", "\u00a0MÜNCHEN", "tree", DriverMatch.MATCH),
+    ("legacy", "\u00a0MÜNCHEN", "tree", DriverMatch.CLEAR),
     ("tree", "foreign", "tree", DriverMatch.CLEAR),
     ("other", None, None, DriverMatch.CLEAR),
 ])
@@ -145,6 +145,68 @@ def test_unicode_pin_matching_is_not_route_matching(q: TaskQueue) -> None:
         assert read(conn, "STRASSE") is DriverMatch.MATCH
         conn.execute("UPDATE tasks SET owner='Straße/tree'")
         assert read(conn, "STRASSE") is DriverMatch.CLEAR
+
+
+@pytest.mark.parametrize(("owner", "pin_tree"), [
+    ("legacy", "tree"), ("tree", None), (None, "tree"),
+])
+@pytest.mark.parametrize(("stored", "caller", "expected"), [
+    (" HOST ", "host", DriverMatch.CLEAR), ("HOST", " host ", DriverMatch.CLEAR),
+    (" HOST ", " host ", DriverMatch.MATCH),
+    ("\u00a0Straße", "STRASSE", DriverMatch.CLEAR),
+    ("Straße", "\u00a0STRASSE", DriverMatch.CLEAR),
+    ("\u00a0Straße", "\u00a0STRASSE", DriverMatch.MATCH),
+])
+def test_pin_preserves_whitespace(
+    q: TaskQueue, owner: str | None, pin_tree: str | None,
+    stored: str, caller: str, expected: DriverMatch,
+) -> None:
+    with sqlite3.connect(q.db_path) as conn:
+        conn.execute("INSERT INTO tasks(id,status,owner,target_machine,target_worktree)"
+                     " VALUES ('task','claimed',?,?,?)", (owner, stored, pin_tree))
+        assert read(conn, caller) is expected
+
+
+@pytest.mark.parametrize(("owner", "machine"), [
+    (" HOST /tree", "host"), ("MÜNCHEN/tree", "\u00a0münchen"),
+    ("\u00a0MÜNCHEN/tree", "münchen"),
+])
+def test_routed_owner_still_normalizes_whitespace(q: TaskQueue, owner: str, machine: str) -> None:
+    with sqlite3.connect(q.db_path) as conn:
+        conn.execute("INSERT INTO tasks(id,status,owner) VALUES ('task','started',?)", (owner,))
+        assert read(conn, machine) is DriverMatch.MATCH
+
+
+def test_v1_projection_upgrade_preserves_concurrent_pinned_reader_and_writer(q: TaskQueue) -> None:
+    from agent_dispatch.current_driver_schema import migrate
+
+    names = ("pin", "tasks_bare", "prestart_pin")
+    legacy_sql = (
+        "SELECT task_id FROM current_driver_pool_v1 INDEXED BY idx_current_driver_v1_prestart_pin"
+        " WHERE placed=0 AND tree='tree' AND (CASE WHEN machine GLOB '*[^ -~]*' THEN 'u'||machine"
+        " ELSE 'a'||lower(trim(COALESCE(machine,''))) END)='ahost'"
+    )
+    with q._connect() as new, sqlite3.connect(q.db_path) as old:
+        for name in names:
+            new.execute(f"DROP INDEX idx_current_driver_v2_{name}")
+        old.execute("INSERT INTO tasks(id,status,target_machine,target_worktree)"
+                    " VALUES ('legacy','claimed',' host ','tree')")
+        old.commit()
+        old.execute("BEGIN")
+        assert old.execute(legacy_sql).fetchone() == ("legacy",)
+        migrate(new)
+        migrate(new)
+        assert old.execute(legacy_sql).fetchone() == ("legacy",)
+        old.rollback()
+        old.execute("UPDATE tasks SET target_machine='host' WHERE id='legacy'")
+        old.commit()
+        assert old.execute(legacy_sql).fetchone() == ("legacy",)
+        new.execute("BEGIN")
+        assert read(new, " host ") is DriverMatch.CLEAR
+        assert read(new, "HOST") is DriverMatch.MATCH
+        indexed = {r[0] for r in new.execute("SELECT name FROM sqlite_schema WHERE type='index'")}
+        assert all(f"idx_current_driver_{version}_{name}" in indexed
+                   for version in ("v1", "v2") for name in names)
 
 
 def test_migration_seeds_preexisting_bindings(tmp_path: Path) -> None:
