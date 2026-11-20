@@ -37,7 +37,6 @@ new behavior, nor permission to resume held implementation or deployment.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
-| [Registry Local-Only Sync](active/registry-local-only-sync/README.md) | Active; reviewed finite ordinary no-remote classification, implementation next | #4173 A5 / historical #4228 only; preserves other project-context owners and genuine errors; no live sync or rollout |
 | [Consumer Telemetry Sink Adoption](active/consumer-telemetry-sink-adoption/README.md) | Draft; command-only configuration, bounded delivery, real producer adoption and release sequence | #13545; preserves #7935/#5900 and producer custody; HTTP and adopter rollout remain separate |
 | [Windows Machine-Protected Cache](active/windows-machine-cache/README.md) | Active; source #13022 merged, native release qualification and promotion pending | #13009; preserves user-cache custody, Vault service and installer owners; no live migration or rollout |
 | [Retained Inbox Message Evolution](active/retained-inbox-message-evolution/README.md) | Draft; versioned migration and nonblocking enrollment proposal before implementation | Bounded #1460 retained-message slice; existing receiver, receipt and broader contract owners preserved; no rollout |
@@ -206,6 +205,7 @@ new behavior, nor permission to resume held implementation or deployment.
 
 | Effort | Outcome | Coordination |
 |--------|---------|--------------|
+| [Registry Local-Only Sync](2026/11/20%20registry-local-only-sync/README.md) | Done; reviewed local-only skip source merged,149 exact-source Windows cases and strict four-file CI qualify | #4173 A5 / historical #4228 only; finite original reservation complete, whole project-context parent Open; no rollout |
 | [Configured Worktree Base Preparation](2026/11/17%20worktree-base-preparation/README.md) | Done for finite source scope; #13033 merged after clean final-head review, required CI and 195-case exact-source qualification | #13013 closed and original claim completed; preserves #4093 fallback, #4303 resume, contributor/workspace custody and #3336 promotion; no rollout |
 | [Verified User-Output Delivery](2026/11/17%20verified-user-output-delivery/README.md) | Done for source scope; #13071 merged after current-head approval, required CI and native Windows/Linux qualification | #13040 closed; normal promotion stays #3336 and broader lifecycle/adoption stays #10968; no real user-storage operation or rollout |
 | [Reliable Git and Daemon Environments](2026/11/17%20reliable-git-environments/README.md) | Done for finite source scope; #12974 merged after exact-head approval, required CI and Linux/Windows native qualification | #12939 retains archive and final native worktree/claim settlement; #12433/#10212 keep mapping ownership and #3336 keeps promotion; no rollout |
