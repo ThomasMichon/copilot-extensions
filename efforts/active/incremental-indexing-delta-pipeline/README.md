@@ -310,6 +310,7 @@ source-owner coordination rather than one large rewrite.
 
 Append-only entries are preserved in dated files, newest first.
 
+- [2026-11-19 caught nested source effects](journal/2026/11.19%20nested-writer-latch.md)
 - [2026-11-19 point-domain binding and read refusal](journal/2026/11.19%20point-read-domains.md)
 - [2026-11-19 component application prerequisites](journal/2026/11.19%20component-application.md)
 - [2026-11-18 Azure DevOps response and selected-record coverage](journal/2026/11.18%20ado-response-coverage.md)

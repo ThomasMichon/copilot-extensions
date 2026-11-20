@@ -331,6 +331,7 @@ class SourceDomain:
         if kind in ("content-upsert", "canonical-delete", "content-compact"):
             value.setdefault("fts_coverage", {}).pop(table, None)
         value.update(uncertain_effect=True, operation=operation)
+        self._local.effect_sequence += 1
         self.save(value)
 
     def _table_identity(self, table_name: str) -> dict[str, Any] | None:
@@ -445,6 +446,7 @@ class SourceDomain:
         }
         # Older participating validators must refuse even an empty native phase.
         value["uncertain_effect"] = True
+        self._local.effect_sequence += 1
         self.save(value)
 
     def write(self, db: Any) -> AbstractContextManager[None]:
@@ -464,9 +466,14 @@ class SourceDomain:
             self.receipt()
             if reconciliation is not None:
                 raise SourceLayoutError("reconciliation requires outer source ownership")
+            sequence = self._local.effect_sequence
             self._local.depth += 1
             try:
                 yield
+            except BaseException:
+                if self._local.effect_sequence != sequence:
+                    self._local.failed_effect = True
+                raise
             finally:
                 self._local.depth -= 1
             return
@@ -499,8 +506,12 @@ class SourceDomain:
             self._local.physical_witness = dict(before or {})
             self._local.bucket_changes = {}
             self._local.bucket_witness = dict(before or {})
+            self._local.effect_sequence = 0
+            self._local.failed_effect = False
             try:
                 yield
+                if self._local.failed_effect:
+                    raise SourceLayoutError("source writer retained a failed nested effect")
                 if self.receipt().get("fts_pending"):
                     raise SourceLayoutError("FTS writer ownership is unsettled")
                 value = self.receipt()
@@ -531,6 +542,8 @@ class SourceDomain:
                 self._local.physical_witness = {}
                 self._local.bucket_changes = {}
                 self._local.bucket_witness = {}
+                self._local.effect_sequence = 0
+                self._local.failed_effect = False
 
 
 def domain_for(

@@ -129,6 +129,13 @@ uncertain effects. A read/guard refusal before mutation remains clean, and a
 later retry retains already completed writes. Ordinary indexing is not fenced
 for a backfill job's lifetime.
 
+A nested participating write that raises after marking a new irreversible
+effect or reconciliation seal latches the outer writer as failed. Catching
+that exception, or completing a later nested no-op, cannot publish the source
+clean or clear its uncertainty. The existing recovery/reconciliation owner is
+still required; this is not rollback or new repair authority. A caught
+pre-effect refusal does not invalidate earlier successfully completed writes.
+
 Ordinary shared-engine ingestion uses [prepared source application](prepared-application.md):
 embedding finishes outside exclusion, then one outer writer contains the
 manifest's content, vector and reconciliation mutations. This changes neither
