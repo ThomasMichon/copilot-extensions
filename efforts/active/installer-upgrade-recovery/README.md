@@ -55,8 +55,9 @@ These are coordination dependencies, not new assignments or ownership transfers.
 ## Coordination
 
 The proposed finite #13667 retained-capture spelling case joins Phase 2's
-existing U6 source/platform qualification and retained-restoration
-coordination. Preserve the current Dispatch capture/restoration, installer,
+existing U6 source/platform and retained-restoration coordination as a
+source-only subcase, not a selected whole-update recovery case. Preserve the
+current Dispatch capture/restoration, installer,
 source, fixture, native and resource owners; no implementer is appointed.
 This optional old-assembly qualification is not an incoming-replacement veto,
 master completed-cycle readiness or permission to stop an incumbent.
@@ -186,14 +187,6 @@ authorize production updates, recovery mutations or new access.
   preservation and truthful refusal without weakening incoming readiness,
   ownership or required-payload admission.
 
-#### Finite retained-assembly Windows path identity - #13667
-
-Agent-recommended U6 subcase; the existing recovery and capture owners remain.
-
-- [ ] **P13667-1:** Accept [equivalent native Windows manifest/slot spellings](retained-capture-path-identity.md#p13667-1-native-path-identity) without weakening retained-assembly admission.
-- [ ] **P13667-2:** Preserve [reported evidence limits and independent incoming readiness](retained-capture-path-identity.md#p13667-2-evidence-and-ownership-boundaries), existing owners and no live-manifest repair.
-- [ ] **V13667:** Qualify [the exact immutable Windows capture/validation fixture and negatives](retained-capture-path-identity.md#v13667-capture-and-validation-controls) under the original boundaries.
-
 - [x] Select the first bounded, unclaimed reproducible source gap, or obtain
   explicit coordination with its existing owner. Record its old-footprint case
   before changing production code.
@@ -225,6 +218,16 @@ Agent-recommended U6 subcase; the existing recovery and capture owners remain.
   historical-seed performance, caller adoption and installed recovery explicit;
   this item is not whole-parent completion. #10570 retains its separate
   contributor-owned consumer work and is not superseded by this qualification.
+
+#### Finite retained-assembly Windows path identity - #13667
+
+Agent-recommended finite source-only U6 subcase; existing recovery and capture
+owners remain. Its acceptance is capture/validation, not the general Phase 2
+ordinary-entry or installed/whole-update outcomes above.
+
+- [ ] **P13667-1:** Accept [equivalent native Windows manifest/slot spellings](retained-capture-path-identity.md#p13667-1-native-path-identity) without weakening retained-assembly admission.
+- [ ] **P13667-2:** Preserve [reported evidence limits and independent incoming readiness](retained-capture-path-identity.md#p13667-2-evidence-and-ownership-boundaries), existing owners and no live-manifest repair.
+- [ ] **V13667:** Qualify [the exact immutable Windows capture/validation fixture and negatives](retained-capture-path-identity.md#v13667-capture-and-validation-controls) under the original boundaries.
 
 ### Whole installer and resident-companion lifecycle - #5820
 
@@ -383,6 +386,8 @@ a new recovery/provenance veto on explicit incoming replacement.
   negatives. Optional retained restoration remains separate from incoming
   completion and master completed-cycle readiness; preserve actual custody
   and original execution limits without a live manifest rewrite or host action.
+  The parent's general latest-entry, installed-consumer and whole-update
+  controls remain separate duties, not prerequisites to this finite source exit.
 
 - [ ] **IR4122-G:** Resolve P0 before claiming this ROOT receives #4122,
   then qualify P1 and its local controls at the original finite source-input

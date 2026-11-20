@@ -1,7 +1,7 @@
 # Retained-capture Windows path identity
 
 Back to [Installer Upgrade Recovery](README.md#finite-retained-assembly-windows-path-identity---13667)
-and [U6 acceptance](acceptance.md#initial-candidate-families).
+and [finite source-only U6 acceptance](acceptance.md#finite-source-only-capture-subcase).
 P13667-1/P13667-2/V13667 and [actual global G13667](README.md#validation-plan)
 retain the completion states; this canonical detail has no duplicate checkboxes.
 
@@ -28,7 +28,10 @@ The reported selected runtime/manifest source version agreement and existing
 completion marker identify the spelling boundary; they do not prove every
 later restoration precondition. This is optional retained-restoration
 qualification, not an incoming-replacement prerequisite or master
-completed-cycle readiness. Preserve the governing authoritative-runtime-
+completed-cycle readiness. This finite capture/validation result does not
+depend on the latest public update entry, an installed consumer or whole-update
+recovery; those remain the parent's separate acceptance duties.
+Preserve the governing authoritative-runtime-
 replacement intent, current retained-capture/restoration and installer
 owners, source/fixture/native custody and all actual holds.
 

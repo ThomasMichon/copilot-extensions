@@ -26,7 +26,6 @@ generic gap with no existing tracker; retain the existing tracker otherwise.
 | U4 - Existing installer state | Existing installation requests, incomplete foundation selection, stale transaction or publication records. | The explicit latest entry reaches ready/current incoming state without old recovery permission. Preserve original request/effect history; coordinate concrete writers by bounded native means, not persistent queuing. | #9448 and #7758. Existing refusal controls describe old behavior, not an exemption from authoritative replacement. |
 | U5 - Historical generated integration | Prior generated command, launcher, provider, task or service registration differs from the incoming producer. | Applicable current registrations select incoming code; user state and unrelated/protected execution survive. Unprovable old central cleanup is separately reported, not an incoming veto. | #6820, #10180 and per-component registration/lifecycle owners. |
 | U6 - Source and platform identity | Retained source-qualified or marker-only slots, changed source assembly, and Windows/POSIX path/layout differences. | Select actual admitted incoming identity without mutable-source references; invoke installed consumers with the source unavailable. No version-blind ready result or guessed compatibility. | #7028, #9290 and owning native resolver/bootstrap families; classify a concrete case before implementation. |
-| U6-13667 - Retained-capture Windows spelling | Optional Dispatch retained capture compares a forward-slash manifest `venv` with a native backslash slot spelling. | Resolve [P13667/V13667/G13667](retained-capture-path-identity.md): same admitted completed directory, positive capture AND validation, different/indirect/incomplete negatives and every existing identity check. | Existing capture/restoration, installer, source, fixture/native and resource owners under #10377; no live-manifest rewrite, supervisor stop, incoming veto or master-cycle completion claim. |
 | U7 - Current serving generation | An old central service remains reachable and capable of serving after incoming selection. | Verify actual required incoming serving identity and every applicable current route; fresh calls must reach the incoming generation, not merely a capable old server. Transfer/exclude conflicting fresh admission where needed. Existing stateful clients and old-code keepers may survive; final predecessor drain/exit, census and cleanup are independent. | Reuse #6389 for stale-capable-serving/fresh-admission acceptance under #10377. Retain #6820/#3491 lifecycle/adopter ownership and #9716 census ownership. #10486 full adopted-client reattachment remains separate, not an incoming prerequisite. |
 | U8 - Manifest-only current shortcut | A matching deploy manifest survives a missing interpreter, incomplete selected slot or wrong current selector; invoke ordinary selected-target update. | Reach the normal owning installer, preserve configuration, keep failed repair failed, then invoke usable selected Python and reuse unchanged healthy slot bytes on repeat. Retain source/profile and selector-free legacy controls. | Bounded non-serving footprint claim on #6389 under #10377; service and retirement owners remain separate. |
 | U9 - Distinct-generation producer repair | Codespaces normal install/update reaches a selected incomplete or completed-but-unlaunchable same-version identity. | Use existing construction/retention owners to build and health-gate a distinct generation, preserve old-slot/state bytes and publish applicable selections. Invoke usable selected CLI, reuse healthy repair on repeat and keep actual incoming failures failed. | Bounded Codespaces adapter claim on #5472 under #10377; no shared admission/guardian, watchdog, diagnostics or service-owner takeover. |
@@ -44,6 +43,20 @@ generic gap with no existing tracker; retain the existing tracker otherwise.
 These are candidate families, not assertions that each needs a new defect or
 issue. Each implementation unit must identify a
 specific failing boundary, supported contract and unconflicted owner.
+
+## Finite source-only capture subcase
+
+U6-13667 is an optional capture/validation subcase of the existing
+source/platform coordination, NOT a selected whole-update recovery case.
+Its complete finite acceptance is P13667-1/P13667-2/V13667/G13667 at the
+owning retained-capture boundary. It does not require the latest public
+update entry, an installed consumer or whole-update recovery to pass first.
+Those broader controls remain unchanged for the parent and its existing
+selected cases, and cannot be claimed from this finite source result.
+
+| Source-only subcase | Reported before-state | Required finite evidence | Existing coordination |
+|---|---|---|---|
+| U6-13667 - Retained-capture Windows spelling | Optional Dispatch retained capture compares a forward-slash manifest `venv` with a native backslash slot spelling. | Resolve [P13667/V13667/G13667](retained-capture-path-identity.md): same admitted completed directory, positive capture AND validation, different/indirect/incomplete negatives and every existing identity check. | Existing capture/restoration, installer, source, fixture/native and resource owners under #10377; no live-manifest rewrite, supervisor stop, incoming veto or master-cycle completion claim. |
 
 ## L5820 - Whole installer and resident-companion lifecycle
 
@@ -74,6 +87,11 @@ No updater, live companion operation, resource release or custody transfer
 is authorized by this documentary intake.
 
 ## Required controls for a selected case
+
+These controls remain unchanged for the parent and its other selected cases.
+The explicitly source-only U6-13667 subcase above retains its own finite
+capture/validation acceptance; it neither inherits these whole-update
+prerequisites nor supplies their missing parent evidence.
 
 | Control | Observable postcondition |
 |---|---|
