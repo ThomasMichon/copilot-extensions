@@ -69,6 +69,13 @@ current pending delivery (including a qualified retry) also blocks; a stale
 unattempted wake or this observation's own pending closeout notification does
 not. A confirmed single-attempt delivery settles an unqualified wake; a later
 retry cannot establish what happened on an earlier ambiguous attempt.
+For each outbox, Dispatch records the first delivery attempt with a qualified
+send identity. A later `sent` or `not_sent` settles only that send. If accounting
+began after attempt one, readiness still refuses. A retry of an exact known
+refusal remains supported when accounting began on attempt one. On upgrade,
+an existing multi-attempt row with no recorded first ordinal is not assumed
+to have been qualified from the start. This evidence is for observation only:
+it does not authorize a retry or change an outbox outcome.
 A successful response identifies the request,
 generation and assignment event; it does not persist a readiness receipt, submit,
 authorize release or send a wake. Previously settled and finalized drivers cannot

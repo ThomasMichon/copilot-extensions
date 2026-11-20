@@ -299,9 +299,9 @@ def test_preview_reconciliations_skip_unrelated_live_and_settled_history(
                 conn.executemany(
                     "INSERT INTO run_waiter_wakes(id,task_id,waiter_generation,task_generation,"
                     "owner,resume_worktree,sender,message,status,attempts,created_at,updated_at,"
-                    "execution_send_state)"
+                    "execution_send_state,first_qualified_attempt)"
                     " VALUES (:i,:task,1,1,'host/w','w','test','message',"
-                    "'delivered',1,1,1,'sent')",
+                    "'delivered',2,1,1,'sent',1)",
                     rows,
                 )
                 conn.executemany(

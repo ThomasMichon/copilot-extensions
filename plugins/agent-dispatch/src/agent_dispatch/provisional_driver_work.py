@@ -38,7 +38,8 @@ _WAITER_HOST = _host_sql("owner")
 # A terminal first delivery can settle an unqualified send, but a later
 # successful retry says nothing about the outcome of an earlier attempt.
 _AMBIGUOUS = (
-    "(execution_send_state IN ('pending','unknown') OR"
+    "(COALESCE(first_qualified_attempt,attempts)>1"
+    " OR execution_send_state IN ('pending','unknown') OR"
     " (status='delivering' AND COALESCE(execution_send_state,'') NOT IN ('sent','not_sent')) OR"
     " (attempts>0 AND COALESCE(execution_send_state,'') NOT IN ('sent','not_sent')"
     " AND NOT (execution_send_state IS NULL AND execution_send IS NULL AND attempts=1"
@@ -53,11 +54,43 @@ _CANDIDATE = (
 
 def migrate(conn: sqlite3.Connection) -> None:
     for table in TABLES:
+        generation = "generation" if table == "wake_outbox" else "task_generation"
+        # A receipt is for this outbox row and owner incarnation, not just a state label.
+        original_identity = (
+            "CASE WHEN json_valid(execution_send) THEN"
+            f" json_extract(execution_send,'$.outbox')='{table}'"
+            " AND json_extract(execution_send,'$.wake_id')=id"
+            f" AND json_extract(execution_send,'$.task_generation')={generation}"
+            " AND json_extract(execution_send,'$.owner_session_id') IS owner_session_id"
+            " AND json_type(execution_send,'$.delivery_token')='text'"
+            " AND length(json_extract(execution_send,'$.delivery_token'))>0 END"
+        )
+        columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+        if "first_qualified_attempt" not in columns:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN first_qualified_attempt INTEGER")
+            # A qualified identity already retained on attempt one has no earlier attempt.
+            # Historical multi-attempt rows cannot make that assertion from the latest receipt.
+            conn.execute(
+                f"UPDATE {table} SET first_qualified_attempt=1 WHERE attempts=1"  # noqa: S608 -- fixed outbox names
+                " AND execution_send IS NOT NULL AND execution_send_state"
+                f" IN ('pending','unknown','sent','not_sent') AND {original_identity}"
+            )
+        conn.execute(
+            f"CREATE TRIGGER IF NOT EXISTS {table}_first_qualified_attempt"  # noqa: S608 -- fixed SQL and outbox names
+            f" AFTER UPDATE OF execution_send ON {table}"
+            " WHEN OLD.execution_send IS NULL AND NEW.execution_send IS NOT NULL"
+            " AND NEW.execution_send_state='pending' AND NEW.first_qualified_attempt IS NULL"
+            " AND NEW.status='delivering' AND NEW.attempts>0"
+            f" BEGIN UPDATE {table} SET first_qualified_attempt=NEW.attempts"
+            f" WHERE id=NEW.id AND {original_identity}"
+            " AND json_extract(execution_send,'$.delivery_token')=delivery_token; END"
+        )
         for suffix, key in (("task", "task_id"), ("target", _TARGET)):
             conn.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_{table}_driver_{suffix}_v2"
+                f"CREATE INDEX IF NOT EXISTS idx_{table}_driver_{suffix}_v3"
                 f" ON {table}({key}) WHERE {_CANDIDATE}"
             )
+            conn.execute(f"DROP INDEX IF EXISTS idx_{table}_driver_{suffix}_v2")
             conn.execute(f"DROP INDEX IF EXISTS idx_{table}_driver_{suffix}")
     conn.execute(
         f"CREATE INDEX IF NOT EXISTS idx_run_waiters_driver_work"
