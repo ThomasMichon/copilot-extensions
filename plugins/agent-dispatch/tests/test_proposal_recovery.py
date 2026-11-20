@@ -7,6 +7,28 @@ import pytest
 from agent_dispatch.proposal_recovery import ProposalIntake
 
 
+def test_failed_clear_recovers_last_acknowledged_draft(tmp_path: Path) -> None:
+    intake = ProposalIntake.create(tmp_path / "intake", title="task", repo="example", payload="data")
+    task = intake.queue.get(intake.identity)
+    assert task is not None
+    saved = intake.write_draft({"answer": "retain"}, expected_revision=task.steering_revision,
+                               expected_draft_revision=task.card_draft_revision)
+    assert saved is not None
+    with closing(sqlite3.connect(intake.records)) as db:
+        db.execute("CREATE TRIGGER refused BEFORE UPDATE OF draft ON proposal_v2 BEGIN SELECT RAISE(FAIL,'full'); END")
+        # A legacy reader cannot claim a draft-aware history as a v1 success.
+        with pytest.raises(sqlite3.OperationalError, match="no such table"):
+            db.execute("SELECT id,title,payload FROM proposal_v1")
+    current = intake.queue.get(intake.identity)
+    assert current is not None
+    with pytest.raises(sqlite3.IntegrityError, match="full"):
+        intake.write_draft(None, expected_revision=current.steering_revision,
+                           expected_draft_revision=current.card_draft_revision)
+    fresh = ProposalIntake.recover(intake.records, tmp_path / "fresh")
+    recovered = fresh.queue.get(intake.identity)
+    assert recovered is not None and recovered.card_draft == saved
+
+
 def test_rebuild_from_proposal_records_without_queue_or_payloads(tmp_path: Path) -> None:
     payload = "portable fixture payload\n" * 100
     a = ProposalIntake.create(tmp_path / "intake", repo="https://example.invalid/org/repo",
