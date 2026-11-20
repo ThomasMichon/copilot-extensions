@@ -178,6 +178,9 @@ def _capture(command: ProviderCommand, payload: str) -> tuple[int, str]:
             )
         except OwnedCleanupError as exc:
             raise PlacementProviderError(f"cleanup unconfirmed: {exc}") from None
+        except UnicodeError:
+            # The owned path settles the Job before decoding, so no child remains.
+            raise PlacementProviderError("stdout is not UTF-8") from None
         if result is None:
             raise PlacementProviderError(f"failed or timed out after {command.timeout:g}s")
         return result.returncode, result.stdout
@@ -191,18 +194,26 @@ def _capture_posix(command: ProviderCommand, payload: str) -> tuple[int, str]:
     try:
         proc = subprocess.Popen(  # noqa: S603 -- trusted, operator-configured argv
             list(command.argv), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL, text=True, encoding="utf-8", start_new_session=True,
+            stderr=subprocess.DEVNULL, start_new_session=True,
         )
     except OSError as exc:
         raise PlacementProviderError(f"could not start: {exc}") from None
     try:
-        stdout, _stderr = proc.communicate(payload, timeout=command.timeout - reserve)
+        raw, _stderr = proc.communicate(
+            payload.encode("utf-8"), timeout=command.timeout - reserve,
+        )
     except subprocess.TimeoutExpired:
         terminate_process_tree(proc, grace=reserve / 2)
         raise PlacementProviderError(f"timed out after {command.timeout:g}s") from None
     except (OSError, subprocess.SubprocessError) as exc:
         terminate_process_tree(proc, grace=reserve / 2)
         raise PlacementProviderError(f"failed: {exc}") from None
+    try:
+        stdout = raw.decode("utf-8")
+    except UnicodeError:
+        # Reap any descendant still in the provider's session before failing.
+        terminate_process_tree(proc, grace=reserve / 2)
+        raise PlacementProviderError("stdout is not UTF-8") from None
     return proc.returncode, stdout
 
 

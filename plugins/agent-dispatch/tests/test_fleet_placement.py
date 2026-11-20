@@ -303,6 +303,14 @@ def test_run_provider_rejects_bad_output(tmp_path: Path, body: str) -> None:
         run_provider(_script(tmp_path, body), ["W1", "W2"])
 
 
+def test_non_utf8_provider_output_disables_only_managed_hosts(tmp_path: Path) -> None:
+    command = _script(tmp_path, "sys.stdin.read()\nsys.stdout.buffer.write(b'\\xff{}')\n")
+    with pytest.raises(PlacementProviderError, match="UTF-8"):
+        run_provider(command, ["W1", "W2"])
+    ordering = PlacementOrdering(PlacementDeclaration("devbox", ("W1", "W2")), command)
+    assert ordering.order(["W1", "CDE", "W2"]) == ["CDE"]
+
+
 def _alive(pid: int) -> bool:
     if sys.platform == "win32":
         import ctypes
