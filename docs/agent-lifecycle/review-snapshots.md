@@ -5,8 +5,9 @@ that review. Dispatch tracks **the job** in a task row and **one attempt to
 run its worker** in a spawn reservation. A spawn reservation is always tied
 to a task. This example asks for a review reference on one revision. In a
 [PR-lifetime reviewer loop](dispatch.md#assignment-is-not-a-running-slot),
-posting that reference is progress: the task suspends until an update or
-merge. It submits only after closeout, not after each verdict.
+posting that reference is progress: the task suspends between rounds. An
+update, a ready reviewer-owned landing action, or a merge wakes it for the
+next step. It submits only after closeout, not after each verdict.
 
 | Event in this example | Task status | Reservation state |
 |---|---|---|

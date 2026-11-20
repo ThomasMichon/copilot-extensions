@@ -21,6 +21,7 @@ from the separate checkout used to inspect candidate changes:
 | Pool accepts work | Record the pool, then bind the worktree it allocates. | A process need not be running yet. |
 | Reviewer posts a verdict | `suspended`, still assigned. | Stop the worker and return its running slot to the pool. |
 | PR is updated | Resume the same assignment, not a new task. | Reacquire capacity for the same worktree and conversation. |
+| Landing is ready and policy assigns it to the reviewer | Resume the same task for landing; no new revision is needed. | Approval alone does not grant merge authority. |
 | PR merges | Wake the original reviewer for closeout. | Clean the review checkout and finalize the assigned workspace before submission. |
 | Result awaits evaluation | `submitted`, still assigned to the pool and finalized worktree. | Evaluation does not need a running worker. Rejection retains the assignment. |
 | Evaluator confirms, task is abandoned, or owner explicitly releases it | Unassignment is now permitted. | Preserve the assignment history. A move to `claimed` just to resume does not qualify as release. |

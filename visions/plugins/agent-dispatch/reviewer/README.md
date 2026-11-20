@@ -233,7 +233,10 @@ to card merely for ordinary unanswered waiting.
 A verdict ends a round, not the assignment. The task suspends; its worker
 stops and frees a slot. The next revision resumes the same task, worktree and
 conversation. The reviewer does not submit the task just because it posted an
-approval or requested changes.
+approval or requested changes. Suspension must not lose a ready landing
+action: when policy assigns landing to the reviewer, a ready-to-merge signal
+resumes that same reviewer without waiting for another author edit. Where
+the author or automation owns landing, it remains their action.
 
 Merge wakes the assigned reviewer for cleanup. It cleans up the separate
 review checkout containing the candidate changes, finalizes its assigned
