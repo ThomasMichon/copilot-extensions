@@ -174,16 +174,21 @@ For prepared native Windows `view`, `rg` and `glob` events within the 1 MiB
 prepared-event bound, including outstanding late-guidance watches, evaluation
 has no synchronous resident request, command
 discovery or Python fallback. Read events do not need mutation invalidation.
-The native-write subset below shares this shell-safe evaluation. Other tools,
-unprepared installation cells and oversized events keep their original entry and
-behavior. This is not the complete shell-only transition.
+The native-write subset below shares this shell-safe evaluation. Other Windows
+events use the [selected native resident contract](architecture.md#native-windows-pre-tool-entry),
+not a per-event Python fallback. Unprepared cells report unavailable rather than
+starting their validator. This is not the complete shell-only transition.
+Supersede attempts needing external GitHub observations report unavailable:
+native frames cannot establish caller account/host authority, so the resident
+does not substitute its own credentials or start an observation child.
 
 Prepared entry uses native file/path operations without loading PowerShell's
 Management module. Fully qualified source paths defer cwd repair until the
-original fallback is needed; relative, drive-relative and root-relative paths
+relative source resolution is needed; relative, drive-relative and root-relative paths
 retain early repair. Runtime-root resolution preserves both normalized-path
 validation and literal ancestor/reparse checks, including ancestors hidden by
-dot segments. This changes neither prepared admission nor fallback policy.
+dot segments. Prepared admission remains current; missing native helpers do not
+cause an interpreter lookup.
 
 Prepared JSON conversion avoids initializing Utility cmdlets in a fresh shell.
 PowerShell 6+ uses its public object-to-hashtable decoding engine; serialization
@@ -191,7 +196,8 @@ uses the public JSON context when available, retaining the cmdlet on older
 engines without that API. PowerShell 5 keeps the framework decoder and the
 shell's metadata type resolver, and serializes its JSON graph with the same
 framework library. Unicode, numeric/date-like values and metadata retain their
-shell representation. Generic post-tool fallback conversion is unchanged.
+shell representation. Resident transport conversion retains those same shell
+semantics; a failed/ambiguous request is not replayed through a Python client.
 
 The reader checks the original prepared membership and all its input witnesses.
 It then reads the binding owner's `worktree-binding.json`. Only the owner's
