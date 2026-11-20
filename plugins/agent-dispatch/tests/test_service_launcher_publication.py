@@ -77,6 +77,28 @@ try {{
     }}
     if([IO.File]::ReadAllText($launcher) -cne $launcherBody){{throw 'Changed content not published'}}
 }} finally {{ $reader.Dispose() }}
+if('{owner}' -eq 'Install-CoordinatorTask'){{
+    $start=@($owner.FindAll({{param($n)
+        $n -is [Management.Automation.Language.AssignmentStatementAst] -and
+        $n.Left.Extent.Text -ceq '$ownedLauncher'
+    }},$true))[0]
+    $end=@($owner.FindAll({{param($n)
+        $n -is [Management.Automation.Language.IfStatementAst] -and
+        $n.Extent.Text.StartsWith('if (-not $refreshOwned)')
+    }},$true))[0]
+    if(-not $start -or -not $end){{throw 'Owned-header boundary missing'}}
+    function Assert-DispatchOrdinaryPath {{ param($Path)
+        if([IO.Path]::GetDirectoryName($Path) -cne $InstallDir){{throw 'Unexpected fixture path'}}
+    }}
+    $header=[scriptblock]::Create($owner.Extent.Text.Substring(
+        $start.Extent.StartOffset-$owner.Extent.StartOffset,
+        $end.Extent.StartOffset-$start.Extent.StartOffset))
+    . $header
+    if(-not $refreshOwned){{throw 'Generated launcher header not recognized'}}
+    $LinkPython=Join-Path $InstallDir 'final-python.exe'
+    . $publish
+    if([IO.File]::ReadAllText($launcher) -cne $launcherBody){{throw 'Header read blocked replacement'}}
+}}
 Write-Output 'identical-preserved changed-refused reader-preserved changed-published'
 """
     result = subprocess.run(
@@ -84,7 +106,7 @@ Write-Output 'identical-preserved changed-refused reader-preserved changed-publi
         capture_output=True,
         text=True,
         timeout=15,
-        creationflags=subprocess.CREATE_NO_WINDOW,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW"),
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert (

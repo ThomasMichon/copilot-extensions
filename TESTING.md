@@ -4,7 +4,9 @@ The manual `installation-context-acceptance.yml` `native_daemon_exit` selection
 also runs an independent `test_durable_wmi_job_survival.py` job through the leased disposable Windows
 owner. It proves WMI daemon survival after strict caller-Job closure, bounded
 child termination and exact fixture cleanup; ordinary local containment is
-not relaxed to obtain that evidence.
+not relaxed to obtain that evidence. The same proof includes expired inherited
+Job names alongside live caller Jobs; its retained-membership negative must
+still refuse admission after an absent name.
 
 The manual foundation portfolio separates contained functional checks from
 Windows production caller-Job loss. After the ordinary runner prepares its
