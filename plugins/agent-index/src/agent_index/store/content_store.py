@@ -182,6 +182,12 @@ class ContentStore(_ContentFtsWorkerMixin, _ContentItemReadsMixin, _ContentSnaps
 
     # -- write ---------------------------------------------------------------
 
+    def upsert_point(self, chunks: list[Chunk], *, point_scope: PointScope | None) -> int:
+        """Write selected native content; caller owns ordering, coverage and publication."""
+        from .point_content import upsert_point_content
+
+        return upsert_point_content(self, chunks, point_scope=point_scope)
+
     @source_write
     def upsert(self, chunks: list[Chunk], *, skip_identical: bool = False) -> int:
         """Insert or update chunk content by chunk_id.
