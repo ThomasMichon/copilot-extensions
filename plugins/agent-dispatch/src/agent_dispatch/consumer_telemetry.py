@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator, Callable
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from pathlib import Path
 from typing import Any
 
 from process_telemetry import SinkSlot
 from process_telemetry.command import Binding, CommandRoutes
 from process_telemetry.command_config import CAPABILITY, read_object
-from process_telemetry.emission import LEGACY
+from process_telemetry.emission import LEGACY as LEGACY
 
 from .install_paths import install_dir
 from .identity import canonicalize_remote
@@ -22,13 +23,16 @@ def attach(bus: Any, policy: Any, *, authenticated: bool) -> ConsumerTelemetry:
     return consumer
 
 
-def owning_lifespan(consumer: ConsumerTelemetry, serving: Any) -> Any:
+Lifespan = Callable[[Any], AbstractAsyncContextManager[None]]
+
+
+def owning_lifespan(consumer: ConsumerTelemetry, serving: Lifespan) -> Lifespan:
     """Keep cleanup outside the existing coordinator's complete startup/stop scope."""
     if consumer.legacy:
         return serving
 
     @asynccontextmanager
-    async def lifespan(app: Any):
+    async def lifespan(app: Any) -> AsyncIterator[None]:
         try:
             consumer.start()
             async with serving(app):
@@ -137,10 +141,10 @@ class ConsumerTelemetry:
             return
         # Fence records are service observations, including failed unauthenticated
         # attempts. Their caller-supplied repo must never select an initiator route.
-        binding = (
-            self.service or self.unavailable if event.get("name") == "producer_fence"
-            else self.bindings.get(event.get("repo"), self.unavailable)
-        )
+        repo = event.get("repo")
+        binding = self.bindings.get(repo, self.unavailable) if isinstance(repo, str) else self.unavailable
+        if event.get("name") == "producer_fence":
+            binding = self.service or self.unavailable
         self.owner.slot.emit(event, binding=binding)
 
     def close(self) -> None:

@@ -12,6 +12,10 @@ import threading
 import time
 from dataclasses import replace
 from pathlib import Path
+from collections.abc import Callable
+from typing import Any, Protocol, cast
+
+from fastapi import FastAPI
 
 from . import __version__, telemetry
 from .action_controls import require_worker_admission
@@ -86,7 +90,9 @@ def check_bind_safety(cfg: Config) -> None:
         )
 
 
-def build_app(cfg: Config | None = None, *, replay_consumer_factory=None):
+def build_app(
+    cfg: Config | None = None, *, replay_consumer_factory: Callable[..., Any] | None = None,
+) -> FastAPI:
     """Construct the coordinator; only a trusted embedding selects replay."""
     cfg = cfg or replace(load_config(), control_token=resolve_control_token())
     from .assignment_admission import configured_writer
@@ -223,7 +229,7 @@ def _owns_active_route() -> bool:
         return _wake_route_owned
 
 
-def advertise_endpoint(cfg: Config):
+def advertise_endpoint(cfg: Config) -> Path | None:
     """Write the rendezvous file advertising the coordinator's bound endpoint.
 
     Discovery: clients resolve the coordinator here (env override -> file ->
@@ -326,7 +332,15 @@ def _clear_routing() -> None:
         log.debug("zdd routing clear-on-shutdown skipped", exc_info=True)
 
 
-@daemon_entrypoint("agent-dispatch-coordinator", source=__file__, purpose="production")
+class _Serve(Protocol):
+    def __call__(
+        self, cfg: Config | None = None, *, passive: bool = False, force: bool = False,
+    ) -> None: ...
+
+
+@cast(Callable[[_Serve], _Serve], daemon_entrypoint(
+    "agent-dispatch-coordinator", source=__file__, purpose="production",
+))
 def serve(cfg: Config | None = None, *, passive: bool = False, force: bool = False) -> None:
     """Bind and serve the coordinator (blocking).
 
@@ -538,7 +552,7 @@ def serve(cfg: Config | None = None, *, passive: bool = False, force: bool = Fal
                     sock.close()
 
 
-def _settle_federation(runner, *, interrupted=None) -> None:
+def _settle_federation(runner: Any, *, interrupted: BaseException | None = None) -> None:
     """Keep the hosting admission until bounded local retirement confirms success."""
     retry = False
     while True:
@@ -558,7 +572,7 @@ def _settle_federation(runner, *, interrupted=None) -> None:
         raise interrupted
 
 
-def _maybe_start_federation(*, drain_gate=None):
+def _maybe_start_federation(*, drain_gate: Any = None) -> Any:
     """Start the federation runner alongside the coordinator when a federation
     role is configured (``AGENT_DISPATCH_FEDERATION_ROLE``); return it (so
     :func:`serve` can stop it) or ``None``.

@@ -3,7 +3,8 @@
 The `consumer-telemetry-native.yml` finite Windows/Linux packet runs both the
 existing Bridge command/custody controls and Dispatch's
 `tests/test_consumer_telemetry_command.py` plus legacy telemetry suite through
-the contained plugin runner. Dispatch's real configured HTTP mutations reach
+the contained plugin runner. It also selects the three existing standalone
+health/control-authority regressions. Dispatch's real configured HTTP mutations reach
 independent fsynced receiver files for two origins and an explicit service
 route. This source evidence is not release, installed-service qualification or
 completion of the wider consumer-telemetry U3/U4 work.

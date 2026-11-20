@@ -3,18 +3,21 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 import sys
 import time
 from types import SimpleNamespace
 from typing import Any
 
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import pytest
 
 from agent_dispatch import consumer_telemetry, telemetry
 from agent_dispatch.config import Config
 from agent_dispatch.coordinator import create_app
+from agent_dispatch.install_paths import install_dir
 from agent_dispatch.queue import TaskQueue
 from agent_dispatch.server import build_app
 from process_telemetry import SinkSlot
@@ -57,7 +60,7 @@ def readback(root: Path) -> list[dict[str, Any]]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
 
 
-def wait_for(predicate, seconds: float = 6) -> None:
+def wait_for(predicate: Callable[[], bool], seconds: float = 6) -> None:
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
         if predicate():
@@ -67,7 +70,7 @@ def wait_for(predicate, seconds: float = 6) -> None:
 
 
 def policy_file(tmp_path: Path, repositories: dict[str, str], service: Path | None = None) -> None:
-    root = consumer_telemetry.install_dir()
+    root = install_dir()
     root.mkdir(parents=True, exist_ok=True)
     (root / "consumer-telemetry.json").write_text(json.dumps({
         "schema_version": 1, "repositories": repositories,
@@ -180,7 +183,7 @@ def test_ordinary_service_policy_interleaves_origins_and_service_receiver(
     monkeypatch.setenv("HARNESS_POLICY", "must-not-reach-child")
     app = build_app(Config(db_path=str(tmp_path / "tasks.db"), token="fixture-data"))
     consumer = app.state.consumer_telemetry
-    assert consumer.owner is None
+    assert consumer.status()["counters"] == {}
     elsewhere = tmp_path / "product checkout"
     elsewhere.mkdir()
     monkeypatch.chdir(elsewhere)
@@ -282,6 +285,7 @@ def test_unknown_origin_and_unauthenticated_owner_never_borrow_service_route(tmp
             }))
             assert consumer.owner is None or consumer.owner.stats()["enqueued"] == 0
             if authenticated:
+                assert consumer.owner is not None
                 assert consumer.owner.stats()["dropped_route"] == 1
         finally:
             consumer.close()
@@ -388,7 +392,7 @@ def test_absent_policy_preserves_legacy_and_malformed_policy_refuses(
     tmp_path: Path,
 ) -> None:
     assert consumer_telemetry.load_policy() is LEGACY
-    root = consumer_telemetry.install_dir()
+    root = install_dir()
     root.mkdir(parents=True, exist_ok=True)
     (root / "consumer-telemetry.json").write_text("{")
     assert consumer_telemetry.load_policy() == {}
@@ -406,7 +410,7 @@ def test_real_receiver_failure_preserves_work_and_restart_is_a_new_source(
     policy = {"schema_version": 1, "repositories": {REPO_A: str(root)}}
     database = tmp_path / "tasks.db"
 
-    def app():
+    def app() -> FastAPI:
         return create_app(
             TaskQueue(database), token="fixture-data", enable_mcp=False,
             consumer_telemetry=policy,
