@@ -93,10 +93,14 @@ def main() -> None:
     opts = cli.parse_args()
     root = Path(tempfile.mkdtemp(dir=opts.scratch_parent, prefix="ipc-drill-")).absolute()
     da, ba, db, bb = [p.absolute() for p in opts.interpreters]
-    if da.samefile(db) or ba.samefile(bb):
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    def prefix(python: Path) -> Path:
+        value = subprocess.check_output([str(python), "-I", "-B", "-c", "import sys; print(sys.prefix)"],
+                                        timeout=15, text=True, creationflags=flags)
+        return Path(value.strip()).resolve(strict=True)
+    if prefix(da) == prefix(db) or prefix(ba) == prefix(bb):
         raise ValueError("distinct generations required")
     server_script = Path(__file__).resolve().parents[1] / "plugins" / "agent-bridge" / "tests" / "ipc_trial_server.py"
-    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     for lost in (False, True):
         lane = root / ("ambiguous" if lost else "confirmed")
         lane.mkdir()
@@ -142,7 +146,12 @@ def main() -> None:
                 finally:
                     if proc.poll() is None:
                         (lane / ("stop-" + phase)).touch()
-                    proc.wait(timeout=15)
+                    try:
+                        proc.wait(timeout=15)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                        proc.wait(timeout=15)
+                        raise
                 assert (lane / ("closed-" + phase)).is_file()
         assert (lane/"prompt-count").read_text().splitlines() == ["1"] and not (lane/"forbidden-send").exists()
         print(f"{lane.name}: passed", flush=True)

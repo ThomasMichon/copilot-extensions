@@ -49,7 +49,7 @@ async def read_native_send(
     try:
         manager = request.app.state.session_manager
         records: NativeReceiptRecords | None = getattr(request.app.state, "native_receipt_records", None)
-        result = (await read_receipt(manager, session_id, req) if records is None
+        result = (await read_receipt(manager, session_id, req) if records is None or not req.no_resume
                   else await records.reconcile(manager, session_id, req))
     except KeyError as exc:
         raise HTTPException(404, detail={"code": "native_session_unavailable"}) from exc
@@ -68,7 +68,7 @@ async def submit_native_send(
     try:
         manager = request.app.state.session_manager
         records: NativeReceiptRecords | None = getattr(request.app.state, "native_receipt_records", None)
-        if records is None:
+        if records is None or not req.no_resume:
             return await native_send(manager, session_id, req)
         receipt = await records.submit_once(manager, session_id, req)
         if receipt is None:

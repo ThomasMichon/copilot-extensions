@@ -70,7 +70,10 @@ class NativeReceiptRecords:
 
     async def reconcile(self, manager: Any, session: str, request: NativeSendPrompt) -> dict[str, Any] | None:
         """Consult the exact original holder's receipt-only path, not settlement or send."""
-        retained = self.inspect(session, request)
+        try:
+            retained = self.inspect(session, request)
+        except KeyError:
+            return await read_receipt(manager, session, request)
         if retained is not None:
             return retained
         observed = await read_receipt(manager, session, request)

@@ -42,3 +42,27 @@ async def test_public_receipt_after_holder_unavailable(
     manager._submit_prompt_locked.assert_not_awaited()
     manager.resume_session.assert_not_awaited()
     manager.handoff_session.assert_not_awaited()
+
+
+@pytest.mark.parametrize("historical", [False, True])
+def test_journal_only_receipt_with_independent_store(
+    native_send: tuple[Any, Any, NativeSendPrompt], tmp_path: Path, historical: bool,
+) -> None:
+    manager, session, original = native_send
+    app = FastAPI()
+    app.state.session_manager = manager
+    app.include_router(router)
+    records = NativeReceiptRecords.create(tmp_path / "records")
+    if not historical:
+        app.state.native_receipt_records = records
+    path = f"/api/v1/sessions/{session.session_id}/turns/native-bound/send"
+    body = original.model_copy(update={"no_resume": historical}).model_dump(mode="json")
+    with TestClient(app) as client:
+        admitted = client.post(path, json=body)
+        assert admitted.status_code == 200
+        app.state.native_receipt_records = records
+        manager._submit_prompt_locked = AsyncMock(side_effect=AssertionError("unexpected send"))
+        observed = client.post(path + "/receipt", json=body)
+        assert observed.status_code == 200 and observed.json() == admitted.json()
+    manager._submit_prompt_locked.assert_not_awaited()
+    assert session.turn_count == 1
