@@ -34,6 +34,14 @@ observe a caller-independent background installer. It preserves one writer,
 request/result history, source admission and uncertain-outcome recovery.
 Historical delivered source and qualification are not retroactively withdrawn.
 
+The operator selected foreground mapping for the legacy fixed `provision -Wait`
+first-use entrypoint. The [receiving proposal](legacy-first-use-foreground.md)
+specializes that migration, including honest interruption/recovery before an
+ordinary receipt and receiver-first compatibility. A durable finite-bootstrap
+record or non-durable launch acknowledgement is not service-owner acceptance.
+The [verbatim selection](inception-transcript.md#legacy-first-use-foreground-mapping)
+does not authorize native escape, deployment or another owner's source takeover.
+
 ## Ownership and cancellation contract
 
 - The foreground updater owns acquisition, construction, staging and other

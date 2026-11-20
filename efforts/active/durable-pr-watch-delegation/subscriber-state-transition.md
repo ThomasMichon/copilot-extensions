@@ -13,10 +13,12 @@ no phase label proves admission or selects an authority. Nothing here
 implements migration or enables versioned/map writes. The preparation slice,
 merged in #13520, adds an internal, explicitly authorized preparation API and
 same-original-inode prepared recovery. It is not connected to ordinary CLI or
-control-plane entry. The subsequent internal Linux source path adds physical
+control-plane entry. The internal Linux source path, merged in #13594, adds physical
 sealing/recovery under the same writer. It still adds no authority selection,
-ordinary entry integration, Windows sealing or qualification of an actual
-boot crossing. Native Linux exchange/interruption qualification remains open.
+ordinary entry integration or qualification of an actual boot crossing. The follow-on
+Windows candidate implements no-delete-sharing sealing/recovery below; review,
+complete historical-runtime and controller-exit qualification remain open.
+Native Linux exchange/interruption qualification remains open.
 
 **Scope:** Historical-root admission, one recoverable state authority and
 P/V/G5947-3/4 prerequisites. No service stop, installation, reboot, rollout,
@@ -318,8 +320,9 @@ historical writer's intervening legacy registrations remain intact. Later
 phases still refuse and cannot be downgraded to preparation.
 
 This is a source-only internal API, not a released migration command or
-standalone/governed control-plane integration. Windows sealing, native Linux
-exchange/interruption qualification, final-source import, actual boot-crossing
+standalone/governed control-plane integration. Windows historical-runtime and
+controller-exit qualification, native Linux exchange/interruption qualification,
+final-source import, actual boot-crossing
 qualification and map/cwd activation remain open.
 
 ### Internal Linux sealing and recovery
@@ -363,3 +366,32 @@ its mutation/readiness fence after both success and uncertain failure.
 Ordinary adoption, callbacks and persistence cannot bypass it. Legacy
 subscription bytes remain the sole authority, and neither isolated state nor
 callback effects are produced by sealing.
+
+### Internal Windows sealing and recovery candidate
+
+The same authorized, already-quiescent writer stages the fixed Windows barrier
+directory, applies and verifies the existing owner-private security policy, and
+publishes its exact identity in the private preparation journal. Every attempt
+confirms journal durability before releasing original custody. Windows uses the
+existing private-publication owner's write-through, no-replace move primitive;
+the original descriptor must be normally released before moving its file.
+No historical open handle may survive that successful move under the supported
+no-delete-sharing lease family.
+
+Moving the retained original is not exclusion by itself. A recreated historical
+file blocks installation and every recovery attempt, without deletion,
+replacement or acquisition of the retained inode. A moved-but-unsealed
+preparation holds no new lease. Only validation of the exact directory barrier,
+retained file and original pin permits creating/acquiring the fixed inner
+`writer.lock`. This serializes final `sealed-legacy` publication, not registry
+import. Unknown children, foreign binding, mismatched identities and isolated
+state refuse recovery. The legacy subscription file remains the sole authority.
+
+Actor-free interruption controls cover journal acknowledgement, original
+release, both moves and sealed publication, plus raced-file retention,
+scope/source/deadline changes and conflicting evidence. Contained native Windows
+checks cover actual sharing refusal, successful sealing and cold recovery from
+both move-return interruptions. These are source/native-primitive evidence, not
+abrupt controller-exit or complete historical released-runtime qualification.
+There is no ordinary entry integration, final import, activation or operational
+migration authority in this slice.
