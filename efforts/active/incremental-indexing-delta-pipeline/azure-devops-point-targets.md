@@ -312,10 +312,11 @@ own connector/client lifetimes remain supported unchanged.
 
 Qualify the production context through the existing service fixture instead of
 reconstructing its executor in the test. Cover paused startup, exact-scope
-intake, one admitted named-target execution, completed/covered retry without
-provider or model work, lazy readiness, partial-construction cleanup and
-joined shutdown. Keep small lifecycle contracts in unit CI and real native
-owner execution in the existing opt-in lane; do not repeat the corpus-size
+intake, one admitted named-target execution, higher-covered completion with
+eligibility-only requests and no body acquisition or model work, and entirely
+local completed-task retry. Also cover lazy readiness, partial-construction
+cleanup and joined shutdown. Keep small lifecycle contracts in unit CI and
+real native owner execution in the existing opt-in lane; do not repeat the corpus-size
 matrix merely to prove this resource-ownership change.
 
 This step leaves health and intake receipts' execution declarations unchanged.
