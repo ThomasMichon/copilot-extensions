@@ -295,14 +295,19 @@ instead of assuming that the package is absent.
 
 #### Installing from a source
 
-A `uv-tool` or `pipx` package may declare exactly one `source`:
+A `uv-tool` or `pipx` package may declare exactly one `source`, for a
+third-party tool that is not published to an index (or must come from a fork
+or a pinned commit). This is the ordinary `uv tool install` / `pipx install`
+of a source tree; it is not a deployment channel for framework-owned runtimes
+(plugin runtimes keep their own installers, version slots and binstubs), and
+it does not schedule or run the installed tool.
 
 ```yaml
 resources:
   - type: package
-    id: harness-tools          # the installed tool name: detection + uninstall
+    id: acme-tool              # the installed tool name: detection + uninstall
     manager: uv-tool
-    source: { path: ../../../tools/harness-tools }
+    source: { path: ../../../tools/acme-tool }
   - type: package
     id: other-tool
     manager: pipx
@@ -608,90 +613,6 @@ resource type rather than `type: package`.
   than a false success. If the binstub itself is not found at the resolved
   location (e.g. a non-WinGet install), the resource reports **skipped**.
 
-### `scheduled-job`
-
-Declare a small recurring job -- one console-script entrypoint of a centrally
-installed application -- and let agent-machines own its OS timer. A consumer
-repository (for example a harness needing periodic `hub-health` or
-`repo-sync` upkeep) declares the application as a `package` (typically with
-[`source`](#installing-from-a-source)) and the timer as a `scheduled-job`,
-instead of shipping its own installer and Scheduled Task / systemd
-registration. Withdrawing the declaration removes the timer. `self-update`,
-`fleet-update`, and `health-job` keep their own schedulers.
-
-```yaml
-resources:
-  - type: package
-    id: harness-tools
-    manager: uv-tool
-    source: { git: https://example.com/org/harness-tools.git }
-  - type: scheduled-job
-    id: hub-health
-    command: { application: harness-tools, entrypoint: hub-health, args: [--quiet] }
-    interval_seconds: 3600
-    timeout_seconds: 600
-```
-
-| Field | Required | Meaning |
-| --- | --- | --- |
-| `type` | yes | `scheduled-job` |
-| `id` | yes | `[a-z0-9][a-z0-9-]*` (max 64). Names the timer `agent-machines-scheduled-job-<id>`. |
-| `state` | no | `present` (default) or `absent`. An `absent` declaration needs only `id`. |
-| `command.application` | present | `id` of the present `uv-tool` or `pipx` `package` that provides the entrypoint; see the command boundary below. |
-| `command.entrypoint` | present | Bare console-script name of that application. Never a path, shell string, interpreter, or shell. |
-| `command.args` | no | List of string arguments, passed as argv (no shell). |
-| `interval_seconds` | present | Integer from 300 (5 minutes) to 604800 (7 days). |
-| `timeout_seconds` | no | Integer below `interval_seconds`; default 900. |
-| `platforms` | no | Restrict to a subset of `windows` / `linux` / `wsl`. |
-| `gate` | no | Restrict to specific machines (defaults to the package gate). |
-| `owner` | no | Override the collision owner label (defaults to the package name). |
-
-The command boundary is the bound application's own installed entrypoints.
-`command.application` must name exactly one present `uv-tool` or `pipx`
-`package` declared on the same machine; otherwise validation reports
-`scheduled-job-unbound` and nothing is registered or run. At run time the
-entrypoint is resolved only from that package's install record -- the
-`uv-receipt.toml` under `uv tool dir`, or `pipx list --json` app paths --
-never from `PATH`; an entrypoint the application does not provide exits 127.
-Interpreter and shell names (`python`, `node`, `pwsh`, `cmd`, `bash`, ...) are
-rejected as entrypoints. The job never installs or updates the application;
-the `package` resource owns that.
-
-The declaration is the only authority. The sole local override is
-`~/.agent-machines/scheduled-jobs/overrides.json`
-(`{"<id>": {"interval_seconds": N}}`), which changes the interval only and is
-clamped to `max(300, timeout_seconds + 1)`..604800.
-
-`restore --apply` registers or refreshes each present job, removes each
-`absent` one, and records what it registered in
-`~/.agent-machines/scheduled-jobs/owned.json` together with the declaring
-package files. A job's removal for withdrawal must be confirmed: every
-declaring package file is in a repository root that is present and readable,
-and that file was either deleted or read without declaring the job present. An
-unreachable repository, an unread file, or a discovery/validation error never
-removes a timer. `--maintenance-safe` runs skip that sweep.
-
-Each timer runs `agent-machines scheduled-job run <id>` through the stable
-`agent-machines` binstub:
-
-- It re-resolves the current declarations first. A job whose withdrawal is
-  confirmed (or declared `absent`) removes its own timer, forgets ownership,
-  and exits 0 without running; an unconfirmed absence prints
-  `declaration unavailable; keeping timer` and exits 0 without running.
-- A per-id lock makes an overlapping run a quiet no-op; missed runs are not
-  caught up.
-- The entrypoint runs headless with `timeout_seconds` and its output is
-  appended to `~/.agent-machines/scheduled-jobs/logs/<id>.log` (truncated to
-  the newest half beyond 256 KiB). `state/<id>.json` records `started_at`,
-  `finished_at`, `exit_code`, and `timed_out`.
-
-Backends: on Windows, a per-user Scheduled Task (Interactive logon, Limited
-run level, `MultipleInstances IgnoreNew`, no `StartWhenAvailable`) launching
-`conhost.exe --headless`; on Linux/WSL, a `systemd --user` oneshot service
-(`TimeoutStartSec`) plus timer (`OnUnitActiveSec`, `Persistent=false`). Other
-platforms, or Linux without a reachable user manager, report `skipped`.
-Registration refused for access reasons reports `deferred`.
-
 ## Path anchors
 
 | Anchor | Resolves to |
@@ -734,7 +655,6 @@ compatibility data from lower-authority declarations remain effective:
 | power setting conflicting `ac` or `dc` value | highest authority for that power source wins; equal-highest disagreement errors |
 | self-update `present` + `absent` | highest authority wins; equal-highest disagreement errors |
 | fleet-update `present` + `absent` | highest authority wins; equal-highest disagreement errors |
-| scheduled-job conflicting `state`, `command`, `interval_seconds`, or `timeout_seconds` | highest authority wins; equal-highest disagreement errors |
 | package conflicting `source` | error |
 | copilot-cli-update conflicting `auto_update` or `pinned_version` | highest authority wins; equal-highest disagreement errors |
 
@@ -779,10 +699,6 @@ Resources appear in every verb:
   `status: ok|changed|deferred|skipped|error`), a `plan.resources` list, and
   stable `authority_decisions`. Any resource error makes the top-level `ok`
   false and the command exit nonzero.
-- `agent-machines scheduled-job run <id>` is what each job's timer invokes
-  (see [`scheduled-job`](#scheduled-job)); `agent-machines scheduled-job status
-  [--json]` reports, per declared or owned job, whether it is declared, owned,
-  and registered, its effective interval and source, and its last run.
 
 ## Adopter guide
 

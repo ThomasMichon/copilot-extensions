@@ -31,7 +31,6 @@ from pathlib import Path
 from typing import Any, cast
 
 from . import cli_fleet_update
-from . import cli_scheduled_job
 from . import cli_git_config
 from . import cli_copilot
 from . import discover as _discover
@@ -389,14 +388,14 @@ def _cmd_installation_repair(args: argparse.Namespace) -> int:
                 confirm_restart=args.confirm_restart,
                 readiness_only=enclosing,
             )
-        report: dict[str, Any] = {**result, "callerOwnedReadiness": enclosing}
+        result["callerOwnedReadiness"] = enclosing
     except (RepairAdmissionError, ValueError) as error:
         print(f"agent-machines: {error}", file=sys.stderr)
         return 1
-    print(json.dumps(report, sort_keys=True))
-    if report["interrupted"]:
+    print(json.dumps(result, sort_keys=True))
+    if result["interrupted"]:
         return 130
-    return 0 if report["status"] in {"discovered", "observed", "ready", "restart-confirmed"} else 2
+    return 0 if result["status"] in {"discovered", "observed", "ready", "restart-confirmed"} else 2
 
 
 def _cmd_installation_configuration(args: argparse.Namespace) -> int:
@@ -951,7 +950,6 @@ def _build_parser() -> argparse.ArgumentParser:
         current.add_argument("--json", action="store_true", help="emit JSON")
         current.set_defaults(func=func)
     cli_fleet_update.register_parser(sub)
-    cli_scheduled_job.register_parser(sub)
     killswitch_cli.register_parser(sub)
     pretool_killswitch.register_parser(sub)
     playwright = sub.add_parser("provision-playwright-cli")

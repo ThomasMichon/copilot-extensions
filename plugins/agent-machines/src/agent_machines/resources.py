@@ -1826,7 +1826,6 @@ def _build_handlers() -> dict[str, ResourceHandler]:
     from .resource_power import PowerSettingResourceHandler
     from .resource_self_update import SelfUpdateResourceHandler
     from .resource_health_job import HealthJobResourceHandler
-    from .resource_scheduled_job import ScheduledJobResourceHandler
 
     return {
         "package": PackageResourceHandler(),
@@ -1836,7 +1835,6 @@ def _build_handlers() -> dict[str, ResourceHandler]:
         "power-setting": PowerSettingResourceHandler(),
         "self-update": SelfUpdateResourceHandler(),
         "health-job": HealthJobResourceHandler(),
-        "scheduled-job": ScheduledJobResourceHandler(),
         "fleet-update": FleetUpdateResourceHandler(),
         "copilot-cli-update": CopilotCliUpdateResourceHandler(),
         "gh-account": GhAccountResourceHandler(),
@@ -1931,9 +1929,6 @@ def resolve_resources(
             )
         )
     findings.extend(_file_ownership_findings(resolved))
-    from .resource_scheduled_job import binding_findings
-
-    findings.extend(binding_findings(resolved))
     return resolved, findings
 
 
@@ -1997,13 +1992,6 @@ def apply_resources(
                 )
                 continue
         results.append(handler.apply(res, ctx, dry_run))
-    if (resource_types is None or "scheduled-job" in resource_types) and not maintenance_safe \
-            and (not only or "scheduled-job" in only):
-        from .resource_scheduled_job import ScheduledJobResourceHandler
-
-        sweeper = HANDLERS["scheduled-job"]
-        if isinstance(sweeper, ScheduledJobResourceHandler):
-            results.extend(sweeper.sweep_orphans(resolved, packages, ctx, dry_run))
     return results
 
 

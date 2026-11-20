@@ -29,7 +29,7 @@ from typing import Any
 import yaml
 
 from .authority import AUTHORITY_MAX, AUTHORITY_MIN
-from . import package_source, package_versions, scheduled_jobs
+from . import package_source, package_versions
 
 #: Current requirement-package schema version. Bumped only by a deliberate,
 #: fixture-guarded migration (see docs/patterns/config-schema-migration.md).
@@ -63,17 +63,14 @@ BOOTSTRAP_CRITICAL_MARKETPLACES = ("copilot-extensions",)
 #: schemes), ``self-update`` (machine-local unattended tier opt-in),
 #: ``fleet-update`` (machine-local unattended worktree-manager update
 #: sweep opt-in), ``gh-account`` (read-only account prerequisites),
-#: ``git-config`` (consent-bound user-global file transactions),
+#: ``git-config`` (consent-bound user-global file transactions), and
 #: ``copilot-cli-update`` (the Copilot CLI's own
 #: built-in self-updater: disable it and/or pin the installed binary to a
-#: known-good version -- Windows only for now), and ``scheduled-job``
-#: (a repository-declared recurring entrypoint run whose OS timer
-#: agent-machines owns). See ``resources.py`` for the
+#: known-good version -- Windows only for now). See ``resources.py`` for the
 #: handlers.
 KNOWN_RESOURCE_TYPES = (
     "package", "file", "registry", "feature", "power-setting", "self-update",
     "fleet-update", "copilot-cli-update", "gh-account", "git-config", "health-job",
-    "scheduled-job",
 )
 
 #: Minimal required identity fields per resource type (checked at load).
@@ -85,7 +82,6 @@ REQUIRED_FIELDS = {
     "power-setting": ("subgroup", "setting"),
     "self-update": ("tier",),
     "health-job": (),
-    "scheduled-job": ("id",),
     "fleet-update": ("tier",),
     "copilot-cli-update": (),
     "gh-account": ("host", "login", "credential_source"),
@@ -459,8 +455,6 @@ def load_package(
         try:
             package_versions.validate(res, schema)
             package_source.validate(res)
-            if rtype == "scheduled-job":
-                scheduled_jobs.validate(res)
         except ValueError as exc:
             raise ManifestError(f"{path}: {exc}") from exc
         if rtype == "git-config":

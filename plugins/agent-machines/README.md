@@ -198,11 +198,6 @@ so an inherited finite guardian is not unlocked by the caller's exit trap.
   own state directory, lock namespace, and scheduled-task family from
   self-update's, so a bug in one can never affect the other's already-
   deployed mechanism. See [`docs/resources.md`](docs/resources.md#fleet-update).
-- **Consumer-declared recurring jobs.** A `scheduled-job` resource lets a
-  repository declare a recurring run of an installed application's entrypoint
-  (install the application with a `package` resource, optionally from a local
-  or git `source`); agent-machines registers and removes the OS timer. See
-  [`docs/resources.md`](docs/resources.md#scheduled-job).
 
 For implementation details, see [`docs/architecture.md`](docs/architecture.md).
 
@@ -646,8 +641,6 @@ agent-machines fleet-update install     # register the opted-in fleet-update swe
 agent-machines fleet-update status      # show opt-in + task presence
 agent-machines fleet-update uninstall   # remove the registered fleet-update task
 agent-machines fleet-update run --tier sweep --json
-agent-machines scheduled-job status    # declared/owned/registered jobs + last run
-agent-machines scheduled-job run <id>  # what a scheduled-job timer invokes
 agent-machines provision-playwright-cli # preview user-home package/skill changes
 agent-machines provision-playwright-cli --apply
 agent-machines provision-playwright-cli --json
