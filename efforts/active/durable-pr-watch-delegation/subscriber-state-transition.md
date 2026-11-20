@@ -7,10 +7,13 @@ and [accepted callback/state contract](subscriber-callback-context.md#persistenc
 runtime realization. The operator accepted the one-time POSIX boot-boundary requirement
 as source design; the [complete decision](subscriber-callback-context.md#physical-transition-feasibility-and-accepted-migration-choice)
 retains its limits. Receiver groundwork is delivered in #13320. The first
-runtime slice adds an effect-free marker/path reader and legacy-absence
-guards under the existing storage owner. Every present phase still refuses;
+runtime slice, merged in #13508, adds an effect-free marker/path reader and
+legacy-absence guards under the existing storage owner. Every present phase still refuses;
 no phase label proves admission or selects an authority. Nothing here
-implements migration or enables versioned/map writes.
+implements migration or enables versioned/map writes. The current source
+candidate adds an internal, explicitly authorized preparation API and
+same-original-inode prepared recovery. It is not connected to ordinary CLI or
+control-plane entry, and adds no sealing or authority-selection capability.
 
 **Scope:** Historical-root admission, one recoverable state authority and
 P/V/G5947-3/4 prerequisites. No service stop, installation, reboot, rollout,
@@ -104,6 +107,7 @@ configuration or caller-selected paths:
 | Purpose | Proposed location under the existing state root |
 |---|---|
 | Historical admission barrier | `agent-pull-requests-watch.lock` as an ordinary directory |
+| Original-inode preparation pin | `watch-state-transition.pin`, a retained hardlink, never a writer lease or staged barrier |
 | Retained original lease inode | `watch-state-transition.legacy.lock`; on POSIX this initially holds the staged barrier directory and is exchanged atomically with the historical path |
 | Windows staged barrier | `watch-state-transition.barrier` before its no-replace installation |
 | New native writer lease | `agent-pull-requests-watch.lock/writer.lock` |
@@ -195,8 +199,8 @@ is removed. Rollback of code is not downgrade of retained state.
 1. The concrete transition amendment cleared review in #13493. Keep the
    receiver-only release and preserved provider prototype distinct while
    implementing the following runtime paths.
-2. The shared storage reader now derives fixed paths and observes the
-   version-1 `agent-pull-requests.watch-state-transition` phase header.
+2. The shared storage reader delivered in #13508 derives fixed paths and
+   observes the version-1 `agent-pull-requests.watch-state-transition` phase header.
    Missing markers preserve legacy behavior only without orphan transition
    artifacts. All present phases refuse through shared read and final-write
    boundaries; header parsing does not validate installation, boot or inode
@@ -229,3 +233,87 @@ Keep complete historical-runtime qualification separate from experiments
 using historical lease/entry source with current unrelated imports.
 Measure transition work once per phase and keep ordinary reads on the
 existing owner path; no process, filesystem scan or boot probe per callback.
+
+### Guarded preparation candidate
+
+The prepared record requires a retained hardlink at the fixed pin path.
+Create it under the original held lease and confirm the file and parent through
+the existing platform persistence policy before publishing the record.
+Recovery compares that pin, the historical pathname and the recorded inode
+before acquisition. The retained reference prevents unlink/recreate inode
+reuse; a numeric device/inode pair alone is insufficient. Missing, foreign or
+symlink/reparse pin evidence refuses. An unjournaled pin remains retained,
+blocking interruption evidence, with no automatic deletion or inferred record
+reconstruction. Never use the pin as another lease. It does not occupy the
+retained pathname needed for POSIX atomic exchange, or qualify sealing/boot.
+
+Selected state and marker writes require an existing parent; moving the
+historical root cannot cause an empty replacement directory to be created.
+Legacy state uses stable regular-file descriptor reads, preserving its
+existing size policy while rejecting links and reparses before adoption or
+replacement. The ordinary receiver also rejects an unjournaled pin; its
+absent-transition path adds one fixed metadata lookup, not a scan.
+
+Install the preparation source/custody guard before validating an active
+owner's evidence. It protects all in-flight persistence and final replacements
+until workers settle or a newly authorized owner boundary revalidates state.
+Validation failure closes admission and drains without persisting rejected
+state, retaining the native lease for unfinished work. Safe timeout abort
+requires another descriptor/path check, both after the failed drain and before
+resume. A storage validation refusal invalidates readiness even when it occurs
+before the final callback; repaired state must be strictly readopted, not
+overwritten from the old registry. Readoption must load a stable plain source
+and revalidate native custody before clearing the full snapshot/installation
+guard. The instance retains strict native effects/storage admission and
+refusal propagation afterward; activation cannot bypass a still-pending
+preparation guard through a weaker operation.
+Worker-startup admission, final source validation and preparation-guard removal
+share the persistence/refusal boundary. A startup refusal must raise and
+retain the installation/snapshot guard rather than report successful effects.
+
+Every new callback admission is guarded. Rejected ownership/readiness fences
+queued legacy callbacks, including the cleanup path that normally drains them.
+Keep unattempted events process-local and transfer them exactly once, with
+history and concurrency limits, through valid readoption; do not report an
+attempt or outcome that never occurred. Acknowledged events remain pending
+without an acknowledgement or spent attempt. Normal authorized drains can
+still finish accepted work. Closure/release must settle running workers
+without first committing an irreversible shutdown intent, then refuse
+discarding a retained fenced queue. An actual external shutdown request is
+never cleared. This does not turn legacy delivery into the reliable protocol.
+Readoption transfers the fence as well as the queue; only authorized activation
+or resumption unfences and wakes that queue. Preparation refuses publication
+while queued legacy work remains, including an already-quiescent recovery
+owner. Activate and complete an authorized drain before retrying preparation.
+
+Preparation pins the prechecked historical inode through existing-only native
+acquisition, including descriptor/path comparison before PID publication.
+Native custody and strict legacy-entry validation run both before drain and
+at the final atomic drain-state replacement. A deadline check follows all
+final validation reads before marker publication. Incomplete drain preserves
+previous read readiness for authorized abort; completed quiescence disables
+it before publication, including uncertain publication. Proven custody loss
+or malformed legacy state invalidates readiness rather than licensing abort
+over rejected evidence. Inherited POSIX lease release never unlocks the
+parent's shared open-file description.
+
+The internal writer first revalidates its owner authorization and, when
+supplied, the pinned current `WatchInstallation`. It recognizes only an
+absent transition or a complete prepared record at the unchanged historical
+lease path. It finishes application quiescence while retaining that lease,
+strictly validates legacy registrations without effects and publishes the
+private record through no-replace persistence. A final callback rechecks
+scope, deadline, quiescence, descriptor/path identity and unchanged journal
+before publication. A failed drain or uncertain commit retains accountable
+custody rather than activating a successor.
+
+Prepared recovery never trusts a phase label or opens the retained inode.
+It validates exact binding, original file identity and absence of physical
+transition artifacts before native acquisition, then reconfirms durability
+without overwriting the record. It does not import an earlier snapshot, so a
+historical writer's intervening legacy registrations remain intact. Later
+phases still refuse and cannot be downgraded to preparation.
+
+This is a source-only internal API, not a released migration command or
+standalone/governed control-plane integration. Physical sealing, final-source
+import, actual boot-crossing qualification and map/cwd activation remain open.

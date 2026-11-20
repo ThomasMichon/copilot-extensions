@@ -22,12 +22,15 @@ class Deliveries:
     def __init__(
         self, registry: WatchRegistry, notify: Callable[[FiredEvent], int | None],
         persist: Persist, transaction: threading.RLock, shutdown: threading.Event,
+        *, before_notify: Callable[[], None] | None = None,
+        retained_legacy: Deliveries | None = None,
     ) -> None:
         self.registry = registry
         self.notify = notify
         self.persist = persist
         self.transaction = transaction
         self.shutdown = shutdown
+        self.before_notify = before_notify
         self.workers: dict[str, threading.Thread] = {}
         self._native_threads: set[threading.Thread] = set()
         self.in_flight: dict[str, dict[str, str | int]] = {}
@@ -40,6 +43,32 @@ class Deliveries:
         self.start_error: str | None = None
         self.legacy_outcomes: deque[dict[str, str | int | bool | None]] = deque(maxlen=128)
         self.legacy_evicted = 0
+        self.legacy_fenced = False
+        if retained_legacy is not None:
+            with retained_legacy.lock:
+                if any(thread.is_alive() for thread in retained_legacy._native_threads):
+                    raise RuntimeError("legacy work cannot transfer while delivery workers are live")
+                self.legacy_queue.extend(retained_legacy.legacy_queue)
+                self.legacy_outcomes.extend(retained_legacy.legacy_outcomes)
+                self.legacy_evicted = retained_legacy.legacy_evicted
+                self.max_workers = retained_legacy.max_workers
+                self.legacy_fenced = retained_legacy.legacy_fenced
+                retained_legacy.legacy_queue.clear()
+                retained_legacy.legacy_fenced = True
+
+    def fence_legacy(self) -> None:
+        with self.lock:
+            self.legacy_fenced = True
+        self.changed.set()
+
+    def unfence_legacy(self) -> None:
+        with self.lock:
+            self.legacy_fenced = False
+        self.changed.set()
+
+    def has_legacy_pending(self) -> bool:
+        with self.lock:
+            return bool(self.legacy_queue)
 
     def resume(self) -> None:
         with self.lock:
@@ -83,8 +112,12 @@ class Deliveries:
                     if next_attempt <= time.time()
                     and identity not in self.workers and self.registry.is_current(event)
                 )
-                while len(candidates) < available and (ready or self.legacy_queue):
-                    if self.legacy_queue and (self.prefer_legacy or not ready):
+                while len(candidates) < available and (
+                    ready or self.legacy_queue and not self.legacy_fenced
+                ):
+                    if self.legacy_queue and not self.legacy_fenced and (
+                        self.prefer_legacy or not ready
+                    ):
                         candidates.append((self.legacy_queue.popleft(), self._run_legacy))
                     else:
                         candidates.append((ready.popleft(), self._run))
@@ -132,7 +165,22 @@ class Deliveries:
     def _run_legacy(self, event: FiredEvent) -> None:
         outcome = "unknown"
         error: str | None = "callback_result_unknown"
+        attempted = False
         try:
+            try:
+                if self.before_notify is not None:
+                    self.before_notify()
+            except Exception:
+                self.shutdown.set()
+                with self.lock:
+                    self.legacy_fenced = True
+                    self.legacy_queue.appendleft(event)
+                return
+            with self.lock:
+                if self.legacy_fenced:
+                    self.legacy_queue.appendleft(event)
+                    return
+            attempted = True
             result = self.notify(event)
             if type(result) is int:
                 outcome = "completed" if result == 0 else "failed"
@@ -143,17 +191,18 @@ class Deliveries:
             error = "callback_error"
         finally:
             with self.lock:
-                if len(self.legacy_outcomes) == self.legacy_outcomes.maxlen:
-                    self.legacy_evicted += 1
-                self.legacy_outcomes.append({
-                    "repo": event.key.repo[:256], "number": event.key.number,
-                    "subscriber_id": event.subscriber.subscriber_id[:256],
-                    "registration_id": event.subscriber.registration_id,
-                    "identity_truncated": (
-                        len(event.key.repo) > 256 or len(event.subscriber.subscriber_id) > 256
-                    ),
-                    "outcome": outcome, "error": error,
-                })
+                if attempted:
+                    if len(self.legacy_outcomes) == self.legacy_outcomes.maxlen:
+                        self.legacy_evicted += 1
+                    self.legacy_outcomes.append({
+                        "repo": event.key.repo[:256], "number": event.key.number,
+                        "subscriber_id": event.subscriber.subscriber_id[:256],
+                        "registration_id": event.subscriber.registration_id,
+                        "identity_truncated": (
+                            len(event.key.repo) > 256 or len(event.subscriber.subscriber_id) > 256
+                        ),
+                        "outcome": outcome, "error": error,
+                    })
                 self.workers.pop(event.subscriber.registration_id, None)
                 self.in_flight.pop(event.subscriber.registration_id, None)
             self.changed.set()
@@ -190,6 +239,13 @@ class Deliveries:
                     if self.shutdown.is_set():
                         return
                     try:
+                        if self.before_notify is not None:
+                            self.before_notify()
+                    except Exception:
+                        self.shutdown.set()
+                        self.fence_legacy()
+                        return
+                    try:
                         result = self.notify(event)
                         error = None if type(result) is int and result == 0 else "callback_nonzero"
                     except subprocess.TimeoutExpired:
@@ -222,7 +278,7 @@ class Deliveries:
                             self.persist()
                         except StateCommitUncertain:
                             return
-                except OSError:
+                except (OSError, ValueError):
                     # The persisted event remains authoritative; never acknowledge a failed write.
                     with self.transaction:
                         if self.registry.is_current(event) and sub.pending is not None:
@@ -254,7 +310,9 @@ class Deliveries:
         with self.lock:
             return [dict(item) for item in self.in_flight.values()]
 
-    def close(self, deadline: float, *, bounded: bool = False) -> list[str]:
+    def close(
+        self, deadline: float, *, bounded: bool = False, preserve_queued: bool = False,
+    ) -> list[str]:
         self.changed.set()
         scheduler = self.scheduler
         if scheduler is not None:
@@ -262,7 +320,8 @@ class Deliveries:
         while True:
             with self.lock:
                 while (
-                    self.legacy_queue and len(self.workers) < self.max_workers
+                    self.legacy_queue and not self.legacy_fenced
+                    and len(self.workers) < self.max_workers
                     and (not bounded or time.monotonic() < deadline)
                 ):
                     event = self.legacy_queue.popleft()
@@ -293,10 +352,16 @@ class Deliveries:
                 for worker in workers:
                     worker.join(max(0.0, deadline - time.monotonic()))
                 break
+        if preserve_queued:
+            with self.lock:
+                retained_threads = list(self._native_threads)
+            for worker in retained_threads:
+                if worker.ident is not None and worker is not threading.current_thread():
+                    worker.join(max(0.0, deadline - time.monotonic()))
         with self.lock:
             native = threading.enumerate()
             live = [worker.name for worker in self._native_threads if worker in native]
             self._native_threads.intersection_update(native)
-            if self.legacy_queue:
+            if self.legacy_queue and not (preserve_queued and self.legacy_fenced):
                 live.append(f"pr-notify:legacy-queued({len(self.legacy_queue)})")
         return live

@@ -76,7 +76,7 @@ def test_transition_is_rechecked_at_the_final_storage_boundary(
         storage.write_subscriptions_state([], Path("fixture-state"))
 
 
-@pytest.mark.parametrize("artifact", ["barrier", "retained", "staging", "reparse"])
+@pytest.mark.parametrize("artifact", ["barrier", "retained", "staging", "reparse", "pin"])
 def test_unjournaled_transition_is_not_legacy_absence(
     storage: Any, monkeypatch: pytest.MonkeyPatch, artifact: str,
 ) -> None:
@@ -88,13 +88,14 @@ def test_unjournaled_transition_is_not_legacy_absence(
         "retained": "watch-state-transition.legacy.lock",
         "staging": "watch-state",
         "reparse": "agent-pull-requests-watch.lock",
+        "pin": "watch-state-transition.pin",
     }
 
     def info(path: Path, **_kwargs: Any) -> Any:
         if path.name != names[artifact]:
             raise FileNotFoundError
         return SimpleNamespace(
-            st_mode=stat.S_IFREG if artifact == "reparse" else stat.S_IFDIR,
+            st_mode=stat.S_IFREG if artifact in {"reparse", "pin"} else stat.S_IFDIR,
             st_file_attributes=0x400 if artifact == "reparse" else 0,
         )
 
