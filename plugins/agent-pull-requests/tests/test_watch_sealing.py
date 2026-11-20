@@ -25,13 +25,15 @@ from agent_pull_requests import watch_windows_sealing
 from agent_pull_requests.watch_storage import watch_state_paths
 from agent_pull_requests.watch_writer import WatchWriter
 
-root, stage = Path(sys.argv[1]), sys.argv[2]
+root, stage, adapted = Path(sys.argv[1]), sys.argv[2], sys.argv[3] == "v2"
 paths = watch_state_paths(root)
 def forbidden(*args):
     raise AssertionError("sealing must not fetch or notify")
 owner = WatchWriter(root=root, authorize=lambda _: None, fetch=forbidden, notify=forbidden)
 owner.adopt(timeout=3)
 owner.prepare_state_transition(timeout=3)
+if adapted:
+    owner.recover_prepared_state_transition(timeout=3)
 def leave():
     print(json.dumps(dict(stage=stage, held=owner.writer_held,
                           lock=str(owner._lease.lock_path), ready=owner.read_ready,
@@ -59,7 +61,8 @@ def moved(source, destination):
     ):
         leave()
 watch_windows_sealing.windows_move_no_replace = moved
-owner.seal_state_transition(timeout=3)
+seal = owner.seal_recovered_state_transition if adapted else owner.seal_state_transition
+seal(timeout=3)
 assert stage == "sealed"
 leave()
 """
@@ -238,17 +241,18 @@ def test_native_windows_cold_recovery_never_opens_retained_inode(
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="native Windows controller-exit qualification")
+@pytest.mark.parametrize("version", ["v1", "v2"])
 @pytest.mark.parametrize(
     "stage", ["prepared", "staged", "released", "moved", "barrier-installed", "sealed"],
 )
 def test_native_windows_abrupt_controller_exit_recovers_without_legacy_effects(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stage: str,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stage: str, version: str,
 ) -> None:
     paths = watch_state_paths(tmp_path)
     legacy = b" [] \n"
     paths.legacy_subscriptions.write_bytes(legacy)
     result = subprocess.run(
-        [sys.executable, "-B", "-c", _ABRUPT_WINDOWS_CONTROLLER, str(tmp_path), stage],
+        [sys.executable, "-B", "-c", _ABRUPT_WINDOWS_CONTROLLER, str(tmp_path), stage, version],
         capture_output=True, text=True, timeout=10, **no_window_kwargs(),
     )
     assert result.returncode == 73, result.stdout + result.stderr
@@ -257,6 +261,7 @@ def test_native_windows_abrupt_controller_exit_recovers_without_legacy_effects(
     assert receipt["held"] == (stage in ("prepared", "staged", "sealed"))
     assert receipt["lock"] == str(paths.writer_lock if stage == "sealed" else paths.historical_lock)
     interrupted = json.loads(paths.journal.read_bytes())
+    assert interrupted["version"] == (2 if version == "v2" else 1)
     assert interrupted["phase"] == ("sealed-legacy" if stage == "sealed" else "prepared")
     original = (interrupted["lease"]["device"], interrupted["lease"]["inode"])
     retained = stage in ("moved", "barrier-installed", "sealed")
@@ -283,10 +288,15 @@ def test_native_windows_abrupt_controller_exit_recovers_without_legacy_effects(
         notify=lambda *_: pytest.fail("sealing recovery must not notify"),
     )
     try:
-        record = recovered.seal_state_transition(timeout=3)
+        seal = recovered.seal_recovered_state_transition if version == "v2" else recovered.seal_state_transition
+        record = seal(timeout=3)
         expected = [paths.writer_lock] if retained else [paths.historical_lock, paths.writer_lock]
         assert acquisitions == expected and paths.retained_lock not in acquisitions
         assert record["phase"] == "sealed-legacy" and record["lease"] == interrupted["lease"]
+        if version == "v2":
+            assert record["origin"] == interrupted["origin"]
+            assert record["origin"]["phase"] == "prepared"
+            assert record["controller"] == interrupted["controller"]
         assert recovered.writer_held and not recovered.read_ready
         assert not recovered.daemon.effects_enabled and recovered.daemon.quiescent
         assert paths.historical_lock.is_dir() and not paths.staged_barrier.exists()
