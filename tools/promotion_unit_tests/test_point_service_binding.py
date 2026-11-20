@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import importlib.util
 import sys
-from asyncio import CancelledError
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from pathlib import Path
@@ -94,18 +93,13 @@ def api(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         for operation in operations:
             await operation
 
-    class Completion:
-        def set_result(self, value: Any) -> None:
-            self.value = value
-
     monkeypatch.setattr(module, "asyncio", SimpleNamespace(
         to_thread=offloop, create_task=lambda operation: operation, gather=gather,
-        CancelledError=CancelledError,
         get_running_loop=lambda: SimpleNamespace(
             run_in_executor=lambda _, call, *args: Future(call, args),
-            create_future=Completion,
         ),
     ))
+    monkeypatch.setattr(module, "_CleanupTask", lambda operation: operation)
     config = object()
     scope = ("selected", "family", "account", "binding")
     result = object()

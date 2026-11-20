@@ -36,6 +36,13 @@ class PointRuntime:
     read_component: PointReader
 
 
+class _CleanupTask(asyncio.Task[None]):
+    """Keep joined async exits running even through pre-entry loop cancellation."""
+
+    def cancel(self, msg: object = None) -> bool:
+        return False
+
+
 def require_point_isolation(config: IndexConfig, legacy_data_dir: Path) -> None:
     """Require existing point owners in a directory disjoint from legacy state."""
     root, legacy = config.data_dir.resolve(), legacy_data_dir.resolve()
@@ -115,7 +122,7 @@ class PointService:
             )
             await resources.enter_async_context(consumer)
         except BaseException:
-            await resources.aclose()
+            await _settle(_CleanupTask(resources.aclose()))
             raise
         self._resources = resources
         self._consumer = consumer
@@ -192,24 +199,15 @@ class PointService:
         resources = self._resources
         if resources is None:
             return
-        result = asyncio.get_running_loop().create_future()
-        self._stop_result = result
-        try:
+        async def close() -> None:
             try:
                 if self._reads:
                     await _settle(asyncio.gather(*self._reads, return_exceptions=True))
             finally:
-                # Inline cleanup cannot be cancelled before a wrapper Task starts.
                 await resources.aclose()
-        except asyncio.CancelledError:
-            result.set_result(None)
-            raise
-        except BaseException as exc:
-            result.set_exception(exc)
-            result.exception()
-            raise
-        else:
-            result.set_result(None)
+
+        self._stop_result = _CleanupTask(close())
+        await _settle(self._stop_result)
 
     def status(self) -> dict[str, bool]:
         return {

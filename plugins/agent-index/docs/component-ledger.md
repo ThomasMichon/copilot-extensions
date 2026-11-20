@@ -614,7 +614,11 @@ activating or acknowledging queued work. Pause/drain/stop close read admission;
 drain shares its existing timeout across reads and workers without cancellation.
 Stop joins admitted reader Futures and workers before closing clients, including
 repeated caller or loop-wide cancellation. Its completion Future coordinates
-concurrent stops without a cleanup Task that could be cancelled before entry.
+concurrent stops through a cancellation-deferred cleanup Task. That task ignores
+direct cancellation, including before its first step, while each caller still
+receives cancellation after the shared cleanup settles. This protects both
+startup rollback and arbitrary caller-owned asynchronous exits, without recording
+successful completion while an exit is interrupted.
 
 The point state must already exist in its selected directory, wholly disjoint
 from the legacy runner's directory. Invalid explicit configuration fails startup

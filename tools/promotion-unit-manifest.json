@@ -7257,7 +7257,7 @@
         "plugins/agent-pull-requests/src/agent_pull_requests/watch_private.py": "9e45fa5807c7ecd0bb7d870450f562bd004528005510f35dc2df0b733f34741b",
         "plugins/agent-pull-requests/src/agent_pull_requests/watch_windows_sealing.py": "892d522e26ab426018652c34c05f8f0c4cb3f3c9e943addaaa5b7ca0d67ff5d7",
         "tools/promotion_unit_tests/test_boot_domain.py": "42da2cacbbdb6ff58618fabe1552530f2500bfea5cd6d16edabe18a291610e1d",
-        "plugins/agent-index/src/agent_index/indexing/point_service.py": "c3364115ab48008aeac030983131b47e8f040167b3cf41e33372ac931435a999",
-        "tools/promotion_unit_tests/test_point_service_binding.py": "1ce8ae505e49027b2d3e188b0db2b87dc499aa3a4ddecdd4e53f9e6ffce5d16f"
+        "plugins/agent-index/src/agent_index/indexing/point_service.py": "bdb3d09a3c64c3ece53c567925fc5c4e712a6d1d62a1cac42128d6bd28c94210",
+        "tools/promotion_unit_tests/test_point_service_binding.py": "da9626e81fb2b60bd3758492ed02c65313983b1d90533ac52f5bb30d2f1433c5"
     }
 }

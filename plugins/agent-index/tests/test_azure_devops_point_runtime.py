@@ -529,6 +529,14 @@ def test_selected_reader_shutdown_joins_cancelled_reads_before_resource_close(
             await service.resume()
             stopping = asyncio.create_task(service.stop())
             await asyncio.sleep(0)
+            if cancelled_owner == "loop":
+                for task in asyncio.all_tasks():
+                    if task is not asyncio.current_task():
+                        task.cancel()
+            else:
+                stopping.cancel()
+            await asyncio.sleep(0.02)
+            assert not stopping.done() and lifetime == ["open"]
             joining = asyncio.create_task(service.stop())
             await asyncio.sleep(0)
             for _ in range(2):
@@ -556,6 +564,68 @@ def test_selected_reader_shutdown_joins_cancelled_reads_before_resource_close(
         await service.stop()
         assert lifetime == ["open", "closed"]
         assert sorted(events) == [("close", "first"), ("close", "second")]
+        assert not f.provider.requests and not f.calls
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("startup_failure", [False, True])
+@pytest.mark.parametrize("cancelled_owner", ["caller", "loop"])
+def test_service_joins_blocked_caller_owned_async_exit_before_reporting_stop(
+    application: worker.Fixture, monkeypatch: pytest.MonkeyPatch,
+    startup_failure: bool, cancelled_owner: str,
+) -> None:
+    from contextlib import asynccontextmanager
+    from collections.abc import AsyncIterator
+
+    f = application
+    lifetime: list[str] = []
+
+    async def exercise() -> None:
+        entered, release = asyncio.Event(), asyncio.Event()
+
+        @asynccontextmanager
+        async def context() -> AsyncIterator[Callable[[TaskRecord], object]]:
+            lifetime.append("open")
+            try:
+                yield lambda _: None
+            finally:
+                lifetime.append("closing")
+                entered.set()
+                await release.wait()
+                lifetime.append("closed")
+
+        service = PointService(
+            config=f.config, point_scope=f.claim.hints.scope, executor_context=context,
+        )
+        if startup_failure:
+            async def fail(_: PointQueueConsumer) -> Any:
+                raise RuntimeError("fixture startup rollback")
+
+            monkeypatch.setattr(PointQueueConsumer, "__aenter__", fail)
+            operation = asyncio.create_task(service.start(
+                legacy_data_dir=f.config.data_dir.parent / "legacy",
+            ))
+        else:
+            await service.start(legacy_data_dir=f.config.data_dir.parent / "legacy")
+            operation = asyncio.create_task(service.stop())
+        try:
+            await asyncio.wait_for(entered.wait(), timeout=5)
+            for _ in range(2):
+                if cancelled_owner == "loop":
+                    for task in asyncio.all_tasks():
+                        if task is not asyncio.current_task():
+                            task.cancel()
+                else:
+                    operation.cancel()
+                await asyncio.sleep(0.02)
+                assert not operation.done() and lifetime == ["open", "closing"]
+        finally:
+            release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await operation
+        await service.stop()
+        assert lifetime == ["open", "closing", "closed"]
         assert not f.provider.requests and not f.calls
 
     asyncio.run(exercise())

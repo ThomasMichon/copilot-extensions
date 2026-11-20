@@ -7804,8 +7804,13 @@ retained point binding rather than reuse an earlier qualification. The new
 read-only path-owner control refuses missing state without creating its parent
 and refuses SQLite writes without changing files.
 Blocked native reads prove truthful drain timeout and repeatedly cancelled
-caller/loop-wide shutdown retain clients until qualification settles. The final
-runtime packet covers 52 cases within its existing opt-in lane.
+caller/loop-wide shutdown retain clients until qualification settles. Four
+additional controls block an executor-only caller-owned asynchronous exit during
+ordinary stop or startup rollback and repeatedly cancel the caller or every
+loop Task. Cleanup must finish before the caller receives cancellation or a
+subsequent stop can return. Pre-entry cancellation and concurrent stopped callers
+remain covered by the blocked native-reader controls. All remain in the existing
+opt-in lane.
 Ten additional actor-free nodes in the executor-context and
 `tools/promotion_unit_tests/test_point_service_binding.py` modules cover shared
 binding, mutually exclusive contexts, missing/mismatched/partial selections,
