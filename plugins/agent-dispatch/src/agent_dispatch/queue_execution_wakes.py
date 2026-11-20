@@ -266,6 +266,11 @@ class QueueExecutionWakesMixin:
             ):
                 if name not in columns:
                     conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} TEXT")
+            conn.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_{table}_unresolved_send"
+                f" ON {table}(execution_send_state,task_id)"
+                " WHERE execution_send_state IN ('pending', 'unknown')"
+            )
         conn.commit()
 
     def defer_execution_wake(

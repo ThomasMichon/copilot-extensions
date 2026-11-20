@@ -1,10 +1,12 @@
 """A retained-driver observation is not settlement or authority to restart a goal."""
 
+import sqlite3
 from collections.abc import Callable
 from typing import cast
 
 import pytest
 
+from agent_dispatch import queue_execution_custody as custody
 from agent_dispatch import submission_readiness_observation
 from agent_dispatch.assignment_workspace import AssignmentWorkspace
 from agent_dispatch.queue import TaskQueue
@@ -16,7 +18,8 @@ from agent_dispatch.review_closeout_submission import SUBMIT
 from agent_dispatch.task_obligations import read_snapshot
 from tests import test_task_relevance_closeout_transport as transport
 from tests.test_assignment_relationships import start_managed
-from tests.test_task_relevance_binding import Assignment
+from tests.test_task_relevance import report
+from tests.test_task_relevance_binding import Assignment, _scope
 from tests.test_task_relevance_closeout_readiness import Ready
 
 managed_assignment = transport.managed_assignment
@@ -177,3 +180,94 @@ def test_unresolved_closeout_send_blocks_preview_before_owner_read(ready: Ready)
                             headers=transport.headers(ready), json=transport.body(ready))
     assert response.status_code == 409 and "unresolved" in response.text
     assert not calls and queue.relevance_snapshot(task.id)["closeout"]["readiness"] is None
+
+
+def test_submitted_original_driver_can_observe_without_a_lease(
+    assignment: Assignment, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    queue, owner, workspace, task = assignment
+    start = cast(Callable[[TaskQueue, AssignmentWorkspace, Task], Task], start_managed)
+    start(queue, workspace, task)
+    monkeypatch.setattr(submission_readiness_observation, "observe", lambda *_: {"ready": True})
+    submitted = queue.complete(task.id, workspace.worker_id, result={"result": 1})
+    assert submitted.status == Status.SUBMITTED and submitted.owner is None
+    cast(Callable[..., object], report)(queue, task.id, scope=_scope(queue, task.id))
+    value: Ready = queue, owner, workspace, task, []
+    with transport.api(value) as api:
+        before = queue.get(task.id)
+        url = transport.path(value, "/observe-provisional")
+        args, headers = transport.body(value), transport.headers(value)
+        response = api.post(url, json=args, headers=headers)
+        assert response.status_code == 200 and response.json()["result"]["ready"] is True
+        assert queue.get(task.id) == before
+        for field, replacement in (
+            ("worker_id", "host/other"), ("worker_id", ""), ("native_id", "other"),
+            ("expected_generation", submitted.generation + 1),
+        ):
+            denied = api.post(url, json={**args, field: replacement}, headers=headers)
+            assert denied.status_code in {403, 422}
+        with queue._connect() as conn:
+            conn.execute(
+                "UPDATE task_relevance_closeouts SET owner='host/other' WHERE task_id=?",
+                (task.id,),
+            )
+        denied = api.post(url, json={**args, "worker_id": "host/other"},
+                          headers=transport.headers(value, worker_id="host/other"))
+        assert denied.status_code == 403
+
+
+def test_preview_reconciliations_skip_settled_transport_history(
+    ready: Ready, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    queue = ready[0]
+    foreign = queue.create("unrelated", repo="example")
+    assert isinstance(foreign, Task)
+    costs: list[int] = []
+    reconcile = custody.require_execution_send_reconciliation
+
+    def measured(conn: sqlite3.Connection, task_id: str, *, exclusive_key: str | None) -> None:
+        steps = 0
+
+        def count() -> int:
+            nonlocal steps
+            steps += 1
+            return 0
+
+        conn.set_progress_handler(count, 1)
+        try:
+            reconcile(conn, task_id, exclusive_key=exclusive_key)
+        finally:
+            conn.set_progress_handler(None, 0)
+        costs.append(steps)
+
+    monkeypatch.setattr(custody, "require_execution_send_reconciliation", measured)
+    with transport.api(ready) as api:
+        url = transport.path(ready, "/observe-provisional")
+        args, headers = transport.body(ready), transport.headers(ready)
+        for start, end in ((0, 20), (20, 2000)):
+            rows = [{"i": i, "task": foreign.id} for i in range(start, end)]
+            with queue._connect() as conn:
+                conn.executemany(
+                    "INSERT INTO wake_outbox(id,task_id,generation,wake_seq,owner,status,"
+                    "created_at,updated_at,execution_send_state)"
+                    " VALUES (:i,:task,1,:i,'host/w','delivered',1,1,'sent')", rows,
+                )
+                conn.executemany(
+                    "INSERT INTO run_waiter_wakes(id,task_id,waiter_generation,task_generation,"
+                    "owner,resume_worktree,sender,message,status,created_at,updated_at,"
+                    "execution_send_state)"
+                    " VALUES (:i,:task,1,1,'host/w','w','test','message','delivered',1,1,'sent')",
+                    rows,
+                )
+                conn.executemany(
+                    "INSERT INTO execution_send_custody(scope_key,send_id,repo,source,"
+                    "producer_generation,task_id,reservation_key,task_generation,kind,"
+                    "identity,state,detail,created_at,updated_at)"
+                    " VALUES ('scope',:i,'example','fixture',1,:task,:i,1,'launch','{}',"
+                    "'sent','',1,1)", rows,
+                )
+            response = api.post(url, json=args, headers=headers)
+            assert response.status_code == 200, response.text
+    assert len(costs) == 4
+    for small, large in zip(costs[:2], costs[2:], strict=True):
+        assert large <= small * 2, costs

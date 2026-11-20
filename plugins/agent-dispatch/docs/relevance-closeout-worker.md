@@ -52,7 +52,10 @@ substitute `/prepare` on an older receiver: that operation settles the claim.
 The observation asks the selected Worktrees owner whether the active driver is
 finalizable **except for its exact bound task claim**. Other unsettled or unknown
 obligations still block. Each call checks the original binding before and after
-the independent owner read. A successful response identifies the request,
+the independent owner read. A driver that submitted before the source closeout
+can also inspect readiness: the recorded submitter, native session and generation
+must still match the captured assignment, even though its lease has ended.
+A successful response identifies the request,
 generation and assignment event; it does not persist a readiness receipt, submit,
 authorize release or send a wake. Previously settled and finalized drivers cannot
 use this operation to regain authority.

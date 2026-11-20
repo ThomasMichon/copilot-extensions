@@ -163,7 +163,11 @@ def observe_provisional(
             " AND readiness IS NULL AND acknowledgement IS NULL", (task_id,),
         ).fetchone()
         if (
-            task is None or task.status not in {Status.STARTED, Status.SUSPENDED}
+            task is None or task.status not in {Status.STARTED, Status.SUSPENDED, Status.SUBMITTED}
+            or (task.status == Status.SUBMITTED and (
+                task.owner is not None or not task.completed_by
+                or task.completed_by != arguments["worker_id"]
+            ))
             or not task.require_verification or task.awaiting_steer
             or state["relationship"]["state"] != "bound" or pending is None
             or closed_execution(conn, task_id) is not None
