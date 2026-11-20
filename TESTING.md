@@ -7795,6 +7795,29 @@ dispatch and native/provider actors, retaining inert entry, exact-task refusal,
 partial-construction cleanup, borrowed-client preservation and readiness-failure
 cleanup in required unit CI; they do not claim native cancellation evidence.
 
+The service fixture now selects the production paired executor/qualified-reader
+context. Its named read follows actual admitted execution; paused fresh reopen
+also qualifies content and an ordered deletion without provider requests, model
+readiness, path schema initialization or any file-byte change. A second read
+must refuse unknown paths, revoked checkpoints, changed receipts or a different
+retained point binding rather than reuse an earlier qualification. The new
+read-only path-owner control refuses missing state without creating its parent
+and refuses SQLite writes without changing files.
+Blocked native reads prove truthful drain timeout and repeatedly cancelled
+caller/loop-wide shutdown retain clients until qualification settles. Four
+additional controls block an executor-only caller-owned asynchronous exit during
+ordinary stop or startup rollback and repeatedly cancel the caller or every
+loop Task. Cleanup must finish before the caller receives cancellation or a
+subsequent stop can return. Pre-entry cancellation and concurrent stopped callers
+remain covered by the blocked native-reader controls. All remain in the existing
+opt-in lane.
+Ten additional actor-free nodes in the executor-context and
+`tools/promotion_unit_tests/test_point_service_binding.py` modules cover shared
+binding, mutually exclusive contexts, missing/mismatched/partial selections,
+executor-only refusal and read-before-close ordering using substituted futures
+and consumers. Required unit CI gains no native, thread, event-loop or provider
+actors. Wire declarations, ordinary read routes and activation are unchanged.
+
 The blocked-selection governance control changes the runner's policy to
 backoff while selection is off-loop. The final admission callback leaves the
 entire task unchanged without provider or executor work; returning to ready

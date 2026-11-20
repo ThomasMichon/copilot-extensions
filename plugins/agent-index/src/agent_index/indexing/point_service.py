@@ -6,8 +6,10 @@ import asyncio
 import logging
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager, AsyncExitStack
+from contextvars import copy_context
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from .point_hints import AcquisitionHints, PointChangeHints
 from .point_queue_consumer import PointQueueConsumer
@@ -16,10 +18,29 @@ from .task_store import TaskRecord, TaskStore
 
 if TYPE_CHECKING:
     from agent_index.index_config import IndexConfig
+    from agent_index.indexing.component_read import ComponentRead
     from agent_index.store.source_layout import PointScope
 
 log = logging.getLogger(__name__)
 PointExecutor = Callable[[TaskRecord], object]
+PointReader = Callable[[str], "ComponentRead"]
+
+
+@dataclass(frozen=True)
+class PointRuntime:
+    """One explicitly composed executor and qualified reader selection."""
+
+    config: IndexConfig
+    point_scope: PointScope
+    execute: PointExecutor
+    read_component: PointReader
+
+
+class _CleanupTask(asyncio.Task[None]):
+    """Keep joined async exits running even through pre-entry loop cancellation."""
+
+    def cancel(self, msg: object = None) -> bool:
+        return False
 
 
 def require_point_isolation(config: IndexConfig, legacy_data_dir: Path) -> None:
@@ -47,14 +68,20 @@ class PointService:
 
     def __init__(
         self, *, config: IndexConfig, point_scope: PointScope,
-        executor_context: Callable[[], AbstractAsyncContextManager[PointExecutor]],
+        executor_context: Callable[[], AbstractAsyncContextManager[PointExecutor]] | None = None,
+        runtime_context: Callable[[], AbstractAsyncContextManager[PointRuntime]] | None = None,
     ) -> None:
+        if (executor_context is None) == (runtime_context is None):
+            raise ValueError("Select exactly one point executor or paired runtime context")
         self._config = config
         self._scope = point_scope
         self._executor_context = executor_context
+        self._runtime_context = runtime_context
+        self._reader: PointReader | None = None
+        self._reads: set[asyncio.Future[ComponentRead]] = set()
         self._consumer: PointQueueConsumer | None = None
         self._resources: AsyncExitStack | None = None
-        self._stop_task: asyncio.Task[None] | None = None
+        self._stop_result: asyncio.Future[None] | None = None
         self._started = False
         self._stopped = False
         self._admitted = False
@@ -78,17 +105,40 @@ class PointService:
         await asyncio.to_thread(require_point_isolation, self._config, legacy_data_dir)
         resources = AsyncExitStack()
         try:
-            executor = await resources.enter_async_context(self._executor_context())
+            reader = None
+            if self._runtime_context is not None:
+                runtime = await resources.enter_async_context(self._runtime_context())
+                if (type(runtime) is not PointRuntime or runtime.config is not self._config
+                        or runtime.point_scope != self._scope
+                        or not callable(runtime.execute) or not callable(runtime.read_component)):
+                    raise ValueError("Point runtime requires its configured executor and reader binding")
+                executor, reader = runtime.execute, runtime.read_component
+            else:
+                assert self._executor_context is not None
+                executor = await resources.enter_async_context(self._executor_context())
             consumer = await asyncio.to_thread(
                 PointQueueConsumer, config=self._config, point_scope=self._scope,
                 point_executor=executor,
             )
             await resources.enter_async_context(consumer)
         except BaseException:
-            await _settle(asyncio.create_task(resources.aclose()))
+            await _settle(_CleanupTask(resources.aclose()))
             raise
         self._resources = resources
         self._consumer = consumer
+        self._reader = reader
+
+    async def read_component(self, path: str) -> ComponentRead:
+        """Qualify one named target, including while execution remains paused."""
+        if self._reader is None or self._stopped or self._draining:
+            raise RuntimeError("Point service is not accepting qualified reads")
+        reader = self._reader
+        operation = asyncio.get_running_loop().run_in_executor(
+            None, copy_context().run, reader, path,
+        )
+        self._reads.add(operation)
+        operation.add_done_callback(self._reads.discard)
+        return cast("ComponentRead", await _settle(operation))
 
     async def activate(self) -> None:
         """Explicitly admit inspected retained work; never called by HTTP control."""
@@ -125,9 +175,15 @@ class PointService:
 
     async def drain(self, *, timeout: float) -> bool:
         self.pause()
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        if self._reads:
+            _, pending = await asyncio.wait(self._reads, timeout=max(0, timeout))
+            if pending:
+                return False
         if self._consumer is None:
             return True
-        return await self._consumer.drain(timeout=timeout)
+        return await self._consumer.drain(timeout=max(0, deadline - loop.time()))
 
     async def resume(self) -> None:
         """Rollback drain without activating reconstructed or failed work."""
@@ -137,12 +193,21 @@ class PointService:
         self._stopped = True
         self._admitted = False
         self.pause()
-        if self._stop_task is None:
-            resources = self._resources
-            if resources is None:
-                return
-            self._stop_task = asyncio.create_task(resources.aclose())
-        await _settle(self._stop_task)
+        if self._stop_result is not None:
+            await _settle(self._stop_result)
+            return
+        resources = self._resources
+        if resources is None:
+            return
+        async def close() -> None:
+            try:
+                if self._reads:
+                    await _settle(asyncio.gather(*self._reads, return_exceptions=True))
+            finally:
+                await resources.aclose()
+
+        self._stop_result = _CleanupTask(close())
+        await _settle(self._stop_result)
 
     def status(self) -> dict[str, bool]:
         return {
