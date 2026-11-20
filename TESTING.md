@@ -7625,7 +7625,18 @@ selected stale-ID cleanup against real cold canonical/two-model stores and a
 nonempty component ledger. It checks indexed bounded raw points, poisoned
 caller caches, known vector-only remnants, preserved neighboring paths/families,
 byte-stable empty/kept calls, all-model preflight and caught native failure
-uncertainty. The required actor-free control in
+uncertainty. The same native fixture exercises selected aggregate final-path
+capacity: exact writer/scope/connection/ledger qualification, poisoned caches,
+bounded indexed path plans, preserved other-family occupancy, replacement and
+deletion counts, current/projected overflow and prepared zero-tail index budgets.
+Empty/deletion/no-op preflight remains byte-stable at the segment ceiling.
+Four selected `test_projected_same_path_capacity` controls in
+`plugins/agent-index/tests/test_component_application.py` preserve default
+legacy multi-family behavior. The actor-free control in
+`tools/promotion_unit_tests/test_point_capacity_contract.py` substitutes native
+owners while checking canonical qualification, unchanged-family occupancy and
+pre-query writer/family refusal.
+The required actor-free control in
 `tools/promotion_unit_tests/test_point_reconciliation_contract.py` substitutes
 native owners while executing cleanup composition, including a saturated later
 model and vector-before-canonical effects. Neither packet qualifies provider

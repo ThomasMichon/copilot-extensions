@@ -1,4 +1,4 @@
-"""Selected native cleanup preserves unselected rows and existing ordering evidence."""
+"""Selected native capacity and cleanup preserve neighboring rows and ordering evidence."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from agent_index.indexing.point_hints import PointBinding
 from agent_index.store import point_reconciliation as cleanup
 from agent_index.store.component_ledger import BINDING, TABLE, ComponentEvidence, initialize_component_ledger
 from agent_index.store.content_mutations import content_record
-from agent_index.store.file_projection import capture_file_projection
+from agent_index.store.file_projection import capture_file_projection, require_file_projection_capacity
 from agent_index.store.ingestion_index import prepare_ingestion_indices
 from agent_index.store.multi_model_store import MultiModelStore
 from agent_index.store.scalar_index import MAX_SEGMENTS, ScalarIndexPreparationRequired, inspect_index
@@ -91,6 +91,137 @@ def reconcile(
         retained_chunk_ids=kwargs.pop("retained_chunk_ids", (chunks[-1].chunk_id,)),
         point_scope=SCOPE, **kwargs,
     )
+
+
+def test_point_capacity_uses_qualified_indexed_paths_without_changing_caches_or_rows(
+    selected: tuple[IndexConfig, MultiModelStore, list[Chunk]], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, store, _ = selected
+    owner = domain(store)
+    store = MultiModelStore(owner.path, content_table="canonical", point_scope=SCOPE)
+    db = store.content_store.db
+    table = db.open_table("canonical")
+    store.content_store._table = db.open_table("vectors_second")
+    query_type = type(table.search())
+    original = query_type.to_list
+    plans: list[str] = []
+
+    def observe(query: Any, *args: Any, **kwargs: Any) -> Any:
+        plans.append(query.analyze_plan())
+        return original(query, *args, **kwargs)
+
+    with owner._write(db, point_scope=SCOPE):
+        before = snapshot(owner.path)
+        with monkeypatch.context() as patch:
+            patch.setattr(query_type, "to_list", observe)
+            require_file_projection_capacity(
+                store, {(SCOPE[1], PATH): 2, (SCOPE[1], "new.md"): 3,
+                        (SCOPE[1], "sibling.md"): 0}, max_rows=3, point_scope=SCOPE,
+            )
+        cached: Any = store.content_store._table
+        assert cached.name == "vectors_second"
+        assert snapshot(owner.path) == before
+    assert len(plans) == 3
+    for plan in plans:
+        scanned = re.findall(r"\brows_scanned=(\d+)", plan)
+        assert "ScalarIndexQuery" in plan and scanned and sum(map(int, scanned)) <= 3, plan
+
+
+@pytest.mark.parametrize("replacements,max_rows", [
+    ({(SCOPE[1], PATH): 3}, 3),  # The unselected family still occupies one row.
+    ({(SCOPE[1], "new.md"): 4}, 3),
+    ({(SCOPE[1], PATH): 0}, 2),  # Current candidates are bounded even for deletion.
+])
+def test_point_capacity_refuses_projected_or_current_path_overflow_without_effects(
+    selected: tuple[IndexConfig, MultiModelStore, list[Chunk]],
+    replacements: dict[tuple[str, str], int], max_rows: int,
+) -> None:
+    _, store, _ = selected
+    owner = domain(store)
+    with owner._write(store.content_store.db, point_scope=SCOPE):
+        before = snapshot(owner.path)
+        with pytest.raises(ScalarIndexPreparationRequired, match="candidate budget"):
+            require_file_projection_capacity(
+                store, replacements, max_rows=max_rows, point_scope=SCOPE,
+            )
+        assert snapshot(owner.path) == before
+
+
+@pytest.mark.parametrize("obstruction", [
+    "no-writer", "omitted-scope", "scope", "family", "store-path", "connection", "ledger-binding",
+    "missing-index", "tail", "segment",
+])
+def test_point_capacity_refuses_unqualified_owners_and_unprepared_path_index(
+    selected: tuple[IndexConfig, MultiModelStore, list[Chunk]],
+    monkeypatch: pytest.MonkeyPatch, obstruction: str,
+) -> None:
+    from agent_index.store import file_projection
+
+    _, store, chunks = selected
+    owner = domain(store)
+    db = store.content_store.db
+    if obstruction == "no-writer":
+        before = snapshot(owner.path)
+        with pytest.raises(SourceLayoutError, match="owning source writer"):
+            require_file_projection_capacity(store, {}, max_rows=3, point_scope=SCOPE)
+        assert snapshot(owner.path) == before
+        return
+    with owner._write(db, point_scope=SCOPE):
+        replacements = {(SCOPE[1], PATH): 2}
+        scope: PointScope | None = SCOPE
+        if obstruction == "omitted-scope":
+            scope = None
+        elif obstruction == "scope":
+            scope = (SCOPE[0], SCOPE[1], "other-account", SCOPE[3])
+        elif obstruction == "family":
+            replacements = {("sample:other", PATH): 0}
+        elif obstruction == "store-path":
+            monkeypatch.setattr(store, "_db_path", owner.path / "foreign")
+        elif obstruction == "connection":
+            monkeypatch.setattr(owner._local, "db", object())
+        elif obstruction == "ledger-binding":
+            receipt = owner.receipt()
+            receipt[BINDING]["version"] += 1
+            owner.save(receipt)
+        elif obstruction in ("missing-index", "tail"):
+            owner.effect("fixture-path-index-drift")
+            table = db.open_table("canonical")
+            if obstruction == "missing-index":
+                table.drop_index("file_path_idx")
+            else:
+                table.add([{**content_record(chunks[0]), "indexed_at": 1.0}])
+        elif obstruction == "segment":
+            def exhausted(table: Any, *, column: str) -> Any:
+                state, dataset = inspect_index(table, column=column)
+                return replace(state, segments=MAX_SEGMENTS + 1), dataset
+
+            monkeypatch.setattr(file_projection, "inspect_index", exhausted)
+        before = snapshot(owner.path)
+        with pytest.raises((ScalarIndexPreparationRequired, SourceLayoutError)):
+            require_file_projection_capacity(
+                store, replacements, max_rows=3, point_scope=scope,
+            )
+        assert snapshot(owner.path) == before
+
+
+def test_point_capacity_empty_deletions_and_noops_need_no_reserved_segment(
+    selected: tuple[IndexConfig, MultiModelStore, list[Chunk]], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_index.store import file_projection
+
+    _, store, _ = selected
+    owner = domain(store)
+
+    def at_capacity(table: Any, *, column: str) -> Any:
+        state, dataset = inspect_index(table, column=column)
+        return replace(state, segments=MAX_SEGMENTS), dataset
+
+    monkeypatch.setattr(file_projection, "inspect_index", at_capacity)
+    with owner._write(store.content_store.db, point_scope=SCOPE):
+        before = snapshot(owner.path)
+        for replacements in ({}, {(SCOPE[1], PATH): 0}, {(SCOPE[1], PATH): 2}):
+            require_file_projection_capacity(store, replacements, max_rows=3, point_scope=SCOPE)
+        assert snapshot(owner.path) == before
 
 
 def test_cleanup_uses_exact_qualified_handles_and_bounded_indexed_raw_points(
