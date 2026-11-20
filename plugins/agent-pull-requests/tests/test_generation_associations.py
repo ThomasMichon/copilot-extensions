@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import asdict
 import json
 from pathlib import Path
 from typing import Any, cast
@@ -13,7 +14,7 @@ import pytest
 from test_review_workspace import evidence as evidence
 
 from agent_pull_requests import generation_associations as associations
-from agent_pull_requests import generation_cache, watch_replay_store
+from agent_pull_requests import conversation_journal, generation_cache, watch_replay_store
 from agent_pull_requests.conversation_store import ConversationStore
 from agent_pull_requests.generation_cache import GenerationCache
 from agent_pull_requests.review_workspace import build_generation
@@ -319,3 +320,38 @@ def test_concurrent_original_cas_admits_one_confirmed_publication(
     assert [row["publication"] for row in rows] == ["confirmed"]
     assert len(state(store)["conversations"]["records"][0]["events"]) == 1
     assert len(list(cache.generations.iterdir())) == 1
+
+
+def test_association_validation_bounds_record_projection_work_at_capacity(
+    tmp_path: Path, evidence: Document, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store, cache = fresh(tmp_path, count=10000)
+    publish(store, cache, generation(evidence))
+    document = state(store)
+    original = document["conversations"]["records"][0]
+    records = []
+    for number in range(1, 257):
+        record = copy.deepcopy(original)
+        record["current"]["key"]["number"] = number
+        records.append(record)
+    document["conversations"]["records"] = records
+    template = document["generation_associations"]["records"][0]
+    associations_at_capacity = []
+    for number in range(10000):
+        association = copy.deepcopy(template)
+        association["scope"]["number"] = number % len(records) + 1
+        association["generation_id"] = f"{number:064x}"
+        associations_at_capacity.append(association)
+    document["generation_associations"]["records"] = associations_at_capacity
+    conversions = 0
+    linear_budget = 8 * len(records) + 2 * len(associations_at_capacity)
+
+    def bounded(value: Any) -> Any:
+        nonlocal conversions
+        conversions += 1
+        assert conversions <= linear_budget, "association validation repeated a linear PR scan"
+        return asdict(value)
+
+    monkeypatch.setattr(conversation_journal, "asdict", bounded)
+    associations.validate(document, store.namespace)
+    assert conversions <= linear_budget

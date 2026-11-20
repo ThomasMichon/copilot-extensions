@@ -7,7 +7,7 @@ import re
 from collections.abc import Callable
 from typing import Any
 
-from .attention import Cursor
+from .attention import Cursor, PRKey
 from .conversation_journal import ConversationJournal
 from .conversation_store import ConversationStore
 from .generation_cache import GenerationCache
@@ -71,6 +71,7 @@ def validate(document: Document, namespace: str) -> None:
     ):
         raise ValueError("invalid generation association limits")
     journal = ConversationJournal(document["conversations"])
+    records = {PRKey(**item["current"]["key"]): item for item in journal.records}
     seen: set[str] = set()
     for row in state["records"]:
         if not isinstance(row, dict) or set(row) != _FIELDS:
@@ -80,7 +81,7 @@ def validate(document: Document, namespace: str) -> None:
         if not isinstance(cursor, dict) or set(cursor) != {"epoch", "sequence"}:
             raise ValueError("invalid original generation cursor")
         position = Cursor(**cursor)
-        record = journal._find(conversation_key(scope, namespace))
+        record = records.get(conversation_key(scope, namespace))
         if (
             not _identifier(row["generation_id"]) or row["generation_id"] in seen
             or not _identifier(row["observation_id"])
