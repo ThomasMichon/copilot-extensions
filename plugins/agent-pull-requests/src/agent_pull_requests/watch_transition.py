@@ -7,7 +7,7 @@ import os
 import stat
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from single_instance_lease import SingleInstance
 
@@ -27,6 +27,37 @@ from .watch_storage import (
 Document = dict[str, Any]
 _SCHEMA = "agent-pull-requests.watch-state-transition"
 _FIELDS = {"schema", "version", "phase", "binding", "lease"}
+
+
+def _validate_record(document: Any, binding: Document, *, phase: str = "prepared") -> None:
+    if (
+        not isinstance(document, dict) or set(document) != _FIELDS
+        or document["schema"] != _SCHEMA or type(document["version"]) is not int
+        or document["version"] != 1 or document["phase"] != phase
+        or json.dumps(document["binding"], sort_keys=True) != json.dumps(binding, sort_keys=True)
+        or not isinstance(document["lease"], dict)
+        or set(document["lease"]) != {"device", "inode"}
+        or any(type(value) is not int or value < 0 for value in document["lease"].values())
+    ):
+        raise PermissionError("watch preparation journal binding or evidence is invalid")
+
+
+def _validate_binding(root: Path, binding: Document) -> None:
+    if (
+        binding.get("stateRoot") != str(root)
+        or (
+            binding.get("kind") == "legacy" and set(binding) != {"kind", "stateRoot"}
+        )
+        or (
+            binding.get("kind") == "installation" and (
+                set(binding) != {"kind", "stateRoot", "installation"}
+                or not isinstance(binding["installation"], dict)
+                or binding["installation"].get("stateRoot") != str(root)
+            )
+        )
+        or binding.get("kind") not in {"legacy", "installation"}
+    ):
+        raise PermissionError("watch preparation binding differs from its state root")
 
 
 def _historical_identity(root: Path) -> tuple[int, int]:
@@ -84,21 +115,7 @@ def read_preparation(
 ) -> Document | None:
     """Validate a pre-move record before opening the original historical lease."""
     identity = _historical_identity(root)
-    if (
-        binding.get("stateRoot") != str(root)
-        or (
-            binding.get("kind") == "legacy" and set(binding) != {"kind", "stateRoot"}
-        )
-        or (
-            binding.get("kind") == "installation" and (
-                set(binding) != {"kind", "stateRoot", "installation"}
-                or not isinstance(binding["installation"], dict)
-                or binding["installation"].get("stateRoot") != str(root)
-            )
-        )
-        or binding.get("kind") not in {"legacy", "installation"}
-    ):
-        raise PermissionError("watch preparation binding differs from its state root")
+    _validate_binding(root, binding)
     paths = watch_state_paths(root)
     phase = (
         read_transition_phase(root, allow_preparation_pin=True) if preparing_pin
@@ -119,21 +136,12 @@ def read_preparation(
     if raw is None:
         raise PermissionError("watch preparation journal disappeared")
     document = json.loads(raw, object_pairs_hook=_unique_object, parse_constant=_reject_constant)
-    if (
-        not isinstance(document, dict) or set(document) != _FIELDS
-        or document["schema"] != _SCHEMA or type(document["version"]) is not int
-        or document["version"] != 1 or document["phase"] != "prepared"
-        or json.dumps(document["binding"], sort_keys=True) != json.dumps(binding, sort_keys=True)
-        or not isinstance(document["lease"], dict)
-        or set(document["lease"]) != {"device", "inode"}
-        or any(type(value) is not int or value < 0 for value in document["lease"].values())
-    ):
-        raise PermissionError("watch preparation journal binding or evidence is invalid")
+    _validate_record(document, binding)
     if identity != (document["lease"]["device"], document["lease"]["inode"]):
         raise PermissionError("watch preparation no longer names the original lease inode")
     if _pin_identity(root) != identity:
         raise PermissionError("watch preparation inode pin differs from the original lease")
-    return document
+    return cast(Document, document)
 
 
 def prepare(

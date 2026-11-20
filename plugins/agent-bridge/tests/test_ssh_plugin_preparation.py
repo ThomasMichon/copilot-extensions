@@ -11,23 +11,37 @@ import shutil
 import subprocess
 import sys
 import time
+from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, TypeVar, cast
 from unittest.mock import AsyncMock
 
 import pytest
-import pytest_asyncio
+import pytest_asyncio  # type: ignore[import-not-found]  # test-only dependency absent from the checker lock
 from agent_procutil import no_window_flags
 
 from agent_bridge import ssh_plugin_preparation, transport
 from agent_bridge.connect import ConnectError, ConnectStage
 from agent_bridge.spawn_target import PluginRef, SpawnTarget
+from ssh_manager import ConnectionManager, SSHProfileSource
+
+_F = TypeVar("_F", bound=Callable[..., Any])
+
+
+def _async_fixture(function: _F) -> _F:
+    return cast(_F, pytest_asyncio.fixture(function))
+
+
+def _prepared(target: SpawnTarget) -> dict[str, Any]:
+    assert target.prepared_plugins is not None
+    return target.prepared_plugins
 
 
 @pytest.mark.parametrize("privileged", [False, True])
 def test_static_ssh_resolver_retains_preparation_provenance_without_new_fields(
-    monkeypatch, privileged,
-):
+    monkeypatch: pytest.MonkeyPatch, privileged: bool,
+) -> None:
     from agent_bridge.agent_registry import AgentResolver, parse_agent_registry
     from agent_bridge.topology import parse_machines_yaml
 
@@ -53,7 +67,7 @@ def test_static_ssh_resolver_retains_preparation_provenance_without_new_fields(
     assert "static_plugin_args" not in json.loads(target.to_json())
 
 
-def _checkout(path: Path, *, plugin: bool = False, enabled: bool = True):
+def _checkout(path: Path, *, plugin: bool = False, enabled: bool = True) -> None:
     subprocess.run(
         ["git", "init", "--quiet", str(path)], check=True, capture_output=True,
         timeout=20, creationflags=no_window_flags(),
@@ -79,12 +93,14 @@ def _checkout(path: Path, *, plugin: bool = False, enabled: bool = True):
 class _Receiver:
     """Executes the actual emitted stdin program, not an installed Bridge."""
 
-    def __init__(self, directory: Path, environment: dict[str, str]):
+    def __init__(self, directory: Path, environment: dict[str, str]) -> None:
         self.directory = directory
         self.environment = environment
-        self.calls = []
+        self.calls: list[tuple[str, str, bytes]] = []
 
-    async def exec_command(self, host, command, *, input_bytes, timeout):
+    async def exec_command(
+        self, host: str, command: str, *, input_bytes: bytes, timeout: float,
+    ) -> SimpleNamespace:
         self.calls.append((host, command, input_bytes))
         args = command.split(" ")
         executable = shutil.which(args[0])
@@ -101,8 +117,11 @@ class _Receiver:
         )
 
 
+ReceiverFixture = tuple[SpawnTarget, Any, Path, Path, Path]
+
+
 @pytest.fixture
-def receiver(tmp_path, monkeypatch):
+def receiver(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> ReceiverFixture:
     controller, child, home, daemon = [tmp_path / name for name in ("controller", "child", "home", "daemon")]
     _checkout(controller, plugin=True)
     _checkout(child)
@@ -125,7 +144,7 @@ def receiver(tmp_path, monkeypatch):
         copilot_args=["--model", "selected", "--plugin-dir", "explicit-request"],
         env={"UNCHANGED": "request-value"},
     )
-    async def receiving_policy(_target, *, operation):
+    async def receiving_policy(_target: SpawnTarget, *, operation: str) -> dict[str, Any]:
         from repository_policy import require_agent_hosting
 
         return {**require_agent_hosting(child, operation=operation).to_dict(), "allowed": True}
@@ -136,7 +155,7 @@ def receiver(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("native", ["absent", "enabled", "disabled", "missing"])
-async def test_streamed_receiver_preserves_native_authority_and_global_preferences(receiver, native):
+async def test_streamed_receiver_preserves_native_authority_and_global_preferences(receiver: ReceiverFixture, native: str) -> None:
     target, manager, controller, child, home = receiver
     # Incompressible fixture data proves the payload is not hidden in SSH argv.
     (controller / ".ai" / "sample" / "asset").write_bytes(random.Random(42).randbytes(90_000))
@@ -153,7 +172,7 @@ async def test_streamed_receiver_preserves_native_authority_and_global_preferenc
         assert target.prepared_plugins is None
     else:
         result = await ssh_plugin_preparation.prepare_ssh_plugins(target, manager, environment=target.env)
-        context = target.prepared_plugins
+        context = _prepared(target)
         assert context["cwd"] == str(child)
         if native == "disabled":
             assert result == [] and context["plugins"] == [] and context["logical_payloads"] == {}
@@ -176,7 +195,9 @@ async def test_streamed_receiver_preserves_native_authority_and_global_preferenc
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("matching", [False, True])
-async def test_ssh_planner_verifies_session_qualified_controller_owner(receiver, monkeypatch, matching):
+async def test_ssh_planner_verifies_session_qualified_controller_owner(
+    receiver: ReceiverFixture, monkeypatch: pytest.MonkeyPatch, matching: bool,
+) -> None:
     from agent_bridge.spawn_target import REQUEST_OVERRIDES_KEY
 
     target, manager, controller, _child, _home = receiver
@@ -193,7 +214,7 @@ async def test_ssh_planner_verifies_session_qualified_controller_owner(receiver,
     monkeypatch.setattr("agent_bridge.acquisition_authority._run_worktree_command", owner)
     if matching:
         assert await ssh_plugin_preparation.prepare_ssh_plugins(target, manager, environment={})
-        assert target.prepared_plugins["plugins"][0]["projected_source"] == "sample@local"
+        assert _prepared(target)["plugins"][0]["projected_source"] == "sample@local"
         owner.assert_awaited_once()
     else:
         with pytest.raises(RuntimeError, match="controller context could not be verified"):
@@ -202,7 +223,9 @@ async def test_ssh_planner_verifies_session_qualified_controller_owner(receiver,
 
 
 @pytest.mark.asyncio
-async def test_gitless_legacy_receiver_skips_projection_before_selecting_controller_plugins(receiver, monkeypatch):
+async def test_gitless_legacy_receiver_skips_projection_before_selecting_controller_plugins(
+    receiver: ReceiverFixture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     target, manager, _controller, child, _home = receiver
     target.cwd = str(child.parent)
     planner = AsyncMock(side_effect=AssertionError("Gitless launches have no registration surface"))
@@ -210,11 +233,11 @@ async def test_gitless_legacy_receiver_skips_projection_before_selecting_control
     assert await ssh_plugin_preparation.prepare_ssh_plugins(target, manager, environment={}) is None
     planner.assert_not_awaited()
     assert len(manager.calls) == 1
-    assert target.prepared_plugins["applicable"] is False
+    assert _prepared(target)["applicable"] is False
 
 
 @pytest.mark.asyncio
-async def test_relative_legacy_directory_resolves_in_receiver_not_controller(receiver):
+async def test_relative_legacy_directory_resolves_in_receiver_not_controller(receiver: ReceiverFixture) -> None:
     target, manager, _controller, _child, _home = receiver
     target.cwd = "."
     assert await ssh_plugin_preparation.prepare_ssh_plugins(target, manager, environment={}) is None
@@ -222,7 +245,7 @@ async def test_relative_legacy_directory_resolves_in_receiver_not_controller(rec
 
 
 @pytest.mark.asyncio
-async def test_receiver_wrapper_drains_large_stderr_without_blocking_stdout(receiver):
+async def test_receiver_wrapper_drains_large_stderr_without_blocking_stdout(receiver: ReceiverFixture) -> None:
     target, manager, _controller, _child, _home = receiver
     output = await ssh_plugin_preparation._run_python(
         manager, target,
@@ -234,13 +257,13 @@ async def test_receiver_wrapper_drains_large_stderr_without_blocking_stdout(rece
 
 
 @pytest.mark.asyncio
-async def test_receiver_directory_with_spaces_and_non_ascii_is_preserved(receiver):
+async def test_receiver_directory_with_spaces_and_non_ascii_is_preserved(receiver: ReceiverFixture) -> None:
     target, manager, _controller, child, _home = receiver
     renamed = child.with_name("child space " + chr(0x3C0))
     child.rename(renamed)
     target.cwd = str(renamed)
     await ssh_plugin_preparation.prepare_ssh_plugins(target, manager, environment={})
-    assert target.prepared_plugins["cwd"] == str(renamed)
+    assert _prepared(target)["cwd"] == str(renamed)
     assert (renamed / ".github" / "copilot" / "settings.local.json").is_file()
 
 
@@ -250,7 +273,7 @@ async def test_receiver_directory_with_spaces_and_non_ascii_is_preserved(receive
     "__VENUE_CHECKOUT__{}",
     '__VENUE_CHECKOUT__{"requested_cwd":"/different","cwd":"/different","applicable":true}',
 ])
-async def test_wrong_or_missing_receiver_checkout_frame_fails_closed(receiver, proof):
+async def test_wrong_or_missing_receiver_checkout_frame_fails_closed(receiver: ReceiverFixture, proof: str) -> None:
     target, manager, _controller, _child, _home = receiver
     manager.exec_command = AsyncMock(return_value=SimpleNamespace(
         exit_code=0, timed_out=False, stdout=proof, stderr="",
@@ -263,8 +286,8 @@ async def test_wrong_or_missing_receiver_checkout_frame_fails_closed(receiver, p
 @pytest.mark.asyncio
 @pytest.mark.parametrize("prebound", [False, True])
 async def test_spawn_prepares_after_allocation_before_existing_productive_command(
-    receiver, monkeypatch, prebound,
-):
+    receiver: ReceiverFixture, monkeypatch: pytest.MonkeyPatch, prebound: bool,
+) -> None:
     target, manager, _controller, child, _home = receiver
     target.worktree_id = "existing-child" if prebound else None
     target.cwd = "/stale/configured-checkout"
@@ -279,9 +302,9 @@ async def test_spawn_prepares_after_allocation_before_existing_productive_comman
     preparation = AsyncMock(wraps=ssh_plugin_preparation.prepare_ssh_plugins)
     monkeypatch.setattr(ssh_plugin_preparation, "prepare_ssh_plugins", preparation)
 
-    async def open_stdio(host, command):
+    async def open_stdio(host: str, command: str) -> SimpleNamespace:
         assert target.cwd == str(child) and target.worktree_id == "actual-child"
-        assert target.prepared_plugins["plugins"][0]["projected_source"] == "sample@local"
+        assert _prepared(target)["plugins"][0]["projected_source"] == "sample@local"
         assert (child / ".github" / "copilot" / "settings.local.json").is_file()
         return SimpleNamespace(pid=999)
 
@@ -291,7 +314,7 @@ async def test_spawn_prepares_after_allocation_before_existing_productive_comman
     assert process.target is target and target.copilot_args == original
     assert target.env == {"UNCHANGED": "request-value"}
     source = manager.ensure_connected.await_args.args[1]
-    assert isinstance(source, transport.SSHProfileSource)
+    assert isinstance(source, SSHProfileSource)
     assert manager.ensure_connected.await_args.args[0] == "synthetic-profile"
     # ACP still launches through the selected project owner, never a new launcher.
     command = manager.open_stdio_channel.await_args.args[1]
@@ -299,21 +322,83 @@ async def test_spawn_prepares_after_allocation_before_existing_productive_comman
         import base64
         command = base64.b64decode(command.rsplit(" ", 1)[1]).decode("utf-16-le")
         assert "'agent-policy' 'check'" in command
-        command = base64.b64decode(command.rsplit(" ", 1)[1]).decode("utf-16-le")
+        assert "-EncodedCommand" not in command
     else:
         assert "agent-policy check" in command
     assert "app" in command and "--worktree-id actual-child" in command
     assert "--model selected" in command and "explicit-request" in command
     assert command.count("--plugin-dir") == 2
+    assert preparation.await_args is not None
     assert preparation.await_args.kwargs["environment"] == {
         "UNCHANGED": "request-value", "FROM_PLAN": "selected-profile",
     }
 
 
+def _decode_launch(command: str) -> str:
+    return base64.b64decode(command.rsplit(" ", 1)[1]).decode("utf-16-le")
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(os.name != "nt", reason="Windows receiver shell")
+async def test_long_windows_launch_is_staged_instead_of_inline(
+    receiver: ReceiverFixture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target, manager, _controller, child, _home = receiver
+    plugins = [f"C:\\Example\\plugins\\{index:03d}-{'p' * 60}" for index in range(90)]
+    for plugin in plugins:
+        target.copilot_args.extend(["--plugin-dir", plugin])
+    manager.ensure_connected = AsyncMock()
+    monkeypatch.setattr(transport, "get_default_manager", lambda: manager)
+    monkeypatch.setattr(transport, "_effective_auth_hooks", lambda hooks: hooks)
+    monkeypatch.setattr(transport, "_resolve_worktree_remote", AsyncMock(return_value={"launch": {
+        "worktree_id": "actual-child", "work_dir": str(child),
+    }}))
+    staged: dict[str, str] = {}
+
+    async def open_stdio(host: str, command: str) -> SimpleNamespace:
+        assert len(command) < transport._WINDOWS_INLINE_COMMAND_LIMIT
+        launcher = _decode_launch(command)
+        name = launcher.split("'", 2)[1]
+        path = Path(os.environ.get("TMP") or os.environ["TEMP"]) / name
+        staged["text"] = path.read_text(encoding="utf-8")
+        path.unlink()
+        return SimpleNamespace(pid=999)
+
+    manager.open_stdio_channel = AsyncMock(side_effect=open_stdio)
+    await transport.spawn_ssh(target)
+    script = staged["text"]
+    assert "-EncodedCommand" not in script
+    assert script.index("'agent-policy' 'check'") < script.index("--worktree-id actual-child")
+    assert all(plugin in script for plugin in plugins)
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(os.name != "nt", reason="Windows receiver shell")
+async def test_staged_windows_launcher_runs_script_and_removes_it(tmp_path: Path) -> None:
+    receiver = _Receiver(tmp_path, dict(os.environ))
+    target = SpawnTarget(type="ssh", host="receiver", ssh_shell="powershell")
+    launcher = await transport._stage_windows_launch(
+        receiver, target, "Write-Output 'staged-ok-é'; exit 7",
+    )
+    name = _decode_launch(launcher).split("'", 2)[1]
+    path = Path(os.environ.get("TMP") or os.environ["TEMP"]) / name
+    assert path.is_file()
+    args = launcher.split(" ")
+    executable = shutil.which(args[0])
+    assert executable is not None
+    args[0] = executable
+    result = subprocess.run(
+        args, capture_output=True, timeout=60, creationflags=no_window_flags(),
+    )
+    assert result.returncode == 7
+    assert b"staged-ok-" in result.stdout
+    assert not path.exists()
+
+
 @pytest.mark.asyncio
 async def test_nested_execution_cwd_keeps_native_repository_root_and_productive_directory(
-    receiver, monkeypatch,
-):
+    receiver: ReceiverFixture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     target, manager, _controller, child, _home = receiver
     _checkout(child, plugin=True)
     nested = child / "tools" / "nested execution"
@@ -327,9 +412,9 @@ async def test_nested_execution_cwd_keeps_native_repository_root_and_productive_
         "worktree_id": "actual-child", "work_dir": str(nested),
     }}))
 
-    async def open_stdio(host, command):
+    async def open_stdio(host: str, command: str) -> SimpleNamespace:
         assert target.cwd == str(nested)
-        context = target.prepared_plugins
+        context = _prepared(target)
         assert context["cwd"] == str(nested) and context["repository_root"] == str(child)
         assert context["logical_payloads"] == {"sample@local": str(child / ".ai" / "sample")}
         assert (child / ".github" / "copilot" / "settings.local.json").is_file()
@@ -343,7 +428,7 @@ async def test_nested_execution_cwd_keeps_native_repository_root_and_productive_
 
 
 @pytest.mark.asyncio
-async def test_applicable_receiver_requires_a_verified_repository_root(receiver):
+async def test_applicable_receiver_requires_a_verified_repository_root(receiver: ReceiverFixture) -> None:
     target, manager, _controller, _child, _home = receiver
     manager.exec_command = AsyncMock(return_value=SimpleNamespace(
         exit_code=0, timed_out=False, stderr="", stdout="__VENUE_CHECKOUT__" + json.dumps({
@@ -358,33 +443,37 @@ async def test_applicable_receiver_requires_a_verified_repository_root(receiver)
 @pytest.mark.skipif(os.name != "nt", reason="Windows quoted execution PATH")
 @pytest.mark.parametrize("relative", [False, True])
 @pytest.mark.asyncio
-async def test_receiver_git_lookup_uses_the_shared_execution_path_contract(receiver, relative):
+async def test_receiver_git_lookup_uses_the_shared_execution_path_contract(receiver: ReceiverFixture, relative: bool) -> None:
     target, manager, _controller, child, _home = receiver
-    git = Path(shutil.which("git")).resolve()
+    git_path = shutil.which("git")
+    assert git_path is not None
+    git = Path(git_path).resolve()
     if relative and os.path.splitdrive(str(git))[0].casefold() != os.path.splitdrive(str(child))[0].casefold():
         pytest.skip("A relative Git PATH requires the fixture and Git on the same drive")
     directory = os.path.relpath(git.parent, child) if relative else str(git.parent)
     environment = {"PATH": '"' + directory + '"', "PATHEXT": ".EXE"}
     result = await ssh_plugin_preparation.prepare_ssh_plugins(target, manager, environment=environment)
-    assert result and target.prepared_plugins["repository_root"] == str(child)
+    assert result and _prepared(target)["repository_root"] == str(child)
     assert environment == {"PATH": '"' + directory + '"', "PATHEXT": ".EXE"}
 
 
 @pytest.mark.asyncio
-async def test_receiver_repository_probe_ignores_foreign_git_selectors(receiver):
+async def test_receiver_repository_probe_ignores_foreign_git_selectors(receiver: ReceiverFixture) -> None:
     target, manager, controller, child, _home = receiver
     environment = {
         "GIT_DIR": str(controller / ".git"), "GIT_WORK_TREE": str(controller),
     }
     assert await ssh_plugin_preparation.prepare_ssh_plugins(target, manager, environment=environment)
-    assert target.prepared_plugins["repository_root"] == str(child)
+    assert _prepared(target)["repository_root"] == str(child)
     assert (child / ".github" / "copilot" / "settings.local.json").is_file()
     assert not (controller / ".github" / "copilot" / "settings.local.json").exists()
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("failure", ["exit", "timeout", "cancel"])
-async def test_preparation_failure_never_opens_productive_stdio(receiver, monkeypatch, failure):
+async def test_preparation_failure_never_opens_productive_stdio(
+    receiver: ReceiverFixture, monkeypatch: pytest.MonkeyPatch, failure: str,
+) -> None:
     target, manager, _controller, _child, _home = receiver
     target.explicit_cwd = True
     manager.ensure_connected = AsyncMock()
@@ -401,13 +490,14 @@ async def test_preparation_failure_never_opens_productive_stdio(receiver, monkey
     with pytest.raises(asyncio.CancelledError if failure == "cancel" else ConnectError) as error:
         await transport.spawn_ssh(target)
     if failure != "cancel":
+        assert isinstance(error.value, ConnectError)
         assert error.value.stage is ConnectStage.TARGET_BINSTUB
     manager.open_stdio_channel.assert_not_awaited()
     assert target.prepared_plugins is None
 
 
 @pytest.mark.parametrize("shell", ["pwsh", "powershell", "cmd"])
-def test_windows_helper_uses_hidden_streamed_python_and_drains_both_pipes(shell):
+def test_windows_helper_uses_hidden_streamed_python_and_drains_both_pipes(shell: str) -> None:
     import base64
     command = ssh_plugin_preparation._python_command(shell)
     script = base64.b64decode(command.rsplit(" ", 1)[1]).decode("utf-16-le")
@@ -417,10 +507,11 @@ def test_windows_helper_uses_hidden_streamed_python_and_drains_both_pipes(shell)
     assert "[Console]::In.ReadToEnd()" in script and "\\WindowsApps\\" in script
 
 
-@pytest_asyncio.fixture
-async def live_receiver(receiver):
-    from ssh_manager import ConnectionManager, SSHProfileSource
+LiveReceiver = tuple[SpawnTarget, ConnectionManager]
 
+
+@_async_fixture
+async def live_receiver(receiver: ReceiverFixture) -> AsyncIterator[LiveReceiver]:
     host = os.environ.get("AGENT_BRIDGE_TEST_SAME_FILESYSTEM_SSH")
     if not host:
         pytest.skip("Opt-in SSH profile with the test runner's filesystem required")
@@ -446,17 +537,20 @@ async def live_receiver(receiver):
 
 
 @pytest.mark.asyncio
-async def test_live_ssh_profile_streams_shared_engine_without_an_installed_bridge(live_receiver):
+async def test_live_ssh_profile_streams_shared_engine_without_an_installed_bridge(live_receiver: LiveReceiver) -> None:
     target, manager = live_receiver
     directories = await ssh_plugin_preparation.prepare_ssh_plugins(
         target, manager, environment=target.env,
     )
+    assert directories is not None
     assert len(directories) == 2 and directories[0] == "--plugin-dir"
     assert (Path(directories[1]) / "marker").read_text() == "controller"
-    assert target.prepared_plugins["plugins"][0]["projected_source"] == "sample@local"
+    assert _prepared(target)["plugins"][0]["projected_source"] == "sample@local"
 
 
-def _mutating_receiver(heartbeat, started, *, early_exit=None, exit_delay=0):
+def _mutating_receiver(
+    heartbeat: Path, started: Path, *, early_exit: int | None = None, exit_delay: float = 0,
+) -> str:
     child = (
         "import pathlib,time\n"
         f"path=pathlib.Path({str(heartbeat)!r})\n"
@@ -484,7 +578,7 @@ def _mutating_receiver(heartbeat, started, *, early_exit=None, exit_delay=0):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("exit_code", [0, 3])
-async def test_receiver_early_exit_reaps_mutating_descendants(receiver, tmp_path, exit_code):
+async def test_receiver_early_exit_reaps_mutating_descendants(receiver: ReceiverFixture, tmp_path: Path, exit_code: int) -> None:
     target, manager, _controller, _child, _home = receiver
     heartbeat, started = tmp_path / "heartbeat", tmp_path / "started"
     before = time.monotonic()
@@ -507,7 +601,7 @@ async def test_receiver_early_exit_reaps_mutating_descendants(receiver, tmp_path
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("active_past_deadline", [False, True])
-async def test_lost_supervisor_does_not_orphan_descendants(tmp_path, active_past_deadline):
+async def test_lost_supervisor_does_not_orphan_descendants(tmp_path: Path, active_past_deadline: bool) -> None:
     from plugin_resolve import receiver as ssh_plugin_receiver
 
     heartbeat, started = tmp_path / "heartbeat", tmp_path / "started"
@@ -549,7 +643,7 @@ async def test_lost_supervisor_does_not_orphan_descendants(tmp_path, active_past
 
 
 @pytest.mark.asyncio
-async def test_receiver_deadline_reaps_installer_descendants(receiver, tmp_path):
+async def test_receiver_deadline_reaps_installer_descendants(receiver: ReceiverFixture, tmp_path: Path) -> None:
     target, manager, _controller, _child, _home = receiver
     heartbeat, started = tmp_path / "heartbeat", tmp_path / "started"
     before = time.monotonic()
@@ -567,7 +661,7 @@ async def test_receiver_deadline_reaps_installer_descendants(receiver, tmp_path)
 
 
 @pytest.mark.asyncio
-async def test_live_ssh_cancellation_quiesces_receiver_and_its_child(live_receiver, tmp_path):
+async def test_live_ssh_cancellation_quiesces_receiver_and_its_child(live_receiver: LiveReceiver, tmp_path: Path) -> None:
     target, manager = live_receiver
     heartbeat = tmp_path / "receiver-child-heartbeat"
     started = tmp_path / "receiver-started"
