@@ -7671,6 +7671,29 @@ and pair composition, not fixture setup or outer writer entry/exit. OS cache is
 uncontrolled and inference is a fixture; two samples are insufficient for tail,
 large-corpus, real-model, writer-contention or native Windows qualification.
 
+`plugins/agent-index/tests/test_point_component_application.py` composes the
+complete explicit typed-claim application against real native content/model/
+ledger owners, retained acquisition and prepared vectors. It covers replacement
+cleanup, tombstones, covered reopen, concurrent application refusal, unchanged
+parent/polling state and pinned/trailing queue separation. Sealed ordering,
+checkpoint and final-clean interruptions reopen without engines or native data
+replay; changed claim/acquisition/native/coverage/checkpoint owners refuse.
+Real native segment fixtures cover full-ledger and near-capacity multi-point
+canonical/vector refusals, per-stream-batch demand, clean retry after no-effect
+refusal, and dirty retention after unexpected preflight or publication effects.
+Run it separately from `test_component_application.py` and
+`test_point_prepared_application.py` so each native packet retains a bounded
+execution window. Use `PYTEST_ADDOPTS='-vv --durations=10'` for named progress
+and phase timings; a killed quiet run's dots do not identify reusable results.
+The existing positive `-k complete_point_application` case with `-s` prints
+separate preparation/publication wall/process-CPU samples and work counts for
+unapplied and covered reopen. Fixture inference and uncontrolled OS caches are
+not production latency, contention, large-corpus or native Windows proof.
+The actor-free exact-scope/physical-seal case in
+`tools/promotion_unit_tests/test_point_source_domain_contract.py` substitutes
+receipt/physical boundaries but executes the source writer. Whole-claim
+retirement, v2 execution, ordinary application and rollout remain unqualified.
+
 The exclusive attachment-export consumer packet executes the real export
 entrypoint, health-selected command transport, extension registry, provider
 dispatch and descriptor-pinned writer with an in-memory filesystem and

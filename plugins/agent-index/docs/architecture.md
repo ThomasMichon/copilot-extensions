@@ -1308,7 +1308,9 @@ V9 completion and discard remain unsupported. Cancellation does not make the
 retained claim successful, and later queue arrivals remain trailing work.
 Future whole-claim completion must recheck the queue owner and bind per-target
 outcomes before retiring the exact pending parent, without advancing polling
-state. No runner, producer or native application selects this new envelope.
+state. Only the explicit
+[typed-claim native application](component-ledger.md#explicit-native-application)
+selects the complete retained candidate; no ordinary runner or producer does.
 
 `ComponentContent.covered_by` is a pure ordering comparison, not stored evidence.
 It compares matching source/path identities, considers lower versions covered,

@@ -239,7 +239,9 @@ must establish provider ordering before **any** replacement or deletion, and
 retain store-before-checkpoint recovery. Ordinary reconciliation remains
 unsupported on a point domain.
 
-Qualified point application and every v2 executor/producer remain unsupported.
+The explicit [typed-claim application and sealed suffix](component-ledger.md#explicit-native-application)
+compose these native prerequisites. Ordinary point application, whole-claim
+completion and every v2 executor/producer remain unsupported.
 The binding is not
 acquisition, application, completion or deployment authority. There is no live
 directory allocation, migration, new service, HTTP parameter, CLI flag or MCP

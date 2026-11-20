@@ -81,8 +81,8 @@ capture and single-row index preparation. The caller must already own the matchi
 domain writer; the method never enters one. Omitted or mismatched scope and
 foreign canonical families refuse before ledger effects, including inside an
 already-owned writer. Reopening retains typed identities and tombstone ordering.
-Ordinary point writers, ledger consolidation, native point application and queue
-completion remain disabled; subordinate observations do not authorize any of them.
+Ordinary point writers, ledger consolidation and queue completion remain disabled;
+subordinate observations do not authorize the explicit application below.
 
 The ledger uses the existing scalar-index owner and its physical-tail/segment
 budgets. Point capture and index preflight must succeed before the ledger
@@ -147,6 +147,26 @@ upkeep, final canonical/routed-vector qualification, native ordering evidence
 and finally path checkpoints. Deletions retain ordering and known vector IDs but
 remove only the named component's rows and checkpoint. Cancellation before writer
 entry is clean; interruption inside it retains the existing dirty latch.
+
+For an explicitly selected protocol-2 store, pass the whole typed
+`point_claim=PendingPointClaim.from_task(pinned_task)` as well. The claim must
+match the exact retained v9 parent and every acquired target; a subset manifest
+cannot become application input. The existing prepared owner copies and binds
+that complete candidate and prepares vectors outside native exclusion.
+Publication recomposes the retained target set and rechecks policy, checkpoints,
+ordering and raw points before effects. Unlike protocol-1 preflight, selected
+capacity and qualified task-local table handles require the already-owned point
+writer. They preserve the retained complete model binding without trusting or
+changing caller caches. Before path invalidation, point preflight reserves the
+whole selected plan's per-index segment demand: changed canonical points,
+vector-provenance upkeep, every routed batch with missing pairs, and the free
+slot required for stale-ID cleanup. It does not consolidate indices. A no-effect
+preflight refusal exits the writer cleanly before propagating, preserving the
+receipt and checkpoints. Any unexpected preflight effect or subsequent
+publication failure retains the dirty latch.
+The selected path composes native content, prepared pair
+publication, bounded index upkeep and stale-ID cleanup before the same sealed
+ordering/checkpoint suffix. No engine call occurs inside publication.
 
 `publish()` returns applied/covered point counts. It **does not** save a polling
 cursor, retire the pending manifest or acknowledge a queued claim. An already
@@ -232,8 +252,9 @@ continue to refuse. Search, clusters, HTTP, MCP, CLI and consumer presentation
 routes remain unsupported for point domains. The separate
 [cold schema bootstrap](source-aware-store.md#point-domain-binding-foundation)
 creates only configured content/model tables, not this ledger or its indices.
-Protocol-2 ledger/index bootstrap and application, v2 execution/producer and
-current-claim completion remain disabled; there is
+Protocol-2 ledger/index bootstrap and typed-claim application are separate
+explicit prerequisites above. V2 execution/producer and current-claim completion
+remain disabled; there is
 no migration or conversion of existing protocol-1 state.
 
 ### Sealed native publication suffix
@@ -261,6 +282,10 @@ physical seal, then revalidates every retained raw point and routed vector
 receipt, exact prior-or-target ledger record and prior-or-completed path state
 before repairing any suffix. Completed checkpoints retain their timestamps.
 It invokes no embedding engine and does not replay native content/vector data.
+For a protocol-2 suffix, supply the same whole typed `point_claim`. The existing
+prepared owner requalifies its complete target candidate; the source owner
+requires the exact explicit scope and unchanged physical seal. Omitted or
+mismatched claims/scopes cannot reopen the writer or repair checkpoints.
 The recovered outer commit conservatively replaces logical coverage metadata;
 it cannot reconstruct the interrupted writer's fine-grained bucket witnesses.
 

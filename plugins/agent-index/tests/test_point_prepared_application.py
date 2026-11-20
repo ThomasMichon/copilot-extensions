@@ -114,7 +114,7 @@ def application(
     )
     store = initialize_source_store(config, point_scope=claim.hints.scope)
     prepare_ingestion_indices(store, max_rows=0, point_scope=claim.hints.scope)
-    paths = PathIndex(config.data_dir / "paths.db")
+    paths = PathIndex(config.data_dir / "path_index.db")
     observations = []
     for target in targets:
         comment = isinstance(target, CommentVersionTarget)
