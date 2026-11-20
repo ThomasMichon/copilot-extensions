@@ -120,6 +120,7 @@ class ReplayObserver:
                 Callable[[ReplayStore, tuple[RepositoryIdentity, ...]], RepositoryProjection], RepositoryProjection,
             )(store, identities) if identities else None
         self._repository_cursor = 0
+        self._repository_reconcile_cursor = 0
         self._query_cursors: dict[str, int] = {}
         self._cycle = threading.Lock()
 
@@ -179,6 +180,7 @@ class ReplayObserver:
             self.store.check_current(expires_at, checkpoint)
 
         prepared: dict[TargetKey, Document | None] = {}
+        inventoried = False
 
         def capture(target: ObservationTarget, snapshot: PRSnapshot | None) -> None:
             key = (target.account, target.repo, target.number)
@@ -189,6 +191,11 @@ class ReplayObserver:
                 ) if snapshot is not None else None
             except (ValueError, TypeError):
                 prepared[key] = None
+            self._disk_call(lambda: repositories.apply_facts(
+                {}, {key: prepared[key]}, observed_at=observed_at, **authority,
+            ), **authority)
+            if inventoried:
+                prepared.pop(key)
 
         for binding in self.bindings.values():
             if binding.repository_identity is None:
@@ -233,31 +240,54 @@ class ReplayObserver:
         )
         repository_targets = self._disk_call(lambda: repositories.plans(inventories, **authority), **authority)
         seen = set(prepared)
-
-        def publish() -> None:
-            self._disk_call(lambda: repositories.apply_facts(
-                inventories, prepared, observed_at=observed_at, **authority,
-            ), **authority)
-            prepared.clear()
-
         while len(prepared) > _MAX_REPOSITORY_READS:
             batch = {key: prepared.pop(key) for key in list(prepared)[:_MAX_REPOSITORY_READS]}
             self._disk_call(lambda: repositories.apply_facts(
                 inventories, batch, observed_at=observed_at, **authority,
             ), **authority)
-        publish()
+        self._disk_call(lambda: repositories.apply_facts(
+            inventories, prepared, observed_at=observed_at, **authority,
+        ), **authority)
+        prepared.clear()
+        inventoried = True
         keys = sorted(key for key in repository_targets if key not in seen and key[:2] in qualified)
         if keys:
-            start = self._repository_cursor % len(keys)
-            selected = (keys[start:] + keys[:start])[:_MAX_REPOSITORY_READS]
-            self._repository_cursor = (start + len(selected)) % len(keys)
+            current_keys = {(key, number) for key, scan in inventories.items() for number in scan["numbers"]}
+            members = [key for key in keys if (key[0], key[2]) in current_keys]
+            reconcile = [key for key in keys if (key[0], key[2]) not in current_keys]
+            member_start = self._repository_cursor % len(members) if members else 0
+            reconcile_start = self._repository_reconcile_cursor % len(reconcile) if reconcile else 0
+            members = (members[member_start:] + members[:member_start])[:_MAX_REPOSITORY_READS]
+            reconcile = (reconcile[reconcile_start:] + reconcile[:reconcile_start])[:_MAX_READS]
+            selected: list[TargetKey] = []
+            width = max(1, _MAX_READS - 1)
+            for offset in range(0, len(members), width):
+                selected.extend(members[offset:offset + width])
+                index = offset // width
+                if index < len(reconcile):
+                    selected.append(reconcile[index])
+            selected.extend(reconcile[(len(members) + width - 1) // width:])
+            selected = selected[:_MAX_REPOSITORY_READS]
+            member_keys = set(members)
+            completed = [0, 0]
+
+            def progress(target: ObservationTarget, snapshot: PRSnapshot | None) -> None:
+                key = (target.account, target.repo, target.number)
+                completed[0 if key in member_keys else 1] += 1
+                capture(target, snapshot)
+
             targets = [repository_targets[key] for key in selected]
-            result = self._consume(targets, cache_keys=set(selected), on_read=capture, **authority)
+            try:
+                result = self._consume(targets, cache_keys=set(selected), on_read=progress, **authority)
+            finally:
+                if members:
+                    self._repository_cursor = member_start + max(1, completed[0])
+                if reconcile:
+                    self._repository_reconcile_cursor = reconcile_start + max(1, completed[1])
             if result["status"] != "observed":
                 return result
             for name in totals:
                 totals[name] += result[name]
-            publish()
         return {"status": "observed", **totals}
 
     def _observe_filtered(self, *, expires_at: int, checkpoint: Checkpoint | None) -> Document:
