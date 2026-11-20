@@ -79,8 +79,16 @@ The optional `command` extra supplies the shared
 [`consumer-telemetry-command` v1 route](../../docs/patterns/consumer-telemetry-command.md).
 Bridge is its first real adapter; see its
 [admission, receiver and validation reference](../../plugins/agent-bridge/docs/consumer-telemetry-command.md).
+Dispatch also adopts the same parser/runner through its
+[coordinator admission and producer reference](../../plugins/agent-dispatch/docs/consumer-telemetry-command.md),
+with the independent closed `dispatch.lifecycle.v1` projection.
 `SinkSlot.configure_commands()` retains a separate explicitly bound path beside
 the unchanged synchronous legacy sink. A binding never falls back to that sink.
+The owner may select `source="agent-dispatch"`; the default remains Bridge.
+Both pre-snapshot filtering and off-path projection are selected from these
+registered source adapters, never from event fields, commands or import strings.
+Each provider advertises only its own source schema; shared-library presence
+does not establish another provider's support.
 `BufferedSink.offer()` adds explicit admission accounting; `drain()` is a
 separate off-path, at-most-250-ms seal/wait. `close()` remains nonflushing.
 The command route reuses that one writer and the native process owner.

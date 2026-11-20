@@ -40,7 +40,7 @@ def _publish(bus: EventBus | None, event_type: str, task: dict[str, Any]) -> Non
         return
     event_task = _event_task_dict(task)
     bus.publish({"type": event_type, "task": event_task})
-    telemetry.emit(telemetry.task_lifecycle_event(event_type, event_task))
+    telemetry.emit_for(bus, telemetry.task_lifecycle_event(event_type, event_task))
 
 
 def _release_handoff_claim(task: dict[str, Any], queue: TaskQueue) -> None:

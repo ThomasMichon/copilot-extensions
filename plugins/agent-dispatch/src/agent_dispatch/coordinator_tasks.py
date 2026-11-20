@@ -157,11 +157,11 @@ def register_task_routes(
         bus.publish({"type": event_type, "task": event_task})
         # Heartbeat/activity wake subscribers but are not state transitions.
         if event_type not in _NO_TELEMETRY_EVENT_TYPES:
-            telemetry.emit(telemetry.task_lifecycle_event(event_type, event_task))
+            telemetry.emit_for(bus, telemetry.task_lifecycle_event(event_type, event_task))
 
     def _emit_producer_event(event_type: str, detail: dict[str, object]) -> None:
         bus.publish({"type": event_type, "producer_fence": detail})
-        telemetry.emit(telemetry.producer_fence_event(event_type, detail))
+        telemetry.emit_for(bus, telemetry.producer_fence_event(event_type, detail))
 
     def _producer_rejection(exc: ProducerFenceError) -> None:
         _emit_producer_event(

@@ -103,8 +103,13 @@ def build_app(cfg: Config | None = None, *, replay_consumer_factory=None):
     # unless a consumer wired a sink). Prefer a convention-located config file
     # (env-free); fall back to the environment so env-wired deploys don't
     # regress. Fail-open either way.
-    if not telemetry.load_sink_from_config():
-        telemetry.load_sink_from_env()
+    from .consumer_telemetry import load_policy
+    from process_telemetry.emission import LEGACY
+
+    telemetry_policy = load_policy()
+    if telemetry_policy is LEGACY:
+        if not telemetry.load_sink_from_config():
+            telemetry.load_sink_from_env()
     Path(cfg.db_path).expanduser().parent.mkdir(parents=True, exist_ok=True)
     queue = TaskQueue(
         Path(cfg.db_path).expanduser(), worker_admission=require_worker_admission,
@@ -132,6 +137,7 @@ def build_app(cfg: Config | None = None, *, replay_consumer_factory=None):
         cohort_sources=RegistrarSources(),
         pool_publication_enabled=cfg.pool_publication_enabled,
         periodic_relevance_interval=60.0 if cfg.control_token else 0.0,
+        consumer_telemetry=telemetry_policy,
     )
     from .source_start import behavior_identity, config_identity
 

@@ -11,12 +11,18 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import AsyncIterator
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .consumer_telemetry import ConsumerTelemetry
 
 DEFAULT_MAX_QUEUE = 1000
 
 
 class EventBus:
     """Fan-out of coordinator task events to any number of SSE subscribers."""
+
+    _consumer_telemetry: ConsumerTelemetry
 
     def __init__(self, *, max_queue: int = DEFAULT_MAX_QUEUE):
         self._subscribers: set[asyncio.Queue[dict]] = set()

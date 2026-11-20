@@ -25,6 +25,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from . import __version__
+from .consumer_telemetry import LEGACY, attach, owning_lifespan
 from . import coordinator_loops as _coordinator_loops
 from .config import DEFAULT_HANDOFF_FALLBACK_GRACE, DEFAULT_ORPHAN_GRACE
 from .coordinator_auth import _make_auth, install_scope_boundary
@@ -159,6 +160,7 @@ def create_app(
     cohort_sources: RegistrarSources | None = None,
     pool_publication_enabled: bool = False,
     periodic_relevance_interval: float = 0.0,
+    consumer_telemetry=LEGACY,
 ) -> FastAPI:
     """Build the coordinator app over an existing :class:`TaskQueue`.
 
@@ -213,6 +215,7 @@ def create_app(
 
     validate_server_authority()
     bus = EventBus()
+    consumer = attach(bus, consumer_telemetry, authenticated=bool(token))
     directory = FleetDirectory(fencing_floor=queue.advance_fencing_epoch)
     # FleetDirectory.discover_coordinator() already matches the shape the
     # Rendezvous Protocol expects, so this in-process fencing guard needs no
@@ -907,9 +910,10 @@ def create_app(
         title="agent-dispatch",
         version=__version__,
         dependencies=[Depends(_make_auth(token, control_token))],
-        lifespan=lifespan,
+        lifespan=owning_lifespan(consumer, lifespan),
     )
     app.state.bus = bus
+    app.state.consumer_telemetry = consumer
     app.state.directory = directory
     app.state.task_fencing_guard = fencing_guard
     app.state.queue = queue

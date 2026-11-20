@@ -118,6 +118,18 @@ def emit(event: dict[str, Any]) -> None:
     _slot.emit(event)
 
 
+def emit_for(owner: Any, event: dict[str, Any]) -> None:
+    """Keep the coordinator's immutable admission, including background producers."""
+    consumer = getattr(owner, "_consumer_telemetry", None)
+    if consumer is None or consumer.legacy:
+        emit(event)
+    else:
+        try:
+            consumer.emit(event)
+        except Exception:
+            pass
+
+
 def load_sink_from_spec(spec: str) -> TelemetrySink | None:
     """Import and build a sink from a ``"package.module:factory"`` spec.
 
