@@ -341,13 +341,17 @@ source-owner coordination rather than one large rewrite.
 The [native-corpus journal](journal/2026/11.20%20point-native-scale.md)
 records actual queue/caller/worker/reader operation-count qualification beside
 100/10,000/100,000 unrelated content/vector/checkpoint rows, and separately
-observed process-byte growth. Ordering-ledger scale and broader acceptance
-remain open. Merged #13678 supplies this bounded qualification, not constant
+observed process-byte growth. Additional fixture setup populates the same
+unrelated ordering-ledger cardinalities and preserves sampled raw records;
+broader acceptance remains open. Merged #13678 supplies the initial native
+corpus qualification, not constant
 total-cost or consumer acceptance.
 The same journal now records a separate no-replay completed-retry control and
 per-query/index-inspection attribution. Representative B-tree plans preserve
 bounded canonical rows while process bytes grow; no production cache, currentness
 shortcut or ordinary activation is justified by these observations.
+Merged #13683 supplies that fixture-only attribution; the broader count/consumer
+matrix remains open.
 
 ### 2026-11-20 - Point-worker dispatch and lifetime
 
