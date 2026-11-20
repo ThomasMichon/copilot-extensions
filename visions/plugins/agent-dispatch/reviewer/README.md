@@ -5,7 +5,7 @@
 - **Scope:** leaf (a child of the
   [agent-dispatch](../README.md) plugin vision)
 - **Status:** Draft
-- **Last revised:** 2026-10-25
+- **Last revised:** 2026-11-20
 - **Reality docs:** [`docs/architecture.md`](../../../../docs/architecture.md) ·
   `plugins/agent-dispatch/` · `plugins/agent-worktrees/`
 
@@ -230,11 +230,19 @@ to card merely for ordinary unanswered waiting.
 
 ### settle-and-release
 
-Merge or deliberate abandonment records the review's terminal resolution,
-retires its reviewer session, and releases its worktree allocation through the
-parent vision's reclamation guarantees. If the target later becomes reviewable
-again after terminal settlement, it begins a new review generation rather than
-reviving a released lineage.
+A verdict ends a round, not the assignment. The task suspends; its worker
+stops and frees a slot. The next revision resumes the same task, worktree and
+conversation. The reviewer does not submit the task just because it posted an
+approval or requested changes.
+
+Merge wakes the assigned reviewer for cleanup. It cleans up the separate
+review checkout containing the candidate changes, finalizes its assigned
+worktree, **then** submits the task for evaluation. That finalized worktree
+is still assigned: the evaluator can identify who did the work and return it
+to the same reviewer if necessary. Only a completed or abandoned task, or an
+explicit release for reassignment, may give up its worktree. A forge merge
+is not itself task completion. If the target becomes reviewable again after
+terminal settlement, it begins a new review generation.
 
 ## Non-Goals / Boundaries
 

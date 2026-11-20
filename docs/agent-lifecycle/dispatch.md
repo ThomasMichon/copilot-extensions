@@ -10,6 +10,30 @@ the worker accepted the job.
 Component references: [queue state model](../../plugins/agent-dispatch/README.md#state-model)
 and [coordinator, supervisor and lanes](../../plugins/agent-dispatch/docs/spawn-supervisor.md#coordinator-supervisor-daemon-and-worker-lanes).
 
+## Assignment is not a running slot
+
+The [reviewer lifecycle contract](../../visions/plugins/agent-dispatch/reviewer/README.md#settle-and-release)
+distinguishes the task's pool and assigned worktree from a process slot and
+from the separate checkout used to inspect candidate changes:
+
+| Event | Task and assignment | Worker and workspace |
+|---|---|---|
+| Pool accepts work | Record the pool, then bind the worktree it allocates. | A process need not be running yet. |
+| Reviewer posts a verdict | `suspended`, still assigned. | Stop the worker and return its running slot to the pool. |
+| PR is updated | Resume the same assignment, not a new task. | Reacquire capacity for the same worktree and conversation. |
+| PR merges | Wake the original reviewer for closeout. | Clean the review checkout and finalize the assigned workspace before submission. |
+| Result awaits evaluation | `submitted`, still assigned to the pool and finalized worktree. | Evaluation does not need a running worker. Rejection retains the assignment. |
+| Evaluator confirms, task is abandoned, or owner explicitly releases it | Unassignment is now permitted. | Preserve the assignment history. A move to `claimed` just to resume does not qualify as release. |
+
+**Reading current state:** [pool placement](../../plugins/agent-dispatch/docs/pool-placement.md)
+records the pool and reservation; workspace attachment comes later. The
+[submission writer](../../plugins/agent-dispatch/src/agent_dispatch/queue_lifecycle.py)
+clears the active `tasks.owner`, and the [closeout path](../../plugins/agent-dispatch/docs/relevance-closeout-worker.md)
+settles a workspace claim before finalization. Neither a null execution owner
+nor a settled claim proves that the logical assignment ended. The table
+states the required lifetime, not a guarantee that every driver or historical
+reservation already exposes both bindings through evaluation.
+
 ## Task
 
 The [task record](../../plugins/agent-dispatch/src/agent_dispatch/queue_records.py)

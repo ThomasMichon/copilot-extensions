@@ -7,7 +7,7 @@
 - **Scope:** branch (a per-plugin vision under the
   [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-11-12
+- **Last revised:** 2026-11-20
 - **Reality docs:** [`docs/architecture.md`](../../../docs/architecture.md) ·
   the plugin's `plugins/agent-dispatch/` (skill `agent-dispatch`, `pick-and-claim`)
 
@@ -174,6 +174,13 @@ the claim resolves to that worktree; a task addressed to a worktree sticks to it
 while an unaddressed task can be placed with any eligible pool. This lets an
 embodied task be joined back to the live session doing it — the delegation layer *derives* that
 liveness from the ground/coordination layers rather than keeping its own copy.
+
+The pool assigns a worktree to the task. Both relationships remain current
+and queryable even when the worker process stops and another task uses its
+slot. Suspension, resumption, workspace finalization and submission for
+evaluation do not unassign the worktree. Only completion, abandonment or an
+explicit release back to queued or claimed work permits unassignment. A
+resume that passes through claimed is not such a release.
 
 Once attached to its worktree, a task resolves **both ways** — a
 worktree enumerates the tasks it holds, and any task resolves back to the

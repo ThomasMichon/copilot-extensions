@@ -3,7 +3,10 @@
 The job is to review PR 12033 at head `a7139c4` and return a reference to
 that review. Dispatch tracks **the job** in a task row and **one attempt to
 run its worker** in a spawn reservation. A spawn reservation is always tied
-to a task.
+to a task. This example asks for a review reference on one revision. In a
+[PR-lifetime reviewer loop](dispatch.md#assignment-is-not-a-running-slot),
+posting that reference is progress: the task suspends until an update or
+merge. It submits only after closeout, not after each verdict.
 
 | Event in this example | Task status | Reservation state |
 |---|---|---|
