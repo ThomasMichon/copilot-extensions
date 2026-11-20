@@ -40,6 +40,32 @@ checks nor yields, declines, abandons first, unregisters or terminates a native.
 The existing session/conclusion owners retain their later responsibilities.
 It does not delete the checkout or directly release a reservation.
 
+### Inspect readiness without settling the driver
+
+`GET /tasks/{task_id}/relevance-closeout/observe-provisional` advertises
+`provisional_observation_versions: [1]` to the original owner when the receiver
+supports a read-only observation via `POST` to the same path.
+Use the existing closeout binding (`version`, `request_id`, `worker_id`, `native_id`,
+`expected_generation`), with no finish action or caller-supplied evidence. Do not
+substitute `/prepare` on an older receiver: that operation settles the claim.
+
+The observation asks the selected Worktrees owner whether the active driver is
+finalizable **except for its exact bound task claim**. Other unsettled or unknown
+obligations still block. Each call checks the original binding before and after
+the independent owner read. A successful response identifies the request,
+generation and assignment event; it does not persist a readiness receipt, submit,
+authorize release or send a wake. Previously settled and finalized drivers cannot
+use this operation to regain authority.
+
+A still-authorized task whose goal is to correct a specified result can already
+use ordinary guarded submission, rejection and resubmission in its original
+workspace. That is not a way to amend an obsolete task's goal. For the latter,
+an executing correction requires a distinct, owner-authorized revision objective
+bound to the inspected proposal, driver and generation. Neither a readiness
+observation nor evaluator feedback establishes that authority.
+
+### Finalized review submission
+
 For a started or suspended `pr-review` task with an independent evaluator,
 the original worker retains a submission proposal **before** settling the
 assignment. The receiver verifies the finalized workspace, the original

@@ -1,0 +1,9 @@
+{
+  "comment": "Allow an original driver to inspect provisional readiness without settling its workspace claim.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
