@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Literal
 if TYPE_CHECKING:
     from agent_index.store.source_layout import PointScope
 
+    from .point_hints import PointChangeHints
     from .point_service import PointService
 
 
@@ -47,7 +48,7 @@ def point_service_contract(
 def require_point_service(
     health: dict[str, object], scope: PointScope, *, operation: Literal["execute", "read"],
 ) -> None:
-    """Validate an optional requirement only; no existing wire caller opts in."""
+    """Validate the selected pair's optional read or execution requirement."""
     contract = health.get("point_service_contract")
     if isinstance(contract, dict):
         state = contract.get("state")
@@ -86,3 +87,70 @@ def require_point_service(
         f"{operation} selection; select a capable service or wait for explicit "
         "retained-state inspection and activation",
     )
+
+
+def _same_peer(
+    payload: dict[str, object], installation_id: str, instance_token: str | None,
+) -> bool:
+    return (
+        isinstance(installation_id, str)
+        and isinstance(instance_token, str) and bool(instance_token)
+        and payload.get("installationId") == installation_id
+        and payload.get("instanceToken") == instance_token
+    )
+
+
+def require_point_admission(
+    health: dict[str, object], scope: PointScope, *,
+    installation_id: str, instance_token: str | None,
+) -> None:
+    """Require the selected peer's request/receipt expansion before submission."""
+    if not _same_peer(health, installation_id, instance_token):
+        raise RuntimeError(
+            "Required point admission needs the selected installation and nonempty instance "
+            "token; select the intended service without copying identity from health",
+        )
+    require_point_service(health, scope, operation="execute")
+    contract = health["point_service_contract"]
+    versions = contract.get("required_admission_versions") if isinstance(contract, dict) else None
+    if not isinstance(versions, list) or not any(type(v) is int and v == 1 for v in versions):
+        raise RuntimeError(
+            "Selected service does not advertise required point admission v1; "
+            "select a capable service without downgrading the request",
+        )
+
+
+def validate_point_receipt(
+    result: dict[str, object], submitted: PointChangeHints, *,
+    installation_id: str, instance_token: str | None,
+) -> None:
+    """Confirm typed admission, never application or safe replay after failure."""
+    from .point_hints import PointChangeHints
+
+    try:
+        if type(result.get("accepted")) is not bool:
+            raise ValueError("Invalid acceptance")
+        if result["accepted"] is False:
+            return
+        admission = result["point_service_admission"]
+        if (
+            not _same_peer(result, installation_id, instance_token)
+            or not isinstance(admission, dict)
+            or admission.get("id") != "agent-index.point-service"
+            or type(admission.get("version")) is not int or admission["version"] != 1
+            or admission.get("scope_fingerprint") != point_scope_fingerprint(submitted.scope)
+        ):
+            raise ValueError("Invalid point admission")
+        task = result["task"]
+        if (
+            not isinstance(task, dict)
+            or task.get("source") != submitted.source or task.get("full") is not False
+        ):
+            raise ValueError("Invalid task scope")
+        stored = PointChangeHints.from_dict(task["change_hints"])
+        if stored.union(submitted) != stored:
+            raise ValueError("Missing accepted targets or correlations")
+    except (KeyError, TypeError, ValueError):
+        raise RuntimeError(
+            "Receiver did not confirm required point hints; acceptance outcome unknown; do not replay",
+        ) from None

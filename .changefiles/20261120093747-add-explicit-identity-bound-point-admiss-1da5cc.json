@@ -1,0 +1,9 @@
+{
+  "comment": "Add explicit identity-bound point admission client with typed receipts and no replay after unknown outcomes.",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

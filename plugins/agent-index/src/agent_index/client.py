@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
 from .indexing.change_hints import ChangeHints
 from .indexing.change_hints_contract import require_intake_v1, validate_scope
+
+if TYPE_CHECKING:
+    from .indexing.point_hints import PointChangeHints
 
 
 class AgentIndexClient:
@@ -51,11 +54,9 @@ class AgentIndexClient:
             method != "GET" or path not in {"/health", "/status", "/search", "/similar", "/clusters"}
         ):
             raise RuntimeError("authenticated HTTP read clients cannot perform lifecycle operations")
-        options = (
-            {"trust_env": False, "follow_redirects": False}
-            if self.read_headers is not None else {}
-        )
-        with httpx.Client(timeout=self.timeout, **options) as client:
+        with httpx.Client(
+            timeout=self.timeout, trust_env=self.read_headers is None, follow_redirects=False,
+        ) as client:
             headers = {"X-Agent-Index-Installation-Id": self.installation_id}
             headers.update(self.read_headers or {})
             if self.instance_token is not None:
@@ -111,6 +112,34 @@ class AgentIndexClient:
                 raise RuntimeError(
                     "Receiver did not confirm required hints; acceptance outcome unknown"
                 ) from None
+        return result
+
+    def reindex_points(self, change_hints: PointChangeHints) -> dict[str, Any]:
+        """Require selected point admission without migrating ordinary callers."""
+        from .indexing.point_hints import PointChangeHints
+        from .indexing.point_service_contract import (
+            require_point_admission, validate_point_receipt,
+        )
+
+        if type(change_hints) is not PointChangeHints:
+            raise ValueError("change_hints must be a PointChangeHints value")
+        installation, instance = self.installation_id, self.instance_token
+        require_point_admission(
+            self.health(), change_hints.scope,
+            installation_id=installation, instance_token=instance,
+        )
+        try:
+            result = self._request("POST", "/reindex/hints", json={
+                "source": change_hints.source, "full": False,
+                "change_hints": change_hints.to_dict(), "required_point_service_version": 1,
+            })
+        except (httpx.HTTPError, ValueError) as exc:
+            raise RuntimeError(
+                "Required point submission failed; acceptance outcome unknown; do not replay"
+            ) from exc
+        validate_point_receipt(
+            result, change_hints, installation_id=installation, instance_token=instance,
+        )
         return result
 
     def search(
