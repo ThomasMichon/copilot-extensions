@@ -46,6 +46,23 @@ def _number(value: str) -> int:
     return int(value)
 
 
+def _require_selection(
+    connector: AzureDevOpsConnector, claim: PendingPointClaim,
+    item_id: int, expected: WorkItemEligibility,
+) -> None:
+    family = connector.source_name + ":workitem-components"
+    endpoint = nonsecret_target(str(connector._http.client.base_url).rstrip("/"))
+    binding = PointBinding(
+        endpoint, json.dumps(connector._work_item_queries, sort_keys=True), expected.query_binding,
+    )
+    if (
+        not expected.eligible or expected.item_id != item_id
+        or expected.source_scope != (endpoint, connector.org, connector.project, claim.hints.account_id)
+        or claim.hints.canonical_family != family or claim.hints.binding != binding
+    ):
+        raise ValueError("Azure DevOps point target account/query/representation binding changed")
+
+
 def acquire_named_point(
     connector: AzureDevOpsConnector, *, claim: PendingPointClaim, target: PointTarget,
     expected: WorkItemEligibility, cancel_check: Callable[[], None] | None = None,
@@ -70,16 +87,7 @@ def acquire_named_point(
         raise ValueError("Azure DevOps point target version exceeds int32")
     comment_id = _number(target.comment_id) if isinstance(target, CommentVersionTarget) else None
     family = connector.source_name + ":workitem-components"
-    endpoint = nonsecret_target(str(connector._http.client.base_url).rstrip("/"))
-    binding = PointBinding(
-        endpoint, json.dumps(connector._work_item_queries, sort_keys=True), expected.query_binding,
-    )
-    if (
-        not expected.eligible or expected.item_id != item_id
-        or expected.source_scope != (endpoint, connector.org, connector.project, claim.hints.account_id)
-        or claim.hints.canonical_family != family or claim.hints.binding != binding
-    ):
-        raise ValueError("Azure DevOps point target account/query/representation binding changed")
+    _require_selection(connector, claim, item_id, expected)
     http = connector._http
     if type(http._max_retries) is not int or not 0 <= http._max_retries <= 4:
         raise ValueError("Azure DevOps point target exceeds the shared retry budget")
