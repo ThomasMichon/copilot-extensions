@@ -78,11 +78,14 @@ def api(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         events.append("read")
         return "qualified"
 
+    def paired(config: Any, point_scope: Any, execute: Any, reader: Any) -> SimpleNamespace:
+        return SimpleNamespace(
+            config=config, point_scope=point_scope, execute=execute, read_component=reader,
+        )
+
     stub("agent_index.indexing.point_service",
          require_point_isolation=lambda *args: events.append("isolation"),
-         PointRuntime=lambda config, point_scope, execute, reader: SimpleNamespace(
-             config=config, point_scope=point_scope, execute=execute, read_component=reader,
-         ))
+         PointRuntime=object, _ConfiguredPointRuntime=paired)
     stub("agent_index.store.source_layout", _point_scope_json=lambda scope: "scope")
     stub("agent_index.sources.azure_devops_point_runtime",
          _require_connector_binding=require_binding, run_configured_azure_devops_points=execute,

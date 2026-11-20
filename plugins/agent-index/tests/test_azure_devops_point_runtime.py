@@ -25,6 +25,7 @@ from agent_index.indexing.embedding_runtime import EmbeddingRuntime
 from agent_index.indexing.point_hints import WorkItemRevisionTarget
 from agent_index.indexing.point_queue_consumer import PointQueueConsumer
 from agent_index.indexing.point_service import PointService
+from agent_index.indexing.point_service_contract import point_scope_fingerprint, require_point_service
 from agent_index.indexing.point_worker_host import PointWorkerHost
 from agent_index.indexing.task_store import TaskRecord, TaskStatus, TaskStore
 from agent_index.indexing.worker import run_worker
@@ -298,15 +299,22 @@ def test_service_promotes_inert_binding_and_routes_only_exact_point_intake(
                 transport=httpx.ASGITransport(app), base_url="http://fixture",
             ) as client:
                 assert lifetime == []
+                assert (await client.get("/health")).json()["point_service_contract"]["reason"] == "passive"
                 body = {"source": f.claim.hints.source, "change_hints": f.claim.hints.to_dict()}
                 assert (await client.post("/reindex/hints", json=body)).status_code == 503
                 assert (await client.post("/promote")).json()["promoted"]
                 runner = app.state.task_runner
                 assert lifetime == ["open"] and runner.point_service.status()["paused"]
                 assert events == []
-                assert 2 not in (await client.get("/health")).json()[
-                    "indexing_contract"
-                ]["execution_versions"]
+                health = (await client.get("/health")).json()
+                assert 2 not in health["indexing_contract"]["execution_versions"]
+                contract = health["point_service_contract"]
+                assert contract["paired"] and contract["state"] == "paused"
+                assert contract["scope_fingerprint"] == point_scope_fingerprint(f.claim.hints.scope)
+                assert contract["read_admitted"] and not contract["execution_admitted"]
+                require_point_service(health, f.claim.hints.scope, operation="read")
+                with pytest.raises(RuntimeError, match="point-service v1"):
+                    require_point_service(health, f.claim.hints.scope, operation="execute")
                 accepted = (await client.post("/reindex/hints", json=body)).json()
                 assert accepted["accepted"]
                 task_id = accepted["task"]["id"]
@@ -320,6 +328,9 @@ def test_service_promotes_inert_binding_and_routes_only_exact_point_intake(
                 await asyncio.sleep(2.1)
                 assert not f.provider.requests
                 await runner.point_service.activate()
+                require_point_service(
+                    (await client.get("/health")).json(), f.claim.hints.scope, operation="execute",
+                )
                 runner.notify()
                 await _wait_point_state(lambda: bool(
                     (task := f.tasks.get_task(task_id)) and task.status == TaskStatus.COMPLETE
@@ -335,6 +346,13 @@ def test_service_promotes_inert_binding_and_routes_only_exact_point_intake(
                 assert observed.coverage == "named-target-only"
                 assert observed.applied_version == 3 and not observed.deleted and observed.chunks
                 assert (f.provider.requests, events, f.calls) == before
+                runner.point_service.pause()
+                closed = (await client.get("/health")).json()["point_service_contract"]
+                assert closed["state"] == "draining"
+                assert not closed["read_admitted"] and not closed["execution_admitted"]
+                with pytest.raises(RuntimeError, match="not accepting"):
+                    await runner.point_service.read_component("workitems/7/body.md")
+                await runner.point_service.resume()
         assert lifetime == ["open", "closed"] and f.connector._http.client.is_closed
         assert events.count(("ensure", "first")) == events.count(("ensure", "second")) == 1
         assert [model for action, model in events if action == "stop"] == ["first"]

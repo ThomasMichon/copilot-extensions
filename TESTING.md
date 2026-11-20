@@ -7816,7 +7816,19 @@ Ten additional actor-free nodes in the executor-context and
 binding, mutually exclusive contexts, missing/mismatched/partial selections,
 executor-only refusal and read-before-close ordering using substituted futures
 and consumers. Required unit CI gains no native, thread, event-loop or provider
-actors. Wire declarations, ordinary read routes and activation are unchanged.
+actors. Ordinary read routes and activation are unchanged.
+
+Four focused additions in `test_point_service_binding.py` qualify the optional
+running point-service declaration: installed qualified composition rather than
+callable/factory metadata, complete receipt-scope fingerprint encoding,
+paused/active/failure/drain/rollback/stop admission, and missing, malformed,
+incompatible or changed-scope requirements. The actual health route body is
+executed with inert application/identity owners and JSON round-tripped, preserving
+legacy intake/execution meaning and refusing support after peer replacement.
+This unit fixture does not run ASGI, threads, stores or an event loop; the
+existing opt-in ASGI service packet additionally verifies the real HTTP
+serialization, production configured pair and effect-side read refusal.
+The pure validator is not wired into an existing client or effectful caller.
 
 The blocked-selection governance control changes the runner's policy to
 backoff while selection is off-loop. The final admission callback leaves the

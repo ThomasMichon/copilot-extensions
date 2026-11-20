@@ -5887,9 +5887,15 @@
         "tools/promotion_unit_tests/test_point_service_binding.py::test_service_partial_binding_never_exposes_reader_and_closes_context[shape]",
         "tools/promotion_unit_tests/test_point_service_binding.py::test_service_partial_binding_never_exposes_reader_and_closes_context[consumer]",
         "tools/promotion_unit_tests/test_point_service_binding.py::test_executor_only_context_never_exposes_qualified_reads",
-        "tools/promotion_unit_tests/test_point_service_binding.py::test_paired_service_reads_paused_and_joins_admitted_read_before_context_close"
+        "tools/promotion_unit_tests/test_point_service_binding.py::test_paired_service_reads_paused_and_joins_admitted_read_before_context_close",
+        "tools/promotion_unit_tests/test_point_service_binding.py::test_qualified_service_declaration_tracks_admission_failure_and_drain_rollback",
+        "tools/promotion_unit_tests/test_point_service_binding.py::test_point_scope_fingerprint_uses_every_existing_receipt_field",
+        "tools/promotion_unit_tests/test_point_service_binding.py::test_point_requirement_rejects_missing_malformed_rollback_and_changed_scope",
+        "tools/promotion_unit_tests/test_point_service_binding.py::test_health_route_serializes_current_selection_without_factory_or_version_inference"
     ],
     "coverage_targets": [
+        "plugins/agent-index/src/agent_index/indexing/point_service_contract.py",
+        "plugins/agent-index/src/agent_index/server.py",
         "plugins/agent-index/src/agent_index/indexing/point_service.py",
         "plugins/agent-index/src/agent_index/sources/azure_devops_point_executor.py",
         "plugins/agent-index/src/agent_index/indexing/embedding_runtime.py",
@@ -6299,9 +6305,9 @@
         "plugins/agent-pull-requests/src/agent_pull_requests/watch_windows_sealing.py"
     ],
     "sources": {
-        "plugins/agent-index/src/agent_index/sources/azure_devops_point_executor.py": "1843d32b92a677243c0555fe9c412531d12e003d818277a0be507e0a82c2eb97",
+        "plugins/agent-index/src/agent_index/sources/azure_devops_point_executor.py": "12e1aaa430c7db6f96f003bc836023d54a16113f6f800fccde1f3943ded01684",
         "plugins/agent-index/src/agent_index/indexing/embedding_runtime.py": "549224017c93c0413ed8a2f475f441fe3d2a2537d35e7c615acf53e40779483e",
-        "tools/promotion_unit_tests/test_point_executor_context.py": "0a6455ade547cde9b9ab5c4db4882486c346f703ba9906afd426ddbbad4b5fc7",
+        "tools/promotion_unit_tests/test_point_executor_context.py": "0ff786a6d5733e324399ba0e64f4b486a81f2a75492ff19db2c3b76182762a22",
         "tools/promotion_unit_tests/test_point_capacity_contract.py": "5969230a1677996af3dc5b9172e60dbdba17d895f97cfbe135500e8bbe4ccaae",
         "tools/promotion_unit_tests/test_point_completion_contract.py": "a6ccb6cf2fc76b2a83c8a6e35b1f370be4c619f413b18b873479eacc29a03a17",
         "plugins/agent-index/src/agent_index/indexing/point_worker.py": "bcde0f1c3e8b1e1c7330d6e72358ece09806511bdbfd96d8e546ec7975705317",
@@ -7257,7 +7263,10 @@
         "plugins/agent-pull-requests/src/agent_pull_requests/watch_private.py": "9e45fa5807c7ecd0bb7d870450f562bd004528005510f35dc2df0b733f34741b",
         "plugins/agent-pull-requests/src/agent_pull_requests/watch_windows_sealing.py": "892d522e26ab426018652c34c05f8f0c4cb3f3c9e943addaaa5b7ca0d67ff5d7",
         "tools/promotion_unit_tests/test_boot_domain.py": "42da2cacbbdb6ff58618fabe1552530f2500bfea5cd6d16edabe18a291610e1d",
-        "plugins/agent-index/src/agent_index/indexing/point_service.py": "bdb3d09a3c64c3ece53c567925fc5c4e712a6d1d62a1cac42128d6bd28c94210",
-        "tools/promotion_unit_tests/test_point_service_binding.py": "da9626e81fb2b60bd3758492ed02c65313983b1d90533ac52f5bb30d2f1433c5"
+        "plugins/agent-index/src/agent_index/indexing/point_service.py": "f7d2720142f931ea2371dc9767da94848c36ec4955393726ec4b9ddc2313c364",
+        "tools/promotion_unit_tests/test_point_service_binding.py": "0056acb32c6605ece70313c7531a94dddc39b3d72e68b96add3ee4828845dbe4",
+        "plugins/agent-index/src/agent_index/indexing/point_service_contract.py": "bbc366434d3aa67a683ec5a70aa01e6ea1c78609a3d8193c1a72e55f8fa04f90",
+        "plugins/agent-index/src/agent_index/server.py": "bd062dbbad702c25d0566138d120fefda9c80d49bb97d3a6aa417c7926f5c62d",
+        "plugins/agent-index/src/agent_index/indexing/change_hints_contract.py": "926e4075db341b397338ffdf0a01b6f4a114186f4940775fd8dd8431d13f8d2b"
     }
 }
