@@ -533,8 +533,7 @@ def spawn_fleet_embodied_worker(
     *,
     origin: str,
     owner: str,
-    worker_id: str,
-    machine: str | None = None,
+    worker_id: str, machine: str | None = None,
     driver: str = DEFAULT_DRIVER,
     project: str | None = None,
     repo: str | None = None,
@@ -569,8 +568,7 @@ def spawn_fleet_embodied_worker(
         owner=owner,
         worker_id=worker_id,
         repo=repo,
-        all_repos=all_repos,
-        machine=machine,
+        all_repos=all_repos, machine=machine,
         **({"route": route} if route else {}),
     )
     remote_argv = ["agent-worktrees"]
@@ -606,8 +604,7 @@ def spawn_fleet_headless_worker(
     *,
     origin: str,
     owner: str,
-    worker_id: str,
-    machine: str | None = None,
+    worker_id: str, machine: str | None = None,
     agent: str = DEFAULT_HEADLESS_AGENT,
     charter: str | None = None,
     repo: str | None = None,
@@ -634,13 +631,8 @@ def spawn_fleet_headless_worker(
     ``--no-wait`` create returns once the ACP session is spawned into the host's
     bridge daemon, which owns it independently of the command transport.
 
-    If carrier capability is absent, missing local ``ssh`` raises
-    :class:`EmbodyUnavailable`. The SSH fallback is a POSIX remote command, so
-    it first asks :func:`agent_dispatch.fleet.host_bridge_shell` to classify
-    the host's login shell; a host that resolves ``agent-bridge`` only under
-    ``cmd.exe`` or PowerShell (for example a Windows OpenSSH host) raises
-    :class:`EmbodyUnavailable` instead of receiving a command its shell would
-    split. A non-zero create exit still fails the reservation.
+    Without carrier capability, missing local ``ssh`` or a non-POSIX fallback
+    host (``fleet.require_posix_bridge_host``) raises :class:`EmbodyUnavailable`.
     """
     host = bridge_remote.normalize_host(host)
     seed = fleet_autopilot_worker_prompt(
@@ -649,8 +641,7 @@ def spawn_fleet_headless_worker(
         owner=owner,
         worker_id=worker_id,
         repo=repo,
-        all_repos=all_repos,
-        machine=machine,
+        all_repos=all_repos, machine=machine,
         **({"route": route} if route else {}),
     )
     try:
@@ -688,23 +679,8 @@ def spawn_fleet_headless_worker(
     exe = shutil.which("ssh")
     if exe is None:
         raise EmbodyUnavailable("ssh CLI not found on PATH (needed for fleet dispatch)")
-    ssh_host = host.strip().lower()
-    # The fallback below is a POSIX-quoted remote command line. Fleet liveness
-    # also admits Windows OpenSSH hosts (for the carrier path), whose cmd.exe or
-    # PowerShell login shell would split that line, so require the fleet probe's
-    # POSIX classification before sending it. Imported here: fleet imports embody.
-    from . import fleet
-
-    shell = fleet.host_bridge_shell(ssh_host, timeout=8.0)
-    if shell is None:
-        raise EmbodyUnavailable(
-            f"pool host {ssh_host!r} is unreachable over ssh or has no agent-bridge"
-        )
-    if shell != fleet.POSIX_SHELL:
-        raise EmbodyUnavailable(
-            f"pool host {ssh_host!r} resolves agent-bridge under a non-POSIX shell; "
-            "without the local Agent Bridge carrier a headless body cannot start there"
-        )
+    from . import fleet  # lazy: fleet imports embody
+    fleet.require_posix_bridge_host(host)
     # `--json` (a global flag, before the subcommand) makes `create --no-wait`
     # emit the created session_id as JSON, so the caller can record a recovery
     # handle (the pool host's agent-bridge session id) for liveness-gated

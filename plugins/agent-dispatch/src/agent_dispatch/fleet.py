@@ -107,6 +107,27 @@ def host_bridge_shell(host: str, *, timeout: float = 8.0) -> str | None:
     return _host_command_shell(host, "agent-bridge", timeout=timeout, windows=True)
 
 
+def require_posix_bridge_host(host: str, *, timeout: float = 8.0) -> None:
+    """Raise :class:`~agent_dispatch.embody.EmbodyUnavailable` unless ``host``
+    resolves ``agent-bridge`` under a POSIX login shell.
+
+    Guards the POSIX-quoted SSH create fallback: fleet liveness also admits
+    Windows OpenSSH hosts (for the carrier path), whose ``cmd.exe`` or
+    PowerShell login shell would split that command line.
+    """
+    host = host.strip().lower()
+    shell = host_bridge_shell(host, timeout=timeout)
+    if shell is None:
+        raise embody.EmbodyUnavailable(
+            f"pool host {host!r} is unreachable over ssh or has no agent-bridge"
+        )
+    if shell != POSIX_SHELL:
+        raise embody.EmbodyUnavailable(
+            f"pool host {host!r} resolves agent-bridge under a non-POSIX shell; "
+            "without the local Agent Bridge carrier a headless body cannot start there"
+        )
+
+
 def _posix_command_probe(command: str) -> str:
     """A probe only a POSIX shell can run: ``command -v`` inside ``case``/``esac``.
 
