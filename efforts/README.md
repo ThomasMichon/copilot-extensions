@@ -38,6 +38,7 @@ new behavior, nor permission to resume held implementation or deployment.
 | Effort | Status | Coordination |
 |--------|--------|--------------|
 | [Registry Local-Only Sync](active/registry-local-only-sync/README.md) | Draft; finite ordinary no-remote classification before implementation | #4173 A5 / historical #4228 only; preserves other project-context owners and genuine errors; no live sync or rollout |
+| [Consumer Telemetry Sink Adoption](active/consumer-telemetry-sink-adoption/README.md) | Draft; command-only configuration, bounded delivery, real producer adoption and release sequence | #13545; preserves #7935/#5900 and producer custody; HTTP and adopter rollout remain separate |
 | [Windows Machine-Protected Cache](active/windows-machine-cache/README.md) | Active; source #13022 merged, native release qualification and promotion pending | #13009; preserves user-cache custody, Vault service and installer owners; no live migration or rollout |
 | [Retained Inbox Message Evolution](active/retained-inbox-message-evolution/README.md) | Draft; versioned migration and nonblocking enrollment proposal before implementation | Bounded #1460 retained-message slice; existing receiver, receipt and broader contract owners preserved; no rollout |
 | [Bridge Queued Steering](active/bridge-queued-steering/README.md) | Draft; notification, exact submission receipt and nonduplicating timed fallback before implementation | Bounded #6394 follow-up; preserves #12487/#11448/#11445 and #10765 owners; no rollout or container-auth takeover |
