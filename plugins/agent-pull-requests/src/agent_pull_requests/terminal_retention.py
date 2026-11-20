@@ -441,6 +441,9 @@ class TerminalRetentionStore:
                 validate_metadata(
                     document, request_cache, retained_targets, current,
                     recorded_generations=self.owner.recorded_terminal_cache,
+                    recorded_native_targets=(
+                        self.owner.recorded_terminal_cache and self.owner.native_generation_associations
+                    ),
                 )
                 from .terminal_recovery import PROTOCOL as RECOVERY
                 from .terminal_cache_retirement import PROTOCOL as CACHE
