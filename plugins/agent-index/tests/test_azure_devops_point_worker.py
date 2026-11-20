@@ -20,7 +20,7 @@ from agent_index.indexing.component_read import read_component
 from agent_index.indexing.path_index import PathIndex
 from agent_index.indexing.pending_crawl import PendingCrawls
 from agent_index.indexing.point_claim import PendingPointClaim
-from agent_index.indexing.point_hints import WorkItemRevisionTarget
+from agent_index.indexing.point_hints import CommentVersionTarget, WorkItemRevisionTarget
 from agent_index.indexing.source_ownership import SourcePipelineBusy, source_writer
 from agent_index.indexing.task_store import TaskRecord, TaskStatus, TaskStore
 from agent_index.sources.azure_devops import AzureDevOpsConnector
@@ -254,10 +254,11 @@ def test_eligibility_loss_after_publication_retains_claim_and_covered_retry(
     assert domain.receipt() == before and not f.calls and not f.provider.body_reads
 
 
-def test_cancelled_body_cannot_be_retained_or_acknowledged(application: Fixture) -> None:
+def test_noncurrent_body_cannot_be_retained_or_acknowledged(application: Fixture) -> None:
     f = application
     def cancel() -> None:
-        f.tasks.cancel(f.claim.task_id)
+        assert not f.tasks.cancel(f.claim.task_id)
+        f.tasks.update_status(f.claim.task_id, TaskStatus.CANCELLED)
     f.provider.on_body = cancel
     with pytest.raises(ValueError, match="no longer eligible"):
         f.run()
@@ -297,6 +298,154 @@ def test_invalid_target_or_retry_budget_refuses_before_provider_io(
         f.run(claim=claim)
     assert not f.provider.requests and not f.calls
     assert PendingCrawls(f.paths).read_payload(f.claim.hints.source, SCOPE) is None
+
+
+def _older_claim(f: Fixture) -> PendingPointClaim:
+    hints = replace(f.claim.hints, targets=(
+        WorkItemRevisionTarget("7", 1, ("older-first",)),
+        WorkItemRevisionTarget("7", 2, ("older-second",)),
+        CommentVersionTarget("7", "5", 1, ("older-comment",)),
+    ))
+    task = f.tasks.enqueue(hints.source, change_hints=hints)
+    return PendingPointClaim.from_task(f.tasks.pin_point_claim(task.id, expected_hints=hints))
+
+
+def _projection(f: Fixture) -> tuple[Any, ...]:
+    domain = f.store._source_domain
+    assert domain is not None
+    receipt = domain.receipt()
+    versions = {
+        name: f.store.content_store.db.open_table(name).version for name in receipt["versions"]
+    }
+    return receipt, versions, f.paths.get_all_entries(), f.config.state_file.read_bytes()
+
+
+def test_mixed_older_and_equal_targets_still_require_whole_claim_acquisition(
+    application: Fixture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    f = application
+    f.run()
+    hints = replace(f.claim.hints, targets=(
+        replace(named._ITEM, revision=2, event_ids=("older",)), named._COMMENT,
+    ))
+    task = f.tasks.enqueue(hints.source, change_hints=hints)
+    f.claim = PendingPointClaim.from_task(f.tasks.pin_point_claim(task.id, expected_hints=hints))
+    f.reopen()
+    before = _projection(f), f.tasks.get_task(task.id)
+
+    def acquire(*args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("fixture requires acquisition")
+
+    monkeypatch.setattr("agent_index.sources.azure_devops_point_worker.acquire_named_point", acquire)
+    with pytest.raises(RuntimeError, match="requires acquisition"):
+        f.run()
+    assert (_projection(f), f.tasks.get_task(task.id)) == before
+    assert not f.calls and f.provider.body_reads == 0
+    assert PendingCrawls(f.paths).read_payload(hints.source, SCOPE) is None
+
+
+@pytest.mark.parametrize("deleted", [False, True])
+def test_fresh_whole_older_claim_completes_without_bodies_preparation_or_native_writes(
+    application: Fixture, deleted: bool,
+) -> None:
+    f = application
+    if deleted:
+        f.provider.comment = {"id": 5, "version": 2, "isDeleted": True}
+    f.run()
+    f.claim = _older_claim(f)
+    trailing = f.tasks.enqueue(f.claim.hints.source, change_hints=replace(
+        f.claim.hints, targets=(WorkItemRevisionTarget("7", 4, ("trailing",)),),
+    ))
+    f.reopen()
+    before = _projection(f)
+    result = f.run(clients={})
+    assert result.status == TaskStatus.COMPLETE and result.change_hints == f.claim.hints
+    assert result.result_stats is not None
+    outcome = result.result_stats["point_completion"]
+    assert outcome["version"] == 2 and outcome["mode"] == "higher-covered"
+    assert "pending" not in outcome and "generation" not in outcome
+    assert len(outcome["components"]) == 2
+    assert {item["component"]["path"]: item["component"]["version"]
+            for item in outcome["components"]} == {
+        "workitems/7/body.md": 3, "workitems/7/comments/5.md": 2,
+    }
+    assert f.provider.body_reads == 0 and len(f.provider.requests) == 2 and not f.calls
+    assert PendingCrawls(f.paths).read_payload(f.claim.hints.source, SCOPE) is None
+    assert f.retained_count() == 0 and _projection(f) == before
+    assert f.tasks.get_task(trailing.id) == trailing
+    f.reopen()
+    f.provider.selected = False
+    assert f.run(clients={}) == result
+    assert not f.provider.requests and not f.calls and _projection(f) == before
+    f.paths.mark_indexed(
+        f.claim.hints.canonical_family, "workitems/7/body.md", content_hash="old-backup", chunk_count=1,
+    )
+    f.reopen()
+    restored = _projection(f)
+    with pytest.raises(SourceLayoutError, match="checkpoint"):
+        f.run(clients={})
+    assert f.tasks.get_task(result.id) == result and _projection(f) == restored
+    assert not f.provider.requests and not f.calls
+
+
+@pytest.mark.parametrize("drift", ["principal", "membership", "query", "checkpoint", "coverage", "policy"])
+def test_unqualified_higher_versions_cannot_skip_acquisition_or_acknowledge(
+    application: Fixture, drift: str,
+) -> None:
+    f = application
+    f.run()
+    f.claim = _older_claim(f)
+    f.reopen()
+    if drift == "principal":
+        f.provider.user = "other"
+    elif drift == "membership":
+        f.provider.selected = False
+    elif drift == "query":
+        f.connector._work_item_queries = [{"wiql": named._QUERY + " AND [System.Id] > 0"}]
+    elif drift == "checkpoint":
+        f.paths.mark_indexed(
+            f.claim.hints.canonical_family, "workitems/7/body.md", content_hash="stale", chunk_count=9,
+        )
+    elif drift == "coverage":
+        with closing(f.paths._connect()) as conn, conn:
+            conn.execute("DELETE FROM embedding_coverage")
+    else:
+        f.config.model_profiles["first"] = replace(f.config.model_profiles["first"], revision="next")
+    before = _projection(f), f.tasks.get_task(f.claim.task_id)
+    with pytest.raises((ValueError, SourceLayoutError)):
+        f.run()
+    assert (_projection(f), f.tasks.get_task(f.claim.task_id)) == before
+    assert not f.calls and f.provider.body_reads == 0
+    assert PendingCrawls(f.paths).read_payload(f.claim.hints.source, SCOPE) is None
+
+
+@pytest.mark.parametrize("conflict", [False, True])
+def test_equal_versions_still_acquire_and_compare_canonical_content(
+    application: Fixture, conflict: bool,
+) -> None:
+    f = application
+    f.run()
+    hints = replace(f.claim.hints, targets=(
+        replace(named._ITEM, event_ids=("equal-body",)),
+        replace(named._COMMENT, event_ids=("equal-comment",)),
+    ))
+    task = f.tasks.enqueue(hints.source, change_hints=hints)
+    f.claim = PendingPointClaim.from_task(f.tasks.pin_point_claim(task.id, expected_hints=hints))
+    f.reopen()
+    before = _projection(f)
+    if conflict:
+        f.provider.item["fields"]["System.Title"] = "Conflicting equal revision"
+        with pytest.raises(ValueError, match="conflicting"):
+            f.run()
+        parked = f.tasks.get_task(task.id)
+        assert parked is not None and parked.status == TaskStatus.QUEUED_HINTS_V2
+        assert PendingCrawls(f.paths).read_payload(hints.source, SCOPE) is not None
+    else:
+        result = f.run()
+        assert result.status == TaskStatus.COMPLETE and result.result_stats is not None
+        assert result.result_stats["point_completion"]["version"] == 1
+    assert f.provider.body_reads == 2 and not f.calls
+    assert _projection(f) == before
 
 
 @pytest.mark.parametrize("application", [True], indirect=True)
