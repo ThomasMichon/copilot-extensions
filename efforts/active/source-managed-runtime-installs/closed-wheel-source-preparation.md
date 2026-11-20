@@ -5,8 +5,8 @@ Back to [Source-Managed Runtime Installs](README.md) and the
 Tracked within [#13504](https://github.com/ThomasMichon/copilot-extensions/issues/13504);
 the broader Manager and provider/profile programs remain with #12905 and #12900.
 
-**Status: source implementation; review, containing release and consumer
-qualification remain open.** `local_install_closed_wheels.prepare` composes the
+**Status: source implementation and containing release qualified; consumer
+qualification remains open.** `local_install_closed_wheels.prepare` composes the
 existing owners without introducing another constructor or changing the
 ordinary source-building path. The
 [install contract](../../../docs/install-contract.md#explicit-manager-source-install-integration)
@@ -93,7 +93,7 @@ a new manual-update veto.
   Source/profile, retention, identity, application and lock owners to compose.
 - [x] C2: Implement the bounded provider and selected-owner support declaration,
   retaining original development metadata and unchanged ordinary defaults.
-- [ ] C3: Qualify the actual owning functions and readers with focused inert
+- [x] C3: Qualify the actual owning functions and readers with focused inert
   controls; complete normal review, required CI, merge and containing release.
 - [ ] C4: Migrate a capable consumer through the released entry, recording
   preparation, construction, native protection and readiness separately.
@@ -141,9 +141,9 @@ with preserved user state and independently scoped outgoing retirement.
 The proposal merged in
 [13669](https://github.com/ThomasMichon/copilot-extensions/pull/13669) as
 `631f9bbeb4cdba5abdddad9cede06e124411240d` after current-head Copilot approval
-and required checks. C1 is complete for the reviewed contract and existing
-owner composition. C2 implementation is next; C3 qualification/release, C4
-consumer adoption, protected P4 and the parent acceptance remain open.
+and required checks. This completed C1 for the reviewed contract and existing
+owner composition. The subsequent implementation and release below complete
+C2/C3; C4 consumer adoption, protected P4 and the parent acceptance remain open.
 
 The implementation retains the original manifest rather than projecting a
 different one. An explicit `closed-wheels` input mode spans the canonical
@@ -182,3 +182,19 @@ The existing static source/wheel validator also admits explicit flat package
 discovery with include selectors, preserving original metadata and exact member
 binding. The expanded packet passes 186 controls, both platform type checks and
 the unchanged contract/sync/size gates; required review/CI still applies.
+
+Implementation [13673](https://github.com/ThomasMichon/copilot-extensions/pull/13673)
+merged as `17078071201bd1f0ee122a8729194c4c87268925` after current-head Copilot
+approval and passing required/observed functional checks. Automatic producing
+run [44734566478](https://github.com/ThomasMichon/copilot-extensions/actions/runs/44734566478)
+admitted that Dev source and passed unit coverage, native Manager/Windows
+Resume, artifact construction/attestation, immutable candidate-unit reuse,
+publication/readback and normal exact-candidate merge. Promotion
+[13682](https://github.com/ThomasMichon/copilot-extensions/pull/13682) landed
+Main `91b633a4374f1fc2cff691978796da87ce5dd169`.
+Nonexecuting Main readback confirms all nine canonical provider/asset files,
+the selected support declaration and both materialized packaged-layout
+provider/lifecycle-helper pairs. This closes C3's source/release scope,
+not actual consumer preparation, construction, native protection or readiness.
+C4 is next through independently admitted consumer inputs and effect authority;
+the broader protected handoff and installation programs remain open.
