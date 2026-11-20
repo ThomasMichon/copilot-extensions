@@ -10,14 +10,18 @@ from .queue_allocation_revisions import RETIRED_BEFORE_ALLOCATION
 from .queue_records import TaskError
 
 
-def _undischarged(task: Literal[":id", "t.id", "NEW.id", "OLD.id"]) -> str:
+def _undischarged(task: Literal[":id", "t.id", "NEW.id", "OLD.id"], *, before_acquisition: bool = False) -> str:
     from .completion_origins import PREPARATION_ORIGINS
 
+    # A newly bound governed worker can recheck the *earlier* discharge, without
+    # treating its own live claim as discharged. No execution guard uses this prefix.
+    prior_events = "AND id<:acquisition" if before_acquisition else ""
+    prior_reservations = "AND s.task_relationship_event_id IS NOT :acquisition" if before_acquisition else ""
     # The latest assignment must itself have a confirmed decline. Only older
     # direct claims may use an independently closed, audited unassignment.
     return f"""(WITH events AS (
         SELECT id, task_id, worker, task_relationship AS value FROM task_events
-        WHERE task_id={task} AND task_relationship IS NOT NULL
+        WHERE task_id={task} AND task_relationship IS NOT NULL {prior_events}
     ), declined AS (
         SELECT e.id FROM events e JOIN spawn_reservations r
             ON r.task_id=e.task_id AND r.task_relationship_event_id=e.id
@@ -72,7 +76,7 @@ def _undischarged(task: Literal[":id", "t.id", "NEW.id", "OLD.id"]) -> str:
               )
           )
           OR EXISTS (
-              SELECT 1 FROM spawn_reservations s WHERE s.task_id={task} AND s.task_relationship_required=1
+              SELECT 1 FROM spawn_reservations s WHERE s.task_id={task} AND s.task_relationship_required=1 {prior_reservations}
                 AND NOT {RETIRED_BEFORE_ALLOCATION} AND NOT (
                     s.task_relationship_event_id IS NOT NULL AND s.task_relationship_event_id IN (SELECT id FROM declined)
                     AND s.release_requested=1 AND s.native_release_pending=0 AND s.state IN ('settled','failed','rearmed')
@@ -80,22 +84,45 @@ def _undischarged(task: Literal[":id", "t.id", "NEW.id", "OLD.id"]) -> str:
           ))"""
 
 
+def _confirm_direct_receipts(conn: sqlite3.Connection, task_id: str, *, before: int | None = None) -> None:
+    # Validate canonical refs with the decoder that admitted the original receipt.
+    from .queue_task_relationships import _matches_receipt
+    for row in conn.execute(
+        "SELECT task_relationship FROM task_events WHERE task_id=? AND task_relationship IS NOT NULL"
+        " AND json_type(task_relationship,'$.request.reservation_key')='null' AND (? IS NULL OR id<?)",
+        (task_id, before, before),
+    ):
+        event = json.loads(row[0])
+        if not _matches_receipt(event["receipt"], event["request"], phase="closed"):
+            raise TaskError("ordinary capture cannot confirm the original direct assignment receipt")
+
+
+def prior_proposals_discharged(conn: sqlite3.Connection, task_id: str, acquisition: int) -> bool:
+    """Recheck retained proposals before the latest acquisition; never discharge that acquisition."""
+    proof = conn.execute(
+        "SELECT EXISTS (SELECT 1 FROM task_events c JOIN spawn_reservations n ON n.task_id=c.task_id"
+        " WHERE c.task_id=:id AND c.id=:acquisition AND n.task_relationship_required=0"
+        " AND NOT EXISTS (SELECT 1 FROM task_events later WHERE later.task_id=c.task_id"
+        " AND later.id>c.id AND later.task_relationship IS NOT NULL)"
+        " AND n.task_relationship_generation<json_extract(c.task_relationship,'$.request.generation')"
+        " AND n.task_relationship_generation>(SELECT MAX(CASE WHEN json_valid(p.submission_preparation)"
+        " THEN json_extract(p.submission_preparation,'$.request.generation') END)"
+        " FROM task_events p WHERE p.task_id=c.task_id AND p.submission_preparation IS NOT NULL))"
+        " AND NOT " + _undischarged(":id", before_acquisition=True),
+        {"id": task_id, "acquisition": acquisition},
+    ).fetchone()
+    if not proof[0]:
+        return False
+    _confirm_direct_receipts(conn, task_id, before=acquisition)
+    return True
+
+
 def admit_ungoverned_replacement(
     conn: sqlite3.Connection, task_id: str, key: str, generation: int
 ) -> None:
     if conn.execute("SELECT " + _undischarged(":id"), {"id": task_id}).fetchone()[0]:
         raise TaskError("ordinary capture cannot drop a governed assignment")
-    # Validate canonical refs with the same AssignmentSubject decoder that admitted
-    # the original receipt. SQLite keeps enforcing the audited binding after rollback.
-    from .queue_task_relationships import _matches_receipt
-
-    for row in conn.execute(
-        "SELECT task_relationship FROM task_events WHERE task_id=? AND task_relationship IS NOT NULL"
-        " AND json_type(task_relationship,'$.request.reservation_key')='null'", (task_id,),
-    ):
-        event = json.loads(row[0])
-        if not _matches_receipt(event["receipt"], event["request"], phase="closed"):
-            raise TaskError("ordinary capture cannot confirm the original direct assignment receipt")
+    _confirm_direct_receipts(conn, task_id)
     conn.execute(
         "UPDATE spawn_reservations SET task_relationship_generation=? WHERE key=?",
         (generation, key),

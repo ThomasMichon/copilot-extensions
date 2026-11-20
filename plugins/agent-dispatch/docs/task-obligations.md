@@ -766,12 +766,15 @@ For an explicitly ungoverned replacement, Dispatch uses the projection at
 placement and in the execution and completion guards. A failed, unadvanced
 proposal predating its assignment's verified unassignment remains immutable
 history, not the replacement's proposal. An unknown origin, newer proposal,
-or unconfirmed discharge still blocks the exemption.
+or unconfirmed discharge still blocks the exemption. A later governed
+assignment following that replacement also starts a fresh proposal only after
+rechecking the earlier discharge. It cannot inherit the prior request ID or
+advance the old proposal; it must meet its own submission and readiness guards.
 
 A successful `detach_agent` may include an additive `completion_origin_v1` in
 its existing recovery receipt. It is captured inside the verified detachment
 transaction, before clearing the native and advancing the generation. It binds
-a completed, ungoverned CLI or ordinary-Bridge pool submission to its actual
+a submitted or completed, ungoverned CLI or ordinary-Bridge pool result to its actual
 completion audit event, queue, reservation, original worker/native, generation,
 completion time, and digest of the stored result and reference. No result body
 is copied. No field is emitted for an unqualified attachment, an ambiguous
@@ -783,8 +786,11 @@ the matching detach receipt and attachment, the immediately preceding pool
 generation, the exact retired native, and byte-identical result and reference
 (including absence). Its positive answer describes a past completion, **not**
 an execution permit or a waiver of caller identity/generation checks. For a
-completed ungoverned replacement whose agent was subsequently detached,
-`complete` uses this check only to return an exact no-op replay. A foreign
+submitted or completed ungoverned replacement whose agent was subsequently
+detached, `complete` uses this check only to return an exact no-op replay.
+An expected starting state must match the original submission audit. After a
+submitted detachment, confirmation requires a later confirmation audit on the
+same task; retrying never confirms the result. A foreign
 worker, changed result, or absent proof cannot enrich the prior completion or
 admit another assignment.
 

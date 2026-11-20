@@ -39,6 +39,35 @@ def _latest(conn: sqlite3.Connection, task_id: str) -> sqlite3.Row | None:
     return row
 
 
+def previous_for_assignment(conn: sqlite3.Connection, task_id: str, acquisition: int) -> sqlite3.Row | None:
+    previous = _latest(conn, task_id)
+    if previous is None:
+        return None
+    from .completion_origins import PREPARATION_ORIGINS
+    origin = conn.execute(
+        "SELECT assignment_event_id FROM (" + PREPARATION_ORIGINS + ") WHERE task_id=? AND preparation_event_id=?",
+        (task_id, previous["id"]),
+    ).fetchone()
+    if origin is not None and origin[0] == acquisition:
+        return previous
+    from .relationship_decline_history import prior_proposals_discharged
+    if (origin is not None and origin[0] is not None and previous["id"] < acquisition
+            and prior_proposals_discharged(conn, task_id, acquisition)):
+        return None
+    raise TaskError("retained submission preparation belongs to an unconfirmed assignment")
+
+
+def require_request_slot(
+    conn: sqlite3.Connection, task_id: str, request_id: str, previous: sqlite3.Row | None,
+) -> None:
+    if conn.execute(
+        "SELECT 1 FROM task_events WHERE task_id=? AND submission_preparation IS NOT NULL"
+        " AND json_extract(submission_preparation, '$.request.request_id')=? AND id IS NOT ? LIMIT 1",
+        (task_id, request_id, previous["id"] if previous else None),
+    ).fetchone() is not None:
+        raise TaskError("submission preparation request was superseded")
+
+
 def require_unprepared_submission(conn: sqlite3.Connection, task_id: str) -> None:
     required = conn.execute(
         "SELECT " + retained_preparation_condition("t") + " FROM tasks t WHERE t.id=?", (task_id,),
@@ -95,7 +124,7 @@ def migrate_submission_preparation(conn: sqlite3.Connection) -> None:
     )
     # Install the replacement before removing the stricter rollback-era trigger.
     conn.execute(
-        "CREATE TRIGGER IF NOT EXISTS submission_preparation_completion_guard_v3"
+        "CREATE TRIGGER IF NOT EXISTS submission_preparation_completion_guard_v4"
         " BEFORE UPDATE ON tasks"
         " WHEN NEW.status IN ('submitted','completed')"
         " AND OLD.status NOT IN ('submitted','completed')"
@@ -123,7 +152,7 @@ def migrate_submission_preparation(conn: sqlite3.Connection) -> None:
         " 'submission preparation requires authoritative readiness'); END"
     )
     conn.execute(
-        "CREATE TRIGGER IF NOT EXISTS submission_required_preparation_guard_v5"  # noqa: S608 -- fixed predicate
+        "CREATE TRIGGER IF NOT EXISTS submission_required_preparation_guard_v6"  # noqa: S608 -- fixed predicate
         " BEFORE UPDATE OF status ON tasks"
         " WHEN NEW.status IN ('submitted','completed')"
         " AND OLD.status NOT IN ('submitted','completed')"
@@ -150,16 +179,19 @@ def migrate_submission_preparation(conn: sqlite3.Connection) -> None:
         " BEGIN SELECT RAISE(ABORT, 'submission advancement receipt is immutable'); END"
     )
     conn.execute(
-        "CREATE TRIGGER IF NOT EXISTS submission_preparation_result_retained_v3"
+        "CREATE TRIGGER IF NOT EXISTS submission_preparation_result_retained_v4"
         " BEFORE UPDATE ON tasks"
         " WHEN OLD.status IN ('submitted','completed')"
         " AND NEW.status IN ('submitted','completed')"
         " AND " + retained_preparation_condition("OLD")
         + " AND (NEW.result IS NOT OLD.result OR NEW.result_ref IS NOT OLD.result_ref"
         " OR NEW.completed_by IS NOT OLD.completed_by OR NEW.completed_at IS NOT OLD.completed_at"
-        " OR NEW.require_verification<>1)"
+        " OR (OLD.require_verification=1 AND NEW.require_verification IS NOT 1))"
         " BEGIN SELECT RAISE(ABORT, 'submission preparation result is retained'); END"
     )
+    conn.execute("DROP TRIGGER IF EXISTS submission_preparation_result_retained_v3")
+    conn.execute("DROP TRIGGER IF EXISTS submission_preparation_completion_guard_v3")
+    conn.execute("DROP TRIGGER IF EXISTS submission_required_preparation_guard_v5")
     conn.execute("DROP TRIGGER IF EXISTS submission_preparation_completion_guard_v2")
     conn.execute("DROP TRIGGER IF EXISTS submission_preparation_result_retained_v2")
     conn.execute("DROP TRIGGER IF EXISTS submission_required_preparation_guard_v4")
@@ -294,7 +326,8 @@ class QueueSubmissionPreparationMixin:
             )
             if expected_status is not None:
                 request["expected_status"] = expected_status
-            previous = _latest(conn, task_id)
+            previous = previous_for_assignment(conn, task_id, request["assignment_event_id"])
+            require_request_slot(conn, task_id, request_id, previous)
             if previous is not None:
                 from .queue_submission_resubmission import rejected_preparation, retained_lineage
 
@@ -308,13 +341,6 @@ class QueueSubmissionPreparationMixin:
                     if _encoded(value["request"]) != _encoded(request):
                         raise TaskError("submission preparation conflicts with its original request")
                     return cast(dict[str, Any], value)
-                if conn.execute(
-                    "SELECT 1 FROM task_events WHERE task_id=?"
-                    " AND submission_preparation IS NOT NULL"
-                    " AND json_extract(submission_preparation, '$.request.request_id')=? LIMIT 1",
-                    (task_id, request_id),
-                ).fetchone() is not None:
-                    raise TaskError("submission preparation request was superseded")
                 if value.get("advancement") is None:
                     raise TaskError("submission preparation conflicts with its original request")
                 request["resubmission"] = rejected_preparation(conn, previous, request)

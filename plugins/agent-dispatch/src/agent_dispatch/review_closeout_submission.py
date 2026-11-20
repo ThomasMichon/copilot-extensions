@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from .queue_common import CompletionOutcome, Task
 from .queue_records import Status, TaskError
-from .queue_submission_preparation import _encoded, _latest
+from .queue_submission_preparation import _encoded, _latest, previous_for_assignment, require_request_slot
 from .queue_submission_resubmission import rejected_preparation, retained_lineage
 
 if TYPE_CHECKING:
@@ -59,7 +59,7 @@ def prepare(queue: TaskQueue, conn: sqlite3.Connection, state: dict[str, Any]) -
     if task.awaiting_steer:
         raise TaskError("resolve outstanding steering request before review closeout")
     proposal = _proposal(state)
-    prior = _latest(conn, task.id)
+    prior = previous_for_assignment(conn, task.id, proposal["assignment_event_id"])
     if prior is not None:
         value = json.loads(prior["submission_preparation"])
         if _same_proposal(conn, state, value):
@@ -73,6 +73,7 @@ def prepare(queue: TaskQueue, conn: sqlite3.Connection, state: dict[str, Any]) -
         if (ready.get("arguments") != state["arguments"] or ready.get("binding") != state["binding"]
                 or ready.get("observation", {}).get("ready") is not True):
             raise TaskError("legacy closed assignment lacks its original readiness receipt")
+    require_request_slot(conn, task.id, proposal["request_id"], prior)
     conn.execute(
         "INSERT INTO task_events(task_id,ts,from_status,to_status,worker,note,submission_preparation)"
         " VALUES (?,?,?,?,?,?,?)", (task.id, queue._now(None), task.status, task.status, task.owner,

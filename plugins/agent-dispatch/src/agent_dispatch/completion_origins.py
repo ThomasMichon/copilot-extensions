@@ -85,6 +85,7 @@ def _terminal_origin(
     task_id: str,
     generation: int,
     native_id: str,
+    expected_status: str | None = None,
 ) -> dict[str, Any] | None:
     rows = conn.execute(
         """
@@ -98,7 +99,8 @@ def _terminal_origin(
         JOIN workspace_queue_identity q ON q.singleton=1
         JOIN task_events e INDEXED BY idx_task_events_task ON e.task_id=t.id AND e.worker=t.completed_by AND e.ts=t.completed_at
             AND e.note='complete' AND e.from_status IN ('started','suspended') AND e.to_status='submitted'
-        WHERE t.id=? AND t.status='completed' AND t.owner IS NULL
+        WHERE t.id=? AND t.status IN ('submitted','completed') AND t.owner IS NULL
+          AND (t.status!='submitted' OR t.require_verification=1) AND (? IS NULL OR e.from_status=?)
           AND s.driver IN ('cli','ordinary-bridge') AND s.task_relationship_required=0
           AND s.task_relationship_event_id IS NULL AND s.state IN ('failed','settled','rearmed')
           AND s.release_requested=1 AND s.native_release_pending=0 AND s.cooling_token IS NULL
@@ -106,7 +108,7 @@ def _terminal_origin(
                           AND (later.note='complete' OR later.note='complete retry: result recorded'
                                OR later.to_status NOT IN ('submitted','completed')))
         LIMIT 2""",
-        (generation, task_id),
+        (generation, task_id, expected_status, expected_status),
     ).fetchall()
     if len(rows) != 1:
         return None
@@ -141,7 +143,7 @@ def capture_terminal_detachment(conn: sqlite3.Connection, task_id: str) -> dict[
     """Called in the verified detach transaction, before generation/native are changed."""
     task = conn.execute(
         """
-        SELECT t.generation, t.owner_session_id FROM tasks t WHERE t.id=? AND t.status='completed'
+        SELECT t.generation, t.owner_session_id FROM tasks t WHERE t.id=? AND t.status IN ('submitted','completed')
           AND 1=(SELECT count(*) FROM task_attachments a WHERE a.task_id=t.id
                  AND a.session_id=t.owner_session_id AND a.attached_at<=t.completed_at AND a.detached_at IS NULL)
     """,
@@ -159,6 +161,7 @@ def exact_detached_completion(
     worker_id: str,
     encoded_result: str | None,
     result_ref: str | None,
+    expected_status: str | None = None,
 ) -> bool:
     """Recognize an exact read-only retry; false includes old or ambiguous evidence."""
     if not conn.in_transaction:
@@ -177,13 +180,23 @@ def exact_detached_completion(
               AND a.detach_reason=('detach_agent: ' || json_extract(r.request,'$.reason'))
         ) AS matched_attachment
         FROM receipts r JOIN tasks t ON t.id=r.task_id
-        WHERE t.status='completed' AND t.owner IS NULL AND t.owner_session_id IS NULL
+        WHERE t.status IN ('submitted','completed') AND t.owner IS NULL AND t.owner_session_id IS NULL
           AND t.completed_by=? AND t.result IS ? AND t.result_ref IS ?
           AND json_extract(r.request,'$.operation')='detach_agent'
           AND json_extract(r.result,'$.operation')='detach_agent' AND json_type(r.result,'$.replayed')='false'
           AND json_extract(r.result,'$.request_id')=r.request_id AND json_extract(r.result,'$.task.id')=t.id
           AND json_type(r.result,'$.task.generation')='integer' AND json_extract(r.result,'$.task.generation')=t.generation
-          AND json_extract(r.result,'$.task.status')='completed' AND json_type(r.result,'$.task.owner')='null'
+          AND (json_extract(r.result,'$.task.status')=t.status OR (
+              json_extract(r.result,'$.task.status')='submitted' AND t.status='completed' AND t.require_verification=1
+              AND EXISTS (SELECT 1 FROM task_events d INDEXED BY idx_task_events_task
+                  JOIN task_events c INDEXED BY idx_task_events_task ON c.task_id=d.task_id AND c.id>d.id
+                  WHERE d.task_id=t.id AND d.id>json_extract(r.result,'$.completion_origin_v1.completion_event_id')
+                    AND d.ts=json_extract(r.result,'$.task.updated_at') AND d.worker=json_extract(r.request,'$.actor')
+                    AND d.from_status='submitted' AND d.to_status='submitted'
+                    AND d.note=('detach_agent: ' || json_extract(r.request,'$.reason'))
+                    AND c.from_status='submitted' AND c.to_status='completed'
+                    AND (c.note='confirmed' OR c.note LIKE 'confirmed by %'))))
+          AND json_type(r.result,'$.task.owner')='null'
           AND json_type(r.result,'$.task.owner_session_id')='null'
         LIMIT 2""",
         (task_id, worker_id, encoded_result, result_ref),
@@ -202,7 +215,7 @@ def exact_detached_completion(
         or not origin["native_id"]
     ):
         return False
-    actual = _terminal_origin(conn, task_id, generation - 1, origin["native_id"])
+    actual = _terminal_origin(conn, task_id, generation - 1, origin["native_id"], expected_status)
     return actual is not None and json.dumps(origin, sort_keys=True) == json.dumps(
         actual, sort_keys=True
     )

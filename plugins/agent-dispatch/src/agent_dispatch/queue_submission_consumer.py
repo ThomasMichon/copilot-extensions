@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 @dataclass(frozen=True)
 class _DetachedReplay:
     generation: int
+    expected_status: str | None
 
 
 def original_request(
@@ -33,18 +34,18 @@ def original_request(
     ).fetchone()[0]
     if not required:
         return None
-    if (task.status == Status.COMPLETED and task.owner is None and task.owner_session_id is None
-            and expected_status is None and conn.execute(
+    if (task.status in {Status.SUBMITTED, Status.COMPLETED} and task.owner is None and task.owner_session_id is None
+            and conn.execute(
                 "SELECT 1 FROM spawn_reservations s JOIN task_pool_assignments a ON a.reservation_key=s.key"
                 " WHERE s.task_id=? AND a.task_id=s.task_id AND s.task_relationship_required=0"
                 " AND s.task_relationship_generation=a.task_generation AND a.task_generation=?",
                 (task.id, task.generation - 1),
             ).fetchone() is not None):
         # Classification is not admission. Only a read-only exact proof may return success.
-        return _DetachedReplay(task.generation)
-    prepared = _latest(conn, task.id)
-    previous = json.loads(prepared["submission_preparation"]) if prepared is not None else None
+        return _DetachedReplay(task.generation, expected_status)
     if task.status in {Status.SUBMITTED, Status.COMPLETED}:
+        prepared = _latest(conn, task.id)
+        previous = json.loads(prepared["submission_preparation"]) if prepared is not None else None
         if previous is None:
             raise TaskError("protected historical submission has no retained preparation")
         request = previous["request"]
@@ -62,6 +63,9 @@ def original_request(
     relationship = latest_relationship(conn, task.id)
     if relationship is None:
         raise TaskError("protected submission requires its original workspace assignment")
+    from .queue_submission_preparation import previous_for_assignment
+    prepared = previous_for_assignment(conn, task.id, relationship["id"])
+    previous = json.loads(prepared["submission_preparation"]) if prepared is not None else None
     workspace = AssignmentWorkspace.from_dict(
         json.loads(relationship["task_relationship"])["request"]["workspace"],
     )
@@ -117,6 +121,7 @@ def complete(
             task = queue._fetch(conn, task_id)
             if task is not None and task.generation == arguments.generation and exact_detached_completion(
                 conn, task_id, worker_id=worker_id, encoded_result=queue._encode_result(result), result_ref=result_ref,
+                expected_status=arguments.expected_status,
             ):
                 return CompletionOutcome(task, None)
         raise TaskError("detached completion lacks its exact original submission evidence")

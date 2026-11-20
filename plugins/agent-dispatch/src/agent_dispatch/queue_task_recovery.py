@@ -350,7 +350,7 @@ class TaskRecoveryMixin:
                     row["detached_at"] is None for row in captured["attachments"]
                 ):
                     raise TaskError("task has no agent assignment")
-                if task.status == Status.COMPLETED:
+                if task.status in {Status.SUBMITTED, Status.COMPLETED}:
                     from .completion_origins import capture_terminal_detachment
                     completion_origin = capture_terminal_detachment(conn, task_id)
                 destination = Status.QUEUED if task.status in Status.OWNED else task.status
