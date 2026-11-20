@@ -117,7 +117,17 @@ class ReplayStore:
         repository_continuing: bool = False,
         repository_filtered: bool = False,
         repository_activity: bool = False,
+        workspace_generation_associations: bool = False,
     ) -> None:
+        if type(workspace_generation_associations) is not bool:
+            raise ValueError("explicit generation association selection required")
+        if workspace_generation_associations and any((
+            terminal_retention, terminal_recovery, terminal_cache_retirement,
+            terminal_comment_mapping, repository_cache, repository_continuing,
+            repository_filtered, repository_activity,
+        )):
+            raise ValueError("generation associations require an unextended baseline owner")
+        self.workspace_generation_associations = workspace_generation_associations
         if type(repository_cache) is not bool:
             raise ValueError("explicit repository cache selection required")
         self.repository_cache = repository_cache
@@ -273,6 +283,11 @@ class ReplayStore:
         terminal = "terminal_retention_version" in document
         recovery = "terminal_recovery_version" in document
         retirement = "terminal_cache_retirement_version" in document
+        associations = "generation_associations_version" in document
+        if associations:
+            if not self.workspace_generation_associations or terminal or prepared or version != 3:
+                raise ReplayStoreInvalid("generation association reader unavailable for adopted owner")
+            names.update(("generation_associations_version", "generation_associations"))
         if "terminal_comment_mapping_version" in document:
             if (
                 not self.terminal_comment_mapping or not recovery or not mappings
@@ -327,6 +342,8 @@ class ReplayStore:
             raise ReplayStoreInvalid("review owner storage binding mismatch")
         capacities = document["capacities"]
         capacity_names = {"replay_bytes", "review_bytes", "receipt_bytes"}
+        if associations:
+            capacity_names.add("generation_association_bytes")
         if terminal:
             capacity_names.add("terminal_retention_bytes")
         if version in (3, 4, 5, 6):
@@ -345,6 +362,7 @@ class ReplayStore:
             + capacities.get("attention_bytes", 0)
             + capacities.get("feedback_capture_bytes", 0)
             + capacities.get("feedback_readback_bytes", 0)
+            + capacities.get("generation_association_bytes", 0)
             + (16 * 1024 * 1024 if cache else 0)
             + capacities.get("terminal_retention_bytes", 0) > MAX_OWNER_BYTES - 4096
             or capacities["receipt_bytes"] < 4096
@@ -356,6 +374,12 @@ class ReplayStore:
                 validate(document, self.namespace)
             except (KeyError, TypeError, ValueError):
                 raise ReplayStoreInvalid("invalid persisted terminal retention") from None
+        if associations:
+            from .generation_associations import validate as validate_associations
+            try:
+                validate_associations(document, self.namespace)
+            except (KeyError, TypeError, ValueError):
+                raise ReplayStoreInvalid("invalid persisted generation associations") from None
         if retirement:
             from .terminal_cache_retirement import validate as validate_retirement
             try:

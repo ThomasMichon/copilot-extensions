@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from collections.abc import Callable, Iterator
 import copy
+from inspect import iscoroutinefunction
 import json
 import os
 from pathlib import Path
@@ -340,7 +341,10 @@ class GenerationCache:
         result: Document = retire_scope(self, scope, progress, capture=capture, checkpoint=checkpoint)
         return result
 
-    def publish(self, generation: Document, *, expected_current: str | None) -> Document:
+    def publish(
+        self, generation: Document, *, expected_current: str | None,
+        before_write: Callable[[], None] | None = None,
+    ) -> Document:
         """CAS one target; contention retains the existing OperationLock error."""
         if not isinstance(generation, dict):
             raise ValueError("publication requires a generation object")
@@ -348,6 +352,10 @@ class GenerationCache:
         scope = _scope(generation.get("scope"))
         _generation(generation, scope)
         identifier = _identifier(generation["id"])
+        if before_write is not None and (
+            not callable(before_write) or iscoroutinefunction(before_write)
+        ):
+            raise ValueError("synchronous publication reservation required")
         if expected_current is not None:
             _identifier(expected_current)
         pointer = {
@@ -403,6 +411,9 @@ class GenerationCache:
                 return None
 
             self._check(lock)
+            if before_write is not None:
+                before_write()
+                self._check(lock)
             # Re-acknowledge durability even for a previously unconfirmed object;
             # its ID/content stay immutable before a pointer can reference it.
             failed = write(object_path, generation, "generation")

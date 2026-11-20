@@ -147,88 +147,97 @@ class ConversationStore:
         terminal_target: ObservationTarget | None = None,
     ) -> Document:
         """Project trusted acquisition under the same journal transaction, not HTTP ingest."""
+        if type(comment_mappings) is not bool:
+            raise ValueError("explicit comment mapping selection required")
+        return self.owner._review_transaction(
+            lambda document: self._observe_workspace(
+                document, generation, attention=attention,
+                comment_mappings=comment_mappings, terminal_target=terminal_target,
+            ),
+            expires_at=expires_at, checkpoint=checkpoint, persist=True,
+        )
+
+    def _observe_workspace(
+        self, document: Document, generation: Document, *,
+        attention: AttentionInputs | None = None, comment_mappings: bool = False,
+        terminal_target: ObservationTarget | None = None,
+    ) -> Document:
         from .workspace_conversation import conversation_key, observation_interval, project_generation
 
         if type(comment_mappings) is not bool:
             raise ValueError("explicit comment mapping selection required")
-
-        def observe(document: Document) -> Document:
-            if document["version"] not in (3, 4, 5, 6):
-                raise ReplayStoreInvalid("conversation journal requires explicit owner adoption")
-            if attention is not None and document["version"] not in (4, 5, 6):
-                raise ReplayStoreInvalid("attention requires explicit owner adoption")
-            if comment_mappings and document.get("review_comment_mapping_version") != 1:
-                raise ReplayStoreInvalid("comment mapping requires explicit storage adoption")
-            journal = ConversationJournal(document["conversations"])
-            key = conversation_key(generation["scope"], self.owner.namespace)
-            record = journal._find(key)
-            previous = Observation.restore(record["current"]) if record is not None else None
-            value = project_generation(generation, self.owner.namespace, previous)
-            attention_state = None
-            interval = None
-            if attention is not None:
-                attention_state = AttentionState(document["attention"])
-                interval = observation_interval(generation["sections"])
-                if interval is None:
-                    return {"status": "unavailable", "reason": "observation_interval_missing"}
-                scoped_key = asdict(key)
-                watermark = max(
-                    (row["facts"]["observed_at"] for row in attention_state.records
-                     if row["facts"]["key"] == scoped_key),
-                    default=0,
-                )
-                watermark = max(watermark, previous.observed_to if previous is not None else 0)
-                current = value.document() if value is not None else None
-                if current is not None and value is not None and value.terminal:
-                    current["sections"] = {}
-                same = current is not None and record is not None and current == record["current"]
-                if interval[0] < watermark and not (same and interval[1] >= watermark):
-                    return {
-                        "status": "stale_observation",
-                        "cursor": {"epoch": record["epoch"], "sequence": record["sequence"]} if record else None,
-                    }
-            if value is None or previous is not None and previous.terminal and not value.complete:
-                result: Document = {
-                    "status": "unavailable",
-                    "reason": "candidate_state_or_interval_missing" if value is None
-                    else "terminal_requires_complete_observation",
-                }
-                if attention is not None and attention_state is not None and interval is not None:
-                    result["attention"] = unavailable_attention(
-                        attention_state, key, generation, attention, interval[1],
-                    )
-                    document["attention"] = attention_state.snapshot()
-                return result
-            expected = Cursor(record["epoch"], record["sequence"]) if record else None
-            result = journal.observe(
-                value, expected=expected,
-                reopen=bool(previous and previous.terminal and value.complete and value.state == "open"),
+        if document["version"] not in (3, 4, 5, 6):
+            raise ReplayStoreInvalid("conversation journal requires explicit owner adoption")
+        if attention is not None and document["version"] not in (4, 5, 6):
+            raise ReplayStoreInvalid("attention requires explicit owner adoption")
+        if comment_mappings and document.get("review_comment_mapping_version") != 1:
+            raise ReplayStoreInvalid("comment mapping requires explicit storage adoption")
+        journal = ConversationJournal(document["conversations"])
+        key = conversation_key(generation["scope"], self.owner.namespace)
+        record = journal._find(key)
+        previous = Observation.restore(record["current"]) if record is not None else None
+        value = project_generation(generation, self.owner.namespace, previous)
+        attention_state = None
+        interval = None
+        if attention is not None:
+            attention_state = AttentionState(document["attention"])
+            interval = observation_interval(generation["sections"])
+            if interval is None:
+                return {"status": "unavailable", "reason": "observation_interval_missing"}
+            scoped_key = asdict(key)
+            watermark = max(
+                (row["facts"]["observed_at"] for row in attention_state.records
+                 if row["facts"]["key"] == scoped_key),
+                default=0,
             )
-            if attention is not None and result["status"] in ("observed", "unchanged"):
-                state = AttentionState(document["attention"])
-                result["attention"] = observe_attention(
-                    state, value, Cursor(**result["cursor"]), generation, attention,
+            watermark = max(watermark, previous.observed_to if previous is not None else 0)
+            current = value.document() if value is not None else None
+            if current is not None and value is not None and value.terminal:
+                current["sections"] = {}
+            same = current is not None and record is not None and current == record["current"]
+            if interval[0] < watermark and not (same and interval[1] >= watermark):
+                return {
+                    "status": "stale_observation",
+                    "cursor": {"epoch": record["epoch"], "sequence": record["sequence"]} if record else None,
+                }
+        if value is None or previous is not None and previous.terminal and not value.complete:
+            result: Document = {
+                "status": "unavailable",
+                "reason": "candidate_state_or_interval_missing" if value is None
+                else "terminal_requires_complete_observation",
+            }
+            if attention is not None and attention_state is not None and interval is not None:
+                result["attention"] = unavailable_attention(
+                    attention_state, key, generation, attention, interval[1],
                 )
-                document["attention"] = state.snapshot()
-            document["conversations"] = journal.snapshot()
-            if "terminal_retention" in document and result["status"] in ("observed", "unchanged"):
-                from .terminal_retention import observe_live, observe_terminal
-                current_record = journal._find(key)
-                if current_record is None or terminal_target is None:
-                    raise ReplayStoreInvalid("terminal ingestion requires workspace evidence and delivery target")
-                if value.terminal:
-                    result["retirement"] = observe_terminal(
-                        document, generation["scope"], current_record, terminal_target,
-                        clock=self.owner.clock,
-                        native_watches=self.owner.terminal_native_watches,
-                    )
-                elif value.complete and value.state == "open":
-                    observe_live(document, generation["scope"], current_record, terminal_target)
-            if comment_mappings and result["status"] in ("observed", "unchanged"):
-                from .review_comment_mapping import observe
-                observe(document, generation)
+                document["attention"] = attention_state.snapshot()
             return result
-
-        return self.owner._review_transaction(
-            observe, expires_at=expires_at, checkpoint=checkpoint, persist=True,
+        expected = Cursor(record["epoch"], record["sequence"]) if record else None
+        result = journal.observe(
+            value, expected=expected,
+            reopen=bool(previous and previous.terminal and value.complete and value.state == "open"),
         )
+        if attention is not None and result["status"] in ("observed", "unchanged"):
+            state = AttentionState(document["attention"])
+            result["attention"] = observe_attention(
+                state, value, Cursor(**result["cursor"]), generation, attention,
+            )
+            document["attention"] = state.snapshot()
+        document["conversations"] = journal.snapshot()
+        if "terminal_retention" in document and result["status"] in ("observed", "unchanged"):
+            from .terminal_retention import observe_live, observe_terminal
+            current_record = journal._find(key)
+            if current_record is None or terminal_target is None:
+                raise ReplayStoreInvalid("terminal ingestion requires workspace evidence and delivery target")
+            if value.terminal:
+                result["retirement"] = observe_terminal(
+                    document, generation["scope"], current_record, terminal_target,
+                    clock=self.owner.clock,
+                    native_watches=self.owner.terminal_native_watches,
+                )
+            elif value.complete and value.state == "open":
+                observe_live(document, generation["scope"], current_record, terminal_target)
+        if comment_mappings and result["status"] in ("observed", "unchanged"):
+            from .review_comment_mapping import observe
+            observe(document, generation)
+        return result
