@@ -18,7 +18,7 @@ from contextlib import ExitStack, nullcontext
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from collections.abc import Callable
-from typing import Any, NoReturn
+from typing import Any, NoReturn, cast
 from unittest.mock import patch
 
 
@@ -33,7 +33,7 @@ def _expect(condition: bool, message: str) -> None:
 
 def _function(path: Path, name: str, namespace: dict[str, Any]) -> Callable[..., Any]:
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    definitions = [
+    definitions: list[ast.stmt] = [
         node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == name
     ]
     _expect(len(definitions) == 1, f"{path.name}: expected one {name} definition")
@@ -41,7 +41,7 @@ def _function(path: Path, name: str, namespace: dict[str, Any]) -> Callable[...,
     function = namespace[name]
     if not callable(function):
         raise ContractViolation(f"{path.name}: {name} is not callable")
-    return function
+    return cast(Callable[..., Any], function)
 
 
 def _module(path: Path, name: str) -> ModuleType:
@@ -67,14 +67,17 @@ def check_monitor_outcome(source: Path) -> list[str]:
 def _check_monitor_outcome(source: Path) -> None:
     environ: dict[str, str] = {}
     environment = SimpleNamespace(environ=environ, getenv=environ.get)
-    state: dict = {}
+    state: dict[str, Any] = {}
     calls: list[bool] = []
 
-    def activate(*, monitor_was_live: bool) -> dict:
+    def activate(*, monitor_was_live: bool) -> dict[str, Any]:
         calls.append(monitor_was_live)
         if state.get("error"):
             raise RuntimeError("fixture transition failure")
-        return state["summary"]
+        summary = state["summary"]
+        if not isinstance(summary, dict):
+            raise ContractViolation("expected a monitor summary")
+        return summary
 
     adapter = _function(source / "status_monitor_cutover.py", "installer_after_update", {
         "os": environment, "activate_after_update": activate, "print": lambda *_args, **_kwargs: None,
@@ -142,7 +145,10 @@ def _check_receipt_judgment(source: Path) -> None:
     def deployed(name: str, *, root: Path) -> str | None:
         _expect(name == "agent-example" and root == Path("receipt-contract-runtime"),
                 "receipt callback used the wrong runtime")
-        return state["deployed"]
+        version = state["deployed"]
+        if version is not None and not isinstance(version, str):
+            raise ContractViolation("expected a deployed version or None")
+        return version
 
     reconcile.__dict__["runtime_deployed_version"] = deployed
     reconcile.__dict__["_versions_equal"] = _function(source / "reconcile.py", "_versions_equal", {})
@@ -170,7 +176,7 @@ def _check_receipt_judgment(source: Path) -> None:
         })
         calls = []
 
-        def spawn(argv: list[str], cwd: Path, env: dict, capture: bool, **_kwargs: object) -> tuple[SimpleNamespace, None]:
+        def spawn(argv: list[str], cwd: Path, env: dict[str, str], capture: bool, **_kwargs: object) -> tuple[SimpleNamespace, None]:
             _expect(argv == ["installer"] and capture, "targeted installer used the wrong child")
             calls.append(argv)
             return SimpleNamespace(returncode=state["rc"]), None

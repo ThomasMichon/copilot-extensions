@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from worktree_manager.repository_suite_roster import plan
+from worktree_manager.repository_suite_roster import main, plan
 
 
 def write(path: Path, data: object) -> None:
@@ -78,3 +78,20 @@ def test_empty_allowlist_is_decisive_but_malformed_selector_is_not(roots: tuple[
     write(gate, {"repos": {"h": {"services": [{"name": "agent-service", "deploy_machines": "host"}]}}})
     with pytest.raises(ValueError, match="machine selector"):
         plan(target, source, gate_paths=(gate,), machines=("host",))
+
+
+def test_cli_separates_complete_incomplete_and_invalid_plans(
+    roots: tuple[Path, Path], capsys: pytest.CaptureFixture[str],
+) -> None:
+    target, source = roots
+    args = ["--worktree", str(target), "--source", str(source), "--no-gate"]
+    assert main(args + ["--index-role", "client", "--vault-state", "configured"]) == 0
+    complete = capsys.readouterr()
+    assert json.loads(complete.out)["complete"] is True and not complete.err
+    assert main(args) == 2
+    incomplete = capsys.readouterr()
+    assert json.loads(incomplete.out)["unresolved"] == ["agent-index", "agent-vault"] and not incomplete.err
+    (target / ".github/copilot/settings.json").write_text("{", encoding="utf-8")
+    assert main(args) == 1
+    invalid = capsys.readouterr()
+    assert not invalid.out and "indeterminate" in invalid.err

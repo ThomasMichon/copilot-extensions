@@ -60,7 +60,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from agent_procutil.owned_process import OwnedExecutionBudget
+    from typing import TypedDict
+    from agent_procutil.owned_budget import OwnedExecutionBudget
+
+    class _BudgetOptions(TypedDict, total=False):
+        budget: OwnedExecutionBudget
 
 import yaml
 
@@ -1020,13 +1024,14 @@ def resolve_runtime_installation(
             # capture this plugin, but malformed core evidence still fails closed.
             _selected_runtime_root(plugin_name, plugin_dir, home=home)
 
+    helper_options: _BudgetOptions = {"budget": budget} if budget is not None else {}
     result = _run_installation_mode_helper(
         plugin_name,
         plugin_dir,
         helper,
         runtime_dir(plugin_name, home),
         context=context,
-        **({"budget": budget} if budget is not None else {}),
+        **helper_options,
     )
     return _select_runtime_installation(plugin_name, result, home=home)
 
