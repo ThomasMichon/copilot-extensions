@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import threading
 import time
 from pathlib import Path
@@ -64,7 +65,11 @@ def test_outage_expiry_persists_before_one_notification_and_retires_its_poller(
     acknowledged: bool, failure: str,
 ) -> None:
     entered, observe, failed = threading.Event(), threading.Event(), threading.Event()
-    retry_waiting, retry_allowed = threading.Event(), threading.Event()
+    publishing, publish_allowed = threading.Event(), threading.Event()
+    callback_entries: list[dict[str, Any]] = []
+    enqueued: list[dict[str, Any]] = []
+    committed: list[list[dict[str, Any]]] = []
+    forbidden_rewrites: list[list[dict[str, Any]]] = []
     delivered: list[tuple[dict[str, Any], list[dict[str, Any]]]] = []
     original_write = watch_daemon.write_subscriptions_state
     armed = False
@@ -76,21 +81,31 @@ def test_outage_expiry_persists_before_one_notification_and_retires_its_poller(
         raise OSError("controlled provider outage")
 
     def write(entries: list[dict[str, Any]]) -> None:
-        if armed and not failed.is_set() and failure != "none":
-            if failure == "uncertain":
-                original_write(entries)
+        if not armed:
+            original_write(entries)
+            return
+        if not failed.is_set() and failure == "definite":
             failed.set()
-            if failure == "uncertain":
-                raise StateCommitUncertain("controlled expiry replacement acknowledgement loss")
             raise OSError("controlled expiry write refusal")
-        if failed.is_set() and failure == "definite":
-            retry_waiting.set()
-            if not retry_allowed.wait(2):
-                raise AssertionError("expiry retry fixture was not released")
+        if not committed:
+            publishing.set()
+            if not publish_allowed.wait(2):
+                raise AssertionError("expiry publication fixture was not released")
+            original_write(entries)
+            committed.append(copy.deepcopy(entries))
+            if failure == "uncertain":
+                failed.set()
+                raise StateCommitUncertain("controlled expiry replacement acknowledgement loss")
+            return
+        if failure == "uncertain" and not acknowledged:
+            forbidden_rewrites.append(copy.deepcopy(entries))
+            raise OSError("legacy expiry must not require another write after replacement")
         original_write(entries)
 
     def notify(event: FiredEvent) -> int:
-        delivered.append((event_payload(event), read_subscriptions_state()))
+        payload = event_payload(event)
+        callback_entries.append(payload)
+        delivered.append((payload, read_subscriptions_state()))
         return 0
 
     monkeypatch.setattr(watch_daemon, "write_subscriptions_state", write)
@@ -105,30 +120,46 @@ def test_outage_expiry_persists_before_one_notification_and_retires_its_poller(
         original = paths.legacy_subscriptions.read_bytes()
         subscriber = daemon._registry.subscriber(WatchKey("example/project", 1), "one")
         assert subscriber is not None and subscriber.deadline is not None
+        legacy = daemon._deliveries.legacy
+
+        def enqueue(event: FiredEvent) -> None:
+            enqueued.append(event_payload(event))
+            legacy(event)
+
+        monkeypatch.setattr(daemon._deliveries, "legacy", enqueue)
         deadline = subscriber.deadline
         wait(lambda: time.monotonic() >= deadline)
         armed = True
         observe.set()
         if failure == "definite":
-            assert failed.wait(2) and retry_waiting.wait(2)
-            assert delivered == [] and paths.legacy_subscriptions.read_bytes() == original
+            assert failed.wait(2)
+        assert publishing.wait(2)
+        assert callback_entries == [] and enqueued == []
+        assert paths.legacy_subscriptions.read_bytes() == original
+        if failure == "definite":
             assert daemon._persistence_error == "state_write_failed"
-            retry_allowed.set()
+        publish_allowed.set()
         wait(lambda: len(delivered) == 1 and not daemon.status()["subscribers"])
         wait(lambda: not daemon._pollers and not daemon.status()["in_flight"])
         payload, durable_at_delivery = delivered[0]
+        assert callback_entries == [payload] and forbidden_rewrites == []
+        assert len(committed) == 1
         assert payload["timed_out"] is True and payload["transitions"] == []
         assert "pr_state" not in payload
         if acknowledged:
             assert len(durable_at_delivery) == 1
             assert durable_at_delivery[0]["pending"]["payload"] == payload
+            assert committed[0][0]["pending"]["payload"] == payload
             assert payload["registration_id"] == subscriber.registration_id
+            assert enqueued == []
         else:
-            assert durable_at_delivery == []
+            assert durable_at_delivery == committed[0] == []
+            assert enqueued == [payload]
             assert "event_id" not in payload and "notification_protocol" not in payload
         assert len(delivered) == 1 and read_subscriptions_state() == []
         assert not daemon._registry.active_keys() and not daemon._registry.pending_events()
         assert failed.is_set() == (failure != "none")
     finally:
+        armed = False
         observe.set()
-        retry_allowed.set()
+        publish_allowed.set()
