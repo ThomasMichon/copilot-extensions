@@ -1,0 +1,9 @@
+{
+  "comment": "Keep inactive optional application associations inert in closed-wheel Source preparation",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
