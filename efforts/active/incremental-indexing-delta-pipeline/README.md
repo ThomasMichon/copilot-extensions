@@ -220,7 +220,9 @@ After the reviewed proposal, the operator admitted execution:
   [reviewed running-service declaration](azure-devops-point-targets.md#running-service-declaration-and-provider-rollback)
   now has receiver-only selected-pair/lifecycle advertisement and pure optional
   missing-support/provider-rollback validation. Existing clients remain unchanged;
-  wire-caller migration remains separate.
+  the [request-bound required-admission refinement](point-required-admission.md)
+  must be reviewed before implementation and wire-caller migration: a prior
+  provider can retain the old v2 form after health-to-request rollback.
   Ordinary v2 execution and automatic partial-effect/restore
   reconciliation remain unimplemented; live-provider, broader event-delivery
   and consumer-scale qualification remain open.

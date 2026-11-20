@@ -490,6 +490,15 @@ Do not repeat the corpus-size matrix, introduce live-provider calls or move
 native work into unit CI. The contract was reviewed before implementation;
 wire callers, broader paged acquisition, activation and rollout remain separate.
 
+### Request-bound required admission
+
+The [receiver-first request refinement](point-required-admission.md) carries an
+optional point requirement onto the existing strict hinted intake and confirms
+its selected-peer/scope admission in the receipt. This separately reviewed
+contract must precede implementation and caller migration: pre-declaration
+providers already accept the old v2 form as retained-only work, so health
+discovery alone cannot preserve required semantics across rollback.
+
 ## Implementation and validation gate
 
 1. Implement the shared typed-target intake, version-aware queue selection and
