@@ -645,6 +645,9 @@ instead of resuming a stale registry. Activation cannot substitute for the
 separately authorized guarded resume. Readoption itself uses the plain-file
 reader, validates custody on both sides, and refuses transition evidence
 before opening or recreating a historical lease.
+Final worker-startup admission and removal of the preparation guard share
+the persistence/refusal boundary. A startup refusal raises instead of
+reporting success and retains the guard, including its installation check.
 
 Successful readoption or safe resume clears the full preparation snapshot/
 installation guard, not the recovery safety boundary. That writer instance
@@ -657,7 +660,10 @@ Rejected callback admission fences queued legacy work instead of starting it
 during cleanup. Already-running callbacks must still settle under the retained
 lease. Strict readoption transfers unattempted legacy work, its process-local
 history and concurrency limit without duplication; a later authorized
-activation may continue it. Closure, release and passive cleanup cannot discard
+activation or resumption unfences and wakes it. Readoption and cleanup keep
+the queue fenced. Preparation refuses to publish a marker while unattempted
+legacy callbacks remain queued; authorized activation and a completed drain
+must settle them first. Closure, release and passive cleanup cannot discard
 that retained queue. Guard rejection does not spend a legacy attempt or falsely
 acknowledge/increment an acknowledged event. This adds no durable legacy
 delivery guarantee or new callback wire fields.

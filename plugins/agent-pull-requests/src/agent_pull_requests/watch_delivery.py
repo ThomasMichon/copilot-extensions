@@ -64,6 +64,7 @@ class Deliveries:
     def unfence_legacy(self) -> None:
         with self.lock:
             self.legacy_fenced = False
+        self.changed.set()
 
     def has_legacy_pending(self) -> bool:
         with self.lock:

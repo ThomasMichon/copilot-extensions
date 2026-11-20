@@ -267,6 +267,9 @@ and revalidate native custody before clearing the full snapshot/installation
 guard. The instance retains strict native effects/storage admission and
 refusal propagation afterward; activation cannot bypass a still-pending
 preparation guard through a weaker operation.
+Worker-startup admission, final source validation and preparation-guard removal
+share the persistence/refusal boundary. A startup refusal must raise and
+retain the installation/snapshot guard rather than report successful effects.
 
 Every new callback admission is guarded. Rejected ownership/readiness fences
 queued legacy callbacks, including the cleanup path that normally drains them.
@@ -278,6 +281,10 @@ still finish accepted work. Closure/release must settle running workers
 without first committing an irreversible shutdown intent, then refuse
 discarding a retained fenced queue. An actual external shutdown request is
 never cleared. This does not turn legacy delivery into the reliable protocol.
+Readoption transfers the fence as well as the queue; only authorized activation
+or resumption unfences and wakes that queue. Preparation refuses publication
+while queued legacy work remains, including an already-quiescent recovery
+owner. Activate and complete an authorized drain before retrying preparation.
 
 Preparation pins the prechecked historical inode through existing-only native
 acquisition, including descriptor/path comparison before PID publication.

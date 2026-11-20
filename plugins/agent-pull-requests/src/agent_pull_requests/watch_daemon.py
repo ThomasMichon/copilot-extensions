@@ -199,8 +199,6 @@ class WatchDaemon:
             self._persistence_guard = guard
             if guard is not None:
                 self._guarded_storage = True
-            if guard is None:
-                self._deliveries.unfence_legacy()
         finally:
             self._persist_lock.release()
 
@@ -228,16 +226,13 @@ class WatchDaemon:
     def _before_notify(self) -> None:
         if self._persistence_guard is None and self._effect_guard is None:
             return
-        try:
-            if self._persistence_guard is None:
+        with self._persist_lock:
+            try:
                 self._check_guard(self._effect_guard)
-            else:
-                with self._persist_lock:
-                    self._check_guard(self._effect_guard)
-                    self._check_guard(self._persistence_guard)
-        except Exception:
-            self._refuse_guarded_work()
-            raise
+                self._check_guard(self._persistence_guard)
+            except Exception:
+                self._refuse_guarded_work()
+                raise
 
     def _persist(
         self, entries: list[dict[str, Any]] | None = None, *,
@@ -624,7 +619,10 @@ class WatchDaemon:
             self._check_lifecycle_deadline(deadline)
             self._quiescent = True
 
-    def resume_effects(self, timeout: float = _SHUTDOWN_REQUEST_DEADLINE_S) -> None:
+    def resume_effects(
+        self, timeout: float = _SHUTDOWN_REQUEST_DEADLINE_S, *,
+        before_admit: Callable[[], None] | None = None,
+    ) -> None:
         """Resume the retained registry only after the owner's transaction authorizes effects."""
         with self._lifecycle_operation(timeout) as deadline:
             if not self._state_loaded:
@@ -653,11 +651,18 @@ class WatchDaemon:
             for key in self._registry.active_keys():
                 self._check_lifecycle_deadline(deadline)
                 self._ensure_poller(key)
-            with self._admission:
+            # Commit admission and guard removal against the same boundary as worker refusal.
+            with self._persist_lock, self._admission:
                 self._check_lifecycle_deadline(deadline)
-                if self._lifecycle_shutdown_event.is_set():
+                if self._lifecycle_shutdown_event.is_set() or self._shutdown_event.is_set():
                     raise RuntimeError("PR watch shutdown interrupted activation")
+                self._check_guard(self._effect_guard)
+                self._check_guard(self._persistence_guard)
+                self._check_lifecycle_deadline(deadline)
+                if before_admit is not None:
+                    before_admit()
                 self._accepting_mutations = True
+                self._deliveries.unfence_legacy()
 
     def close(self, timeout: float = _SHUTDOWN_REQUEST_DEADLINE_S) -> None:
         """Stop polling and join in-flight ticks without discarding subscriptions."""

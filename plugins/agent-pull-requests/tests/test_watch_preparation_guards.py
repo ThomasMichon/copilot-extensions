@@ -313,3 +313,168 @@ def test_installation_loss_refuses_the_affected_publication(
     finally:
         _policy(installation.os_profile)
         owner.close(timeout=3)
+
+
+def _retain_unattempted_callback(owner: WatchWriter) -> None:
+    owner.adopt(timeout=1)
+    key = WatchKey("example/project", 1)
+    owner.daemon._registry.register(
+        key, "retained", until=(MERGED,), notify={"argv": ["fixture-callback"]},
+    )
+    event, = owner.daemon._registry.apply_snapshot(
+        key, PRSnapshot(merged=True, pr_state="closed"),
+    )
+    owner.daemon._persist()
+    owner._reject_preparation()
+    owner.daemon._deliveries.legacy(event)
+    owner.adopt(timeout=1)
+
+
+@pytest.mark.parametrize("operation", ["close", "withdraw"])
+def test_readoption_keeps_retained_callbacks_fenced_until_activation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str,
+) -> None:
+    delivered: list[str] = []
+    completed, idle = threading.Event(), threading.Event()
+
+    def notify(event: FiredEvent) -> int:
+        delivered.append(event.subscriber.subscriber_id)
+        completed.set()
+        return 0
+
+    owner = WatchWriter(
+        root=tmp_path, authorize=lambda _: None, fetch=lambda *_: PRSnapshot(),
+        notify=notify,
+    )
+    try:
+        _retain_unattempted_callback(owner)
+        with pytest.raises(RuntimeError, match="legacy work"):
+            getattr(owner, operation)(timeout=1)
+        assert delivered == [] and owner.writer_held and owner.daemon.has_legacy_pending()
+        deliveries = owner.daemon._deliveries
+        wait, resume = deliveries.changed.wait, deliveries.resume
+
+        def wait_fenced(timeout: float | None = None) -> bool:
+            idle.set()
+            return wait(timeout)
+
+        def start_fenced() -> None:
+            resume()
+            assert idle.wait(1)
+
+        monkeypatch.setattr(deliveries.changed, "wait", wait_fenced)
+        monkeypatch.setattr(deliveries, "resume", start_fenced)
+        owner.activate(timeout=1)
+        assert completed.wait(1)
+    finally:
+        if not owner._closed:
+            if not owner.daemon.effects_enabled:
+                owner.activate(timeout=1)
+            owner.daemon.quiesce(timeout=3)
+            owner.close(timeout=3)
+    assert delivered == ["retained"]
+
+
+def test_preparation_cannot_strand_a_retained_callback_queue(tmp_path: Path) -> None:
+    delivered: list[str] = []
+
+    def notify(event: FiredEvent) -> int:
+        delivered.append(event.subscriber.subscriber_id)
+        return 0
+
+    owner = WatchWriter(
+        root=tmp_path, authorize=lambda _: None, fetch=lambda *_: PRSnapshot(),
+        notify=notify,
+    )
+    paths = watch_state_paths(tmp_path)
+    try:
+        _retain_unattempted_callback(owner)
+        state = paths.legacy_subscriptions.read_bytes()
+        with pytest.raises(RuntimeError, match="queued legacy"):
+            owner.prepare_state_transition(timeout=1)
+        assert not paths.journal.exists() and not paths.preparation_pin.exists()
+        assert paths.legacy_subscriptions.read_bytes() == state and delivered == []
+        owner.adopt(timeout=1)
+        owner.activate(timeout=1)
+        owner.daemon.quiesce(timeout=3)
+        owner.prepare_state_transition(timeout=1)
+        assert paths.journal.exists() and delivered == ["retained"]
+    finally:
+        # Also settle the intentionally failing baseline's fixture-owned marker.
+        paths.journal.unlink(missing_ok=True)
+        paths.preparation_pin.unlink(missing_ok=True)
+        owner.adopt(timeout=1)
+        owner.activate(timeout=1)
+        owner.daemon.quiesce(timeout=3)
+        owner.close(timeout=3)
+
+
+@pytest.mark.parametrize("operation", ["resume", "activate"])
+def test_startup_worker_refusal_cannot_report_success_or_clear_the_guard(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str,
+) -> None:
+    installation = _installation(tmp_path)
+    owner = WatchWriter(
+        root=installation.state_root, authorize=lambda _: None, fetch=lambda *_: PRSnapshot(),
+    )
+    worker_errors: list[BaseException] = []
+    custody_lost = False
+    identity = owner._lease.held_file_identity
+
+    def custody() -> tuple[int, int]:
+        if custody_lost:
+            raise PermissionError("controlled startup custody loss")
+        return identity()
+
+    def refuse() -> None:
+        nonlocal custody_lost
+        if operation == "resume":
+            _policy(installation.os_profile, False)
+        else:
+            custody_lost = True
+        try:
+            owner.daemon._before_notify()
+        except BaseException as error:
+            worker_errors.append(error)
+
+    def start(_key: WatchKey) -> None:
+        worker = threading.Thread(target=refuse)
+        worker.start()
+        worker.join(2)
+        assert not worker.is_alive()
+
+    def unfinished(*_args: Any, **_kwargs: Any) -> None:
+        raise TimeoutError("controlled unfinished drain")
+
+    try:
+        owner.adopt(timeout=1)
+        owner.activate(timeout=1)
+        with monkeypatch.context() as blocked:
+            blocked.setattr(owner.daemon, "_stop_workers", unfinished)
+            with pytest.raises(TimeoutError, match="unfinished drain"):
+                owner.prepare_state_transition(timeout=1, installation=installation)
+        owner.daemon.settle_workers(timeout=1, preserve_queued=True)
+        if operation == "activate":
+            owner.adopt(timeout=1)
+        guard = owner._preparation_guard
+        owner.daemon._registry.register(
+            WatchKey("example/project", 1), "startup", until=(MERGED,),
+            notify={"argv": ["fixture-callback"]},
+        )
+        with monkeypatch.context() as startup:
+            startup.setattr(owner._lease, "held_file_identity", custody)
+            startup.setattr(owner.daemon, "_ensure_poller", start)
+            with pytest.raises((PermissionError, RuntimeError)):
+                getattr(owner, operation)(timeout=3)
+        assert len(worker_errors) == 1
+        assert not owner.read_ready and not owner.daemon.effects_enabled
+        assert owner._preparation_guard is guard
+        if operation == "resume":
+            assert guard is not None
+            with pytest.raises(PermissionError):
+                owner.adopt(timeout=1)
+    finally:
+        custody_lost = False
+        _policy(installation.os_profile)
+        owner.daemon.settle_workers(timeout=3, preserve_queued=True)
+        owner.close(timeout=3)

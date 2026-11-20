@@ -817,7 +817,10 @@ descriptor custody, drains without releasing the writer and records only
 final-publication guards. Preparation rejection closes admission, permanently
 retains guarded native/storage checks and fences unattempted queued callbacks;
 unsafe repair requires strict readoption. Readoption moves the retained queue,
-history and concurrency limits only after old workers settle. It is not
+history, fence and concurrency limits only after old workers settle. Only
+authorized activation/resumption unfences it; preparation refuses publication
+until retained legacy work has drained. Startup refusal and guard removal
+share the final admission boundary. It is not
 connected to ordinary CLI/control entry. Physical sealing, post-seal recovery
 and authority selection remain unimplemented; no map/cwd capability or
 isolated subscription publisher is activated.

@@ -156,7 +156,21 @@ class WatchWriter:
                 timeout=self._remaining(deadline), preserve_queued=True,
             )
         if self.daemon.has_legacy_pending():
-            raise RuntimeError("guarded legacy work requires readoption before closure or release")
+            raise RuntimeError("guarded legacy work requires activation and drain before closure or release")
+
+    def _resume_effects(self, deadline: float) -> None:
+        if not self._strict_custody:
+            self.daemon.resume_effects(timeout=self._remaining(deadline))
+            self._remaining(deadline)
+            return
+
+        def complete() -> None:
+            self.daemon.set_persistence_guard(None, timeout=self._remaining(deadline))
+            self._preparation_guard = None
+
+        self.daemon.resume_effects(
+            timeout=self._remaining(deadline), before_admit=complete,
+        )
 
     def adopt(self, *, timeout: float) -> None:
         """Acquire the real writer lock before reading the final snapshot."""
@@ -181,8 +195,7 @@ class WatchWriter:
                 raise RuntimeError("watch preparation requires guarded resume or readoption")
             try:
                 self._check_callback_effects()
-                self.daemon.resume_effects(timeout=self._remaining(deadline))
-                self._remaining(deadline)
+                self._resume_effects(deadline)
             except Exception:
                 if self._strict_custody:
                     self._reject_preparation()
@@ -244,6 +257,8 @@ class WatchWriter:
                         raise PermissionError("watch preparation installation state root differs")
                 if not self.daemon.quiescent or self.daemon.effects_enabled:
                     raise PermissionError("watch preparation requires completed quiescence")
+                if self.daemon.has_legacy_pending():
+                    raise RuntimeError("queued legacy callbacks require activation and completed drain")
                 check_deadline()
 
             self._validate("prepare-state-transition", deadline)
@@ -326,11 +341,7 @@ class WatchWriter:
                 self._reject_preparation()
                 raise
             try:
-                self.daemon.resume_effects(timeout=self._remaining(deadline))
-                self._remaining(deadline)
-                self.daemon.set_persistence_guard(None, timeout=self._remaining(deadline))
-                self._remaining(deadline)
-                self._preparation_guard = None
+                self._resume_effects(deadline)
             except Exception:
                 if self._strict_custody:
                     self._reject_preparation()

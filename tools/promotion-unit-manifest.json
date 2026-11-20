@@ -6947,6 +6947,6 @@
         "libs/agent-procutil/src/agent_procutil/scratch.py": "3d4f488761f75b4e743feb22bbffaf8de903b39ed34be6a6bc2bc7c84a6af58f",
         "plugins/agent-pull-requests/src/agent_pull_requests/watch_transition.py": "17c61b2a4e65cd2de4834c2b99bbf7fc73f0aacf30906e563d8c387a01b40c88",
         "tools/promotion_unit_tests/test_watch_preparation.py": "922ecd434c3063dcac8d47c71a1ce4124e54dfbbb052cee4def9043efe9bda26",
-        "plugins/agent-pull-requests/src/agent_pull_requests/watch_delivery.py": "ae78116c7ec3c05c088455ce58b54e27a817f179e18019c022b069e5eee196d0"
+        "plugins/agent-pull-requests/src/agent_pull_requests/watch_delivery.py": "ebc5d3802cd628208711e6a09cc115083e3645136e4a6e6c9436d36c5ac508bb"
     }
 }
