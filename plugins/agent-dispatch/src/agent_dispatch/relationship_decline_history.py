@@ -10,7 +10,9 @@ from .queue_allocation_revisions import RETIRED_BEFORE_ALLOCATION
 from .queue_records import TaskError
 
 
-def _undischarged(task: Literal[":id", "t.id", "NEW.id"]) -> str:
+def _undischarged(task: Literal[":id", "t.id", "NEW.id", "OLD.id"]) -> str:
+    from .completion_origins import PREPARATION_ORIGINS
+
     # The latest assignment must itself have a confirmed decline. Only older
     # direct claims may use an independently closed, audited unassignment.
     return f"""(WITH events AS (
@@ -53,6 +55,22 @@ def _undischarged(task: Literal[":id", "t.id", "NEW.id"]) -> str:
           )
     ) SELECT NOT EXISTS (SELECT 1 FROM declined WHERE id=(SELECT MAX(id) FROM events))
           OR EXISTS (SELECT 1 FROM events WHERE id NOT IN (SELECT id FROM declined UNION SELECT id FROM yielded))
+          -- Ignore only an unadvanced, failed proposal made *before* the original
+          -- assignment's unassignment. The LEFT JOIN projection preserves unknowns.
+          OR EXISTS (
+              SELECT 1 FROM ({PREPARATION_ORIGINS}) o JOIN task_events p ON p.id=o.preparation_event_id
+              WHERE o.task_id={task} AND (
+                  o.assignment_event_id IS NULL OR json_type(p.submission_preparation,'$.advancement') IS NOT NULL
+                  OR json_type(p.submission_preparation,'$.blocker.code') IS NOT 'text'
+                  OR NOT EXISTS (
+                      SELECT 1 FROM events e WHERE e.id=o.assignment_event_id
+                        AND e.id IN (SELECT id FROM yielded UNION SELECT id FROM declined)
+                        AND p.id < (SELECT MIN(u.id) FROM task_events u WHERE u.task_id=e.task_id
+                                    AND u.id>e.id AND u.from_status IN ('claimed','started','suspended')
+                                    AND u.to_status='queued' AND u.unassigned_worker=e.worker)
+                  )
+              )
+          )
           OR EXISTS (
               SELECT 1 FROM spawn_reservations s WHERE s.task_id={task} AND s.task_relationship_required=1
                 AND NOT {RETIRED_BEFORE_ALLOCATION} AND NOT (
@@ -84,11 +102,26 @@ def admit_ungoverned_replacement(
     )
 
 
-def relationship_required_condition(task: Literal["t", "NEW"]) -> str:
-    return (
-        f"((EXISTS (SELECT 1 FROM task_events e WHERE e.task_id={task}.id AND e.task_relationship IS NOT NULL)"
-        f" OR EXISTS (SELECT 1 FROM spawn_reservations s WHERE s.task_id={task}.id AND s.task_relationship_required=1))"
-        f" AND (NOT EXISTS (SELECT 1 FROM spawn_reservations n WHERE n.task_id={task}.id"
-        f" AND n.task_relationship_required=0 AND n.task_relationship_generation={task}.generation)"
-        f" OR ({_undischarged('NEW.id' if task == 'NEW' else 't.id')})))"
+TaskAlias = Literal["t", "NEW", "OLD"]
+
+
+def require_if_not_discharged(task: TaskAlias, history: str) -> str:
+    task_id: Literal["NEW.id", "OLD.id", "t.id"] = (
+        "NEW.id" if task == "NEW" else "OLD.id" if task == "OLD" else "t.id"
     )
+    return (
+        f"(({history}) AND (NOT EXISTS (SELECT 1 FROM spawn_reservations n WHERE n.task_id={task_id}"
+        f" AND n.task_relationship_required=0 AND n.task_relationship_generation={task}.generation)"
+        f" OR ({_undischarged(task_id)})))"
+    )
+
+
+def relationship_history(task: TaskAlias) -> str:
+    return (
+        f"EXISTS (SELECT 1 FROM task_events e WHERE e.task_id={task}.id AND e.task_relationship IS NOT NULL)"
+        f" OR EXISTS (SELECT 1 FROM spawn_reservations s WHERE s.task_id={task}.id AND s.task_relationship_required=1)"
+    )
+
+
+def relationship_required_condition(task: TaskAlias) -> str:
+    return require_if_not_discharged(task, relationship_history(task))

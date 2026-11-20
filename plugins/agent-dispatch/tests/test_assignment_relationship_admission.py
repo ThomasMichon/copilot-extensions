@@ -91,7 +91,7 @@ def test_previous_bound_assignment_cannot_protect_another_pool_workspace_after_r
             " allocation_project='example', worktree_path='/different' WHERE key=?",
             (reservation.key,),
         )
-        conn.execute("DROP TRIGGER task_relationship_execution_guard_v9")
+        conn.execute("DROP TRIGGER task_relationship_execution_guard_v10")
         conn.execute(
             "CREATE TRIGGER task_relationship_execution_guard BEFORE UPDATE ON tasks"
             " BEGIN SELECT 1; END"
@@ -348,7 +348,7 @@ def test_retired_agent_detachment_does_not_readmit_execution_or_release_submitte
     queue.retire_spawn(reservation.key, exact_absence=True)
     if legacy_guard:
         with queue._connect() as conn:
-            conn.execute("DROP TRIGGER task_relationship_execution_guard_v9")
+            conn.execute("DROP TRIGGER task_relationship_execution_guard_v10")
             conn.execute(
                 "CREATE TRIGGER task_relationship_execution_guard_v3"
                 " BEFORE UPDATE OF status, generation, owner, owner_session_id ON tasks"

@@ -14,7 +14,7 @@ from .assignment_workspace import AssignmentWorkspace, same_assignment_worker
 from .queue_common import CompletionOutcome, StructuredResult, Task, _task_transition_spec
 from .queue_execution_handoff import require_execution_admission
 from .queue_records import TaskError
-from .relationship_decline_history import relationship_required_condition
+from .relationship_decline_history import TaskAlias, relationship_history, require_if_not_discharged
 from .queue_task_relationships import latest_relationship, require_relationship
 
 
@@ -40,19 +40,26 @@ def _latest(conn: sqlite3.Connection, task_id: str) -> sqlite3.Row | None:
 
 
 def require_unprepared_submission(conn: sqlite3.Connection, task_id: str) -> None:
-    if _latest(conn, task_id) is not None:
+    required = conn.execute(
+        "SELECT " + retained_preparation_condition("t") + " FROM tasks t WHERE t.id=?", (task_id,),
+    ).fetchone()
+    if required is not None and required[0]:
         raise TaskError(
             "task has a retained submission preparation;"
             " authoritative readiness is not yet available"
         )
 
 
+def _preparation_history(task: TaskAlias) -> str:
+    return f"EXISTS (SELECT 1 FROM task_events e WHERE e.task_id={task}.id AND e.submission_preparation IS NOT NULL)"
+
+
+def retained_preparation_condition(task: TaskAlias) -> str:
+    return require_if_not_discharged(task, _preparation_history(task))
+
+
 def submission_required_condition(task: Literal["t", "NEW"]) -> str:
-    """Persist positive governed assignment evidence across provider rollback."""
-    return (
-        relationship_required_condition(task) + f" OR EXISTS (SELECT 1 FROM task_events e WHERE e.task_id={task}.id"
-        " AND e.submission_preparation IS NOT NULL)"
-    )
+    return require_if_not_discharged(task, relationship_history(task) + " OR " + _preparation_history(task))
 
 
 def migrate_submission_preparation(conn: sqlite3.Connection) -> None:
@@ -88,13 +95,13 @@ def migrate_submission_preparation(conn: sqlite3.Connection) -> None:
     )
     # Install the replacement before removing the stricter rollback-era trigger.
     conn.execute(
-        "CREATE TRIGGER IF NOT EXISTS submission_preparation_completion_guard_v2"
+        "CREATE TRIGGER IF NOT EXISTS submission_preparation_completion_guard_v3"
         " BEFORE UPDATE ON tasks"
         " WHEN NEW.status IN ('submitted','completed')"
         " AND OLD.status NOT IN ('submitted','completed')"
-        " AND EXISTS (SELECT 1 FROM task_events e WHERE e.task_id=NEW.id"
-        " AND e.submission_preparation IS NOT NULL)"
-        " AND NOT EXISTS (SELECT 1 FROM task_events e WHERE e.task_id=NEW.id"
+        " AND (" + retained_preparation_condition("OLD")
+        + " OR (NEW.generation!=OLD.generation AND " + _preparation_history("OLD") + "))"
+        + " AND NOT EXISTS (SELECT 1 FROM task_events e WHERE e.task_id=NEW.id"
         " AND json_extract(e.submission_preparation, '$.advancement.state')='admitting'"
         " AND json_extract(e.submission_preparation, '$.advancement.version')=1"
         " AND NEW.status='submitted' AND NEW.require_verification=1"
@@ -116,7 +123,7 @@ def migrate_submission_preparation(conn: sqlite3.Connection) -> None:
         " 'submission preparation requires authoritative readiness'); END"
     )
     conn.execute(
-        "CREATE TRIGGER IF NOT EXISTS submission_required_preparation_guard_v4"  # noqa: S608 -- fixed predicate
+        "CREATE TRIGGER IF NOT EXISTS submission_required_preparation_guard_v5"  # noqa: S608 -- fixed predicate
         " BEFORE UPDATE OF status ON tasks"
         " WHEN NEW.status IN ('submitted','completed')"
         " AND OLD.status NOT IN ('submitted','completed')"
@@ -143,17 +150,19 @@ def migrate_submission_preparation(conn: sqlite3.Connection) -> None:
         " BEGIN SELECT RAISE(ABORT, 'submission advancement receipt is immutable'); END"
     )
     conn.execute(
-        "CREATE TRIGGER IF NOT EXISTS submission_preparation_result_retained_v2"
+        "CREATE TRIGGER IF NOT EXISTS submission_preparation_result_retained_v3"
         " BEFORE UPDATE ON tasks"
         " WHEN OLD.status IN ('submitted','completed')"
         " AND NEW.status IN ('submitted','completed')"
-        " AND EXISTS (SELECT 1 FROM task_events e WHERE e.task_id=OLD.id"
-        " AND e.submission_preparation IS NOT NULL)"
-        " AND (NEW.result IS NOT OLD.result OR NEW.result_ref IS NOT OLD.result_ref"
+        " AND " + retained_preparation_condition("OLD")
+        + " AND (NEW.result IS NOT OLD.result OR NEW.result_ref IS NOT OLD.result_ref"
         " OR NEW.completed_by IS NOT OLD.completed_by OR NEW.completed_at IS NOT OLD.completed_at"
         " OR NEW.require_verification<>1)"
         " BEGIN SELECT RAISE(ABORT, 'submission preparation result is retained'); END"
     )
+    conn.execute("DROP TRIGGER IF EXISTS submission_preparation_completion_guard_v2")
+    conn.execute("DROP TRIGGER IF EXISTS submission_preparation_result_retained_v2")
+    conn.execute("DROP TRIGGER IF EXISTS submission_required_preparation_guard_v4")
     conn.execute("DROP TRIGGER IF EXISTS submission_required_preparation_guard_v3")
     conn.execute("DROP TRIGGER IF EXISTS submission_required_preparation_guard_v2")
     conn.execute("DROP TRIGGER IF EXISTS submission_preparation_result_retained")

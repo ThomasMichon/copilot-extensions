@@ -1,6 +1,7 @@
 """A new generation can depend on exact discharges, never on a missing receipt."""
 
 from pathlib import Path
+import json
 import sqlite3
 from typing import Any
 
@@ -51,6 +52,12 @@ def replace_after_decline(queue: TaskQueue, task_id: str, now: float) -> SpawnRe
         "prebind-foreign-ref",
         "prebind-conflicting-identity",
         "prebind-foreign-recovery",
+        "proposal",
+        "unknown-proposal",
+        "late-proposal",
+        "detached",
+        "proposal-detached",
+        "legacy-detached",
     ],
 )
 def test_direct_unassignment_before_decline_survives_removal_of_capture(
@@ -70,6 +77,13 @@ def test_direct_unassignment_before_decline_survives_removal_of_capture(
             claim(q, first, t)
     else:
         claim(q, first, t)
+    proposal = None
+    if "proposal" in history:
+        q.start(t.id, first.worker_id, owner_session_id="manual-native")
+        with pytest.raises(TaskError, match="readiness"):
+            q.complete(t.id, first.worker_id, result={"prior": True})
+        proposal = q.submission_preparation(t.id)
+        assert proposal and proposal["blocker"] and proposal.get("advancement") is None
     q.yield_task(t.id, first.worker_id)
     direct = q.reconcile_task_relationship(t.id)
     assert direct["state"] == "closed"
@@ -121,21 +135,40 @@ def test_direct_unassignment_before_decline_survives_removal_of_capture(
         with pytest.raises(TaskError, match="original direct assignment receipt"):
             replace_after_decline(reopened, t.id, due)
         return
+
+    def append_proposal(conn: sqlite3.Connection, *, foreign: bool) -> None:
+        assert proposal is not None
+        copied = dict(proposal)
+        if foreign:
+            copied["request"] = {**proposal["request"], "assignment_request_id": "foreign"}
+        conn.execute(
+            "INSERT INTO task_events(task_id,ts,from_status,to_status,worker,note,submission_preparation)"
+            " VALUES (?,100,'started','started',?,'unqualified fixture',?)",
+            (t.id, first.worker_id, json.dumps(copied)),
+        )
+
+    if history == "unknown-proposal":
+        with reopened._connect() as conn:
+            append_proposal(conn, foreign=True)
+        with pytest.raises(TaskError, match="cannot drop a governed assignment"):
+            replace_after_decline(reopened, t.id, due)
+        return
     replacement = replace_after_decline(reopened, t.id, due)
-    queued = reopened.exhaust_pool_startup(
-        replacement.key,
-        generation=current_task(reopened, t.id).generation,
-        startup_revision=replacement.startup_revision,
-        now=due + 600,
-    )
-    reopened.request_spawn_release(replacement.key, finished_startup_revision=1, now=due + 601)
-    reopened.retire_spawn(
-        replacement.key, exact_absence=True, conclusion_state="skipped", now=due + 602
-    )
-    due = queued.not_before
-    retry = replace_after_decline(reopened, t.id, due)
-    assert retry.key != replacement.key and retry.allocation_reservation_key == replacement.key
-    replacement = retry
+    if "detached" not in history:
+        queued = reopened.exhaust_pool_startup(
+            replacement.key,
+            generation=current_task(reopened, t.id).generation,
+            startup_revision=replacement.startup_revision,
+            now=due + 600,
+        )
+        reopened.request_spawn_release(replacement.key, finished_startup_revision=1, now=due + 601)
+        reopened.retire_spawn(
+            replacement.key, exact_absence=True, conclusion_state="skipped", now=due + 602
+        )
+        due = queued.not_before
+        retry = replace_after_decline(reopened, t.id, due)
+        assert retry.key != replacement.key and retry.allocation_reservation_key == replacement.key
+        replacement = retry
     reopened.record_spawn_worktree(
         replacement.key,
         "replacement",
@@ -181,7 +214,62 @@ def test_direct_unassignment_before_decline_survives_removal_of_capture(
         owner_session_id="other-native",
         now=due + 1,
     )
+    if history == "late-proposal":
+        with reopened._connect() as conn:
+            append_proposal(conn, foreign=False)
+            with pytest.raises(sqlite3.IntegrityError, match="readiness|unconfirmed"):
+                conn.execute("UPDATE tasks SET status='completed' WHERE id=?", (t.id,))
+        with pytest.raises(TaskError):
+            reopened.complete(t.id, "host-a/replacement", result={"ok": True})
+        return
     reopened.complete(t.id, "host-a/replacement", result={"ok": True})
+    if proposal is not None:
+        assert reopened.submission_preparation(t.id) == proposal
+    if "detached" in history:
+        reopened.request_spawn_release(replacement.key, disposition="settled")
+        reopened.retire_spawn(replacement.key, exact_absence=True)
+        if history == "legacy-detached":
+            from agent_dispatch import completion_origins
+            monkeypatch.setattr(completion_origins, "capture_terminal_detachment", lambda *_: None)
+        reopened.recover_task(
+            t.id,
+            operation="detach_agent",
+            expected_revision=reopened.task_diagnostics(t.id)["revision"],
+            request_id="remove-native",
+            actor="operator",
+            reason="verified retirement",
+        )
+        before = current_task(reopened, t.id)
+        assert before.owner_session_id is None
+        if history == "legacy-detached":
+            with pytest.raises(TaskError, match="exact original"):
+                reopened.complete(t.id, "host-a/replacement", result={"ok": True})
+            assert current_task(reopened, t.id) == before
+            return
+        replay = reopened.complete_with_outcome(t.id, "host-a/replacement", result={"ok": True})
+        assert replay.task == before and replay.event_type is None
+        for worker, data in [
+            ("host-a/other", {"ok": True}),
+            ("host-a/replacement", {"ok": False}),
+        ]:
+            with pytest.raises(TaskError, match="exact original"):
+                reopened.complete(t.id, worker, result=data)
+        with pytest.raises(TaskError, match="incarnation changed"):
+            reopened.complete(
+                t.id,
+                "host-a/replacement",
+                result={"ok": True},
+                expected_generation=before.generation - 1,
+                expected_owner_session_id="other-native",
+            )
+        with (
+            reopened._connect() as conn,
+            pytest.raises(sqlite3.IntegrityError, match="unconfirmed"),
+        ):
+            conn.execute("UPDATE tasks SET status='started' WHERE id=?", (t.id,))
+        assert current_task(reopened, t.id) == before
+        if proposal is not None:
+            assert reopened.submission_preparation(t.id) == proposal
     assert current_task(reopened, t.id).status == "completed"
 
 

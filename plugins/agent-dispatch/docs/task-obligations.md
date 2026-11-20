@@ -762,8 +762,11 @@ proposal's sealed request ID, workspace, worker and incarnation binding
 against the acquisition. An unmatched proposal is returned with a null origin;
 it is **not** absence or permission to ignore it. The SQL projection
 `PREPARATION_ORIGINS` is available for transaction and persisted-guard consumers.
-The projection does not mark a proposal discharged, change its contents, or
-select which proposal may advance.
+For an explicitly ungoverned replacement, Dispatch uses the projection at
+placement and in the execution and completion guards. A failed, unadvanced
+proposal predating its assignment's verified unassignment remains immutable
+history, not the replacement's proposal. An unknown origin, newer proposal,
+or unconfirmed discharge still blocks the exemption.
 
 A successful `detach_agent` may include an additive `completion_origin_v1` in
 its existing recovery receipt. It is captured inside the verified detachment
@@ -779,8 +782,11 @@ inside the caller's queue transaction. It requires the same terminal outcome,
 the matching detach receipt and attachment, the immediately preceding pool
 generation, the exact retired native, and byte-identical result and reference
 (including absence). Its positive answer describes a past completion, **not**
-an execution permit or a waiver of caller identity/generation checks. It does
-not itself change completion routing or the submission guards.
+an execution permit or a waiver of caller identity/generation checks. For a
+completed ungoverned replacement whose agent was subsequently detached,
+`complete` uses this check only to return an exact no-op replay. A foreign
+worker, changed result, or absent proof cannot enrich the prior completion or
+admit another assignment.
 
 ### Internal guarded submission advancement
 
