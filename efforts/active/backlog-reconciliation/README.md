@@ -410,6 +410,17 @@ the non-public approval conversation.
 
 ## Plan
 
+The [portable fixture and runtime-resource unit](journal/2026/11.20-portable-fixture-and-runtime-resource-receiving.md)
+proposes complete #13082/#13369/#13378 receiving in existing Test Portfolio
+Phase 4 waves through Phase 7: portable peer handles, complete distribution/
+staged resources and all six caller/session/incarnation cases. Fifteen new
+technical rows remain unchecked, original alternatives and actual custodians
+are preserved, and all three sources remain OPEN during proposal.
+The same record follows through actual reviewed #13730 and three separate
+Vault NOT_PLANNED tracking retirements, with eighteen technical rows still
+unchecked. The complete 12:40 PT whole census remains 880 open, 151 above
+fixed 729, with no arrivals or departures in this proposal.
+
 The [finite Vault copy-transaction unit](journal/2026/11.20-vault-copy-and-existing-keepers.md)
 proposes complete #13077/#13083/#13085 receiving in existing Vault Service P2:
 relocation/fencing, selected-peer copy support and uncertain overwrite

@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-20 - Portable fixture and runtime-resource receiving](journal/2026/11.20-portable-fixture-and-runtime-resource-receiving.md)
+
 - [2026-11-20 - Finite Vault copy contracts and existing keepers](journal/2026/11.20-vault-copy-and-existing-keepers.md)
 
 - [2026-11-20 - Retained supervisor recovery and existing canonicals](journal/2026/11.20-retained-supervisor-and-existing-canonicals.md)

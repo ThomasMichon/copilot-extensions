@@ -55,6 +55,25 @@ release gates, or count unexecuted native coverage as passing.
 
 ## Coordination
 
+The proposed finite #13082 portable-pidfd, #13369 distribution/profile
+and #13378 caller-session/PID-reuse fixture families enter the existing
+Phase 4 Vault/shared-library, Containers and Bridge waves through Phase 7
+migration-intake and domain review. Preserve the primary maintainer and
+actual fixture, process-identity, runtime-resource, migration/preparation,
+runner, source/native/release and resource custodians, OPEN #1303, all
+incumbent states/holds, unit-only required CI and hosted-Windows quiescence.
+No implementer, common cause, execution or resource is appointed.
+
+Normal review must deliver every P/V/G clause, continuing Coordination,
+dated Journal and intake route. Keep all three source issues OPEN during
+proposal; permitted current whole receiving/source/custody readback and
+separate source-specific judgments follow actual complete reviewed delivery.
+All fifteen new technical rows remain unchecked. Preserve each original
+fallback/tier alternative and failure packet; unrelated source delivery or
+required unit success is not qualification. No generic ACK, unrelated
+whole-portfolio prerequisite, production-policy waiver or execution grant
+is introduced.
+
 The complete #1475 full-user Windows WinGet bootstrap-venue family was
 accepted through reviewed #13701 and the explicit plugin-AND-runtime
 clarification #13703 in Phase 5's owning-runner/native-workflow lane and
@@ -680,6 +699,42 @@ Agent-recommended Phase 3 Worktrees-pilot receiving through Phase 7.
   observable features per process launch.
 - [ ] Keep each plugin's contract map, inventory, and TESTING coverage summary
   current as its wave lands.
+
+#### Finite portable-pidfd fixture contract from #13082
+
+Agent-recommended Phase 4 Vault/shared-library receiving through Phase 7.
+
+- [ ] **P13082-1:** Preserve the [portable helper fallback OR explicit unsupported skip](fixture-authority-and-cleanup.md#p13082-1-portable-peer-handle), not a direct `os.pidfd_open` requirement.
+- [ ] **P13082-2:** Retain the [original nine-error module and existing process custody](fixture-authority-and-cleanup.md#p13082-2-original-module-and-custody), without changing production policy.
+
+##### Local Validation for #13082
+
+- [ ] **V13082-1:** Qualify the [original module on the supported portable interpreter](fixture-authority-and-cleanup.md#v13082-1-original-portable-module), with honest unsupported outcomes.
+- [ ] **V13082-2:** Preserve [peer-handle assertions, capability distinctions and runner settlement](fixture-authority-and-cleanup.md#v13082-2-faithful-outcomes), not unrelated diagnostic credit.
+
+#### Finite distribution and staged-profile fixtures from #13369
+
+Agent-recommended Phase 4 Containers-wave receiving through Phase 7.
+
+- [ ] **P13369-1:** Refresh the [complete fixture/staged resource contract](fixture-authority-and-cleanup.md#p13369-1-complete-resource-fixtures), not only three copied files.
+- [ ] **P13369-2:** Preserve [wheel/sdist expectations, per-resource refusals and independent scope](fixture-authority-and-cleanup.md#p13369-2-assertions-and-independent-scope).
+
+##### Local Validation for #13369
+
+- [ ] **V13369-1:** Qualify [both original files and every distribution/refusal expectation](fixture-authority-and-cleanup.md#v13369-1-both-original-files) against the current intended builder contract.
+- [ ] **V13369-2:** Qualify [both staged-load modes AND native-policy refusal](fixture-authority-and-cleanup.md#v13369-2-all-three-profile-cases), retaining original failure attribution.
+
+#### Finite caller-session and process-incarnation fixtures from #13378
+
+Agent-recommended Phase 4 Bridge-wave receiving through Phase 7.
+
+- [ ] **P13378-1:** Retain [all six exact caller/migration/PID cases and their distinct failures](fixture-authority-and-cleanup.md#p13378-1-six-case-packet), without assuming one cause.
+- [ ] **P13378-2:** Resolve [managed-runner pass OR justified explicit host-dependent tier](fixture-authority-and-cleanup.md#p13378-2-original-outcome-alternative), preserving assertions and bounds.
+
+##### Local Validation for #13378
+
+- [ ] **V13378-1:** Qualify [each original case and its selected supported outcome](fixture-authority-and-cleanup.md#v13378-1-complete-selected-outcomes).
+- [ ] **V13378-2:** Preserve [custody/incarnation negatives, deadlines and truthful unreached coverage](fixture-authority-and-cleanup.md#v13378-2-no-false-aggregate).
 
 #### Finite observed Windows bytecode attribution from #13598
 
@@ -1722,6 +1777,16 @@ an assertion that the historical source defect remains current._
   effort Done, and archive it.
 
 ### Phase 7 — Reconcile deferred backlog
+
+The proposed P13082/V13082/G13082, P13369/V13369/G13369 and
+P13378/V13378/G13378 families each have one primary placement in the existing
+Phase 4 Vault/shared-library, Containers and Bridge waves, respectively.
+The append-only migration-intake route retains complete finite contracts
+and actual custodians. This same planning unit supplies direct Plan,
+local/actual global Validation, Coordination and dated Journal for review.
+The sources stay OPEN during proposal; no new tracker, administrative
+checkbox, implementation appointment, execution enrollment or custody
+transfer follows from routing.
 
 The accepted complete P1475/V1475/G1475 family has one primary placement in
 Phase 5's owning-runner/native-workflow lane. The append-only migration-intake
@@ -3079,6 +3144,26 @@ independent of #10031's large-caller startup/cutover lane.
 
 ## Validation Plan
 
+- [ ] **G13082:** Resolve every P13082/V13082 and continuing Coordination
+  clause for the original portable-interpreter peer-handle module: shared
+  wrapper/libc fallback OR clear unsupported skip only when neither works,
+  retained assertions and nine-error history, existing process/runner custody
+  and honest results. Preserve original bounds and Phase 7 acceptance; a
+  diagnostic fix or documentary merge is not this module's qualification.
+- [ ] **G13369:** Resolve every P13369/V13369 and continuing Coordination
+  clause for BOTH original files: all three current runtime resources,
+  wheel/sdist expectations, per-resource refusal controls, both staged-load
+  modes AND native-policy refusal. Retain five-failure/twenty-error and
+  three-case history, actual source/build/fixture owners and original tiers;
+  discovery, Fleet work or required unit CI does not qualify this packet.
+- [ ] **G13378:** Resolve every P13378/V13378 and continuing Coordination
+  clause for ALL six migration/caller-session/PID-incarnation cases under
+  the managed runner OR justified explicit host-dependent tiers. Preserve
+  writable preparation, all four remote caller cases, process-birth
+  distinctions, original deadlines and truthful later-not-run coverage.
+  Keep actual owners, unit-only CI and execution holds; neither a timeout
+  waiver nor another caller's source pass fulfills the family.
+
 - [ ] **G1475:** Resolve every P1475/V1475 and continuing Coordination clause:
   the supported full-user WinGet venue; PowerShell/WinGet/Git-only baseline
   plus required checkout transport; subject WinGet Copilot, external marketplace,
@@ -3527,6 +3612,8 @@ with another unbounded full-suite run. Portfolio reductions follow only after
 the inventory and evidence gates are available.
 
 ## Journal
+
+### [2026-11-20 UTC - Proposed portable fixture and runtime-resource receiving](../backlog-reconciliation/journal/2026/11.20-portable-fixture-and-runtime-resource-receiving.md)
 
 ### [2026-11-20 UTC - Full-user WinGet receiving and tracking accepted](../backlog-reconciliation/journal/2026/11.20-independent-inference-identity-and-custody.md#accepted-portfolio-receiving-follow-through)
 

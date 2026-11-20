@@ -50,16 +50,21 @@ enrollment or admit the remaining platform/UI/migration campaign by implication.
 
 ## Coordination
 
-The proposed [finite copy-transaction cases](copy-transaction-contracts.md)
+The reviewed [finite copy-transaction cases](copy-transaction-contracts.md)
 retain complete #13077 relocation/fencing, #13083 selected-service copy
 capability and #13085 uncertain overwrite-recovery acceptance under P2.
-All eighteen new technical rows remain unchecked. Existing CLI/service,
+#13730 delivered complete planned receiving; current whole source/receiver/
+custody readback and three separate audited judgments preceded acknowledged
+NOT_PLANNED tracking retirements. All eighteen technical rows remain
+unchecked. OPEN #8729 carries the planned work; the three retired sources
+remain historical provenance, not pending proposal or receiving gates.
+Existing CLI/service,
 cache/journal, credential/provider and recovery custodians retain their work;
 the relay implementer receives no new assignment. Preserve P0 design,
 applicable owner/slice admission and the current R1-R4 priority. The three
-source issues remain OPEN during proposal; reviewed complete receiving,
-current whole source/receiver/custody readback and separate source judgments
-precede any tracking retirement. Planning authorizes no credential operation,
+source conditions and technical acceptance remain intact. Accepted tracking
+does not appoint an implementer, resolve the defects or grant custody.
+Planning authorizes no credential operation,
 copy, rename, cache mutation, service restart, implementation or rollout.
 
 The reviewed finite #11816 generation/freshness lane stays with the existing
