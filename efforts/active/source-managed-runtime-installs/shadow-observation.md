@@ -108,3 +108,67 @@ view; widening the discovery catalog must not label a candidate as live.
   Windows separately exercises native pipes, ACLs, Jobs and surviving hosts.
   Only connect to an existing installation after passing denied-effect tests
   on that platform. Writer takeover remains a later, separate testbed gate.
+
+### Proposed local Session Host launch receipt (owner decision pending)
+
+**Decision for the Bridge launch-custody and Driver Session Host maintainers:**
+can the existing host registration owner preserve a launch-only observation
+independently of subsequent candidate updates? Prefer extending that owner to
+adding another store. If it cannot enforce separation of writers and compatible
+round trips, retain candidate-only discovery. This is a proposal, not a selected
+storage format or a grant to implement attachment.
+
+**Current boundary.** `LocalLaunchOwner.retain_process` holds the original
+process object and observes its OS birth before readiness. `retain_host` calls
+`_register_host_launch`, which publishes outside the Bridge DB. The existing
+`HostIndex.register` also accepts later location updates: it preserves frontend
+ownership fields, not independent evidence about the original Host. Its
+`locked_inventory` is a storage read, not an incarnation check. Acquisition and
+creation `read_launch` can read closed attempts, but both use the Bridge DB;
+neither survives loss of that DB. Driver's readiness file is written by the
+Host and contains an attachment nonce. Neither it nor a new registration is a
+source for reconstructing original evidence after the fact.
+
+**Recommended producer and reader, if accepted.** For an admitted local
+launch, let the launch owner bind its original handoff and session identity
+to the host PID and OS process birth while it still holds the live process
+object. Scope the observation to the OS instance and principal; where those
+cannot be distinguished reliably, return unknown. Publish once through the
+existing registration owner under its lock. An ordinary register, claim,
+forward refresh or restore must neither mint nor rewrite that observation.
+A conflicting launch or a torn write is not first registration. Retirement
+or deletion invalidates the association; never recreate it from a candidate.
+Exclude endpoint, nonce, grant, prompt and credential material from the
+reader's projection. A private file alone does not establish who wrote it:
+the owners must establish writer provenance and prevent candidate-controlled
+metadata from populating the trusted fields, or decline this design.
+
+After loss of the frontend and DB, the registration owner would read that
+scoped observation and compare the OS identity of the named process, without
+opening the candidate endpoint. Return an **original process observed** only
+on an exact match; a reused PID is a different incarnation. Distinguish an
+observably exited original from a denied or unavailable OS read, ambiguous
+record, unsupported producer or unsupported reader. All leave the agent route
+unresolved. Local results do not authorize remote probing. Do not query an
+attachment interface, and never fall back to reading the nonce. Absence of
+this optional capability leaves ordinary inventory and the measured
+`GET /api/v1/sessions/{id}/status` **404** unchanged for an unmanaged session.
+
+**Acceptance before implementation.** Record the source owners' decision
+on the proposal PR: accept the existing registration owner with those writer,
+retirement and reader constraints; nominate a different existing durable
+launch owner and its cold read; or retain the 404 if neither qualifies.
+Automated review and CI alone do not decide persistence ownership.
+
+**Implementation and installed gates after acceptance.** Start a synthetic
+original through the real launch owner, discard its frontend and DB, and use
+the public opt-in Bridge consumer. Compare the original with a replacement
+at the same address, a reused PID, an exited host and an unreadable source.
+Attempt to change the observation via ordinary registration and via an older
+writer. It must remain valid and unchanged or become explicitly unavailable,
+never silently certify the replacement. Exercise both mixed-version orders
+and return to the original installed build. Compare ordinary inventory and
+status before and after; assert zero candidate connections, attachments,
+creates, replacements, prompts or control grants. Require source review,
+required CI and merge, then separate Windows and Linux installed proof.
+Neither design acceptance nor observation recovers acknowledged writes.
