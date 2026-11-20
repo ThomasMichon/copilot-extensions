@@ -264,6 +264,32 @@ owner-v3 storage and serving adoption. It is read-only and capability-selected;
 unbound/prior hosts remain usable for their existing operations. A returned
 cursor is not an ACK or a handled-review baseline.
 
+### Original active-operation recovery library
+
+The executing core's `review_recovery.recovery_contract()` declares
+`agent-pull-requests.retained-active-review-recovery/v1`. Its source-only
+`ReplayStore.inspect_retained_review` reads a scoped original v1 active
+operation without live execution admission, including after terminal closure
+or reopen. It preserves the immutable intent, original attempt, native receipts
+and unattempted actions. Prepared/mapping and compact representations are not
+selected by this reader.
+
+`review_recovery.reconcile_review` requires the existing owner's actual typed
+protected context and a finite invocation budget. It calls that context's
+original reconciliation method, accepts only attributable native readback and
+records it through the original-attempt receipt transaction. Principal/scope,
+current authority, credential binding and expiry remain checked; matching
+current content or vote cannot confirm an old effect. Unsupported actions stay
+unknown. It never admits an operation, allocates an attempt or enters a sender.
+An uncertain receipt replacement is read through the same owner, not resent.
+No new recovery deadline is attached to an active operation.
+
+This provider-first library expansion does not select retained-volume adoption,
+add a workspace CLI/HTTP recovery command, configure a protected factory or
+substitute observation credentials. Existing `inspect` and submission defaults
+remain unchanged. Negotiated receiver/client selection and actual retained
+transition remain separate acceptance.
+
 ## Optional local comment preparation
 
 An existing host may supply `WorkspaceTools(client, comment_preparer=prepare)`.

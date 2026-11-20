@@ -6734,6 +6734,18 @@ runner/workflow budgets are unchanged; this is not a production database change.
 
 ## Optional PR service lifecycle
 
+`plugins/agent-pull-requests/tests/test_review_recovery.py` exercises original
+v1 active-operation inspection and protected native readback after terminal
+closure/reopen. The actual store and existing synthetic protected transport
+cover original-attempt preservation, unavailable attribution, unsupported
+actions, authority/material withdrawal at receipt commit, finite invocation
+budgets, native-ID conflicts and before/after-replace readback. Actual initial
+inspection and final readback lock contention must expire at the same original
+monotonic deadline, including the no-unknown fast path. Admission,
+new attempts and senders are trapped. Prepared/compact representations keep
+their refusals. This library packet does not qualify retained adoption,
+negotiated workspace serving, a live provider or installed recovery.
+
 `plugins/agent-pull-requests/tests/test_generation_native_targets.py` qualifies
 original target capture before the actual synthetic native exporter capability
 and read calls, publication interruption/readback, scope/epoch refusal and
