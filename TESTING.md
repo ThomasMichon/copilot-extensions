@@ -7823,9 +7823,18 @@ content/vector/checkpoint bytes preserve the unrelated corpus.
 
 The packet emits `POINT_NATIVE_WORK` records with Linux process I/O, elapsed
 wall/process-CPU time and separately reported setup time. Process bytes include
-query-plan diagnostic replay and metadata/queue traffic, and are not asserted
-constant: measured read-byte growth remains a separate investigation, not a
-physical-disk or whole-CPU/memory acceptance claim. Stage counters retain their
+query-plan diagnostic replay and metadata/queue traffic. Completed retries also
+run after reopening owners without replay, with replay and checkpoint enumeration
+trapped, identical logical/query counts, no HTTP/embedding and unchanged native
+versions. Their `ordinary_completed_retry` records include inclusive per-owner
+I/O around fully consumed `to_arrow` queries and scalar-index inspection, plus
+per-call read bytes. Representative diagnostic plans retain indexed-query
+metrics with fixture paths redacted. These are separate observations: subtracting
+replay bytes does not recover ordinary cost because replay can warm caches.
+Native row bounds do not certify flat byte cost; the no-replay control still
+shows index/query and metadata read growth. OS/process caches are uncontrolled,
+and inclusive process counters include instrumentation overhead, not exclusively
+physical disk reads or whole-CPU/memory acceptance. Stage counters retain their
 existing instrumentation scope; the point checkpoint owner's writes are not
 inferred from a zero shared-engine counter. This packet does not populate
 100,000 ordering-evidence entries, exercise HTTP service intake, replace the
