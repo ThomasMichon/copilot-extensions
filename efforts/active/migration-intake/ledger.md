@@ -1305,3 +1305,37 @@ remain unchecked. Original source, native, credential, worker and resource
 custody is unchanged; neither retirement claims an implementation fix.
 Earlier proposed entries remain history. The [dated follow-through](../backlog-reconciliation/journal/2026/11.20-vault-copy-and-existing-keepers.md#previous-reviewed-receiving-and-distinct-tracking-retirements)
 does not repeat the already-published #13718/#3443 disposition.
+
+## Proposed portable fixture and resource receiving - 2026-11-20 UTC
+
+| Source | Disposition | Complete proposed owner and retained acceptance |
+|---|---|---|
+| #13082 | residual | Existing [Portfolio Phase 4 Vault/shared-library wave](../test-portfolio-rationalization/README.md#finite-portable-pidfd-fixture-contract-from-13082), P13082-1..2/V13082-1..2/G13082: original generation module, shared pidfd wrapper/libc fallback OR clear unsupported skip, retained peer-handle assertions/Windows branch and nine-error history. Five technical rows unchecked. |
+| #13369 | residual | Existing [Portfolio Phase 4 Containers wave](../test-portfolio-rationalization/README.md#finite-distribution-and-staged-profile-fixtures-from-13369), P13369-1..2/V13369-1..2/G13369: both original files, identity/fingerprint/cache resources, wheel/sdist and per-resource refusal expectations, both staged-load modes AND native-policy retention. Five technical rows unchecked. |
+| #13378 | residual | Existing [Portfolio Phase 4 Bridge wave](../test-portfolio-rationalization/README.md#finite-caller-session-and-process-incarnation-fixtures-from-13378), P13378-1..2/V13378-1..2/G13378: all six migration/four caller/PID-incarnation cases, managed-runner pass OR justified explicit host-dependent tier, original bounds/assertions and later-not-run coverage. Five technical rows unchecked. |
+
+The [complete crosswalk and current whole census](../backlog-reconciliation/journal/2026/11.20-portable-fixture-and-runtime-resource-receiving.md)
+retains all three OPEN sources during proposal. Each becomes `routed` only
+after actual complete reviewed domain Plan/local/global Validation,
+Coordination and Journal delivery through existing Phase 7. Preserve OPEN
+#1303, primary maintainer and actual fixture/process/runtime-resource/
+migration/runner/source/native/release/resource custody, every incumbent
+state/hold and original alternative, unit-only CI and hosted-Windows quiescence.
+Current whole receiving/source/custody readback and separate source judgments
+remain before any retirement. No execution, appointment or transfer follows.
+
+## Vault copy-transaction reviewed receiving - 2026-11-20 UTC
+
+| Source | Disposition | Accepted owner and distinct tracker outcome |
+|---|---|---|
+| #13077 | routed | #13730 delivered complete existing Vault P2 relocation/fencing receiving; separate audited acknowledgment and NOT_PLANNED retirement preserve all seven unchecked technical rows and actual custodians. |
+| #13083 | routed | Same reviewed P2 owner retains running-peer capability, preflight and evolution acceptance; separate audited acknowledgment and NOT_PLANNED retirement preserve all five unchecked technical rows. |
+| #13085 | routed | Same reviewed P2 owner retains uncertain overwrite/recovery and both failure regressions; separate audited acknowledgment and NOT_PLANNED retirement preserve all six unchecked technical rows. |
+
+Current [Vault Coordination](../vault-service/README.md#coordination) and the
+[additive dated receipt](../backlog-reconciliation/journal/2026/11.20-vault-copy-and-existing-keepers.md#reviewed-receiving-and-separate-source-judgments)
+record complete current receiving/source/custody readback before three separate
+tracking judgments. Earlier proposals remain immutable history, not another
+pending receiving gate. All eighteen technical rows, OPEN #8729, R1-R4/P0
+and applicable owner/slice admission stay unchanged; no credential, cache,
+copy/overwrite, service, test/native or resource operation is inferred.

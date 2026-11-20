@@ -5,8 +5,9 @@ Back to [Test Portfolio Rationalization](README.md).
 These are complete technical details of the canonical
 [Phase 4 Plan](README.md#finite-historical-workflow-fixture-contracts-from-9348)
 and [Phase 5 Plan](README.md#finite-finished-daemon-cleanup-qualification-from-12973),
-not a separate completion ledger or implementation assignment. The sixteen
-P/V state anchors and four actual global G rows remain in the
+including the [portable fixture families](README.md#finite-portable-pidfd-fixture-contract-from-13082),
+not a separate completion ledger or implementation assignment. The
+P/V state anchors and actual global G rows remain in the
 [Portfolio README](README.md#validation-plan), all unchecked during proposal.
 Its continuing Coordination, actual owners and Phase 7 migration-intake route
 apply to every clause. The
@@ -167,3 +168,124 @@ descendants and changed artifacts. Qualify actual safe settlement and cleanup
 under original bounds; do not treat every reused PID as safe, skip cleanup,
 raise budgets or blindly rerun the workflow. The reproduction alternative
 does not grant native execution, process action or artifact deletion.
+
+## Phase 4 Vault/shared-library - #13082
+
+### P13082-1: Portable peer handle
+
+Correct the peer-process-handle helper in
+`plugins/agent-vault/tests/test_service_generation.py` so Linux portable
+CPython builds need not expose `os.pidfd_open`. Use the existing
+`agent_procutil._linux_pidfd.open_pidfd` wrapper/libc fallback OR skip with
+a clear reason when neither wrapper nor libc support is available.
+Preserve the Windows branch and intended peer-handle behavior; this is a
+test-helper correction, not a new production fallback or relaxed custody.
+
+### P13082-2: Original module and custody
+
+Retain the original nine-error `AttributeError` observation on a managed
+portable Python 3.12 Linux/WSL interpreter and the exact
+`tests/test_service_generation.py` selection. Earlier #6354 diagnostic work
+is precedent for the capability gap, not delivery of this test-helper repair.
+Keep existing Vault generation, process-identity, fixture and runner owners.
+
+### V13082-1: Original portable module
+
+Exercise the original module through the bounded managed plugin-test runner
+on the supported portable Linux interpreter that lacks the OS wrapper.
+Demonstrate the shared libc fallback where available OR the clear unsupported
+skip when neither supported mechanism works. Do not silently skip a supported
+fallback, alter assertion intent or substitute another cache/diagnostic test.
+
+### V13082-2: Faithful outcomes
+
+Retain peer-handle/process-incarnation assertions and actual owned cleanup.
+Distinguish a passing supported module from a justified unsupported skip
+and unavailable execution. Preserve original item/group/plugin/resource
+bounds and the Windows path; planning supplies no new test/native authority.
+
+## Phase 4 Containers - #13369
+
+### P13369-1: Complete resource fixtures
+
+Align BOTH `tests/test_execution_runtime_distribution.py` fixture projects
+and `tests/test_runtime_profile.py` staged payloads with the current intended
+`standalone_build.py` runtime-resource contract. Retain
+`versioned_runtime_identity.py`, `versioned_runtime_fingerprint.py` AND
+`versioned_runtime_cache.py` alongside the existing resources. Refresh
+wheel/sdist contents and expectations AND per-resource refusal cases;
+adding three fixture-map entries alone does not complete this correction.
+
+### P13369-2: Assertions and independent scope
+
+Preserve builder/source-completeness, owned-runtime safe-path/isolation and
+native-policy refusal assertions rather than changing the builder contract
+merely to satisfy stale fixtures. The report at `562e27da78` observed five
+failures/twenty errors in distribution and three profile failures while
+validating #13366. #13371's discovery work and #13479's Fleet changes
+explicitly excluded this packet; #13698's local-transport plan is not a
+fixture implementation. Required CI's unit-only admission stays unchanged.
+
+### V13369-1: Both original files
+
+Exercise both original test files through the existing bounded managed
+Containers runner against the actual intended current builder resource
+contract. Qualify complete fixture projects, generated wheel/sdist
+expectations and each missing-resource refusal rather than counting a
+successful build or three added files as the entire packet's pass.
+
+### V13369-2: All three profile cases
+
+Qualify BOTH
+`test_staged_profile_loads_only_its_owned_runtime_with_safe_path[safe-path|isolated]`
+cases AND `test_native_profile_policy_refusal_retains_selected_runtime`.
+Retain safe-path/isolation and selected-runtime retention on refusal.
+Attribute actual current results separately from historical missing-file
+errors; preserve source/build/fixture/runner custody, original limits and
+explicit native admission without enrolling these tests in required CI.
+
+## Phase 4 Bridge - #13378
+
+### P13378-1: Six-case packet
+
+Retain all six original cases and their distinct Linux managed-runner failures:
+
+- `test_caller_session_id.py::test_migrates_existing_v24_database` refused
+  writable `live_messages_runtime_admission` preparation with
+  `RuntimeCustodyError`.
+- The four `test_remote_venue_cli_records_caller_session` combinations,
+  create AND send across both CodeSpace AND SSH venues, exceeded the
+  30-second pytest timeout.
+- `test_cli_mode_reservations.py::test_a_pid_reused_within_250ms_is_still_a_different_process`
+  returned `live` instead of `incarnation_mismatch`.
+
+The original run stopped at sub-suite 4/39; later sub-suites were not reached.
+These are attributed failures found while validating #13366, not fresh
+reproduction, one proven cause, or evidence that later selections passed.
+
+### P13378-2: Original outcome alternative
+
+For each original case, obtain a supported managed-plugin-runner pass OR
+justify its actual host dependence and declare its explicit tier. Preserve
+writable migration preparation, correct caller attribution and process-birth
+identity expectations; investigate fixture versus production cause rather
+than blanket-patching custody checks, treating a reused PID as the same
+process, increasing timeouts or labeling deterministic failures flakes.
+Keep the existing migration, caller, reservation/process, fixture and runner
+owners; explicit tiering retains coverage instead of silently removing it.
+
+### V13378-1: Complete selected outcomes
+
+Qualify all six named cases through the original bounded managed Bridge
+runner, recording each selected supported pass OR justified host-dependent
+tier and its intended execution path. Cover all four operation/venue
+combinations independently; a different transport/caller pass, discovery
+change or required unit result does not qualify this six-case family.
+
+### V13378-2: No false aggregate
+
+Preserve migration/preparation refusal controls, caller-session assertions
+and the 250-ms PID-reuse incarnation distinction under original deadlines,
+containment and owned cleanup. Attribute a failed/stopped packet and every
+later not-run sub-suite truthfully. Tier classification is not an executed
+pass or permission for live venues, native work, process action or resources.
