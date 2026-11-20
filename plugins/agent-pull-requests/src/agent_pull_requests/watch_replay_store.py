@@ -119,7 +119,13 @@ class ReplayStore:
         repository_activity: bool = False,
         workspace_generation_associations: bool = False,
         recorded_terminal_cache: bool = False,
+        native_generation_associations: bool = False,
     ) -> None:
+        if type(native_generation_associations) is not bool or native_generation_associations and (
+            not workspace_generation_associations or terminal_retention or recorded_terminal_cache
+        ):
+            raise ValueError("native generation associations require a selected fresh baseline")
+        self.native_generation_associations = native_generation_associations
         if type(recorded_terminal_cache) is not bool or recorded_terminal_cache and (
             not workspace_generation_associations or not terminal_retention
             or not terminal_recovery or not terminal_cache_retirement or terminal_comment_mapping
@@ -306,6 +312,9 @@ class ReplayStore:
             if (
                 not self.workspace_generation_associations or prepared or version != 3
                 or terminal and not recorded
+                or document["generation_associations_version"] != (
+                    2 if self.native_generation_associations else 1
+                )
             ):
                 raise ReplayStoreInvalid("generation association reader unavailable for adopted owner")
             names.update(("generation_associations_version", "generation_associations"))
