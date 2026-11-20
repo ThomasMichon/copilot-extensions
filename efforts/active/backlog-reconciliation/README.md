@@ -410,6 +410,11 @@ the non-public approval conversation.
 
 ## Plan
 
+The [registration and selected peer-launch unit](journal/2026/11.20-registration-and-peer-launch-completions.md)
+records two independently acknowledged finite source completions and nine
+distinct retained contracts, with a complete 888-open census. Existing owner,
+source/copy, native and rollout gates and all parent check states remain.
+
 The [native crypto and existing-owner receiving unit](journal/2026/11.20-native-crypto-budget-and-lock-receiving.md)
 records acknowledged whole #12119 fulfillment through #12122 and proposes
 complete #11995 portfolio receiving plus #12111's same-parent TargetLock
