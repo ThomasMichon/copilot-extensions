@@ -278,10 +278,14 @@ def test_linux_backend_uses_only_atomic_exchange_and_preserves_native_failure(
             calls.append(args)
             return -1 if failure else 0
 
+    native_api = ModuleType("ctypes")
+    for name in ("c_int", "c_char_p", "c_uint"):
+        setattr(native_api, name, object())
+    setattr(native_api, "CDLL", lambda *_a, **_kw: SimpleNamespace(renameat2=Rename()))
+    setattr(native_api, "get_errno", lambda: 95)
     with monkeypatch.context() as native:
         native.setattr(module.sys, "platform", "linux")
-        native.setattr(module.ctypes, "CDLL", lambda *_a, **_kw: SimpleNamespace(renameat2=Rename()))
-        native.setattr(module.ctypes, "get_errno", lambda: 95)
+        native.setitem(sys.modules, "ctypes", native_api)
         exchange = state["native_backend"]()
         if failure:
             with pytest.raises(OSError) as error:
@@ -408,3 +412,34 @@ def test_changed_preparation_snapshot_cannot_be_adopted_as_staging_authority(
     with pytest.raises(PermissionError, match="changed before staging"):
         _seal(sealing)
     assert state["writes"] == [] and state["exchanges"] == 0 and len(state["paths"]) == 1
+
+
+def test_retry_cannot_exchange_until_staged_journal_durability_is_confirmed(
+    sealing: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module, state, root, _binding, _lease = sealing
+    publish = module.write_private
+
+    def unacknowledged(path: Path, document: Any, **kwargs: Any) -> None:
+        publish(path, document, **kwargs)
+        raise OSError("controlled journal replacement without directory acknowledgement")
+
+    with monkeypatch.context() as interrupted:
+        interrupted.setattr(module, "write_private", unacknowledged)
+        with pytest.raises(OSError, match="without directory acknowledgement"):
+            _seal(sealing)
+    paths = module.watch_state_paths(root)
+    assert state["document"]["seal"]["boot"] is None
+    assert not state["paths"][paths.historical_lock][1]
+    assert state["exchanges"] == 0
+
+    def still_uncertain(_path: Path) -> None:
+        raise OSError("controlled staged journal still not durable")
+
+    with monkeypatch.context() as uncertain:
+        uncertain.setattr(module, "confirm_private", still_uncertain)
+        with pytest.raises(OSError, match="still not durable"):
+            _seal(sealing)
+    assert state["exchanges"] == 0 and not state["paths"][paths.historical_lock][1]
+    assert _seal(sealing)["phase"] == "sealed-legacy"
+    assert state["exchanges"] == 1

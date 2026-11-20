@@ -339,6 +339,8 @@ uncertain evidence, not something recovery silently deletes or guesses.
 The journal never stores caller-chosen filesystem paths.
 
 Only Linux `renameat2` with `RENAME_EXCHANGE` performs the namespace change.
+Each pre-exchange attempt confirms the staging journal's file and parent
+durability and rechecks evidence, including recovery after an uncertain commit.
 There is no move/mkdir or no-replace fallback. An unsupported filesystem leaves
 the original historical lock untouched, retaining staged recovery evidence.
 After exchange the owner readdresses the same held descriptor to the original

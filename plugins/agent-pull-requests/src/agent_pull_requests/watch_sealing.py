@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ctypes
 import json
 import os
 import stat
@@ -31,6 +30,8 @@ _BACKEND = "linux-renameat2-exchange"
 def _exchange_backend() -> Callable[[Path, Path], None]:
     if not sys.platform.startswith("linux"):
         raise NotImplementedError("watch physical sealing requires the Linux exchange backend")
+    import ctypes
+
     try:
         rename = ctypes.CDLL(None, use_errno=True).renameat2
     except AttributeError as error:
@@ -212,6 +213,7 @@ def seal(
         document = staged
         recheck()
     if not exchanged:
+        confirm_private(paths.journal)
         recheck()
         exchange(paths.historical_lock, paths.retained_lock)
         exchanged = True

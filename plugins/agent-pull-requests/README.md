@@ -672,7 +672,9 @@ The separate internal `WatchWriter.seal_state_transition()` API requires
 `seal-state-transition` authorization and completed preparation quiescence.
 Its Linux backend durably stages an empty private barrier and records its
 identity before `renameat2(RENAME_EXCHANGE)` atomically swaps the historical
-lock and retained path. No move/mkdir or no-replace fallback exists.
+lock and retained path. Every pre-exchange attempt confirms journal durability
+and rechecks custody, including retries after an uncertain staging commit.
+No move/mkdir or no-replace fallback exists.
 Unsupported platforms refuse before staging or acquisition. A filesystem
 that refuses exchange retains the staged evidence and original lock.
 Recovery validates the journal, original pin and both actual path identities
