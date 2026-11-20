@@ -378,8 +378,8 @@ G13487 and both parents open until their own remaining gates are satisfied.
 
 ### Original native-target association refinement
 
-This is the next review-first source refinement, not implemented native-watch
-adoption. `HostConfig` already relates each admitted caller/target's
+This is the reviewed source refinement for original native-watch adoption,
+not installed migration. `HostConfig` already relates each admitted caller/target's
 `ConsumerScope` to a `NativeReadHandler` with an immutable full workspace scope.
 `NativeReadHandler.read` verifies the acquired evidence against that scope, but
 its result does not preserve the native account/repository association.
@@ -465,26 +465,112 @@ replays an operation, adds an effect receiver or declares full T3 complete.
 - [x] Review this native-target contract before changing writer/storage or
   admitting active native waits (#13748; current-head approval and required
   green CI). Fresh-writer qualification does not admit its later adoption reader.
-- [ ] Qualify the selected fresh writer through actual load/sync and fresh
+- [x] Qualify the selected fresh writer through actual load/sync and fresh
   process reconstruction, proving capture precedes native discovery/IO.
   Include original absence, close/reopen during acquisition, scope/target
   mismatch, repeated IDs, shared native targets, definite CAS/capacity refusal
   and every uncertain publication boundary. Preserve v1/default behavior and
-  missing/skewed-core/old-reader refusal.
-- [ ] Qualify the later actual transition CLI with current/noncurrent recorded
+  missing/skewed-core/old-reader refusal. #13751 delivered the writer; the
+  subsequent native-adoption packet adds the shared-native/full-scope control.
+- [x] Qualify the later actual transition CLI with current/noncurrent recorded
   generations and active coalesced native waits. Cover target-A/target-B
   configuration changes, unmatched old waits, conflicting historical mappings,
   frozen deliveries, partial/uncertain adoption and retry, competing lifecycle
   owners, deadline expiry and rollback. Verify refusal preserves original
-  usable readers and bytes; successful adoption changes no replay/ACK position.
-- [ ] Exercise native pre-IO fencing after fresh-reader restart: delayed old
+  usable readers and bytes; successful adoption changes no replay/ACK position
+  (#13755; finite source/process controls, not installed migration).
+- [x] Exercise native pre-IO fencing after fresh-reader restart: delayed old
   samples refuse across adoption or close/reopen, fresh samples retain their
   full native payload, and original registration/deadline/receipt semantics
   survive. Use finite synthetic process fixtures, not a live provider request
-  or production watch.
+  or production watch (#13755).
 - [ ] Return to original unknown-effect recovery, association lifetime and
   full T3/provider/installed acceptance. Neither writer nor native-adoption
   source completion closes P13487/V13487/G13487 or either parent.
+
+### Original operation-recovery reader refinement
+
+This is the next review-first proposal, not implemented operation adoption.
+The native reader in #13755 still refuses active and compact review operations.
+That refusal prevents a real interface loss: `ReplayStore.inspect_review` and
+`ReviewSelectionStore.inspect` require live admission, while the selected
+terminal workspace receiver does not expose ordinary operation inspection.
+`execute_review` also begins with live execution admission before reaching its
+unknown-attempt readback branch. Retaining those JSON records alone would not
+keep their original inspection and reconciliation usable.
+
+Existing compact recovery is a different representation and authority path.
+`TerminalRecoveryStore.inspect/record` retains original compact identities,
+policy and receipt reservations. `reconcile_terminal` uses the actual protected
+context but currently attempts attributable identity readback only for compact
+comment actions. Neither that source capability nor a newly successful ordinary
+client proves all prepared, reply, edit and verdict recovery is supported.
+
+**Expand the original readers before relaxing adoption.** Reuse the existing
+ReplayStore envelope, scope checks, request budgets, protected context boundary
+and local `adopt-terminal` lifecycle. Supply a separate executing-core declaration
+for retained operation inspection/recovery; terminal body-reading support alone
+is insufficient. Preserve defaults, strict older-core refusal and the existing
+v1/v2 recorded-cache selections. Ordinary startup validates; it does not adopt
+operations or silently enable a write receiver.
+
+The first finite source leaf may admit already retained version-one active
+operations alongside an otherwise eligible recorded-cache volume. Keep prepared
+selection/mapping and existing compact-operation volumes refused unchanged until
+their own compatible readers are qualified. Validate original operation scope
+and every selected reader/interface before the first adoption commit. Preserve
+the complete original operation/intent/action/attempt identities, generation,
+source and revision bindings, outcomes, native IDs, receipt reservations and
+unattempted-versus-unknown distinction. Do not rewrite an old operation into a
+new intent or manufacture a native acquisition/terminal admission from it.
+All existing generation, native-watch, historical-epoch and complete-capacity
+preflight remains applicable.
+
+Provide explicitly negotiated scoped inspection through the existing workspace
+receiver and client seams. A recovery selection is not submission, allocation,
+preparation, cancellation, receipt confirmation or fresh native proof.
+Recovered operations cannot acquire a new attempt or become sendable after
+terminal adoption or reopen. Preserve the existing original receipt inspector
+where its selected representation is supported; otherwise refuse that
+representation before migration, rather than advertise generic recovery.
+
+For an original unknown active attempt, separate readback from `execute_review`
+instead of re-entering execution admission. Reuse an explicitly supplied actual
+protected context and its existing reconciliation method against the original
+operation/action and attempt. Check current authenticated scope through that
+owner, preserve retained native-ID conflicts, and record only attributable
+confirmation through the existing original-attempt receipt transaction.
+No call may enter a sender, allocate another attempt, accept caller-asserted
+confirmation or equate matching current text/vote/actor with historical proof.
+Unknown or unsupported readback remains unknown. The standalone observer has no
+protected context configured by this proposal; its observation credential is
+never a substitute. Retained active operations have invocation budgets, not a
+new migration-created recovery deadline. Preserve any original compact recovery
+policy/deadline/escalation unchanged; do not invent, reset or discard it.
+
+Later actual terminal compaction remains with its original drain, operation and
+recovery owners. This leaf neither compacts operations nor enables a remote
+retirement command. It does not claim prepared/compact readback, every provider,
+body-free retention or installed migration. Subsequent expansion must preserve
+the original compact inspect/readback interfaces and each unsupported action
+class before selecting that broader transition.
+
+**Serial source acceptance:**
+
+- [ ] Review this refinement before changing operation eligibility, serving
+  selection or recovery behavior.
+- [ ] Expand and qualify the actual scoped active-operation inspection and
+  original-attempt readback owners, including unsupported native attribution,
+  current authority withdrawal, expiry, partial/unknown results and zero sends.
+- [ ] Only then select the compatible retained transition and actual negotiated
+  receiver/client path. Qualify original inspection before/after actual CLI
+  adoption and fresh-reader restart, same-operation retry after every uncertain
+  boundary, scope/attempt/native-ID conflicts, capacity/deadline/lifecycle
+  refusal, old/new cores and rollback. Refusal preserves usable original readers
+  and bytes; successful adoption creates no native receipt or effect.
+- [ ] Return to prepared/compact representation compatibility, association
+  lifetime, full T3 and both parent gates. Original unresolved effects remain
+  with their owners, not satisfied by this finite active-operation source leaf.
 
 ## See Also
 

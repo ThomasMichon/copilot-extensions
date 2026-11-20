@@ -29,9 +29,9 @@ def core(*, native_targets: bool = False) -> Any:
         raise ValueError("selected generation association core unsupported") from None
 
 
-def recorded_core() -> None:
+def recorded_core(*, native_targets: bool = False) -> None:
     """Combined selection requires the executing transition reader, not its writer alone."""
-    core()
+    core(native_targets=native_targets)
     try:
         from agent_pull_requests.recorded_terminal_cache import contract
         if contract() != {
@@ -40,5 +40,13 @@ def recorded_core() -> None:
             "bindings": "recorded_workspace_epochs_only", "native_targets": False,
         }:
             raise ValueError("unsupported recorded cache declaration")
+        if native_targets:
+            from agent_pull_requests.recorded_native_cache import contract as native_contract
+            if native_contract() != {
+                "protocol": "agent-pull-requests.recorded-native-cache-adoption/v1",
+                "storage_extension": "recorded_terminal_cache_version:2",
+                "bindings": "original_confirmed_native_targets", "legacy_backfill": False,
+            }:
+                raise ValueError("unsupported recorded native cache declaration")
     except (ImportError, AttributeError, TypeError, ValueError, RuntimeError):
         raise ValueError("selected recorded terminal cache core unsupported") from None

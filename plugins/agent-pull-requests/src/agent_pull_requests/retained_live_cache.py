@@ -51,12 +51,14 @@ def _targets(targets: list[Document]) -> list[Document]:
 def validate(
     document: Document, cache: GenerationCache, targets: list[Document],
     checkpoint: Callable[[], None],
-    *, recorded_generations: bool = False,
+    *, recorded_generations: bool = False, recorded_native_targets: bool = False,
 ) -> None:
     """Run inside the existing replay adoption and exclusive service lifecycle."""
     checkpoint()
     if type(recorded_generations) is not bool:
         raise ValueError("explicit retained generation adoption selection required")
+    if type(recorded_native_targets) is not bool or recorded_native_targets and not recorded_generations:
+        raise ValueError("native adoption requires the recorded generation reader")
     targets = _targets(targets)
     keys = {
         conversation_key({**target["scope"], "number": 1}, document["namespace"])
@@ -77,6 +79,9 @@ def validate(
         from .recorded_terminal_cache import readable_bindings
         from .review_intent import encoded
         selected(document, cache)
+        if recorded_native_targets:
+            from .recorded_native_cache import original_targets
+            original_targets(document, targets, checkpoint)
         readable = readable_bindings(document, checkpoint)
 
         def existing(value: Document) -> None:
@@ -106,7 +111,7 @@ def validate(
         if replace(observed.key, number=1) not in keys:
             raise ValueError("retained conversation is outside the selected workspace scope")
         records[observed.key] = record
-    if journal.records and WatchReplay(
+    if not recorded_native_targets and journal.records and WatchReplay(
         document["namespace"], state=document["replay"], commit=lambda state: None,
     ).observation_targets():
         raise ValueError("retained active native watches require their original workspace association")
@@ -116,7 +121,10 @@ def validate(
         raise CacheInvalid("retained generations require durable original observation association")
 
     if recorded_generations:
-        stage(document, cache, records, visit_pointer, checkpoint)
+        stage(
+            document, cache, records, visit_pointer, checkpoint,
+            native_targets=targets if recorded_native_targets else None,
+        )
         return
     cache.inspect_retained(visit, visit_pointer, allow_generations=False)
     checkpoint()

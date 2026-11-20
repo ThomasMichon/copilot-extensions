@@ -170,7 +170,11 @@ class CommandPipe:
                     raise BrokenPipeError("command pipe made no progress")
                 remaining = remaining[written:]
             except OSError as error:
-                if error.errno not in (errno.EAGAIN, errno.EWOULDBLOCK) and (
+                # The Windows CRT reports a full PIPE_NOWAIT pipe as ENOSPC,
+                # without preserving a winerror on the raised OSError.
+                if error.errno not in (errno.EAGAIN, errno.EWOULDBLOCK) and not (
+                    os.name == "nt" and error.errno == errno.ENOSPC
+                ) and (
                     os.name != "nt" or getattr(error, "winerror", None) not in (232, 536)
                 ):
                     raise

@@ -67,7 +67,9 @@ def adopted_version(workspace: WorkspaceOperations, *, expires_at: int,
             "terminal_retention", "terminal_recovery", "terminal_cache_retirement",
         )):
             raise ReplayStoreInvalid("terminal workspace read requires explicit storage adoption")
-        if workspace.store.recorded_terminal_cache and document.get("recorded_terminal_cache_version") != 1:
+        if workspace.store.recorded_terminal_cache and document.get("recorded_terminal_cache_version") != (
+            2 if workspace.store.native_generation_associations else 1
+        ):
             raise ReplayStoreInvalid("recorded terminal cache requires explicit storage adoption")
         return cast(int, document["version"])
 

@@ -394,9 +394,9 @@ with the same owner.
 
 Only fresh provisioning selects this version; adding the flag to a v1 volume
 does not migrate it. Removing the flag or choosing an older strict reader
-refuses expanded storage unchanged. Native-target selection does not compose
-with `terminal_reads`: active-native retained adoption and unknown-effect
-recovery are not yet qualified. It does not backfill targets, change watch
+refuses expanded storage unchanged. The retained transition below separately
+declares support for combining this profile with `terminal_reads`; the fresh
+writer alone is insufficient. It does not backfill targets, change watch
 receipts or deadlines, or create terminal admissions. Existing count/byte
 limits and pending/confirmed metadata custody remain intact.
 
@@ -432,6 +432,31 @@ remain fenced. Retry of a complete adoption validates current terminal-owned
 generations without importing them into the old baseline association history.
 Removing either selection or rolling back to a strict older reader refuses
 the expanded envelope unchanged.
+
+For an existing volume originally provisioned with the native-target writer,
+also retain `native_generation_associations: true`. The executing core must
+declare `agent-pull-requests.recorded-native-cache-adoption/v1` independently of
+the writer and workspace-only reader. This selects
+`recorded_terminal_cache_version: 2`, not an upgrade of a v1 association volume.
+Fresh provisioning still refuses the combined selection.
+
+The same transition validates every historical target association, including
+noncurrent entries, against the selected full scopes and native targets.
+It imports generation bindings and native admissions together, using only
+confirmed complete open first-epoch associations with actual validated retained
+cache objects. The admission cursor is an original association cursor, not the
+current journal high-water mark. Every actually waiting coalesced native target
+must have such evidence. Unmatched old targets, pending publication, conflicting
+history, ambiguous scopes or changed configuration refuse before adoption;
+today's target B cannot justify an old wait for target A.
+
+Original watch receipts, predicates, deadlines, frozen events and ACK positions
+are unchanged. Native capture after adoption carries the imported epoch before
+IO; a sample captured without it, or across close/reopen, refuses unchanged.
+Fresh native observations keep their complete native snapshot and triggering
+head. No observation, successful watch event, cache rewrite or delivery
+settlement is created by importing admissions. Unknown-effect operation
+recovery and installed migration remain separate, unqualified outcomes.
 
 ## Optional preparation-only hosting
 

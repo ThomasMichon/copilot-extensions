@@ -122,7 +122,8 @@ class ReplayStore:
         native_generation_associations: bool = False,
     ) -> None:
         if type(native_generation_associations) is not bool or native_generation_associations and (
-            not workspace_generation_associations or terminal_retention or recorded_terminal_cache
+            not workspace_generation_associations
+            or terminal_retention != recorded_terminal_cache
         ):
             raise ValueError("native generation associations require a selected fresh baseline")
         self.native_generation_associations = native_generation_associations
@@ -304,7 +305,9 @@ class ReplayStore:
             if (
                 not self.recorded_terminal_cache or not associations or not terminal
                 or type(document["recorded_terminal_cache_version"]) is not int
-                or document["recorded_terminal_cache_version"] != 1
+                or document["recorded_terminal_cache_version"] != (
+                    2 if self.native_generation_associations else 1
+                )
             ):
                 raise ReplayStoreInvalid("recorded terminal cache reader unavailable for adopted owner")
             names.add("recorded_terminal_cache_version")

@@ -9,6 +9,15 @@ independent fsynced receiver files for two origins and an explicit service
 route. This source evidence is not release, installed-service qualification or
 completion of the wider consumer-telemetry U3/U4 work.
 
+The same native packet selects
+`agent-bridge/tests/test_consumer_telemetry_performance.py` and Dispatch's
+`wall_cpu_tail` / incompatible-reader controls. JUnit properties named
+`consumer_telemetry_performance` and `consumer_telemetry_http_performance`
+retain the finite measurements. See
+[`docs/patterns/consumer-telemetry-qualification.md`](docs/patterns/consumer-telemetry-qualification.md)
+for boundaries, reproduction, accounting and explicit gaps. Test success does
+not establish an overhead service-level objective or release/rollout.
+
 The manual `installation-context-acceptance.yml` `native_daemon_exit` selection
 also runs an independent `test_durable_wmi_job_survival.py` job through the leased disposable Windows
 owner. It proves WMI daemon survival after strict caller-Job closure, bounded
@@ -6743,6 +6752,13 @@ owner without changing original cache, replay or association bytes.
 `plugins/agent-pull-requests/tests/test_recorded_terminal_cache.py` supplies the
 focused core contracts, including body-only admission and original-reader
 refusals. Neither packet qualifies installed migration or a live provider.
+The same process lane now includes the separately selected original-native
+transition: coalesced active waits, frozen events, current/noncurrent bytes,
+all adoption boundaries, competing lifecycle owners, fresh native payloads and
+old-sample refusal across adoption or close/reopen. The focused
+`test_recorded_native_cache.py` core packet adds historical target conflicts,
+unmatched old waits, shared native/full-scope identities and original capacity
+and deadline controls. Required unit-only CI is unchanged.
 
 The existing `pr_service=true` manual selector retains two disposable jobs
 (Linux and Windows), each capped at 10 minutes. Its source-pinned standalone

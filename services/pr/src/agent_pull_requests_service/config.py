@@ -214,7 +214,7 @@ class HostConfig:
             if self.workspaces.generation_native_targets:
                 association_options["native_generation_associations"] = True
             if self.workspaces.terminal_targets:
-                recorded_core()
+                recorded_core(native_targets=bool(self.workspaces.generation_native_targets))
                 association_options["recorded_terminal_cache"] = True
         if self.workspaces and self.workspaces.terminal_targets:
             terminal.core()
@@ -327,13 +327,13 @@ def _workspaces(value: object, bindings: list[WatchScopeBinding],
         raise ValueError("generation_associations requires an explicit baseline selection")
     native_associations = selected.get("native_generation_associations", False)
     if type(native_associations) is not bool or native_associations and (
-        not generation_associations or terminal_reads
+        not generation_associations
     ):
         raise ValueError("native_generation_associations requires a selected fresh baseline")
     if generation_associations:
         from .generation_associations import core, recorded_core
         if terminal_reads:
-            recorded_core()
+            recorded_core(native_targets=native_associations)
         else:
             core(native_targets=native_associations)
         if terminal_mapping_reads:

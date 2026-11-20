@@ -36,9 +36,12 @@ Document = dict[str, Any]
 
 def recorded(
     configuration: Configuration, monkeypatch: pytest.MonkeyPatch,
+    *, native_targets: bool = False,
 ) -> tuple[Path, Document, HostConfig, list[Document]]:
     path, value = workspace_config(configuration)
     value["workspaces"]["generation_associations"] = True
+    if native_targets:
+        value["workspaces"]["native_generation_associations"] = True
     path.write_text(json.dumps(value))
     provisioned = subprocess.run(
         [sys.executable, "-m", "agent_pull_requests_service", "provision", "--config", str(path)],
@@ -67,10 +70,14 @@ def recorded(
     return path, value, baseline, values
 
 
+@pytest.mark.parametrize("native_targets", [False, True])
 def test_actual_transition_and_fresh_reader_preserve_all_original_bytes(
     configuration: Configuration, monkeypatch: pytest.MonkeyPatch,
+    native_targets: bool,
 ) -> None:
-    path, value, baseline, values = recorded(configuration, monkeypatch)
+    path, value, baseline, values = recorded(
+        configuration, monkeypatch, native_targets=native_targets,
+    )
     expected = [materialized(reader(baseline), selected) for selected in values]
     before = json.loads(baseline.store().path.read_bytes())
     objects = cache_bytes(baseline)
@@ -112,7 +119,7 @@ print(json.dumps(result))
     assert [(d, base64.b64decode(content)) for d, content in json.loads(restarted.stdout)] == expected
     adopted = load_config(path)
     document = json.loads(adopted.store().path.read_bytes())
-    assert document["terminal_retention"]["admissions"] == []
+    assert len(document["terminal_retention"]["admissions"]) == int(native_targets)
     for field in ("replay", "reviews", "conversations", "generation_associations"):
         assert document[field] == before[field]
     assert cache_bytes(adopted) == objects
@@ -127,10 +134,12 @@ print(json.dumps(result))
         )
 
 
+@pytest.mark.parametrize("native_targets", [False, True])
 def test_retained_sync_uses_terminal_publication_and_keeps_native_pre_io_fence(
     configuration: Configuration, monkeypatch: pytest.MonkeyPatch,
+    native_targets: bool,
 ) -> None:
-    path, _, _, values = recorded(configuration, monkeypatch)
+    path, _, _, values = recorded(configuration, monkeypatch, native_targets=native_targets)
     assert command(path).returncode == 0
     config = load_config(path)
     owner = config.store()
@@ -142,7 +151,8 @@ def test_retained_sync_uses_terminal_publication_and_keeps_native_pre_io_fence(
         "number": number, "until": ("head_changed",), "deadline_at": time.time() + 60,
     }, expires_at=expires)
     target = ObservationTarget(scope.account, scope.repo, number, frozenset({receipt["registration_id"]}))
-    assert replay_epoch(json.loads(owner.path.read_bytes()), target) is None
+    before_epoch = replay_epoch(json.loads(owner.path.read_bytes()), target)
+    assert (before_epoch is not None) == native_targets
     latest = generation(2, padding=12000)
     monkeypatch.setattr(NativeReadHandler, "read", lambda *_args, **_kwargs: {
         "generation": copy.deepcopy(latest), "acquisition": {"source": "synthetic-owner"},
@@ -218,13 +228,14 @@ def test_partial_refresh_keeps_recorded_bodies_and_sync_reacquisition(
     assert result["comparison"]["generation_id"] == selected["id"]
 
 
+@pytest.mark.parametrize("native_targets", [False, True])
 @pytest.mark.parametrize("uncertain", [False, True])
 @pytest.mark.parametrize("boundary", ["retention", "recovery", "cache"])
 def test_actual_adoption_boundaries_reconcile_original_recorded_bindings(
     configuration: Configuration, monkeypatch: pytest.MonkeyPatch,
-    uncertain: bool, boundary: str,
+    uncertain: bool, boundary: str, native_targets: bool,
 ) -> None:
-    path, _, baseline, values = recorded(configuration, monkeypatch)
+    path, _, baseline, values = recorded(configuration, monkeypatch, native_targets=native_targets)
     original = json.loads(baseline.store().path.read_bytes())
     objects = cache_bytes(baseline)
     write = watch_replay_store._atomic_write_json
@@ -250,7 +261,123 @@ def test_actual_adoption_boundaries_reconcile_original_recorded_bindings(
     assert cache_bytes(adopted) == objects
     for field in ("replay", "conversations", "generation_associations"):
         assert after[field] == original[field]
-    assert after["terminal_retention"]["admissions"] == []
+    assert len(after["terminal_retention"]["admissions"]) == int(native_targets)
     assert len(after["terminal_retention"]["generations"]) == 2
     for selected in values:
         assert materialized(reader(adopted), selected)[0]["id"] == selected["id"]
+
+
+def test_native_waits_and_frozen_delivery_survive_actual_transition_and_process_restart(
+    configuration: Configuration, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path, _, baseline, values = recorded(configuration, monkeypatch, native_targets=True)
+    owner = baseline.store()
+    scope = baseline.bindings[0].scope
+    number = values[0]["scope"]["number"]
+    expires = int(time.time()) + 60
+    for request, selected_number in (("first", number), ("second", number), ("frozen", number + 1)):
+        owner.execute(scope, "register", {
+            "request_id": request, "issued_at": time.time(), "number": selected_number,
+            "until": ("head_changed",), "deadline_at": time.time() + 60,
+        }, expires_at=expires)
+    old = owner.observation_targets(expires_at=expires)
+    for target in old:
+        owner.observe(target, PRSnapshot(head_sha="a" * 40), expires_at=expires)
+        if target.number == number + 1:
+            owner.observe(target, PRSnapshot(head_sha="b" * 40), expires_at=expires)
+    before = json.loads(owner.path.read_bytes())
+    frozen_before = owner.execute(scope, "pending", {}, expires_at=expires)["events"]
+    assert len(frozen_before) == 1
+    assert len(owner.observation_targets(expires_at=expires)) == 1
+    result = command(path)
+    assert result.returncode == 0, result.stderr
+    after = json.loads(owner.path.read_bytes())
+    assert after["replay"] == before["replay"]
+    program = """
+import json, sys, time
+from agent_pull_requests_service.config import load_config
+from agent_pull_requests.watch_contract import PRSnapshot
+from agent_pull_requests.watch_replay import ObservationTarget
+c = load_config(sys.argv[1])
+o = c.store()
+expires = int(time.time()) + 60
+t = o.observation_targets(expires_at=expires)[0]
+assert t.retention_epoch is not None and len(t.registration_ids) == 2
+old = ObservationTarget(t.account, t.repo, t.number, t.registration_ids)
+assert o.observe(old, PRSnapshot(head_sha="b" * 40), expires_at=expires) == {"status": "stale_observation"}
+native = {"schema": "agent-worktrees.pr-snapshot", "version": 1,
+          "repo": t.repo, "pr": t.number, "provider": "azure-devops", "pr_state": "open",
+          "merged": False, "mergeable": None, "head_sha": "b" * 40, "base_ref": "main",
+          "checks_state": "", "title": "complete native event", "draft": False}
+o.observe(t, PRSnapshot(head_sha="b" * 40, provider="azure-devops", native_snapshot=native), expires_at=expires)
+events = o.execute(c.bindings[0].scope, "pending", {}, expires_at=expires)["events"]
+print(json.dumps({"events": events, "native": native}))
+"""
+    restarted = subprocess.run(
+        [sys.executable, "-I", "-c", program, str(path)],
+        capture_output=True, text=True, timeout=15,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
+    )
+    assert restarted.returncode == 0, restarted.stderr
+    readback = json.loads(restarted.stdout)
+    assert len(readback["events"]) == 3
+    frozen = load_config(path).store().execute(scope, "pending", {}, expires_at=expires)["events"]
+    assert len(frozen) == 3
+    assert frozen_before[0] in frozen
+    for event in readback["events"]:
+        if event["event_id"] != frozen_before[0]["event_id"]:
+            assert event["snapshot"] == readback["native"]
+            assert event["transitions"] == ["head_changed"]
+
+
+def test_native_transition_requires_its_reader_declaration_not_the_fresh_writer(
+    configuration: Configuration, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path, _, baseline, _ = recorded(configuration, monkeypatch, native_targets=True)
+    before = baseline.store().path.read_bytes()
+    from agent_pull_requests import recorded_native_cache
+    monkeypatch.setattr(recorded_native_cache, "contract", lambda: {"protocol": "old"})
+    with pytest.raises(ValueError, match="core unsupported"):
+        load_config(path)
+    assert main(["adopt-terminal", "--config", str(path)]) == 1
+    assert baseline.store().path.read_bytes() == before
+
+
+def test_imported_native_epoch_fences_old_samples_across_close_reopen(
+    configuration: Configuration, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from single_instance_lease import SingleInstance
+
+    path, _, baseline, values = recorded(configuration, monkeypatch, native_targets=True)
+    original = baseline.store()
+    scope = baseline.bindings[0].scope
+    expires = int(time.time()) + 60
+    original.execute(scope, "register", {
+        "request_id": "original-epoch", "issued_at": time.time(),
+        "number": values[0]["scope"]["number"], "until": ("merged",),
+        "deadline_at": time.time() + 60,
+    }, expires_at=expires)
+    before = original.path.read_bytes()
+    with SingleInstance(baseline.root, service="agent-pull-requests-watch"):
+        assert command(path).returncode == 1
+        assert original.path.read_bytes() == before
+    assert command(path).returncode == 0
+    config = load_config(path)
+    owner = config.store()
+    captured = owner.observation_targets(expires_at=expires)[0]
+    for selected in (generation(2, terminal=True), generation(4)):
+        monkeypatch.setattr(NativeReadHandler, "read", lambda *_args, **_kwargs: {
+            "generation": copy.deepcopy(selected), "acquisition": {"source": "synthetic-owner"},
+        })
+        reader(config).execute("load", {
+            "number": selected["scope"]["number"], "expected_current": values[-1]["id"],
+            "budget_seconds": 30,
+        }, expires_at=expires, checkpoint=lambda: None)
+    before = owner.path.read_bytes()
+    assert owner.observe(captured, PRSnapshot(pr_state="closed", merged=True), expires_at=expires) == {
+        "status": "stale_observation",
+    }
+    assert owner.path.read_bytes() == before
+    fresh = owner.observation_targets(expires_at=expires)[0]
+    assert fresh.retention_epoch != captured.retention_epoch
+    assert not owner.execute(scope, "pending", {}, expires_at=expires)["events"]
