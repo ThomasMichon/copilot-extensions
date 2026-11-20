@@ -249,6 +249,80 @@ periodic PSMux CLI discovery or change cleanup authority. A silent failed PSMux 
 presence query still cannot authorize a cold replacement, and failed
 reachability does not make a mux-homed process reclaimable.
 
+### In-place PSMux replacement: preserve the running image name
+
+Prefer the normal side-by-side update above. The installer does **not** move
+live images: its native live/unknown-provider guard selects side-by-side
+installation, and in-place WinGet package replacement requires confirmed
+provider absence. Do not bypass that guard with `--uninstall-previous`,
+`--force`, a process stop, or an ad-hoc backup rename.
+
+An explicitly approved **in-place binary replacement** is a different
+operation from uninstalling/reinstalling the portable package. It must preserve
+the old running image as well as install the incoming binary. PSMux 3.4.0's
+`cleanup_stale_port_files` checks server image stems against
+`psmux`/`tmux`/`pmux`. Renaming a running `psmux.exe` to `psmux.old.exe`,
+`psmux-backup.exe`, or another stem can cause a subsequent client startup to
+delete that still-live server's port registration. Even a nominal CLI read can
+run that cleanup. Keeping a copy of the bytes elsewhere does not repair the
+running process's image identity.
+
+Use this flow only with the installation owner's approval and an incoming
+publication method that does not terminate existing providers:
+
+1. Exclude competing package updates through the existing owner. Inventory
+   the affected servers using native process/registration observation, not
+   `psmux -V` or `list-sessions`. Record each PID, native creation identity and
+   actual executable path, the existing registrations, and the incoming
+   release/version. Verify the incoming bytes through the normal source and
+   file-version checks before moving anything. Unknown ownership, unreadable
+   image paths or an unsupported updater stop this operation.
+2. Resolve a **non-disposable, installer-owned retention directory on the
+   same volume as the running image**. The standard layout is
+   `%USERPROFILE%\.agent-worktrees\psmux\retained\<version>-<pid>\psmux.exe`.
+   Create a fresh destination; never overwrite another retained generation.
+   If that root is on another volume, use an owner-approved durable location
+   on the image's volume or stay side by side. Do not substitute Temp, a test
+   fixture, an expiring scratch directory, or a copy/delete fallback.
+3. Revalidate the recorded native identities and paths immediately before
+   the move. Move each distinct running image **without changing its basename
+   from `psmux.exe`** into its retained directory. For example, with both paths
+   already resolved and qualified, use
+   `Move-Item -LiteralPath $runningImage -Destination $retainedImage -ErrorAction Stop`,
+   where `$retainedImage` ends in `\psmux.exe`, not `.old.exe` or `.bak`.
+   Several servers may share one image: retain it once and account for every
+   dependent PID. Preserve required companion files; if their coexistence
+   cannot be established, use the normal side-by-side flow instead.
+4. Re-read native image identity for those same PIDs and creation identities.
+   Every affected process must still be running from its intended retained
+   `psmux.exe` path. A successful file move alone is not proof. On a partial
+   or uncertain result, preserve the journal and inspect both paths rather
+   than repeating the move or starting a PSMux client.
+5. Publish the verified incoming binary at the original `psmux.exe` path
+   through the approved installation owner, without an uninstall/kill phase.
+   Read back its file version and the owner-selected client path. Keeping
+   the old process alive does not by itself prove the incoming selection.
+6. Verify preserved server registrations, native session/pane observations
+   and existing joins without creating or reseeding sessions. Record the
+   actual outcome and retained paths in the owner's upgrade journal. Keep
+   each retained image until all dependent processes have exited naturally
+   and its other owner references are released; age, an incoming version
+   check, or a completed installer is not deletion permission.
+
+**Recovery after an unsafe rename:** do not signal or kill the server, delete
+port files, or run another PSMux client to diagnose it. Pin the affected native
+PID/creation identity and the actual renamed image first. Under the same
+owner's exclusion, move that exact image on the same volume into a fresh,
+non-disposable retained directory **as `psmux.exe`**, then re-read the same
+process's image path and existing registrations. Do not overwrite an incoming
+`psmux.exe` to restore the name. An image already kept in Temp also needs a
+durable retained home, even when its basename is correct. If cleanup already
+removed registrations, fixing the filename does not recreate them or prove
+the sessions recoverable. Preserve the processes and evidence and ask the
+existing native owner whether supported registration recovery is available;
+report it as unavailable when it is not. Do not invent rows, restart the
+provider, or claim success.
+
 ### Resident state-only status projection
 
 The elected monitor projects already-computed Worktrees state, not Git work.
