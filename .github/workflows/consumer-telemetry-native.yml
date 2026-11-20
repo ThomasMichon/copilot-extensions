@@ -9,6 +9,7 @@ on:
       - "libs/process-telemetry/**"
       - "libs/agent-procutil/src/agent_procutil/command_pipe.py"
       - "libs/agent-procutil/src/agent_procutil/_windows_caller_owned.py"
+      - "libs/agent-procutil/tests/sdk_visibility_sources.py"
       - "plugins/agent-bridge/src/agent_bridge/**"
       - "plugins/agent-bridge/pyproject.toml"
       - "plugins/agent-bridge/tests/test_consumer_telemetry_command.py"
