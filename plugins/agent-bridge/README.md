@@ -1371,3 +1371,18 @@ owner's remaining obligations.
 | Windows | Scheduled task | At-logon (15s delay) |
 | Linux/WSL | systemd user unit | Enabled |
 | macOS | Planned | -- |
+### Independent native admission evidence
+
+For private recovery fixtures, `native_receipt_records.NativeReceiptRecords`
+provides an opt-in Python interface alongside the ordinary native send path.
+Prepare a fresh owner-private directory and retain it across generations.
+`submit_once` accepts only `no_resume=True`: it commits the original request
+digest before its one possible submission. A repeated request can only return
+the recorded receipt or query the original holder's receipt-only path.
+`inspect` reads independent evidence without a running Bridge; `None` is
+unknown, not proof that a prompt was never admitted. The record contains no
+prompt text and must not be used to reconstruct a runnable turn or lease.
+Protect and retain it for the full retry lifetime: starting with a new empty
+store is not a retry of the original operation. Ordinary CLI sends do not
+silently opt in. `tools/bridge_installed_receipt.py` exercises this contract
+with two non-editable fixture wheels and no live agent session.
