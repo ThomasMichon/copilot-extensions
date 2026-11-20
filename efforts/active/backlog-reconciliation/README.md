@@ -410,13 +410,27 @@ the non-public approval conversation.
 
 ## Plan
 
+The [retained-supervisor and existing-canonical unit](journal/2026/11.20-retained-supervisor-and-existing-canonicals.md)
+proposes complete #13617 receiving in existing Installer Upgrade Recovery:
+seven unchecked technical rows retain the native legacy/current transition,
+coordinator-only credit, original OR, repeat and independent capture. Eight
+other source contracts keep their existing canonical or exact unresolved
+owner/evidence boundary; no duplicate effort or implementation is introduced.
+The same record follows through #13718's actual reviewed planning and the
+separate #3443 NOT_PLANNED tracking retirement. The complete 11:07 PT whole
+census is unchanged at 884 open, 155 above fixed 729, with no arrivals,
+departures or new campaign disposition; filtered recent-delivery discovery
+is a different observation.
+
 The [complete orphan-task adoption planning unit](journal/2026/11.20-orphan-task-adoption-planning.md)
-proposes one distinct Draft for #3443's four stages and BOTH headless ACP
-and bare scripted tasks. Nine technical rows remain unchecked; the existing
-#7237 relationship owner and all task/workspace/provider/credential custodians
-remain. It records #13709's actual reviewed inference-identity delivery and
-#3296's separately retained bounded claim. The complete 09:27 PT census is
-885 open, 156 above fixed 729, with no arrivals, departures or new disposition.
+was delivered through reviewed #13718. Complete current receiving/custody
+readback and a separate judgment preceded #3443's acknowledged NOT_PLANNED
+tracking retirement. Its four stages and BOTH headless ACP and bare scripted
+tasks remain in one Draft, with all nine technical rows unchecked and #7237's
+independent relationship and actual resource custodians unchanged. Its
+09:27 PT 885-open census is historical; the subsequent complete 09:58 PT
+observation is 884 open, 155 above fixed 729. The new unit records the
+follow-through, not a repeated disposition or claim of adoption functionality.
 
 The [independent inference-identity and custody unit](journal/2026/11.20-independent-inference-identity-and-custody.md)
 proposes complete #3296 receiving in existing Account-Aware Operations
