@@ -199,7 +199,7 @@ class WatchGateway:
         if request.target.startswith(("/v1/read/", "/v2/read/")):
             from .report_gateway import handle
             report_handler = cast(
-                Callable[..., Awaitable[ServiceResponse | BoundedServiceResponse]], handle,
+                "Callable[..., Awaitable[ServiceResponse | BoundedServiceResponse]]", handle,
             )
             return await report_handler(self, request)
         matched = _PATH.fullmatch(request.target)
