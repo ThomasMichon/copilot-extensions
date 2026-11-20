@@ -96,6 +96,13 @@ class ScheduledJobResourceHandler(ResourceHandler):
     ) -> ResourceResult:
         desired = resolved.desired
         present = str(desired.get("state", "present")) != "absent"
+        if present and not desired.get("application"):
+            return self._result(
+                resolved.id,
+                dry_run,
+                "error",
+                detail="command.application is not bound to a declared uv-tool or pipx package",
+            )
         timeout = int(desired.get("timeout_seconds") or jobs.DEFAULT_TIMEOUT_SECONDS)
         interval, source = (
             jobs.effective_interval(

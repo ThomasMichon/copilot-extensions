@@ -2,16 +2,19 @@
 and the body of ``agent-machines scheduled-job run <id>``.
 
 A scheduled job runs one console-script entrypoint of a centrally installed
-application on a fixed interval. The declaring requirement package is the
-only authority; the sole local knob is an ``interval_seconds`` override.
-Everything machine-local lives under ``~/.agent-machines/scheduled-jobs/``.
+application on a fixed interval. ``command.application`` names a declared
+``uv-tool``/``pipx`` package, and the entrypoint is resolved only from that
+package's own install record -- never from PATH. The declaring requirement
+package is the only authority; the sole local knob is an ``interval_seconds``
+override. Everything machine-local lives under
+``~/.agent-machines/scheduled-jobs/``.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import re
-import shutil
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -24,7 +27,16 @@ MAX_INTERVAL_SECONDS = 7 * 24 * 3600
 DEFAULT_TIMEOUT_SECONDS = 900
 LOG_MAX_BYTES = 256 * 1024
 
+APP_MANAGERS = ("uv-tool", "pipx")
+
 _ID = re.compile(r"[a-z0-9][a-z0-9-]{0,63}")
+# Interpreters, shells and package managers take code or scripts as
+# arguments, so they are never an application's job entrypoint.
+_INTERPRETER = re.compile(
+    r"(python|py|pip|pipx|uv|uvx|node|deno|bun|perl|ruby|php|java|pwsh|powershell|cmd"
+    r"|sh|bash|zsh|dash|ksh|fish|env|wsl|conhost)[\d.]*w?(\.exe)?",
+    re.IGNORECASE,
+)
 _FIELDS = {
     "type",
     "id",
@@ -79,6 +91,11 @@ def validate(decl: dict[str, Any]) -> None:
             raise ValueError(
                 f"scheduled-job {job!r} command.{key} must be a bare name, not a path"
             )
+    if _INTERPRETER.fullmatch(command["entrypoint"]):
+        raise ValueError(
+            f"scheduled-job {job!r} command.entrypoint {command['entrypoint']!r} is an "
+            "interpreter or shell, not an application entrypoint"
+        )
     args = command.get("args", [])
     if not isinstance(args, list) or not all(isinstance(arg, str) for arg in args):
         raise ValueError(f"scheduled-job {job!r} command.args must be a list of strings")
@@ -183,12 +200,81 @@ def read_state(job_id: str, home: Path | None = None) -> dict[str, Any]:
 
 
 # --------------------------------------------------------------------------- #
-# Running one job
+# Application binding and running one job
 # --------------------------------------------------------------------------- #
-def resolve_entrypoint(entrypoint: str, home: Path | None = None) -> str | None:
-    """The installed console script, preferring the user tool bin dir."""
-    base = home if home is not None else Path.home()
-    return shutil.which(entrypoint, path=str(base / ".local" / "bin")) or shutil.which(entrypoint)
+def bind_application(job_id: str, desired: dict[str, Any], packages: dict[str, list[str]]):
+    """Bind a present job's ``command.application`` to the declared package.
+
+    ``packages`` maps each present ``uv-tool``/``pipx`` package id to its
+    managers. Sets ``desired["application"]`` and returns ``None``, or
+    returns why the job cannot be bound."""
+    name = (desired.get("command") or {}).get("application")
+    managers = packages.get(name, [])
+    if len(managers) != 1:
+        found = "none is declared present" if not managers else "it is declared under both"
+        return (
+            f"scheduled-job {job_id!r} application {name!r} must name exactly one present "
+            f"uv-tool or pipx package; {found}"
+        )
+    desired["application"] = {"manager": managers[0], "name": name}
+    return None
+
+
+def _uv_entrypoints(text: str) -> dict[str, str]:
+    """``name -> install-path`` from a ``uv-receipt.toml``."""
+    try:
+        import tomllib
+    except ModuleNotFoundError:  # Python 3.10: parse the receipt's inline tables
+        entries = []
+        for table in re.findall(r"\{([^{}]*)\}", text.partition("entrypoints")[2]):
+            pairs = re.findall(r'([\w-]+)\s*=\s*("(?:[^"\\]|\\.)*"|\'[^\']*\')', table)
+            entries.append({k: json.loads(v) if v[0] == '"' else v[1:-1] for k, v in pairs})
+    else:
+        entries = tomllib.loads(text).get("tool", {}).get("entrypoints", [])
+    return {
+        str(entry["name"]): str(entry["install-path"])
+        for entry in entries
+        if isinstance(entry, dict) and entry.get("name") and entry.get("install-path")
+    }
+
+
+def _pipx_entrypoints(text: str, name: str) -> dict[str, str]:
+    """``name -> app path`` from ``pipx list --json`` for the main package."""
+    venv = json.loads(text).get("venvs", {}).get(name) or {}
+    main = venv.get("metadata", {}).get("main_package", {})
+    paths = [p.get("__Path__") if isinstance(p, dict) else p for p in main.get("app_paths", [])]
+    return {Path(str(p)).stem: str(p) for p in paths if p}
+
+
+def resolve_entrypoint(
+    application: dict[str, str], entrypoint: str, runner
+) -> tuple[str | None, str]:
+    """The entrypoint's path from the bound package's own install record.
+
+    Returns ``(path, "")`` or ``(None, reason)``. Only executables the
+    package itself installed qualify; PATH is never searched."""
+    manager, name = application["manager"], application["name"]
+    try:
+        if manager == "uv-tool":
+            out = runner(["uv", "tool", "dir"], timeout=60)
+            if out.returncode != 0:
+                return None, f"uv tool dir failed: {out.output}"
+            receipt = Path(out.stdout.strip().splitlines()[-1]) / name / "uv-receipt.toml"
+            entries = _uv_entrypoints(receipt.read_text(encoding="utf-8"))
+        else:
+            out = runner(["pipx", "list", "--json"], timeout=60)
+            if out.returncode != 0:
+                return None, f"pipx list failed: {out.output}"
+            entries = _pipx_entrypoints(out.stdout, name)
+    except (OSError, ValueError, IndexError, KeyError, AttributeError) as error:
+        return None, f"cannot read {manager} install record for {name!r}: {error}"
+    want = entrypoint.casefold()
+    path = next((p for n, p in entries.items() if n.casefold() == want), None)
+    if path is None:
+        return None, f"{manager} package {name!r} does not provide entrypoint {entrypoint!r}"
+    if not Path(path).is_file():
+        return None, f"entrypoint {entrypoint!r} of {name!r} is missing at {path}"
+    return path, ""
 
 
 def _lock(job_id: str, home: Path | None):
@@ -222,20 +308,18 @@ def run_job(job_id: str, desired: dict[str, Any], *, home: Path | None = None, r
             command = desired["command"]
             timeout = int(desired.get("timeout_seconds") or DEFAULT_TIMEOUT_SECONDS)
             started = _now()
-            binary = resolve_entrypoint(command["entrypoint"], home)
+            run = runner or default_command_runner
+            application = desired.get("application")
+            binary, reason = (
+                resolve_entrypoint(application, command["entrypoint"], run)
+                if application
+                else (None, f"application {command['application']!r} is not bound to a package")
+            )
             if binary is None:
-                result = CommandResult(
-                    [command["entrypoint"]],
-                    127,
-                    "",
-                    (
-                        f"entrypoint {command['entrypoint']!r} of application "
-                        f"{command['application']!r} is not installed"
-                    ),
-                )
+                result = CommandResult([command["entrypoint"]], 127, "", reason)
             else:
                 argv = [binary, *command.get("args", [])]
-                result = (runner or default_command_runner)(argv, cwd=root, timeout=timeout)
+                result = run(argv, cwd=root, timeout=timeout)
             timed_out = result.returncode == TIMEOUT_RETURNCODE and "timed out after" in (
                 result.stderr or ""
             )

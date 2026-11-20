@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -24,6 +25,13 @@ JOB = {
     "command": {"application": "harness-tools", "entrypoint": "hub-health", "args": ["--quiet"]},
     "interval_seconds": 3600,
 }
+APP = {"type": "package", "id": "harness-tools", "manager": "uv-tool"}
+
+
+def _apply(packages, machine, plat, ctx, dry_run):
+    return apply_resources(
+        packages, machine, plat, ctx, dry_run=dry_run, resource_types=frozenset({"scheduled-job"})
+    )
 
 
 def _pkg(tmp_path: Path, name: str, resources: list[dict]):
@@ -84,6 +92,8 @@ def test_valid_present_and_id_only_absent_declarations_load(tmp_path):
         {"command": {"application": "t", "entrypoint": "bin/hub-health"}},
         {"command": {"application": "t", "entrypoint": "hub-health", "shell": "echo hi"}},
         {"command": {"application": "t", "entrypoint": "hub-health", "args": "--quiet"}},
+        {"command": {"application": "t", "entrypoint": "python3", "args": ["-c", "print()"]}},
+        {"command": {"application": "t", "entrypoint": "pwsh.exe"}},
         {"interval_seconds": 60},
         {"interval_seconds": 8 * 24 * 3600},
         {"timeout_seconds": 3600},
@@ -97,31 +107,58 @@ def test_invalid_scheduled_job_declarations_are_rejected(tmp_path, change):
         _pkg(tmp_path, "acme/a", [decl])
 
 
+@pytest.mark.parametrize(
+    "app",
+    [None, {**APP, "state": "absent"}, {**APP, "manager": "winget"}],
+    ids=["undeclared", "absent", "unsupported-manager"],
+)
+def test_job_whose_application_is_not_a_declared_tool_package_is_unbound(
+    tmp_path, monkeypatch, app
+):
+    backend = FakeBackend(monkeypatch)
+    pkg = _pkg(tmp_path, "acme/a", [JOB] if app is None else [app, JOB])
+
+    _, findings = R.resolve_resources([pkg], "box-1", "windows")
+    results = _apply([pkg], "box-1", "windows", _ctx(tmp_path), dry_run=False)
+
+    assert [f.code for f in findings] == ["scheduled-job-unbound"]
+    assert [r.action for r in results] == ["error"] and backend.calls == []
+
+
+def test_job_binds_to_its_declared_tool_package(tmp_path):
+    resolved, findings = R.resolve_resources(
+        [_pkg(tmp_path, "acme/a", [APP, JOB])], "box-1", "windows"
+    )
+    job = next(res for res in resolved if res.type == "scheduled-job")
+    assert findings == []
+    assert job.desired["application"] == {"manager": "uv-tool", "name": "harness-tools"}
+
+
 # --------------------------------------------------------------------------- #
 # Handler convergence
 # --------------------------------------------------------------------------- #
 def test_present_job_registers_then_is_idempotent_and_owned(tmp_path, monkeypatch):
     backend = FakeBackend(monkeypatch)
-    pkg = _pkg(tmp_path, "acme/a", [JOB])
+    pkg = _pkg(tmp_path, "acme/a", [APP, JOB])
 
-    planned = apply_resources([pkg], "box-1", "windows", _ctx(tmp_path), dry_run=True)
+    planned = _apply([pkg], "box-1", "windows", _ctx(tmp_path), dry_run=True)
     assert [(r.action, r.dry_run) for r in planned] == [("install", True)]
     assert backend.calls == [] and jobs.read_owned(tmp_path) == {}
 
-    first = apply_resources([pkg], "box-1", "windows", _ctx(tmp_path), dry_run=False)
+    first = _apply([pkg], "box-1", "windows", _ctx(tmp_path), dry_run=False)
     assert [r.action for r in first] == ["install"]
     assert backend.calls == [("register", "hub-health", 3600, 900)]
     assert jobs.read_owned(tmp_path)["hub-health"]["sources"] == [str(pkg.source_path)]
 
-    second = apply_resources([pkg], "box-1", "windows", _ctx(tmp_path), dry_run=False)
+    second = _apply([pkg], "box-1", "windows", _ctx(tmp_path), dry_run=False)
     assert [r.action for r in second] == ["none"]
     assert len(backend.calls) == 1
 
 
 def test_changed_interval_reregisters(tmp_path, monkeypatch):
     backend = FakeBackend(monkeypatch, {"hub-health": (7200, 900)})
-    results = apply_resources(
-        [_pkg(tmp_path, "acme/a", [JOB])], "box-1", "windows", _ctx(tmp_path), dry_run=False
+    results = _apply(
+        [_pkg(tmp_path, "acme/a", [APP, JOB])], "box-1", "windows", _ctx(tmp_path), dry_run=False
     )
     assert [r.action for r in results] == ["install"]
     assert backend.registered["hub-health"] == (3600, 900)
@@ -132,7 +169,7 @@ def test_absent_declaration_unregisters(tmp_path, monkeypatch):
     pkg = _pkg(
         tmp_path, "acme/a", [{"type": "scheduled-job", "id": "hub-health", "state": "absent"}]
     )
-    results = apply_resources([pkg], "box-1", "windows", _ctx(tmp_path), dry_run=False)
+    results = _apply([pkg], "box-1", "windows", _ctx(tmp_path), dry_run=False)
     assert [r.action for r in results] == ["uninstall"]
     assert backend.calls == [("unregister", "hub-health", True)]
 
@@ -144,7 +181,7 @@ def test_withdrawn_declaration_is_swept_but_out_of_scope_owner_is_kept(tmp_path,
     jobs.record_owned(tmp_path, "hub-health", [str(pkg.source_path)])
     jobs.record_owned(tmp_path, "repo-sync", [str(other.source_path)])
 
-    results = apply_resources([pkg], "box-1", "windows", _ctx(tmp_path), dry_run=False)
+    results = _apply([pkg], "box-1", "windows", _ctx(tmp_path), dry_run=False)
 
     assert [(r.id, r.action) for r in results] == [("hub-health", "uninstall")]
     assert set(jobs.read_owned(tmp_path)) == {"repo-sync"}
@@ -154,7 +191,7 @@ def test_withdrawn_declaration_is_swept_but_out_of_scope_owner_is_kept(tmp_path,
 def test_owned_job_whose_declaring_file_is_gone_is_swept(tmp_path, monkeypatch):
     FakeBackend(monkeypatch, {"hub-health": (3600, 900)})
     jobs.record_owned(tmp_path, "hub-health", [str(tmp_path / "deleted" / "pkg.yaml")])
-    results = apply_resources([], "box-1", "windows", _ctx(tmp_path), dry_run=False)
+    results = _apply([], "box-1", "windows", _ctx(tmp_path), dry_run=False)
     assert [(r.id, r.action) for r in results] == [("hub-health", "uninstall")]
 
 
@@ -162,15 +199,15 @@ def test_owned_job_from_an_unreachable_repo_is_not_swept(tmp_path, monkeypatch):
     backend = FakeBackend(monkeypatch, {"hub-health": (3600, 900)})
     unreachable = tmp_path.parent / f"{tmp_path.name}-unmounted" / "pkg.yaml"
     jobs.record_owned(tmp_path, "hub-health", [str(unreachable)])
-    assert apply_resources([], "box-1", "windows", _ctx(tmp_path), dry_run=False) == []
+    assert _apply([], "box-1", "windows", _ctx(tmp_path), dry_run=False) == []
     assert "hub-health" in backend.registered and "hub-health" in jobs.read_owned(tmp_path)
 
 
 def test_unsupported_platform_is_skipped(tmp_path, monkeypatch):
     FakeBackend(monkeypatch)
     monkeypatch.setattr(tasks, "unsupported_reason", lambda *a, **k: "no systemd")
-    results = apply_resources(
-        [_pkg(tmp_path, "acme/a", [JOB])],
+    results = _apply(
+        [_pkg(tmp_path, "acme/a", [APP, JOB])],
         "box-1",
         "linux",
         _ctx(tmp_path, plat="linux"),
@@ -204,12 +241,83 @@ DESIRED = {
     "command": JOB["command"],
     "interval_seconds": 3600,
     "timeout_seconds": 5,
+    "application": {"manager": "uv-tool", "name": "harness-tools"},
 }
+
+
+def _install(tmp_path: Path, name: str) -> Path:
+    path = tmp_path / "bin" / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("", encoding="utf-8")
+    return path
+
+
+@pytest.mark.parametrize("tomllib_available", [True, False])
+def test_run_resolves_entrypoint_from_uv_receipt_not_path(
+    tmp_path, monkeypatch, tomllib_available
+):
+    if not tomllib_available:
+        monkeypatch.setitem(sys.modules, "tomllib", None)
+    entry, other = _install(tmp_path, "hub-health.exe"), _install(tmp_path, "repo-sync.exe")
+    tool_dir = tmp_path / "tools"
+    (tool_dir / "harness-tools").mkdir(parents=True)
+    (tool_dir / "harness-tools" / "uv-receipt.toml").write_text(
+        '[tool]\nrequirements = [{ name = "harness-tools" }]\nentrypoints = [\n'
+        f'    {{ name = "repo-sync", install-path = {json.dumps(str(other))} }},\n'
+        f'    {{ name = "hub-health", install-path = \'{entry}\', from = "harness-tools" }},\n]\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("PATH", str(tmp_path / "elsewhere"))
+    seen = []
+
+    def runner(argv, *, cwd=None, timeout=None):
+        seen.append(argv)
+        out = f"{tool_dir}\n" if argv == ["uv", "tool", "dir"] else ""
+        return CommandResult(argv, 0, out, "")
+
+    assert jobs.run_job("hub-health", DESIRED, home=tmp_path, runner=runner) == 0
+    assert seen == [["uv", "tool", "dir"], [str(entry), "--quiet"]]
+
+
+def test_run_resolves_entrypoint_from_pipx_metadata(tmp_path):
+    entry = _install(tmp_path, "hub-health")
+    listing = {
+        "venvs": {
+            "harness-tools": {
+                "metadata": {"main_package": {"app_paths": [{"__Path__": str(entry)}]}}
+            }
+        }
+    }
+    seen = []
+
+    def runner(argv, *, cwd=None, timeout=None):
+        seen.append(argv)
+        out = json.dumps(listing) if argv[0] == "pipx" else ""
+        return CommandResult(argv, 0, out, "")
+
+    desired = {**DESIRED, "application": {"manager": "pipx", "name": "harness-tools"}}
+    assert jobs.run_job("hub-health", desired, home=tmp_path, runner=runner) == 0
+    assert seen[-1] == [str(entry), "--quiet"]
+
+
+def test_run_refuses_entrypoint_the_application_does_not_provide(tmp_path):
+    listing = {"venvs": {"harness-tools": {"metadata": {"main_package": {"app_paths": []}}}}}
+    seen = []
+
+    def runner(argv, *, cwd=None, timeout=None):
+        seen.append(argv)
+        return CommandResult(argv, 0, json.dumps(listing), "")
+
+    desired = {**DESIRED, "application": {"manager": "pipx", "name": "harness-tools"}}
+    assert jobs.run_job("hub-health", desired, home=tmp_path, runner=runner) == 127
+    assert seen == [["pipx", "list", "--json"]]
+    log = (jobs.jobs_root(tmp_path) / "logs" / "hub-health.log").read_text("utf-8")
+    assert "does not provide entrypoint 'hub-health'" in log
 
 
 def test_run_records_timeout_and_log(tmp_path, monkeypatch):
     monkeypatch.setattr(
-        jobs, "resolve_entrypoint", lambda name, home=None: "C:/bin/hub-health.exe"
+        jobs, "resolve_entrypoint", lambda app, name, runner: ("C:/bin/hub-health.exe", "")
     )
     seen = []
 

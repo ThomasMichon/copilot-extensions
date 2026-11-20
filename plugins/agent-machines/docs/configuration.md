@@ -203,7 +203,7 @@ to `manifest.py`'s `KNOWN_RESOURCE_TYPES`/`REQUIRED_FIELDS` and
 | `power-setting` | Required `subgroup`, `setting`; scheme and at least one of `ac`/`dc`, unsigned indexes or accepted symbolic action; no `state`. |
 | `self-update` | Required `tier` (`watchdog`, `sweep`); unattended update policy. |
 | `fleet-update` | Required `tier` (`sweep`); native fleet/update scheduling policy. |
-| `scheduled-job` | Required `id`; when present, `command` (`application`, bare `entrypoint`, `args`), `interval_seconds` (300..604800), optional `timeout_seconds` below it. |
+| `scheduled-job` | Required `id`; when present, `command` (`application` naming a present `uv-tool`/`pipx` `package`, bare non-interpreter `entrypoint` it provides, `args`), `interval_seconds` (300..604800), optional `timeout_seconds` below it. |
 | `copilot-cli-update` | At least `auto_update` boolean or `pinned_version` string. |
 | `gh-account` | Required `host`, `login`, `credential_source`; read-only credential/account prerequisite. |
 | `git-config` | `scope` only `global`, required `entries`; strict entry schema in `git_config_transaction.py`; never maintenance-safe. |

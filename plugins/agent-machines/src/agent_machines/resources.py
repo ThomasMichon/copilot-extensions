@@ -1929,7 +1929,29 @@ def resolve_resources(
             )
         )
     findings.extend(_file_ownership_findings(resolved))
+    findings.extend(_scheduled_job_binding_findings(resolved))
     return resolved, findings
+
+
+def _scheduled_job_binding_findings(resolved: list[ResolvedResource]) -> list[ResourceFinding]:
+    """Bind each present ``scheduled-job`` to the ``package`` it names."""
+    from . import scheduled_jobs
+
+    apps: dict[str, list[str]] = {}
+    for res in resolved:
+        if (
+            res.type == "package"
+            and res.desired.get("manager") in scheduled_jobs.APP_MANAGERS
+            and res.desired.get("state", "present") != "absent"
+        ):
+            apps.setdefault(res.id, []).append(str(res.desired["manager"]))
+    findings = []
+    for res in resolved:
+        if res.type == "scheduled-job" and res.desired.get("state", "present") != "absent":
+            problem = scheduled_jobs.bind_application(res.id, res.desired, apps)
+            if problem:
+                findings.append(ResourceFinding("error", "scheduled-job-unbound", problem))
+    return findings
 
 
 def detect_conflicts(

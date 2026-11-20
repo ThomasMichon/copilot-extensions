@@ -616,12 +616,15 @@ repository (for example a harness needing periodic `hub-health` or
 `repo-sync` upkeep) declares the application as a `package` (typically with
 [`source`](#installing-from-a-source)) and the timer as a `scheduled-job`,
 instead of shipping its own installer and Scheduled Task / systemd
-registration. Withdrawing the declaration removes the timer. This is the one
-generic timer mechanism for consumer repositories; `self-update`,
+registration. Withdrawing the declaration removes the timer. `self-update`,
 `fleet-update`, and `health-job` keep their own schedulers.
 
 ```yaml
 resources:
+  - type: package
+    id: harness-tools
+    manager: uv-tool
+    source: { git: https://example.com/org/harness-tools.git }
   - type: scheduled-job
     id: hub-health
     command: { application: harness-tools, entrypoint: hub-health, args: [--quiet] }
@@ -634,14 +637,25 @@ resources:
 | `type` | yes | `scheduled-job` |
 | `id` | yes | `[a-z0-9][a-z0-9-]*` (max 64). Names the timer `agent-machines-scheduled-job-<id>`. |
 | `state` | no | `present` (default) or `absent`. An `absent` declaration needs only `id`. |
-| `command.application` | present | Identifier of the application providing the entrypoint, used for reporting only and never validated. |
-| `command.entrypoint` | present | Bare console-script name, resolved from `~/.local/bin` then `PATH`. Never a path, shell string, or interpreter + script. |
+| `command.application` | present | `id` of the present `uv-tool` or `pipx` `package` that provides the entrypoint; see the command boundary below. |
+| `command.entrypoint` | present | Bare console-script name of that application. Never a path, shell string, interpreter, or shell. |
 | `command.args` | no | List of string arguments, passed as argv (no shell). |
 | `interval_seconds` | present | Integer from 300 (5 minutes) to 604800 (7 days). |
 | `timeout_seconds` | no | Integer below `interval_seconds`; default 900. |
 | `platforms` | no | Restrict to a subset of `windows` / `linux` / `wsl`. |
 | `gate` | no | Restrict to specific machines (defaults to the package gate). |
 | `owner` | no | Override the collision owner label (defaults to the package name). |
+
+The command boundary is the bound application's own installed entrypoints.
+`command.application` must name exactly one present `uv-tool` or `pipx`
+`package` declared on the same machine; otherwise validation reports
+`scheduled-job-unbound` and nothing is registered or run. At run time the
+entrypoint is resolved only from that package's install record -- the
+`uv-receipt.toml` under `uv tool dir`, or `pipx list --json` app paths --
+never from `PATH`; an entrypoint the application does not provide exits 127.
+Interpreter and shell names (`python`, `node`, `pwsh`, `cmd`, `bash`, ...) are
+rejected as entrypoints. The job never installs or updates the application;
+the `package` resource owns that.
 
 The declaration is the only authority. The sole local override is
 `~/.agent-machines/scheduled-jobs/overrides.json`
@@ -669,7 +683,7 @@ Each timer runs `agent-machines scheduled-job run <id>` through the stable
 - The entrypoint runs headless with `timeout_seconds` and its output is
   appended to `~/.agent-machines/scheduled-jobs/logs/<id>.log` (truncated to
   the newest half beyond 256 KiB). `state/<id>.json` records `started_at`,
-  `finished_at`, `exit_code`, and `timed_out`. A missing entrypoint exits 127.
+  `finished_at`, `exit_code`, and `timed_out`.
 
 Backends: on Windows, a per-user Scheduled Task (Interactive logon, Limited
 run level, `MultipleInstances IgnoreNew`, no `StartWhenAvailable`) launching
