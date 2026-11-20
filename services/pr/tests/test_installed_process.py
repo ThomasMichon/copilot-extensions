@@ -590,7 +590,7 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
                     raise AssertionError(f"{operation} remained busy")
 
                 async def workspace(
-                    operation: str, payload: dict[str, Any],
+                    operation: str, payload: dict[str, Any], *, retry_unavailable: bool = True,
                 ) -> dict[str, Any]:
                     from agent_pull_requests import workspace_cli
                     from agent_pull_requests.watch_replay_binding import ReplayBinding
@@ -641,12 +641,13 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
                         if code == 0:
                             return cast(dict[str, Any], json.loads(output.out))
                         if (
-                            operation in {"capabilities", "events", "inspect", "materialize", "retained-comment"}
+                            retry_unavailable
+                            and operation in {"capabilities", "events", "inspect", "materialize", "retained-comment"}
                             and len(workspace_errors) > errors_before
                             and getattr(workspace_errors[-1], "http_status", None) == 503
                         ):
-                            # The observer holds a nonblocking store lock briefly.
-                            # Retry only effect-free reads, never load/sync/allocation.
+                            # Positive reads can race the observer's store lock.
+                            # Expected refusals opt out; never retry effectful work.
                             await asyncio.sleep(0.05)
                             continue
                         raise AssertionError((output.out, output.err, workspace_errors, responses[-5:]))
@@ -945,8 +946,13 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
                         assert before_reopen["current"]["state"] == terminal_outcome
                         failures = len(workspace_errors)
                         with pytest.raises(AssertionError):
-                            await workspace("materialize", {"number": 42, "generation_id": generation_id})
+                            await workspace(
+                                "materialize", {"number": 42, "generation_id": generation_id},
+                                retry_unavailable=False,
+                            )
                         assert len(workspace_errors) > failures
+                        assert getattr(workspace_errors[-1], "code", None) == "workspace_unavailable"
+                        assert getattr(workspace_errors[-1], "http_status", None) == 503
                         assert getattr(workspace_errors[-1], "outcome_unknown", None) is False
                         evidence["sections"]["pull_request"]["data"]["status"] = "active"
                         save_evidence(8)
