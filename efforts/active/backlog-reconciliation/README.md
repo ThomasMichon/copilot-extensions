@@ -410,6 +410,16 @@ the non-public approval conversation.
 
 ## Plan
 
+The [provider-observation and terminal-load unit](journal/2026/11.20-provider-observation-and-terminal-load-receiving.md)
+proposes complete direct #11726 Driver observation-design and #11711 PR-service
+original-result contracts in their existing owners' Plan, local/global
+Validation, Coordination and Journal. All fourteen new technical rows remain
+unchecked. Thirteen complete current unions also preserve actual claimants,
+three existing canonical cohorts and independent source/copy conditions.
+The same record captures actual #13571 delivery, four separately verified
+tracking retirements and the complete 903-open census; no new disposition
+or technical/custody credit follows from these two proposals.
+
 The [source-attribution and retirement-fixture unit](journal/2026/11.20-source-attribution-and-retirement-fixture-receiving.md)
 proposes complete direct #11348 required-context, #11372 visual-fixture,
 #11512 independent-witness/related-triage and #11482 managed-trailer
@@ -4951,6 +4961,15 @@ closure credit, resource release or parent checkbox change follows.
   normal publication flow.
 
 ## Validation Plan
+
+The [two-source receiving proposal](journal/2026/11.20-provider-observation-and-terminal-load-receiving.md)
+directly retains both complete finite unions in their actual existing owners'
+Plan, local and actual global Validation, Coordination and dated Journal.
+Every incumbent check state remains and all fourteen new technical rows are
+unchecked. Normal reviewed whole receiving delivery, permitted current complete
+source/ROOT/custody readback and two separate judgments precede any new
+disposition. No native/provider experiment, implementation appointment, generic
+ACK/receipt PR, whole-parent prerequisite or uncertain-effect replay follows.
 
 The [four-source receiving contract](journal/2026/11.20-source-attribution-and-retirement-fixture-receiving.md)
 directly retains all four complete finite unions in their actual owners'
