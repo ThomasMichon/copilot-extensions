@@ -55,6 +55,23 @@ release gates, or count unexecuted native coverage as passing.
 
 ## Coordination
 
+The proposed finite #12156/#12193/#12194 fixture families enter the existing
+Phase 4 Vault, tools/workflow and SSH/installer waves. The distinct #12235
+native-profile admission family enters Phase 5. All four use existing Phase 7
+migration-intake deduplication and domain review, preserving the primary
+maintainer and actual fixture, cache/DPAPI, installer, workflow/runner,
+platform, source/native/release and resource custodians. No implementer,
+common cause, native venue or execution is appointed. Preserve OPEN #1303,
+all incumbent states/holds, unit-only required CI and hosted-Windows quiescence.
+
+Normal review must deliver every applicable P/V/G clause, continuing
+Coordination, dated Journal and intake route. Keep the four sources OPEN during
+proposal; permitted current whole receiving/source/custody readback and separate
+source-specific judgments follow actual complete reviewed delivery. All
+twenty-three technical rows remain unchecked. This is not a cache/installer
+repair, workflow run, no-skip waiver, production fallback, resource transfer,
+generic ACK or unrelated whole-portfolio completion prerequisite.
+
 The finite #11995 PowerShell 5.1 child-budget family enters Phase 4's
 Worktrees/owning-fixture wave through existing Phase 7 migration-intake and
 domain review. Preserve the primary maintainer, actual prepared-membership/
@@ -602,6 +619,118 @@ Agent-recommended Phase 3 Worktrees-pilot receiving through Phase 7.
   observable features per process launch.
 - [ ] Keep each plugin's contract map, inventory, and TESTING coverage summary
   current as its wave lands.
+
+#### Finite Windows Vault cleanup and native-cache fixtures from #12156
+
+Agent-recommended Phase 4 Vault-wave receiving through Phase 7. These are two
+distinct reported fixture families, not one proved product or host cause.
+
+- [ ] **P12156-1:** Retain all four parametrizations of
+  `test_cleanup_only_calls_a_loaded_construction_handler` in
+  `test_install_cleanup_ps1.py`: installer exit 1, `Write-Warn:` and
+  actual `['UNLOCK']` versus expected `['STAMP', 'UNLOCK']`. Diagnose the
+  loaded-construction-handler/stamp/unlock boundary while preserving meaningful
+  cleanup ordering and failure behavior; a different copy/CLI repair is not
+  correspondence.
+- [ ] **P12156-2:** Separately retain all four original native-profile cases:
+  `TestNativeProfileSequence::test_base_repeat_and_ssh_switch`,
+  `test_ssh_repeat_update_and_preservation`,
+  `test_native_profile_failed_dependency_preserves_installed_consumer` and
+  `test_source_profile_stamp_survives_publisher_and_validates_retained_helpers[ssh]`.
+  Their actual native consumer's `PersistentCache().put(...)` returned false;
+  the owner attributed `CryptProtectData` error 5 to unavailable DPAPI in that
+  process. Preserve explicit capability-based test skipping OR a selected
+  non-DPAPI test cipher. Neither alternative authorizes a production cipher
+  fallback, profile/privilege change or silent cache-write success.
+- [ ] **P12156-3:** Preserve the original Windows 11/PowerShell 7/Python 3.13
+  context, reported unchanged-Dev failures and real native-consumer population
+  assertions. Credit actual existing source/fixture corrections only at their
+  demonstrated scope; a different cache test's exit 77 is not this consumer's
+  correction. Keep unavailable capability, skipped assertions and passing
+  supported controls distinct, with original budgets and owning cleanup.
+
+##### Local Validation for #12156
+
+- [ ] **V12156-1:** Through the existing bounded fixture lane, qualify all four
+  loaded-handler cases and their expected stamp/unlock and error/cleanup
+  outcomes. Preserve assertions and original failure history; unrelated suite
+  counts or an isolated different test are not this finite result.
+- [ ] **V12156-2:** Qualify all four actual profile consumers under the
+  selected capability-skip OR test-cipher policy, with DPAPI available and
+  unavailable controls at the proper supported tier. Preserve real consumer
+  cache population, ordinary production policy, truthful pass/skip/failure and
+  resource cleanup. No credential operation or new native run is authorized.
+
+#### Finite public-toolchain workflow assertion reconciliation from #12193
+
+Agent-recommended Phase 4 tools/workflow receiving through Phase 7.
+
+- [ ] **P12193-1:** Map the reported 153 failures/187 passes in
+  `test_public_toolchain_source.py` plus `test_seasoned_public_feed.py` to
+  authoritative current workflow and runner contracts. Retain all five named
+  failure groups: absent `windows-python-artifact-builder`, removed/renamed
+  steps, three imports of the unavailable shared CI-gate helper, absent
+  `construction-macos`, and the native-MCP provisioning-command mismatch.
+- [ ] **P12193-2:** Replace an obsolete expectation only when its intended
+  source-path selection, dependency-policy, platform and coverage guarantee has
+  an identified, meaningfully tested replacement. Preserve legitimate failure
+  sensitivity; broad skips, disabled checks or matching a broken workflow do
+  not reconcile the contract.
+- [ ] **P12193-3:** Keep this broader module family separate from metadata
+  transport deadlines and the positively admitted promotion-unit packet.
+  Their independent source/CI credit is not a pass of this selection. Use the
+  existing workflow/test-support owners and original bounded tier, not a new
+  required full-suite or native matrix.
+
+##### Local Validation for #12193
+
+- [ ] **V12193-1:** Exercise the reconciled named workflow/helper assertions
+  and actual runner/selection contracts, preserving meaningful path,
+  dependency, platform and coverage positives and negatives. Record explicit
+  original-to-current replacements rather than dropping absent names.
+- [ ] **V12193-2:** Attribute the actual two-module selection and its
+  pass/failure/skip outcomes separately from required unit CI and deadline
+  extraction. Preserve existing containment and budgets; historical counts
+  are not a fresh reproduction or current repair.
+
+#### Finite Windows SSH installer snapshot and transaction fixtures from #12194
+
+Agent-recommended Phase 4 SSH/installer-wave receiving through Phase 7.
+Preserve [authoritative runtime replacement](../../../visions/installer/README.md#authoritative-runtime-replacement);
+fixture admission does not add an old-recovery veto to ordinary installation.
+
+- [ ] **P12194-1:** Retain the PowerShell
+  `test_checkout_stamp_retains_complete_driver_graph_without_source` failure:
+  the stamped snapshot's `pyproject.toml` retained a
+  `../../libs/configuration-layers` UV source path resolving outside the
+  snapshot. Qualify the actual Windows snapshot/driver-graph contract, not
+  only the Bash path exercised by the dispatch lane.
+- [ ] **P12194-2:** Retain all six `agent-machines` transaction
+  parametrizations: `source_ps_native_reuse_keeps_package_and_exact_slot`
+  on both PowerShell hosts; `source_sh_native_reuse_keeps_package_and_exact_slot`;
+  `source_sh_selection_skips_nonfunctional_python3`; and
+  `source_ps_stamp_preserves_hashed_closure_and_refuses_corruption` on both
+  PowerShell hosts. Diagnose `source-runtime: completed source work` and
+  missing `Assert-CellPayloadIdentity` at their actual fixture/consumer
+  boundaries without treating them as one established cause.
+- [ ] **P12194-3:** Preserve the original alternative: correct and qualify
+  supported Windows behavior OR explicitly scope/skip cases where that lane
+  does not apply, retaining the intended supported-domain assertions elsewhere.
+  Preserve package/exact-slot reuse, nonfunctional-interpreter selection and
+  hashed-closure/corruption refusal. The separately corrected
+  `installerLifecycle` expectation is credit, not these seven tests' result.
+
+##### Local Validation for #12194
+
+- [ ] **V12194-1:** Map all seven original cases to the actual PowerShell/Bash
+  snapshot and transaction consumers and their supported Windows lane. Verify
+  the chosen corrected-behavior OR justified-domain disposition without
+  weakening production identity, source or corruption guards.
+- [ ] **V12194-2:** Retain actual supported pass, unsupported/skip and
+  unavailable outcomes with source/selection and cleanup under original
+  bounds. Workflow-dispatch availability or required PR CI alone is not this
+  local full-suite acceptance. No installer, native test or rollout is run by
+  this intake.
 
 #### Finite prepared-membership PowerShell child-budget contract from #11995
 
@@ -1308,6 +1437,35 @@ a different selection. Any changed controlled selection must be named as changed
 - [ ] Add contribution guidance requiring new test families to declare their
   contract, tier, effects, and expected budget impact.
 
+#### Finite Windows-native no-skip roster admission from #12235
+
+Agent-recommended Phase 5 profile/runner receiving through Phase 7.
+
+- [ ] **P12235-1:** Preserve the reported 4,804 passes/three skips followed
+  by correct evidence refusal, not a passing native profile. The three
+  POSIX-only nodes in `test_windows_lease_acl.py` are
+  `test_posix_fresh_lease_root_passes_strict_private_admission[construction]`,
+  the corresponding `[retention]` case, and
+  `test_posix_existing_root_is_not_repaired_for_private_admission`.
+- [ ] **P12235-2:** Positively admit the platform-appropriate Windows-native
+  roster OR report the unsupported platform boundary before complete
+  execution. Preserve exact inventory and every-admitted-unit setup/call/
+  teardown-without-skips rules, the Linux required-CI inventory and actual
+  native qualification owner. Do not ignore skips, relabel partial execution
+  or broaden this finite admission correction into constructor/policy repair.
+
+##### Local Validation for #12235
+
+- [ ] **V12235-1:** Exercise selected Windows admission and all three
+  platform-inapplicable-node controls before execution, plus intended
+  platform-appropriate positives. The declared roster must match the executed
+  evidence; supported refusal is not an executed native pass.
+- [ ] **V12235-2:** Verify exact-inventory/no-skip enforcement and unchanged
+  Linux required-CI admission, retaining historical failure and actual
+  selected outcomes separately. Preserve original containment, budgets,
+  supervisor-verified cleanup credit and separately authorized native scope;
+  this intake runs no profile or test.
+
 #### Independently bounded optional Windows scheduling - #9568
 
 _Agent-recommended finite receiving, not a newly reproduced regression or
@@ -1421,6 +1579,15 @@ an assertion that the historical source defect remains current._
   effort Done, and archive it.
 
 ### Phase 7 — Reconcile deferred backlog
+
+The proposed P12156/V12156/G12156, P12193/V12193/G12193 and
+P12194/V12194/G12194 families each have one primary Phase 4 placement;
+P12235/V12235/G12235 has one Phase 5 placement. The append-only
+migration-intake ledger records deduplication and unchanged custodians.
+This same planning unit supplies complete domain Plan, local/global
+Validation, Coordination and dated Journal for ordinary review; sources
+remain their trackers during proposal. No new administrative checkbox,
+tracker, implementer or unrelated portfolio prerequisite is added.
 
 The finite P11995/V11995/G11995 family has one primary placement in
 Phase 4's Worktrees/owning-fixture wave. Its append-only migration-intake
@@ -2749,6 +2916,28 @@ independent of #10031's large-caller startup/cutover lane.
 
 ## Validation Plan
 
+- [ ] **G12156:** Resolve every P12156/V12156 and continuing Coordination
+  clause for BOTH original Windows fixture families: all four stamp/unlock
+  controls and all four actual native-profile cache consumers, original
+  capability-skip OR non-DPAPI-test-cipher choice and honest evidence tiers.
+  Preserve production DPAPI/cache policy, existing custodians and original
+  bounds; a different fixture's skip or plan merge is not a repair.
+- [ ] **G12193:** Resolve every P12193/V12193 and continuing Coordination
+  clause for the two-module workflow contract: all five failure groups,
+  identified meaningful replacements and retained path/dependency/platform/
+  coverage sensitivity. Required unit success and deadline extraction are
+  independent; no broad disabling or new full-suite required gate follows.
+- [ ] **G12194:** Resolve every P12194/V12194 and continuing Coordination
+  clause for all seven Windows snapshot/transaction cases, actual supported
+  behavior OR justified domain disposition and preserved source/identity/
+  corruption assertions. Retain separate prior repair credit, ordinary
+  replacement intent, actual owners and truthful native/unavailable outcomes.
+- [ ] **G12235:** Resolve every P12235/V12235 and continuing Coordination
+  clause: platform-appropriate positive admission OR explicit pre-execution
+  unsupported boundary, all three named POSIX-only controls and unchanged
+  exact-inventory/no-skip/Linux required-CI rules. Documentary receiving is
+  not a profile pass, native execution grant or resource release.
+
 - [ ] **G11995:** Resolve every P11995/V11995 and continuing Coordination
   clause: both actual PowerShell 5.1 families, original 10-second failures/
   phase evidence, production-latency classification and the original
@@ -3132,6 +3321,19 @@ with another unbounded full-suite run. Portfolio reductions follow only after
 the inventory and evidence gates are available.
 
 ## Journal
+
+### 2026-11-20 UTC - Proposed Windows fixture and no-skip roster receiving
+
+Complete current originals/discussions retain the four finite families in
+their existing Phase 4/5 waves through Phase 7, with direct Plan, local and
+actual global Validation, continuing Coordination and append-only intake.
+All twenty-three new technical rows remain unchecked. The consumed prior
+Vault study is reused without repeating its unchanged source/native trace;
+its two actual fixture gaps are not replaced with a different cache test.
+The [fourteen-source record](../backlog-reconciliation/journal/2026/11.20-windows-fixture-and-profile-receiving.md)
+retains the independent scope, original alternatives, claims and separate
+post-review judgment gates. No implementation, import, test/native run,
+production fallback, installer/CI/profile change or resource action occurred.
 
 ### 2026-11-20 UTC - Proposed finite PowerShell budget-policy receiving
 
