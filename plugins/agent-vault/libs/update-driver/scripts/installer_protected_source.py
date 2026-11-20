@@ -452,7 +452,10 @@ def install(selected: ProtectedApplication, *, code: Path) -> dict[str, str]:
     source = install_source.select_project(selected.snapshot, selected.component)
     if not source.payload.is_relative_to(selected.snapshot) or any(
         not package.is_relative_to(selected.snapshot)
-        for package in install_source.engine._package_roots(source.payload)
+        for package in install_source.engine._package_roots(
+            source.payload,
+            **({"closed_wheels": True} if source.closed_wheel_source else {}),
+        )
     ):
         raise ValueError(
             "protected incoming package closure leaves its admitted snapshot"
