@@ -692,6 +692,15 @@ def test_nonreading_receiver_has_finite_writer_and_shutdown(
             assert owner.stats()["receiver_exited"] == 1
         for _ in range(10 if idle_exit else 5000):
             slot.emit(event, binding=binding)
+        if not idle_exit:
+            pressure_deadline = time.monotonic() + 3
+            while (
+                owner.stats()["write_failed"] + owner.stats()["receiver_exited"] == 0
+                and time.monotonic() < pressure_deadline
+            ):
+                for _ in range(32):
+                    slot.emit(event, binding=binding)
+                time.sleep(.005)
     finally:
         before = time.monotonic()
         owner.close()

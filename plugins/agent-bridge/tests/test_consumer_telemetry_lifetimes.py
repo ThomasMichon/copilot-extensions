@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import AbstractContextManager, nullcontext
+import io
 import json
 from pathlib import Path
 import sys
@@ -92,6 +93,65 @@ def test_receiver_can_persist_final_batch_after_stdin_eof(tmp_path: Path) -> Non
     assert record["sequence"] > 0
     assert binding.pipe is not None and binding.pipe.closed
     assert owner.writer is not None and owner.writer.join(0)
+
+
+def test_retained_windows_startup_failure_closes_its_stdin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_procutil import _windows_caller_owned, command_pipe
+    from agent_procutil.owned_process import OwnedCleanupError
+
+    stream = io.BytesIO()
+    retired: list[bool] = []
+    process = SimpleNamespace(
+        stdin=stream, wait=lambda **kwargs: 0,
+        close=lambda: retired.append(stream.closed),
+    )
+    failure = OwnedCleanupError(cast(Any, process))
+
+    def refused(*args: Any, **kwargs: Any) -> Any:
+        raise failure
+
+    monkeypatch.setattr(_windows_caller_owned, "spawn", refused)
+    monkeypatch.setattr(command_pipe, "os", SimpleNamespace(name="nt"))
+    pipe = command_pipe.CommandPipe()
+    with pytest.raises(OwnedCleanupError):
+        pipe.start(["fixture"], "fixture", {})
+    assert pipe.failure is failure and not stream.closed
+    pipe.close(time.monotonic() + 1)
+    assert pipe.closed and stream.closed
+    assert retired == [True]
+
+
+def test_windows_member_exit_confirmation_retains_custody_until_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_procutil import _windows_caller_owned, command_pipe
+
+    retired: list[bool] = []
+    job = object()
+    process = SimpleNamespace(
+        wait=lambda **kwargs: 0, close=lambda: retired.append(True),
+    )
+    attempts: list[float] = []
+
+    def retire(exact_job: Any, timeout: float) -> None:
+        assert exact_job is job and 0 < timeout <= 1
+        attempts.append(timeout)
+        if len(attempts) == 1:
+            raise TimeoutError("fixture descendant still owns a process handle")
+
+    monkeypatch.setattr(_windows_caller_owned, "_retire_job", retire)
+    monkeypatch.setattr(command_pipe, "os", SimpleNamespace(name="nt"))
+    pipe = command_pipe.CommandPipe()
+    pipe.process, pipe.job = process, job
+    with pytest.raises(TimeoutError):
+        pipe.close(time.monotonic() + 1)
+    assert pipe.job is job and pipe.process is process and not pipe.closed
+    assert retired == []
+    pipe.close(time.monotonic() + 1)
+    assert pipe.closed and pipe.job is None and retired == [True]
+    assert len(attempts) == 2
 
 
 def test_concurrent_offer_is_nonblocking_and_preserves_wire_sequence(

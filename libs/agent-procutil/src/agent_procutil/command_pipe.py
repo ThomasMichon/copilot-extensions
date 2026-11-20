@@ -56,6 +56,7 @@ class CommandPipe:
             except OwnedCleanupError as error:
                 self.failure = error
                 self.process, self.job = error.process, error.job
+                self._stdin = getattr(self.process, "stdin", None)
                 raise
             self._stdin = self.process.stdin
             self._windows_nonblocking()
@@ -199,7 +200,9 @@ class CommandPipe:
                 except subprocess.TimeoutExpired:
                     pass
             if self.job is not None:
-                self.job.terminate_and_wait(max(0, deadline - time.monotonic()))
+                from ._windows_caller_owned import _retire_job
+
+                _retire_job(self.job, max(0, deadline - time.monotonic()))
                 self.job = None
             if self.process is not None:
                 self.process.wait(timeout=max(0, deadline - time.monotonic()))
