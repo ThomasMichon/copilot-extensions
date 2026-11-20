@@ -121,6 +121,7 @@ def test_exact_winner_is_prospective_across_reconfiguration(
     ("initial", "source"), ("empty", "source"), ("prepared", "source"),
     ("prepared-before-start", "source"), ("empty", "complete"), ("prepared", "complete"),
     ("empty", "decline"), ("prepared", "decline"),
+    ("bound-project", "decline"), ("bound-project-foreign", "decline"), ("bound-project-native", "decline"),
 ])
 @pytest.mark.parametrize("ordinary", ["scoped"], indirect=True)
 def test_scoped_original_receipt_and_disposition_survive_drain(
@@ -142,6 +143,8 @@ def test_scoped_original_receipt_and_disposition_survive_drain(
         from agent_dispatch import ordinary_bridge
         from tests.test_pool_startup_policy import exhaust, renew
 
+        if retry_stage.startswith("bound-project"):
+            queue.record_spawn_allocation(first.key, "example")
         if retry_stage.startswith("prepared"):
             original_run = ordinary_bridge.subprocess.run
             with monkeypatch.context() as once:
@@ -196,11 +199,15 @@ def test_scoped_original_receipt_and_disposition_survive_drain(
     original = queue.task_relationship(task.id)
     assert original["state"] == "bound"
     worker = "host-a/worktree-a"
-    def ready(request: dict[str, Any], allocation: dict[str, Any], ref: str) -> dict[str, bool]:
+    def ready(request: dict[str, Any], allocation: dict[str, Any], ref: str) -> dict[str, Any]:
         assert request["owner_session_id"] == "native-a"
         assert (allocation["reservation_key"], allocation["attempt"]) == (first.key, first.attempt)
         assert ref == original["receipt"]["ref"]
-        return {"ready": True}
+        return {"ready": True, "operation": "observe-ready", "allocation": allocation,
+                "reservation_key": allocation["reservation_key"], "task_claim_ref": ref,
+                "task_id": request["task_id"], "native_id": request["owner_session_id"],
+                "worktree_id": reservation.worktree, "creation_nonce": reservation.creation_nonce,
+                "path": reservation.worktree_path, "project": reservation.allocation_project}
 
     monkeypatch.setattr(submission_readiness_observation, "observe", ready)
     if disposition == "decline":
@@ -213,6 +220,15 @@ def test_scoped_original_receipt_and_disposition_survive_drain(
         queue.retire_spawn(key, exact_absence=True, conclusion_state="skipped")
         from tests.test_relationship_discharge import replace_after_decline
         reopened = TaskQueue(queue.db_path)
+        if retry_stage in {"bound-project-foreign", "bound-project-native"}:
+            field = ("$.observation.allocation.reservation_key" if retry_stage == "bound-project-foreign"
+                     else "$.observation.native_id")
+            with reopened._connect() as conn:
+                conn.execute("UPDATE pool_worker_decline_closeouts SET receipt=json_set(receipt,?,'foreign')"
+                             " WHERE reservation_key=?", (field, key))
+            with pytest.raises(TaskError, match="cannot drop a governed assignment"):
+                replace_after_decline(reopened, task.id, closed.receipt["not_before"])
+            return
         replacement = replace_after_decline(reopened, task.id, closed.receipt["not_before"])
         assert not replacement.task_relationship_required
         return
@@ -488,3 +504,42 @@ def test_settled_decline_permits_unselected_replacement(
         )
         q.complete(task_id, "host-a/new-tree", result={"verified": True})
         assert current_task(q, task_id).status == "submitted"
+
+
+@pytest.mark.parametrize("ordinary", ["disposed"], indirect=True)
+@pytest.mark.parametrize("evidence", ["disposed", "retained-workspace", "unsettled-relationship", "foreign-handle"])
+def test_only_fully_disposed_captured_revision_can_begin_again(local: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, evidence: str) -> None:
+    import json
+    from agent_dispatch import submission_readiness_observation
+
+    launch(local)
+    q = local.q
+    reservation = q.get_reservation(local.placed["reservation"]["key"])
+    q.record_spawn(reservation.key, session_handle=reservation.session_handle, worktree=reservation.worktree,
+                   startup_complete=True, startup_revision=1)
+    worker = "host-a/worktree-a"
+    q.start(reservation.task_id, worker, owner_session_id="native-a", expected_generation=local.task["generation"])
+    monkeypatch.setattr(submission_readiness_observation, "observe", lambda *_: {"ready":True})
+    q.complete(reservation.task_id, worker, result={"ok":True})
+    q.confirm(reservation.task_id)
+    if evidence != "unsettled-relationship":
+        assert q.reconcile_task_relationship(reservation.task_id)["state"] == "closed"
+    q.request_spawn_release(reservation.key, disposition="settled")
+    old = q.retire_spawn(reservation.key, exact_absence=True, conclusion_state="complete",
+                         conclusion_detail=json.dumps({"worktree_cleanup":{"state":"complete","outcome":{
+                             "action":"preserved" if evidence == "retained-workspace" else "already-removed"}}}))
+    if evidence == "foreign-handle":
+        with q._connect() as conn:
+            conn.execute("UPDATE spawn_reservations SET session_handle='local-body:other' WHERE key=?", (old.key,))
+        old = q.get_reservation(old.key)
+    successor = new_task(q, dedup_key="recurring")
+    if evidence != "disposed":
+        with pytest.raises(TaskError, match="original task and driver"):
+            q.reserve_spawn(successor.id, reserved_by="allocator", driver="cli", pool_catalog_revision=q.pool_catalog_snapshot().revision)
+        assert not q.list_reservations(task_id=successor.id)
+    else:
+        new, fresh = q.reserve_spawn(successor.id, reserved_by="allocator", driver="cli", pool_catalog_revision=q.pool_catalog_snapshot().revision)
+        assert fresh and not new.task_relationship_required
+        assert new.allocation_reservation_key == new.key and new.creation_key != old.creation_key
+        assert new.allocation_revision == old.allocation_revision+1
+    assert q.get_reservation(old.key) == old

@@ -48,7 +48,8 @@ def ordinary(
         from tests.test_assignment_relationships import GroundOwner
         relationship_owner = GroundOwner()
         relationship_owner.queue = q
-        if governed == "scoped":
+        # The local fixture supplies the native participant; select it before placement.
+        if governed == "scoped" or "local" in request.fixturenames:
             from agent_dispatch.assignment_local_ordinary import LocalOrdinaryRelationshipWriter
             from agent_dispatch.ordinary_capture import configured_capture
 
@@ -60,11 +61,13 @@ def ordinary(
             q._ordinary_capture = capture
             q._ordinary_relationship_writer = LocalOrdinaryRelationshipWriter(q)
         else:
+            q._ordinary_factory_policy = "factory:fixture"
             q._relationship_writer = relationship_owner
         q._relationship_authority = "local"
     revision = publish(q, pool())
     requested = q.create(
         "work", repo="example", require_verification=bool(governed),
+        dedup_key="recurring" if governed == "disposed" else None,
         source="emitter" if governed == "scoped" else None,
         origin_ref="review-source" if governed == "scoped" else None,
     )

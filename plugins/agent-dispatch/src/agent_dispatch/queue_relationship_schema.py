@@ -138,7 +138,7 @@ def migrate_relationships(conn: sqlite3.Connection) -> None:
     # These guards survive a provider rollback. Older queue code cannot admit
     # a governed assignment by forgetting an optional Python field.
     conn.execute(
-        "CREATE TRIGGER IF NOT EXISTS task_relationship_execution_guard_v11"  # noqa: S608 -- fixed predicate
+        "CREATE TRIGGER IF NOT EXISTS task_relationship_execution_guard_v12"  # noqa: S608 -- fixed predicate
         " BEFORE UPDATE OF status, generation, owner, owner_session_id ON tasks"
         " WHEN " + relationship_required_condition("NEW") + " AND ("
         " (NEW.status='claimed' AND OLD.status='queued' AND NOT EXISTS ("
@@ -158,6 +158,7 @@ def migrate_relationships(conn: sqlite3.Connection) -> None:
     )
     # Recovery metadata and submitted-result acceptance do not admit execution.
     # Install the admission guard before removing its stricter predecessors.
+    conn.execute("DROP TRIGGER IF EXISTS task_relationship_execution_guard_v11")
     conn.execute("DROP TRIGGER IF EXISTS task_relationship_execution_guard_v10")
     conn.execute("DROP TRIGGER IF EXISTS task_relationship_execution_guard_v9")
     conn.execute("DROP TRIGGER IF EXISTS task_relationship_execution_guard_v8")

@@ -60,7 +60,7 @@ def revision_disposed(rows: list[sqlite3.Row]) -> bool:
 
 # `s` is an ordinary reservation. Preparation binds its project *before* any
 # external workspace effect. Merely lacking a receipt after that point is unknown.
-RETIRED_BEFORE_ALLOCATION = (
+RETIRED_WITHOUT_WORKSPACE = (
     "COALESCE((s.driver IS 'ordinary-bridge' AND s.task_relationship_required=1"
     " AND s.task_relationship_generation IS NOT NULL AND s.conversation_retired=0"
     " AND EXISTS (SELECT 1 FROM pool_reservation_bindings p WHERE p.reservation_key=s.key)"
@@ -69,7 +69,7 @@ RETIRED_BEFORE_ALLOCATION = (
     " AND o.allocation_revision=s.allocation_revision)"
     " AND s.creation_key IS NOT NULL AND s.startup_fenced=1 AND s.startup_complete=0"
     " AND s.release_requested=1 AND s.native_release_pending=0 AND s.state IN ('failed','settled','rearmed')"
-    " AND s.allocation_project IS NULL AND s.worktree IS NULL AND s.worktree_path IS NULL"
+    " AND s.worktree IS NULL AND s.worktree_path IS NULL"
     " AND s.inherited_worktree IS NULL AND s.creating_host IS NULL AND s.worktree_ownership IS NULL"
     " AND s.creation_nonce IS NULL AND s.worktree_writer_requirement IS NULL"
     " AND s.task_relationship_event_id IS NULL AND s.agent_info IS NULL AND s.session_handle IS NULL"
@@ -77,6 +77,118 @@ RETIRED_BEFORE_ALLOCATION = (
     " AND NOT EXISTS (SELECT 1 FROM acquisition_markers a WHERE a.reservation_key=s.key)"
     " AND NOT EXISTS (SELECT 1 FROM execution_send_custody c WHERE c.reservation_key=s.key AND c.state!='not_sent')),0)"
 )
+RETIRED_BEFORE_ALLOCATION = f"({RETIRED_WITHOUT_WORKSPACE} AND s.allocation_project IS NULL)"
+
+
+def _disposed_captured_revision(conn: sqlite3.Connection, rows: list[sqlite3.Row]) -> bool:
+    """Disposal certifies a workspace, not a native, claim or transport."""
+    from .managed_assignment_proof import managed_allocation
+    from .ordinary_agent_facts import identity
+    from .ordinary_native_bindings import reservation_native_identity
+    from .queue_execution_custody import reservation_transport_accountable
+    from .queue_relationship_continuation import current_binding
+
+    if not revision_disposed(rows):
+        return False
+    root = next((r for r in rows if r["key"] == r["allocation_reservation_key"]), None)
+    workspace = next((r for r in rows if r["worktree"]), None)
+    if root is None or workspace is None or not root["ordinary_admission_policy"]:
+        return False
+    event_id = workspace["task_relationship_event_id"]
+    event = conn.execute(
+        "SELECT task_relationship FROM task_events WHERE task_id=? AND id=?",
+        (root["task_id"], event_id),
+    ).fetchone()
+    if event is None or not event[0]:
+        return False
+    try:
+        relationship = json.loads(event[0])
+        if relationship["state"] != "closed":
+            return False
+        receipt = relationship["receipt"]
+        proof = receipt["producer"]["closeout"]["relationship_verification"]
+        if (
+            proof["retired"] is not True
+            or proof["quiescent"] is not True
+            or proof["subject"] != receipt["ref"]
+        ):
+            return False
+        execution = conn.execute(
+            "SELECT * FROM spawn_reservations WHERE task_id=? AND key=?",
+            (root["task_id"], current_binding(relationship)["reservation_key"]),
+        ).fetchone()
+        if execution is None:
+            return False
+        origin = managed_allocation(conn, root["task_id"], execution, relationship)
+        if origin["key"] != root["key"] or not execution["worktree_writer_requirement"]:
+            return False
+        for row in rows:
+            if (
+                row["driver"] != "ordinary-bridge"
+                or row["ordinary_admission_policy"] != root["ordinary_admission_policy"]
+                or not row["task_relationship_required"]
+                or not row["release_requested"]
+                or row["state"] not in {"settled", "failed", "rearmed"}
+                or row["native_release_pending"]
+                or not (row["startup_complete"] or row["startup_fenced"])
+                or row["cooling_token"]
+                or row["cleanup_claim_token"]
+                or row["conclusion_state"] in {"pending", "held"}
+                or reservation_transport_accountable(conn, row)
+            ):
+                return False
+            if not row["worktree"]:
+                # A project-bound root is not empty by inference: managed_allocation
+                # verified its later prepared receipt on this exact creation key.
+                if row["allocation_project"] is not None and (
+                    row["key"] != origin["key"]
+                    or row["allocation_project"] != origin["allocation_project"]
+                ):
+                    return False
+                if not conn.execute(
+                    "SELECT 1 FROM spawn_reservations s WHERE key=? AND "
+                    + RETIRED_WITHOUT_WORKSPACE,
+                    (row["key"],),
+                ).fetchone():
+                    return False
+                continue
+            if (
+                row["task_relationship_event_id"] != event_id
+                or row["worktree_ownership"] not in {"created", "reused"}
+                or row["worktree_ownership"] == "reused"
+                and row["inherited_worktree"] != row["worktree"]
+                or row["worktree_writer_requirement"] != execution["worktree_writer_requirement"]
+                or any(
+                    row[k] != origin[k]
+                    for k in (
+                        "task_id",
+                        "reserved_by",
+                        "creation_key",
+                        "allocation_revision",
+                        "worktree",
+                        "worktree_path",
+                        "allocation_project",
+                        "execution_machine",
+                        "creation_nonce",
+                    )
+                )
+            ):
+                return False
+            native = reservation_native_identity(conn, row)
+            if row["agent_info"] or row["session_handle"] or native:
+                if not row["agent_info"]:
+                    return False
+                agent = identity(json.loads(row["agent_info"]))
+                if (
+                    agent.native != native
+                    or row["session_handle"] != f"local-body:{agent.bridge}"
+                    or (agent.project, agent.worktree) != (row["allocation_project"], row["worktree"])
+                    or agent.path is not None and agent.path != row["worktree_path"]
+                ):
+                    return False
+    except (TaskError, TypeError, ValueError, KeyError):
+        return False
+    return True
 
 
 def next_revision(
@@ -111,16 +223,17 @@ def next_revision(
         and previous["creation_key"] == creation_prefix + str(prior)
     ):
         # Only a different terminal emitter task, and only if the entire keyed
-        # revision ended before allocation. The normal send/wake gate still runs.
+        # revision is empty or positively disposed. The normal send/wake gate still runs.
         qualified = conn.execute(
-            f"""SELECT 1 FROM tasks n WHERE n.id=:successor AND n.dedup_key IS NOT NULL AND NOT EXISTS (
+            f"""SELECT NOT EXISTS (SELECT 1 FROM spawn_reservations s WHERE s.creation_key=:creation
+                                 AND NOT {RETIRED_BEFORE_ALLOCATION}) AS never_allocated
+                FROM tasks n WHERE n.id=:successor AND n.dedup_key IS NOT NULL AND NOT EXISTS (
                 SELECT 1 FROM spawn_reservations s LEFT JOIN tasks t ON t.id=s.task_id
                 WHERE (s.creation_key=:creation OR s.allocation_reservation_key=:root)
                   AND (s.task_id IS NOT :task OR s.allocation_revision IS NOT :revision
                        OR s.creation_key IS NOT :creation OR s.allocation_reservation_key IS NOT :root
                        OR t.id IS NULL OR t.status NOT IN ('completed','abandoned') OR t.repo IS NOT n.repo
-                       OR t.dedup_key IS NOT n.dedup_key
-                       OR NOT {RETIRED_BEFORE_ALLOCATION})
+                       OR t.dedup_key IS NOT n.dedup_key)
             )""",
             {
                 "successor": successor,
@@ -130,7 +243,13 @@ def next_revision(
                 "task": previous["task_id"],
             },
         ).fetchone()
-        if qualified is not None:
+        if qualified is not None and (
+            qualified["never_allocated"]
+            or _disposed_captured_revision(
+                conn,
+                [row for row in history if row["allocation_revision"] == prior],
+            )
+        ):
             if prior >= 2**63 - 1:
                 raise TaskError("allocation revision exhausted")
             revision += 1

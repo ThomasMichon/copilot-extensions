@@ -153,18 +153,42 @@ class QueueTaskRelationshipsMixin:
             return self._relationship_queue._ordinary_relationship_writer, "local"
         return self._relationship_queue._relationship_writer, self._relationship_queue._relationship_authority
 
+    def _ordinary_policy(self) -> str | None:
+        if getattr(self, "_ordinary_relationship_writer", None) is not None:
+            return "local-ordinary"
+        return self._ordinary_factory_policy
+
+    def _qualified_driver(self) -> tuple[str, tuple[str, ...]]:
+        """Filter owner reads before choosing a writer. NULL is never a policy match."""
+        policy = self._ordinary_policy()
+        if policy is None:
+            return " AND driver='cli'", ()
+        return (
+            " AND (driver='cli' OR (driver='ordinary-bridge' AND ordinary_admission_policy=?"
+            " AND EXISTS (SELECT 1 FROM spawn_reservations root WHERE root.key=spawn_reservations.allocation_reservation_key"
+            " AND root.key=root.allocation_reservation_key AND root.task_id=spawn_reservations.task_id"
+            " AND root.driver='ordinary-bridge' AND root.creation_key=spawn_reservations.creation_key"
+            " AND root.allocation_revision=spawn_reservations.allocation_revision AND root.task_relationship_required=1"
+            " AND root.ordinary_admission_policy=spawn_reservations.ordinary_admission_policy)))",
+            (policy,),
+        )
+
     def _relationship_selection(
         self, task: Task, *, reservation_key: str | None = None,
     ) -> tuple[RelationshipWriter | None, str | None]:
+        if reservation_key is not None:
+            clause, parameters = self._qualified_driver()
+            with self._relationship_queue._connect() as conn:
+                row = conn.execute(
+                    "SELECT driver FROM spawn_reservations WHERE key=? AND task_id=? AND task_relationship_required=1"
+                    + clause, (reservation_key, task.id, *parameters),
+                ).fetchone()
+            if row is None:
+                raise TaskError("original queue cannot confirm original prepared workspace, reservation or admission policy")
+            if row["driver"] == "ordinary-bridge":
+                return self._spawn_relationship_selection(row["driver"])
         if task.kind == "standing-charter" and self._relationship_queue._standing_relationship_writer is not None:
             return self._relationship_queue._standing_relationship_writer, "local"
-        if reservation_key is not None and getattr(self, "_ordinary_relationship_writer", None) is not None:
-            reservation = self._relationship_queue.get_reservation(reservation_key)
-            if (
-                reservation is not None and reservation.task_id == task.id
-                and reservation.task_relationship_required
-            ):
-                return self._spawn_relationship_selection(reservation.driver)
         return self._relationship_queue._relationship_writer, self._relationship_queue._relationship_authority
 
     def _retain_pool_relationship_requirement(
@@ -175,7 +199,7 @@ class QueueTaskRelationshipsMixin:
         writer, authority = self._spawn_relationship_selection(driver)
         ordinary = driver == "ordinary-bridge"
         native = ordinary and self._relationship_queue._ordinary_relationship_writer is not None
-        policy = "local-ordinary" if native else self._ordinary_factory_policy if ordinary else None
+        policy = self._ordinary_policy() if ordinary else None
 
         if allocation_key == key:
             required = writer is not None and (not native or self._ordinary_capture.selects(winner))
@@ -349,15 +373,11 @@ class QueueTaskRelationshipsMixin:
         from .task_obligations import read_snapshot
 
         task = self._relationship_queue.get(request["task_id"])
-        authority = self._relationship_selection(
-            task, reservation_key=request.get("reservation_key"),
-        )[1] if task is not None else None
         snapshot = read_snapshot(
             self._relationship_queue, request["task_id"], assignment_event_id=request["event_id"],
         )
         if (
-            authority != request["authority"]
-            or snapshot is None
+            task is None or snapshot is None
             or snapshot["queue_identity"] != request["recovery"]["queue_identity"]
             or snapshot["assignment"] != {
                 "event_id": request["event_id"],
@@ -367,12 +387,13 @@ class QueueTaskRelationshipsMixin:
         ):
             raise TaskError("original queue and audited relationship request are unconfirmed")
         if request["reservation_key"] is not None:
+            clause, parameters = self._qualified_driver()
             with self._relationship_queue._connect() as conn:
                 prepared = conn.execute(
-                    "SELECT task_id, worktree, allocation_project, worktree_path,"
+                    "SELECT task_id, worktree, allocation_project, worktree_path, driver,"
                     " execution_machine, creation_nonce, task_relationship_required,"
                     " task_relationship_event_id, task_relationship_generation"
-                    " FROM spawn_reservations WHERE key=?", (request["reservation_key"],),
+                    " FROM spawn_reservations WHERE key=?" + clause, (request["reservation_key"], *parameters),
                 ).fetchone()
             workspace = AssignmentWorkspace(**request["workspace"])
             expected = {
@@ -390,6 +411,20 @@ class QueueTaskRelationshipsMixin:
                 )
             ):
                 raise TaskError("original prepared workspace and reservation are unconfirmed")
+            # Recheck the authority without selecting or binding another writer.
+            authority = self._relationship_queue._relationship_authority
+            if (
+                getattr(self, "_ordinary_relationship_writer", None) is not None
+                and prepared["driver"] == "ordinary-bridge"
+                or task.kind == "standing-charter"
+                and self._relationship_queue._standing_relationship_writer is not None
+                and prepared["driver"] == "cli"
+            ):
+                authority = "local"
+        else:
+            _, authority = self._relationship_selection(task)
+        if authority != request["authority"]:
+            raise TaskError("original queue and audited relationship request are unconfirmed")
         return snapshot
 
     def reconcile_task_relationship(

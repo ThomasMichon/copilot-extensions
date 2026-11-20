@@ -99,7 +99,7 @@ governed ordinary root the queue also retains the admission selection (native
 local, or a fingerprint of the configured factory and its queue authority). Changing between
 native rollout scopes is not a change of writer policy. A different or unknown
 selection, including a historical root without this evidence, cannot authorize
-a new same-allocation attempt. A matching selection does not prove a writer's
+a new same-allocation attempt or select a relationship writer for an existing reservation. A matching selection does not prove a writer's
 identity: the original workspace, writer and receipt checks still apply.
 
 After a confirmed worker decline, a *new* unselected allocation may proceed only once the old claim is
@@ -110,8 +110,11 @@ receipt must instead identify that same assignment in its version-2 recovery
 record. A pending claim or retirement still blocks replacement.
 A different task re-emitted under the same deduplication key can receive a new
 allocation revision for either the CLI or ordinary-Bridge pool driver if every
-attempt in the captured predecessor revision was retired before workspace preparation. A missing workspace receipt after project
-binding is not proof of absence. Unresolved sends or wakes still block placement.
+attempt in the captured predecessor revision was retired before workspace preparation,
+or the entire same-origin revision has verified workspace disposal, settled claims and retired natives.
+A missing workspace receipt after project binding is not proof of absence. For a decline,
+a retired project-bound root can instead be accounted for by its exact recovered workspace,
+closed relationship and retired native under the same creation key and revision. Unresolved sends or wakes still block placement.
 
 **Roll back prospectively.** With authority still `local`, change admission to
 `local-ordinary-drain`. This starts no new captures; it keeps the native writer
