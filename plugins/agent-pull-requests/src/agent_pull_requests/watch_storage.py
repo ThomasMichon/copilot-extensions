@@ -136,7 +136,7 @@ def read_transition_phase(
                 or type(data.get("version")) is not int or data["version"] not in {1, 2}
                 or not isinstance(data.get("phase"), str)
                 or data["phase"] not in _TRANSITION_PHASES
-                or (data["version"] == 2 and data["phase"] != "prepared")
+                or (data["version"] == 2 and data["phase"] not in {"prepared", "sealed-legacy"})
             ):
                 raise ValueError("unsupported marker")
         except (ValueError, UnicodeError):

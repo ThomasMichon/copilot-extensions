@@ -8321,10 +8321,13 @@ listing, including no-call files and invalid inputs.
 
 `tools/run-promotion-unit-tests.py` executes only the exact nodes declared by
 `tools/promotion-unit-manifest.json`, in one Python process with coverage.
-Three prepared watch-transition controls exercise the actual receiver with
-inert storage and lease owners: complete version-1 origin preservation,
-final-publication refusal and unchanged version-2 retry. Native inode,
-installation and durability qualification remains in the plugin packet.
+The watch-transition controls exercise the actual prepared and Windows sealed
+receivers with inert storage and lease owners: complete version-1 origin
+preservation, current writer admission, physical-topology refusal,
+final-publication races, uncertain acknowledgement and unchanged version-2
+retry. POSIX sealed records refuse without retroactive domain evidence.
+Native inode, installation and durability qualification remains in the plugin
+packet; `tests/test_watch_sealed_recovery.py` covers the Windows receiver.
 Ten namespace capability controls use the actual Bridge namespace decoder
 and shared declarations with substituted provider bytes. They preserve true,
 false, null and legacy omission and reject numeric/string/container values

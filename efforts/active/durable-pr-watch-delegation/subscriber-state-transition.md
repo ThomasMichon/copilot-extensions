@@ -242,6 +242,7 @@ automatic migration or installer veto is added by this proposal.
 
 #### Initial native-domain source scope
 
+**Unwired source merged in #13654; native qualification remains open.**
 The additive source API and its limits are documented by the
 [existing boot-evidence owner](../../../libs/update-driver/README.md#execution-domain-boot-observations).
 Its version-1 observation pairs the Windows VM Generation Counter with the
@@ -547,6 +548,41 @@ This is neither native Linux qualification nor actual domain/boot evidence.
 Sealed reconciliation, final import, ordinary command integration and the
 complete historical installed window remain open. No installation, migration,
 service operation or rollout is performed.
+
+### Windows sealed version-2 receiver
+
+The internal `WatchWriter.recover_sealed_state_transition()` source API receives
+an already installed Windows barrier under fresh lifecycle authorization and,
+when governed, the current installation's actually held transaction. It uses
+the same original v1 record/topology validator as Windows sealing rather than
+weakening or bypassing the v1 readers. The complete original private journal,
+including its no-delete-sharing seal, remains immutable `origin`; top-level
+`binding`, `lease` and `seal` remain equal to that origin. A separately validated
+`controller` records the admitted current executor without requiring the old
+executable to exist.
+
+Only the qualified installed barrier permits acquisition of the inner writer
+lease. No original/retained lease is acquired, and an incomplete preparation or
+move is not silently completed by this receiver. Candidate serialization is
+bounded before acquisition; the final guard rechecks strict legacy source,
+fresh current admission, native custody, original journal and actual topology.
+An uncertain publication retains origin, custody and the legacy sole authority;
+unchanged v2 retry confirms durability without rewriting. Ordinary entry still
+refuses all present records, while v1 preparation/sealing readers refuse v2.
+
+Actor-free controls exercise the actual receiver and writer-admission boundary.
+Contained Windows fixtures additionally qualify old-payload-absent current
+installation adoption, exact transaction refusal, native inner-lease selection,
+cold v2 retry, final-publication races and uncertain acknowledgement. These are
+receiver proofs only, not a new seal, provider/boot qualification, final source
+import, isolated registry or ordinary startup integration.
+POSIX sealed records refuse before custody/publication because no qualified
+domain epoch can be recovered from their v1 boot field. A current controller
+cannot fill that historical gap with its own host observation.
+Fresh POSIX epoch reconciliation and later actual same-domain boot, the v2
+sealing writer, final import/authority selection, governed entry and complete
+historical-window qualification remain open under their existing owners.
+No native domain probe or live migration/rollout is authorized.
 
 ### Internal Linux sealing and recovery
 

@@ -1,9 +1,10 @@
-"""Prepared-only journal adaptation under the existing native writer owner."""
+"""Journal adaptation under the existing native writer; never import or activate."""
 
 from __future__ import annotations
 
 import json
 import os
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
@@ -35,14 +36,14 @@ def _validate_scope(
     guard: CutoverLock | None,
 ) -> None:
     if not isinstance(binding, dict):
-        raise PermissionError("watch prepared recovery binding is invalid")
+        raise PermissionError("watch transition recovery binding is invalid")
     _validate_binding(root, binding)
     if installation is None:
         if binding["kind"] != "legacy":
-            raise PermissionError("watch prepared recovery requires its governed installation")
+            raise PermissionError("watch transition recovery requires its governed installation")
     else:
         if binding["kind"] != "installation" or guard is None:
-            raise PermissionError("watch prepared recovery requires its installation transaction")
+            raise PermissionError("watch transition recovery requires its installation transaction")
         installation.require_transition_origin(
             binding["installation"], guard=guard, environment=_controller_environment(),
         )
@@ -101,11 +102,83 @@ def recover_prepared(
     validate: Callable[[], None], check_deadline: Callable[[], None],
 ) -> Document:
     """Adapt only validated prepared bytes; never select, seal or import state."""
+    return _recover(
+        root, lease, installation=installation, guard=guard, validate=validate,
+        check_deadline=check_deadline, sealed=False,
+    )
+
+
+def _read_sealed(
+    root: Path, installation: WatchInstallation | None, guard: CutoverLock | None,
+) -> tuple[Document, bytes]:
+    from .watch_windows_sealing import _inspect_sealing
+
+    if sys.platform != "win32":
+        raise NotImplementedError("watch sealed recovery has no qualified POSIX domain epoch")
+    if not root.is_absolute() or root.resolve(strict=True) != root:
+        raise PermissionError("watch sealed recovery requires its canonical state root")
+    paths = watch_state_paths(root)
+    require_private(paths.journal)
+    raw = _regular_bytes(paths.journal)
+    if raw is None:
+        raise PermissionError("watch sealed recovery journal disappeared")
+    document = json.loads(raw, object_pairs_hook=_unique_object, parse_constant=_reject_constant)
+    if not isinstance(document, dict) or type(document.get("version")) is not int:
+        raise PermissionError("watch sealed recovery journal is invalid")
+    if document["version"] == 1:
+        origin = document
+    elif (
+        document["version"] == 2 and set(document) == _FIELDS | {"seal", "origin", "controller"}
+        and isinstance(document["origin"], dict)
+    ):
+        origin = document["origin"]
+        if any(
+            json.dumps(document[field], sort_keys=True) != json.dumps(origin.get(field), sort_keys=True)
+            for field in ("schema", "phase", "binding", "lease", "seal")
+        ):
+            raise PermissionError("watch sealed recovery changed immutable origin evidence")
+        _validate_scope(root, document["controller"], installation, guard)
+    else:
+        raise PermissionError("watch sealed recovery journal version is unsupported")
+    _validate_scope(root, origin.get("binding"), installation, guard)
+
+    def topology() -> None:
+        if origin.get("phase") != "sealed-legacy" or _inspect_sealing(
+            root, origin["binding"], origin,
+        ) != "sealed":
+            raise PermissionError("watch sealed recovery requires its installed barrier")
+
+    topology()
+    require_private(paths.journal)
+    if _regular_bytes(paths.journal) != raw:
+        raise PermissionError("watch sealed recovery journal changed during admission")
+    topology()
+    return cast(Document, document), raw
+
+
+def recover_sealed(
+    root: Path, lease: SingleInstance, *,
+    installation: WatchInstallation | None, guard: CutoverLock | None,
+    validate: Callable[[], None], check_deadline: Callable[[], None],
+) -> Document:
+    """Receive only a qualified Windows barrier; retain legacy sole authority."""
+    return _recover(
+        root, lease, installation=installation, guard=guard, validate=validate,
+        check_deadline=check_deadline, sealed=True,
+    )
+
+
+def _recover(
+    root: Path, lease: SingleInstance, *,
+    installation: WatchInstallation | None, guard: CutoverLock | None,
+    validate: Callable[[], None], check_deadline: Callable[[], None], sealed: bool,
+) -> Document:
+    read = _read_sealed if sealed else _read_prepared
     validate()
-    prior, original_bytes = _read_prepared(root, installation, guard)
+    prior, original_bytes = read(root, installation, guard)
     identity: tuple[int, int] = (prior["lease"]["device"], prior["lease"]["inode"])
     paths = watch_state_paths(root)
-    if lease.lock_path != paths.historical_lock:
+    if not sealed and lease.lock_path != paths.historical_lock:
         raise PermissionError("watch prepared recovery lease belongs to another state root")
     controller: Document = {"kind": "legacy", "stateRoot": str(root)}
     if installation is not None:
@@ -116,7 +189,7 @@ def recover_prepared(
     }
     published_bytes = json.dumps(document, allow_nan=False).encode("utf-8")
     if len(published_bytes) > _MAX_METADATA_BYTES:
-        raise ValueError("watch prepared recovery journal exceeds its bounded size")
+        raise ValueError("watch transition recovery journal exceeds its bounded size")
 
     def source() -> None:
         WatchRegistry().restore_state(
@@ -125,23 +198,36 @@ def recover_prepared(
 
     source()
     validate()
-    if _read_prepared(root, installation, guard)[1] != original_bytes:
-        raise PermissionError("watch prepared recovery journal changed before acquisition")
+    if read(root, installation, guard)[1] != original_bytes:
+        raise PermissionError("watch transition recovery journal changed before acquisition")
     check_deadline()
-    if not lease.held:
+    if sealed:
+        from .watch_windows_sealing import _acquire_barrier_lease
+
+        _acquire_barrier_lease(root, origin, lease)
+    elif not lease.held:
         lease.acquire(expected_file_identity=identity)
+
+    def custody() -> None:
+        if sealed:
+            from .watch_windows_sealing import _identity
+
+            if lease.lock_path != paths.writer_lock or lease.held_file_identity() != _identity(
+                paths.writer_lock,
+            ):
+                raise PermissionError("watch sealed recovery native barrier custody changed")
+        elif lease.held_file_identity() != identity:
+            raise PermissionError("watch prepared recovery native custody changed")
 
     def recheck(expected_bytes: bytes) -> None:
         validate()
-        if lease.held_file_identity() != identity:
-            raise PermissionError("watch prepared recovery native custody changed")
+        custody()
         source()
         validate()
-        _, current_bytes = _read_prepared(root, installation, guard)
+        _, current_bytes = read(root, installation, guard)
         if current_bytes != expected_bytes:
-            raise PermissionError("watch prepared recovery journal changed before publication")
-        if lease.held_file_identity() != identity:
-            raise PermissionError("watch prepared recovery native custody changed")
+            raise PermissionError("watch transition recovery journal changed before publication")
+        custody()
         check_deadline()
 
     recheck(original_bytes)

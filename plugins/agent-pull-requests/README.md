@@ -599,7 +599,7 @@ The shared storage owner now observes the fixed-path
 replacement. Its internal header uses schema
 `agent-pull-requests.watch-state-transition` and phases `prepared`,
 `sealed-legacy`, `import-ready` and `active` for version 1; version 2 currently
-admits only `prepared`. Reading a phase establishes
+admits `prepared` and `sealed-legacy`. Reading a phase establishes
 neither sealing nor custody. This groundwork refuses **every** present
 transition rather than selecting the legacy file or isolated candidate.
 Malformed, linked, oversized or unreadable markers also refuse. An
@@ -660,6 +660,31 @@ conflicting version-2 evidence refuse without adaptation. Version-1 preparation
 and sealing validators still refuse version 2; ordinary entry refuses both.
 This API does not drain an active owner, qualify a domain or boot, seal, import,
 activate, or provide a CLI/control-plane migration operation.
+
+`WatchWriter.recover_sealed_state_transition()` separately receives a completed
+Windows seal under `recover-sealed-state-transition` authorization, the same
+fresh current installation/transaction checks, completed quiescence and no
+queued legacy callbacks. It validates the actual private journal and reuses
+the Windows sealing owner's original-record/topology validator, including the
+original inode pin, retained file, installed barrier and absence of conflicting
+staging or isolated state. Only then may it acquire the inner `writer.lock`;
+it never acquires the retained original inode. Prepared or moved-but-unsealed
+topologies are not inputs to this receiver.
+
+The version-2 sealed record retains the complete original version-1 journal as
+`origin`, including its `seal`, and unchanged top-level `binding`, `lease` and
+`seal`. Its separate `controller` is revalidated scope history, not admission
+authority. Publication and unchanged-record retry use the same bounded,
+guarded persistence owner as prepared adaptation. Final source validation,
+current admission, native inner-lease custody, unchanged journal and actual
+topology are rechecked before publication. Unknown acknowledgement retains
+origin, native custody and legacy sole authority without import or effects.
+Version-1 readers still reject this version-2 record; ordinary readers/writers
+refuse every present phase. POSIX sealed records refuse before custody or
+publication: their version-1 boot epoch lacks qualified domain evidence,
+and no current host identity may be retroactively attached to it. This adds
+no fresh sealed epoch, domain/boot probe, version-2 sealing writer, isolated
+publisher, ordinary entry or migration command.
 
 An unjournaled pin is retained interruption evidence, not legacy absence or
 permission to erase it or recreate a record. Preparation's state and marker

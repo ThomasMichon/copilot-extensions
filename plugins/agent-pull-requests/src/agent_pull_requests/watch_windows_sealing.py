@@ -63,13 +63,24 @@ def read_sealing(root: Path, binding: Document) -> tuple[Document, str]:
         if prior is None:
             raise PermissionError("watch sealing requires completed preparation")
         return prior, "original"
+    return document, _inspect_sealing(root, binding, document)
+
+
+def _inspect_sealing(root: Path, binding: Document, document: Document) -> str:
+    """Validate original v1 evidence against topology, without adapting its record."""
+    if sys.platform != "win32":
+        raise NotImplementedError("watch Windows sealing requires Windows")
+    if not root.is_absolute() or root.resolve(strict=True) != root:
+        raise PermissionError("watch sealing requires its canonical state root")
+    _validate_binding(root, binding)
+    paths = watch_state_paths(root)
     phase = document.get("phase")
     if phase not in ("prepared", "sealed-legacy"):
         raise PermissionError("watch sealing cannot downgrade a later transition")
     _validate_record(
         {key: value for key, value in document.items() if key != "seal"}, binding, phase=phase,
     )
-    seal = document["seal"]
+    seal = document.get("seal")
     if (
         not isinstance(seal, dict) or set(seal) != {"backend", "barrier", "boot"}
         or seal["backend"] != _BACKEND or seal["boot"] is not None
@@ -86,16 +97,16 @@ def read_sealing(root: Path, binding: Document) -> tuple[Document, str]:
         if os.path.lexists(paths.retained_lock):
             if _identity(paths.retained_lock) != original or os.path.lexists(paths.historical_lock):
                 raise PermissionError("watch sealing is blocked by a raced historical path")
-            return document, "moved"
+            return "moved"
         if _identity(paths.historical_lock) != original:
             raise PermissionError("watch sealing no longer names the original lease")
-        return document, "original"
+        return "original"
     if (
         _identity(paths.retained_lock) != original
         or _identity(paths.historical_lock, directory=True, installed=True) != barrier
     ):
         raise PermissionError("watch sealing installed barrier differs from its record")
-    return document, "sealed"
+    return "sealed"
 
 
 def _acquire_barrier_lease(root: Path, document: Document, lease: SingleInstance) -> None:
