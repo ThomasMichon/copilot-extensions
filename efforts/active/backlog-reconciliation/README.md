@@ -1316,6 +1316,28 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The [source-fulfillment and retained-owner unit](journal/2026/11.20-source-fulfillment-and-owned-boundaries.md)
+records actual #13622 delivery/current whole receiving and four separately
+audited tracking retirements, plus acknowledged whole #12542 fulfillment
+through #12533. All twenty-three Portfolio technical rows remain unchecked.
+Fourteen complete current original unions, one withheld original and eleven
+linked delivery observations retain the distinct source/claim/native gaps,
+including OPEN #12875 and new mixed-review-history inflow. The complete
+897-open census remains 168 above fixed 729; no implementation, rollout,
+resource release or automatic remaining-source disposition follows.
+
+The [Windows fixture and native-profile unit](journal/2026/11.20-windows-fixture-and-profile-receiving.md)
+records #13611's actual reviewed delivery and parent return, complete current
+receiving readback and two separately audited redundant-tracking retirements
+of #11995/#12111. All eleven earlier technical rows and the OPEN keepers remain.
+Four complete finite fixture/profile families are proposed directly in the
+existing Portfolio Phase 4/5 waves through Phase 7; all twenty-three new
+technical rows remain unchecked. Ten other complete outcomes preserve actual
+claimants, combined keepers, source/copy gaps and live-consumer boundaries.
+No implementation, native/hosted test, changed policy or resource effect is
+claimed. The complete 05:47:50 UTC census is 901 whole open, 172 above fixed
+729; two arrivals offset the two retirements and every parent gate remains.
+
 The [native-readiness and Vault boundary audit](journal/2026/11.19-native-readiness-and-vault-boundaries.md)
 records #13456's reviewed delivery and parent return, the whole finite #13020
 source completion through #13027, and distinct #12900/#12920 adoption/context
@@ -4980,6 +5002,15 @@ closure credit, resource release or parent checkbox change follows.
   normal publication flow.
 
 ## Validation Plan
+
+The [source-fulfillment and retained-owner record](journal/2026/11.20-source-fulfillment-and-owned-boundaries.md)
+separates four accepted planned-receiving retirements from one acknowledged
+whole source completion. All incumbent campaign/Portfolio checks and the
+twenty-three technical obligations remain unchanged. Actual merge/current
+source, full-roster and public-effect readbacks do not qualify unexecuted
+native/installed work or transfer resource custody. Fourteen current whole
+originals and one held original retain actual owners and exact acceptance;
+the full 897-open census, not arithmetic subtraction, remains authoritative.
 
 The [source-claim and generation proposal](journal/2026/11.20-source-claim-and-credential-generation-receiving.md)
 preserves every incumbent check state and all six new Vault technical rows

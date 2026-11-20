@@ -802,6 +802,19 @@ that exact guard; startup and mutating reconciliation must use the same run
 root. This binding alone supplies neither completed-runtime/process evidence
 nor transaction authorization.
 
+`require_transition_origin()` is a read-only prerequisite for the version-2
+subscriber-state recovery adapter. Under that same held transaction it brackets
+a complete historical installation-evidence check with fresh current governance.
+Every source, installation, receipt and durable-root field must still match;
+historical generations must be positive and no newer than the current receipts.
+The original absolute payload location remains provenance and need not exist.
+The method neither rewrites that evidence nor reactivates the old binding.
+Its caller must obtain the origin from the validated private transition journal
+and separately prove exact runtime/process authorization and native
+lease/pin/barrier custody. A caller-supplied dictionary is not adoption authority.
+This prerequisite does not yet adapt or write a journal, qualify an execution
+domain or boot, select a subscription authority, or enable ordinary entry.
+
 `WatchRuntime` composes that current binding with canonical immutable snapshot,
 slot ownership and build completion evidence. A freshly governed action can
 attest an older owned incumbent without treating the new payload as its loaded

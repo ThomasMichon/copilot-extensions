@@ -17,11 +17,14 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .change_hints import ChangeHints
 from .point_hints import AcquisitionHints, PointChangeHints, read_change_hints, union_change_hints
 from .task_hints_schema import install_hints_schema
+
+if TYPE_CHECKING:
+    from .point_claim import PendingPointClaim
 
 if sys.version_info >= (3, 11):
     from enum import StrEnum as _TaskStatusBase
@@ -547,6 +550,40 @@ class TaskStore:
             conn.close()
 
     # ── Status updates ───────────────────────────────────────
+
+    def _require_point_claim(
+        self, conn: sqlite3.Connection, claim: PendingPointClaim,
+    ) -> TaskRecord:
+        row = conn.execute("SELECT * FROM tasks WHERE id = ?", (claim.task_id,)).fetchone()
+        if row is None:
+            raise ValueError("Current point claim is missing")
+        task = _row_to_record(row)
+        if (
+            task.status not in (TaskStatus.QUEUED_HINTS_V2, TaskStatus.COMPLETE)
+            or task.point_claim_id != claim.point_claim_id or task.change_hints != claim.hints
+            or any(value is not None for value in (task.worker_pid, task.worker_host, task.worker_version))
+        ):
+            raise ValueError("Current point claim is no longer eligible for completion")
+        return task
+
+    def _complete_point_claim(
+        self, conn: sqlite3.Connection, claim: PendingPointClaim, stats: dict[str, Any],
+    ) -> TaskRecord:
+        from .point_claim import _point_completion_transition
+
+        task = self._require_point_claim(conn, claim)
+        if task.status != TaskStatus.QUEUED_HINTS_V2:
+            raise ValueError("Point completion requires the current parked claim")
+        now = time.time()
+        with _point_completion_transition(conn, "tasks_point_execution_unsupported_update"):
+            conn.execute(
+                "UPDATE tasks SET status = 'complete', result_stats = ?, error = NULL, "
+                "progress_stage = 'complete', progress_pct = 100.0, "
+                "progress_msg = 'Whole point claim completed', finished_at = ?, updated_at = ? "
+                "WHERE id = ?",
+                (json.dumps(stats, sort_keys=True, allow_nan=False), now, now, claim.task_id),
+            )
+        return self._require_point_claim(conn, claim)
 
     def update_status(
         self,

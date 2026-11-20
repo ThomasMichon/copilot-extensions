@@ -174,8 +174,8 @@ committed native application can reopen and qualify as covered while that exact
 parent remains retained. A dirty/incoherent native state refuses ordinary
 reopening; prepared vectors never clear uncertainty. The explicit sealed
 publication suffix below is narrower than arbitrary partial-effect
-reconciliation. Mixed checkpoint/native restore qualification, whole-claim
-completion and explicit reader isolation remain unfinished under
+reconciliation. Mixed checkpoint/native restore recovery and broader consumer/read composition
+remain unfinished under
 [#13386](https://github.com/ThomasMichon/copilot-extensions/issues/13386).
 The ordinary engine, recovery and pending-completion entrypoints still refuse
 components. No v2 execution declaration, connector, producer, service/CLI form,
@@ -253,9 +253,138 @@ routes remain unsupported for point domains. The separate
 [cold schema bootstrap](source-aware-store.md#point-domain-binding-foundation)
 creates only configured content/model tables, not this ledger or its indices.
 Protocol-2 ledger/index bootstrap and typed-claim application are separate
-explicit prerequisites above. V2 execution/producer and current-claim completion
+explicit prerequisites above. V2 execution/producer and ordinary current-claim completion
 remain disabled; there is
 no migration or conversion of existing protocol-1 state.
+
+### Explicit whole-claim completion
+
+`indexing.point_completion.complete_point_claim(claim, scope=..., paths=...,
+tasks=..., ledger=..., max_rows=...)` completes only an explicitly selected,
+already applied whole typed claim. The explicit retained worker below composes
+it with application; ordinary workers, receivers, recovery and producers do not
+call it. It advertises no v2 execution capability.
+Queue and path databases must be the configured owners alongside the ledger.
+The exact current task must retain the whole immutable claim and pin, remain
+parked, and have no registered worker. Cancelled, failed, interrupted, partial,
+unbound and changed claims refuse; cancellation never certifies application.
+
+The existing prepared owner reopens its retained incarnation without creating
+missing cache state, recomposes **every** named version and correlation, and
+requires the existing immutable complete application binding. Completion binds
+each selected component's typed logical identity, rendering semantics, provider
+version and canonical fingerprint. Every component must have matching applied
+or higher-covered native ordering evidence and pass the existing applied
+snapshot's raw-point, canonical, routed-vector, coverage and checkpoint checks.
+Missing or untyped history is not absence or deletion proof.
+
+The operation takes the existing queue/path SQLite writer transactions before
+native exclusion, then holds all three owners through qualification. It performs
+no embedding, native mutation, polling-cursor save or repair. Queue success and
+a compact versioned outcome in its existing `result_stats` commit **before**
+pending retirement. The databases use separate WALs; this is deliberately not
+described as a crash-atomic cross-database commit. The outcome retains claim and
+parent digests/incarnation, scope, policy, native domain and per-component
+version/fingerprint/deletion summaries, not copies of acquired bodies.
+Completed v2 outcomes reject later updates, including from older status writers.
+
+Only the owning transaction temporarily removes its exact legacy status or
+pending-delete fence, performs the qualified transition, then reinstalls the
+same trigger before commit. Both schema and data roll back on interruption.
+Ordinary completion, processing, worker registration, v9 clear/discard,
+replacement and legacy decoding retain their refusal behavior. Pending deletion
+uses the existing same-transaction prepared-row/incarnation retirement triggers.
+
+A failure between queue commit and pending retirement leaves the exact parent
+retained. A fresh explicit call requalifies all current evidence and finishes
+retirement without replaying application. After retirement, a lost-return retry
+uses the queue's retained summary and again qualifies every point; it cannot
+clear a newer pending claim. Mixed stale checkpoints, native-directory restores,
+policy changes or missing coverage refuse rather than repairing or recertifying
+them. This does not undo a historical queue success or qualify arbitrary backup
+restoration; it blocks that retry/retirement until the existing owner resolves
+the discrepancy. A coherent obsolete copy of every owner still needs an external
+freshness oracle, not inference from internal agreement.
+
+Work scales with the claimed target set, not unrelated source history.
+`max_rows` retains its existing **per-point** meaning, not an aggregate claim,
+payload-memory, lock-duration or physical-I/O budget. The focused native
+`tests/test_point_completion.py` packet covers real completion/reopen, higher
+coverage, partial/stale refusal, trailing work, cancellation, separate-WAL failure
+boundaries, mixed restores and transactional-fence rollback after abrupt exit.
+Small actor-free composition controls live in required unit CI. Native Windows
+and ordinary producer/worker composition remain unqualified.
+
+### Explicit retained point worker
+
+`indexing.point_worker.run_retained_point_worker(claim, scope=..., paths=...,
+tasks=..., ledger=..., clients=..., max_rows=..., progress_cb=...,
+qualify_claim=...)` is a
+synchronous in-process boundary for an **already fully acquired** whole claim.
+The caller supplies the configured owners and owns client lifetime and provider
+eligibility qualification. It does not acquire targets, initialize a native
+domain, open clients or declare a v2-capable ordinary indexing callable.
+
+The existing source-writer lock spans retained acquisition decoding, prepared
+application, native publication and whole-claim completion. Missing, incomplete,
+stale or foreign retained work refuses rather than fetching it or invoking
+ordinary recovery. Preparation reuses the same immutable acquired observations
+and prepared vectors after interruption. Current queue eligibility and callback
+cancellation are checked before preparation, before publication and before
+completion; cancellation or failure never becomes generic successful task status.
+Native/checkpoint ordering, pending retirement and retry qualification remain
+with their existing owners above.
+
+An optional caller-owned `qualify_claim()` runs before preparation, before
+publication and before completion, outside native operations. A refusal retains
+the claim and recovery material. A failure after publication does not undo that
+publication or acknowledge the claim; a qualified retry reuses covered outcomes.
+Already-completed retries skip this provider callback.
+
+A completed lost-return retry goes directly to requalifying completion, without
+re-preparing, embedding or replaying native application. Uncertain native effects
+and mixed restores refuse; this worker never automatically invokes the separate
+sealed-publication reconciliation operation. Retained work stays available to
+its existing recovery owner. No polling state is read or advanced.
+
+This boundary registers no detached worker and changes no runner, CLI, HTTP,
+MCP, producer, queue-selection or execution-capability declaration. Ordinary v2
+execution remains disabled. Its row cap is still per point; it does not impose
+an aggregate target, memory, elapsed-time or physical-I/O budget.
+
+### Explicit Azure DevOps acquisition caller
+
+`sources.azure_devops_point_worker.run_azure_devops_point_worker(connector,
+claim, scope=..., paths=..., tasks=..., ledger=..., clients=..., max_rows=...,
+progress_cb=...)` composes the named-version adapter with this worker. The caller
+must already select a compatible, bootstrapped point domain and own client
+lifetime. It is not a new selected-callable capability or ordinary runner path.
+The existing domain operation verifies the actual native point selection before
+provider acquisition or pending writes; its exclusion is released before HTTP.
+
+The existing source writer spans fresh qualification of every distinct claimed
+item, exact named-version acquisition, immutable `PreparedPoints` retention and
+worker completion. A new v9 pending parent starts with the first positively
+qualified observation, never an empty component manifest. Resume reuses only
+positively retained observations and fetches missing named versions; retained
+bytes alone do not prove current eligibility. Before preparation, publication
+and acknowledgement, fresh principal/query-union/definition checks must still
+match the entire claim binding. Query exit, changed principal/context,
+ambiguous responses, unsupported identities/versions and cancellation refuse,
+without inferring deletion or invoking broad/legacy acquisition.
+
+For U distinct items and M missing targets the upper bound is 132U + 67M logical
+provider requests, each under the existing maximum of five attempts. This uses
+the existing 1,024-target envelope and per-read decoded/rendered payload caps;
+it is not a transport-memory, aggregate-payload, writer-lock-time or elapsed
+budget. Provider counters remain with the shared HTTP/acquisition owners.
+After acknowledged success, retry takes the existing local completion path
+without provider reads, preparation or native replay.
+
+Failures preserve unresolved work under the existing queue/pending/native
+owners. No polling cursor, detached-worker registration, producer, service
+contract, execution declaration, automatic repair, source activation or rollout
+is added. Ordinary v2 execution remains disabled.
 
 ### Sealed native publication suffix
 

@@ -7692,7 +7692,51 @@ not production latency, contention, large-corpus or native Windows proof.
 The actor-free exact-scope/physical-seal case in
 `tools/promotion_unit_tests/test_point_source_domain_contract.py` substitutes
 receipt/physical boundaries but executes the source writer. Whole-claim
-retirement, v2 execution, ordinary application and rollout remain unqualified.
+retirement through ordinary workers, v2 execution, ordinary application and
+rollout remain unqualified.
+
+The separate explicit `tests/test_point_completion.py` packet qualifies the
+current whole queue pin, every retained target and native/checkpoint outcome,
+then exercises queue success before exact pending retirement. It covers covered
+reopen without engines, trailing claims, cancellation, stale/partial refusal,
+lost-return retries across separate WAL commits, mixed checkpoint/native restores
+and abrupt-exit rollback of transactional schema/data transitions. Run this
+bounded native packet separately from application/preparation packets. Its
+actor-free `tools/promotion_unit_tests/test_point_completion_contract.py` controls
+check complete typed-target coverage and qualification/commit/retirement order
+in required unit CI; they substitute SQLite/native boundaries, not qualification
+of real restores or native Windows. See
+[explicit completion](plugins/agent-index/docs/component-ledger.md#explicit-whole-claim-completion)
+for retry and budget limits.
+
+The explicit `tests/test_point_worker.py` packet composes fully retained targets
+through the source writer, preparation, native application, whole-claim completion
+and named-component reads. It covers interrupted embedding/cache reuse,
+cancellation before publication, incomplete/foreign input refusal, retained
+uncertain effects without automatic repair, source-writer contention, trailing
+claims, requalifying completed retries and legacy-worker exclusion. Run it as a
+separate bounded packet with `--test-file tests/test_point_worker.py
+--allow-explicit-tiers`. Two additional actor-free controls in
+`test_point_completion_contract.py` qualify publication-before-completion and
+failure propagation with native/SQLite/lock effects substituted. Neither packet
+enables ordinary v2 execution or qualifies native Windows or live provider
+eligibility. See the [retained worker](plugins/agent-index/docs/component-ledger.md#explicit-retained-point-worker)
+for the caller and budget boundaries.
+
+The explicit `tests/test_azure_devops_point_worker.py` packet composes synthetic
+HTTP responses through the actual named-version reader, retained acquisition,
+native content/model/ledger application, completion and named reads. It covers
+new and partially acquired claims, retained-body reuse with fresh principal/
+query checks, eligibility loss during embedding and after publication,
+cancellation, trailing claims, completed retry without provider access,
+writer/owner exclusion, pre-acquisition native-scope refusal, target limits and
+the shared retry cap. Select it with
+`--test-file tests/test_azure_devops_point_worker.py --allow-explicit-tiers`;
+it can share one bounded runner with the existing named-reader and retained-worker
+packets. Four actor-free cases in `test_point_completion_contract.py` cover the
+optional qualifier's three phase boundaries and completed-retry bypass. These
+are synthetic-provider/local-native evidence, not live API, native Windows,
+ordinary v2 runner, full event delivery or consumer-scale qualification.
 
 The exclusive attachment-export consumer packet executes the real export
 entrypoint, health-selected command transport, extension registry, provider

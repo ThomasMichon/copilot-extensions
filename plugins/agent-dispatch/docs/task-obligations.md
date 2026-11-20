@@ -754,6 +754,34 @@ fresh observation and atomic checks. Both the existing completion refusal and
 its rollback-resistant SQLite enforcement remain in effect. The task claim,
 workspace, result proposal and native capacity remain retained.
 
+### Completion origin evidence
+
+`completion_origins.preparation_origins` classifies each retained proposal by
+its immutable acquisition event in the same queue and task. It checks the
+proposal's sealed request ID, workspace, worker and incarnation binding
+against the acquisition. An unmatched proposal is returned with a null origin;
+it is **not** absence or permission to ignore it. The SQL projection
+`PREPARATION_ORIGINS` is available for transaction and persisted-guard consumers.
+The projection does not mark a proposal discharged, change its contents, or
+select which proposal may advance.
+
+A successful `detach_agent` may include an additive `completion_origin_v1` in
+its existing recovery receipt. It is captured inside the verified detachment
+transaction, before clearing the native and advancing the generation. It binds
+a completed, ungoverned CLI or ordinary-Bridge pool submission to its actual
+completion audit event, queue, reservation, original worker/native, generation,
+completion time, and digest of the stored result and reference. No result body
+is copied. No field is emitted for an unqualified attachment, an ambiguous
+completion, or an enriched result. Old receipts are not backfilled.
+
+`completion_origins.exact_detached_completion` is a read-only evidence check
+inside the caller's queue transaction. It requires the same terminal outcome,
+the matching detach receipt and attachment, the immediately preceding pool
+generation, the exact retired native, and byte-identical result and reference
+(including absence). Its positive answer describes a past completion, **not**
+an execution permit or a waiver of caller identity/generation checks. It does
+not itself change completion routing or the submission guards.
+
 ### Internal guarded submission advancement
 
 `advance_prepared_submission(task_id, request_id=...)` is an internal queue

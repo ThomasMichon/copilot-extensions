@@ -64,7 +64,7 @@ notification, isolated state or activation. This proves those current-owner
 process-exit boundaries, not complete historical startup-family coverage,
 host power-loss durability or the POSIX boot boundary.
 
-The explicit historical packet archives complete source closures from
+The explicit historical packet, merged in #13615, archives complete source closures from
 `24b79724ac81d65f80a50507f6a7bef5b5dc1a33`,
 `a936d3b39f4d069b4e77ed11cf8e0e59bebbcd2b` and
 `3c62c9442c5944640d2c13385d7ff00db614c1aa`, including their declared
@@ -81,6 +81,20 @@ Missing local source commits explicitly skip rather than fetching or falling
 back to current code. This qualifies those pinned legacy-home source entries,
 not released installers, governed installation/adoption, every supported
 historical release or POSIX native behavior.
+
+A follow-on packet, merged in #13618, also selects the actual promoted payloads
+`9d11a84f794506956dbaeb8341578a0b0f13b899` (`0.3.1-dev1`),
+`c2ee1877fb55f965c141f400a31bc5e95dbebe6b` (`0.3.2-dev1`) and
+`5ee1468f15967fd6e76a0be08ee3dc69da2551bb` (`0.3.16-dev1`).
+These archive the libraries actually bundled under each promoted plugin,
+not the repository-root development libraries. The children verify the
+observed package version as well as loaded source locations. Both scenarios
+pass for all six snapshots: twelve historical cases under unchanged runner
+limits. The first two promotions differ from their development anchors only
+in the package version stamp; the third contains substantive source changes
+and is qualified independently. These versions identify fixture inputs, not
+a support floor or version-equality negotiation rule. Installer, governed
+adoption, complete-window and POSIX qualifications remain separate.
 
 POSIX rename does not revoke a descriptor for the original inode. A delayed
 historical acquisition can consequently succeed after the incumbent releases
@@ -129,6 +143,102 @@ cross-platform or unchanged identity does not qualify the boundary.
 Moving a state directory or volume to a different host is not this migration;
 retain existing installation binding rather than treating another machine's
 boot identity as a restart of the original execution domain.
+
+### Execution-domain evidence and current-controller recovery amendment
+
+**Reviewed in #13624; not runtime support or operational authority.** The
+delivered native boot reader identifies a boot, not continuity of its physical
+execution domain. The delivered journal also compares the complete original
+installation binding, including its payload and receipt generations. A changed
+boot UUID alone cannot distinguish an ordinary reboot from a copied state root
+on another host; requiring that entire binding to equal a newer controller's
+binding would instead strand the transition on its original executable.
+Resolve both gaps before implementing boot qualification or final import.
+This amendment follows the pattern's
+[durable-state compatibility requirement](../../../docs/patterns/service-contract-evolution.md#durable-state-must-not-require-its-original-executable).
+It does not weaken existing validation or authorize running an old build.
+
+Keep three facts distinct under the existing transition owner:
+
+| Fact | Required meaning |
+|---|---|
+| Original transition evidence | Immutable original installation provenance, exact state-root scope, original lease/pin and installed barrier identities, and the durably acknowledged sealed epoch. Preserve these across controller adoption. |
+| Current controller admission | A freshly selected compatible executor, its own validated current installation when governed, existing lifecycle authorization and actual native custody. A stored controller field is history, not authority to acquire or mutate. |
+| Physical execution-domain evidence | A versioned native domain identity and its kernel boot identity, obtained together through the existing boot-evidence owner, not inferred from installation/profile paths or supplied by the caller. |
+
+Extend `update_driver.boot` only as needed for this evidence contract; keep the
+existing boot-UUID API and its callers compatible. A qualified domain identity
+must remain stable across an ordinary boot and distinguish independently
+running hosts or VMs for the supported venue. Its provider must document and
+test its cloning, container and mounted-home limitations. A hostname,
+installation receipt, home path, arbitrary persisted UUID, service lifetime or
+container restart is not that proof. A machine identifier copied with the
+movable state/image is not sufficient by itself. If the venue cannot supply
+qualified native continuity, report that specific unsupported boundary and
+leave legacy authority intact; do not silently substitute a weaker identity.
+No new inventory service, global controller, shell probe or periodic observer
+is introduced.
+
+Acquire coherent domain/boot evidence at the sealing acknowledgement and
+again at qualified recovery through that provider. Validate its contract,
+platform and native source; evidence that changes during sampling refuses the
+attempt rather than mixing two observations. POSIX admission requires the
+same qualified domain and a different valid kernel boot identity from the
+durable sealed epoch. Missing, malformed, unsupported, same-boot or
+different-domain evidence cannot authorize import. A copied/moved root does
+not become a reboot migration, and a fresh controller cannot relabel its own
+host as the original domain. A real boot-crossing fixture remains necessary;
+injected identities prove only selection/refusal logic.
+
+Evolve the private journal to version 2 before writing these new required
+semantics. The existing version-1 records remain a supported recovery input,
+not an instruction to start their original payload. A version-2 reader retains
+the complete original `binding` and physical evidence as origin facts and
+records a separately admitted current controller; it never replaces the
+original generation with the incoming generation to make equality pass.
+Use a documented adapter inside the existing preparation/sealing owner,
+with current native custody and atomic guarded publication. Do not remove
+fields from the present validator, accept a caller's claimed old binding, or
+turn structural parsing into authorization.
+
+For governed recovery, the existing installation owner must establish that
+the admitted current installation addresses the same original installation
+and state-root scope. Keep original source/payload/generation fields as
+provenance rather than requiring the old generation to remain active. Preserve
+all current receipt, process, selection and transaction checks for the
+executor; do not derive permission merely by matching path strings or a
+subset of receipt fields. Unsupported or conflicting scope refuses this
+transition, not installation replacement. Legacy-home recovery retains its
+original exact-root scope and native ownership checks. Neither path may
+manufacture a migration or relocation relationship.
+
+Version-1 prepared records can be adapted only after validating their actual
+topology, pin, original-inode custody and strict final legacy source. A sealed
+version-1 record lacks qualified domain evidence: a new controller cannot
+retroactively attach its current domain to the old boot UUID. Reconcile the
+installed barrier and retained inode through the existing authorized owner,
+durably establish a fresh qualified sealed epoch without undoing the seal,
+and on POSIX wait for a later actual boot of that same domain. If that
+reconciliation cannot be established, retain the record and bytes and expose
+the unresolved evidence. Do not infer the original host or timing from file
+age, preparation time or current receipt metadata.
+
+On Windows, controller adoption still requires the qualified no-delete-sharing
+topology and existing inner writer lease. Domain metadata is not an alternative
+to the historical open-handle and raced-file checks, or permission to acquire
+the retained inode. Before either platform publishes an adapted record,
+recheck the unchanged original journal, actual topology, current admission,
+native custody and strict legacy source under the existing final-write guard.
+An interrupted or uncertain adaptation preserves both origin history and the
+legacy sole authority; it never selects an isolated registry or repeats an
+import. Unknown callback outcomes and unrelated resource obligations survive.
+
+Ship the version-2 receiver/adapter before any writer relies on it. Version-1
+transition-aware readers must continue to refuse an unsupported present record
+without mutation; historical pre-transition readers remain fenced by the
+physical barrier, not JSON negotiation. Test both rollback directions through
+the actual persistence boundary. No ordinary CLI syntax, map/cwd advertisement,
+automatic migration or installer veto is added by this proposal.
 
 ## One owner, explicit phases
 
@@ -258,10 +368,23 @@ is removed. Rollback of code is not downgrade of retained state.
    never exercise a rename/mkdir fallback as if it were the guarded path.
    Assert byte preservation, one writer and zero premature effects. A fake
    boot identity does not qualify a real reboot.
-5. Qualify an actual kernel-boot-crossing lane separately when a disposable
+5. Before boot admission or final import, implement the reviewed
+   [domain/controller amendment](#execution-domain-evidence-and-current-controller-recovery-amendment)
+   through the existing evidence, installation and writer owners. Actor-free
+   cases must cover same/different/unsupported domains, unchanged/changed boot,
+   incoherent samples, copied roots, newer-current-controller recovery of both
+   journal versions, stale/foreign controller refusal, uncertain adaptation and
+   unsupported-reader rollback with unchanged legacy bytes and zero effects.
+   Contained native cases must exercise the actual evidence provider and
+   current-controller serialization, not caller-provided identity substitutes.
+6. Qualify an actual kernel-boot-crossing lane separately when a disposable
    venue and its lifecycle authority are available. Until then, retain that
    acceptance gate explicitly; no live boot or hosted run is authorized here.
-6. Only after transition protection is released and applicable activation
+   Prove an ordinary reboot in the same execution domain qualifies, while a
+   service/container restart and a copy to another domain do not. Keep
+   native Linux exchange/interruption and historical-window qualification
+   separate; a passing evidence provider does not close either gate.
+7. Only after transition protection is released and applicable activation
    qualification passes, adapt the preserved map/cwd provider and then the
    CLI in separate reviewed releases. Resolve P/V/G5947-3/4 only with their
    actual consumer evidence; the parent effort remains Active.

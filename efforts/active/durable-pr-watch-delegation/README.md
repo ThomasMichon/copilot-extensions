@@ -838,14 +838,23 @@ or activating state. The Windows source slice merged in #13608 adds private
 staging, normal original-lease release, no-replace sealing and topology-based
 recovery; raced historical files remain retained blockers, never another lease.
 Contained Windows current-controller abrupt-exit recovery, merged in #13612, covers six
-transition boundaries without import or effects. A contained Windows packet
+transition boundaries without import or effects. The contained Windows packet
+merged in #13615 and extended in #13618
 also covers delayed opens, gap creation and cold legacy-home `serve`/`restart`
-refusal from three complete pinned historical source closures. Native Linux
+refusal from three development snapshots and three promoted payloads with their
+bundled historical dependencies. Native Linux
 exchange/interruption, released historical installations, governed entry and
 complete supported-window qualification,
 boot-boundary qualification and authority
 selection remain open; no
 map/cwd capability or isolated subscription publisher is activated.
+The
+[domain/controller amendment](subscriber-state-transition.md#execution-domain-evidence-and-current-controller-recovery-amendment)
+reviewed in #13624
+separates immutable transition origin from current executor admission and
+requires native same-domain continuity before comparing boots. It proposes a
+versioned recovery adapter, not weaker binding checks or delivered boot/import
+support. Existing source-only authority and every qualification gate remain.
 
 #6019 already delivered outage-independent expiry and the acknowledged-delivery
 foundation. Preserve that positive credit; the unchecked rows below retain
