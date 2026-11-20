@@ -410,6 +410,17 @@ the non-public approval conversation.
 
 ## Plan
 
+The [source-attribution and retirement-fixture unit](journal/2026/11.20-source-attribution-and-retirement-fixture-receiving.md)
+proposes complete direct #11348 required-context, #11372 visual-fixture,
+#11512 independent-witness/related-triage and #11482 managed-trailer
+contracts in three existing domain plans. All twenty-six new technical
+rows remain unchecked. Twelve complete current original unions also retain
+eight specific claimant, acceptance-gate or receiving gaps, rather than
+forcing title-only homes. The same unit records actual #13535 delivery,
+six independently verified tracking retirements and the complete 898-open
+census whose six arrivals offset those departures. No new source disposition
+or technical/custody credit follows from these proposals.
+
 The [six-source existing-owner receiving unit](journal/2026/11.19-bounded-readers-guidance-and-recipes-receiving.md)
 proposes complete direct #10487 portfolio, #10811 bounded enumeration,
 #11210 transcript-reader/output, #11239/#11240 guidance and #11296 recipe
@@ -4940,6 +4951,16 @@ closure credit, resource release or parent checkbox change follows.
   normal publication flow.
 
 ## Validation Plan
+
+The [four-source receiving contract](journal/2026/11.20-source-attribution-and-retirement-fixture-receiving.md)
+directly retains all four complete finite unions in their actual owners'
+Plan, local and actual global Validation, Coordination and dated Journal;
+both portfolio families also use existing Phase 7 migration-intake/domain
+review. Every incumbent state remains and all twenty-six new technical rows
+are unchecked. Ordinary reviewed complete delivery and permitted current
+receiving/source/custody readback precede four separate source judgments.
+No current defect, causal repair, native pass, owner transfer, extra ACK/
+receipt PR or unrelated whole-parent prerequisite is inferred.
 
 The [six-source receiving contract](journal/2026/11.19-bounded-readers-guidance-and-recipes-receiving.md)
 directly retains all six finite original unions in their existing owners'

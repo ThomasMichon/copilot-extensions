@@ -55,6 +55,19 @@ release gates, or count unexecuted native coverage as passing.
 
 ## Coordination
 
+The proposed finite #11372 visual-fixture and #11512 supported-interpreter/
+independent-witness families enter the existing Phase 4 Manager and Dispatch
+waves, respectively, through Phase 7 migration-intake deduplication and
+domain review. Preserve the same primary maintainer and actual UI/fixture,
+worker/witness, related-family, runner, source/native/release and resource
+custodians. No implementer, common cause, native venue or execution is appointed.
+Keep OPEN #1303, all incumbent checks/holds, unit-only required CI and hosted-
+Windows quiescence. Ordinary review must deliver every applicable P/V/G clause,
+Coordination/Journal and intake route; ledger-only publication is not domain
+acceptance. Keep both sources OPEN during the proposal, then make separate
+judgments after permitted current whole receiving/source/custody readback.
+No new ACK, receipt PR, source/resource transfer or whole-parent barrier follows.
+
 The proposed finite #10487 author-command family enters the Phase 3 Worktrees
 pilot through existing Phase 7 migration-intake deduplication and domain review.
 The primary maintainer and actual CLI registration, lazy-dispatch/scanner,
@@ -576,6 +589,96 @@ Agent-recommended Phase 3 Worktrees-pilot receiving through Phase 7.
   observable features per process launch.
 - [ ] Keep each plugin's contract map, inventory, and TESTING coverage summary
   current as its wave lands.
+
+#### Finite Recovery comparison visual fixture from #11372
+
+Agent-recommended Phase 4 Manager fixture-wave receiving through Phase 7.
+
+- [ ] **P11372-1:** Retain the reported Linux source `9ea3b8958e` failure of
+  `test_full_companion_visual[evidence-size3]`: the Recovery comparison-
+  evidence `Collapsible` remained collapsed when expansion was expected;
+  the other thirteen parametrizations passed. These are historical outcomes,
+  not a current reproduction or a proved production UI regression. Keep the
+  original `worktree-manager/tests/test_companion_visual.py` family mapping.
+- [ ] **P11372-2:** Classify the actual selected tab/target/size interaction
+  before choosing the original fixture/expectation correction OR UI-behavior
+  correction. Earlier static inspection found a Timeline-selected fixture
+  interacting with a Recovery comparison, but did not execute the click or
+  prove the runtime cause. Do not blindly change expected collapse state.
+- [ ] **P11372-3:** Preserve the finite fourteen-case visual selection and
+  its real layout/interaction assertions, existing UI/fixture ownership and
+  runner bounds. A merged Agenda change, unchanged source, isolated green
+  or a broader unrelated UI programme is not whole correction or causality.
+
+##### Local Validation for #11372
+
+- [ ] **V11372-1:** Through the actual bounded visual fixture, exercise the
+  intended Recovery comparison interaction at `evidence-size3`, distinguish
+  the selected tab/target, and preserve the other thirteen controls and
+  original expanded/collapsed assertions. Do not mock past the click/layout.
+- [ ] **V11372-2:** Attribute the chosen fixture/expectation OR behavior
+  correction to meaningful failed/positive controls and current source.
+  Preserve original selection, budgets and truthful unavailable outcomes;
+  intake is not executed Linux/native/installed evidence or an accepted flake.
+
+#### Finite independent worker-witness and related triage from #11512
+
+Agent-recommended Phase 4 Dispatch fixture-wave receiving through Phase 7.
+The principal regression and five related local-failure families are distinct.
+
+- [ ] **P11512-1:** Retain the reported CPython 3.12.11 devcontainer failure
+  of `test_lane_admission_retains_original_native_stream_worker[legacy-True-*]`
+  in `test_lane_event_retirement.py` on private `Thread._handle`, distinct
+  from runners using 3.13+. Preserve
+  the original faithful public/independent API OR reviewed interpreter-
+  alignment options; alignment alone cannot silently drop an older still-
+  supported fallback or qualify its independent-retirement behavior.
+- [ ] **P11512-2:** Preserve evidence of the ORIGINAL worker despite poisoned
+  or replaced facade/wake references. The regression deliberately poisons
+  instance `is_alive()` and wraps `join()`; directly using those substituted
+  methods cannot replace its independent witness. Retain live, retired and
+  finally-cleanup assertions. Credit earlier feature-detection/`_capture_legacy`
+  source findings only at their inspected tier, not as fresh execution.
+- [ ] **P11512-3:** Keep intake running until actual retirement, exact-once
+  witness release, original interruption/error propagation and bounded
+  failure cleanup. Preserve the legacy/native AND poisoned/unpoisoned matrix
+  on its supported interpreter/platform combinations, meaningful assertions
+  and original budgets; no skip or production-liveness weakening is a fix.
+- [ ] **P11512-4:** Separately triage ALL five reported local families:
+  pool-release successor-wake native accounting (`pending`/`unknown`);
+  pool-accountability suspended-wake legacy-spawn blocking (`pending`/`unknown`);
+  stale cold-snapshot/pending-resume capacity; fleet SSH embody argv; and
+  order-dependent spawn diagnostics. Recover exact unnamed diagnostic nodes
+  OR retain their named unknown; a shared interpreter/environment cause is
+  unproven, not permission to repair all cases as one or drop their assertions.
+
+Original related selectors under `plugins/agent-dispatch/tests/` are retained
+as reported patterns, not invented current parameter IDs:
+
+```text
+test_pool_release.py::test_successor_wake_accounts_its_native_without_recounting_retired_predecessor[wake_outbox-pending|unknown]
+test_pool_accountability.py::test_active_suspended_pool_wake_blocks_actual_legacy_spawn[wake_outbox-pending|unknown]
+test_pending_startup_reentry.py::test_stale_cold_snapshot_cannot_hide_newer_pending_resume_capacity
+test_fleet.py::test_spawn_fleet_embodied_worker_builds_ssh_embody_argv
+test_spawn_diagnostics.py (several unnamed nodes; combined failure, isolated pass)
+```
+
+##### Local Validation for #11512
+
+- [ ] **V11512-1:** Exercise actual original-worker observation while blocked,
+  after real retirement and during failed cleanup, including poisoned facade
+  and replacement-reference controls. Prove intake lifetime, exact-once
+  witness release and original error/interruption propagation independently
+  of the facade being tested.
+- [ ] **V11512-2:** Qualify the declared legacy/native and poisoned/unpoisoned
+  supported matrix through the owning bounded lane. Preserve the original
+  Python 3.12 report, static findings and new executed results as different
+  tiers; pinning an interpreter or passing on 3.13 alone is not fallback proof.
+- [ ] **V11512-3:** Map each related family to current nodes and a separate
+  causal/fixture treatment OR explicitly retained tracked uncertainty, with
+  original assertions, tier and budgets. Preserve isolated-versus-combined
+  spawn-diagnostic evidence. No common-cause claim, new full-suite/native
+  programme or required-CI exception follows from the principal test repair.
 
 #### Finite Windows-native unit-collector attribution from #13294
 
@@ -1264,6 +1367,14 @@ an assertion that the historical source defect remains current._
   effort Done, and archive it.
 
 ### Phase 7 — Reconcile deferred backlog
+
+The proposed P11372/V11372/G11372 and P11512/V11512/G11512 families each
+have one primary Phase 4 placement, in the Manager and Dispatch fixture
+waves respectively. The append-only migration-intake ledger records
+deduplication and unchanged owners; this same planning unit supplies the
+complete domain Plan, local/global Validation, Coordination and dated Journal
+for review. Existing sources supply the trackers during proposal; no new
+tracker, administrative checkbox or implementation appointment follows.
 
 The proposed P10487/V10487/G10487 family has one primary placement in the
 Phase 3 Worktrees pilot. The append-only migration-intake ledger records its
@@ -2577,6 +2688,19 @@ independent of #10031's large-caller startup/cutover lane.
 
 ## Validation Plan
 
+- [ ] **G11372:** Resolve every P11372/V11372 and continuing Coordination
+  clause at the original fourteen-case visual boundary: correct Recovery/
+  selected-tab/size interaction, original fixture/expectation OR behavior
+  alternative, retained assertions and attributable cause/results. Historical
+  source inspection and unrelated Agenda delivery are not a current UI pass;
+  preserve actual owners, Phase 7 intake, unit-only CI and execution holds.
+- [ ] **G11512:** Resolve every P11512/V11512 and continuing Coordination
+  clause: original worker evidence despite poison/replacement, running-until-
+  retirement, exact-once release/error/cleanup, supported matrix and separate
+  triage of ALL five related families/unknown diagnostic nodes. Preserve
+  original alternatives, old-versus-new evidence, budgets and actual custodians;
+  planned consolidation is not interpreter/native proof or claim release.
+
 - [ ] **G10487:** Resolve every P10487/V10487 and continuing Coordination
   clause: both regeneration equalities, all three supported author commands,
   genuine per-command cold-handler/cluster-loading proof and attributable
@@ -2938,6 +3062,17 @@ with another unbounded full-suite run. Portfolio reductions follow only after
 the inventory and evidence gates are available.
 
 ## Journal
+
+### 2026-11-20 UTC - Proposed visual and worker-witness fixture receiving
+
+Complete qualified #11372 and #11512 originals, including the latter's
+whole static-research discussion, are retained directly in the existing
+Phase 4 Manager/Dispatch waves through Phase 7. Both have local and actual
+global Validation; all fourteen new technical rows remain unchecked.
+The principal witness regression does not absorb its five related unknown-
+cause families into one alleged fix. The [four-source receiving record](../backlog-reconciliation/journal/2026/11.20-source-attribution-and-retirement-fixture-receiving.md)
+preserves complete source distinctions, owners and separate tracking gates.
+No test, source implementation, native/GUI action or resource release occurred.
 
 ### 2026-11-19 UTC - Proposed finite author-command guard receiving
 
