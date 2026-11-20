@@ -308,6 +308,7 @@ class QueueExecutionWakesMixin:
         provenance: tuple[ExecutionScopeBinding, str] | None,
         now: float | None = None,
         before_commit: Callable[[sqlite3.Connection, Task, str], None] | None = None,
+        no_resume: bool = False,
     ) -> WakeSendAdmission:
         """Only fresh admission permits transport; settled acceptance permits cleanup."""
         table = wake_table(wake)
@@ -359,6 +360,8 @@ class QueueExecutionWakesMixin:
             previous_send = row["execution_send"]
             if previous_send is not None and not _known_native_retry(row, current_wake, task):
                 raise TaskError("settled wake send is observation only; retain its transport history")
+            if previous_send is not None and json.loads(previous_send).get("no_resume", False) is not no_resume:
+                raise TaskError("wake retry cannot change its original native send mode")
             if isinstance(wake, RunWaiterWakeOperation) and wake.sender == CLAIM_RELEASE_SENDER:
                 raise TaskError("claim-release bookkeeping must not request execution custody")
             require_execution_admission(
@@ -389,6 +392,7 @@ class QueueExecutionWakesMixin:
                     raise TaskError("local recovery wake has no assignment")
                 fields = {
                     "protocol": "task_relevance_closeout/v1" if local_closeout else "pool_recovery_wake/v1",
+                    **({"no_resume": True} if no_resume else {}),
                     "reservation_key": (
                         reservation["key"] if reservation else None
                     ) if local_closeout else cast(sqlite3.Row, assignment)["reservation_key"],
@@ -430,6 +434,7 @@ class QueueExecutionWakesMixin:
             identity = json.dumps(
                 {
                     "scope": asdict(binding.scope), "runtime_id": runtime_id,
+                    **({"no_resume": True} if no_resume else {}),
                     "producer_generation": binding.producer_generation,
                     "outbox": table, "wake_id": wake.id, "delivery_token": wake.delivery_token,
                     "task_generation": task.generation, "owner_session_id": wake.owner_session_id,

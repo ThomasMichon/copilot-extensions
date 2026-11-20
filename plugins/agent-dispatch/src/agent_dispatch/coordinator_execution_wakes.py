@@ -60,7 +60,7 @@ def _deliver(
         if wake_table(wake) != "wake_outbox":
             raise TaskError("independent records require an ordinary wake")
         admission = queue.admit_execution_wake(
-            wake, provenance=provenance, before_commit=lambda conn, task, identity:
+            wake, provenance=provenance, no_resume=no_resume, before_commit=lambda conn, task, identity:
             records.retain(conn, task, wake.id, identity, no_resume=no_resume),
         )
     if not admission.send_required:

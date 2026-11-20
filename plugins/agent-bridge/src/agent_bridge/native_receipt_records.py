@@ -94,5 +94,13 @@ class NativeReceiptRecords:
             db.commit()
         if not inserted:
             return await self.reconcile(manager, session, request)
-        receipt = await submit(manager, session, request)
+        from .session_prompts import SessionBusyBeforeAdmission
+        try:
+            receipt = await submit(manager, session, request)
+        except SessionBusyBeforeAdmission:
+            with closing(self._open(write=True)) as db:
+                db.execute("DELETE FROM native_v1 WHERE delivery=? AND digest=? AND accepted_turn IS NULL",
+                           (request.delivery_id(), request_digest(session, request)))
+                db.commit()
+            raise
         return self._accept(session, request, receipt)
