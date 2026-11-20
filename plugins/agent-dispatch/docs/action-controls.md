@@ -229,7 +229,24 @@ full Windows rotation or authorize a production installation.
 
 ## Worker admission
 
-### Stop selected new workers without winding down a pool
+### Worker admission KillSwitches (not E-Stops)
+
+A **KillSwitch** inhibits starting new work units, including a pool initiating
+a resume. Outstanding work continues and can settle. Both scoped holds and
+the system-wide `worker-admission` hold in the selected installation are
+KillSwitches. An **E-Stop** rapidly terminates outstanding work; Dispatch
+does not implement an E-Stop here.
+
+The pool switch governs **who initiates the operation**. It prevents Dispatch
+from reserving, launching or reactivating a worker on behalf of the held pool.
+It is not a switch inside the worker or in agent-bridge. An independently
+authorized direct Bridge resume of the very same conversation remains subject
+to Bridge's normal access, identity and ownership checks. That resume neither
+creates a Dispatch reservation nor starts, adopts or releases a task. A live
+native observation is not proof of a pool-issued resume. Holds never tell a
+running worker to shut down; progress, receipt observation and cleanup remain
+available. A work-bearing idle-confirm prompt or cleanup requiring a new
+pool-issued process resume waits; observing or settling existing work does not.
 
 Use the updated `agent-dispatch` **on the installation making the decision**.
 These commands reread/write local state without contacting a coordinator or
@@ -294,7 +311,10 @@ checks fresh reservations before insertion, using the task row and, for
 managed placement, the actual selected instance even if the request omits
 one. It also checks the bound instance before admitting a new pool retry.
 Retained retries include the original allocator and recorded Bridge agent
-selection when available. The coordinator's one-shot handoff fallback checks
+selection when available. Ordinary redrive checks the reservation's durable
+pool binding even if it has no task assignment. Queued retries check the
+driver being recorded, including an inherited workspace driver.
+The coordinator's one-shot handoff fallback checks
 its stored task and actual default worker before consuming its launch attempt.
 The coordinator can check its known body class; it cannot attest an unnamed
 remote supervisor's selected agent. Set named-agent holds on every executing
@@ -304,7 +324,7 @@ direct placement clients. There is no distributed policy replication.
 **In flight:** A reservation request or retry already admitted at its check
 can finish its original launch/send; a file update and a remote launch are
 not one transaction. No process is killed, attempt reset, task canceled or
-custody cleared. Existing claims, same-owner continuations, observation of
+custody cleared. Existing claims, work already underway, observation of
 an already-issued retry, exhaustion, retirement and cleanup keep their normal
 rules. For a pending ordinary Bridge redrive, the updated supervisor can
 request observation of its exact retained revision and invocation during a

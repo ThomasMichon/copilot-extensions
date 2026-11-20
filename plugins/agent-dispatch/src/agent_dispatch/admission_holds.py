@@ -130,6 +130,11 @@ def supervisor_inhibited(owner: Supervisor, task: Mapping[str, object],
                      kind=kind if isinstance(kind, str) else None, agents=agents, reservation=reservation)
 
 
+def supervisor_resume_inhibited(owner: Supervisor, task: Mapping[str, object], reservation: Mapping[str, object]) -> bool:
+    from .action_controls import action_inhibited
+    return action_inhibited("worker-admission", logger=log) or supervisor_inhibited(owner, task, reservation)
+
+
 def require_spawn_admission(task: Task, reserved_by: str | None,
                             instance: tuple[str, str, str] | None, driver: str | None,
                             reservation: Mapping[str, object] | None = None) -> None:

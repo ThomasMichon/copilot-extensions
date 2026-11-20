@@ -562,8 +562,10 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                     execution_machine=carried_execution_machine,
                 )
                 require_selected_instance(expected_instance, selected_pool)
+            effective_driver = (driver if latest_allocation is not None and latest_allocation["driver"] == "ordinary-bridge"
+                                else driver or carried_driver)
             if self._spawn_admission is not None:
-                self._spawn_admission(task, reserved_by, selected_pool.identity if selected_pool else None, driver)
+                self._spawn_admission(task, reserved_by, selected_pool.identity if selected_pool else None, effective_driver)
             conn.execute(
                 "INSERT INTO spawn_reservations "
                 "(key, task_id, exclusive_key, attempt, state, reserved_by, "
@@ -587,7 +589,7 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                     carried_project,
                     carried_path,
                     carried_host,
-                    driver if latest_allocation is not None and latest_allocation["driver"] == "ordinary-bridge" else driver or carried_driver,
+                    effective_driver,
                     ts,
                     ts,
                     revision,

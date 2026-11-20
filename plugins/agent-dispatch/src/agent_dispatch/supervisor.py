@@ -848,6 +848,9 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                     target_dir,
                 )
                 continue
+            from .admission_holds import supervisor_resume_inhibited
+            if supervisor_resume_inhibited(self, task, current):
+                continue
             prompt = (
                 f"Task {task['id']} has new durable steering. Resume this same "
                 "task and ACP conversation, run `agent-dispatch steer take "
@@ -2104,6 +2107,9 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
         session_id = _parse_local_body_handle(reservation.get("session_handle"))
         worktree = reservation.get("worktree")
         if session_id is None or not isinstance(worktree, str) or not worktree:
+            return False
+        from .admission_holds import supervisor_resume_inhibited
+        if supervisor_resume_inhibited(self, task, reservation):
             return False
         prompt = (
             f"Task {task.get('id')} is already terminal, but managed worktree "

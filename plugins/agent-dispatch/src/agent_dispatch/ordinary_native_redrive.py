@@ -169,8 +169,8 @@ def record_redrive(
             if facts != ordinary_redrive:
                 raise TaskError("retained native redrive admission changed")
             queue.require_worker_admission()
-            if queue._spawn_admission is not None:
-                queue._spawn_admission(task, row["reserved_by"], None, row["driver"], {"agent_info": info})
+            from .retained_admission import require_retained
+            require_retained(queue, conn, task, row)
             if not row["startup_complete"]:
                 return SpawnReservation._from_row(row)
             revision += 1

@@ -10,16 +10,21 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from agent_dispatch import ordinary_bridge
+from agent_dispatch import bridge, ordinary_bridge
 from agent_dispatch.action_controls import require_worker_admission
 from agent_dispatch.client_errors import DispatchError
 from agent_dispatch.coordinator import create_app
+from agent_dispatch.ordinary_agent_storage import reservation_native_facts
 from agent_dispatch.queue import TaskQueue
-from agent_dispatch.queue_records import WorkerAdmissionInhibited
+from agent_dispatch.queue_common import Task
+from agent_dispatch.queue_execution_custody import PoolLaneUnavailable
+from agent_dispatch.queue_pool_recovery import prepare_recovery_wake
+from agent_dispatch.queue_records import SpawnReservation, WorkerAdmissionInhibited
 from agent_dispatch.supervisor import Supervisor
 from tests import test_native_owner_wake as native
 from tests import test_pool_placement_client as controls
 from tests.test_pool_placement import pool, publish, task
+from tests.test_pool_suspended_recovery import suspended
 from tests.test_scoped_worker_holds import command
 
 q = controls.q
@@ -39,6 +44,146 @@ def test_fresh_placement_checks_allocator_as_well_as_winner(tmp_path: Path, monk
         assert queue.latest_reservation(row.id) is None and queue.get(row.id) == row
         command("resume", "--pool", owner)
     assert queue.place_pool_task(row.id, reserved_by="allocator", catalog_revision=revision).reserved
+
+
+def test_omitted_retry_driver_cannot_escape_inherited_cli_hold(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(tmp_path))
+    queue = TaskQueue(tmp_path / "queue.db", worker_admission=require_worker_admission)
+    row = task(queue)
+    first, _ = queue.reserve_spawn(row.id, reserved_by="allocator", driver="cli")
+    queue.record_spawn_worktree(first.key, "original", ownership="created", creating_host="host-a", driver="cli")
+    queue.fail_spawn(first.key, detail="startup failed")
+    history: tuple[SpawnReservation, ...] = tuple(queue.list_reservations(task_id=row.id))
+    before = queue.get(row.id)
+    command("hold", "--agent", "cli", "--reason", "stop")
+    with pytest.raises(WorkerAdmissionInhibited):
+        queue.reserve_spawn(row.id, reserved_by="allocator")
+    assert queue.get(row.id) == before and tuple(queue.list_reservations(task_id=row.id)) == history
+    command("resume", "--agent", "cli")
+    retry, reserved = queue.reserve_spawn(row.id, reserved_by="allocator")
+    assert reserved and retry.driver == "cli" and retry.worktree == "original" and retry.attempt == 2
+
+
+@pytest.mark.parametrize("global_hold", [False, True])
+def test_direct_bridge_continuation_is_not_pool_resume_evidence(
+    hosted: tuple[TaskQueue, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, global_hold: bool,
+) -> None:
+    queue, task_id = hosted
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(tmp_path))
+    reservation = queue.latest_reservation(task_id)
+    assert reservation and reservation.reserved_by and reservation.session_handle == f"local-body:{native.BRIDGE}"
+    queue.record_cold(reservation.key)
+    queue.submit_steer(task_id, fields={"continue": True}, sender="producer")
+    before: tuple[Task | None, tuple[SpawnReservation, ...]] = (
+        queue.get(task_id), tuple(queue.list_reservations(task_id=task_id)),
+    )
+    if global_hold:
+        command("inhibit", "worker-admission", "--reason", "no pool starts or resumes")
+    else:
+        command("hold", "--pool", reservation.reserved_by, "--reason", "no pool starts or resumes")
+    direct_calls: list[list[str]] = []
+    def fake_transport(argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        direct_calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, "", "")
+    monkeypatch.setattr(bridge, "run_startup", fake_transport)
+    assert bridge.resume_session(native.BRIDGE, "separately authorized continuation")
+    assert len(direct_calls) == 1 and native.BRIDGE in direct_calls[0] and "--require-agent-hosting" in direct_calls[0]
+    with TestClient(create_app(queue, token="data", control_token="control", enable_mcp=False,
+                               verification_interval=0)) as api, controls.connected(api, []) as client:
+        lane = Supervisor(client, supervisor_id=reservation.reserved_by, repo="queue-project",
+                          spawn_fn=lambda _: pytest.fail("no replacement"), local_body_verdict_fn=lambda _: "live",
+                          local_acp_session_fn=lambda _: native.NATIVE, local_body_target_dir_fn=lambda _: str(tmp_path),
+                          local_resume_fn=lambda *_: pytest.fail("pool-initiated resume while held"))
+        assert lane.release_resumed_cold_tasks() == 0
+        assert lane.recover_stranded_cold_reservations() == 0
+    assert (queue.get(task_id), tuple(queue.list_reservations(task_id=task_id))) == before
+
+
+def test_held_pool_keeps_started_worker_but_cannot_resume_an_idle_turn(
+    hosted: tuple[TaskQueue, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    queue, task_id = hosted
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(tmp_path))
+    running = queue.resume(task_id, native.OWNER, reuse_session=True)
+    original = queue.latest_reservation(task_id)
+    assert running.status == "started" and original and original.reserved_by
+    command("hold", "--pool", original.reserved_by, "--reason", "stop")
+    with TestClient(create_app(queue, token="data", control_token="control", enable_mcp=False,
+                               verification_interval=0)) as api, controls.connected(api, []) as client:
+        lane = Supervisor(client, supervisor_id=original.reserved_by, repo="queue-project",
+                          spawn_fn=lambda _: pytest.fail("no replacement"), local_body_activity_fn=lambda _: "IDLE",
+                          idle_nudge_fn=lambda *_: pytest.fail("no pool-initiated work-bearing resume"))
+        assert lane.nudge_idle_headless_tasks() == 0
+    queue.heartbeat(task_id, native.OWNER)
+    active = queue.get(task_id)
+    assert active and (active.status, active.owner_session_id, active.generation) == ("started", native.NATIVE, running.generation)
+    assert queue.latest_reservation(task_id) == original
+
+
+@pytest.mark.parametrize("cold", [True, False])
+def test_recovery_send_rechecks_bound_pool_after_request(
+    q: TaskQueue, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cold: bool,
+) -> None:
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(tmp_path))
+    task_id, key, _ = suspended(q)
+    monkeypatch.setattr(q, "_spawn_admission", require_worker_admission.require_spawn)
+    if cold:
+        q.record_cold(key)
+    q.resume(task_id, "host-a/worktree", wake_requested=True, now=103)
+    wake = q.claim_due_wake(now=104)
+    assert wake
+    before = q.get(task_id), q.get_reservation(key), q.pool_startup(task_id)
+    command("hold", "--pool", "worker", "--reason", "stop resume")
+    with pytest.raises(PoolLaneUnavailable):
+        if cold:
+            prepare_recovery_wake(q, wake)
+        else:
+            q.admit_execution_wake(wake, provenance=None, now=104)
+    assert (q.get(task_id), q.get_reservation(key), q.pool_startup(task_id)) == before
+    command("resume", "--pool", "worker")
+    prepare_recovery_wake(q, wake)
+    assert q.admit_execution_wake(wake, provenance=None, now=104).send_required
+
+
+@pytest.mark.parametrize("scope", [("--pool", "bound"), ("--instance", "bound", "host-a", "linux")])
+def test_adopted_pool_binding_gates_send_not_observation(
+    hosted: tuple[TaskQueue, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scope: tuple[str, ...],
+) -> None:
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(tmp_path))
+    queue, task_id = hosted
+    queue.resume(task_id, native.OWNER, reuse_session=True)
+    queue.yield_task(task_id, native.OWNER, release_spawn=False)
+    queue = TaskQueue(queue.db_path, worker_admission=require_worker_admission)
+    original = queue.latest_reservation(task_id)
+    assert original and original.reserved_by != "bound"
+    with queue._connect() as conn:
+        conn.execute("INSERT INTO pool_reservation_bindings(reservation_key,registration_id,machine,env) "
+                     "VALUES(?,?,?,?)", (original.key, "bound", "host-a", "linux"))
+    assert queue.task_pool_assignment(task_id) is None
+
+    def record(*, observe: bool = False, complete: bool = False) -> None:
+        facts = reservation_native_facts(queue, original.key)["ordinary_redrive"]
+        queue.record_spawn(original.key, session_handle=original.session_handle, worktree=original.worktree,
+                           startup_complete=complete, startup_revision=facts["startup_revision"],
+                           ordinary_redrive={**facts, **({"observe_only": True} if observe else {})})
+
+    before = queue.get(task_id), queue.list_reservations(task_id=task_id)
+    command("hold", *scope, "--reason", "stop")
+    with pytest.raises(WorkerAdmissionInhibited):
+        record()
+    assert (queue.get(task_id), queue.list_reservations(task_id=task_id)) == before
+    command("resume", *scope)
+    record()
+    pending = queue.latest_reservation(task_id)
+    command("hold", *scope, "--reason", "receipt observation only")
+    with pytest.raises(WorkerAdmissionInhibited):
+        record()
+    record(observe=True)
+    assert pending and not pending.startup_complete and queue.latest_reservation(task_id) == pending
+    record(complete=True)
+    settled = queue.latest_reservation(task_id)
+    assert settled and settled.startup_complete and settled.startup_revision == pending.startup_revision
+    assert settled.key == original.key and settled.agent_info == pending.agent_info and queue.get(task_id) == before[0]
 
 
 @pytest.mark.parametrize("lane_labels", [None, ["lane"]])
