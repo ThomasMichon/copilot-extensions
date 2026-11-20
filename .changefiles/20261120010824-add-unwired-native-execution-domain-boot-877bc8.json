@@ -1,0 +1,9 @@
+{
+  "comment": "Add unwired native execution-domain boot evidence with strict records and explicit unsupported venues",
+  "changes": [
+    {
+      "plugin": "libs/update-driver",
+      "type": "patch"
+    }
+  ]
+}

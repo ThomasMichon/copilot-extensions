@@ -3,6 +3,14 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-20 - Config-free registration and selected peer-launch completion](journal/2026/11.20-registration-and-peer-launch-completions.md)
+
+- [2026-11-20 - Constructor retention and distinct owner continuations](journal/2026/11.20-constructor-retention-and-owner-continuations.md)
+
+- [2026-11-20 - Changed deliveries and two finite defect completions](journal/2026/11.20-changed-deliveries-and-finite-defect-completion.md)
+
+- [2026-11-20 - Three compatibility requests fulfilled by existing source](journal/2026/11.20-source-compatibility-fulfillment.md)
+
 - [2026-11-20 - Whole source fulfillment and retained ownership boundaries](journal/2026/11.20-source-fulfillment-and-owned-boundaries.md)
 
 - [2026-11-20 - Windows fixture and native-profile receiving](journal/2026/11.20-windows-fixture-and-profile-receiving.md)

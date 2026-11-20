@@ -386,6 +386,203 @@ owners. No polling cursor, detached-worker registration, producer, service
 contract, execution declaration, automatic repair, source activation or rollout
 is added. Ordinary v2 execution remains disabled.
 
+### Configured in-process Azure DevOps composition
+
+`sources.azure_devops_point_runtime.run_configured_azure_devops_points(connector,
+task_id, expected_hints=..., config=..., legacy_data_dir=..., point_scope=...,
+scope=..., clients=..., max_rows=..., progress_cb=...)` selects the owners above
+from an explicit `IndexConfig`. Its complete configured `point_scope` must match
+the expected whole queue snapshot, the prepared protocol-2 domain and the
+connector's endpoint/family/query union. Fresh principal and resolved-definition
+qualification remains with the acquisition caller, not this static comparison.
+
+The selected data directory must be disjoint from the explicitly supplied
+legacy directory, including ancestor/descendant and resolved symlink aliases.
+Derived content/model, cluster, polling-state, queue and path locations must
+remain inside the selected directory. Queue/path databases and the native
+domain, exact model mapping, indices and component ledger must already be
+prepared by their existing owners. This entrypoint never initializes a domain,
+converts legacy state or opens embedding clients; callers own connector/client
+lifetime. Legacy `SourceSpec`, source hashes and environment defaults do not
+change.
+
+Under the existing source writer it qualifies native readiness, opens configured
+queue/path owners, then uses `pin_point_claim` to compare and freeze the exact
+parked snapshot before acquisition. A changed snapshot refuses rather than
+pinning a subset or widening the request. Failures retain the parked pin and
+recovery material; fresh composition reuses retained observations. A matching
+completed pin takes the existing local completion retry without clients or
+provider work. Native exclusion is not held during provider or embedding calls.
+
+This is an explicit synchronous Python operation, not a `run_reindex`-shaped
+callable. `TaskRunner` still delegates ordinary tasks to its versioned detached
+worker; registering its in-process callback does not select this entrypoint.
+No ordinary v2 dequeue, execution-version advertisement, producer, service
+configuration/wire form, automatic repair or runtime activation is added.
+The acquisition and per-point row budgets above remain unchanged.
+
+### Explicit in-process worker dispatch
+
+`indexing.worker.run_worker(task_id, config=..., point_executor=...)` selects a
+point executor only for that explicit Python invocation. Supply the actual
+`IndexConfig` and a synchronous callable accepting the selected `TaskRecord`;
+the callable binds the connector, complete point scope, legacy directory,
+application scope, row budget and caller-owned clients required above. It can
+call `run_configured_azure_devops_points` with the selected task's ID and exact
+typed hints. It cannot be combined with the legacy `indexer` injection.
+
+Dispatch holds the configured source writer from snapshot recheck through the
+callable's return and durable queue verification. The configured runtime still
+qualifies and pins the whole snapshot before effects. The dispatcher ignores
+the callable's return value: success requires the existing queue owner to
+confirm completion against the original task ID, exact immutable hints and pin,
+captured before the callback can mutate its `TaskRecord`. Exceptions leave
+the claim and recovery material as the execution owners retained them; dispatch
+does not write generic failed, cancelled or successful status. Return codes are
+0 for verified completion, 1 for an execution exception and 2 for an unsupported
+selection or a callback returning without durable completion.
+
+The caller owns the synchronous invocation's lifetime and must keep its clients
+alive until it returns, including during cancellation or service shutdown. An
+async host must offload and join this blocking operation; abandoning a thread
+does not stop its effects. This path neither changes process priority/signal
+handlers nor registers a worker PID. It is not a detached-worker or cutover
+adoption contract. A process interruption retains the pin; a fresh explicit
+invocation can resume through the existing recovery owners.
+
+`index-worker --task` supplies no executor, reconstructs its legacy config and
+continues to refuse parked v2 work. Existing v1 callable negotiation, ordinary
+dequeue, worker-generation selection and execution advertisement are unchanged.
+No new CLI syntax, serialized configuration, service selector, producer or
+automatic v2 scheduling is enabled.
+
+### Explicit async lifetime owner
+
+`indexing.point_worker_host.PointWorkerHost` adapts the explicit dispatch above
+to one event loop. Enter its single-use async context inside the caller-owned
+connector/client lifetime, then `await host.run(task_id)`. It offloads the
+complete synchronous dispatch, including durable verification, and joins it
+before propagating cancellation. Context exit and `stop()` close admission and
+join the same operation even if repeatedly cancelled; they do not terminate a
+thread or synthesize cancelled queue status.
+
+Only one explicit dispatch is admitted at a time. `drain(timeout=...)` pauses
+admission and waits without cancelling the worker; it returns false on timeout.
+Cancelling the drain observer also leaves the active operation owned.
+`resume()` reopens paused admission, but never a stopped host. Clients must
+remain alive until context exit or stop settles, not merely until drain times
+out. There is no bounded thread-termination guarantee.
+
+The supported `TaskStore.cancel()` API acquires the same data-directory source
+writer before cancelling point work. It returns false without changing the row
+when another thread/process owns that writer, or when called reentrantly by
+the current owner. This matters because a running point claim still has parked
+queue status. After the owner settles, cancellation and explicit retry retain
+the immutable pin and pending recovery material. Legacy queued cancellation
+does not acquire this lock. The lock does not fence raw SQL or older,
+nonparticipating cancellation implementations; it is not a new running state,
+cross-version adoption contract or cooperative interruption of native work.
+
+This standalone Python owner does not select tasks or configure a service.
+The explicit service binding below composes it without changing detached-worker
+survival/adoption. Ordinary v2 capability, cross-consumer coordination and
+runtime activation remain separate.
+
+### Explicit point queue consumer
+
+`indexing.point_queue_consumer.PointQueueConsumer(config=..., point_scope=...,
+point_executor=...)` composes the joined host with caller-scheduled bounded
+queue consumption. Enter its single-use async context inside the configured
+connector/client lifetime. Every instance starts paused, including after
+reconstruction. Explicitly `await consumer.resume()`, then
+`await consumer.run_pending(max_tasks=...)` to complete at most that many claims
+(default one). Empty batches return zero; successful batches return their
+completed-task count. It creates no timer, task loop or process.
+
+The read-only `TaskStore.next_point_task(point_scope=...)` selects parked v2
+work FIFO by creation time and ID, matching source, family, account and the
+entire endpoint/query binding. It neither pins nor changes status. Queue reads
+run off the event loop; admission is rechecked afterward so drain or stop cannot
+be followed by a late dispatch. The dispatcher checks the current whole scope
+again before invoking the bound executor. Its existing snapshot comparison,
+runtime pinning, source writer and completion verification remain authoritative;
+later arrivals never mutate an existing pin. Legacy/v1 tasks, other scopes and
+terminal rows are not selected. An optional in-process `admit` callback runs
+after selection, immediately before dispatch; false leaves the task parked
+without treating the policy refusal as a failed claim.
+
+A nonzero dispatch result raises with its task ID and exit code and pauses
+consumption. Any exception or cancellation also pauses it; repeated scheduling
+cannot retry that parked claim without explicit resume. Retained bodies and
+pins remain with their current recovery owners. Reconstruction and resume do
+not repair dirty native state, reconcile partial effects, or infer restore
+currentness. Supported retained retry still requires the existing qualification.
+
+Drain pauses this consumer and observes the host's active native operation;
+stop permanently closes admission and joins effects. Neither cancels the thread
+or revokes its queue pin. Resume refuses an active batch. Keep clients alive
+until context exit or stop settles, even after a drain timeout.
+
+The task limit bounds dispatch count, not candidate-queue reads, provider
+requests, total elapsed time or native I/O. Selection may inspect parked rows
+for the selected source to find an exact binding; it does not scan indexed
+content or provider history. This is not a transactional dequeue lease or
+cross-consumer scheduling coordinator. The explicit binding below supplies
+service construction and notifications; cross-process cutover/adoption and
+ordinary v2 execution advertisement remain separate. The CLI and default
+ingestion behavior are unchanged.
+
+### Explicit service binding
+
+`server.build_app(point_service_factory=...)` optionally constructs a
+`indexing.point_service.PointService` when the service's existing task runner
+starts. A passive application does not invoke that factory until promotion.
+The binding takes an explicit `IndexConfig`, complete `PointScope`, and
+`executor_context`: an async-context-manager factory yielding the synchronous
+point executor. That context owns the configured connector and all model
+clients, and remains entered until native dispatch and runner shutdown settle.
+No callback or new configuration form is serialized.
+
+The point state must already exist in its selected directory, wholly disjoint
+from the legacy runner's directory. Invalid explicit configuration fails startup
+or promotion instead of silently falling back to legacy execution. There is no
+implicit store bootstrap, discovery or engine selection.
+
+Every new binding starts paused, including reconstruction after failure or
+interruption. The configuring in-process owner must inspect retained state,
+then explicitly `await app.state.task_runner.point_service.activate()` and call
+`app.state.task_runner.notify()`. Activation does not repair partial native
+effects or certify restore currentness. The existing qualified retry and
+recovery owners still govern that decision.
+
+The existing `/reindex/hints` route sends only exact-scope v2 envelopes to the
+binding's isolated queue and wakes the existing runner. Other bindings and all
+legacy/v1/source-only requests retain their legacy queue behavior. Matching
+intake may park work while point execution is paused; notification cannot
+activate it. The HTTP contract remains intake v1/v2 with no ordinary v2
+execution declaration, selector or activation endpoint.
+
+There is no second scheduler, timer or child process. The existing governed
+`TaskRunner` iteration executes at most one point claim before its legacy queue
+turn, and never starts point work alongside an adopted detached worker.
+Governance is checked again after off-loop selection, immediately before
+dispatch, so a newly active maintenance hold cannot admit selected work. A
+failure pauses point dispatch, records `indexing.point.failed` in `/status`,
+and leaves legacy scheduling available. Repeated wakes and `/undrain` do not
+clear that failure. `indexing.running` includes an active point batch; the
+additional `indexing.point` object reports its running/admitted/paused/failed
+state only for explicitly configured bindings.
+
+Drain synchronously pauses admission and reports false if native point effects
+have not settled within its budget. `/undrain` can roll back that pause without
+activating reconstructed or failed work. Stop closes point admission before its
+asynchronous join, including while read-only selection is off the event loop,
+and joins the existing iteration before closing the executor/client context.
+Cancellation cannot turn a native thread into an adoptable detached worker or
+release its clients early. Forced process interruption, cross-generation
+adoption, cross-consumer arbitration, native platform qualification and runtime
+rollout remain separate; this binding does not promise bounded thread shutdown.
+
 ### Sealed native publication suffix
 
 After qualifying all selected native content, routed vectors, cleanup and

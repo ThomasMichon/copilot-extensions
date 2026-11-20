@@ -2,6 +2,34 @@
 
 [Back to the effort](README.md). The Plan and Validation Plan remain the completion gate.
 
+## 2026-11-20 - Recover saved and cleared proposal drafts without the queue
+
+The original installed reader reconstructed the proposal but lost its saved
+draft before any B mutation. The opt-in `ProposalIntake.write_draft` now commits
+the guarded queue result to the existing proposal records before acknowledging
+it. The first such write selects a draft-aware record layout; an older reader
+cannot silently accept it as a v1 history. Ordinary queue writes do not acquire
+this guarantee. A failed journal commit invalidates the writer; reconstruct
+from the last acknowledged records instead of mounting the partial queue.
+
+Separate Windows installed A -> B -> A trials withheld each entire outgoing
+queue before starting the next reader. Both B readers saw the exact seed
+draft. One returning A saw B's exact updated draft, including its revision;
+the other saw B's acknowledged clear. Task, payload and original keyed steer
+receipt survived before retry, with no wake requested. These are queue-loss
+rebuilds between draft-aware fixture wheels, not historical compatibility,
+active task recovery, or deployment evidence.
+
+## 2026-11-20 - Compatible Dispatch handoff retains a cleared card draft
+
+Two installed Windows fixture wheels transferred an unowned proposal A -> B
+-> A using the outgoing queue each time. B read the exact draft saved by A
+and cleared it against the observed card and draft revisions. Returning A
+read the same task with the draft absent. The keyed steer receipt remained
+unchanged and the wake outbox stayed empty. This covers the task's draft
+field, not task deletion. Both queues used format 1; the independent
+proposal and steer records do not witness a draft clear after queue loss.
+
 ## 2026-11-20 - Host-index discovery without an attached session
 
 The installed mux consumer trial merged in [#13635](https://github.com/ThomasMichon/copilot-extensions/pull/13635).

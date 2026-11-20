@@ -1,0 +1,9 @@
+{
+  "comment": "Recover acknowledged proposal drafts and clears after queue loss.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

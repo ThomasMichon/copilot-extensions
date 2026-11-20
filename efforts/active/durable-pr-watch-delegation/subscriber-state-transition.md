@@ -240,6 +240,27 @@ physical barrier, not JSON negotiation. Test both rollback directions through
 the actual persistence boundary. No ordinary CLI syntax, map/cwd advertisement,
 automatic migration or installer veto is added by this proposal.
 
+#### Initial native-domain source scope
+
+**Unwired source merged in #13654; native qualification remains open.**
+The additive source API and its limits are documented by the
+[existing boot-evidence owner](../../../libs/update-driver/README.md#execution-domain-boot-observations).
+Its version-1 observation pairs the Windows VM Generation Counter with the
+native kernel boot UUID, checking both for changes during sampling. The
+counter's native contract separates ordinary reboot from clone/restore; a
+changed generation conservatively refuses continuity. Device absence or
+access denial has no fallback or elevation. Linux/WSL and macOS have no
+implemented provider. Firmware IDs, machine IDs and movable state remain
+insufficient substitutes.
+
+This is an unwired source prerequisite, not actual native qualification or
+subscriber migration support. Actor-free native-call and serialized-record
+controls cannot close the actual provider, same-domain reboot, cloned/moved
+root, container-restart or Linux-provider gates. The sealed-record receiver,
+fresh sealed epoch, original/current controller separation, guarded final
+source import and authority selection remain under the same writer owner;
+ordinary entry and map/cwd writes remain unchanged.
+
 ## One owner, explicit phases
 
 Extend the watch owner's existing journal/storage/adoption boundary. The
@@ -479,6 +500,89 @@ standalone/governed control-plane integration. Windows historical-runtime and
 controller-exit qualification, native Linux exchange/interruption qualification,
 final-source import, actual boot-crossing
 qualification and map/cwd activation remain open.
+
+### Prepared-only version-2 receiver
+
+The internal `WatchWriter.recover_prepared_state_transition()` operation is
+limited to completed quiescence with no queued legacy callbacks. It admits the
+current controller through existing authorization, process and lifecycle checks;
+governed recovery also holds the exact current installation transaction and
+uses the installation owner's complete historical-scope validation. It reads
+origin only from the private journal, never a caller-provided old binding.
+
+The version-2 prepared record retains the entire version-1 record as `origin`
+and its unchanged `binding` and `lease` at the top level, with a separate
+`controller` binding. The latter is historical evidence on the next attempt,
+not authority. Recovery accepts a later compatible current installation while
+retaining both original generations and payload provenance, without accessing
+an older executable. Version-1 validators remain unchanged and refuse the new
+record. Shared ordinary entry recognizes the prepared header but refuses every
+present transition.
+
+Before native acquisition and at final atomic publication, the adapter checks
+the exact canonical root, original lease/pin, absent physical-transition
+artifacts, unchanged journal bytes, strict legacy source, native custody,
+current admission and deadline. Acquisition never creates another historical
+inode or opens a pin/retained file. An already-current version-2 retry confirms
+durability without rewriting it. Unknown acknowledgement retains the published
+origin, native custody and legacy sole authority. Both sealed inputs and
+conflicting records refuse before acquiring a lease.
+
+Contained tests exercise actual receipt/activation replacement through a third
+generation, absent older payloads, serialized version-1/version-2 recovery and
+rollback refusal, scope/topology/source conflicts, transaction custody,
+pre/post-publication failures and uncertain acknowledgement. The focused
+preparation/storage/sealing packet passes 155 tests with three platform-specific
+skips on Windows; strict typing checks both Linux and Windows targets.
+The final exact-transaction precondition correction passes seven targeted
+negative/positive cases. Precondition refusals leave existing readiness and
+effects unchanged. Admission is revalidated after the initial source read,
+before acquisition; final source/admission work precedes the journal/topology
+check. Candidate serialization is bounded before acquisition/publication so a
+valid origin cannot produce an unreadable oversized record. Fresh current-cell
+checks omit only `COPILOT_PLUGIN_ROOT`, preserving WSL distribution identity
+and other observed environment evidence. Four focused propagation/identity
+controls pass after this final correction; guest resolution uses the canonical
+owner with fixture-only observations, not native WSL qualification.
+This is neither native Linux qualification nor actual domain/boot evidence.
+Sealed reconciliation, final import, ordinary command integration and the
+complete historical installed window remain open. No installation, migration,
+service operation or rollout is performed.
+
+### Windows sealed version-2 receiver
+
+The internal `WatchWriter.recover_sealed_state_transition()` source API receives
+an already installed Windows barrier under fresh lifecycle authorization and,
+when governed, the current installation's actually held transaction. It uses
+the same original v1 record/topology validator as Windows sealing rather than
+weakening or bypassing the v1 readers. The complete original private journal,
+including its no-delete-sharing seal, remains immutable `origin`; top-level
+`binding`, `lease` and `seal` remain equal to that origin. A separately validated
+`controller` records the admitted current executor without requiring the old
+executable to exist.
+
+Only the qualified installed barrier permits acquisition of the inner writer
+lease. No original/retained lease is acquired, and an incomplete preparation or
+move is not silently completed by this receiver. Candidate serialization is
+bounded before acquisition; the final guard rechecks strict legacy source,
+fresh current admission, native custody, original journal and actual topology.
+An uncertain publication retains origin, custody and the legacy sole authority;
+unchanged v2 retry confirms durability without rewriting. Ordinary entry still
+refuses all present records, while v1 preparation/sealing readers refuse v2.
+
+Actor-free controls exercise the actual receiver and writer-admission boundary.
+Contained Windows fixtures additionally qualify old-payload-absent current
+installation adoption, exact transaction refusal, native inner-lease selection,
+cold v2 retry, final-publication races and uncertain acknowledgement. These are
+receiver proofs only, not a new seal, provider/boot qualification, final source
+import, isolated registry or ordinary startup integration.
+POSIX sealed records refuse before custody/publication because no qualified
+domain epoch can be recovered from their v1 boot field. A current controller
+cannot fill that historical gap with its own host observation.
+Fresh POSIX epoch reconciliation and later actual same-domain boot, the v2
+sealing writer, final import/authority selection, governed entry and complete
+historical-window qualification remain open under their existing owners.
+No native domain probe or live migration/rollout is authorized.
 
 ### Internal Linux sealing and recovery
 

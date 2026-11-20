@@ -854,7 +854,20 @@ reviewed in #13624
 separates immutable transition origin from current executor admission and
 requires native same-domain continuity before comparing boots. It proposes a
 versioned recovery adapter, not weaker binding checks or delivered boot/import
-support. Existing source-only authority and every qualification gate remain.
+support. The installation-owner prerequisite merged in #13634 validates full
+retained installation scope under fresh current admission and native transaction
+custody without requiring the historical payload. It does not authenticate
+caller-supplied provenance or adapt a transition journal. The internal
+[prepared-only adapter](subscriber-state-transition.md#prepared-only-version-2-receiver)
+merged in #13639 and preserves complete origin under freshly admitted current
+native custody.
+It does not adapt sealed records, select state authority or enable ordinary
+entry. The unwired native-domain/boot API merged in #13654 under the existing
+boot-evidence owner, with a Windows VM Generation Counter source and strict
+version-1 observations. Actor-free source proof is not native qualification;
+Linux/WSL and macOS still have no implemented continuity provider.
+Version-2 sealing/recovery, native domain/boot qualification and every
+remaining gate still follow under the existing source-only authority.
 
 #6019 already delivered outage-independent expiry and the acknowledged-delivery
 foundation. Preserve that positive credit; the unchecked rows below retain
@@ -1912,6 +1925,7 @@ callback an implicit credential store.
 
 ## Journal
 
+- [2026-11-20 - Native domain/boot source prerequisite](journal/2026/11.20%20Native%20domain%20boot%20source.md)
 - [2026-11-20 - Windows abrupt-controller qualification](journal/2026/11.20%20Windows%20abrupt-controller%20qualification.md)
 - **2026-11-20 - Proposed finite M1 source-claim acknowledgment.** The
   [current campaign reconciliation](../backlog-reconciliation/journal/2026/11.20-source-claim-and-credential-generation-receiving.md)

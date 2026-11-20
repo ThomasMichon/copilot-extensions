@@ -14,6 +14,20 @@ of each generation's task DB and payload files. A write is acknowledged only
 after the independent record commits. Preserve that file with the same privacy
 and retention controls as the task contents; it is not diagnostic telemetry.
 
+To retain a draft across queue loss, read the current task and pass its
+`steering_revision` and `card_draft_revision` as `expected_revision` and
+`expected_draft_revision` to `intake.write_draft(fields, ...)`. Pass `None`
+to clear it. A new accepted steer invalidates the draft; retrying its key
+does not invalidate a later save. Direct queue save/clear calls are not
+recorded by the intake and do not provide this recovery guarantee.
+
+The first successful `write_draft` changes the independent records to a
+draft-aware format. An older reader refuses those records; it cannot safely
+recover even a cleared draft. On rollback, retain the records and use a
+draft-aware reader with a fresh destination. Do not start an empty proposal
+or rewrite the records to suppress the refusal. Unmodified v1 records remain
+readable for their original proposal and steer guarantees.
+
 `recover(records, new_generation)` uses the ordinary queue creator and steering
 consumer to rebuild into an absent directory. It compares every receipt before
 moving the journal writer epoch. An unsuccessful replay leaves the old writer

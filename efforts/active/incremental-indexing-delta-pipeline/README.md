@@ -156,7 +156,7 @@ After the reviewed proposal, the operator admitted execution:
   application candidate without replacing the pending parent. Explicit
   `PreparedApplication` consumption now requalifies that complete binding before
   chunking/embedding and uses scoped native vector reads; ordinary point-domain
-  execution and acquisition-to-worker composition remain open.
+  execution remains open; the explicit acquisition caller is described below.
   A [retained component carrier](../../../plugins/agent-index/docs/architecture.md#component-recovery-carrier-application-unsupported)
   preserves ordering inputs behind pre-application refusal, including changed
   replacement and premature-completion refusal. Pure content/version comparison
@@ -191,7 +191,21 @@ After the reviewed proposal, the operator admitted execution:
   completion under the existing source writer. An explicit
   [Azure DevOps acquisition caller](../../../plugins/agent-index/docs/component-ledger.md#explicit-azure-devops-acquisition-caller)
   composes missing named reads with fresh eligibility checks, retained recovery
-  and that worker. Ordinary v2 execution and automatic partial-effect/restore
+  and that worker; an explicit
+  [configured composition](../../../plugins/agent-index/docs/component-ledger.md#configured-in-process-azure-devops-composition)
+  opens isolated prepared owners and pins the expected whole parked snapshot.
+  An explicit [in-process worker hook](../../../plugins/agent-index/docs/component-ledger.md#explicit-in-process-worker-dispatch)
+  selects that bound composition without detached-worker registration and verifies
+  completion through the queue rather than the callable's return value.
+  An explicit [async lifetime owner](../../../plugins/agent-index/docs/component-ledger.md#explicit-async-lifetime-owner)
+  joins native dispatch through cancellation and truthful bounded drains,
+  with supported point queue cancellation serialized against that same source
+  writer. An explicit [point queue consumer](../../../plugins/agent-index/docs/component-ledger.md#explicit-point-queue-consumer)
+  supplies exact-scope FIFO batches with failure pause and explicit retained
+  retry. An explicit [service binding](../../../plugins/agent-index/docs/component-ledger.md#explicit-service-binding)
+  composes isolated exact-scope HTTP intake, the existing governed runner and
+  joined client lifetime, with paused reconstruction and no ordinary activation.
+  Ordinary v2 execution and automatic partial-effect/restore
   reconciliation remain unimplemented; live-provider, broader event-delivery
   and consumer-scale qualification remain open.
 - [ ] Persist acquisition progress so retry/restart does not restart a
@@ -316,6 +330,24 @@ Implementation should use dependency-ordered, reviewable PRs, with explicit
 source-owner coordination rather than one large rewrite.
 
 ## Journal
+
+### 2026-11-20 - Point-worker dispatch and lifetime
+
+The [worker-lifetime journal](journal/2026/11.20%20point-worker-lifetime.md)
+records merged #13646, original-selection verification, current-head review,
+executed/reused CI evidence and guarded source reconciliation. Both parent
+completion gates remain open; hosted lifetime and ordinary scheduling remain
+separate implementation work.
+The same entry now records the explicit async host's joined cancellation and
+truthful drain tests; service/queue admission and cutover wiring remain open.
+Merged #13649 supplies that host after current-head approval and passing CI;
+its source reconciliation and remaining integration boundary are journaled.
+Merged #13651 serializes supported point cancellation with native ownership;
+merged #13655 adds caller-driven exact-scope queue batches with failure pause.
+Automatic service scheduling and cutover composition remain open.
+The entry also records explicit service composition through the existing
+runner, isolated exact-scope HTTP intake and joined client lifetime; ordinary
+activation, cross-generation recovery and broader acceptance remain separate.
 
 Append-only entries are preserved in dated files, newest first.
 

@@ -7738,6 +7738,43 @@ optional qualifier's three phase boundaries and completed-retry bypass. These
 are synthetic-provider/local-native evidence, not live API, native Windows,
 ordinary v2 runner, full event delivery or consumer-scale qualification.
 
+`tests/test_azure_devops_point_runtime.py` exercises explicit configuration through
+the same native/HTTP fixture. It covers unpinned whole-snapshot selection,
+completed local retries, retained-acquisition recovery across fresh composition,
+changed queue snapshots, scope/model/connector/client refusal and separate
+legacy/point directories including symlink aliases. Missing configuration is
+not implicitly initialized. Select this bounded integration packet with
+`--test-file tests/test_azure_devops_point_runtime.py --allow-explicit-tiers`.
+It does not enlarge required unit CI or qualify ordinary v2 worker admission,
+native Windows, live APIs or runtime activation.
+
+The same runtime packet composes `PointQueueConsumer` with actual retained
+acquisition, native application and durable completion. It covers exact-scope
+FIFO selection, bounded batches and untouched trailing/other-account work,
+failure pause, explicit retained retry after reconstruction, and joined
+cancellation/drain/stop. A blocked queue-read control proves paused/stopped
+admission is rechecked before native dispatch. Lightweight selection and
+failure-latch controls remain in `tests/test_point_hints.py`; these additions
+do not themselves enlarge required CI admission. Neither packet qualifies
+ordinary/default v2 activation, cross-consumer coordination or restore repair.
+
+The same opt-in native runtime packet now hosts the actual ASGI application
+with an explicit `PointService` factory and the existing `TaskRunner` loop.
+It covers passive promotion, inert/reconstructed admission, exact-scope HTTP
+queue routing, ordinary capability refusal, wake-driven named acquisition and
+native completion, and retained failure/retry across notification and drain
+rollback. Blocked selection and embedding controls prove synchronous stop
+admission, truthful drain results and repeatedly cancelled shutdown retain the
+executor's actual HTTP client until the runner settles. Invalid explicit
+legacy/point overlap refuses before opening clients rather than falling back.
+These cases do not start a detached child, enlarge required unit CI, qualify a
+live-provider/cross-generation cutover, or enable ordinary v2 advertisement.
+
+The blocked-selection governance control changes the runner's policy to
+backoff while selection is off-loop. The final admission callback leaves the
+entire task unchanged without provider or executor work; returning to ready
+uses the existing runner wakeup rather than resetting point failure state.
+
 The exclusive attachment-export consumer packet executes the real export
 entrypoint, health-selected command transport, extension registry, provider
 dispatch and descriptor-pinned writer with an in-memory filesystem and
@@ -8301,6 +8338,13 @@ listing, including no-call files and invalid inputs.
 
 `tools/run-promotion-unit-tests.py` executes only the exact nodes declared by
 `tools/promotion-unit-manifest.json`, in one Python process with coverage.
+The watch-transition controls exercise the actual prepared and Windows sealed
+receivers with inert storage and lease owners: complete version-1 origin
+preservation, current writer admission, physical-topology refusal,
+final-publication races, uncertain acknowledgement and unchanged version-2
+retry. POSIX sealed records refuse without retroactive domain evidence.
+Native inode, installation and durability qualification remains in the plugin
+packet; `tests/test_watch_sealed_recovery.py` covers the Windows receiver.
 Ten namespace capability controls use the actual Bridge namespace decoder
 and shared declarations with substituted provider bytes. They preserve true,
 false, null and legacy omission and reject numeric/string/container values

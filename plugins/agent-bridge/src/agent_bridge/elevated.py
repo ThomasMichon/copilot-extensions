@@ -153,6 +153,8 @@ def _seed_config(port: int) -> Path:
     data["bind"] = "127.0.0.1"
     data["db_path"] = str(ed / "sessions.db")
     data["enable_credential_relay"] = False
+    if primary.consumer_telemetry_harnesses is not None:
+        data["consumer_telemetry_harnesses"] = {}
     (ed / "config.yaml").write_text(
         yaml.dump(data, default_flow_style=False, sort_keys=False)
     )
@@ -422,7 +424,7 @@ def is_up(port: int | None = None, timeout: float = 1.0) -> bool:
         with urllib.request.urlopen(
             f"http://127.0.0.1:{port}/health", timeout=timeout
         ) as resp:
-            return resp.status == 200
+            return bool(resp.status == 200)
     except (urllib.error.URLError, OSError):
         return False
 
@@ -529,11 +531,11 @@ def stop(*, deregister: bool = False) -> None:
         _run_elevated(bootstrap)
 
 
-def status() -> dict:
+def status() -> dict[str, Any]:
     """Return a small status dict for the sub-daemon."""
     port = discovered_port()
     up = is_up(port)
-    info: dict = {"port": port, "up": up, "config_dir": str(elevated_dir())}
+    info: dict[str, Any] = {"port": port, "up": up, "config_dir": str(elevated_dir())}
     try:
         out = subprocess.run(
             ["schtasks", "/query", "/tn", TASK_NAME, "/fo", "LIST"],

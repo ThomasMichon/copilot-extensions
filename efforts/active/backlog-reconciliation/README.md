@@ -410,6 +410,11 @@ the non-public approval conversation.
 
 ## Plan
 
+The [registration and selected peer-launch unit](journal/2026/11.20-registration-and-peer-launch-completions.md)
+records two independently acknowledged finite source completions and nine
+distinct retained contracts, with a complete 888-open census. Existing owner,
+source/copy, native and rollout gates and all parent check states remain.
+
 The [native crypto and existing-owner receiving unit](journal/2026/11.20-native-crypto-budget-and-lock-receiving.md)
 records acknowledged whole #12119 fulfillment through #12122 and proposes
 complete #11995 portfolio receiving plus #12111's same-parent TargetLock
@@ -1315,6 +1320,35 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 - [x] Preserve the initial cohort and oldest-first cursor in structured session state.
 
 ### Phase 2 - Continuing reconciliation
+
+The [constructor-retention completion record](journal/2026/11.20-constructor-retention-and-owner-continuations.md)
+records #13648's actual reviewed merge and parent return, acknowledged whole
+#10799 source fulfillment through #10810, and seven distinct retained
+continuations. The real constructor consumer and immutable-bundle controls
+remain separate from synthetic owner data, historical notification failures,
+foreground intent and installed acceptance. No incumbent check state, actual
+source/copy restriction or custody changes. The complete 890-open census is
+161 above fixed 729; the campaign remains Active.
+
+The [changed-delivery and finite-defect unit](journal/2026/11.20-changed-deliveries-and-finite-defect-completion.md)
+records #13643's actual reviewed delivery/parent return and acknowledged
+whole #13491/#13585 fulfillment through existing merged/current source.
+Eleven whole originals, seven delivery descriptions and a bounded reference
+delta retain nine unfinished contracts plus #10873's metadata-only continuation.
+Local author-reported Windows evidence, exact-head hosted qualification and
+source correspondence remain distinct from campaign execution or rollout.
+All incumbent check states and owners remain; the complete 891-open census
+is 162 above fixed 729.
+
+The [three-request source-compatibility unit](journal/2026/11.20-source-compatibility-fulfillment.md)
+records actual #13632 delivery/parent return and acknowledged whole #12819,
+#12852 and #12773 fulfillment through their original contributors' merged
+source. Exact current implementation/regression correspondence, the existing
+real constructor result and actual retained-prefix process controls remain
+distinct from fresh native execution, broader writer capabilities or installed
+adoption. All incumbent campaign/Portfolio check states and retained owners
+remain unchanged. The complete 893-open census is 164 above fixed 729;
+unrelated #13626 completion receives no campaign credit.
 
 The [source-fulfillment and retained-owner unit](journal/2026/11.20-source-fulfillment-and-owned-boundaries.md)
 records actual #13622 delivery/current whole receiving and four separately
@@ -5002,6 +5036,16 @@ closure credit, resource release or parent checkbox change follows.
   normal publication flow.
 
 ## Validation Plan
+
+The [source-compatibility completion record](journal/2026/11.20-source-compatibility-fulfillment.md)
+maps three whole original contracts to actual merged/current source and
+regressions, with separate acknowledged `COMPLETED` effects and independent
+provider readbacks. Prior native/semantic results remain attributed rather
+than new campaign runs; account identity is not human-review evidence.
+Auxiliary document drift was distinguished from unchanged core source without
+repeating the standing final check. No technical row, source/copy or resource
+gate is waived. Two equal complete observations establish 893 whole open,
+not prospective subtraction or parent completion.
 
 The [source-fulfillment and retained-owner record](journal/2026/11.20-source-fulfillment-and-owned-boundaries.md)
 separates four accepted planned-receiving retirements from one acknowledged

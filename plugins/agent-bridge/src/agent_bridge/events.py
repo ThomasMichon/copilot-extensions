@@ -222,8 +222,27 @@ class EventLog:
         # Generic telemetry seam: emit only the reducer's content-free
         # structural transitions (no-op unless a consumer registered a sink).
         for record in telemetry_records:
-            telemetry.emit(record)
+            self._emit_telemetry(record)
         return evt
+
+    def bind_consumer_telemetry(self, binding: Any) -> None:
+        """Retain owner admission independently of replaceable reducer/history state."""
+        self._consumer_telemetry_binding = binding
+
+    def _emit_telemetry(self, record: dict[str, Any]) -> None:
+        from process_telemetry.emission import LEGACY
+
+        if not hasattr(self, "_consumer_telemetry_binding"):
+            owner = getattr(self._db, "_consumer_telemetry_owner", None)
+            binding = LEGACY if owner is None else owner.binding_for_log(self._session_id)
+            if owner is None or binding is not owner.unavailable:
+                self._consumer_telemetry_binding = binding
+        else:
+            binding = self._consumer_telemetry_binding
+        if binding is LEGACY:
+            telemetry.emit(record)
+        else:
+            telemetry.emit(record, binding=binding)
 
     def set_telemetry_identity(
         self,
@@ -331,7 +350,7 @@ class EventLog:
                         timestamp=ts,
                     )
         self.wake_waiters()
-        telemetry.emit(rebuild_marker)
+        self._emit_telemetry(rebuild_marker)
         return count
 
     def wake_waiters(self) -> None:
