@@ -862,7 +862,11 @@ caller-supplied provenance or adapt a transition journal. The internal
 merged in #13639 and preserves complete origin under freshly admitted current
 native custody.
 It does not adapt sealed records, select state authority or enable ordinary
-entry. Version-2 sealing/recovery, native domain/boot qualification and every
+entry. The unwired native-domain/boot API merged in #13654 under the existing
+boot-evidence owner, with a Windows VM Generation Counter source and strict
+version-1 observations. Actor-free source proof is not native qualification;
+Linux/WSL and macOS still have no implemented continuity provider.
+Version-2 sealing/recovery, native domain/boot qualification and every
 remaining gate still follow under the existing source-only authority.
 
 #6019 already delivered outage-independent expiry and the acknowledged-delivery
