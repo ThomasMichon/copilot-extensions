@@ -690,6 +690,11 @@ def load_declaration(
             raise RegistrarError(
                 "plugin-companion declarations require attributed plugin discovery"
             )
+        if kind == RegistrationKind.PLACED_LANE:
+            raise RegistrarError(
+                f"kind {kind!r} is derived; declare a supervised-lane with "
+                "fleet.placement_provider instead"
+            )
 
         allowed = {
             "name",
@@ -868,6 +873,10 @@ def load_declaration(
     if decl.body.no_pair and decl.fleet.enabled:
         raise RegistrarError(
             "body.no_pair is supported only for local worker bodies"
+        )
+    if decl.fleet.placement_provider is not None and decl.evaluator:
+        raise RegistrarError(
+            "fleet.placement_provider is supported only for lanes without an evaluator"
         )
     return decl
 

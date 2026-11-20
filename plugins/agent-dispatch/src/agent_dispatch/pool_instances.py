@@ -116,7 +116,7 @@ class PoolInstanceDefinition:
         """Read an in-process definition without guessing a legacy row's filters."""
         if not isinstance(registration, Mapping):
             raise PoolDefinitionError("pool registration must be a mapping")
-        if registration.get("kind") != RegistrationKind.SUPERVISED_LANE:
+        if registration.get("kind") not in RegistrationKind.LANES:
             raise PoolDefinitionError("only supervised worker lanes define pool instances")
         spec = registration.get("spec")
         stored = spec.get("pool_definition") if isinstance(spec, Mapping) else None

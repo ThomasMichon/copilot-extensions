@@ -106,12 +106,14 @@ def declaration_to_registration(
     decl: ProfileDeclaration, *, machine: str | None, env: str = "default"
 ) -> dict[str, Any]:
     """Map a declaration to a daemon registration dict scoped to ``(machine, env)``."""
-    kind = (
-        decl.kind
-        if decl.kind != RegistrationKind.SUPERVISED_LANE
-        else RegistrationKind.EVALUATOR if decl.evaluator
-        else RegistrationKind.SUPERVISED_LANE
-    )
+    if decl.kind != RegistrationKind.SUPERVISED_LANE:
+        kind = decl.kind
+    elif decl.evaluator:
+        kind = RegistrationKind.EVALUATOR
+    elif decl.fleet.placement_provider is not None:
+        kind = RegistrationKind.PLACED_LANE
+    else:
+        kind = RegistrationKind.SUPERVISED_LANE
     registration: dict[str, Any] = {
         "id": declared_registration_id(decl),
         "logical_id": decl.name,
@@ -123,7 +125,7 @@ def declaration_to_registration(
         "source": DECLARED_ID_PREFIX,
         "owner": decl.owner,
     }
-    if kind == RegistrationKind.SUPERVISED_LANE and machine and machine.strip() and env and env.strip():
+    if kind in RegistrationKind.LANES and machine and machine.strip() and env and env.strip():
         from .pool_instances import PoolInstanceDefinition
 
         registration["pool_definition"] = PoolInstanceDefinition(

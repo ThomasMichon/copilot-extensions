@@ -23,6 +23,7 @@ import math
 import re
 from dataclasses import dataclass
 from pathlib import PurePosixPath
+from typing import Any
 
 
 class RegistrationKind:
@@ -35,15 +36,21 @@ class RegistrationKind:
     """
 
     SUPERVISED_LANE = "supervised-lane"
+    #: A supervised lane whose fleet consults a placement provider. It is a
+    #: distinct kind so a supervisor or coordinator that predates placement
+    #: refuses it as an unknown kind instead of running the lane without its
+    #: provider.
+    PLACED_LANE = "placed-supervised-lane"
     SCHEDULE = "schedule"
     EMITTER = "emitter"
     EVALUATOR = "evaluator"
     PLUGIN_COMPANION = "plugin-companion"
 
+    LANES = frozenset({SUPERVISED_LANE, PLACED_LANE})
     ALL = frozenset(
-        {SUPERVISED_LANE, SCHEDULE, EMITTER, EVALUATOR, PLUGIN_COMPANION}
+        {SUPERVISED_LANE, PLACED_LANE, SCHEDULE, EMITTER, EVALUATOR, PLUGIN_COMPANION}
     )
-    DIRECT = frozenset({SUPERVISED_LANE, SCHEDULE, EMITTER, EVALUATOR})
+    DIRECT = frozenset({SUPERVISED_LANE, PLACED_LANE, SCHEDULE, EMITTER, EVALUATOR})
 
 
 class RegistrationStatus:
@@ -367,7 +374,7 @@ def _validate_managed_runtime(value: object) -> None:
             )
 
 
-def _validate_plugin_companion(spec: dict) -> None:
+def _validate_plugin_companion(spec: dict[str, Any]) -> None:
     unknown = sorted(set(spec) - _COMPANION_KEYS)
     if unknown:
         raise RegistrationError(
@@ -397,7 +404,7 @@ def _validate_plugin_companion(spec: dict) -> None:
         _validate_managed_runtime(spec["managed_runtime"])
 
 
-def validate_companion_config_result(result: dict) -> None:
+def validate_companion_config_result(result: dict[str, Any]) -> None:
     """Validate the versioned JSON contract emitted by a companion config provider."""
     if not isinstance(result, dict):
         raise RegistrationError("companion config result must be a JSON object")
@@ -441,7 +448,7 @@ def validate_companion_config_result(result: dict) -> None:
         )
 
 
-def validate_companion_health_result(result: dict) -> None:
+def validate_companion_health_result(result: dict[str, Any]) -> None:
     """Validate the versioned JSON contract emitted by a companion health probe."""
     if not isinstance(result, dict):
         raise RegistrationError("companion health result must be a JSON object")
@@ -469,7 +476,26 @@ def validate_companion_health_result(result: dict) -> None:
         )
 
 
-def _validate_disposable_cli_labels(spec: dict) -> None:
+def has_placement_provider(spec: dict[str, Any]) -> bool:
+    """Whether a lane spec's fleet block declares a placement provider."""
+    fleet = spec.get("fleet")
+    return isinstance(fleet, dict) and fleet.get("placement_provider") is not None
+
+
+def _validate_placement(spec: dict[str, Any]) -> None:
+    from .fleet_placement import PlacementConfigError, parse_declaration
+
+    fleet = spec["fleet"]
+    pool = fleet.get("pool")
+    if not isinstance(pool, list) or not pool or not all(isinstance(h, str) for h in pool):
+        raise RegistrationError("fleet.placement_provider requires a non-empty fleet.pool")
+    try:
+        parse_declaration(fleet["placement_provider"], pool)
+    except PlacementConfigError as exc:
+        raise RegistrationError(str(exc)) from exc
+
+
+def _validate_disposable_cli_labels(spec: dict[str, Any]) -> None:
     values = spec.get("disposable_cli_labels")
     if values is None:
         return
@@ -510,7 +536,7 @@ def _validate_disposable_cli_labels(spec: dict) -> None:
             raise RegistrationError(f"'{key}' must be a list of labels")
 
 
-def _validate_idle_nudge_exempt_labels(spec: dict) -> None:
+def _validate_idle_nudge_exempt_labels(spec: dict[str, Any]) -> None:
     values = spec.get("idle_nudge_exempt_labels")
     if values is None:
         return
@@ -535,7 +561,7 @@ def _validate_idle_nudge_exempt_labels(spec: dict) -> None:
         )
 
 
-def _validate_steering_disallowed_labels(spec: dict) -> None:
+def _validate_steering_disallowed_labels(spec: dict[str, Any]) -> None:
     values = spec.get("steering_disallowed_labels")
     if values is None:
         return
@@ -560,7 +586,7 @@ def _validate_steering_disallowed_labels(spec: dict) -> None:
         )
 
 
-def _schedule_entry(spec: dict, *, strict: bool) -> dict:
+def _schedule_entry(spec: dict[str, Any], *, strict: bool) -> dict[str, Any]:
     """The single schedule entry a schedule registration carries.
 
     A schedule spec is either a bare entry, or ``{"schedules": [entry]}``. When a
@@ -592,7 +618,7 @@ class RegistrationRecord:
 
     id: str
     kind: str
-    spec: dict
+    spec: dict[str, Any]
     machine: str | None = None
     env: str = "default"
     status: str = RegistrationStatus.ACTIVE
@@ -600,7 +626,7 @@ class RegistrationRecord:
     updated_at: float = 0.0
 
 
-def validate_registration(kind: str, spec: dict) -> None:
+def validate_registration(kind: str, spec: dict[str, Any]) -> None:
     """Validate a registration's ``kind`` and ``spec`` eagerly.
 
     Rejects an unknown kind or a non-dict spec, and applies a light per-kind
@@ -616,18 +642,23 @@ def validate_registration(kind: str, spec: dict) -> None:
         )
     if not isinstance(spec, dict):
         raise RegistrationError("registration 'spec' must be a JSON object")
+    if has_placement_provider(spec) != (kind == RegistrationKind.PLACED_LANE):
+        raise RegistrationError(
+            "fleet.placement_provider requires, and is required by, the "
+            f"{RegistrationKind.PLACED_LANE!r} kind"
+        )
 
     if "pool_definition" in spec:
         from .pool_instances import PoolDefinitionError, PoolInstanceDefinition
 
-        if kind != RegistrationKind.SUPERVISED_LANE:
+        if kind not in RegistrationKind.LANES:
             raise RegistrationError("only supervised worker lanes accept 'pool_definition'")
         try:
             PoolInstanceDefinition.from_dict(spec["pool_definition"])
         except PoolDefinitionError as exc:
             raise RegistrationError(str(exc)) from exc
 
-    if kind == RegistrationKind.SUPERVISED_LANE:
+    if kind in RegistrationKind.LANES:
         if "restricted_worker" in spec:
             from .restricted_spawn import validate_lane
 
@@ -654,6 +685,8 @@ def validate_registration(kind: str, spec: dict) -> None:
         _validate_disposable_cli_labels(spec)
         _validate_idle_nudge_exempt_labels(spec)
         _validate_steering_disallowed_labels(spec)
+        if kind == RegistrationKind.PLACED_LANE:
+            _validate_placement(spec)
     elif kind == RegistrationKind.SCHEDULE:
         # A schedule is a self-run emitter: it needs an id (its dedup namespace,
         # 'sched:<id>:<epoch>') and a lane to emit into.
@@ -682,7 +715,8 @@ def validate_registration(kind: str, spec: dict) -> None:
     elif kind == RegistrationKind.EVALUATOR:
         if not spec:
             raise RegistrationError("evaluator registration needs a non-empty spec")
-        from .reviewer_loops import EvaluatorError, reviewer_loop_lifecycle_config
+        from .producers.evaluator import EvaluatorError
+        from .reviewer_loops import reviewer_loop_lifecycle_config
 
         eval_spec = spec.get("evaluator_spec")
         if eval_spec is None and not spec.get("evaluator"):
@@ -726,13 +760,13 @@ def validate_registration(kind: str, spec: dict) -> None:
         _validate_plugin_companion(spec)
 
 
-def _scope_key(kind: str, spec: dict) -> str:
+def _scope_key(kind: str, spec: dict[str, Any]) -> str:
     """A short, human-readable natural key for a registration's scope.
 
     Used only as the readable prefix of a derived id; the trailing digest is what
     actually guarantees idempotency, so this need only be stable, not unique.
     """
-    if kind == RegistrationKind.SUPERVISED_LANE:
+    if kind in RegistrationKind.LANES:
         lane = "all-repos" if spec.get("all_repos") else str(spec.get("repo") or "lane")
         labels = spec.get("labels") or spec.get("label") or []
         if isinstance(labels, str):
@@ -750,7 +784,7 @@ def _scope_key(kind: str, spec: dict) -> str:
 
 
 def derive_registration_id(
-    kind: str, spec: dict, machine: str | None, env: str
+    kind: str, spec: dict[str, Any], machine: str | None, env: str
 ) -> str:
     """Derive a stable registration id from its identity.
 

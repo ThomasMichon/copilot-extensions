@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from contextlib import AbstractContextManager
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     import httpx
@@ -19,6 +19,7 @@ from .client_pool_cohort import PoolCohortClientMixin
 from .pool_publication_custody import PoolCatalogRead, PoolMetadataRequest
 from .pool_publication_response import read_pool_metadata_result
 from .queue_pool_catalog import PoolPublicationScope
+from .registrations import RegistrationKind
 
 
 class RegistrationClientMixin(PoolCohortClientMixin):
@@ -31,17 +32,17 @@ class RegistrationClientMixin(PoolCohortClientMixin):
         _http: httpx.Client
         _unwrap: Callable[[httpx.Response], Any]
         _control_headers: Callable[[], dict[str, str]]
-        health: Callable[[], dict]
+        health: Callable[[], dict[str, Any]]
 
     def register_registration(
         self,
         kind: str,
-        spec: dict,
+        spec: dict[str, Any],
         *,
         reg_id: str | None = None,
         machine: str | None = None,
         env: str = "default",
-    ) -> dict:
+    ) -> dict[str, Any]:
         body = {
             "kind": kind,
             "spec": spec,
@@ -50,7 +51,9 @@ class RegistrationClientMixin(PoolCohortClientMixin):
             "env": env,
         }
         endpoint = "/registrations"
-        if "pool_definition" in spec:
+        # A coordinator that knows the placed kind already accepts lossless
+        # definitions on the generic route; older ones refuse the kind outright.
+        if "pool_definition" in spec and kind != RegistrationKind.PLACED_LANE:
             health = self.health()
             contract = health.get("pool_catalog_transport") if isinstance(health, dict) else None
             versions = contract.get("registration_definition_versions") if isinstance(contract, dict) else None
@@ -63,7 +66,7 @@ class RegistrationClientMixin(PoolCohortClientMixin):
                 raise DispatchUpgradeRequired("running coordinator lacks lossless direct pool definitions")
             endpoint = "/registrations/pool-definition"
         headers = self._control_headers() if kind == "evaluator" else None
-        return self._unwrap(self._http.post(endpoint, json=body, headers=headers))
+        return cast("dict[str, Any]", self._unwrap(self._http.post(endpoint, json=body, headers=headers)))
 
     def list_registrations(
         self,
@@ -72,7 +75,7 @@ class RegistrationClientMixin(PoolCohortClientMixin):
         machine: str | None = None,
         env: str | None = None,
         include_paused: bool = True,
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         params: dict[str, str | bool] = {"include_paused": include_paused}
         if kind is not None:
             params["kind"] = kind
@@ -80,7 +83,7 @@ class RegistrationClientMixin(PoolCohortClientMixin):
             params["machine"] = machine
         if env is not None:
             params["env"] = env
-        return self._unwrap(self._http.get("/registrations", params=params))
+        return cast("list[dict[str, Any]]", self._unwrap(self._http.get("/registrations", params=params)))
 
     def _require_pool_metadata_transport(
         self, *, configured_cohort: bool = False, queue_identity: bool = False,
@@ -113,10 +116,10 @@ class RegistrationClientMixin(PoolCohortClientMixin):
         ):
             raise DispatchUpgradeRequired("running coordinator lacks original queue identity request fences")
 
-    def pool_catalog_metadata(self) -> dict:
+    def pool_catalog_metadata(self) -> dict[str, Any]:
         """Control-authorized preparation read, also used by opt-in maintenance."""
         self._require_pool_metadata_transport()
-        result = self._unwrap(self._http.get("/pool-catalog", headers=self._control_headers()))
+        result: dict[str, Any] = self._unwrap(self._http.get("/pool-catalog", headers=self._control_headers()))
         PoolCatalogRead.from_dict(result)
         return result
 
@@ -137,13 +140,13 @@ class RegistrationClientMixin(PoolCohortClientMixin):
             ))
         return read_pool_metadata_result(result)
 
-    def get_registration(self, rid: str) -> dict:
-        return self._unwrap(self._http.get(f"/registrations/{rid}"))
+    def get_registration(self, rid: str) -> dict[str, Any]:
+        return cast("dict[str, Any]", self._unwrap(self._http.get(f"/registrations/{rid}")))
 
-    def remove_registration(self, rid: str) -> dict:
-        return self._unwrap(self._http.delete(f"/registrations/{rid}"))
+    def remove_registration(self, rid: str) -> dict[str, Any]:
+        return cast("dict[str, Any]", self._unwrap(self._http.delete(f"/registrations/{rid}")))
 
-    def set_registration_status(self, rid: str, status: str) -> dict:
-        return self._unwrap(
+    def set_registration_status(self, rid: str, status: str) -> dict[str, Any]:
+        return cast("dict[str, Any]", self._unwrap(
             self._http.post(f"/registrations/{rid}/status", json={"status": status})
-        )
+        ))

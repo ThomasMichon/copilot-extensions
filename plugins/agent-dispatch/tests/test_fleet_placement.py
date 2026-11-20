@@ -27,12 +27,15 @@ from agent_dispatch.fleet_placement import (
     placement_from_flag,
     run_provider,
 )
+from agent_dispatch.pool_instances import PoolInstanceDefinition
 from agent_dispatch.registrar import RegistrarError, load_declaration
 from agent_dispatch.registrar_reconcile import declaration_to_registration, declaration_to_spec
+from agent_dispatch.registrations import RegistrationError, RegistrationKind, validate_registration
 from agent_dispatch.supervisor import Supervisor
 from agent_dispatch.supervisor_registration import UnsupportedKind, _lane_flags, build_command
 from tests._helpers import TEST_REPO
 from tests._helpers import RepoDefaultingQueue as TaskQueue
+from tests.test_direct_pool_definitions import _api, _client, _daemon
 from tests.test_fleet import _create, _fake_spawn
 from tests.test_supervisor import QueueBackedClient
 
@@ -137,6 +140,105 @@ def test_placement_without_pool_is_refused() -> None:
         _lane_flags({"fleet": {"pool": [], "placement_provider": {"name": "x", "hosts": ["a"]}}})
     with pytest.raises(PlacementConfigError):
         placement_from_flag('{"name": "x", "hosts": ["a"]}', [])
+
+
+# -- mixed-version admission boundary ------------------------------------------
+
+#: The registration kinds a pre-placement supervisor daemon and coordinator know.
+#: Their ``build_command`` raises ``UnsupportedKind`` (the daemon logs and skips)
+#: and their ``validate_registration`` raises for any other kind.
+_PRE_PLACEMENT_KINDS = frozenset(
+    {"supervised-lane", "schedule", "emitter", "evaluator", "plugin-companion"}
+)
+
+
+def test_placement_lane_registers_under_a_kind_older_consumers_refuse() -> None:
+    reg = declaration_to_registration(
+        load_declaration(yaml.safe_load(_LANE_YAML)), machine="host-a"
+    )
+    assert reg["kind"] == RegistrationKind.PLACED_LANE
+    assert reg["kind"] not in _PRE_PLACEMENT_KINDS
+    validate_registration(reg["kind"], reg["spec"])
+    assert PoolInstanceDefinition.from_registration(reg).registration_id == reg["id"]
+    # The same unknown-kind skip an older daemon applies, through today's code.
+    with pytest.raises(UnsupportedKind):
+        build_command({**reg, "kind": "future-lane-kind"}, python="PY")
+
+
+def test_lane_without_placement_keeps_the_baseline_kind_and_spec() -> None:
+    data = yaml.safe_load(_LANE_YAML)
+    del data["fleet"]["placement_provider"]
+    reg = declaration_to_registration(load_declaration(data), machine="host-a")
+    assert reg["kind"] == RegistrationKind.SUPERVISED_LANE
+    assert reg["spec"]["fleet"] == {"pool": ["W1", "cde", "W2"], "origin": "orig", "headless": False}
+
+
+def test_placement_requirement_is_bound_to_its_kind() -> None:
+    placed: dict[str, Any] = {
+        "repo": TEST_REPO,
+        "fleet": {"pool": ["W1", "cde"], "placement_provider": {"name": "d", "hosts": ["W1"]}},
+    }
+    plain: dict[str, Any] = {"repo": TEST_REPO, "fleet": {"pool": ["W1", "cde"]}}
+    for kind, spec in (
+        (RegistrationKind.SUPERVISED_LANE, placed),
+        (RegistrationKind.PLACED_LANE, plain),
+        (RegistrationKind.EVALUATOR, placed),
+    ):
+        with pytest.raises(RegistrationError):
+            validate_registration(kind, spec)
+    for kind, spec in ((RegistrationKind.SUPERVISED_LANE, placed), (RegistrationKind.PLACED_LANE, plain)):
+        with pytest.raises(UnsupportedKind):
+            build_command({"id": "r", "kind": kind, "spec": spec}, python="PY")
+    bad = {**placed, "fleet": {**placed["fleet"], "placement_provider": {"name": "d", "hosts": ["W9"]}}}
+    with pytest.raises(RegistrationError):
+        validate_registration(RegistrationKind.PLACED_LANE, bad)
+    validate_registration(RegistrationKind.PLACED_LANE, placed)
+    validate_registration(RegistrationKind.SUPERVISED_LANE, plain)
+
+
+def test_placed_lanes_contribute_steering_denylists(tmp_path: Path) -> None:
+    q = TaskQueue(tmp_path / "tasks.db")
+    q.register_registration(RegistrationKind.PLACED_LANE, {
+        "repo": TEST_REPO, "labels": ["build"], "steering_disallowed_labels": ["build"],
+        "fleet": {"pool": ["W1", "cde"], "placement_provider": {"name": "d", "hosts": ["W1"]}},
+    })
+    assert q._steering_disallowed_labels() == {"build"}
+
+
+def test_placed_lane_definition_registers_on_the_kind_gated_route(tmp_path: Path) -> None:
+    decl = load_declaration({
+        "name": "worker", "owner": "repo:example", "repos": "example", "labels": ["review"],
+        "body": {"type": "headless", "agent": "task-worker"},
+        "fleet": {"pool": ["W1", "cde"], "placement_provider": {"name": "devbox", "hosts": ["W1"]}},
+    })
+    registration = declaration_to_registration(decl, machine="host-a", env="isolated")
+    registration["spec"]["pool_definition"] = registration.pop("pool_definition")
+    calls: list[tuple[str, str]] = []
+    with _api(TaskQueue(tmp_path / "tasks.db")) as api, _client(api, calls) as client:
+        record = client.register_registration(
+            registration["kind"], registration["spec"], reg_id=registration["id"],
+            machine="host-a", env="isolated",
+        )
+        # Only a coordinator that knows the placed kind accepts it, so no
+        # pool-definition capability probe or route is needed.
+        assert calls == [("POST", "/registrations")]
+        assert record["kind"] == RegistrationKind.PLACED_LANE
+        daemon = _daemon(client)
+        try:
+            assert daemon._desired() == {registration["id"]: record}
+            definition, = daemon.pool_source_snapshot().definitions
+            assert definition.to_dict() == registration["spec"]["pool_definition"]
+        finally:
+            daemon.shutdown()
+
+
+def test_declarations_cannot_spell_the_derived_kind_or_mix_an_evaluator() -> None:
+    with pytest.raises(RegistrarError, match="derived"):
+        load_declaration({"name": "x", "kind": RegistrationKind.PLACED_LANE, "spec": {"repo": TEST_REPO}})
+    data = yaml.safe_load(_LANE_YAML)
+    data["evaluator"] = "eval.yaml"
+    with pytest.raises(RegistrarError, match="evaluator"):
+        load_declaration(data)
 
 
 # -- trusted provider config -------------------------------------------------

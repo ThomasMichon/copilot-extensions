@@ -28,7 +28,7 @@ from typing import Any, Protocol
 
 from .companion import CompanionResolution
 from .procutil import no_window_kwargs
-from .registrations import RegistrationKind
+from .registrations import RegistrationKind, has_placement_provider
 
 
 class UnsupportedKind(RuntimeError):
@@ -238,7 +238,7 @@ def _runtime_equivalence_fingerprint(reg: dict[str, Any]) -> str:
     spec.pop("reactive", None)
     spec.pop("reactive_interval", None)
     spec.pop("pool_definition", None)
-    if kind in {RegistrationKind.SUPERVISED_LANE, RegistrationKind.EVALUATOR}:
+    if kind in {*RegistrationKind.LANES, RegistrationKind.EVALUATOR}:
         defaults = {
             "labels": [],
             "max_concurrent": 1,
@@ -523,7 +523,14 @@ def build_command(
             )
         return materialize(name, payload)
 
-    if kind == RegistrationKind.SUPERVISED_LANE:
+    if kind in RegistrationKind.LANES:
+        # The placement requirement travels only under its own kind, which a
+        # pre-placement daemon refuses as unknown; never run either mismatch.
+        if has_placement_provider(spec) != (kind == RegistrationKind.PLACED_LANE):
+            raise UnsupportedKind(
+                "fleet.placement_provider requires, and is required by, the "
+                f"{RegistrationKind.PLACED_LANE!r} kind"
+            )
         scope = []
         if reg.get("machine") and reg.get("env"):
             scope = ["--registration-machine", str(reg["machine"]), "--registration-env", str(reg["env"])]

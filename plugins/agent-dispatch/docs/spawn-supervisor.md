@@ -635,7 +635,8 @@ agent-dispatch supervise daemon-status [--machine M] [--env E]
 ```
 
 - **`register`** writes a durable **registration** row (kind ∈
-  `supervised-lane | schedule | emitter | evaluator`, plus a `spec` — the config
+  `supervised-lane | placed-supervised-lane | schedule | emitter | evaluator`,
+  plus a `spec` — the config
   the unit's runtime consumes — scoped to a `machine`+`env`) and **emits the
   handle**; it does *not* start the loop. The id is the caller's `--id` or a value
   **derived deterministically** from `(kind, machine, env, spec)`, so
@@ -1381,6 +1382,22 @@ order. Pool `[W1, CDE, W2]` with `ordered: [W2, W1]` tries `[W2, CDE, W1]`.
   in `ordered` and live; otherwise it defers and never moves to another host.
 - A lane without `placement_provider` never calls a provider and behaves as
   before. The legacy environment-variable lane path does not support it.
+
+**Adoption and rollback (mixed versions).** A placement lane registers under
+its own kind, `placed-supervised-lane`, not `supervised-lane`. The registration
+validator requires `fleet.placement_provider` for that kind and refuses it on
+any other kind, so the requirement cannot be stored or run as an ordinary lane.
+A supervisor daemon or coordinator that predates placement treats the kind as
+unknown: the coordinator refuses to store it, and the daemon logs
+`skipping registration` and launches nothing. Such a lane stays down instead of
+running without its provider. Its declaration also fails on an older parser,
+which rejects the unknown `fleet` key.
+
+Upgrade every supervisor host and its coordinator first, then add
+`placement_provider` to declarations. Before a rollback, remove
+`placement_provider` (the lane returns to `supervised-lane`), or accept that the
+placement lane stays down until the upgrade returns. Direct registrations use
+`supervise register --kind placed-supervised-lane --spec '<json>'`.
 
 ### Headless-fleet body (`--headless`) — the reliable remote embodiment
 
