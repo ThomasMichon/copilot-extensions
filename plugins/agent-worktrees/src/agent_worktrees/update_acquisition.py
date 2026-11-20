@@ -8,7 +8,7 @@ import subprocess
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from time import monotonic, sleep
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 from . import output, update_events, update_auth_context as _auth
 
@@ -32,6 +32,18 @@ _ATTEMPT_TIMEOUT_S = 120.0
 _BACKOFF_S = 1.0
 _WINDOWS = os.name == "nt"
 _POSIX_CLEANUP_S = 2.0
+
+
+class _Environment(TypedDict, total=False):
+    env: Mapping[str, str]
+
+
+class _Settlement(TypedDict, total=False):
+    on_settled: Callable[[], None]
+
+
+class _NativeDeadline(TypedDict, total=False):
+    native_write_deadline: float
 
 
 class _QuiescentPayloadTimeout(subprocess.TimeoutExpired):
@@ -68,10 +80,14 @@ def _run_update(
     from . import installer_run
 
     lines: list[str] = []
+    native_options: _NativeDeadline = (
+        {"native_write_deadline": native_write_deadline}
+        if native_write_deadline is not None else {}
+    )
     result = installer_run.run_installer(
         argv, cwd=cwd, env=os.environ if env is None else env, deadline_s=timeout,
         log=lines.append, require_tree_exit=True,
-        **({"native_write_deadline": native_write_deadline} if native_write_deadline is not None else {}),
+        **native_options,
     )
     text = "\n".join(lines)
     if result.rc is None and result.status.startswith("timed out"):
@@ -95,7 +111,7 @@ def _run_install(
     """
     from . import activation_preservation, installer_run
 
-    environment = {"env": env} if env is not None else {}
+    environment: _Environment = {"env": env} if env is not None else {}
     started = monotonic()
     if not _WINDOWS:
         from agent_procutil.owned_process import require_caller_owned_support
@@ -116,7 +132,7 @@ def _run_install(
                 "payload command budget exhausted during activation recovery; no child launched"
             )
         try:
-            settlement = (
+            settlement: _Settlement = (
                 {"on_settled": preservation.confirm_posix_quiescent} if not _WINDOWS else {}
             )
             result = _auth.run_acquisition(
@@ -140,7 +156,7 @@ def _run_install(
             raise
         if _WINDOWS:
             preservation.confirm_quiescent()
-        return result
+        return cast("subprocess.CompletedProcess[str]", result)
 
 
 def _refusal_reason(detail: str) -> str | None:
@@ -195,7 +211,7 @@ def acquire(
 
 
 def _run_revalidated(
-    *args, revalidate: Callable[[], None], started: float, **kwargs,
+    *args: Any, revalidate: Callable[[], None], started: float, **kwargs: Any,
 ) -> subprocess.CompletedProcess[str]:
     from . import activation_preservation, installer_run
 
@@ -228,7 +244,7 @@ def acquire_missing(
     copilot_home = copilot_home.resolve()
     started = monotonic()
 
-    def checked_runner(*args, **kwargs):
+    def checked_runner(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:
         return _run_revalidated(*args, revalidate=revalidate, started=started, **kwargs)
 
     try:
@@ -259,7 +275,7 @@ def acquire_missing(
 
 
 def acquire_prepared(
-    source: str, definition: dict, copilot: str, *, cwd: Path,
+    source: str, definition: dict[str, Any], copilot: str, *, cwd: Path,
     staging: Path, revalidate: Callable[[], None],
 ) -> str:
     """Compose the existing isolated source installer with owned execution."""
@@ -270,17 +286,22 @@ def acquire_prepared(
     started = monotonic()
     auth_context = cwd
 
-    def authentication(definition, environment, context):
+    def authentication(
+        definition: dict[str, Any], environment: Mapping[str, str], context: Path,
+    ) -> dict[str, str]:
         if not _auth.marketplace_auth_enabled(context, source.rpartition("@")[2]):
             return dict(environment)
         return plugin_management_environment(definition, environment, context)
 
-    def run(argv, *, env, cwd, timeout, **_kwargs):
+    def run(
+        argv: list[str], *, env: Mapping[str, str], cwd: Path, timeout: float,
+        **_kwargs: Any,
+    ) -> subprocess.CompletedProcess[str]:
         remaining = min(timeout, _TOTAL_BUDGET_S - (monotonic() - started))
         if remaining <= 0:
             raise installer_run.InstallerLaunchError("payload acquisition budget exhausted")
 
-        def checked(*args, **kwargs):
+        def checked(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:
             return _run_revalidated(*args, revalidate=revalidate, started=started, **kwargs)
 
         with activation_preservation.activation_custody(home=Path(env["COPILOT_HOME"])) as custody:
@@ -313,7 +334,17 @@ def _acquire(
     from . import activation_preservation, installer_run, reconcile
     from .update_runtime import describe_copilot_spawn_error
 
-    if _auth.blocked(cwd, marketplace):
+    auth_session = _auth._current.get()
+    previous_report = auth_session.reports.get(cwd) if auth_session is not None else None
+    blocked = _auth.blocked(cwd, marketplace)
+    # Cached reports do not enter a new auth phase or split payload timing.
+    if (
+        auth_session is not None
+        and auth_session.reports.get(cwd) is not previous_report
+        and auth_session.reports[cwd].results
+    ):
+        update_events.enter("payload_refresh")
+    if blocked:
         return "auth_required"
     ref = f"{name}@{marketplace}"
     missing_ledger_pattern = re.compile(
@@ -341,15 +372,18 @@ def _acquire(
                 return status
         argv = [copilot, "plugin", verb, ref]
         timeout = min(_ATTEMPT_TIMEOUT_S, remaining)
-        environment = _auth.child_environment(cwd)
+        environment = cast(_Environment, _auth.child_environment(cwd))
+        native_options: _NativeDeadline = (
+            {"native_write_deadline": started + _TOTAL_BUDGET_S - installer_run._REAP_GRACE_S}
+            if _WINDOWS and installed else {}
+        )
         try:
             result = (
                 _run_install(argv, ref, cwd=cwd, timeout=timeout, custody=custody, **environment)
                 if verb == "install" else _auth.run_acquisition(
                     _run_update, argv, context=cwd, marketplace=marketplace,
                     cwd=cwd, timeout=timeout, **environment,
-                    **({"native_write_deadline": started + _TOTAL_BUDGET_S - installer_run._REAP_GRACE_S}
-                       if _WINDOWS and installed else {}),
+                    **native_options,
                 )
             )
         except activation_preservation.PluginStateError as error:
