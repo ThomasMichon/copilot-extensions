@@ -7,6 +7,28 @@ import pytest
 from agent_dispatch.proposal_recovery import ProposalIntake
 
 
+def test_new_steer_invalidates_draft_but_retry_preserves_later_save(tmp_path: Path) -> None:
+    intake = ProposalIntake.create(tmp_path / "intake", title="task", repo="example", payload="data")
+    first = intake.steer("first", {"decision": 1})
+    task = intake.queue.get(intake.identity)
+    assert task is not None
+    intake.write_draft({"answer": "original"}, expected_revision=task.steering_revision,
+                       expected_draft_revision=task.card_draft_revision)
+    second = intake.steer("second", {"decision": 2})
+    restored = ProposalIntake.recover(intake.records, tmp_path / "restored")
+    task = restored.queue.get(intake.identity)
+    assert task is not None and task.card_draft is None
+    assert restored.queue.steer_receipt(task.id, "first") == first
+    assert restored.queue.steer_receipt(task.id, "second") == second
+    later = restored.write_draft({"answer": "later"}, expected_revision=task.steering_revision,
+                                 expected_draft_revision=task.card_draft_revision)
+    assert later is not None and restored.steer("second", {"decision": 2}) == second
+    again = ProposalIntake.recover(intake.records, tmp_path / "again")
+    task = again.queue.get(intake.identity)
+    assert task is not None and task.card_draft == later
+    assert len(again.queue.steer_log(task.id)) == 2 and not again.queue.list_wakes(task.id)
+
+
 def test_failed_clear_recovers_last_acknowledged_draft(tmp_path: Path) -> None:
     intake = ProposalIntake.create(tmp_path / "intake", title="task", repo="example", payload="data")
     task = intake.queue.get(intake.identity)
