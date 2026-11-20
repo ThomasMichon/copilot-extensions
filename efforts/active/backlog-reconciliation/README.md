@@ -1316,6 +1316,16 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The [source-fulfillment and retained-owner unit](journal/2026/11.20-source-fulfillment-and-owned-boundaries.md)
+records actual #13622 delivery/current whole receiving and four separately
+audited tracking retirements, plus acknowledged whole #12542 fulfillment
+through #12533. All twenty-three Portfolio technical rows remain unchecked.
+Fourteen complete current original unions, one withheld original and eleven
+linked delivery observations retain the distinct source/claim/native gaps,
+including OPEN #12875 and new mixed-review-history inflow. The complete
+897-open census remains 168 above fixed 729; no implementation, rollout,
+resource release or automatic remaining-source disposition follows.
+
 The [Windows fixture and native-profile unit](journal/2026/11.20-windows-fixture-and-profile-receiving.md)
 records #13611's actual reviewed delivery and parent return, complete current
 receiving readback and two separately audited redundant-tracking retirements
@@ -4992,6 +5002,15 @@ closure credit, resource release or parent checkbox change follows.
   normal publication flow.
 
 ## Validation Plan
+
+The [source-fulfillment and retained-owner record](journal/2026/11.20-source-fulfillment-and-owned-boundaries.md)
+separates four accepted planned-receiving retirements from one acknowledged
+whole source completion. All incumbent campaign/Portfolio checks and the
+twenty-three technical obligations remain unchanged. Actual merge/current
+source, full-roster and public-effect readbacks do not qualify unexecuted
+native/installed work or transfer resource custody. Fourteen current whole
+originals and one held original retain actual owners and exact acceptance;
+the full 897-open census, not arithmetic subtraction, remains authoritative.
 
 The [source-claim and generation proposal](journal/2026/11.20-source-claim-and-credential-generation-receiving.md)
 preserves every incumbent check state and all six new Vault technical rows

@@ -848,8 +848,9 @@ complete supported-window qualification,
 boot-boundary qualification and authority
 selection remain open; no
 map/cwd capability or isolated subscription publisher is activated.
-The next review-first
+The
 [domain/controller amendment](subscriber-state-transition.md#execution-domain-evidence-and-current-controller-recovery-amendment)
+reviewed in #13624
 separates immutable transition origin from current executor admission and
 requires native same-domain continuity before comparing boots. It proposes a
 versioned recovery adapter, not weaker binding checks or delivered boot/import
