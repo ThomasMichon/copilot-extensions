@@ -151,7 +151,7 @@ same admitted payload supplies its portable resolver. Both resolver protocols
 are decoded as UTF-8; a portable refusal never triggers a native retry or
 selection of another authority.
 
-During `update`, registered plugin refresh resumes `payload_refresh` after
+During `update`, engine and registered plugin refresh resume `payload_refresh` after
 marketplace authorization, including separately prepared fallback contexts.
 Marketplace refresh, inventory browsing, plugin acquisition and their summary
 therefore do not extend the auth report's phase or human scope. These timing

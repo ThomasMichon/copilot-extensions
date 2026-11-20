@@ -3,6 +3,14 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-20 - Idle steering and existing keepers](journal/2026/11.20-idle-steering-and-existing-keepers.md)
+
+- [2026-11-20 - Portable fixture and runtime-resource receiving](journal/2026/11.20-portable-fixture-and-runtime-resource-receiving.md)
+
+- [2026-11-20 - Finite Vault copy contracts and existing keepers](journal/2026/11.20-vault-copy-and-existing-keepers.md)
+
+- [2026-11-20 - Retained supervisor recovery and existing canonicals](journal/2026/11.20-retained-supervisor-and-existing-canonicals.md)
+
 - [2026-11-20 - Complete orphan-task adoption planning](journal/2026/11.20-orphan-task-adoption-planning.md)
 
 - [2026-11-20 - Independent inference identity and retained custody](journal/2026/11.20-independent-inference-identity-and-custody.md)

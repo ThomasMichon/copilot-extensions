@@ -149,6 +149,15 @@ It requires explicit owner-v3 adoption and embedding opt-in; default hosts and
 legacy verbs are unchanged. Journal tombstones do not compact other caches
 or pending effect receipts.
 
+The standalone host can explicitly provision
+[fresh-baseline generation associations](../../services/pr/README.md#optional-fresh-baseline-generation-associations).
+The executing core records original immutable generation/observation identities
+before cache publication, with bounded pending/confirmed custody and no legacy
+backfill. A separately selected
+[recorded-generation terminal transition](../../services/pr/README.md#recorded-generation-terminal-transition)
+preserves associated cache reads without manufacturing native watch targets.
+Default workspace publication is unchanged.
+
 Source embeddings additionally expose the finite
 [workspace service/client API](docs/workspace-integration.md) through the
 existing PR owner. These library interfaces do not install a writer, acquire

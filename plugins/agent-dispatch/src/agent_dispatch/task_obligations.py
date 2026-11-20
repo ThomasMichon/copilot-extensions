@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .queue_records import SpawnState, Status
 
@@ -35,7 +35,7 @@ def _worktree_requirement(raw: str) -> bool:
 
 def read_snapshot(
     queue: TaskQueue, task_id: str, *, assignment_event_id: int | None = None,
-) -> dict | None:
+) -> dict[str, Any] | None:
     """Read task, logical assignment and disposition history in one snapshot."""
     if assignment_event_id is not None and (
         type(assignment_event_id) is not int or not 1 <= assignment_event_id <= 2**63 - 1
@@ -55,7 +55,9 @@ def read_snapshot(
         if task is None:
             return None
         assignment = conn.execute(
-            "SELECT 1 FROM task_pool_assignments WHERE task_id=? AND assignment_released IS NOT 1",
+            "SELECT registration_id, machine, env, reservation_key, task_generation,"
+            " assignment_released FROM task_pool_assignments"
+            " WHERE task_id=? AND assignment_released IS NOT 1",
             (task_id,),
         ).fetchone()
         reservation = conn.execute(
@@ -86,7 +88,7 @@ def read_snapshot(
                 "event_id": transition["id"], "from_state": transition["from_status"],
                 "worker_id": transition["unassigned_worker"],
             }
-        result = {
+        result: dict[str, Any] = {
             "schema": SCHEMA, "version": VERSION, "task_id": task["id"],
             "state": task["status"], "generation": task["generation"],
             "queue_identity": task["queue_identity"],
@@ -105,8 +107,29 @@ def read_snapshot(
             "held": any(task[key] is not None for key in ("hold_reason", "hold_actor", "hold_at")),
             "unassignment": unassignment,
         }
-        if assigned is not None and assigned["task_relationship"] is not None:
-            result["relationship"] = json.loads(assigned["task_relationship"])["request"]
+        relationship = json.loads(assigned["task_relationship"]) if (
+            assigned is not None and assigned["task_relationship"] is not None
+        ) else None
+        if relationship is not None:
+            result["relationship"] = relationship["request"]
+        if assignment_event_id is None:
+            result["pool_placement"] = None
+        if (
+            assignment_event_id is None and assignment is not None
+            and assignment["assignment_released"] == 0
+            and task["status"] in (*Status.OWNED, Status.SUBMITTED)
+            and assignment["task_generation"] == task["generation"]
+        ):
+            placement = {key: assignment[key] for key in ("registration_id", "machine", "env")}
+            workspace = None
+            if relationship is not None:
+                request = relationship["request"]
+                binding = {**request, **relationship.get("continuation", {})}
+                if (binding["reservation_key"], binding["generation"]) == (
+                    assignment["reservation_key"], assignment["task_generation"],
+                ):
+                    workspace = {key: request["workspace"][key] for key in ("machine", "worktree")}
+            result["pool_placement"] = {"assignment": placement, "workspace": workspace}
         if task["closeout_readiness"] is not None:
             from .queue_relevance_readiness import release_evidence
             result["closeout"] = release_evidence(queue, conn, task["closeout_readiness"])
@@ -116,7 +139,7 @@ def read_snapshot(
         conn.close()
 
 
-def _release_outcome(value: dict) -> str | None:
+def _release_outcome(value: dict[str, Any]) -> str | None:
     if value["state"] == Status.COMPLETED:
         return "completed"
     if (
@@ -130,7 +153,7 @@ def _release_outcome(value: dict) -> str | None:
     return None
 
 
-def _closeout_ready(value: dict) -> bool:
+def _closeout_ready(value: dict[str, Any]) -> bool:
     proof = value.get("closeout")
     assignment, request = value.get("assignment"), value.get("relationship")
     return bool(
@@ -154,8 +177,8 @@ def _closeout_ready(value: dict) -> bool:
 
 
 def enrich_task_detail(
-    queue: TaskQueue, detail: dict, *, assignment_event_id: int | None = None,
-) -> dict:
+    queue: TaskQueue, detail: dict[str, Any], *, assignment_event_id: int | None = None,
+) -> dict[str, Any]:
     return {**detail, "task_obligation": read_snapshot(
         queue, detail["id"], assignment_event_id=assignment_event_id,
     )}
@@ -201,4 +224,4 @@ def valid_snapshot(value: object, *, task_id: str) -> bool:
         or not 0 < len(unassignment["worker_id"]) <= 4096
     ):
         return False
-    return value["release_outcome"] == _release_outcome(value)
+    return bool(value["release_outcome"] == _release_outcome(value))

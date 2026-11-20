@@ -1250,3 +1250,127 @@ now record that acceptance rather than presenting it as still pending.
 All nine technical rows remain unchecked; Draft status, temporary-token
 implementation restriction and actual owners remain. Earlier proposed rows
 are unchanged history, not a second current acceptance gate or claim release.
+
+## Proposed retained legacy supervisor receiving - 2026-11-20 UTC
+
+| Source | Complete proposed receiver | Retained boundary |
+|---|---|---|
+| #13617 | Existing [Installer Upgrade Recovery Plan](../installer-upgrade-recovery/README.md#retained-legacy-supervisor-transition---13617), [case](../installer-upgrade-recovery/legacy-supervisor-upgrade.md) and G13617: P13617-1..3/V13617-1..3 preserve the complete original and discussion. | Seven technical rows unchecked; original transition OR actionable prerequisite, actual native/cycle/worker custody, distinct coordinator-only positive, full-update/repeat truth and optional capture. Review/current complete receiving and custody readback/separate judgment precede source disposition. No implementation, process action or owner appointment. |
+
+The [dated mapping](../backlog-reconciliation/journal/2026/11.20-retained-supervisor-and-existing-canonicals.md)
+retains #13614's independent same-running-consumer qualification and existing
+owners; it is not forced into the incoming-installation gate. Other existing
+canonicals retain their precise gaps, not another documentary umbrella.
+
+## Orphan adoption reviewed receiving receipt - 2026-11-20 UTC
+
+#13718 delivered complete four-stage/two-shape planned receiving. Complete
+current original/discussions, ROOT/intake and custody readback preceded the
+separate acknowledged #3443 NOT_PLANNED tracking retirement. The
+[live receiver](../orphan-task-adoption/README.md#coordination) and
+[follow-through](../backlog-reconciliation/journal/2026/11.20-retained-supervisor-and-existing-canonicals.md#previous-reviewed-adoption-and-separate-source-disposition)
+record actual acceptance; all nine technical rows, Draft status, #7237's
+independent relationship and actual resource owners remain unchanged.
+Earlier proposed entries are preserved history, not an additional pending
+receiving gate or proof of feature implementation.
+
+## Proposed finite Vault copy-transaction receiving - 2026-11-20 UTC
+
+| Source | Disposition | Complete proposed owner and retained acceptance |
+|---|---|---|
+| #13077 | residual | Proposed existing [Vault Service P2](../vault-service/README.md#finite-copy-transaction-contracts), P13077-1..3/V13077-1..3/G13077 and [whole case](../vault-service/copy-transaction-contracts.md#relocation-and-cache-fences---13077): BOTH outside-group move/copy with move safety; invalidate ONLY values at/below the pre-revocation ceiling; preserve pending journal AND newer writes; expire floors at lookup; all three regression findings. Seven technical rows unchecked. |
+| #13083 | residual | Proposed same P2, P13083-1..2/V13083-1..2/G13083 and [whole case](../vault-service/copy-transaction-contracts.md#running-service-copy-support---13083): running-service health copy capability, selected-peer pre-mutation refusal/message, provider-first migration, mixed-version/rollback and declared support window. Five technical rows unchecked. |
+| #13085 | residual | Proposed same P2, P13085-1..3/V13085-1..2/G13085 and [whole case](../vault-service/copy-transaction-contracts.md#explicit-overwrite-and-uncertain-renames---13085): explicit overwrite separate from ordinary no-overwrite copy, re-list-before-restore for uncertain renames, committed-backup timeout AND final/restore failure, every surviving staged/backup name and both regressions. Six technical rows unchecked. |
+
+The [complete crosswalk and current whole census](../backlog-reconciliation/journal/2026/11.20-vault-copy-and-existing-keepers.md)
+retains all three OPEN sources during proposal; each becomes `routed` only
+after reviewed complete domain receiving. The existing credential/
+cache/journal/provider/CLI/service/recovery custodians, P0 design and applicable
+owner/slice admission, current R1-R4 priority and every incumbent state remain.
+This appoints no relay implementer and authorizes no credential, cache,
+copy/rename/overwrite, cleanup, service, source, native or resource operation.
+Actual complete reviewed receiving and current whole source/receiver/custody
+readback precede separate source judgments; no prospective retirement or
+technical completion is credited.
+
+## Vault generation and legacy supervisor reviewed receipts - 2026-11-20 UTC
+
+#13590/#11816 and #13723/#13617 are actual reviewed planned receiving followed
+by distinct, acknowledged NOT_PLANNED tracking retirements. The live
+[Vault Coordination](../vault-service/README.md#coordination) and
+[upgrade-recovery Coordination](../installer-upgrade-recovery/README.md#coordination)
+now record accepted tracking rather than another pending gate. Their six
+generation/freshness and seven legacy-supervisor technical checks respectively
+remain unchecked. Original source, native, credential, worker and resource
+custody is unchanged; neither retirement claims an implementation fix.
+Earlier proposed entries remain history. The [dated follow-through](../backlog-reconciliation/journal/2026/11.20-vault-copy-and-existing-keepers.md#previous-reviewed-receiving-and-distinct-tracking-retirements)
+does not repeat the already-published #13718/#3443 disposition.
+
+## Proposed portable fixture and resource receiving - 2026-11-20 UTC
+
+| Source | Disposition | Complete proposed owner and retained acceptance |
+|---|---|---|
+| #13082 | residual | Existing [Portfolio Phase 4 Vault/shared-library wave](../test-portfolio-rationalization/README.md#finite-portable-pidfd-fixture-contract-from-13082), P13082-1..2/V13082-1..2/G13082: original generation module, shared pidfd wrapper/libc fallback OR clear unsupported skip, retained peer-handle assertions/Windows branch and nine-error history. Five technical rows unchecked. |
+| #13369 | residual | Existing [Portfolio Phase 4 Containers wave](../test-portfolio-rationalization/README.md#finite-distribution-and-staged-profile-fixtures-from-13369), P13369-1..2/V13369-1..2/G13369: both original files, identity/fingerprint/cache resources, wheel/sdist and per-resource refusal expectations, both staged-load modes AND native-policy retention. Five technical rows unchecked. |
+| #13378 | residual | Existing [Portfolio Phase 4 Bridge wave](../test-portfolio-rationalization/README.md#finite-caller-session-and-process-incarnation-fixtures-from-13378), P13378-1..2/V13378-1..2/G13378: all six migration/four caller/PID-incarnation cases, managed-runner pass OR justified explicit host-dependent tier, original bounds/assertions and later-not-run coverage. Five technical rows unchecked. |
+
+The [complete crosswalk and current whole census](../backlog-reconciliation/journal/2026/11.20-portable-fixture-and-runtime-resource-receiving.md)
+retains all three OPEN sources during proposal. Each becomes `routed` only
+after actual complete reviewed domain Plan/local/global Validation,
+Coordination and Journal delivery through existing Phase 7. Preserve OPEN
+#1303, primary maintainer and actual fixture/process/runtime-resource/
+migration/runner/source/native/release/resource custody, every incumbent
+state/hold and original alternative, unit-only CI and hosted-Windows quiescence.
+Current whole receiving/source/custody readback and separate source judgments
+remain before any retirement. No execution, appointment or transfer follows.
+
+## Vault copy-transaction reviewed receiving - 2026-11-20 UTC
+
+| Source | Disposition | Accepted owner and distinct tracker outcome |
+|---|---|---|
+| #13077 | routed | #13730 delivered complete existing Vault P2 relocation/fencing receiving; separate audited acknowledgment and NOT_PLANNED retirement preserve all seven unchecked technical rows and actual custodians. |
+| #13083 | routed | Same reviewed P2 owner retains running-peer capability, preflight and evolution acceptance; separate audited acknowledgment and NOT_PLANNED retirement preserve all five unchecked technical rows. |
+| #13085 | routed | Same reviewed P2 owner retains uncertain overwrite/recovery and both failure regressions; separate audited acknowledgment and NOT_PLANNED retirement preserve all six unchecked technical rows. |
+
+Current [Vault Coordination](../vault-service/README.md#coordination) and the
+[additive dated receipt](../backlog-reconciliation/journal/2026/11.20-vault-copy-and-existing-keepers.md#reviewed-receiving-and-separate-source-judgments)
+record complete current receiving/source/custody readback before three separate
+tracking judgments. Earlier proposals remain immutable history, not another
+pending receiving gate. All eighteen technical rows, OPEN #8729, R1-R4/P0
+and applicable owner/slice admission stay unchanged; no credential, cache,
+copy/overwrite, service, test/native or resource operation is inferred.
+
+## Proposed finite idle-steering receiving - 2026-11-20 UTC
+
+| Source | Disposition | Complete proposed owner and retained acceptance |
+|---|---|---|
+| #13734 | residual | Proposed idle/hint slice in existing Active [Queued Steering Phase 2](../bridge-queued-steering/README.md#finite-idle-transition-and-truthful-notification-from-13734), P13734-1..2/V13734-1..2/G13734: supported idle submission without unrelated tool/operator/scheduled turns, resume/re-registration, truthful conditional hints, multiple arrivals and exact identity/no duplicate or false consumption. Five technical rows unchecked. A later possibly separate resumed-headless carrier 503/hello-read observation stays unreceived at OPEN #13734 under existing carrier owners; these rows are not whole-source receiving. |
+
+The [complete case, eight current keepers and whole census](../backlog-reconciliation/journal/2026/11.20-idle-steering-and-existing-keepers.md)
+preserve the existing Driver and actual provider/registration/routing/
+compatibility/receipt/resource owners, broader #6394 gates and bounded claim,
+Goal/Request/Scope Approvals and existing notification credit. Normal complete
+reviewed Plan/local/actual global Validation, Coordination and dated Journal
+delivery receives this idle slice, not the separate carrier observation.
+The overall source remains `residual` and OPEN until that distinct observation
+has complete accepted handling as well. Permitted current whole source/
+receiving/custody readback and a separate source judgment remain before any
+retirement. No implementation, native/session/queue
+operation, prompt replay, assignment or resource transfer follows.
+
+## Portable fixture reviewed receiving and distinct outcomes - 2026-11-20 UTC
+
+| Source | Disposition | Accepted owner and distinct tracker outcome |
+|---|---|---|
+| #13082 | routed | #13733 delivered complete existing Portfolio Phase 4 Vault/shared-library receiving; separate audited acknowledgment and NOT_PLANNED retirement retain all five unchecked technical rows and actual custodians. |
+| #13369 | routed | Same reviewed Portfolio owner retains complete two-file distribution/profile acceptance. Source stays OPEN as the other contributor's unfinished request; all five technical rows remain unchecked. |
+| #13378 | routed | Same reviewed Portfolio owner retains all six caller/migration/PID cases and original pass OR justified-tier alternative. Source stays OPEN as the other contributor's unfinished request; all five technical rows remain unchecked. |
+
+The current [Portfolio Coordination](../test-portfolio-rationalization/README.md#coordination)
+and [additive dated receipt](../backlog-reconciliation/journal/2026/11.20-portable-fixture-and-runtime-resource-receiving.md#reviewed-receiving-and-distinct-source-outcomes)
+record complete current finite receiving/source/custody readback before three
+separate judgments. Earlier proposals remain immutable history, not another
+pending receiving gate. Preserve OPEN #1303, all fifteen technical rows,
+incumbent states/holds, unit-only CI, hosted-Windows quiescence and actual
+source/native/release/resource custody. Planned intake is not fulfillment,
+fixture correction, execution, claim release or deployment.

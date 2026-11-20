@@ -54,6 +54,20 @@ These are coordination dependencies, not new assignments or ownership transfers.
 
 ## Coordination
 
+The reviewed [retained legacy supervisor case](legacy-supervisor-upgrade.md)
+records #13723's complete planned receiving of #13617's ordinary
+full-update/post-install gap while preserving its
+distinct coordinator-only result, optional capture and actual Dispatch,
+installer, completed-cycle, worker and native-process owners. It appoints
+no implementer and authorizes no transition. Old capability is not an
+incoming-replacement veto; a healthy coordinator is not complete master
+adoption. A separate complete current receiving/source/custody judgment
+preceded #13617's acknowledged NOT_PLANNED tracking retirement; all seven
+technical rows remain unchecked. #13614's already-running client/policy-consumer continuity remains
+with its existing #5035/#3303/#7935 owners, outside this case and not an
+incoming-replacement prerequisite. The existing #10486 full-client boundary
+is unchanged; this intake does not appoint it to #13614.
+
 The proposed finite #13667 retained-capture spelling case joins Phase 2's
 existing U6 source/platform and retained-restoration coordination as a
 source-only subcase, not a selected whole-update recovery case. Preserve the
@@ -229,6 +243,15 @@ ordinary-entry or installed/whole-update outcomes above.
 - [ ] **P13667-2:** Preserve [reported evidence limits and independent incoming readiness](retained-capture-path-identity.md#p13667-2-evidence-and-ownership-boundaries), existing owners and no live-manifest repair.
 - [ ] **V13667:** Qualify [the exact immutable Windows capture/validation fixture and negatives](retained-capture-path-identity.md#v13667-capture-and-validation-controls) under the original boundaries.
 
+#### Retained legacy supervisor transition - #13617
+
+- [ ] **P13617-1:** Preserve [the attributed coordinator/master/capture outcomes](legacy-supervisor-upgrade.md#p13617-1---attribute-the-actual-incomplete-boundary), original failure and actual legacy/current ownership evidence.
+- [ ] **P13617-2:** Qualify [a supported transition OR actionable prerequisite](legacy-supervisor-upgrade.md#p13617-2---supported-transition-or-actionable-prerequisite), preserving authoritative incoming replacement, native checks and protected workers without a new old-state veto.
+- [ ] **P13617-3:** Retain [post-install and immediate-repeat truth](legacy-supervisor-upgrade.md#p13617-3---preserve-repeat-and-post-install-truth); a version-current skip cannot erase the uncompleted supervisor gate or replay unknown effects.
+- [ ] **V13617-1:** Verify [the actual Windows legacy/current transition evidence](legacy-supervisor-upgrade.md#v13617-1---actual-legacycurrent-transition) at the original native boundary, with supported positive, capability/preparation and unknown/failure controls.
+- [ ] **V13617-2:** Preserve [the separate coordinator-only physical-runtime and original-master checks](legacy-supervisor-upgrade.md#v13617-2---explicit-preservation-mode), without claiming ordinary full-update acceptance.
+- [ ] **V13617-3:** Verify [failed full-update and current-version repeat reporting](legacy-supervisor-upgrade.md#v13617-3---failure-and-immediate-repeat-reporting), independent capture and unchanged genuine incoming failure semantics.
+
 ### Whole installer and resident-companion lifecycle - #5820
 
 The complete finite family is retained in
@@ -379,6 +402,8 @@ a new recovery/provenance veto on explicit incoming replacement.
 
 ## Validation Plan
 
+- [ ] **G13617:** Resolve every [P13617-1..3/V13617-1..3 clause](legacy-supervisor-upgrade.md#receiving-and-completion) and current Coordination by applicable-tier fulfillment OR an explicit accepted transfer to a named tracked objective preserving the clause and actual custody. Retain the literal transition OR prerequisite, coordinator-only credit, native/cycle/worker ownership, optional capture and authoritative incoming completion. Unavailable proof is not a pass; planned receipt, source disposition and resource release are separate.
+
 - [ ] **G13667:** Resolve P13667-1/P13667-2/V13667 and continuing Coordination:
   equivalent Windows spelling must preserve the same admitted completed slot,
   all plain-directory/completion/source/immutable/editable/selected-version
@@ -472,6 +497,10 @@ is proposed. Select each concrete unit only after current owner and source
 reconciliation; the matrix is not a blanket reservation of those components.
 
 ## Journal
+
+### [2026-11-20 UTC - Legacy supervisor planned receiving accepted; technical gap retained](../backlog-reconciliation/journal/2026/11.20-vault-copy-and-existing-keepers.md#previous-reviewed-receiving-and-distinct-tracking-retirements)
+
+### [2026-11-20 UTC - Retained legacy supervisor case proposed](../backlog-reconciliation/journal/2026/11.20-retained-supervisor-and-existing-canonicals.md)
 
 ### [2026-11-20 UTC - Finite retained-capture path identity proposed](../backlog-reconciliation/journal/2026/11.20-path-attribution-and-retained-transitions.md)
 

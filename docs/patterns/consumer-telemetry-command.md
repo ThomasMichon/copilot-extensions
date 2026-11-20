@@ -1,8 +1,10 @@
 # Consumer telemetry command contract — v1
 
-**Status: v1 contract with an opt-in Bridge source implementation.**
+**Status: v1 contract with opt-in Bridge and Dispatch source implementations.**
 The [Bridge reference](../../plugins/agent-bridge/docs/consumer-telemetry-command.md)
 defines its trusted admission and selected-runtime metadata location.
+The [Dispatch reference](../../plugins/agent-dispatch/docs/consumer-telemetry-command.md)
+defines its independent coordinator-owned admission and closed source projection.
 Source support does not establish a promoted release or installed adoption.
 Track realization in
 [consumer telemetry sink adoption](../../efforts/active/consumer-telemetry-sink-adoption/README.md)
@@ -34,10 +36,15 @@ Source links name the actual record owner, not a catalog of desired hooks.
 | [Bridge telemetry](../../plugins/agent-bridge/src/agent_bridge/telemetry.py) | `session_lifecycle_event` and `SessionTraceReducer`: session health, session/conversation/tool state transitions, rebuild markers; original source cursors and log epochs where available | U1 first consumer: structural lifecycle projection below, through its normal owner initialization and real transition |
 | [Bridge inbox delivery](../../plugins/agent-bridge/src/agent_bridge/delivery_telemetry.py) | Already offers reduced `inbox_delivery` observations to the existing owned buffer, not directly to every callable sink | Not admitted in v1; U2 must account for these dropped/uncovered records, not claim all Bridge events |
 | [Bridge diagnostics](../../plugins/agent-bridge/docs/diagnostic-logs.md) and watchdog | Retained application diagnostics and watchdog-owned bounded observations are distinct owners | No automatic enrollment; no raw application logs in this route |
-| [Dispatch telemetry](../../plugins/agent-dispatch/src/agent_dispatch/telemetry.py) | `task_lifecycle_event` and `producer_fence_event`; factory, legacy spool and explicit retained-spool APIs | U2 adapter, preserving these owners; no claim that U0 or U1 delivers Dispatch |
-| Dispatch `emission_trace.py`, `hourly_reporting.py` | Separate emission diagnostics and retained hourly reduction | U2 coverage reconciliation; not enrolled by library import |
+| [Dispatch telemetry](../../plugins/agent-dispatch/src/agent_dispatch/telemetry.py) | `task_lifecycle_event` and `producer_fence_event`; factory, legacy spool and explicit retained-spool APIs | U2: `dispatch.lifecycle.v1` through the same command owner; authenticated service policy binds stored task repositories and an explicit, separate service route |
+| [Dispatch emission diagnostics](../../plugins/agent-dispatch/src/agent_dispatch/emission_trace.py) | An independently owned `BufferedSink` writes content-free stderr diagnostics | Explicitly inapplicable to lifecycle command v1; not enrolled by library import |
+| [Dispatch hourly reporting](../../plugins/agent-dispatch/src/agent_dispatch/hourly_reporting.py) | Reads retained sources and reduces hourly reports | Explicitly inapplicable: reader/reducer, not a command producer |
 | [Manager source observation](../../worktree-manager/docs/source-observation.md) | Existing frame-health writer, typed performance measurements and optional real OTLP exporters | Reserved under #7935/#5900; no command adoption in this slice |
 | Machines health/service reports | Imports the shared measurement/report/hourly schemas and reducers, not a lifecycle `SinkSlot` registration | Out of command v1; preserve existing report collection |
+| Bridge/Dispatch `diagnostic_logs.py`, `telemetry_cli.py` | Diagnostic-log ownership and retained-spool configuration/maintenance | Explicitly inapplicable: independent retained diagnostics and management APIs, not exported application logs |
+| Bridge represented/restored `EventLog` owners | `live_representation.py` / `live_runtime.py` preserve reducer state and explicit missing admission | Under bound mode these lack an admitted initiating operation and suppress export; no inferred caller identity or promise of represented-session command coverage |
+| `tools/performance/manager_native_probe.py` | Explicit native validation uses signal/OTLP APIs | Validation-only; remains with #7935/#5900, not a production command consumer |
+| `tools/reproducer-lab/initial_case*.py` | Diagnostic-log type/fixture and local tests | Validation-only; not another production lifecycle producer |
 | [QoS/Engagement](telemetry-qos-engagement.md) and [event catalog](../telemetry-event-catalog.md) | Proposed normalized semantics/catalog; not the existing lifecycle wire schema or evidence of installed hooks | Not a second payload schema to implement in U1 |
 
 Bridge and Dispatch currently load their convention-located `telemetry.json`
@@ -45,6 +52,18 @@ factory or spool selection and expose synchronous callable sinks. Their
 startup owners try configuration before the environment factory fallback.
 The [shared library reference](../../libs/process-telemetry/README.md)
 owns those existing semantics, retained-spool custody and buffer bounds.
+
+This reconciles the actual checked-out Python imports of `process_telemetry`
+across runtime plugins, Manager and tools, excluding library-internal helpers
+and test suites. Owners are the linked producer modules and the retained
+#7935/#5900 campaign, not every `agent-*` plugin. Library dependency declarations
+alone are not adoption. Direct queue mutations or SSE-only call sites with no
+existing telemetry offer remain **unobserved**; this change adds no missing
+instrumentation. Uninstrumented plugins, dynamic external factories and
+installed generations have **unknown** coverage outside these source witnesses.
+Those are open #13545/U3 qualification inputs, not zero losses or implicit
+suite-wide adoption. Inbox, watchdog and represented-session expansion would
+need separately reviewed source/admission work; no owner scope is transferred.
 
 ### Source reservation and admitted implementation boundary
 
@@ -189,8 +208,8 @@ Required envelope fields, with no others in v1:
 |---|---|
 | `contract` | Literal `consumer-telemetry-command` |
 | `version` | Integer `1` |
-| `source` | Registered producer name; initially only `agent-bridge` |
-| `source_schema` | Literal `bridge.lifecycle.v1` for the first adapter |
+| `source` | Registered producer name: `agent-bridge` or `agent-dispatch` |
+| `source_schema` | `bridge.lifecycle.v1` or `dispatch.lifecycle.v1`, paired with that producer |
 | `source_instance` | Random UUID for this producer lifetime; not a native session, user or machine ID |
 | `route_generation` | Admitted route UUID from section 3 |
 | `sequence` | Positive integer, at most `2^53-1`, increasing per source instance before queue admission; gaps may indicate loss; stop this source on exhaustion |
@@ -240,12 +259,64 @@ do not stringify objects, run `repr`, or add missing source identities.
 
 The reducer can currently forward other session status strings. This narrower
 projection deliberately drops those records rather than export arbitrary text;
-U1 must cover that distinction in focused adapter tests. Additional source families
-(including Dispatch), richer identity and QoS mapping need their own reviewed
+U1 must cover that distinction in focused adapter tests. Additional source families, richer identity and QoS mapping need their own reviewed
 source-schema capability; they cannot hide under an extensible `attributes`
 bag in this contract. Shared attribution requires the vision's separately
 admitted keyed/privacy boundary before serialization. No raw fallback is
 permitted when that optional capability is absent.
+
+### Second source projection: `dispatch.lifecycle.v1`
+
+This is an independent, closed projection of Dispatch's existing
+`task_lifecycle_event` and `producer_fence_event`, not a rewrite of their
+factory/spool records. It uses source `agent-dispatch`; a provider or receiver
+supporting only `bridge.lifecycle.v1` does not thereby support this schema.
+
+All records require `kind: "state_transition"`, `name` equal to `task` or
+`producer_fence`, and one event from the corresponding closed list:
+
+* `task`: `task.proposed`, `task.created`, `task.approved`, `task.claimed`,
+  `task.started`, `task.yielded`, `task.suspended`, `task.resumed`,
+  `task.released`, `task.held`, `task.unheld`, `task.unexcluded`, `task.reset`,
+  `task.submitted`, `task.completed`, `task.reopened`, `task.abandoned`,
+  `task.detached`, `task.recovered`, `task.result_recorded`, `task.rejected`,
+  `task.owner_session_bound`,
+  `task.progress`, `task.card`, `task.steer`, `task.card_draft`,
+  `task.card_draft_cleared`, `task.steer_taken`.
+* `producer_fence`: `task.create_rejected`, `producer.claim_rejected`,
+  `producer_scope.transitioned`, `producer_scope.transition_rejected`.
+
+Optional task fields are `to` and `attempts`. `to` admits only `proposed`,
+`queued`, `claimed`, `started`, `suspended`, `submitted`, `completed`,
+`abandoned`, `dead_letter` (the last is retained-read compatibility).
+`attempts` is an actual source count, not a fabricated attempt ID.
+Task card/progress/steering observations retain their existing reducer's
+structural event meaning; the projection contains no card or message content.
+Periodic heartbeats and activity updates are not lifecycle observations and
+remain excluded by the existing producer.
+
+Optional fence fields are nonnegative integers `requested_generation`,
+`current_generation`, `from_generation`, `to_generation`, `blocking_task_count`;
+and Booleans `retryable`, `replayed`, `blocking_ids_truncated`.
+All integers admit at most `2^53-1`; Booleans are not integers.
+`replayed` is the producer's actual fence replay flag, not a sink retry.
+
+No other fields are exported. Omit null/absent optional fields, native task,
+request, producer, owner, worker, machine and session IDs, repo/source/routing
+strings, raw reason/code text, labels, fingerprints, lists of blocked task IDs,
+titles, prompts, payloads, result/card/steering content and arbitrary context.
+Unknown fields are omitted **before** bounded snapshotting. Unknown record
+families/events and invalid admitted primitive values drop the record with
+accounting. No trace/span identity or missing operation key is synthesized.
+There is no cross-record deduplication: source instance/sequence identifies an
+observation; explicit replay and attempt values keep their original meaning.
+
+Ordinary authenticated HTTP/MCP mutations and the existing relevance/
+verification publishers retain one coordinator-owned admission. Stored task
+repository selects its approved initiating root; taskless/rejected fence events
+use only the explicit service root. Missing admission never borrows a last
+caller or falls back to the legacy sink. The Dispatch reference owns the
+bounded local service-policy file and lifecycle wiring.
 
 The envelope identifies a transport observation, not an operation attempt.
 `source_instance` + `sequence` remains unchanged if a receiver deliberately
@@ -366,7 +437,7 @@ unknown support, not latest support. Cache only for that selected generation.
 Ship the descriptor only when that provider's actual entry/admission path
 implements its advertised source schema; library presence alone is not enough.
 
-A resident Bridge must additionally advertise this same optional object in
+A resident Bridge or Dispatch must additionally advertise its own optional object in
 its existing running discovery/handshake response. Installed metadata is not
 proof that a resident old daemon is capable. U1 must use a backward-compatible
 existing response seam; if its old-reader contract forbids this addition,
@@ -377,6 +448,9 @@ Provider-first phases, with support for legacy callers throughout v1:
 
 1. **Expand (U1):** implement parser, route ownership, Bridge adapter and
    descriptor/live advertisement together; retain legacy behavior.
+   U2 independently expands Dispatch with only `dispatch.lifecycle.v1` in its
+   own descriptor and `/health` object. A shared-library adapter registry is
+   not a union of every provider's supported schemas.
 2. **Migrate:** enable bound selection only when the executing provider
    advertises v1 and the requested source schema. Unknown/incapable provider
    yields `unsupported_contract` locally; ordinary work still runs. Do not

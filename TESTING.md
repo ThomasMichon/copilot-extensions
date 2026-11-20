@@ -1,5 +1,14 @@
 # Testing copilot-extensions
 
+The `consumer-telemetry-native.yml` finite Windows/Linux packet runs both the
+existing Bridge command/custody controls and Dispatch's
+`tests/test_consumer_telemetry_command.py` plus legacy telemetry suite through
+the contained plugin runner. It also selects the three existing standalone
+health/control-authority regressions. Dispatch's real configured HTTP mutations reach
+independent fsynced receiver files for two origins and an explicit service
+route. This source evidence is not release, installed-service qualification or
+completion of the wider consumer-telemetry U3/U4 work.
+
 The manual `installation-context-acceptance.yml` `native_daemon_exit` selection
 also runs an independent `test_durable_wmi_job_survival.py` job through the leased disposable Windows
 owner. It proves WMI daemon survival after strict caller-Job closure, bounded
@@ -6715,6 +6724,16 @@ before waiter preparation began. Other items, non-Windows item limits and the
 runner/workflow budgets are unchanged; this is not a production database change.
 
 ## Optional PR service lifecycle
+
+`services/pr/tests/test_recorded_terminal_cache.py` belongs to this existing
+explicit process lane. It provisions the selected baseline through the actual
+CLI, transitions current/noncurrent recorded generations, reconstructs all
+chunks in a fresh reader and exercises retained sync/native epoch fencing.
+Interruption before/after each adoption replacement retries through the same
+owner without changing original cache, replay or association bytes.
+`plugins/agent-pull-requests/tests/test_recorded_terminal_cache.py` supplies the
+focused core contracts, including body-only admission and original-reader
+refusals. Neither packet qualifies installed migration or a live provider.
 
 The existing `pr_service=true` manual selector retains two disposable jobs
 (Linux and Windows), each capped at 10 minutes. Its source-pinned standalone

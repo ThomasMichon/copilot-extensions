@@ -50,17 +50,35 @@ enrollment or admit the remaining platform/UI/migration campaign by implication.
 
 ## Coordination
 
-The proposed finite #11816 generation/freshness lane stays with the existing
+The reviewed [finite copy-transaction cases](copy-transaction-contracts.md)
+retain complete #13077 relocation/fencing, #13083 selected-service copy
+capability and #13085 uncertain overwrite-recovery acceptance under P2.
+#13730 delivered complete planned receiving; current whole source/receiver/
+custody readback and three separate audited judgments preceded acknowledged
+NOT_PLANNED tracking retirements. All eighteen technical rows remain
+unchecked. OPEN #8729 carries the planned work; the three retired sources
+remain historical provenance, not pending proposal or receiving gates.
+Existing CLI/service,
+cache/journal, credential/provider and recovery custodians retain their work;
+the relay implementer receives no new assignment. Preserve P0 design,
+applicable owner/slice admission and the current R1-R4 priority. The three
+source conditions and technical acceptance remain intact. Accepted tracking
+does not appoint an implementer, resolve the defects or grant custody.
+Planning authorizes no credential operation,
+copy, rename, cache mutation, service restart, implementation or rollout.
+
+The reviewed finite #11816 generation/freshness lane stays with the existing
 `agent-vault` credential read/rotation, cache and consumer custodians under P2,
 with direct P11816/V11816/G11816 below. It does not assign that correction to
 the federated-relay implementer, change the current R1-R4 priority or grant
 credential/runtime authority. Preserve the existing P0 design and applicable
 owner/slice admission gates; recording finite requirements does not require
 completing the unrelated relay/browser/native/migration portfolio.
-Keep #11816 OPEN during proposal. Ordinary reviewed complete receiving and
-permitted current source/ROOT/custody readback precede a separate tracking
-judgment, not a generic ACK, receipt PR, new implementation appointment or
-resource release.
+#13590 delivered the planned receiving; complete current receiving/source/
+custody readback and a separate judgment preceded #11816's acknowledged
+NOT_PLANNED tracking retirement. All six technical rows remain unchecked.
+This accepted tracking is not a generation fix, new implementation
+appointment or resource release; the earlier proposal remains history.
 
 <!-- backlog-reconciliation:7556:qualified-sixteen:3979:Coordination -->
 
@@ -224,6 +242,28 @@ permission to read, rotate or cache an actual credential.
   rotation, cache mutation, provider/native probe, rollout or new resource
   operation follows from this planned receiving.
 
+#### Finite copy-transaction contracts
+
+Agent-recommended P2 correctness receiving, outside the separately admitted
+relay implementation. The [complete case detail](copy-transaction-contracts.md)
+is part of this canonical Plan; these are its only technical state rows.
+
+- [ ] **P13077-1:** Restore both outside-group destination forms with existing move safety ([detail](copy-transaction-contracts.md#p13077-1---destination-and-move-safety)).
+- [ ] **P13077-2:** Invalidate only fenced values; preserve pending journal and post-ceiling writes ([detail](copy-transaction-contracts.md#p13077-2---generation-bounded-invalidation)).
+- [ ] **P13077-3:** Capture before revocation and apply floor expiry during lookup ([detail](copy-transaction-contracts.md#p13077-3---capture-order-and-lookup-expiry)).
+- [ ] **V13077-1:** Exercise actual move and copy destination/scope behavior ([detail](copy-transaction-contracts.md#v13077-1---destination-regressions)).
+- [ ] **V13077-2:** Prove fenced-value removal without journal or newer-write loss ([detail](copy-transaction-contracts.md#v13077-2---preservation-regressions)).
+- [ ] **V13077-3:** Cover capture/revoke concurrency and expired-floor lookup ([detail](copy-transaction-contracts.md#v13077-3---ordering-and-expiry-regressions)).
+- [ ] **P13083-1:** Advertise actual running-service copy support before caller migration ([detail](copy-transaction-contracts.md#p13083-1---provider-first-support)).
+- [ ] **P13083-2:** Check the selected peer before mutation and document its support window ([detail](copy-transaction-contracts.md#p13083-2---selected-peer-preflight)).
+- [ ] **V13083-1:** Exercise current/prior peers and useful pre-effect incompatibility ([detail](copy-transaction-contracts.md#v13083-1---mixed-version-boundary)).
+- [ ] **V13083-2:** Qualify supported rollback and retained ordinary operations ([detail](copy-transaction-contracts.md#v13083-2---rollback-and-unknown-outcomes)).
+- [ ] **P13085-1:** Keep no-overwrite defaults; separately realize the deferred explicit overwrite ([detail](copy-transaction-contracts.md#p13085-1---explicit-overwrite-scope)).
+- [ ] **P13085-2:** Reconcile uncertain renames by re-listing before restore decisions ([detail](copy-transaction-contracts.md#p13085-2---uncertain-rename-reconciliation)).
+- [ ] **P13085-3:** Name every surviving staged or backup entry on error ([detail](copy-transaction-contracts.md#p13085-3---recoverable-error-reporting)).
+- [ ] **V13085-1:** Reproduce a committed backup rename followed by timeout/failure ([detail](copy-transaction-contracts.md#v13085-1---committed-backup-timeout)).
+- [ ] **V13085-2:** Cover failed final rename AND failed restore with named survivors ([detail](copy-transaction-contracts.md#v13085-2---failed-final-rename-and-restore)).
+
 ### P3 - Standalone and central service construction
 
 - [ ] Construct independently installable local service/CLI and container
@@ -338,6 +378,10 @@ from retaining it._
 
 ## Validation Plan
 
+- [ ] **G13077:** Resolve every P13077/V13077 and continuing Coordination clause at its original source/regression tier, or explicitly transfer every unresolved clause to an accepted named tracked objective with actual custody preserved. Both destination forms, generation-bounded invalidation, pending-journal/newer-write preservation, pre-revocation capture and lookup expiry remain required; planning is not a cache or relocation fix.
+- [ ] **G13083:** Resolve every P13083/V13083 and continuing Coordination clause at the actual CLI/service contract boundary, or explicitly transfer every unresolved clause to an accepted named tracked objective with actual custody preserved. Running-peer capability, pre-mutation selection, useful refusal, mixed-version/rollback and declared support-window obligations remain; planning is not negotiated copy support.
+- [ ] **G13085:** Resolve every P13085/V13085 and continuing Coordination clause at its original source/regression tier, or explicitly transfer every unresolved clause to an accepted named tracked objective with actual custody preserved. Both uncertain-rename failures, re-list-before-restore and all surviving names remain required; planning grants no overwrite or cleanup authority.
+
 - [ ] **G11816:** Resolve every P11816/V11816 and continuing Coordination
   clause: all relevant consumers and allocation paths, selected production
   old/new distinction, constant/backwards-clock controls, applicable cache/
@@ -419,6 +463,14 @@ qualification sequence. Outside it, operator design review and explicit
 implementation admission remain the next gate; publication does not start P1.
 
 ## Journal
+
+### 2026-11-20 - Proposed finite copy-transaction receiving
+
+[Complete source crosswalk, preserved custody and prior receiving follow-through](../backlog-reconciliation/journal/2026/11.20-vault-copy-and-existing-keepers.md).
+The three cases join existing P2 through eighteen unchecked technical rows;
+the Goal, relay priority, P0/owner admission and every incumbent state remain.
+This is planned tracking, not an implementation, credential operation or
+source disposition.
 
 ### 2026-11-20 - Proposed finite generation/freshness receiving
 

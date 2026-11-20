@@ -410,13 +410,64 @@ the non-public approval conversation.
 
 ## Plan
 
+The [idle-steering and existing-keeper unit](journal/2026/11.20-idle-steering-and-existing-keepers.md)
+proposes the finite #13734 idle/hint slice in the existing Active Queued
+Steering owner: supported idle submission without another unrelated turn,
+resume/re-registration, truthful conditional hints and exact message identity.
+Five technical rows remain unchecked. A qualified later repeat also reports
+a possibly separate resumed-headless carrier handshake failure; it remains
+unreceived under existing carrier owners in OPEN #13734, not folded into the
+idle slice or waived by its review.
+Eight complete current original/discussion unions retain actual canonical,
+claim, incident, policy, source/native and explicit acceptance gates; #3507's
+literal accepted-transfer alternative resolves an older OPEN-placement
+statement without replay or a native-pass claim. The same record follows
+through reviewed #13733, #13082's separate NOT_PLANNED retirement and
+#13369/#13378's unfinished-other-party KEEP judgments. The complete 13:21 PT
+census is unchanged at 880 whole, 151 above fixed 729.
+
+The [portable fixture and runtime-resource unit](journal/2026/11.20-portable-fixture-and-runtime-resource-receiving.md)
+proposes complete #13082/#13369/#13378 receiving in existing Test Portfolio
+Phase 4 waves through Phase 7: portable peer handles, complete distribution/
+staged resources and all six caller/session/incarnation cases. Fifteen new
+technical rows remain unchecked, original alternatives and actual custodians
+are preserved, and all three sources remain OPEN during proposal.
+The same record follows through actual reviewed #13730 and three separate
+Vault NOT_PLANNED tracking retirements, with eighteen technical rows still
+unchecked. The complete 12:40 PT whole census remains 880 open, 151 above
+fixed 729, with no arrivals or departures in this proposal.
+
+The [finite Vault copy-transaction unit](journal/2026/11.20-vault-copy-and-existing-keepers.md)
+proposes complete #13077/#13083/#13085 receiving in existing Vault Service P2:
+relocation/fencing, selected-peer copy support and uncertain overwrite
+recovery retain eighteen unchecked technical rows and their actual
+custodians. The three sources remain OPEN during proposal. The same record
+follows through reviewed #13590/#13723 and separate #11816/#13617
+NOT_PLANNED tracking retirements without checking technical acceptance.
+The complete 11:59 PT whole census remains 883 open, 154 above fixed 729;
+there are no arrivals, departures or new campaign dispositions in this unit.
+
+The [retained-supervisor and existing-canonical unit](journal/2026/11.20-retained-supervisor-and-existing-canonicals.md)
+proposes complete #13617 receiving in existing Installer Upgrade Recovery:
+seven unchecked technical rows retain the native legacy/current transition,
+coordinator-only credit, original OR, repeat and independent capture. Eight
+other source contracts keep their existing canonical or exact unresolved
+owner/evidence boundary; no duplicate effort or implementation is introduced.
+The same record follows through #13718's actual reviewed planning and the
+separate #3443 NOT_PLANNED tracking retirement. The complete 11:07 PT whole
+census is unchanged at 884 open, 155 above fixed 729, with no arrivals,
+departures or new campaign disposition; filtered recent-delivery discovery
+is a different observation.
+
 The [complete orphan-task adoption planning unit](journal/2026/11.20-orphan-task-adoption-planning.md)
-proposes one distinct Draft for #3443's four stages and BOTH headless ACP
-and bare scripted tasks. Nine technical rows remain unchecked; the existing
-#7237 relationship owner and all task/workspace/provider/credential custodians
-remain. It records #13709's actual reviewed inference-identity delivery and
-#3296's separately retained bounded claim. The complete 09:27 PT census is
-885 open, 156 above fixed 729, with no arrivals, departures or new disposition.
+was delivered through reviewed #13718. Complete current receiving/custody
+readback and a separate judgment preceded #3443's acknowledged NOT_PLANNED
+tracking retirement. Its four stages and BOTH headless ACP and bare scripted
+tasks remain in one Draft, with all nine technical rows unchecked and #7237's
+independent relationship and actual resource custodians unchanged. Its
+09:27 PT 885-open census is historical; the subsequent complete 09:58 PT
+observation is 884 open, 155 above fixed 729. The new unit records the
+follow-through, not a repeated disposition or claim of adoption functionality.
 
 The [independent inference-identity and custody unit](journal/2026/11.20-independent-inference-identity-and-custody.md)
 proposes complete #3296 receiving in existing Account-Aware Operations

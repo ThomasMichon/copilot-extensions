@@ -71,7 +71,7 @@ def register_relevance_routes(
         release_if_handoff(task, cancel_pending=True, queue=queue)
         event_task = _event_task_dict(task)
         app.state.bus.publish({"type": outcome.event_type, "task": event_task})
-        telemetry.emit(telemetry.task_lifecycle_event(cast(str, outcome.event_type), event_task))
+        telemetry.emit_for(app.state.bus, telemetry.task_lifecycle_event(cast(str, outcome.event_type), event_task))
 
     @app.get(f"{RELEVANCE_PATH}/contract", dependencies=dependencies)
     def contract() -> dict[str, Any]:

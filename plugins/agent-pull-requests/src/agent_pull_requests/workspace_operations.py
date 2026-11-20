@@ -12,6 +12,11 @@ import json
 import math
 import threading
 import time
+from typing import Any, TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from .watch_replay import ObservationTarget
+    from .watch_replay_store import ReplayStore
 
 from .generation_cache import GenerationCache
 from .attention import Cursor
@@ -21,7 +26,7 @@ from .workspace_conversation import conversation_key as conversation_key
 from .owner_read import OwnerReadBudgetExceeded, OwnerReadHandler, REQUEST_SCHEMA
 from .review_executor import execute_review
 from .review_feedback import FeedbackInputs
-from .review_intent import identifier
+from .review_intent import identifier as _identifier
 from .review_comment_observation import (
     contract as comment_observation_contract, observe_prepared_comment,
     supports as supports_comment_observation,
@@ -37,6 +42,8 @@ from .workspace_comment_mapping import (
 from . import workspace_terminal_mapping as terminal_mapping
 
 PROTOCOL = "agent-pull-requests.workspace/v1"
+Document = dict[str, Any]
+identifier = cast(Callable[[object], str], _identifier)
 CHUNK_BYTES = 8192
 OPERATIONS = ("capabilities", "load", "sync", "lookup", "chunk", "inspect", "submit", "events", "receipt",
               "allocate", "observe-comment", "retained-comment")
@@ -72,7 +79,7 @@ class WorkspaceUnavailable(RuntimeError):
     """Missing executing owner/data, not a permission or empty-success result."""
 
 
-def encoded(value):
+def encoded(value: object) -> bytes:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
 
 
@@ -83,20 +90,22 @@ class WorkspaceOperations:
     Construction never provisions/adopts storage or creates a transport.
     """
 
-    def __init__(self, store, cache, *, scope, read_owner, binding_ref,
-                 write_context=None, checkpoint, max_work_seconds, conversations=False,
-                 attention_owner: Callable[[dict], AttentionInputs] | None = None,
-                 feedback_owner: Callable[[dict], FeedbackInputs] | None = None,
+    def __init__(self, store: ReplayStore, cache: GenerationCache, *, scope: Document,
+                 read_owner: OwnerReadHandler | NativeReadHandler, binding_ref: str,
+                 write_context: Callable[..., Any] | None = None,
+                 checkpoint: Callable[[], None], max_work_seconds: float, conversations: bool = False,
+                 attention_owner: Callable[[Document], AttentionInputs] | None = None,
+                 feedback_owner: Callable[[Document], FeedbackInputs] | None = None,
                  prepared_reviews: bool = False,
                  comment_mappings: bool = False,
-                 selection_preparer: Callable[..., Callable[..., dict]] | None = None,
+                 selection_preparer: Callable[..., Callable[..., Document]] | None = None,
                  selection_preparer_deadline: bool = False,
                  selection_owned_edits: bool = False,
-                 retention_target: Callable | None = None,
+                 retention_target: Callable[..., ObservationTarget] | None = None,
                  retention_target_deadline: bool = False,
                  terminal_reads: bool = False,
                  terminal_mapping_reads: bool = False,
-                 write_context_factory: Callable[..., Callable] | None = None) -> None:
+                 write_context_factory: Callable[..., Callable[..., Any]] | None = None) -> None:
         writers = (write_context, write_context_factory)
         write_available = sum(value is not None for value in writers) == 1
         if (
@@ -114,6 +123,12 @@ class WorkspaceOperations:
             or type(comment_mappings) is not bool
             or type(terminal_reads) is not bool
             or type(terminal_mapping_reads) is not bool
+            or store.workspace_generation_associations and (
+                not conversations or terminal_reads and not store.recorded_terminal_cache
+                or prepared_reviews or comment_mappings
+                or attention_owner is not None or feedback_owner is not None
+                or any(writers) or selection_preparer is not None
+            )
             or terminal_mapping_reads and (not terminal_reads or not store.terminal_comment_mapping)
             or type(retention_target_deadline) is not bool
             or retention_target_deadline and retention_target is None
@@ -172,8 +187,10 @@ class WorkspaceOperations:
         self.terminal_mapping_reads = terminal_mapping_reads
         from .workspace_retention import WorkspaceRetention
         self.retention = WorkspaceRetention(self)
-        self._materializations = OrderedDict()
-        self._generation_positions: OrderedDict[str, dict | None] = OrderedDict()
+        self._materializations: OrderedDict[
+            tuple[str, str], tuple[Document, bytes, tuple[int, int, int]]
+        ] = OrderedDict()
+        self._generation_positions: OrderedDict[str, Document | None] = OrderedDict()
         self._materialization_lock = threading.Lock()
 
     @property
@@ -186,23 +203,27 @@ class WorkspaceOperations:
             value is not None for value in (self.write_context, self.write_context_factory)
         )
 
-    def _review_context_factory(self, scope, checkpoint, deadline):
+    def _review_context_factory(
+        self, scope: Document, checkpoint: Callable[[], None], deadline: float | None,
+    ) -> Callable[[], Any]:
         from agent_worktrees.providers.azure_owned_review import ReviewContextUnavailable
 
         legacy, resolve = self.write_context, self.write_context_factory
         selected, attempted = None, False
 
-        def current():
+        def current() -> None:
             checkpoint()
             if not self.write_available or (
                 self.write_context is not legacy or self.write_context_factory is not resolve
             ):
                 raise ReviewContextUnavailable("selected protected write owner changed")
 
-        def context():
+        def context() -> Any:
             nonlocal selected, attempted
             current()
             if resolve is None:
+                if legacy is None:
+                    raise ReviewContextUnavailable("selected protected write owner unavailable")
                 return legacy(scope["number"])
             if not attempted:
                 attempted = True
@@ -219,9 +240,16 @@ class WorkspaceOperations:
         self.execute("capabilities", {}, expires_at=expires_at, checkpoint=checkpoint)
         with self.cache._transaction() as lock:
             self.cache._check(lock)
+        if self.store.workspace_generation_associations:
+            from .generation_associations import selected
+            self.store._review_transaction(
+                lambda document: selected(document, self.cache),
+                expires_at=expires_at, checkpoint=checkpoint, persist=False,
+            )
 
-    def execute(self, operation, payload, *, expires_at, checkpoint,
-                selection_validator: Callable[[dict], None] | None = None):
+    def execute(self, operation: str, payload: Document, *, expires_at: int,
+                checkpoint: Callable[[], None],
+                selection_validator: Callable[[Document], None] | None = None) -> Document:
         if self.terminal_reads:
             from .workspace_terminal_read import OPERATIONS as READ_OPERATIONS
             if operation not in READ_OPERATIONS and not (
@@ -240,9 +268,10 @@ class WorkspaceOperations:
                 selection_validator=selection_validator, retention_epoch=epoch,
             )
 
-    def _execute(self, operation, payload, *, expires_at, checkpoint,
-                 selection_validator: Callable[[dict], None] | None = None,
-                 retention_epoch: int | None = None):
+    def _execute(self, operation: str, payload: Document, *, expires_at: int,
+                 checkpoint: Callable[[], None],
+                 selection_validator: Callable[[Document], None] | None = None,
+                 retention_epoch: int | None = None) -> Document:
         if operation not in OPERATIONS or not isinstance(payload, dict):
             raise ValueError("unsupported workspace operation")
         fields = {
@@ -262,7 +291,7 @@ class WorkspaceOperations:
         required, optional = fields[operation]
         if not required <= payload.keys() or payload.keys() - required - optional:
             raise ValueError("invalid workspace fields")
-        deadline = None
+        deadline: float | None = None
         if "budget_seconds" in payload:
             seconds = payload["budget_seconds"]
             if type(seconds) not in (int, float) or not math.isfinite(seconds) or seconds <= 0:
@@ -270,7 +299,7 @@ class WorkspaceOperations:
             seconds = min(seconds, self.max_work_seconds)
             deadline = time.monotonic() + seconds
 
-        def check():
+        def check() -> None:
             checkpoint()
             self.checkpoint()
             if self.cache.checkpoint is not None:
@@ -361,6 +390,8 @@ class WorkspaceOperations:
             check()
             return {"protocol": self.protocol, "scope": scope, "result": result}
         if operation in ("load", "sync"):
+            if deadline is None:
+                raise ValueError("finite workspace operation budget required")
             previous = None
             if operation == "sync":
                 previous = self.retention.guarded(
@@ -387,7 +418,15 @@ class WorkspaceOperations:
             _generation(generation, scope)
             check()
             retention_observation = None
-            if retention_epoch is not None:
+            if self.store.workspace_generation_associations and retention_epoch is None:
+                from .generation_associations import publish
+                publication, retention_observation = publish(
+                    self.store, cache, generation, expected_current=payload["expected_current"],
+                    expires_at=expires_at, checkpoint=check,
+                )
+            elif retention_epoch is not None:
+                if terminal_target is None:
+                    raise WorkspaceUnavailable("terminal observation target unavailable")
                 attention = self.attention_owner(copy.deepcopy(generation)) if self.attention_owner else None
                 publication, retention_observation = self.retention.publish(
                     generation, cache, expected_current=payload["expected_current"],
@@ -513,7 +552,7 @@ class WorkspaceOperations:
                     if acquired is not None:
                         feedback_position = Cursor(**acquired)
 
-                def feedback_current():
+                def feedback_current() -> tuple[Document, Cursor] | None:
                     latest = cache.lookup(scope)["generation"]
                     if latest is None:
                         return None
@@ -542,14 +581,16 @@ class WorkspaceOperations:
         from .workspace_terminal_read import PROTOCOL as TERMINAL_PROTOCOL
         return TERMINAL_PROTOCOL if self.terminal_reads else PROTOCOL
 
-    def _materialized(self, cache, scope, generation_id):
+    def _materialized(
+        self, cache: GenerationCache, scope: Document, generation_id: str | None,
+    ) -> tuple[Document, bytes]:
         from .generation_cache import _plain
         from .review_workspace import _digest
 
         with self._materialization_lock:
-            key = (_digest(scope), generation_id)
+            key = (_digest(scope), generation_id or "")
             retained = self._materializations.get(key) if generation_id is not None else None
-            if retained is not None:
+            if retained is not None and generation_id is not None:
                 descriptor, data, stamp = retained
                 # Small descriptor/file-identity checks retain the existing owner
                 # boundary without reparsing/reserializing the full object N times.
@@ -593,7 +634,7 @@ class WorkspaceOperations:
             return copy.deepcopy(descriptor), data
 
     @staticmethod
-    def _descriptor(generation):
+    def _descriptor(generation: Document) -> Document:
         data = encoded(generation)
         if len(data) > MAX_GENERATION_BYTES:
             raise ValueError("materialized generation exceeds contract")
@@ -606,7 +647,10 @@ class WorkspaceOperations:
 class NativeWorkspaceClient:
     """Same finite operations under the caller's existing native owner."""
 
-    def __init__(self, operations, *, checkpoint, expires_at):
+    def __init__(
+        self, operations: WorkspaceOperations, *, checkpoint: Callable[[], None],
+        expires_at: Callable[[], int],
+    ) -> None:
         self.operations, self.checkpoint, self.expires_at = operations, checkpoint, expires_at
         self._prepared_contract: object = None
         self._selection_contract: object = None
@@ -618,14 +662,16 @@ class NativeWorkspaceClient:
         self._prepared_lock = threading.Lock()
         self._discovery_epoch = 0
 
-    def preparation_contract(self):
+    def preparation_contract(self) -> Document:
         return {"schema": "agent-pull-requests.client-preparation",
                 "version": 2 if _native_source_supported(self) else 1, "io": "worker"}
 
-    def exchange(self, operation, payload, *, checkpoint=None):
+    def exchange(
+        self, operation: str, payload: Document, *, checkpoint: Callable[[], None] | None = None,
+    ) -> Document:
         epoch: int | None = None
 
-        def current():
+        def current() -> None:
             self.checkpoint()
             if checkpoint is not None:
                 checkpoint()
@@ -712,30 +758,36 @@ class NativeWorkspaceClient:
             raise WorkspaceUnavailable("invalid terminal comment mapping response")
         return result
 
-    def materialize(self, number, generation_id, *, checkpoint=None):
+    def materialize(
+        self, number: int, generation_id: str, *, checkpoint: Callable[[], None] | None = None,
+    ) -> Document:
         if checkpoint is not None:
             checkpoint()
             if callable(getattr(getattr(checkpoint, "__self__", None), "_submit_native", None)) and not _native_source_supported(self):
                 raise ValueError("workspace_preparation_binding_unsupported")
         options = {"checkpoint": checkpoint} if checkpoint is not None else {}
         descriptor = self.exchange("lookup", {"number": number, "generation_id": generation_id}, **options)["result"]["descriptor"]
-        def chunk(offset):
+        def chunk(offset: int) -> Document:
             if checkpoint is not None:
                 checkpoint()
                 if callable(getattr(getattr(checkpoint, "__self__", None), "_submit_native", None)) and not _native_source_supported(self):
                     raise ValueError("workspace_preparation_binding_unsupported")
-            return self.exchange("chunk", {
+            return cast(Document, self.exchange("chunk", {
                 "number": number, "generation_id": generation_id, "offset": offset,
-            }, **options)["result"]
+            }, **options)["result"])
         return materialize(descriptor, chunk)
 
     @staticmethod
-    def attach_source(generation, source_owner, **limits):
+    def attach_source(
+        generation: Document, source_owner: Any, **limits: Any,
+    ) -> Document:
         from .source_attachment import attach_source
         return attach_source(generation, source_owner, **limits)
 
 
-def _stock_preparation(client, methods):
+def _stock_preparation(
+    client: object, methods: tuple[tuple[str, Callable[..., Any]], ...],
+) -> bool:
     from types import GetSetDescriptorType, MethodType
     namespace = getattr_static(type(client), "__dict__", None)
     if (
@@ -756,7 +808,7 @@ _NATIVE_PREPARATION_METHODS = tuple(
 )
 
 
-def _native_source_supported(client):
+def _native_source_supported(client: object) -> bool:
     if type(client) is not NativeWorkspaceClient:
         return False
     missing = object()
@@ -768,7 +820,7 @@ def _native_source_supported(client):
     return _stock_preparation(client, _NATIVE_PREPARATION_METHODS)
 
 
-def materialize(descriptor, read_chunk):
+def materialize(descriptor: Document, read_chunk: Callable[[int], Document]) -> Document:
     if (
         not isinstance(descriptor, dict) or set(descriptor) != {"id", "scope", "bytes", "sha256"}
         or type(descriptor["bytes"]) is not int or not 0 < descriptor["bytes"] <= MAX_GENERATION_BYTES
