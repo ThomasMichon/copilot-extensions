@@ -336,6 +336,14 @@ source-owner coordination rather than one large rewrite.
 
 ## Journal
 
+### 2026-11-20 - Named-point native corpus counts
+
+The [native-corpus journal](journal/2026/11.20%20point-native-scale.md)
+records actual queue/caller/worker/reader operation-count qualification beside
+100/10,000/100,000 unrelated content/vector/checkpoint rows, and separately
+observed process-byte growth. Ordering-ledger scale and broader acceptance
+remain open.
+
 ### 2026-11-20 - Point-worker dispatch and lifetime
 
 The [worker-lifetime journal](journal/2026/11.20%20point-worker-lifetime.md)
@@ -355,6 +363,9 @@ Ordinary activation, cross-generation recovery and broader acceptance remain
 separate.
 Merged #13665 qualifies explicit service reconstruction around sealed native
 publication and unchanged refusal of an unsealed partial write.
+Merged #13672 skips acquisition for entirely higher-covered fresh claims;
+merged #13676 qualifies that outcome through actual HTTP/service dispatch and
+client-free completed retry. Unrelated-corpus scale qualification remains open.
 
 Append-only entries are preserved in dated files, newest first.
 
