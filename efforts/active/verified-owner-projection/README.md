@@ -76,7 +76,10 @@ Plan review does not grant those effects.
   through the real strict ownership scanner, preserving the original actor.
   Distinguish already-delivered positive behavior from a current defect.
 - [ ] Characterize unverified/unrelated actor negatives against current
-  record-qualified acceptance and projection. Preserve #12485's receiving
+  record-qualified acceptance and projection, including an unverified or
+  explicitly foreign machine with the SAME receiving project/worktree ID.
+  A different project/ID alone does not test the alias fallback.
+  Preserve #12485's receiving
   subject and arbitrary historical rename continuity; naming alone cannot
   manufacture record or execution authority.
 
@@ -92,15 +95,16 @@ Plan review does not grant those effects.
   historical receipt bytes. Document any affected existing guarantee.
 - [ ] Clear focused consumer tests, whole-file strict checks and ordinary
   source review/required CI; merge, accept the six finite OA/OAV rows only
-  when proved, complete this reservation and archive this source effort.
+  when proved, and record finite acceptance.
 
 ## Validation Plan
 
 - [ ] V1: Real offer/accept -> strict scan for both historical and qualified
   consumers; correct current owner, complete snapshot, unaffected independent
   owner and unchanged actor/ledger bytes during observation.
-- [ ] V2: Unverified/unrelated actor or receiving-record mismatch remains
-  unresolved/incomplete and suppresses fabricated current ownership.
+- [ ] V2: An unverified or explicitly foreign machine with the same receiving
+  project/worktree ID remains unresolved/incomplete and suppresses fabricated
+  current ownership; separately cover receiving-record mismatch.
   Preserve existing single/multiple rename, chain and uncertainty controls.
 - [ ] V3: No cached tracking load, write, provider callback, subprocess or live
   resource operation during scanning; preserve actual no-effect controls.
@@ -109,7 +113,11 @@ Plan review does not grant those effects.
   contract guards and exact-source review/CI before merge.
 - [ ] V5: Full current parent readback before finite acceptance; original
   reservation completed by its author, all other parent rows/custodians
-  unchanged, canonical Done/archive merged. Release and rollout are separate.
+  unchanged. Release and rollout are separate.
+
+After these source acceptance checks are resolved, mark this finite effort
+Done, publish its normal dated archive PR and verify that merge separately.
+Archive publication is a closeout action, not its own pre-Done checkbox.
 
 ## Proposal
 
