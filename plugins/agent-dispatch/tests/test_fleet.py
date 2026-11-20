@@ -500,7 +500,7 @@ def test_host_can_bridge_probes_agent_bridge(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(fleet, "run_ssh_command", fake_run)
     assert fleet.host_can_bridge("Host-B") is True
     cmd = captured["cmd"]
-    assert cmd[-1] == "command -v agent-bridge"
+    assert cmd[-1] == "case posix in posix) command -v agent-bridge;; esac"
     assert cmd[-2] == "host-b"  # alias lowercased
     assert captured["kwargs"]["timeout"] == 8.0
 
@@ -526,7 +526,24 @@ def test_probe_rejects_empty_output_from_powershell_get_command(monkeypatch: pyt
     monkeypatch.setattr(shutil, "which", lambda _n: "/usr/bin/ssh")
     monkeypatch.setattr(fleet, "run_ssh_command", fake_run)
     assert fleet.host_can_embody("win-host") is False
-    assert [c for c, _ in calls] == ["command -v agent-worktrees"]
+    assert [c for c, _ in calls] == ["case posix in posix) command -v agent-worktrees;; esac"]
+
+
+def test_host_bridge_shell_classifies_powershell_host_with_bridge(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """PowerShell answers a bare ``command -v`` through ``Get-Command`` when
+    Bridge exists, but rejects the ``case`` probe; such a host is live for the
+    carrier route yet classified as Windows, not POSIX."""
+    fake_run, calls = _probe_runner(
+        [(1, ""), (0, "C:\\bin\\agent-bridge.cmd\r\n")]
+    )
+    monkeypatch.setattr(shutil, "which", lambda _n: "/usr/bin/ssh")
+    monkeypatch.setattr(fleet, "run_ssh_command", fake_run)
+    assert fleet.host_bridge_shell("win-host") == fleet.WINDOWS_SHELL
+    assert [c for c, _ in calls] == [
+        "case posix in posix) command -v agent-bridge;; esac", "where.exe agent-bridge",
+    ]
 
 
 def test_host_can_bridge_falls_back_to_where_exe_on_windows(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -537,7 +554,7 @@ def test_host_can_bridge_falls_back_to_where_exe_on_windows(monkeypatch: pytest.
     monkeypatch.setattr(fleet, "run_ssh_command", fake_run)
     assert fleet.host_can_bridge("win-host") is True
     assert [c for c, _ in calls] == [
-        "command -v agent-bridge", "where.exe agent-bridge",
+        "case posix in posix) command -v agent-bridge;; esac", "where.exe agent-bridge",
     ]
     # the fallback shares the original budget rather than doubling it
     assert calls[0][1] == 8.0
@@ -569,7 +586,7 @@ def test_spawn_fleet_headless_worker_builds_ssh_agent_bridge_argv(monkeypatch: p
         import subprocess
 
         captured["cmd"] = cmd
-        out = "/usr/bin/agent-bridge\n" if cmd[-1].startswith("command -v") else ""
+        out = "/usr/bin/agent-bridge\n" if cmd[-1].startswith("case posix in posix)") else ""
         return subprocess.CompletedProcess(cmd, 0, stdout=out, stderr="")
 
     def unavailable_client() -> NoReturn:
@@ -577,6 +594,7 @@ def test_spawn_fleet_headless_worker_builds_ssh_agent_bridge_argv(monkeypatch: p
 
     monkeypatch.setattr(shutil, "which", lambda _n: "/usr/bin/ssh")
     monkeypatch.setattr(embody, "run_ssh_command", fake_run)
+    monkeypatch.setattr(fleet, "run_ssh_command", fake_run)
     monkeypatch.setattr(bridge_remote, "LocalBridgeRemoteClient", unavailable_client)
 
     embody.spawn_fleet_headless_worker(

@@ -1112,15 +1112,23 @@ def test_fleet_spawn_threads_project_before_embody(monkeypatch: pytest.MonkeyPat
     assert remote_cmd.index("--project") < remote_cmd.index("embody")
 
 
+_POSIX_BRIDGE_PROBE = "case posix in posix) command -v agent-bridge;; esac"
+
+
 def _probe_out(cmd: list[str]) -> str:
-    """The SSH fallback first probes ``command -v agent-bridge`` on the host."""
-    return "/usr/bin/agent-bridge\n" if cmd[-1].startswith("command -v") else ""
+    """The SSH fallback first classifies the host shell with the fleet probe."""
+    return "/usr/bin/agent-bridge\n" if cmd[-1] == _POSIX_BRIDGE_PROBE else ""
 
 
-def test_fleet_headless_ssh_fallback_refuses_non_posix_host(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A Windows OpenSSH host passes fleet liveness for the carrier path, but
-    its shell would split the POSIX fallback command line: ``command -v`` exits
-    0 with no output under PowerShell, so the fallback refuses before create."""
+def _patch_ssh(monkeypatch: pytest.MonkeyPatch, fake: Any) -> None:
+    """Route both the fleet shell probe and the embody create through ``fake``."""
+    from agent_dispatch import fleet
+
+    monkeypatch.setattr(embody, "run_ssh_command", fake)
+    monkeypatch.setattr(fleet, "run_ssh_command", fake)
+
+
+def _no_carrier(monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_dispatch import bridge_remote
 
     class _UnavailableClient:
@@ -1131,9 +1139,15 @@ def test_fleet_headless_ssh_fallback_refuses_non_posix_host(monkeypatch: pytest.
         bridge_remote, "LocalBridgeRemoteClient", _UnavailableClient
     )
     monkeypatch.setattr(shutil, "which", lambda _n: "/usr/bin/ssh")
+
+
+def test_fleet_headless_ssh_fallback_refuses_non_posix_host(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A Windows OpenSSH host without agent-bridge has no POSIX probe output
+    and no ``where.exe`` match, so the fallback refuses before create."""
+    _no_carrier(monkeypatch)
     calls: list[list[str]] = []
-    monkeypatch.setattr(
-        embody, "run_ssh_command",
+    _patch_ssh(
+        monkeypatch,
         _appending(calls, lambda cmd: subprocess.CompletedProcess(cmd, 0, "", "")),
     )
 
@@ -1142,8 +1156,37 @@ def test_fleet_headless_ssh_fallback_refuses_non_posix_host(monkeypatch: pytest.
             "win-host", "t1", origin="coord", owner="fleet-t1-abc",
             worker_id="fleet-t1-abc",
         )
-    assert len(calls) == 1
-    assert calls[0][-1] == "command -v agent-bridge"
+    assert [c[-1] for c in calls] == [_POSIX_BRIDGE_PROBE, "where.exe agent-bridge"]
+
+
+def test_fleet_headless_ssh_fallback_refuses_powershell_host_with_bridge(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A PowerShell host with Bridge installed but no carrier: ``command -v``
+    alone would succeed there through ``Get-Command``, but PowerShell rejects
+    the ``case`` probe and only ``where.exe`` resolves Bridge. The fallback
+    must refuse before sending the POSIX-quoted create command."""
+    _no_carrier(monkeypatch)
+    calls: list[list[str]] = []
+
+    def powershell_host(cmd: list[str]) -> subprocess.CompletedProcess[str]:
+        remote = cmd[-1]
+        if remote == "command -v agent-bridge":
+            return subprocess.CompletedProcess(cmd, 0, "Application agent-bridge.cmd\r\n", "")
+        if remote.startswith("case "):
+            return subprocess.CompletedProcess(cmd, 1, "", "ParserError: Unexpected token ')'")
+        if remote == "where.exe agent-bridge":
+            return subprocess.CompletedProcess(cmd, 0, "C:\\bin\\agent-bridge.cmd\r\n", "")
+        return subprocess.CompletedProcess(cmd, 0, "{}", "")
+
+    _patch_ssh(monkeypatch, _appending(calls, powershell_host))
+
+    with pytest.raises(embody.EmbodyUnavailable, match="non-POSIX shell"):
+        embody.spawn_fleet_headless_worker(
+            "win-host", "t1", origin="coord", owner="fleet-t1-abc",
+            worker_id="fleet-t1-abc",
+        )
+    assert [c[-1] for c in calls] == [_POSIX_BRIDGE_PROBE, "where.exe agent-bridge"]
 
 
 def test_fleet_headless_ssh_fallback_passes_caller(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1163,8 +1206,8 @@ def test_fleet_headless_ssh_fallback_passes_caller(monkeypatch: pytest.MonkeyPat
     )
     monkeypatch.setattr(shutil, "which", lambda _n: "/usr/bin/ssh")
     captured: dict[str, Any] = {}
-    monkeypatch.setattr(
-        embody, "run_ssh_command",
+    _patch_ssh(
+        monkeypatch,
         _capturing(captured, lambda cmd: subprocess.CompletedProcess(cmd, 0, _probe_out(cmd), "")),
     )
 
@@ -1198,8 +1241,8 @@ def test_fleet_headless_falls_back_to_ssh_on_far_side_426(monkeypatch: pytest.Mo
     )
     monkeypatch.setattr(shutil, "which", lambda _n: "/usr/bin/ssh")
     captured: dict[str, Any] = {}
-    monkeypatch.setattr(
-        embody, "run_ssh_command",
+    _patch_ssh(
+        monkeypatch,
         _capturing(captured, lambda cmd: subprocess.CompletedProcess(cmd, 0, _probe_out(cmd), "")),
     )
 

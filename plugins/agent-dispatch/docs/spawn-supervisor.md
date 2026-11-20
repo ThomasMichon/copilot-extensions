@@ -1303,10 +1303,13 @@ Three properties define it:
   pool host, so an SSH blip after launch never kills a running job.
 - **Liveness-gated selection.** A pool host is a candidate only when it is
   reachable over SSH **and** has `agent-worktrees` (a single cheap
-  `command -v agent-worktrees` probe, cached briefly) — or, in **headless-fleet**
+  `command -v agent-worktrees` probe inside a POSIX-only `case` construct,
+  cached briefly) — or, in **headless-fleet**
   mode, `agent-bridge` (the binary a headless body embodies through). A probe
-  counts only when it exits 0 **and** prints the resolved path (PowerShell's
-  `Get-Command` exits 0 with no output for a missing binary). The headless probe
+  counts only when it exits 0 **and** prints the resolved path. A bare
+  `command -v` is not proof of a POSIX shell, because PowerShell resolves
+  `command` to `Get-Command`; PowerShell and `cmd.exe` both reject the `case`
+  construct. The headless probe
   also tries `where.exe agent-bridge` within the same timeout, so a Windows
   OpenSSH host qualifies; the CLI-embody probe stays POSIX-only because its
   remote command is a POSIX shell line. An unpinned task takes the first live
@@ -1318,8 +1321,9 @@ Three properties define it:
   when `requires` names `machine:` entries, any host they do not name (exact
   token match, as in the claim). A headless body on a Windows OpenSSH host needs
   the local Agent Bridge carrier: the SSH fallback sends a POSIX command line, so
-  it first probes `command -v agent-bridge` and refuses a host without a POSIX
-  shell instead of sending a command that shell would split.
+  it uses the same probe to classify the host's login shell and refuses a host
+  that resolves `agent-bridge` only through `where.exe` (a `cmd.exe` or
+  PowerShell shell) instead of sending a command that shell would split.
 - **Defer, don't fail, when the pool is asleep.** `FleetSpawner.can_spawn` is wired
   as the supervisor's **`capacity_gate`** — an optional pre-reservation check
   (default no-op → the local path is unchanged). When no host is live, the task is

@@ -636,8 +636,9 @@ def spawn_fleet_headless_worker(
 
     If carrier capability is absent, missing local ``ssh`` raises
     :class:`EmbodyUnavailable`. The SSH fallback is a POSIX remote command, so
-    it first probes ``command -v agent-bridge``; a host without a POSIX shell
-    that resolves ``agent-bridge`` (for example a Windows OpenSSH host) raises
+    it first asks :func:`agent_dispatch.fleet.host_bridge_shell` to classify
+    the host's login shell; a host that resolves ``agent-bridge`` only under
+    ``cmd.exe`` or PowerShell (for example a Windows OpenSSH host) raises
     :class:`EmbodyUnavailable` instead of receiving a command its shell would
     split. A non-zero create exit still fails the reservation.
     """
@@ -690,20 +691,19 @@ def spawn_fleet_headless_worker(
     ssh_host = host.strip().lower()
     # The fallback below is a POSIX-quoted remote command line. Fleet liveness
     # also admits Windows OpenSSH hosts (for the carrier path), whose cmd.exe or
-    # PowerShell login shell would split that line, so confirm a POSIX shell
-    # that resolves agent-bridge before sending it.
-    try:
-        probe = run_ssh_command(
-            [exe, "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", ssh_host,
-             "command -v agent-bridge"],
-            timeout=8.0,
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise EmbodyUnavailable(f"pool host {ssh_host!r} is unreachable over ssh") from exc
-    if probe.returncode != 0 or not (probe.stdout or "").strip():
+    # PowerShell login shell would split that line, so require the fleet probe's
+    # POSIX classification before sending it. Imported here: fleet imports embody.
+    from . import fleet
+
+    shell = fleet.host_bridge_shell(ssh_host, timeout=8.0)
+    if shell is None:
         raise EmbodyUnavailable(
-            f"pool host {ssh_host!r} has no POSIX shell with agent-bridge; without "
-            "the local Agent Bridge carrier a headless body cannot start there"
+            f"pool host {ssh_host!r} is unreachable over ssh or has no agent-bridge"
+        )
+    if shell != fleet.POSIX_SHELL:
+        raise EmbodyUnavailable(
+            f"pool host {ssh_host!r} resolves agent-bridge under a non-POSIX shell; "
+            "without the local Agent Bridge carrier a headless body cannot start there"
         )
     # `--json` (a global flag, before the subcommand) makes `create --no-wait`
     # emit the created session_id as JSON, so the caller can record a recovery

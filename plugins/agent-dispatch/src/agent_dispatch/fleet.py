@@ -84,37 +84,72 @@ def host_can_bridge(host: str, *, timeout: float = 8.0) -> bool:
 
     A headless body is created through the Bridge carrier rather than a POSIX
     remote command line, so this probe also accepts a Windows OpenSSH host whose
-    login shell is ``cmd.exe`` or PowerShell (see :func:`_host_has_command`).
+    login shell is ``cmd.exe`` or PowerShell (see :func:`host_bridge_shell`).
     """
-    return _host_has_command(host, "agent-bridge", timeout=timeout, windows=True)
+    return host_bridge_shell(host, timeout=timeout) is not None
+
+
+#: :func:`host_bridge_shell` result for a host whose SSH login shell is POSIX.
+POSIX_SHELL = "posix"
+#: :func:`host_bridge_shell` result for a ``cmd.exe``/PowerShell login shell.
+WINDOWS_SHELL = "windows"
+
+
+def host_bridge_shell(host: str, *, timeout: float = 8.0) -> str | None:
+    """Classify the SSH login shell under which ``host`` resolves ``agent-bridge``.
+
+    Returns :data:`POSIX_SHELL`, :data:`WINDOWS_SHELL`, or ``None`` when the
+    host is unreachable or has no ``agent-bridge``. Fleet liveness needs only
+    presence (:func:`host_can_bridge`); the SSH create fallback in
+    :func:`agent_dispatch.embody.spawn_fleet_headless_worker` sends a
+    POSIX-quoted command line, so it also requires :data:`POSIX_SHELL`.
+    """
+    return _host_command_shell(host, "agent-bridge", timeout=timeout, windows=True)
+
+
+def _posix_command_probe(command: str) -> str:
+    """A probe only a POSIX shell can run: ``command -v`` inside ``case``/``esac``.
+
+    A bare ``command -v`` does not prove POSIX semantics: PowerShell resolves
+    ``command`` to ``Get-Command``, which succeeds with nonempty output when the
+    binary exists. PowerShell and ``cmd.exe`` both reject the ``case`` construct
+    before running anything, so success here means a POSIX shell resolved it.
+    """
+    return f"case posix in posix) command -v {command};; esac"
 
 
 def _host_has_command(
     host: str, command: str, *, timeout: float = 8.0, windows: bool = False
 ) -> bool:
-    """SSH to ``host`` (SSH alias) and check that ``command`` resolves there.
+    """SSH to ``host`` (SSH alias) and check that ``command`` resolves there."""
+    return _host_command_shell(host, command, timeout=timeout, windows=windows) is not None
 
-    The shared reachability + capability probe behind :func:`host_can_embody` and
-    :func:`host_can_bridge`. ``BatchMode`` so a missing key fails fast; any
-    failure (ssh absent, unreachable, timeout, or missing binary) returns False.
 
-    The POSIX probe is ``command -v <command>``; it counts only when it exits 0
-    **and** prints the resolved command. PowerShell expands an unknown
-    ``command`` to ``Get-Command``, which exits 0 with no output for a missing
-    binary, so the output check stops that false positive. With ``windows``, a
-    host that fails the POSIX probe (other than an SSH-level failure, exit 255)
-    gets one ``where.exe <command>`` probe within the same ``timeout`` budget;
+def _host_command_shell(
+    host: str, command: str, *, timeout: float = 8.0, windows: bool = False
+) -> str | None:
+    """Classify the login shell under which ``command`` resolves on ``host``.
+
+    The shared reachability + capability probe behind :func:`host_can_embody`
+    and :func:`host_bridge_shell`. ``BatchMode`` so a missing key fails fast;
+    any failure (ssh absent, unreachable, timeout, or missing binary) returns
+    ``None``.
+
+    The POSIX probe (:func:`_posix_command_probe`) counts only when it exits 0
+    **and** prints the resolved command. With ``windows``, a host that fails
+    the POSIX probe (other than an SSH-level failure, exit 255) gets one
+    ``where.exe <command>`` probe within the same ``timeout`` budget;
     ``where.exe`` behaves the same under ``cmd.exe`` and PowerShell.
     """
     exe = shutil.which("ssh")
     if exe is None:
-        return False
-    probes = [f"command -v {command}"]
+        return None
+    probes = [(POSIX_SHELL, _posix_command_probe(command))]
     if windows:
-        probes.append(f"where.exe {command}")
+        probes.append((WINDOWS_SHELL, f"where.exe {command}"))
     deadline = time.monotonic() + timeout
     budget = timeout
-    for probe in probes:
+    for shell, probe in probes:
         cmd = [
             exe, "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
             _ssh_alias(host), probe,
@@ -122,15 +157,15 @@ def _host_has_command(
         try:
             result = run_ssh_command(cmd, timeout=budget)
         except (OSError, subprocess.SubprocessError):
-            return False
+            return None
         if result.returncode == 0 and (result.stdout or "").strip():
-            return True
+            return shell
         if result.returncode == 255:
-            return False
+            return None
         budget = deadline - time.monotonic()
         if budget <= 0:
-            return False
-    return False
+            return None
+    return None
 
 
 def _selector_tokens(value: object) -> set[str]:
