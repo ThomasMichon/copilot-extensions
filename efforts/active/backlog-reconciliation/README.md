@@ -1316,6 +1316,16 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The [three-request source-compatibility unit](journal/2026/11.20-source-compatibility-fulfillment.md)
+records actual #13632 delivery/parent return and acknowledged whole #12819,
+#12852 and #12773 fulfillment through their original contributors' merged
+source. Exact current implementation/regression correspondence, the existing
+real constructor result and actual retained-prefix process controls remain
+distinct from fresh native execution, broader writer capabilities or installed
+adoption. All incumbent campaign/Portfolio check states and retained owners
+remain unchanged. The complete 893-open census is 164 above fixed 729;
+unrelated #13626 completion receives no campaign credit.
+
 The [source-fulfillment and retained-owner unit](journal/2026/11.20-source-fulfillment-and-owned-boundaries.md)
 records actual #13622 delivery/current whole receiving and four separately
 audited tracking retirements, plus acknowledged whole #12542 fulfillment
@@ -5002,6 +5012,16 @@ closure credit, resource release or parent checkbox change follows.
   normal publication flow.
 
 ## Validation Plan
+
+The [source-compatibility completion record](journal/2026/11.20-source-compatibility-fulfillment.md)
+maps three whole original contracts to actual merged/current source and
+regressions, with separate acknowledged `COMPLETED` effects and independent
+provider readbacks. Prior native/semantic results remain attributed rather
+than new campaign runs; account identity is not human-review evidence.
+Auxiliary document drift was distinguished from unchanged core source without
+repeating the standing final check. No technical row, source/copy or resource
+gate is waived. Two equal complete observations establish 893 whole open,
+not prospective subtraction or parent completion.
 
 The [source-fulfillment and retained-owner record](journal/2026/11.20-source-fulfillment-and-owned-boundaries.md)
 separates four accepted planned-receiving retirements from one acknowledged
