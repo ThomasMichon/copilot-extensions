@@ -987,3 +987,23 @@ required CI, hosted-Windows quiescence and original budgets. No test, code,
 native/GUI/process operation, rollout, source takeover or resource release
 follows. The [campaign record](../backlog-reconciliation/journal/2026/11.20-source-attribution-and-retirement-fixture-receiving.md)
 retains the independent evidence and proposal/disposition boundaries.
+
+## Proposed finite PowerShell child-budget receiving - 2026-11-20 UTC
+
+| Source | Disposition | Primary canonical owner | Retained gates |
+|---|---|---|---|
+| #11995 prepared-membership native-write/membership child budget | routed (proposed; effective after actual reviewed complete domain acceptance) | [Test Portfolio Rationalization](../test-portfolio-rationalization/README.md), Phase 4 Worktrees/owning-fixture wave, P11995/V11995/G11995 through Phase 7 | Original PowerShell 5.1/10-second failures and phase evidence; production-latency decision OR warmed-host/phase-based/calibrated-fixture policy; no production-timeout increase or assumed common cause |
+
+This same planning unit supplies complete direct domain Plan, local and
+actual global Validation, Coordination and dated Journal. Ledger publication
+alone is not domain acceptance. Keep #11995 OPEN during proposal, with
+OPEN #1303 and the existing primary, fixture, runner, production, platform,
+source/native/release and resource custodians unchanged. Normal reviewed
+complete receiving delivery and permitted current whole source/receiver/
+custody readback precede a separate tracking judgment. All six technical
+rows remain unchecked. This is a separate finite family, not a seventh
+member silently added to the earlier six-family grouping. Unit-only
+required CI, hosted-Windows quiescence, original failure history and
+applicable bounds remain; no run, implementation appointment, budget
+increase or resource release follows. The [campaign record](../backlog-reconciliation/journal/2026/11.20-native-crypto-budget-and-lock-receiving.md)
+retains the evidence and independent proposal/disposition boundaries.
