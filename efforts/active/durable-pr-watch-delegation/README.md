@@ -911,8 +911,13 @@ outage-expiry defect remains unfixed.
 The [expiry persistence packet](journal/2026/11.20%20Expiry%20persistence%20qualification.md)
 adds pure per-subscriber deadline/terminal controls and actual
 legacy/acknowledged expiry publication failure controls. Its 133-case combined
-packet passes; whole-outcome reconciliation below remains open, including
-sustained outage/recovery with other subscribers and ordinary synchronous waits.
+packet merged in #13684 and passes; whole-outcome reconciliation below remains
+open, including sustained outage/recovery with other subscribers and ordinary
+synchronous waits.
+The same packet now records focused residual controls for both contracts'
+shared-poller recovery with known/unknown baselines and the separate ordinary
+synchronous-wait consumer. Local behavior checks pass; normal review, required
+CI (including strict typing) and whole-outcome reconciliation remain.
 
 - [ ] **P5947-1:** Preserve expiry independently of successful provider fetch,
   subscriber-specific filters/deadlines, legitimate terminal transitions,
