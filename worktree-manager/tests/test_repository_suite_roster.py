@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+import subprocess
 
 import pytest
+from agent_procutil import no_window_kwargs
 
 from worktree_manager.repository_suite_roster import main, plan
 
@@ -113,3 +116,14 @@ def test_linked_overlay_must_resolve(roots: tuple[Path, Path]) -> None:
     result = plan(target, source, gate_paths=(), machines=(), index_role="client", vault_state="configured")
     assert result["complete"] is True
     assert result["required"] == ["worktree-manager", "agent-index", "agent-service", "agent-vault"]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows junction")
+def test_dangling_settings_parent_is_not_absent(roots: tuple[Path, Path]) -> None:
+    target, source = roots
+    subprocess.run(
+        [os.environ["COMSPEC"], "/d", "/c", "mklink", "/J", str(target / ".claude"), str(target / "missing")],
+        capture_output=True, timeout=20, check=True, **no_window_kwargs(),
+    )
+    with pytest.raises(ValueError, match="dangling link"):
+        plan(target, source, gate_paths=(), machines=())

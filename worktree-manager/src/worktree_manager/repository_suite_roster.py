@@ -87,8 +87,14 @@ def plan(
         entry = target
         for part in parts:
             entry = entry / part
-            if entry.is_symlink() and not entry.exists():
-                raise ValueError(f"Indeterminate plugin settings: dangling link at {entry}")
+            try:
+                entry.lstat()
+            except FileNotFoundError:
+                break
+            try:
+                entry.stat()
+            except FileNotFoundError as error:
+                raise ValueError(f"Indeterminate plugin settings: dangling link at {entry}") from error
     settings = _read_settings(target, SETTINGS_RELS)
     if settings.authority is ScanAuthority.INDETERMINATE:
         raise ValueError("Effective worktree plugin settings are indeterminate")
