@@ -185,10 +185,10 @@ def _byte_lock(path: Path, deadline: float | None = None) -> Iterator[bool]:
         while True:
             try:
                 stream.seek(0)
-                if sys.platform == "win32":
+                if os.name == "nt":
                     import msvcrt
 
-                    msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+                    msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)  # type: ignore[attr-defined, unused-ignore]
                 else:
                     import fcntl
 
@@ -208,8 +208,8 @@ def _byte_lock(path: Path, deadline: float | None = None) -> Iterator[bool]:
             try:
                 if acquired:
                     stream.seek(0)
-                    if sys.platform == "win32":
-                        msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+                    if os.name == "nt":
+                        msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)  # type: ignore[attr-defined, unused-ignore]
                     else:
                         fcntl.lockf(stream, fcntl.LOCK_UN, 1)
             finally:
@@ -345,11 +345,11 @@ def _worker_definitely_gone(owner: object) -> bool:
         if runtime is not None and not runtime.lock_is_live(owner):
             return True
         pid = owner["pid"]
-        if sys.platform == "win32":
+        if os.name == "nt":
             import ctypes
             from ctypes import wintypes
 
-            kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined, unused-ignore]
             kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
             kernel.OpenProcess.restype = wintypes.HANDLE
             kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
@@ -358,7 +358,7 @@ def _worker_definitely_gone(owner: object) -> bool:
             kernel.CloseHandle.restype = wintypes.BOOL
             handle = kernel.OpenProcess(0x100000, False, pid)  # SYNCHRONIZE, no mutation rights
             if not handle:
-                return bool(ctypes.get_last_error() == 87)  # absent PID, not access denial
+                return bool(ctypes.get_last_error() == 87)  # type: ignore[attr-defined, unused-ignore]  # absent PID, not access denial
             try:
                 return bool(kernel.WaitForSingleObject(handle, 0) == 0)
             finally:
