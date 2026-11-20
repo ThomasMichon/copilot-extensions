@@ -3,17 +3,20 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import sqlite3
 
 from . import bridge
 from .bridge_command_delivery import native_prompt, steering_prompt
 from .ordinary_agent_facts import identity, native_conflict
 from .ordinary_native_bindings import native_bindings
-from .queue import TaskQueue, WakeOperation
+from .queue import TaskQueue
+from .queue_common import Task, WakeOperation
 from .queue_records import SpawnReservation, SpawnState, Status, TaskError
 from .spawn_factories import _parse_fleet_body_handle, _parse_local_body_handle
 
 
-def _closeout_delivery(conn, task_id, owner, owner_session_id, key) -> bool:
+def _closeout_delivery(conn: sqlite3.Connection, task_id: str, owner: str,
+                       owner_session_id: str | None, key: str) -> bool:
     from .queue_execution_handoff import require_execution_admission
     from .queue_relevance import closeout_request
     from .queue_relevance_delivery import closeout_wake
@@ -30,8 +33,8 @@ def _closeout_delivery(conn, task_id, owner, owner_session_id, key) -> bool:
     return True
 
 
-def _require_retained_owner(task, reservation: SpawnReservation, owner, owner_session_id, *,
-                            closeout: bool = False):
+def _require_retained_owner(task: Task, reservation: SpawnReservation, owner: str, owner_session_id: str, *,
+                            closeout: bool = False) -> None:
     unassigned_closeout = bool(
         closeout and task is not None
         and task.status in {Status.PROPOSED, Status.QUEUED, Status.CLAIMED}
@@ -55,13 +58,15 @@ def _require_retained_owner(task, reservation: SpawnReservation, owner, owner_se
         raise TaskError("hosted wake owner or retained execution facts are unavailable")
 
 
-def _target_identity(reservation: SpawnReservation, task, owner: str,
+def _target_identity(reservation: SpawnReservation, task: Task, owner: str,
                      owner_session_id: str) -> tuple[str, str]:
     if reservation.driver == "restricted-bridge":
         from .restricted_delivery import wake_identity
         return wake_identity(
             reservation, replace(task, owner=owner, owner_session_id=owner_session_id),
         )
+    if reservation.agent_info is None:
+        raise TaskError("hosted wake retained execution facts are unavailable")
     actual = identity(reservation.agent_info)
     if (
         actual.worktree != reservation.worktree
@@ -74,7 +79,7 @@ def _target_identity(reservation: SpawnReservation, task, owner: str,
 
 def deliver_owner_wake(
     queue: TaskQueue, owner: str, owner_session_id: str | None, task_id: str,
-    message: str | None, idempotency_key: str,
+    message: str | None, idempotency_key: str, *, no_resume: bool = False,
 ) -> bool:
     with queue._connect() as conn:
         closeout = _closeout_delivery(conn, task_id, owner, owner_session_id, idempotency_key)
@@ -85,12 +90,16 @@ def deliver_owner_wake(
         or reservation.agent_info is not None
         or bool(handle and handle.startswith(("local-body:", "fleet-body:")))
     )
-    if not hosted:
+    if reservation is None or not hosted:
+        if no_resume:
+            raise TaskError("retained wake requires the original hosted owner")
         return bridge.resume_steered_owner(
             owner, task_id, message, owner_session_id=owner_session_id,
             idempotency_key=idempotency_key,
         )
     task = queue.get(task_id)
+    if task is None or not owner_session_id:
+        raise TaskError("hosted wake owner or retained execution facts are unavailable")
     _require_retained_owner(task, reservation, owner, owner_session_id, closeout=closeout)
     bridge_id, native_id = _target_identity(reservation, task, owner, owner_session_id)
     fleet = _parse_fleet_body_handle(handle)
@@ -111,6 +120,8 @@ def deliver_owner_wake(
             raise TaskError("hosted wake reservation is unavailable")
         current = SpawnReservation._from_row(row)
         current_task = queue._fetch(conn, task_id)
+        if current_task is None:
+            raise TaskError("hosted wake owner or retained execution facts are unavailable")
         closeout = _closeout_delivery(conn, task_id, owner, owner_session_id, idempotency_key)
         _require_retained_owner(current_task, current, owner, owner_session_id, closeout=closeout)
         if current_task.generation != task.generation or any(
@@ -134,4 +145,5 @@ def deliver_owner_wake(
         idempotency_key=idempotency_key,
         machine=host, launch_prefix=bridge._agent_bridge_launch_prefix,
         run_ssh=bridge.run_ssh_command,
+        **({"no_resume": True} if no_resume else {}),
     )

@@ -8,7 +8,7 @@ import sqlite3
 from typing import Any
 
 from .native_keyed_admission import admission_receipt
-from .native_send_admission import NativeSendPrompt, read_receipt, submit
+from .native_send_admission import NativeSendBusy, NativeSendPrompt, read_receipt, submit
 from .native_send_settlement import request_digest
 
 
@@ -70,7 +70,10 @@ class NativeReceiptRecords:
 
     async def reconcile(self, manager: Any, session: str, request: NativeSendPrompt) -> dict[str, Any] | None:
         """Consult the exact original holder's receipt-only path, not settlement or send."""
-        retained = self.inspect(session, request)
+        try:
+            retained = self.inspect(session, request)
+        except KeyError:
+            return await read_receipt(manager, session, request)
         if retained is not None:
             return retained
         observed = await read_receipt(manager, session, request)
@@ -94,5 +97,12 @@ class NativeReceiptRecords:
             db.commit()
         if not inserted:
             return await self.reconcile(manager, session, request)
-        receipt = await submit(manager, session, request)
+        try:
+            receipt = await submit(manager, session, request)
+        except NativeSendBusy:
+            with closing(self._open(write=True)) as db:
+                db.execute("DELETE FROM native_v1 WHERE delivery=? AND digest=? AND accepted_turn IS NULL",
+                           (request.delivery_id(), request_digest(session, request)))
+                db.commit()
+            raise
         return self._accept(session, request, receipt)
