@@ -410,6 +410,16 @@ the non-public approval conversation.
 
 ## Plan
 
+The [local transport and complete rendezvous planning unit](journal/2026/11.20-local-transport-and-rendezvous-planning.md)
+records #13690's actual reviewed delivery, #12042's separately audited tracking
+retirement and a complete unchanged 884-open census. One canonical Draft plan
+under existing #54 directly retains the native-first ladder, unresolved #4040
+Bridge-policy choice and #5904's complete independently tracked parser/cleanup
+lane. All fourteen technical rows remain unchecked; #54 and #5904 remain OPEN.
+Changed ownership-observation, cancellation-closeout and fleet-growth source
+references are credited only at their actual finite scope, not whole-parent
+fulfillment or permission to repeat unchanged code/native audits.
+
 The [shared-context and registry-default unit](journal/2026/11.20-shared-context-and-registry-default-receiving.md)
 records #13680's actual reviewed delivery, two separately audited tracking
 retirements and the complete 884-open census. It proposes one canonical

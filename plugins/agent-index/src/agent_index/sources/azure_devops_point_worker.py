@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from contextlib import closing
 from typing import TYPE_CHECKING
 
@@ -35,6 +36,7 @@ def run_azure_devops_point_worker(
     paths: PathIndex, tasks: TaskStore, ledger: ComponentLedger,
     clients: dict[str, EngineClient], max_rows: int,
     progress_cb: ProgressCallback | None = None,
+    before_model_embed: Callable[[str], None] | None = None,
 ) -> TaskRecord:
     """Acquire missing exact targets and apply only the current whole parked claim.
 
@@ -135,4 +137,5 @@ def run_azure_devops_point_worker(
         return run_retained_point_worker(
             claim, scope=scope, paths=paths, tasks=tasks, ledger=ledger, clients=clients,
             max_rows=max_rows, progress_cb=progress_cb, qualify_claim=qualify_claim,
+            before_model_embed=before_model_embed,
         )

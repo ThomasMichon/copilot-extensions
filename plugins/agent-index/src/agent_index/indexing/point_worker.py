@@ -46,6 +46,7 @@ def run_retained_point_worker(
     ledger: ComponentLedger, clients: dict[str, EngineClient], max_rows: int,
     progress_cb: ProgressCallback | None = None,
     qualify_claim: Callable[[], None] | None = None,
+    before_model_embed: Callable[[str], None] | None = None,
 ) -> TaskRecord:
     """Apply retained targets, then qualify and acknowledge only their whole claim.
 
@@ -85,6 +86,7 @@ def run_retained_point_worker(
                 manifest, scope=scope, family=claim.hints.canonical_family,
                 max_rows=max_rows, config=config, paths=paths, store=store,
                 clients=clients, point_claim=claim, progress_cb=progress_cb,
+                before_model_embed=before_model_embed,
             )
             if qualify_claim:
                 qualify_claim()

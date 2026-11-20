@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-20 - Local transport and complete rendezvous planning](journal/2026/11.20-local-transport-and-rendezvous-planning.md)
+
 - [2026-11-20 - Shared context and registry-default receiving](journal/2026/11.20-shared-context-and-registry-default-receiving.md)
 
 - [2026-11-20 - Windows attribution and retained-transition receiving](journal/2026/11.20-path-attribution-and-retained-transitions.md)

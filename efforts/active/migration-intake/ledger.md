@@ -1132,3 +1132,22 @@ generic ACK, native run, credential/service action or resource transfer is
 supplied. The [complete source crosswalk](../backlog-reconciliation/journal/2026/11.20-shared-context-and-registry-default-receiving.md)
 also retains actual #13680 delivery, the two independent tracking retirements,
 the 884-open census and all existing owners/holds.
+
+## Proposed local transport and complete rendezvous planning - 2026-11-20 UTC
+
+| Source | Disposition | Primary canonical owner | Retained gates |
+|---|---|---|---|
+| #54 native-first local service transport, including its received #4040 policy choice | routed (proposed; effective after actual reviewed complete domain-plan acceptance) | Existing #54 transport authority through [Local Service Transport](../local-service-transport/README.md), P54-H/P54-D/P54-V/P54-Docs/P4040 and G54/G4040/GSkew/GCustody | Native endpoint default OR justified dynamic-loopback/rendezvous fallback, trusted opt-in boundary tunnel, actual clients/standalone reach and truthful architecture; exclusive Bridge loopback versus explicit-wider policy stays unresolved for its existing owners; #54 remains OPEN |
+| #5904 complete endpoint cleanup and already-received #5903 tolerant discovery | routed (proposed; effective after actual reviewed complete domain-plan acceptance) | Same Local Service Transport P5904-Read/P5904-Clean/P5904-Copies with P-Skew and G5904/GSkew/GCustody; existing reader/cleanup owners unchanged | Actual same-publication mutation authority, credited common lock/PID guard, PRESENT unknown ownership versus genuine absence, shape-safe/fail-closed readers and all affected copies/callers; independent #5904 tracking remains OPEN |
+
+This is one direct planning home, not a new issue, service, implementation
+reservation or domain-owner replacement. Complete Goal/Request,
+Participants/Coordination, Plan, actual global Validation and dated Journal
+must land through normal review; this ledger alone is not acceptance.
+All fourteen technical rows remain unchecked. Neither source retirement nor
+claimant handback is proposed. #5716, #5791 and #4183 keep their actual
+separate pipe-lifetime, account and duplex-transport owners/conditions.
+The [whole-source crosswalk](../backlog-reconciliation/journal/2026/11.20-local-transport-and-rendezvous-planning.md)
+also retains actual #13690 delivery, the independent #12042 tracking outcome
+and the complete 884-open census. No product, native, endpoint, credential,
+configuration, cleanup, source/resource or rollout effect follows.

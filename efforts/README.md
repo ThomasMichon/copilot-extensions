@@ -37,6 +37,7 @@ new behavior, nor permission to resume held implementation or deployment.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Local Service Transport](active/local-service-transport/README.md) | Draft; native-first transport and independent complete rendezvous parser/cleanup plan | #54 and #5904 remain OPEN; preserves #4040's unresolved Bridge policy and all existing component/custody owners; no implementation or rollout |
 | [Shared Repository Context](active/shared-repository-context/README.md) | Draft; versioned in-process reader and complete registry-default receiving proposed before implementation | #12920 remains OPEN; preserves #12042/#12681 native-default and #12900 cache owners, Worktrees writes/cell authority; no rollout |
 | [Consumer Telemetry Sink Adoption](active/consumer-telemetry-sink-adoption/README.md) | Draft; command-only configuration, bounded delivery, real producer adoption and release sequence | #13545; preserves #7935/#5900 and producer custody; HTTP and adopter rollout remain separate |
 | [Windows Machine-Protected Cache](active/windows-machine-cache/README.md) | Active; source #13022 merged, native release qualification and promotion pending | #13009; preserves user-cache custody, Vault service and installer owners; no live migration or rollout |

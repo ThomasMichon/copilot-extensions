@@ -177,7 +177,8 @@ def test_http_superseded_claim_completes_and_retries_without_body_or_native_work
         WorkItemRevisionTarget("7", 2, ("older-second",)),
         CommentVersionTarget("7", "5", 1, ("older-comment",)),
     ))
-    app, clients = runtime._point_service_app(f, monkeypatch)
+    model_events: list[tuple[str, str]] = []
+    app, clients = runtime._point_service_app(f, monkeypatch, model_events=model_events)
 
     async def exercise() -> None:
         async with app.router.lifespan_context(app):
@@ -214,8 +215,16 @@ def test_http_superseded_claim_completes_and_retries_without_body_or_native_work
                     "indexing_contract"
                 ]["execution_versions"]
         assert clients == ["open", "closed"] and f.connector._http.client.is_closed
+        assert sorted(model_events) == [("close", "first"), ("close", "second")]
         await asyncio.to_thread(f.reopen)
         f.provider.selected = False
+        retry_lifetime: list[str] = []
+        retry_events: list[tuple[str, str]] = []
+        async with runtime._owned_executor_context(f, retry_lifetime, retry_events) as execute:
+            assert await asyncio.to_thread(execute, completed) == completed
+            assert retry_events == []
+        assert retry_lifetime == ["open", "closed"]
+        assert sorted(retry_events) == [("close", "first"), ("close", "second")]
         assert await asyncio.to_thread(
             runtime.run, f, completed, expected_hints=hints, clients={},
         ) == completed
