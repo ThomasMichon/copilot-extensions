@@ -95,3 +95,16 @@ def test_cli_separates_complete_incomplete_and_invalid_plans(
     assert main(args) == 1
     invalid = capsys.readouterr()
     assert not invalid.out and "indeterminate" in invalid.err
+
+
+def test_linked_overlay_must_resolve(roots: tuple[Path, Path]) -> None:
+    target, source = roots
+    overlay = target / ".github/copilot/settings.local.json"
+    backing = target / "overlay.json"
+    overlay.symlink_to(backing)
+    with pytest.raises(ValueError, match="dangling link"):
+        plan(target, source, gate_paths=(), machines=())
+    write(backing, {"enabledPlugins": {"agent-utility@copilot-extensions": False}})
+    result = plan(target, source, gate_paths=(), machines=(), index_role="client", vault_state="configured")
+    assert result["complete"] is True
+    assert result["required"] == ["worktree-manager", "agent-index", "agent-service", "agent-vault"]

@@ -82,7 +82,14 @@ def plan(
         None, "configured", "configuration-empty",
     ):
         raise ValueError("Invalid app policy observation")
-    settings = _read_settings(_directory(worktree), SETTINGS_RELS)
+    target = _directory(worktree)
+    for parts in SETTINGS_RELS:
+        entry = target
+        for part in parts:
+            entry = entry / part
+            if entry.is_symlink() and not entry.exists():
+                raise ValueError(f"Indeterminate plugin settings: dangling link at {entry}")
+    settings = _read_settings(target, SETTINGS_RELS)
     if settings.authority is ScanAuthority.INDETERMINATE:
         raise ValueError("Effective worktree plugin settings are indeterminate")
     market = load_marketplace(_directory(source))
