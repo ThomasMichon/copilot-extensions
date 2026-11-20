@@ -5870,9 +5870,18 @@
         "tools/promotion_unit_tests/test_point_completion_contract.py::test_retained_worker_qualification_failure_never_acknowledges[2]",
         "tools/promotion_unit_tests/test_point_completion_contract.py::test_retained_worker_qualification_failure_never_acknowledges[3]",
         "tools/promotion_unit_tests/test_point_completion_contract.py::test_retained_worker_publishes_before_whole_completion_and_never_reapplies_success",
-        "tools/promotion_unit_tests/test_point_completion_contract.py::test_retained_worker_propagates_uncertain_application_without_false_completion"
+        "tools/promotion_unit_tests/test_point_completion_contract.py::test_retained_worker_propagates_uncertain_application_without_false_completion",
+        "tools/promotion_unit_tests/test_point_executor_context.py::test_executor_opens_inertly_and_stops_only_started_engines[False]",
+        "tools/promotion_unit_tests/test_point_executor_context.py::test_executor_opens_inertly_and_stops_only_started_engines[True]",
+        "tools/promotion_unit_tests/test_point_executor_context.py::test_executor_readiness_failure_preserves_owned_engine_cleanup",
+        "tools/promotion_unit_tests/test_point_executor_context.py::test_executor_partial_construction_releases_only_owned_resources[budget]",
+        "tools/promotion_unit_tests/test_point_executor_context.py::test_executor_partial_construction_releases_only_owned_resources[binding]",
+        "tools/promotion_unit_tests/test_point_executor_context.py::test_executor_partial_construction_releases_only_owned_resources[borrowed]",
+        "tools/promotion_unit_tests/test_point_executor_context.py::test_executor_partial_construction_releases_only_owned_resources[second-client]"
     ],
     "coverage_targets": [
+        "plugins/agent-index/src/agent_index/sources/azure_devops_point_executor.py",
+        "plugins/agent-index/src/agent_index/indexing/embedding_runtime.py",
         "libs/update-driver/src/update_driver/boot.py",
         "plugins/agent-index/src/agent_index/indexing/point_worker.py",
         "plugins/agent-index/src/agent_index/indexing/point_completion.py",
@@ -6279,9 +6288,12 @@
         "plugins/agent-pull-requests/src/agent_pull_requests/watch_windows_sealing.py"
     ],
     "sources": {
+        "plugins/agent-index/src/agent_index/sources/azure_devops_point_executor.py": "cd5f4841fd6b1f3a6d81d55484564b256901fe0082dc674a242f2e22b3a3cce0",
+        "plugins/agent-index/src/agent_index/indexing/embedding_runtime.py": "549224017c93c0413ed8a2f475f441fe3d2a2537d35e7c615acf53e40779483e",
+        "tools/promotion_unit_tests/test_point_executor_context.py": "9c82793173c0346c05b8ce579f503d35574266223d036914cf7647f0ccf63626",
         "tools/promotion_unit_tests/test_point_capacity_contract.py": "5969230a1677996af3dc5b9172e60dbdba17d895f97cfbe135500e8bbe4ccaae",
         "tools/promotion_unit_tests/test_point_completion_contract.py": "a6ccb6cf2fc76b2a83c8a6e35b1f370be4c619f413b18b873479eacc29a03a17",
-        "plugins/agent-index/src/agent_index/indexing/point_worker.py": "ff8f10891dc4217112b5c45e27419c8ce48722bb193f08ef8b2809910b62e9e4",
+        "plugins/agent-index/src/agent_index/indexing/point_worker.py": "bcde0f1c3e8b1e1c7330d6e72358ece09806511bdbfd96d8e546ec7975705317",
         "plugins/agent-index/src/agent_index/indexing/point_completion.py": "c15c00e5747f467ca409c01641602153e6c3a55aef1ecf12d83e6af0cde0754d",
         "plugins/agent-index/src/agent_index/indexing/point_claim.py": "02cbe2ac90f35fbe6edaec731f8995bab47c73d79ac36c23bc7433c62262c90c",
         "plugins/agent-index/src/agent_index/store/file_projection.py": "8ad033d3e78f58cb701f9e7befd572683475c025e434e82e9c27ad16185c6d50",

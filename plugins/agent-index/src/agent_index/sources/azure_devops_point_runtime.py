@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -26,11 +27,25 @@ if TYPE_CHECKING:
     from agent_index.sources.azure_devops import AzureDevOpsConnector
 
 
+def _require_connector_binding(
+    connector: AzureDevOpsConnector, point_scope: PointScope,
+) -> None:
+    if (
+        point_scope[1] != connector.source_name + ":workitem-components"
+        or point_scope[3].endpoint != nonsecret_target(
+            str(connector._http.client.base_url).rstrip("/"),
+        )
+        or point_scope[3].query_scope != json.dumps(connector._work_item_queries, sort_keys=True)
+    ):
+        raise ValueError("Point runtime connector differs from its configured binding")
+
+
 def run_configured_azure_devops_points(
     connector: AzureDevOpsConnector, task_id: str, *, expected_hints: PointChangeHints,
     config: IndexConfig, legacy_data_dir: Path, point_scope: PointScope, scope: str,
     clients: dict[str, EngineClient], max_rows: int,
     progress_cb: ProgressCallback | None = None,
+    before_model_embed: Callable[[str], None] | None = None,
 ) -> TaskRecord:
     """Select existing isolated owners, pin one exact snapshot and execute it.
 
@@ -46,14 +61,7 @@ def run_configured_azure_devops_points(
     ):
         raise ValueError("Point runtime requires its complete configured scope and row budget")
     require_point_isolation(config, legacy_data_dir)
-    if (
-        point_scope[1] != connector.source_name + ":workitem-components"
-        or point_scope[3].endpoint != nonsecret_target(
-            str(connector._http.client.base_url).rstrip("/"),
-        )
-        or point_scope[3].query_scope != json.dumps(connector._work_item_queries, sort_keys=True)
-    ):
-        raise ValueError("Point runtime connector differs from its configured binding")
+    _require_connector_binding(connector, point_scope)
     cancel_check = progress_cb.check_cancelled if progress_cb is not None else None
     with source_writer(config.data_dir, cancel_check=cancel_check):
         store = MultiModelStore(
@@ -86,4 +94,5 @@ def run_configured_azure_devops_points(
         return run_azure_devops_point_worker(
             connector, claim, scope=scope, paths=paths, tasks=tasks, ledger=ledger,
             clients=clients, max_rows=max_rows, progress_cb=progress_cb,
+            before_model_embed=before_model_embed,
         )
