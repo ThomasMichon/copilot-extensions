@@ -1114,3 +1114,21 @@ tracking. No new issue, executor, generic ACK, unrelated whole-parent gate,
 runtime/observer change, native test, migration or source/resource transfer
 follows. The [complete source crosswalk](../backlog-reconciliation/journal/2026/11.20-path-attribution-and-retained-transitions.md)
 retains evidence tiers, prior outcomes and current ownership.
+
+## Proposed shared-context and registry-default receiving - 2026-11-20 UTC
+
+| Source | Disposition | Primary canonical owner | Retained gates |
+|---|---|---|---|
+| #12920 versioned in-process repository-context core | routed (proposed; effective after actual reviewed complete domain acceptance) | Existing configuration-layer/read authority through the new [Shared Repository Context](../shared-repository-context/README.md) S1-S7/G12920/GSkew/GCustody plan | #12920 remains OPEN as the canonical whole tracker; provider-first schema/read core, Worktrees adapters and exclusive write/cell authority, identical promoted vendors and actual consumer/skew/rollback acceptance remain unfinished |
+| #12042 registry-derived machine-default Vault owner | routed (proposed; effective after actual reviewed complete domain acceptance) | Same Shared Repository Context P12042/V12042/actual G12042, coordinated with existing Vault native-default claimant | Whole original and both refinements retained: registry graft, precedence, validated default root, CLI AND daemon Linux/Windows neutral/service/minimal-PATH behavior, parity and actionable distinct fail-fast absence; #12681 explicit native-default credit and existing cwd/cache/database/service custody remain |
+
+Normal review must deliver the complete canonical Goal/Request,
+Participants/Coordination, Plan, actual global Validation and dated Journal
+before these proposed routes become accepted. Every technical row remains
+unchecked. Current applicable whole original/receiver/custody readback and a
+separate source judgment remain necessary; #12042 stays OPEN during proposal
+and #12920 remains the whole tracker. No new issue, source implementer,
+generic ACK, native run, credential/service action or resource transfer is
+supplied. The [complete source crosswalk](../backlog-reconciliation/journal/2026/11.20-shared-context-and-registry-default-receiving.md)
+also retains actual #13680 delivery, the two independent tracking retirements,
+the 884-open census and all existing owners/holds.
