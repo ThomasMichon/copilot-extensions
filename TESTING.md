@@ -7770,6 +7770,11 @@ legacy/point overlap refuses before opening clients rather than falling back.
 These cases do not start a detached child, enlarge required unit CI, qualify a
 live-provider/cross-generation cutover, or enable ordinary v2 advertisement.
 
+The blocked-selection governance control changes the runner's policy to
+backoff while selection is off-loop. The final admission callback leaves the
+entire task unchanged without provider or executor work; returning to ready
+uses the existing runner wakeup rather than resetting point failure state.
+
 The exclusive attachment-export consumer packet executes the real export
 entrypoint, health-selected command transport, extension registry, provider
 dispatch and descriptor-pinned writer with an in-memory filesystem and

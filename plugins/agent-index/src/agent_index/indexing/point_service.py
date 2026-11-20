@@ -98,7 +98,7 @@ class PointService:
         self._failed = False
         self._admitted = True
 
-    async def run_pending(self) -> int:
+    async def run_pending(self, *, admit: Callable[[], bool] | None = None) -> int:
         consumer = self._consumer
         if consumer is None or self._stopped or self._draining or not self._admitted:
             return 0
@@ -106,7 +106,7 @@ class PointService:
         try:
             if consumer.paused:
                 await consumer.resume()
-            return await consumer.run_pending(max_tasks=1)
+            return await consumer.run_pending(max_tasks=1, admit=admit)
         except BaseException as exc:
             self._admitted = False
             self._failed = True

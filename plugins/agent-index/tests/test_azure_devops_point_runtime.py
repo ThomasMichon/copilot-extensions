@@ -166,6 +166,57 @@ def test_service_promotes_inert_binding_and_routes_only_exact_point_intake(
     asyncio.run(exercise())
 
 
+def test_service_rechecks_governance_after_blocked_point_selection(
+    application: worker.Fixture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    f = application
+    app, lifetime = _point_service_app(f, monkeypatch)
+    entered, release = threading.Event(), threading.Event()
+    select = TaskStore.next_point_task
+    original = f.tasks.get_task(f.claim.task_id)
+    governance = {"status": "ready"}
+
+    def blocked_select(self: TaskStore, **kwargs: Any) -> TaskRecord | None:
+        selected = select(self, **kwargs)
+        if self.data_dir == f.config.data_dir and not entered.is_set():
+            entered.set()
+            assert release.wait(timeout=8)
+        return selected
+
+    monkeypatch.setattr(TaskStore, "next_point_task", blocked_select)
+
+    async def exercise() -> None:
+        async with app.router.lifespan_context(app):
+            runner = app.state.task_runner
+            runner.set_governance_recheck_fn(lambda checkpoint: {
+                **governance, "checkpoint": checkpoint,
+            })
+            await runner.point_service.activate()
+            runner.notify()
+            try:
+                assert await asyncio.to_thread(entered.wait, 5)
+                governance["status"] = "backoff"
+                release.set()
+                await _wait_point_state(lambda: bool(
+                    (state := runner.status()["governance"])
+                    and state["checkpoint"] == "pre-mutation:point-launch"
+                ))
+                assert f.tasks.get_task(f.claim.task_id) == original
+                assert not f.provider.requests and not f.calls
+                assert not runner.point_service.status()["failed"] and lifetime == ["open"]
+                governance["status"] = "ready"
+                runner.notify()
+                await _wait_point_state(lambda: bool(
+                    (task := f.tasks.get_task(f.claim.task_id))
+                    and task.status == TaskStatus.COMPLETE
+                ))
+            finally:
+                release.set()
+        assert lifetime == ["open", "closed"]
+
+    asyncio.run(exercise())
+
+
 def test_service_failure_stays_paused_across_wake_and_drain_rollback(
     application: worker.Fixture, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

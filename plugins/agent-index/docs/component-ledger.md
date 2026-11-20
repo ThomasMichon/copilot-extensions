@@ -507,7 +507,9 @@ be followed by a late dispatch. The dispatcher checks the current whole scope
 again before invoking the bound executor. Its existing snapshot comparison,
 runtime pinning, source writer and completion verification remain authoritative;
 later arrivals never mutate an existing pin. Legacy/v1 tasks, other scopes and
-terminal rows are not selected.
+terminal rows are not selected. An optional in-process `admit` callback runs
+after selection, immediately before dispatch; false leaves the task parked
+without treating the policy refusal as a failed claim.
 
 A nonzero dispatch result raises with its task ID and exit code and pauses
 consumption. Any exception or cancellation also pauses it; repeated scheduling
@@ -562,7 +564,9 @@ execution declaration, selector or activation endpoint.
 
 There is no second scheduler, timer or child process. The existing governed
 `TaskRunner` iteration executes at most one point claim before its legacy queue
-turn, and never starts point work alongside an adopted detached worker. A
+turn, and never starts point work alongside an adopted detached worker.
+Governance is checked again after off-loop selection, immediately before
+dispatch, so a newly active maintenance hold cannot admit selected work. A
 failure pauses point dispatch, records `indexing.point.failed` in `/status`,
 and leaves legacy scheduling available. Repeated wakes and `/undrain` do not
 clear that failure. `indexing.running` includes an active point batch; the

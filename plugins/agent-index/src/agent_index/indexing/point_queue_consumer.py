@@ -71,7 +71,9 @@ class PointQueueConsumer:
         if not self._entered or self._stopped:
             raise RuntimeError("Point queue consumer is not accepting work")
 
-    async def run_pending(self, *, max_tasks: int = 1) -> int:
+    async def run_pending(
+        self, *, max_tasks: int = 1, admit: Callable[[], bool] | None = None,
+    ) -> int:
         """Complete at most max_tasks claims; raise and pause on any failure."""
         self._require_open()
         if type(max_tasks) is not int or max_tasks < 1:
@@ -88,6 +90,8 @@ class PointQueueConsumer:
                     self._tasks.next_point_task, point_scope=self._scope,
                 )
                 if task is None or self._paused or self._stopped:
+                    break
+                if admit is not None and not admit():
                     break
                 result = await self._host.run(task.id)
                 if result != 0:

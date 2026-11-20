@@ -575,6 +575,12 @@ class TaskRunner:
             and self._hint_worker_refusal != self._selected_worker_generation()
         )
 
+    def _can_dispatch_point(self) -> bool:
+        if self._shutdown or self._paused:
+            return False
+        boundary = self._recheck_governance("pre-mutation:point-launch")
+        return boundary is None or boundary.get("status") == "ready"
+
     async def _worker_loop(self) -> None:
         log.info("Worker loop started")
         # Small initial delay to let the service fully start
@@ -610,7 +616,7 @@ class TaskRunner:
             before_point = self._recheck_governance("pre-mutation:point-dispatch")
             if before_point is not None and before_point.get("status") != "ready":
                 return _GOVERNANCE_BACKOFF_SECONDS
-            point_completed = await self.point_service.run_pending()
+            point_completed = await self.point_service.run_pending(admit=self._can_dispatch_point)
         if self._shutdown or self._paused:
             return None
 
