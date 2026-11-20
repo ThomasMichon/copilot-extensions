@@ -5,16 +5,25 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
+import shutil
+from collections.abc import Iterable
 from pathlib import Path
+from typing import Any
 
 import pytest
 
+from agent_machines import discover
 from agent_machines import resources as R
 from agent_machines import scheduled_job_tasks as tasks
 from agent_machines import scheduled_jobs as jobs
-from agent_machines.manifest import ManifestError, load_package
-from agent_machines.resources import ResourceContext, RunOutcome, apply_resources
+from agent_machines.manifest import ManifestError, RequirementPackage, load_package
+from agent_machines.resources import (
+    ResourceContext,
+    ResourceResult,
+    Runner,
+    RunOutcome,
+    apply_resources,
+)
 from agent_machines.self_update_types import TIMEOUT_RETURNCODE, CommandResult
 
 from ._helpers import base_package, write_package
@@ -28,19 +37,25 @@ JOB = {
 APP = {"type": "package", "id": "harness-tools", "manager": "uv-tool"}
 
 
-def _apply(packages, machine, plat, ctx, dry_run):
+def _apply(
+    packages: list[RequirementPackage],
+    machine: str,
+    plat: str,
+    ctx: ResourceContext,
+    dry_run: bool,
+) -> list[ResourceResult]:
     return apply_resources(
         packages, machine, plat, ctx, dry_run=dry_run, resource_types=frozenset({"scheduled-job"})
     )
 
 
-def _pkg(tmp_path: Path, name: str, resources: list[dict]):
+def _pkg(tmp_path: Path, name: str, resources: list[dict[str, Any]]) -> RequirementPackage:
     data = base_package(name=name, resources=resources)
     path = write_package(tmp_path / name.replace("/", "_"), "pkg.yaml", data)
     return load_package(path, source_repo=name.split("/")[0])
 
 
-def _ctx(tmp_path: Path, runner=None, plat: str = "windows") -> ResourceContext:
+def _ctx(tmp_path: Path, runner: Runner | None = None, plat: str = "windows") -> ResourceContext:
     return ResourceContext(
         home=tmp_path,
         repo_paths={"acme": tmp_path},
@@ -52,24 +67,32 @@ def _ctx(tmp_path: Path, runner=None, plat: str = "windows") -> ResourceContext:
 class FakeBackend:
     """Replaces the OS task backend; ``registered`` maps id -> (interval, timeout)."""
 
-    def __init__(self, monkeypatch, registered=None):
+    def __init__(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        registered: dict[str, tuple[int, int]] | None = None,
+    ) -> None:
         self.registered = dict(registered or {})
-        self.calls: list[tuple] = []
+        self.calls: list[tuple[Any, ...]] = []
         monkeypatch.setattr(tasks, "unsupported_reason", lambda *a, **k: None)
         monkeypatch.setattr(tasks, "query", self.query)
         monkeypatch.setattr(tasks, "register", self.register)
         monkeypatch.setattr(tasks, "unregister", self.unregister)
 
-    def query(self, platform, job_id, interval, timeout, **_):
+    def query(
+        self, platform: str, job_id: str, interval: int, timeout: int, **_: Any
+    ) -> tasks.TaskState:
         live = self.registered.get(job_id)
         return tasks.TaskState(live is not None, live == (interval, timeout))
 
-    def register(self, platform, job_id, interval, timeout, **_):
+    def register(
+        self, platform: str, job_id: str, interval: int, timeout: int, **_: Any
+    ) -> CommandResult:
         self.calls.append(("register", job_id, interval, timeout))
         self.registered[job_id] = (interval, timeout)
         return CommandResult([], 0, "", "")
 
-    def unregister(self, platform, job_id, **kw):
+    def unregister(self, platform: str, job_id: str, **kw: Any) -> CommandResult:
         self.calls.append(("unregister", job_id, kw.get("stop", True)))
         self.registered.pop(job_id, None)
         return CommandResult([], 0, "", "")
@@ -78,7 +101,7 @@ class FakeBackend:
 # --------------------------------------------------------------------------- #
 # Schema
 # --------------------------------------------------------------------------- #
-def test_valid_present_and_id_only_absent_declarations_load(tmp_path):
+def test_valid_present_and_id_only_absent_declarations_load(tmp_path: Path) -> None:
     pkg = _pkg(
         tmp_path, "acme/a", [JOB, {"type": "scheduled-job", "id": "old-job", "state": "absent"}]
     )
@@ -101,7 +124,9 @@ def test_valid_present_and_id_only_absent_declarations_load(tmp_path):
         {"unknown": 1},
     ],
 )
-def test_invalid_scheduled_job_declarations_are_rejected(tmp_path, change):
+def test_invalid_scheduled_job_declarations_are_rejected(
+    tmp_path: Path, change: dict[str, Any]
+) -> None:
     decl = {k: v for k, v in {**JOB, **change}.items() if v is not None}
     with pytest.raises(ManifestError):
         _pkg(tmp_path, "acme/a", [decl])
@@ -113,8 +138,8 @@ def test_invalid_scheduled_job_declarations_are_rejected(tmp_path, change):
     ids=["undeclared", "absent", "unsupported-manager"],
 )
 def test_job_whose_application_is_not_a_declared_tool_package_is_unbound(
-    tmp_path, monkeypatch, app
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, app: dict[str, Any] | None
+) -> None:
     backend = FakeBackend(monkeypatch)
     pkg = _pkg(tmp_path, "acme/a", [JOB] if app is None else [app, JOB])
 
@@ -125,7 +150,7 @@ def test_job_whose_application_is_not_a_declared_tool_package_is_unbound(
     assert [r.action for r in results] == ["error"] and backend.calls == []
 
 
-def test_job_binds_to_its_declared_tool_package(tmp_path):
+def test_job_binds_to_its_declared_tool_package(tmp_path: Path) -> None:
     resolved, findings = R.resolve_resources(
         [_pkg(tmp_path, "acme/a", [APP, JOB])], "box-1", "windows"
     )
@@ -137,7 +162,9 @@ def test_job_binds_to_its_declared_tool_package(tmp_path):
 # --------------------------------------------------------------------------- #
 # Handler convergence
 # --------------------------------------------------------------------------- #
-def test_present_job_registers_then_is_idempotent_and_owned(tmp_path, monkeypatch):
+def test_present_job_registers_then_is_idempotent_and_owned(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     backend = FakeBackend(monkeypatch)
     pkg = _pkg(tmp_path, "acme/a", [APP, JOB])
 
@@ -155,7 +182,7 @@ def test_present_job_registers_then_is_idempotent_and_owned(tmp_path, monkeypatc
     assert len(backend.calls) == 1
 
 
-def test_changed_interval_reregisters(tmp_path, monkeypatch):
+def test_changed_interval_reregisters(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     backend = FakeBackend(monkeypatch, {"hub-health": (7200, 900)})
     results = _apply(
         [_pkg(tmp_path, "acme/a", [APP, JOB])], "box-1", "windows", _ctx(tmp_path), dry_run=False
@@ -164,7 +191,7 @@ def test_changed_interval_reregisters(tmp_path, monkeypatch):
     assert backend.registered["hub-health"] == (3600, 900)
 
 
-def test_absent_declaration_unregisters(tmp_path, monkeypatch):
+def test_absent_declaration_unregisters(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     backend = FakeBackend(monkeypatch, {"hub-health": (3600, 900)})
     pkg = _pkg(
         tmp_path, "acme/a", [{"type": "scheduled-job", "id": "hub-health", "state": "absent"}]
@@ -174,7 +201,9 @@ def test_absent_declaration_unregisters(tmp_path, monkeypatch):
     assert backend.calls == [("unregister", "hub-health", True)]
 
 
-def test_withdrawn_declaration_is_swept_but_out_of_scope_owner_is_kept(tmp_path, monkeypatch):
+def test_withdrawn_declaration_is_swept_but_out_of_scope_owner_is_kept(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     backend = FakeBackend(monkeypatch, {"hub-health": (3600, 900), "repo-sync": (3600, 900)})
     pkg = _pkg(tmp_path, "acme/a", [])  # still in scope, no longer declares hub-health
     other = _pkg(tmp_path, "acme/b", [])  # exists on disk but not passed in scope
@@ -188,14 +217,18 @@ def test_withdrawn_declaration_is_swept_but_out_of_scope_owner_is_kept(tmp_path,
     assert "repo-sync" in backend.registered
 
 
-def test_owned_job_whose_declaring_file_is_gone_is_swept(tmp_path, monkeypatch):
+def test_owned_job_whose_declaring_file_is_gone_is_swept(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     FakeBackend(monkeypatch, {"hub-health": (3600, 900)})
     jobs.record_owned(tmp_path, "hub-health", [str(tmp_path / "deleted" / "pkg.yaml")])
     results = _apply([], "box-1", "windows", _ctx(tmp_path), dry_run=False)
     assert [(r.id, r.action) for r in results] == [("hub-health", "uninstall")]
 
 
-def test_owned_job_from_an_unreachable_repo_is_not_swept(tmp_path, monkeypatch):
+def test_owned_job_from_an_unreachable_repo_is_not_swept(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     backend = FakeBackend(monkeypatch, {"hub-health": (3600, 900)})
     unreachable = tmp_path.parent / f"{tmp_path.name}-unmounted" / "pkg.yaml"
     jobs.record_owned(tmp_path, "hub-health", [str(unreachable)])
@@ -203,7 +236,7 @@ def test_owned_job_from_an_unreachable_repo_is_not_swept(tmp_path, monkeypatch):
     assert "hub-health" in backend.registered and "hub-health" in jobs.read_owned(tmp_path)
 
 
-def test_unsupported_platform_is_skipped(tmp_path, monkeypatch):
+def test_unsupported_platform_is_skipped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     FakeBackend(monkeypatch)
     monkeypatch.setattr(tasks, "unsupported_reason", lambda *a, **k: "no systemd")
     results = _apply(
@@ -224,7 +257,7 @@ def test_unsupported_platform_is_skipped(tmp_path, monkeypatch):
         ("x", (3600, "declared")),
     ],
 )
-def test_interval_override_is_clamped(tmp_path, override, expected):
+def test_interval_override_is_clamped(tmp_path: Path, override: object, expected: Any) -> None:
     root = jobs.jobs_root(tmp_path)
     root.mkdir(parents=True)
     (root / "overrides.json").write_text(
@@ -254,10 +287,10 @@ def _install(tmp_path: Path, name: str) -> Path:
 
 @pytest.mark.parametrize("tomllib_available", [True, False])
 def test_run_resolves_entrypoint_from_uv_receipt_not_path(
-    tmp_path, monkeypatch, tomllib_available
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tomllib_available: bool
+) -> None:
     if not tomllib_available:
-        monkeypatch.setitem(sys.modules, "tomllib", None)
+        monkeypatch.setattr(jobs, "_receipt_entries", jobs._receipt_entries_fallback)
     entry, other = _install(tmp_path, "hub-health.exe"), _install(tmp_path, "repo-sync.exe")
     tool_dir = tmp_path / "tools"
     (tool_dir / "harness-tools").mkdir(parents=True)
@@ -268,9 +301,11 @@ def test_run_resolves_entrypoint_from_uv_receipt_not_path(
         encoding="utf-8",
     )
     monkeypatch.setenv("PATH", str(tmp_path / "elsewhere"))
-    seen = []
+    seen: list[list[str]] = []
 
-    def runner(argv, *, cwd=None, timeout=None):
+    def runner(
+        argv: list[str], *, cwd: Path | None = None, timeout: int | None = None
+    ) -> CommandResult:
         seen.append(argv)
         out = f"{tool_dir}\n" if argv == ["uv", "tool", "dir"] else ""
         return CommandResult(argv, 0, out, "")
@@ -279,18 +314,20 @@ def test_run_resolves_entrypoint_from_uv_receipt_not_path(
     assert seen == [["uv", "tool", "dir"], [str(entry), "--quiet"]]
 
 
-def test_run_resolves_entrypoint_from_pipx_metadata(tmp_path):
+def test_run_resolves_entrypoint_from_pipx_metadata(tmp_path: Path) -> None:
     entry = _install(tmp_path, "hub-health")
-    listing = {
+    listing: dict[str, Any] = {
         "venvs": {
             "harness-tools": {
                 "metadata": {"main_package": {"app_paths": [{"__Path__": str(entry)}]}}
             }
         }
     }
-    seen = []
+    seen: list[list[str]] = []
 
-    def runner(argv, *, cwd=None, timeout=None):
+    def runner(
+        argv: list[str], *, cwd: Path | None = None, timeout: int | None = None
+    ) -> CommandResult:
         seen.append(argv)
         out = json.dumps(listing) if argv[0] == "pipx" else ""
         return CommandResult(argv, 0, out, "")
@@ -300,11 +337,15 @@ def test_run_resolves_entrypoint_from_pipx_metadata(tmp_path):
     assert seen[-1] == [str(entry), "--quiet"]
 
 
-def test_run_refuses_entrypoint_the_application_does_not_provide(tmp_path):
-    listing = {"venvs": {"harness-tools": {"metadata": {"main_package": {"app_paths": []}}}}}
-    seen = []
+def test_run_refuses_entrypoint_the_application_does_not_provide(tmp_path: Path) -> None:
+    listing: dict[str, Any] = {
+        "venvs": {"harness-tools": {"metadata": {"main_package": {"app_paths": []}}}}
+    }
+    seen: list[list[str]] = []
 
-    def runner(argv, *, cwd=None, timeout=None):
+    def runner(
+        argv: list[str], *, cwd: Path | None = None, timeout: int | None = None
+    ) -> CommandResult:
         seen.append(argv)
         return CommandResult(argv, 0, json.dumps(listing), "")
 
@@ -315,13 +356,15 @@ def test_run_refuses_entrypoint_the_application_does_not_provide(tmp_path):
     assert "does not provide entrypoint 'hub-health'" in log
 
 
-def test_run_records_timeout_and_log(tmp_path, monkeypatch):
+def test_run_records_timeout_and_log(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         jobs, "resolve_entrypoint", lambda app, name, runner: ("C:/bin/hub-health.exe", "")
     )
-    seen = []
+    seen: list[tuple[list[str], int | None]] = []
 
-    def runner(argv, *, cwd=None, timeout=None):
+    def runner(
+        argv: list[str], *, cwd: Path | None = None, timeout: int | None = None
+    ) -> CommandResult:
         seen.append((argv, timeout))
         return CommandResult(argv, TIMEOUT_RETURNCODE, "partial", "command timed out after 5s")
 
@@ -332,15 +375,17 @@ def test_run_records_timeout_and_log(tmp_path, monkeypatch):
     assert "partial" in (jobs.jobs_root(tmp_path) / "logs" / "hub-health.log").read_text("utf-8")
 
 
-def test_run_is_noop_while_another_run_holds_the_lock(tmp_path, monkeypatch):
+def test_run_is_noop_while_another_run_holds_the_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     class Held:
-        def try_acquire(self):
+        def try_acquire(self) -> str:
             return "timeout"
 
-        def release(self):
+        def release(self) -> None:
             raise AssertionError("never acquired")
 
-        def close(self):
+        def close(self) -> None:
             pass
 
     monkeypatch.setattr(jobs, "_lock", lambda job_id, home: Held())
@@ -349,30 +394,38 @@ def test_run_is_noop_while_another_run_holds_the_lock(tmp_path, monkeypatch):
     assert jobs.read_state("hub-health", tmp_path) == {}
 
 
-def _cli_run(tmp_path, monkeypatch, *, sources, roots, examined=()):
+def _cli_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    sources: Iterable[Path],
+    roots: list[Path],
+    examined: Iterable[Path] = (),
+) -> tuple[int, list[tuple[str, bool]]]:
     """Run ``cmd_run`` for an undeclared, owned job; return (rc, backend calls)."""
     from agent_machines import cli_scheduled_job as cli
 
-    calls = []
+    calls: list[tuple[str, bool]] = []
     monkeypatch.setattr(jobs, "jobs_root", lambda home=None: tmp_path / "scheduled-jobs")
     jobs.record_owned(None, "hub-health", [str(s) for s in sources])
     monkeypatch.setattr(
         cli, "_declared", lambda args: cli.Resolution({}, {str(p) for p in examined}, roots)
     )
-    monkeypatch.setattr(cli._discover, "current_platform", lambda: "windows")
+    monkeypatch.setattr(discover, "current_platform", lambda: "windows")
     monkeypatch.setattr(tasks, "unsupported_reason", lambda *a, **k: None)
-    monkeypatch.setattr(
-        tasks,
-        "unregister",
-        lambda plat, job_id, **kw: (
-            calls.append((job_id, kw["stop"])) or CommandResult([], 0, "", "")
-        ),
-    )
+
+    def unregister(plat: str, job_id: str, **kw: Any) -> CommandResult:
+        calls.append((job_id, kw["stop"]))
+        return CommandResult([], 0, "", "")
+
+    monkeypatch.setattr(tasks, "unregister", unregister)
     monkeypatch.setattr(jobs, "run_job", lambda *a, **k: pytest.fail("must not run"))
     return cli.cmd_run(argparse.Namespace(id="hub-health", machine=None)), calls
 
 
-def test_run_keeps_timer_when_declaring_repo_is_undiscovered(tmp_path, monkeypatch, capsys):
+def test_run_keeps_timer_when_declaring_repo_is_undiscovered(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     repo = tmp_path / "unmounted-repo"
     rc, calls = _cli_run(tmp_path, monkeypatch, sources=[repo / "pkg.yaml"], roots=[repo])
     assert (rc, calls) == (0, [])
@@ -380,7 +433,9 @@ def test_run_keeps_timer_when_declaring_repo_is_undiscovered(tmp_path, monkeypat
     assert "declaration unavailable; keeping timer" in capsys.readouterr().err
 
 
-def test_run_removes_timer_when_discovered_file_no_longer_declares_it(tmp_path, monkeypatch):
+def test_run_removes_timer_when_discovered_file_no_longer_declares_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     repo = tmp_path / "repo"
     source = write_package(repo, "pkg.yaml", base_package(name="acme/a", resources=[]))
     rc, calls = _cli_run(tmp_path, monkeypatch, sources=[source], roots=[repo], examined=[source])
@@ -388,7 +443,9 @@ def test_run_removes_timer_when_discovered_file_no_longer_declares_it(tmp_path, 
     assert jobs.read_owned() == {}
 
 
-def test_run_removes_timer_when_discovered_file_was_deleted(tmp_path, monkeypatch):
+def test_run_removes_timer_when_discovered_file_was_deleted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     rc, calls = _cli_run(tmp_path, monkeypatch, sources=[repo / "pkg.yaml"], roots=[repo])
@@ -399,10 +456,10 @@ def test_run_removes_timer_when_discovered_file_was_deleted(tmp_path, monkeypatc
 # --------------------------------------------------------------------------- #
 # OS backends
 # --------------------------------------------------------------------------- #
-def test_windows_registration_is_headless_ignore_new_without_catch_up(tmp_path):
-    scripts = []
+def test_windows_registration_is_headless_ignore_new_without_catch_up(tmp_path: Path) -> None:
+    scripts: list[str] = []
 
-    def runner(argv, *, timeout=None):
+    def runner(argv: list[str], *, timeout: int | None = None) -> CommandResult:
         scripts.append(argv[-1])
         return CommandResult(argv, 0, "", "")
 
@@ -422,10 +479,10 @@ def test_windows_registration_is_headless_ignore_new_without_catch_up(tmp_path):
     assert "-RunLevel Limited" in script and "-Seconds 3600" in script
 
 
-def test_linux_units_register_and_match(tmp_path):
-    calls = []
+def test_linux_units_register_and_match(tmp_path: Path) -> None:
+    calls: list[list[str]] = []
 
-    def runner(argv, *, timeout=None):
+    def runner(argv: list[str], *, timeout: int | None = None) -> CommandResult:
         calls.append(argv)
         return CommandResult(argv, 0, "enabled\n" if "is-enabled" in argv else "", "")
 
@@ -464,11 +521,17 @@ def test_linux_units_register_and_match(tmp_path):
         ),
     ],
 )
-def test_sourced_package_installs_from_source(tmp_path, monkeypatch, manager, source, expected):
-    monkeypatch.setattr(R.shutil, "which", lambda b: f"C:/{b}.exe")
-    calls = []
+def test_sourced_package_installs_from_source(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    manager: str,
+    source: dict[str, str],
+    expected: Any,
+) -> None:
+    monkeypatch.setattr(shutil, "which", lambda b: f"C:/{b}.exe")
+    calls: list[list[str]] = []
 
-    def runner(argv):
+    def runner(argv: list[str]) -> RunOutcome:
         calls.append(argv)
         return RunOutcome(0, "", "")
 
@@ -483,6 +546,7 @@ def test_sourced_package_installs_from_source(tmp_path, monkeypatch, manager, so
 
     assert [r.action for r in results] == ["install"]
     if expected is None:
+        assert pkg.source_path is not None
         expected = [
             "uv",
             "tool",
@@ -502,7 +566,9 @@ def test_sourced_package_installs_from_source(tmp_path, monkeypatch, manager, so
         ("uv-tool", {"git": "--upload-pack=x"}),
     ],
 )
-def test_invalid_package_source_is_rejected(tmp_path, manager, source):
+def test_invalid_package_source_is_rejected(
+    tmp_path: Path, manager: str, source: dict[str, str]
+) -> None:
     with pytest.raises(ManifestError):
         _pkg(
             tmp_path,

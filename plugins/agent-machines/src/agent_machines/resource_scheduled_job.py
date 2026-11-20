@@ -15,15 +15,21 @@ from . import scheduled_jobs as jobs
 from .resources import ResourceFinding, ResourceHandler, ResourceResult, _select_field
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from .manifest import RequirementPackage
     from .resources import ResolvedResource, ResourceContext, ResourceContribution
+    from .scheduled_jobs import Runner
+    from .self_update_types import CommandResult
 
 
-def task_runner(ctx: ResourceContext):
+def task_runner(ctx: ResourceContext) -> Runner:
     """Adapt ``ctx.runner`` to the backend's ``runner(argv, timeout=)`` shape."""
     from .self_update_types import CommandResult
 
-    def runner(argv: list[str], *, cwd=None, timeout=None):
+    def runner(
+        argv: list[str], *, cwd: Path | None = None, timeout: int | None = None
+    ) -> CommandResult:
         _ = cwd, timeout
         outcome = ctx.runner(argv)
         return CommandResult(list(argv), outcome.returncode, outcome.stdout, outcome.stderr)
@@ -31,7 +37,26 @@ def task_runner(ctx: ResourceContext):
     return runner
 
 
-def _failure(result) -> str | None:
+def binding_findings(resolved: list[ResolvedResource]) -> list[ResourceFinding]:
+    """Bind each present ``scheduled-job`` to the ``package`` it names."""
+    apps: dict[str, list[str]] = {}
+    for res in resolved:
+        if (
+            res.type == "package"
+            and res.desired.get("manager") in jobs.APP_MANAGERS
+            and res.desired.get("state", "present") != "absent"
+        ):
+            apps.setdefault(res.id, []).append(str(res.desired["manager"]))
+    findings = []
+    for res in resolved:
+        if res.type == "scheduled-job" and res.desired.get("state", "present") != "absent":
+            problem = jobs.bind_application(res.id, res.desired, apps)
+            if problem:
+                findings.append(ResourceFinding("error", "scheduled-job-unbound", problem))
+    return findings
+
+
+def _failure(result: CommandResult) -> str | None:
     return None if result.returncode == 0 else (result.output or f"exit code {result.returncode}")
 
 
@@ -59,14 +84,17 @@ class ScheduledJobResourceHandler(ResourceHandler):
         decisions: list[dict[str, Any]] = []
         for name in self.FIELDS:
             state = desired.get("state")
+
+            def value_of(member: ResourceContribution, name: str = name) -> Any:
+                return member.declaration.get(name, defaults.get(name))
+
+            def include(
+                member: ResourceContribution, name: str = name, state: Any = state
+            ) -> bool:
+                return name == "state" or member.declaration.get("state", "present") == state
+
             value, selected, _, conflict, decision, info = _select_field(
-                members,
-                identity,
-                name,
-                lambda member, name=name: member.declaration.get(name, defaults.get(name)),
-                include=lambda member, name=name, state=state: (
-                    name == "state" or member.declaration.get("state", "present") == state
-                ),
+                members, identity, name, value_of, include=include
             )
             desired[name] = value
             if conflict:
@@ -158,7 +186,7 @@ class ScheduledJobResourceHandler(ResourceHandler):
 
     # ------------------------------------------------------------------ #
     def _result(
-        self, job_id: str, dry_run: bool, action: str, *, changed: bool = False, **kw
+        self, job_id: str, dry_run: bool, action: str, *, changed: bool = False, **kw: Any
     ) -> ResourceResult:
         return ResourceResult(self.TYPE, job_id, changed, dry_run, action, **kw)
 

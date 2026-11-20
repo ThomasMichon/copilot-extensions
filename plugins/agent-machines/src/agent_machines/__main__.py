@@ -389,14 +389,14 @@ def _cmd_installation_repair(args: argparse.Namespace) -> int:
                 confirm_restart=args.confirm_restart,
                 readiness_only=enclosing,
             )
-        result["callerOwnedReadiness"] = enclosing
+        report: dict[str, Any] = {**result, "callerOwnedReadiness": enclosing}
     except (RepairAdmissionError, ValueError) as error:
         print(f"agent-machines: {error}", file=sys.stderr)
         return 1
-    print(json.dumps(result, sort_keys=True))
-    if result["interrupted"]:
+    print(json.dumps(report, sort_keys=True))
+    if report["interrupted"]:
         return 130
-    return 0 if result["status"] in {"discovered", "observed", "ready", "restart-confirmed"} else 2
+    return 0 if report["status"] in {"discovered", "observed", "ready", "restart-confirmed"} else 2
 
 
 def _cmd_installation_configuration(args: argparse.Namespace) -> int:

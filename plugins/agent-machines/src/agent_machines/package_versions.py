@@ -17,7 +17,7 @@ def version_parts(value: Any) -> tuple[int, ...] | None:
     return tuple(int(part) for part in value.split("."))
 
 
-def version_key(value: str) -> tuple[int, ...]:
+def version_key(value: Any) -> tuple[int, ...]:
     parts = version_parts(value)
     if parts is None:
         raise ValueError("package compatibility versions must be dotted numeric strings")
@@ -62,7 +62,7 @@ def conflicts(desired: dict[str, Any]) -> bool:
 
 
 def merge(
-    members: list[ResourceContribution], identity: tuple,
+    members: list[ResourceContribution], identity: tuple[Any, ...],
 ) -> tuple[dict[str, Any], list[ResourceFinding], list[dict[str, Any]]]:
     from . import package_source
     from .resources import ResourceFinding, _select_field
@@ -91,7 +91,7 @@ def merge(
                 "error", "resource-conflict",
                 f"package '{identity[2]}' ({identity[1]}) {description} across packages: {owners}.",
             ))
-        if decision:
+        if decision and info is not None:
             decisions.append(decision)
             findings.append(info)
     pin = any(bool(declaration.get("pin")) for declaration in declarations)

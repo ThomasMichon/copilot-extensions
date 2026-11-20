@@ -55,7 +55,7 @@ def resolve(member: ResourceContribution) -> dict[str, str] | None:
 
 
 def merge(
-    members: list[ResourceContribution], identity: tuple
+    members: list[ResourceContribution], identity: tuple[Any, ...]
 ) -> tuple[dict[str, str] | None, list[ResourceFinding]]:
     from .resources import ResourceFinding
 

@@ -16,11 +16,19 @@ import json
 import os
 import re
 import sys
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, TypeGuard
 
 from .surfaces._common import read_json, write_json_atomic
+
+if TYPE_CHECKING:
+    from .self_update_lock import _PosixFileLock, _WindowsMutex
+    from .self_update_types import CommandResult
+
+    Runner = Callable[..., CommandResult]
+    BinaryResolver = Callable[[str], str | None]
 
 MIN_INTERVAL_SECONDS = 300
 MAX_INTERVAL_SECONDS = 7 * 24 * 3600
@@ -52,7 +60,7 @@ _FIELDS = {
 }
 
 
-def _int(value: Any) -> bool:
+def _int(value: object) -> TypeGuard[int]:
     return isinstance(value, int) and not isinstance(value, bool)
 
 
@@ -202,14 +210,16 @@ def read_state(job_id: str, home: Path | None = None) -> dict[str, Any]:
 # --------------------------------------------------------------------------- #
 # Application binding and running one job
 # --------------------------------------------------------------------------- #
-def bind_application(job_id: str, desired: dict[str, Any], packages: dict[str, list[str]]):
+def bind_application(
+    job_id: str, desired: dict[str, Any], packages: dict[str, list[str]]
+) -> str | None:
     """Bind a present job's ``command.application`` to the declared package.
 
     ``packages`` maps each present ``uv-tool``/``pipx`` package id to its
     managers. Sets ``desired["application"]`` and returns ``None``, or
     returns why the job cannot be bound."""
     name = (desired.get("command") or {}).get("application")
-    managers = packages.get(name, [])
+    managers = packages.get(name, []) if isinstance(name, str) else []
     if len(managers) != 1:
         found = "none is declared present" if not managers else "it is declared under both"
         return (
@@ -220,17 +230,27 @@ def bind_application(job_id: str, desired: dict[str, Any], packages: dict[str, l
     return None
 
 
+def _receipt_entries_fallback(text: str) -> list[Any]:
+    """Python 3.10 has no ``tomllib``: parse the receipt's inline tables."""
+    entries: list[Any] = []
+    for table in re.findall(r"\{([^{}]*)\}", text.partition("entrypoints")[2]):
+        pairs = re.findall(r'([\w-]+)\s*=\s*("(?:[^"\\]|\\.)*"|\'[^\']*\')', table)
+        entries.append({k: json.loads(v) if v[0] == '"' else v[1:-1] for k, v in pairs})
+    return entries
+
+
+def _receipt_entries(text: str) -> list[Any]:
+    if sys.version_info >= (3, 11):
+        import tomllib
+
+        entries: list[Any] = tomllib.loads(text).get("tool", {}).get("entrypoints", [])
+        return entries
+    return _receipt_entries_fallback(text)
+
+
 def _uv_entrypoints(text: str) -> dict[str, str]:
     """``name -> install-path`` from a ``uv-receipt.toml``."""
-    try:
-        import tomllib
-    except ModuleNotFoundError:  # Python 3.10: parse the receipt's inline tables
-        entries = []
-        for table in re.findall(r"\{([^{}]*)\}", text.partition("entrypoints")[2]):
-            pairs = re.findall(r'([\w-]+)\s*=\s*("(?:[^"\\]|\\.)*"|\'[^\']*\')', table)
-            entries.append({k: json.loads(v) if v[0] == '"' else v[1:-1] for k, v in pairs})
-    else:
-        entries = tomllib.loads(text).get("tool", {}).get("entrypoints", [])
+    entries = _receipt_entries(text)
     return {
         str(entry["name"]): str(entry["install-path"])
         for entry in entries
@@ -247,7 +267,7 @@ def _pipx_entrypoints(text: str, name: str) -> dict[str, str]:
 
 
 def resolve_entrypoint(
-    application: dict[str, str], entrypoint: str, runner
+    application: dict[str, str], entrypoint: str, runner: Runner
 ) -> tuple[str | None, str]:
     """The entrypoint's path from the bound package's own install record.
 
@@ -277,7 +297,7 @@ def resolve_entrypoint(
     return path, ""
 
 
-def _lock(job_id: str, home: Path | None):
+def _lock(job_id: str, home: Path | None) -> _WindowsMutex | _PosixFileLock:
     from .self_update_lock import _PosixFileLock, _WindowsMutex
 
     if sys.platform == "win32":
@@ -294,7 +314,9 @@ def _append_log(path: Path, header: str, text: str) -> None:
         path.write_bytes(tail[tail.find(b"\n") + 1 :])
 
 
-def run_job(job_id: str, desired: dict[str, Any], *, home: Path | None = None, runner=None) -> int:
+def run_job(
+    job_id: str, desired: dict[str, Any], *, home: Path | None = None, runner: Runner | None = None
+) -> int:
     """Run one declared job once; a concurrent run of the same id is a no-op."""
     from .self_update_types import TIMEOUT_RETURNCODE, CommandResult, default_command_runner
 

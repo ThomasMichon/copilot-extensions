@@ -312,7 +312,7 @@ def _validate_manage(
             and set(keys) == {"enabledPlugins"}
             and isinstance(keys.get("enabledPlugins"), list)
         )
-        if not valid_keys:
+        if not valid_keys or not isinstance(keys, dict):
             raise ManifestError(
                 f"{path}: ensure-absent is supported only at "
                 f"manage.{PLUGIN_ACTIVATION_GROUP} with exactly "
@@ -590,12 +590,12 @@ def load_package(
                     )
                 normalized = normalize_power_setting_value(value)
                 setting = canonical_power_token(res["setting"])
-                allowed = POWER_SETTING_ALLOWED_VALUES.get(setting)
-                if allowed is not None and normalized not in allowed:
+                allowed_values = POWER_SETTING_ALLOWED_VALUES.get(setting)
+                if allowed_values is not None and normalized not in allowed_values:
                     raise ManifestError(
                         f"{path}: power-setting {power_source!r} value {value!r} "
                         f"is not supported by setting {res['setting']!r}; "
-                        f"allowed indexes are {sorted(allowed)}"
+                        f"allowed indexes are {sorted(allowed_values)}"
                     )
         if rtype == "self-update":
             tier = res.get("tier")

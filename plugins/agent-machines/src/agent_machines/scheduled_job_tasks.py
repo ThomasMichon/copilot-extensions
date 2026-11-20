@@ -12,6 +12,7 @@ import json
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .scheduled_jobs import jobs_root
 from .self_update_tasks import (
@@ -22,6 +23,10 @@ from .self_update_tasks import (
     linux_systemd_user_available,
     task_binstub_path,
 )
+
+if TYPE_CHECKING:
+    from .scheduled_jobs import BinaryResolver, Runner
+    from .self_update_types import CommandResult
 
 TASK_PREFIX = "agent-machines-scheduled-job-"
 
@@ -40,7 +45,9 @@ def backend_label(platform: str) -> str:
     return "systemd --user timer" if platform in ("linux", "wsl") else "Scheduled Task"
 
 
-def unsupported_reason(platform: str, *, runner, resolve_binary) -> str | None:
+def unsupported_reason(
+    platform: str, *, runner: Runner, resolve_binary: BinaryResolver
+) -> str | None:
     if platform == "windows":
         return None
     if platform in ("linux", "wsl"):
@@ -94,8 +101,8 @@ def query(
     interval: int,
     timeout: int,
     *,
-    runner,
-    resolve_binary,
+    runner: Runner,
+    resolve_binary: BinaryResolver,
     home: Path | None = None,
 ) -> TaskState:
     if platform in ("linux", "wsl"):
@@ -152,10 +159,10 @@ def register(
     interval: int,
     timeout: int,
     *,
-    runner,
-    resolve_binary,
+    runner: Runner,
+    resolve_binary: BinaryResolver,
     home: Path | None = None,
-):
+) -> CommandResult:
     jobs_root(home).mkdir(parents=True, exist_ok=True)
     if platform in ("linux", "wsl"):
         service_path, timer_path = _unit_paths(job_id, home)
@@ -193,18 +200,21 @@ Register-ScheduledTask -TaskName {name} -Action $action -Trigger $trigger -Setti
   -Principal $principal -Force -Description {description} | Out-Null
 Enable-ScheduledTask -TaskName {name} -ErrorAction SilentlyContinue | Out-Null
 """.strip()
-    return _run_powershell(script, runner=runner, resolve_binary=resolve_binary, timeout=300)
+    registered: CommandResult = _run_powershell(
+        script, runner=runner, resolve_binary=resolve_binary, timeout=300
+    )
+    return registered
 
 
 def unregister(
     platform: str,
     job_id: str,
     *,
-    runner,
-    resolve_binary,
+    runner: Runner,
+    resolve_binary: BinaryResolver,
     home: Path | None = None,
     stop: bool = True,
-):
+) -> CommandResult:
     """Remove one job's timer; ``stop=False`` when the caller is that job's own run."""
     if platform in ("linux", "wsl"):
         # Best effort: a unit never loaded has nothing to disable. Stopping
@@ -229,4 +239,7 @@ if (-not (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue)) {{
 if (-not (Get-ScheduledTask -TaskName {name} -ErrorAction SilentlyContinue)) {{ exit 0 }}
 {stop_line}Unregister-ScheduledTask -TaskName {name} -Confirm:$false -ErrorAction Stop | Out-Null
 """.strip()
-    return _run_powershell(script, runner=runner, resolve_binary=resolve_binary, timeout=180)
+    removed: CommandResult = _run_powershell(
+        script, runner=runner, resolve_binary=resolve_binary, timeout=180
+    )
+    return removed

@@ -13,7 +13,7 @@ import json
 import shutil
 import sys
 from pathlib import Path
-from typing import NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from . import discover as _discover
 from . import reconcile as _reconcile
@@ -26,11 +26,14 @@ from .cli_fleet_update import (
     _resolve_machine_identity,
 )
 
+if TYPE_CHECKING:
+    from .self_update_types import CommandResult
+
 TYPE = "scheduled-job"
 
 
 class Resolution(NamedTuple):
-    declared: dict[str, dict]  # every resolved ``scheduled-job`` desired state by id
+    declared: dict[str, dict[str, Any]]  # every resolved ``scheduled-job`` desired state by id
     examined: set[str]  # package files read in this resolution
     roots: list[Path]  # repo roots present in this resolution
 
@@ -59,7 +62,9 @@ def _declared(args: argparse.Namespace) -> Resolution | None:
     )
 
 
-def _runner(argv: list[str], *, cwd=None, timeout=None):
+def _runner(
+    argv: list[str], *, cwd: Path | None = None, timeout: int | None = None
+) -> CommandResult:
     from .self_update_types import default_command_runner
 
     return default_command_runner(argv, cwd=cwd, timeout=timeout or 300)
@@ -109,7 +114,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     platform = _discover.current_platform()
     unsupported = _tasks.unsupported_reason(platform, runner=_runner, resolve_binary=shutil.which)
     owned = _jobs.read_owned()
-    rows = []
+    rows: list[dict[str, Any]] = []
     for job_id in sorted(set(declared) | set(owned)):
         desired = declared.get(job_id) or {}
         present = bool(desired) and desired.get("state", "present") != "absent"
@@ -119,7 +124,7 @@ def cmd_status(args: argparse.Namespace) -> int:
             if present
             else (None, None)
         )
-        row = {
+        row: dict[str, Any] = {
             "id": job_id,
             "declared": present,
             "owned": job_id in owned,
