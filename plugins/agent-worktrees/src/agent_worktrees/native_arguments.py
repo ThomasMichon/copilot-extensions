@@ -26,7 +26,9 @@ def powershell_invocation(arguments: Sequence[str]) -> str:
     return "& " + " ".join("'" + value.replace("'", "''") + "'" for value in arguments)
 
 
-def bash_command_index(command, *, start=0, limit=None):
+def bash_command_index(
+    command: Sequence[str], *, start: int = 0, limit: int | None = None,
+) -> int | None:
     index = start + 1
     end = len(command) if limit is None else limit
     while index < end:
@@ -120,6 +122,6 @@ def append_native_arguments(command: Sequence[str], arguments: Sequence[str]) ->
             boundary = script + 2
             return [*result[:boundary], *_insert(result[boundary:], arguments)]
         if PureWindowsPath(result[start + 1]).name == "default-setup.sh":
-            values = VALUE_OPTIONS | SETUP_VALUE_OPTIONS | {"--execution-directory"}
-            return [*result[:start + 2], *_insert(result[start + 2:], arguments, values)]
+            value_options = VALUE_OPTIONS | SETUP_VALUE_OPTIONS | {"--execution-directory"}
+            return [*result[:start + 2], *_insert(result[start + 2:], arguments, value_options)]
     return [*result, *arguments]

@@ -1,0 +1,9 @@
+{
+  "comment": "Annotate bash_command_index for the strict typecheck ratchet (no behavior change)",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
