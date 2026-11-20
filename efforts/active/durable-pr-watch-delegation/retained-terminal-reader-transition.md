@@ -557,8 +557,9 @@ class before selecting that broader transition.
 
 **Serial source acceptance:**
 
-- [ ] Review this refinement before changing operation eligibility, serving
-  selection or recovery behavior.
+- [x] Review this refinement before changing operation eligibility, serving
+  selection or recovery behavior (#13757; current-head approval and all
+  required checks green).
 - [ ] Expand and qualify the actual scoped active-operation inspection and
   original-attempt readback owners, including unsupported native attribution,
   current authority withdrawal, expiry, partial/unknown results and zero sends.
