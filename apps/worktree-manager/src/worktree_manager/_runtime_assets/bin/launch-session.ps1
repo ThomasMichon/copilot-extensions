@@ -1303,9 +1303,16 @@ if (
     }
 }
 
-# Append copilot passthrough args (from after -- separator)
+# Add copilot passthrough args (from after -- separator) at the prepared native
+# boundary. A Windows setup launch carries Copilot's arguments in a
+# -NativeArgumentsJson envelope, and default-setup.ps1 refuses arguments that
+# follow the envelope, so a plain append would stop an ACP launch.
 if ($CopilotPassthrough.Count -gt 0) {
-    $cmd += $CopilotPassthrough
+    $appendedJson = & $VenvPython (Join-Path $PSScriptRoot 'ahp-command.py') append $CopilotPassthrough.Count -- @CopilotPassthrough @cmd
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Could not add the Copilot passthrough arguments to the prepared native command.'
+    }
+    $cmd = @($appendedJson | ConvertFrom-Json)
 }
 
 if ($ahpArgs.Count -gt 0) {
