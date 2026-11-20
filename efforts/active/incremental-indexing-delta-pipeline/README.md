@@ -208,7 +208,8 @@ After the reviewed proposal, the operator admitted execution:
   Fresh entirely superseded claims can now select qualified higher-version
   completion before named-body acquisition; equal versions retain canonical
   comparison, mixed claims retain whole acquisition and existing pending work
-  is never bypassed.
+  is never bypassed. Explicit HTTP/service qualification covers that distinct
+  no-acquisition outcome and its client-free completed retry.
   Ordinary v2 execution and automatic partial-effect/restore
   reconciliation remain unimplemented; live-provider, broader event-delivery
   and consumer-scale qualification remain open.
