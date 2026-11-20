@@ -123,6 +123,12 @@ supply the first workspace receipt after an empty attempt, or the first native
 after the workspace was bound. Its owner checks the original creation stamp,
 workspace incarnation and writer requirement against the audited assignment;
 the executing reservation supplies the native receipt, not a new writer choice.
+This retry path ends once the original native has been retired. Dispatch
+retirement does not authorize Bridge to create a different conversation under
+the same creation key. Do not retry that key, replace the writer receipt, or
+treat a stopped conversation as retired. A successor needs a separately
+admitted allocation revision; automatic same-workspace replacement after
+native retirement is not supported by this selector.
 Other carried/targeted workspaces, uncaptured natives
 and historical requests without the original evidence refuse; current labels
 or an idle process list cannot retrofit them.
