@@ -97,6 +97,7 @@ class ReplayConsumer:
             raise ValueError("replay binding changed")
         self._check_binding()
         capabilities = await self.client.capabilities()
+        self._check_binding()
         try:
             admission = capabilities.registration_admission
         except AttributeError:
@@ -178,6 +179,25 @@ class ReplayConsumer:
             receipt = await self.client.inspect(request)
         return await self._settle(waiter, receipt)
 
+    def _recover_incompatible(self, waiter: dict[str, Any], admission: Any) -> None:
+        waiter = self._current(waiter)
+        if admission is None or waiter["state"] not in ("preparing", "active"):
+            return
+        spec = waiter["delegation"]
+        try:
+            admission.validate_registration(
+                until=tuple(spec["until"]), deadline_at=spec["replay"]["deadline_at"],
+            )
+        except ValueError:
+            recover = (self.queue.recover_preparing_run_waiter
+                       if waiter["state"] == "preparing" else self.queue.recover_dead_run_waiter)
+            recover(
+                waiter["task_id"], generation=waiter["generation"],
+                reason="service watch admission changed",
+                message="PR watch admission changed; re-check external state.",
+                sender="agent-dispatch-replay-recovery",
+            )
+
     async def _complete(self, event: Any) -> bool:
         self._check_binding()
         waiter = self.queue.find_replay_waiter(self.binding, event.registration_id)
@@ -236,7 +256,7 @@ class ReplayConsumer:
         counts: dict[str, Any] = {"checked": 0, "events": 0, "settled": 0, "blocked": False}
         try:
             self._check_binding()
-            await self.client.capabilities()
+            capabilities = await self.client.capabilities()
             self._check_binding()
             rows = self.queue.list_replay_waiters(self.binding, after=self._after, limit=32)
             if not rows:
@@ -244,6 +264,9 @@ class ReplayConsumer:
             for waiter in rows:
                 self._after = waiter["id"]
                 counts["checked"] += 1
+                self._recover_incompatible(
+                    waiter, getattr(capabilities, "registration_admission", None),
+                )
                 counts["settled"] += int(await self._reconcile(waiter))
             self._check_binding()
             batch = await self.client.pending(limit=16)

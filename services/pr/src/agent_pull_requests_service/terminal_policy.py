@@ -22,6 +22,7 @@ def registration(payload: dict[str, Any]) -> None:
 
 class TerminalReplayStore(ReplayStore):
     registration_admission = TERMINAL_ADMISSION
+    terminal_native_watches = True
 
     def execute(
         self, scope: ConsumerScope, operation: str, payload: dict[str, Any], *,

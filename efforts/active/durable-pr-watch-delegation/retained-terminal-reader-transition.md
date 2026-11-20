@@ -63,6 +63,9 @@ preflight so the original register retry is never stranded by the new reader.
 Advertise the optional terminal admission profile through every watch binding's
 capabilities media profile, not only workspace discovery. The capable consumer
 checks criteria before suspension; settlement still reconciles original receipts.
+It also rechecks existing preparations before emission after a policy change:
+incompatible tasks wake for reinspection, while attempted/unknown requests
+retain original reconciliation custody rather than being discarded or replayed.
 Keep optional old-core refusal and baseline-host compatibility.
 Validate plain lease files
 before PID writes and reject native callback state. Use bounded cache
@@ -85,6 +88,12 @@ Target capture includes already frozen pending events, preserving their
 original IDs/deadlines under the same request budget. Public load/sync output
 projects only bounded workspace retirement metadata; cross-consumer delivery
 and operation custody remains internal even for high fan-out.
+The standalone profile does not synthesize reduced watch notifications from
+workspace retirement. Its selected core declares native-watch preservation;
+the existing native observer continues evaluating fresh predicates, including
+after an unmerged workspace closure, and supplies the complete native snapshot
+and triggering head. Retirement and native application resolve elapsed original
+deadlines before success evidence. No retired workspace bodies are restored.
 
 ## Interrupted adoption and skew
 

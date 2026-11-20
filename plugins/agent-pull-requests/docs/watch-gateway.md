@@ -107,6 +107,12 @@ An older optional client without the `registration_admission` capability
 attribute is unsupported for new preparation; absence of that client API is
 not the same as an admission-aware client reporting a baseline `None` policy.
 Existing receipt reconciliation remains available across that client skew.
+The bounded consumer cycle rechecks live preparations against the current
+policy before emission. A preparation made before policy transition can
+therefore wake for external-state reinspection even if no remote registration
+exists. Unattempted work settles locally; attempted/uncertain work retains its
+original reconciliation identity and does not retransmit a now-incompatible
+registration. A real existing receipt still reconciles or cancels normally.
 
 Legacy direct requests with supported finite criteria retain their semantics.
 Unaware delegation clients are not qualified for a new restricted profile:

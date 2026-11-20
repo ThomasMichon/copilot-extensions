@@ -105,6 +105,7 @@ class ReplayStore:
     """
 
     registration_admission: ReplayAdmission | None = None
+    terminal_native_watches: bool = False
 
     def __init__(
         self, root: Path, namespace: str, *, clock: Callable[[], float] = time.time,
@@ -816,13 +817,25 @@ class ReplayStore:
         def prepare(document: Document) -> None:
             nonlocal selected_snapshot
             from .terminal_retention import replay_observation
-            selected_snapshot = replay_observation(document, target, snapshot)
+            selected_snapshot = (
+                snapshot if self.terminal_native_watches
+                else replay_observation(document, target, snapshot)
+            )
 
-        return self._transaction(
-            lambda core: core.observe(
+        def apply(core: WatchReplay) -> Document:
+            if selected_snapshot is None:
+                return {"status": "stale_observation"}
+            if self.terminal_native_watches:
+                swept = core.sweep_timeouts()
+                if swept["status"] == "uncertain":
+                    return cast(Document, swept)
+            return cast(Document, core.observe(
                 target.account, target.repo, target.number, selected_snapshot,
                 registration_ids=target.registration_ids,
-            ) if selected_snapshot is not None else {"status": "stale_observation"},
+            ))
+
+        return self._transaction(
+            apply,
             expires_at=expires_at, checkpoint=checkpoint,
             prepare=prepare if self.terminal_retention else None,
         )

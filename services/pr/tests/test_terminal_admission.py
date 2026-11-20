@@ -244,9 +244,9 @@ def test_high_fanout_terminal_gateway_response_does_not_expose_delivery_custody(
     asyncio.run(scenario())
     row = json.loads(selected.store.path.read_bytes())["terminal_retention"]["records"][0]
     assert len(row["deliveries"]) == 97 and len(json.dumps(row).encode()) > 32768
-    assert len(selected.store.execute(
+    assert not selected.store.execute(
         config.bindings[1].scope, "pending", {"limit": 1}, expires_at=expires(),
-    )["events"]) == 1
+    )["events"]
 
 
 @pytest.mark.parametrize("unsupported", ["deadline", "predicate"])
@@ -280,6 +280,14 @@ def test_terminal_gateway_rejects_incompatible_new_registration_before_commit(
             "number": 42, "expected_current": None, "budget_seconds": 10,
         }, workspace=True))
         assert terminal.status == 200
+        assert not selected.store.execute(
+            config.bindings[0].scope, "pending", {}, expires_at=expires(),
+        )["events"]
+        scope = config.bindings[0].scope
+        selected.store.observe(
+            ObservationTarget(scope.account, scope.repo, 42, frozenset({receipt["registration_id"]})),
+            PRSnapshot(pr_state="closed", merged=True), expires_at=expires(),
+        )
         pending = selected.store.execute(
             config.bindings[0].scope, "pending", {}, expires_at=expires(),
         )["events"]

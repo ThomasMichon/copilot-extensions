@@ -471,6 +471,10 @@ It additionally requires the core's separate
 `agent-pull-requests.terminal-target-capture/v1` declaration before selecting
 the budget-aware target callback. The existing remote terminal-read descriptor
 and legacy single-argument callbacks remain unchanged.
+The selected core must also declare
+`agent-pull-requests.terminal-native-watches/v1`: this standalone profile
+retains the native watch observer rather than synthesizing a reduced
+notification from workspace evidence.
 
 Only explicit **fresh** provisioning, under the existing host-local writer
 lease and operation deadline, adopts the core's terminal retention, recovery
@@ -532,12 +536,17 @@ service is installed. Actual physical retirement still belongs to the existing
 explicit lifecycle owner; this selection does not execute it automatically.
 Before native acquisition, the target callback captures matching existing
 watch registrations through the original ReplayStore using that request's
-expiry and budget-aware checkpoint. Accepted terminal notifications therefore
-retain their original delivery identity after reopen; a registration added
-after capture is not retroactively included.
+expiry and budget-aware checkpoint. The retirement record retains original
+delivery custody; a registration added after capture is not retroactively included.
 Capture includes frozen pending registrations, not just subscriptions awaiting
 another provider observation. Their original event IDs and deadlines remain
 in the internal retirement delivery ledger; acquisition does not replace them.
+Workspace retirement sweeps elapsed original watch deadlines under that same
+custody, but does not fire a synthetic watch success. Success still comes from
+the existing native observer, with its complete native notification and head
+SHA. Fresh native observations remain usable after an unmerged workspace
+closure, without reopening or restoring retired workspace content. Native
+application also resolves elapsed deadlines before applying success evidence.
 
 The standalone terminal profile applies the same admission policy to **new**
 watch registrations, before any commit. Requests without an original finite
@@ -551,6 +560,11 @@ including watch-only callers without a workspace route. The current Dispatch
 consumer checks it before durable suspension. An older or incompatible
 optional PR core refuses terminal selection before state creation; baseline
 hosting remains independent of that declaration.
+Each bounded consumer cycle also rechecks already-prepared waiters against a
+changed policy. Incompatible live waiters wake for external-state reinspection
+before another registration attempt. Unattempted requests settle locally;
+attempted or uncertain requests retain their original identity and reconcile
+receipts or cancellation, without retransmitting an incompatible registration.
 Legacy watch/v1-v2 capability and receipt shapes remain unchanged, and finite
 legacy requests using those predicates keep their original semantics. Clients
 needing unbounded or richer watches must retain the baseline host until a
