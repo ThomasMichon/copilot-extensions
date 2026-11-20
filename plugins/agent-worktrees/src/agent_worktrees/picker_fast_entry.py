@@ -99,17 +99,11 @@ def dispatch(argv: list[str]) -> int | None:
     environment.pop("UV_INTERNAL__PYTHONHOME", None)
     from .terminal_launch import available
 
-    if result.get("manager_session") and not available():
-        from .picker_session_entry import open_session
-
-        code = open_session(result, engine_command, environment)
-        if code is not None:
-            return code
     from agent_procutil import spawn_sync_in_kill_on_close_job
 
     from .terminal_launch import select_receiver
 
-    selected, environment = select_receiver(result["manager_command"], environment)
+    selected, environment = select_receiver(result["manager_command"], environment, timeout=None)
     command = [*selected, "--project", argv[1]]
     # Without a terminal-host channel, Windows keeps this process as the
     # kill-on-close waiter: returning None would only reach the ordinary

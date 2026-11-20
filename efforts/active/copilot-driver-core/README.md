@@ -115,6 +115,17 @@ alone does not satisfy this criterion. Deployment remains separately authorized.
 
 ## Coordination
 
+- **Finite #11726 observation design (proposed):** Receive the complete
+  provider-owned mux-observation proposal in Phase 3's existing Driver and
+  caller-convergence lane, directly through P11726/V11726/G11726 below.
+  Preserve the refactor driver, actual provider and Worktrees/Bridge/Manager
+  consumers, current priority/return, all incumbent checks and exhausted or
+  separately held qualification allowances. This is planned design receiving,
+  not an implementation appointment, provider upgrade or a replacement for
+  the current portable-consumer outcome. Keep #11726 OPEN during proposal;
+  ordinary reviewed complete receiving and permitted current source/ROOT/
+  custody readback precede a separate tracking judgment. No generic ACK,
+  receipt PR, whole-Core-completion prerequisite or resource transfer is added.
 - **Topology:** tightly coupled source work with one owner, one checkout and
   dependency-ordered functional outcomes.
 - **Host (owns PRs):** Refactor driver.
@@ -301,6 +312,57 @@ remain with their existing owners.
   through the real callers without duplicate creation or seed replay.
 - [ ] Publish and merge the complete headed/caller flow without regressing headless use.
 
+#### Finite provider-owned mux observation from #11726
+
+Agent-recommended design receiving within the existing Driver-owned boundary.
+This does not declare a new mandatory provider contract or authorize execution.
+
+- [ ] **P11726-1:** Inventory supported public query/capability interfaces for
+  TMux and supported PSMux versions, distinguishing actual provider contracts
+  from private registration artifacts. Specify namespace/target scope,
+  completeness, stable incarnation identity, authentication, bounded replies
+  and read-only/no-startup-effects guarantees. Review any necessary new
+  normative intent in the governing vision/pattern before implementation.
+- [ ] **P11726-2:** Compose provider-declared observation capability WITH a
+  supported public query/control endpoint. A documented provider discovery
+  contract may locate it; `.pid`/`.port`/`.sid`/`.key` layout or package-version
+  equality is not capability or lifecycle truth. Prefer the public socket/
+  control channel; a CLI is eligible only after its selected implementation's
+  no-cleanup-startup and complete-query semantics are qualified.
+- [ ] **P11726-3:** Keep normalized observation with Driver and its existing
+  Worktrees/Bridge/Manager consumers, not another observer daemon or independent
+  discovery implementation. Distinguish targeted presence, namespace-complete
+  absence, actual client rows and process-only liveness. Retain valid positives
+  under unrelated partial failure; missing metadata, timeout, incomplete
+  inventory and unsupported capability remain unknown/unsupported, not grounds
+  for duplicate execution, registration repair, cleanup or retirement.
+- [ ] **P11726-4:** Retain bounded tolerant legacy adaptation while providers
+  gain the declared/public interface before callers depend on it. Preserve
+  independent bound-Copilot, cold-launch and retirement gates, supported
+  old/new callers, rollback and migration/deprecation documentation. #11724's
+  narrow PID-sentinel compatibility repair is not this architectural outcome;
+  #11539/#11718/#11724 retain their independent scope and remaining gates.
+
+##### Local Validation for #11726
+
+- [ ] **V11726-1:** Cover authenticated positive state, complete empty inventory,
+  partial results retaining positives, namespace isolation, unsupported
+  capability and process/endpoint incarnation replacement. Missing, stale,
+  malformed or deleted private registration files must not determine results
+  while the supported public channel remains available; incomplete coverage
+  must not authorize negative lifecycle decisions elsewhere.
+- [ ] **V11726-2:** Prove the selected query does not invoke cleanup-bearing
+  startup or alter provider files, servers, panes, input, attachments or client
+  state. Qualify actual native Windows AND POSIX caller paths, aggregate
+  latency/response bounds and exact owned-fixture cleanup; unit results or a
+  command named `has-session` do not establish native no-effect behavior.
+- [ ] **V11726-3:** Exercise legacy/new provider and caller combinations,
+  capability-first expansion, unsupported/unknown handling and rollback.
+  Attribute source, native and installed results separately, preserve existing
+  authority/qualification bounds and update architecture/recovery/migration
+  guidance. Planned receiving authorizes no provider probe, registration
+  repair, server/session mutation, external report, implementation or rollout.
+
 ### Phase 4 - Lifetime, receiving parity and completion
 
 - [ ] Prove CLI persistence until user closure or explicit authorized retirement,
@@ -350,6 +412,14 @@ remain with their existing owners.
   owned adoption gate, then mark Done, archive and finalize the source workspace.
 
 ## Validation Plan
+
+- [ ] **G11726:** Resolve every P11726/V11726 and continuing Coordination
+  clause: declared capability plus supported public endpoint, scope/completeness/
+  incarnation/authentication/no-startup-effects, bounded legacy positives versus
+  negative proof, actual caller/platform qualification and supported migration/
+  rollback. Preserve original design-first intent, independent compatibility
+  credit, current priorities and all source/resource custodians. Documentary
+  receiving is not implemented observation, native proof or effect authority.
 
 - [ ] Core works from its built/copied artifact without source checkout or
   installed Bridge/Worktrees/Manager; extension assets and notices are complete.
@@ -415,6 +485,13 @@ this proposal's review gate.
 
 ## Journal
 
+- **2026-11-20 - Proposed finite provider-observation receiving.** The complete
+  qualified #11726 design is retained in this existing Driver-owned Phase 3,
+  local/global Validation and continuing Coordination. All eight technical
+  rows remain unchecked. The [campaign record](../backlog-reconciliation/journal/2026/11.20-provider-observation-and-terminal-load-receiving.md)
+  preserves actual provider/caller owners, prior compatibility credit, review
+  and separate tracking judgments. No provider, runtime, native or resource
+  operation occurred; the current root outcome and priority remain unchanged.
 - [2026-11-12 - Private mux creation merged; selected caller source migration complete](journal/2026/11.12%20private%20mux%20creation%20convergence.md)
 - [2026-11-12 - Recordless normalized caller converges on the core](journal/2026/11.12%20recordless%20caller%20core%20acceptance.md)
 - [2026-11-12 - Original-owner recovery store reviewed and merged](journal/2026/11.12%20original-owner%20recovery%20store.md)
