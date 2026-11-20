@@ -1,7 +1,10 @@
 # Consumer telemetry command contract — v1
 
-**Status: reviewed-before-implementation contract. No runtime support is
-enabled by this document.** Track realization in
+**Status: v1 contract with an opt-in Bridge source implementation.**
+The [Bridge reference](../../plugins/agent-bridge/docs/consumer-telemetry-command.md)
+defines its trusted admission and selected-runtime metadata location.
+Source support does not establish a promoted release or installed adoption.
+Track realization in
 [consumer telemetry sink adoption](../../efforts/active/consumer-telemetry-sink-adoption/README.md)
 (#13545), starting with U1. Do not configure a live receiver on the strength
 of this document or a package version alone.
@@ -20,7 +23,8 @@ The implementation home is **`libs/process-telemetry`**, distributed through
 its existing consumers. Extend its existing `SinkSlot` / `BufferedSink`
 owner; do not add a bus, registry, SDK or independent reporter service.
 One shared configuration parser and command adapter serve plugin adapters.
-There is **no existing generic command-sink resolver** to invoke.
+`process_telemetry.command_config` and `process_telemetry.command` own that
+selection and delivery; plugin adapters do not duplicate them.
 
 The inventory below describes checked-out source, not installed adoption.
 Source links name the actual record owner, not a catalog of desired hooks.
@@ -69,8 +73,8 @@ The initiating, already trusted harness root owns:
 * `.agent-telemetry/config.local.json`: optional, user-local, Git-ignored
   replacement; never committed or projected into shared configuration.
 
-These are new paths to be implemented in U1, not existing configuration
-readers. There is no upward directory search, global default sink, implicit
+The shared parser reads only these exact paths at an admitted root.
+There is no upward directory search, global default sink, implicit
 knowledge-repository lookup or environment-variable command override.
 The existing harness/request admission owner supplies the exact root; the
 telemetry library does not adopt or trust a repository.

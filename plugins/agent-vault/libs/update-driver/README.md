@@ -502,6 +502,55 @@ than silently upgraded into fabricated recovery authority. Malformed state
 also refuses. Neither this proof nor the distinct authorization path below
 authorizes manual journal surgery, a reboot, or an unrequested live repair.
 
+### Execution-domain boot observations
+
+The additive `update_driver.boot.native_execution_domain_boot_evidence()`
+returns a frozen `ExecutionDomainBootEvidence` observation with exactly
+`version`, `platform`, `source`, `domain` and `boot`. Version **1** has one
+implemented source: Windows `windows-vm-generation-counter`, paired with the
+existing native Windows boot UUID. `domain` is the lower-case hexadecimal
+encoding of the device's 16 output bytes, not a UUID or a machine/profile ID.
+`parse_execution_domain_boot_evidence(record)` strictly decodes this exact
+record shape and source; decoding stored or caller-created bytes does not
+attest that they came from the native provider.
+
+The provider opens the fixed `\\.\VmGenerationCounter` device, performs only
+zero-input `IOCTL_VMGENCOUNTER_READ` operations, and closes each handle. It
+samples the counter twice inside two equal native boot observations and
+refuses any observed change. No event-driven wait, subprocess, inventory,
+state-file creation, elevation, installation or service operation is involved.
+Device absence, access denial, native errors, invalid lengths or sentinel
+identities raise `ExecutionDomainEvidenceError`; there is no fallback.
+The [Windows API](https://learn.microsoft.com/en-us/windows/win32/hyperv_v2/virtual-machine-generation-identifier)
+requires administrator/SYSTEM access. This API never requests those rights.
+
+The [VM Generation ID contract](https://uapi-group.org/specifications/specs/vmgenid/)
+keeps the generation unchanged across ordinary guest reboot and live migration,
+but changes it for cloning, snapshot restoration and backup recovery. Thus a
+copied home/state root on another conforming VM cannot reuse its domain
+observation. A restore/import that changes the generation conservatively loses
+continuity even if it is administratively considered the same VM. A hypervisor
+that duplicates or fails to refresh the generation is outside this provider's
+supported contract. The value identifies the guest execution generation, not
+its physical host or installation.
+
+Linux (including WSL), macOS, physical Windows hosts without the device and
+Windows containers without access to their execution kernel's device are
+unsupported or unavailable. Sharing a device/kernel does not make a container
+restart a kernel boot. No machine-id, SMBIOS UUID, mounted-home stamp or
+environment override substitutes for the missing native source.
+
+This source is **not yet native-qualified for state migration**. Actor-free
+tests cover the actual ctypes call construction and record boundary, not a
+real device, clone or reboot. Actual provider/venue qualification and a
+same-domain real-boot-crossing lane remain required before migration admission.
+The observation is unwired: it changes neither existing queue recovery nor
+watch journals, authority selection or ordinary startup. The existing
+`kernel_boot_identity()` / `valid_boot_identity()` APIs and all their callers
+retain their original behavior. A later consumer must retain original evidence,
+freshly sample through this owner at its guarded boundary and refuse unsupported
+providers; a parsed record or package version never grants recovery authority.
+
 ### Explicit operator-authorized queue release
 
 `recover_for_repair(*, authorized=False, root=None) -> tuple[Request, ...]`

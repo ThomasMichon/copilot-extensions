@@ -197,6 +197,12 @@ After the reviewed proposal, the operator admitted execution:
   An explicit [in-process worker hook](../../../plugins/agent-index/docs/component-ledger.md#explicit-in-process-worker-dispatch)
   selects that bound composition without detached-worker registration and verifies
   completion through the queue rather than the callable's return value.
+  An explicit [async lifetime owner](../../../plugins/agent-index/docs/component-ledger.md#explicit-async-lifetime-owner)
+  joins native dispatch through cancellation and truthful bounded drains,
+  with supported point queue cancellation serialized against that same source
+  writer. An explicit [point queue consumer](../../../plugins/agent-index/docs/component-ledger.md#explicit-point-queue-consumer)
+  supplies exact-scope FIFO batches with failure pause and explicit retained
+  retry, without yet composing the service's scheduling or cutover owners.
   Ordinary v2 execution and automatic partial-effect/restore
   reconciliation remain unimplemented; live-provider, broader event-delivery
   and consumer-scale qualification remain open.
@@ -332,6 +338,10 @@ completion gates remain open; hosted lifetime and ordinary scheduling remain
 separate implementation work.
 The same entry now records the explicit async host's joined cancellation and
 truthful drain tests; service/queue admission and cutover wiring remain open.
+Merged #13649 supplies that host after current-head approval and passing CI;
+its source reconciliation and remaining integration boundary are journaled.
+Merged #13651 serializes supported point cancellation with native ownership;
+actual queue selection and service/cutover composition remain open.
 
 Append-only entries are preserved in dated files, newest first.
 
