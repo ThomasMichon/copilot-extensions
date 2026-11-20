@@ -283,7 +283,7 @@ template leaves open: the target repo, the change-review technology, the issue
 backend, the actual machine and account names. Four archetypes are first-class:
 
 1. **reviewer** — a cooperative, verdict-bearing loop that carries one target
-   change to merge or deliberate abandonment. Its deeper contract lives in the
+   change to a reviewer-policy outcome. Its completion conditions live in the
    [reviewer-loop child vision](reviewer/README.md).
 2. **conflict-resolution** — for a change some *other* system opened but nobody is
    driving, take the last mile: check out the branch, rebase, resolve conflicts,
@@ -1018,8 +1018,8 @@ Its worktree still holds the task as an outstanding obligation, preserving
 the same workspace and conversation for a rejected submission. That durable
 claim is not an active execution slot. It protects the assigned workspace
 from reclamation until completion, abandonment or explicit release for
-reassignment. A reviewer can finalize its workspace before submission
-without settling that claim. See the [submission responsibility contract](task-outputs-and-review/README.md#submission-retains-worktree-responsibility).
+reassignment. Submission means the worktree could be cleaned on acceptance,
+not that it has been detached or deleted. See the [submission responsibility contract](task-outputs-and-review/README.md#submission-retains-worktree-responsibility).
 An arbitrary backlog of submissions may sit for as long as the
 caller needs before being accepted, re-queued, or abandoned, exactly the way
 a *queued*, not-yet-embodied task may sit before a worker binds to it — waiting

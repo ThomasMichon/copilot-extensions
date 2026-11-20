@@ -14,7 +14,8 @@
 A reviewer loop turns one target change into one durable collaboration between
 its submitter and a reviewer. The submitter improves the change; the reviewer
 renders timely, explicit verdicts and actionable feedback; the loop preserves
-their shared context until the change lands or is deliberately abandoned.
+their shared context until the change lands, is abandoned, or meets the
+review flow's explicit inactivity policy.
 
 The review is not a sequence of disposable jobs. It is one long-lived dispatch
 task embodied by one worktree-identified reviewer in any supported fabric venue
@@ -238,11 +239,18 @@ action: when policy assigns landing to the reviewer, a ready-to-merge signal
 resumes that same reviewer without waiting for another author edit. Where
 the author or automation owns landing, it remains their action.
 
-Merge wakes the assigned reviewer for cleanup. It cleans up the separate
-review checkout containing the candidate changes, finalizes its assigned
-worktree, **then** submits the task for evaluation. That finalized worktree
-is still assigned: the evaluator can identify who did the work and return it
-to the same reviewer if necessary. Only a completed or abandoned task, or an
+The reviewer flow, not core Dispatch, determines when review work is over.
+It verifies that the target merged, was abandoned, or meets its stale-PR
+policy (for example, more than seven days without an author update). A stale
+verdict, a worker timeout or missing forge data is not a stale PR.
+
+On merge the assigned reviewer wakes for closeout. Before submitting it
+settles downstream claims and finalizes its work: it may hard-reset and
+remove its **own disposable candidate checkout**, not the driver's assigned
+worktree or an author's branch. Any edits the reviewer owns as deliverables
+must land through the normal PR flow. The driver's worktree is now cleanable
+on acceptance but still assigned; rejection resumes the same reviewer there,
+recreating disposable state as needed. Only a completed or abandoned task, or an
 explicit release for reassignment, may give up its worktree. A forge merge
 is not itself task completion. If the target becomes reviewable again after
 terminal settlement, it begins a new review generation.

@@ -12,9 +12,10 @@ and [coordinator, supervisor and lanes](../../plugins/agent-dispatch/docs/spawn-
 
 ## Assignment is not a running slot
 
-The [reviewer lifecycle contract](../../visions/plugins/agent-dispatch/reviewer/README.md#settle-and-release)
-distinguishes the task's pool and assigned worktree from a process slot and
-from the separate checkout used to inspect candidate changes:
+Dispatch tracks assignment independently of process capacity. The task's
+flow supplies its completion condition; core Dispatch does not inspect PR
+state or choose an inactivity timeout. The [PR reviewer](../../visions/plugins/agent-dispatch/reviewer/README.md#settle-and-release)
+is one example of that generic contract:
 
 | Event | Task and assignment | Worker and workspace |
 |---|---|---|
@@ -22,8 +23,8 @@ from the separate checkout used to inspect candidate changes:
 | Reviewer posts a verdict | `suspended`, still assigned. | Stop the worker and return its running slot to the pool. |
 | PR is updated | Resume the same assignment, not a new task. | Reacquire capacity for the same worktree and conversation. |
 | Landing is ready and policy assigns it to the reviewer | Resume the same task for landing; no new revision is needed. | Approval alone does not grant merge authority. |
-| PR merges | Wake the original reviewer for closeout. | Clean the review checkout and finalize the assigned workspace before submission. |
-| Result awaits evaluation | `submitted`, still assigned to the pool and finalized worktree. | Evaluation does not need a running worker. Rejection retains the assignment. |
+| Reviewer verifies merge, abandonment or policy-defined staleness | On merge, wake the original reviewer for closeout. Submit only after the outcome and readiness checks pass. | Settle child claims and dispose of the review checkout; preserve the assigned driver workspace. |
+| Result awaits evaluation | `submitted`, still assigned to the pool and worktree. | Cleanable on acceptance, resumable on rejection. Recreate child worktrees if needed. |
 | Evaluator confirms, task is abandoned, or owner explicitly releases it | Unassignment is now permitted. | Preserve the assignment history. A move to `claimed` just to resume does not qualify as release. |
 
 **Reading current state:** [pool placement](../../plugins/agent-dispatch/docs/pool-placement.md)

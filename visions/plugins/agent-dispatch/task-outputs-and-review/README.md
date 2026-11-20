@@ -79,12 +79,15 @@ obligation, not the reverse. Submission requires mechanical closeout readiness:
 unfinished source or disallowed obligations prevent it without automatically
 repairing, merging, abandoning or discarding work.
 
-Passing readiness is not itself finalization. A task may require finalization
-before submission: for example, the [PR reviewer](../reviewer/README.md#settle-and-release)
-cleans up its review checkout and finalizes its assigned workspace on merge.
-Finalization neither releases the assignment nor permits deletion. The task
-claim protects that workspace and its conversation throughout evaluation,
-even with no running process. On rejection the same agent resumes there.
+The submitting agent settles downstream obligations first: it lands its own
+changes through the required review path, reconciles its open PRs and releases
+owned child worktrees. Unresolved work blocks submission; abandoning WIP is
+not a way to pass readiness. The assigned worktree must now be cleanable if
+the evaluator accepts. It is not detached or deleted at submission.
+The task claim protects that workspace and conversation throughout evaluation,
+even with no running process. On rejection the same agent resumes there and
+can recreate disposable child state. On confirmation the worktree can be
+detached and promptly reclaimed through its owner's cleanup checks.
 Only completion, abandonment or explicit release back to queued or claimed
 work permits unassignment. Physical reclamation still has its own safety gates.
 
