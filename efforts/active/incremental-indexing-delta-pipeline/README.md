@@ -212,8 +212,11 @@ After the reviewed proposal, the operator admitted execution:
   no-acquisition outcome and its client-free completed retry.
   The [configured executor ownership step](azure-devops-point-targets.md#configured-executor-ownership-before-caller-migration)
   supplies production connector/model lifetime composition under that existing
-  Python binding, with lazy missing-pair readiness and joined cleanup.
-  Selected-binding/reader caller migration remains a separate next gate.
+  Python binding, with per-execution missing-pair readiness and cancellation-safe
+  joined cleanup.
+  The [selected executor/qualified-reader refinement](azure-devops-point-targets.md#selected-executor-and-qualified-reader-composition)
+  proposes their shared in-process binding; implementation and later wire-caller
+  migration remain separate gates.
   Ordinary v2 execution and automatic partial-effect/restore
   reconciliation remain unimplemented; live-provider, broader event-delivery
   and consumer-scale qualification remain open.
