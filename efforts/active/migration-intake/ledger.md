@@ -1173,3 +1173,16 @@ No native/hosted-Windows enrollment, evaluation, credential operation, bootstrap
 restore, configuration change, cleanup or rollout is authorized. The
 [source crosswalk and current census](../backlog-reconciliation/journal/2026/11.20-winget-venue-and-retained-contracts.md)
 also record actual #13698 delivery and the distinct retained canonicals.
+
+## Proposed seed plugin AND runtime clarification - 2026-11-20 UTC
+
+| Source | Disposition | Primary canonical owner | Retained gates |
+|---|---|---|---|
+| #1475 complete WinGet bootstrap, explicitly including BOTH plugin delivery and runtime setup | routed; #13701 delivered the full existing P1475/V1475/G1475 family, with this conjunction clarification proposed for normal review | Same Portfolio Phase 5 P1475-2/G1475 and [complete subject-owned chain](../test-portfolio-rationalization/winget-bootstrap-venue.md#subject-owned-bootstrap-and-repository-restore) | Install the one seed plugin THROUGH the external marketplace AND establish THAT plugin's runtime through explicit installation ownership using bootstrap Python/uv; neither operation substitutes for the other |
+
+The preceding row remains unchanged history. This clarification preserves
+the original two requirements, not a new implementation, owner, venue or
+technical checkbox. All six technical rows remain unchecked. Keep #1475 OPEN
+until corrected complete current receiving/original/custody readback and a
+separate judgment after reviewed delivery. No native run, implicit loading-time
+provisioning, resource transfer or changed #688/#1192/downstream F3-E gate follows.
