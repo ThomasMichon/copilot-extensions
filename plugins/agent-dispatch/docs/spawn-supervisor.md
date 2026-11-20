@@ -123,6 +123,14 @@ missing-plugin installation. The
 and [Bridge local launch owner](../../agent-bridge/src/agent_bridge/transport.py)
 define those separate behaviors.
 
+Repository resources share one 25-second registry-resolution deadline across
+distinct repository roots in an operation; each child lookup receives only the
+remaining time. The ordinary startup agent-to-project lookup allows 18 seconds
+for the Bridge CLI, including module loading. Explicit caller limits and the
+full-registry fallback retain their own budgets. These lookup limits are
+separate from an emitter's configured command timeout, which starts after
+resource resolution, and from workspace creation or worker acceptance limits.
+
 Task events, spawn reservations and Bridge creation/acquisition journals retain
 different parts of the sequence. They are not a complete diagnostic transcript
 of every scheduling decision, child process or failed allocation. Default

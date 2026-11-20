@@ -238,14 +238,35 @@ def test_relative_executable_cannot_normalize_away_read_only_admission(tmp_path,
 def test_distinct_repository_lookups_share_one_bounded_budget(tmp_path, monkeypatch):
     (tmp_path / "worker.py").write_text("print('ok')", encoding="utf-8")
     calls = _registry(monkeypatch, tmp_path)
-    times = iter([0, 0, 16])
+    times = iter([0, 0, 26])
     monkeypatch.setattr(resources, "monotonic", lambda: next(times))
-    with pytest.raises(RegistrarError, match="shared 15s budget"):
+    with pytest.raises(RegistrarError, match="shared 25s budget"):
         resources.resolve_execution_resources(
             ["repo:tools:worker.py", "repo:other:worker.py"], None,
         )
     assert len(calls) == 1
-    assert calls[0][1] == {"timeout": 15}
+    assert calls[0][1] == {"timeout": 25}
+
+
+def test_slow_first_repository_leaves_only_remaining_shared_budget(tmp_path, monkeypatch):
+    (tmp_path / "worker.py").write_text("print('ok')", encoding="utf-8")
+    calls = []
+
+    def run(*args, timeout):
+        calls.append(timeout)
+        return subprocess.CompletedProcess(args, 0, json.dumps({
+            "registration": "ready", "name": args[2], "class": "worktree",
+            "path": str(tmp_path),
+        }), "")
+
+    times = iter([0, 0, 20])
+    monkeypatch.setattr(resources, "monotonic", lambda: next(times))
+    monkeypatch.setattr(resources, "run_agent_worktrees_capture", run)
+    argv, _ = resources.resolve_execution_resources(
+        ["repo:tools:worker.py", "repo:other:worker.py"], None,
+    )
+    assert argv == [str(tmp_path / "worker.py")] * 2
+    assert calls == [25, 5]
 
 
 def test_ordinary_argv_does_not_require_registry(monkeypatch):

@@ -124,7 +124,7 @@ _AGENT_SHOW_UNSUPPORTED = _Unsupported()
 def registered_agent(
     name: str,
     *,
-    timeout: float = 8.0,
+    timeout: float = 18.0,
     include_unaddressable: bool = False,
 ) -> dict | _NotFound | _Unsupported | None:
     """Best-effort single-agent record via agent-bridge's fast ``agent-show``
@@ -257,7 +257,7 @@ def registered_agent_names(*, timeout: float = 20.0) -> set[str] | None:
 def registered_agent_project(
     agent: str,
     *,
-    timeout: float = 8.0,
+    timeout: float = 18.0,
     strict: bool = False,
 ) -> str | None:
     """Return a registered agent's explicit project, when available.
@@ -267,10 +267,10 @@ def registered_agent_project(
     transparently falls back to the full listing for a namespace-prefixed
     name or an agent-bridge CLI predating ``agent-show`` (see
     :func:`_resolve_agent_record`), so this remains correct for every caller,
-    not just the common plain-local-agent case. ``timeout`` defaults to 8s
-    (was 20s): the fast path has no namespace-enumeration latency to size
-    for; a fallback to the full listing uses a more generous timeout of its
-    own regardless.
+    not just the common plain-local-agent case. ``timeout`` defaults to 18s
+    to allow for fresh CLI module loading even without namespace enumeration.
+    Explicit caller limits are preserved; the full-list fallback retains
+    its separate, more generous budget.
     """
     row = _resolve_agent_record(
         agent, timeout=timeout, include_unaddressable=True

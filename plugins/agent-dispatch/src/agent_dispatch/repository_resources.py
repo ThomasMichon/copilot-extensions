@@ -145,7 +145,7 @@ class RepositoryResourceSnapshot:
         self._execution = execution
         self._roots: dict[str, tuple[Path, str]] = {}
         self._errors: dict[str, str] = {}
-        self._deadline = monotonic() + 15
+        self._deadline = monotonic() + 25
 
     def with_execution(self, *, execution: bool) -> RepositoryResourceSnapshot:
         """Share this operation's cache/deadline, not its admission mode."""
@@ -161,7 +161,7 @@ class RepositoryResourceSnapshot:
         if name not in self._roots:
             remaining = self._deadline - monotonic()
             if remaining <= 0:
-                raise RegistrarError("repository resource resolution exceeded its shared 15s budget")
+                raise RegistrarError("repository resource resolution exceeded its shared 25s budget")
             try:
                 self._roots[name] = _registered_repository(name, timeout=remaining)
             except RegistrarError as exc:
