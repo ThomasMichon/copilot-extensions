@@ -410,6 +410,15 @@ the non-public approval conversation.
 
 ## Plan
 
+The [full-user WinGet venue receiving unit](journal/2026/11.20-winget-venue-and-retained-contracts.md)
+records #13698's actual reviewed transport-plan delivery and the complete
+884-open census. It proposes complete #1475 provider/minimal-seed/bootstrap/
+repository-restore acceptance in the existing Portfolio Phase 5, with six
+unchecked technical rows and unchanged native/resource custodians. #688's
+separate credit/precondition/downstream-F3 contracts, #2612's actual mapping
+acceptance condition and the distinct activation/configuration/container
+canonicals remain. No source retirement follows from the proposal alone.
+
 The [local transport and complete rendezvous planning unit](journal/2026/11.20-local-transport-and-rendezvous-planning.md)
 records #13690's actual reviewed delivery, #12042's separately audited tracking
 retirement and a complete unchanged 884-open census. One canonical Draft plan
