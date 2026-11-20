@@ -55,6 +55,10 @@ obligations still block. Each call checks the original binding before and after
 the independent owner read. A driver that submitted before the source closeout
 can also inspect readiness: the recorded submitter, native session and generation
 must still match the captured assignment, even though its lease has ended.
+Dispatch checks its own detached waiters and wake/send records on both sides
+of the owner read. A preparing or active waiter, an attempted wake without a
+proven transport outcome, or an unresolved send targeting the same driver
+blocks readiness even without a corresponding Worktrees claim.
 A successful response identifies the request,
 generation and assignment event; it does not persist a readiness receipt, submit,
 authorize release or send a wake. Previously settled and finalized drivers cannot

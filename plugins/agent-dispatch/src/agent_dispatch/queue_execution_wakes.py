@@ -24,6 +24,13 @@ from .queue_run_waiter_transition_cleanup import CLAIM_RELEASE_SENDER
 
 Wake = WakeOperation | RunWaiterWakeOperation
 TABLES = ("wake_outbox", "run_waiter_wakes")
+_DRIVER_WAKE = (
+    "(execution_send_state IN ('pending', 'unknown') OR status='delivering'"
+    " OR (attempts>0 AND COALESCE(execution_send_state,'') NOT IN ('sent','not_sent')))"
+)
+# A wake without a native uses the tree portion of its machine/tree owner.
+# This indexed candidate key does not replace the exact host/native check.
+_DRIVER_TARGET = "COALESCE(NULLIF(owner_session_id,''),substr(owner,instr(owner,'/')+1))"
 
 
 def wake_table(wake: Wake) -> str:
@@ -206,6 +213,31 @@ def _wake_targets_reservation(wake: Any, reservation: Any, native: str | None) -
     return not (host and wake_host and normalize_host(host) != normalize_host(wake_host))
 
 
+def require_no_outstanding_driver_work(
+    conn: sqlite3.Connection, task: Task, reservation: dict[str, Any], native: str,
+) -> None:
+    """Check queue-owned work that a workspace claim inventory cannot establish."""
+    require_execution_send_reconciliation(conn, task.id, exclusive_key=task.exclusive_key)
+    if conn.execute(
+        "SELECT 1 FROM run_waiters WHERE task_id=? AND state IN ('preparing','active') LIMIT 1",
+        (task.id,),
+    ).fetchone():
+        raise TaskError("provisional observation has an outstanding detached waiter")
+    for table in TABLES:
+        waiter = table == "run_waiter_wakes"
+        bookkeeping = (
+            " AND (sender<>? OR execution_send_state IN ('pending','unknown'))" if waiter else ""
+        )
+        params = (task.id, native, reservation["worktree"])
+        for wake in conn.execute(
+            f"SELECT task_id,owner,owner_session_id FROM {table} WHERE {_DRIVER_WAKE}{bookkeeping}"
+            f" AND (task_id=? OR {_DRIVER_TARGET} IN (?,?))",
+            (CLAIM_RELEASE_SENDER, *params) if waiter else params,
+        ):
+            if wake["task_id"] == task.id or _wake_targets_reservation(wake, reservation, native):
+                raise TaskError("provisional observation has unresolved driver wake custody")
+
+
 class ReservationWakeSnapshot:
     """Index unresolved wakes once; preserve the exact per-native matching rule."""
 
@@ -271,6 +303,15 @@ class QueueExecutionWakesMixin:
                 f" ON {table}(execution_send_state,task_id)"
                 " WHERE execution_send_state IN ('pending', 'unknown')"
             )
+            for name, key in (("task", "task_id"), ("target", _DRIVER_TARGET)):
+                conn.execute(
+                    f"CREATE INDEX IF NOT EXISTS idx_{table}_driver_{name}"
+                    f" ON {table}({key}) WHERE {_DRIVER_WAKE}"
+                )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_run_waiters_driver_work"
+            " ON run_waiters(task_id) WHERE state IN ('preparing','active')"
+        )
         conn.commit()
 
     def defer_execution_wake(

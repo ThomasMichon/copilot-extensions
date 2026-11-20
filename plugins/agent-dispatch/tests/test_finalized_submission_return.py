@@ -2,12 +2,11 @@
 
 import sqlite3
 from collections.abc import Callable
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
-from agent_dispatch import queue_execution_custody as custody
-from agent_dispatch import submission_readiness_observation
+from agent_dispatch import queue_execution_wakes, submission_readiness_observation
 from agent_dispatch.assignment_workspace import AssignmentWorkspace
 from agent_dispatch.queue import TaskQueue
 from agent_dispatch.queue_common import Task
@@ -223,9 +222,11 @@ def test_preview_reconciliations_skip_settled_transport_history(
     foreign = queue.create("unrelated", repo="example")
     assert isinstance(foreign, Task)
     costs: list[int] = []
-    reconcile = custody.require_execution_send_reconciliation
+    reconcile = queue_execution_wakes.require_no_outstanding_driver_work
 
-    def measured(conn: sqlite3.Connection, task_id: str, *, exclusive_key: str | None) -> None:
+    def measured(
+        conn: sqlite3.Connection, task: Task, reservation: dict[str, Any], native: str,
+    ) -> None:
         steps = 0
 
         def count() -> int:
@@ -235,28 +236,36 @@ def test_preview_reconciliations_skip_settled_transport_history(
 
         conn.set_progress_handler(count, 1)
         try:
-            reconcile(conn, task_id, exclusive_key=exclusive_key)
+            reconcile(conn, task, reservation, native)
         finally:
             conn.set_progress_handler(None, 0)
         costs.append(steps)
 
-    monkeypatch.setattr(custody, "require_execution_send_reconciliation", measured)
+    monkeypatch.setattr(queue_execution_wakes, "require_no_outstanding_driver_work", measured)
     with transport.api(ready) as api:
         url = transport.path(ready, "/observe-provisional")
         args, headers = transport.body(ready), transport.headers(ready)
         for start, end in ((0, 20), (20, 2000)):
-            rows = [{"i": i, "task": foreign.id} for i in range(start, end)]
+            rows = [
+                {"i": i + 10, "task": foreign.id if i % 2 else ready[3].id}
+                for i in range(start, end)
+            ]
             with queue._connect() as conn:
                 conn.executemany(
-                    "INSERT INTO wake_outbox(id,task_id,generation,wake_seq,owner,status,"
+                    "INSERT INTO run_waiters(task_id,generation,pid,resume_worktree,state,"
+                    "created_at,updated_at) VALUES (:task,:i,0,'w','retired',1,1)", rows,
+                )
+                conn.executemany(
+                    "INSERT INTO wake_outbox(id,task_id,generation,wake_seq,owner,status,attempts,"
                     "created_at,updated_at,execution_send_state)"
-                    " VALUES (:i,:task,1,:i,'host/w','delivered',1,1,'sent')", rows,
+                    " VALUES (:i,:task,1,:i,'host/w','delivered',1,1,1,'sent')", rows,
                 )
                 conn.executemany(
                     "INSERT INTO run_waiter_wakes(id,task_id,waiter_generation,task_generation,"
-                    "owner,resume_worktree,sender,message,status,created_at,updated_at,"
+                    "owner,resume_worktree,sender,message,status,attempts,created_at,updated_at,"
                     "execution_send_state)"
-                    " VALUES (:i,:task,1,1,'host/w','w','test','message','delivered',1,1,'sent')",
+                    " VALUES (:i,:task,1,1,'host/w','w','test','message',"
+                    "'delivered',1,1,1,'sent')",
                     rows,
                 )
                 conn.executemany(
@@ -271,3 +280,68 @@ def test_preview_reconciliations_skip_settled_transport_history(
     assert len(costs) == 4
     for small, large in zip(costs[:2], costs[2:], strict=True):
         assert large <= small * 2, costs
+
+
+@pytest.mark.parametrize("waiter_state", ["preparing", "active", "retired"])
+def test_preview_waits_for_detached_work_even_without_workspace_claim(
+    ready: Ready, waiter_state: str,
+) -> None:
+    queue, _, workspace, task, calls = ready
+    with queue._connect() as conn:
+        conn.execute(
+            "INSERT INTO run_waiters(task_id,generation,pid,resume_worktree,state,"
+            "created_at,updated_at) VALUES (?,1,0,?,?,1,1)",
+            (task.id, workspace.worker_id, waiter_state),
+        )
+    with transport.api(ready) as api:
+        response = api.post(transport.path(ready, "/observe-provisional"),
+                            headers=transport.headers(ready), json=transport.body(ready))
+    assert response.status_code == (200 if waiter_state == "retired" else 409)
+    assert len(calls) == (1 if waiter_state == "retired" else 0)
+
+
+@pytest.mark.parametrize(("foreign", "owner", "native", "send", "blocked"), [
+    (False, "host-a/worktree", "native", None, True),
+    (False, "host-a/worktree", "native", "sent", False),
+    (False, "host-a/worktree", "native", "not_sent", False),
+    (True, "HOST-A/other", "native", "unknown", True),
+    (True, "host-a/worktree", None, "pending", True),
+    (True, "other/worktree", "native", "unknown", False),
+    (True, "other/worktree", None, "unknown", False),
+    (True, "host-a/worktree", "different", "unknown", False),
+])
+@pytest.mark.parametrize("waiter", [False, True], ids=["owner-wake", "waiter-wake"])
+def test_preview_rechecks_exact_wake_target_after_owner_read(
+    ready: Ready, monkeypatch: pytest.MonkeyPatch, foreign: bool, owner: str,
+    native: str | None, send: str | None, blocked: bool, waiter: bool,
+) -> None:
+    queue, _, _, task, calls = ready
+    target = queue.create("Unrelated", repo="example") if foreign else task
+    assert isinstance(target, Task)
+    observe = submission_readiness_observation.observe
+
+    def raced(request: dict[str, object], allocation: dict[str, object],
+              ref: str) -> dict[str, object]:
+        evidence = observe(request, allocation, ref)
+        with queue._connect() as conn:
+            if waiter:
+                conn.execute(
+                    "INSERT INTO run_waiter_wakes(id,task_id,waiter_generation,task_generation,"
+                    "owner,owner_session_id,resume_worktree,sender,message,status,attempts,"
+                    "created_at,updated_at,execution_send_state) VALUES ('w',?,1,1,?,?,'w',"
+                    "'test','m','failed',1,1,1,?)", (target.id, owner, native, send),
+                )
+            else:
+                conn.execute(
+                    "INSERT INTO wake_outbox(id,task_id,generation,wake_seq,owner,"
+                    "owner_session_id,status,attempts,created_at,updated_at,execution_send_state)"
+                    " VALUES ('w',?,1,42,?,?,'failed',1,1,1,?)", (target.id, owner, native, send),
+                )
+        return evidence
+
+    monkeypatch.setattr(submission_readiness_observation, "observe", raced)
+    with transport.api(ready) as api:
+        response = api.post(transport.path(ready, "/observe-provisional"),
+                            headers=transport.headers(ready), json=transport.body(ready))
+    assert response.status_code == (409 if blocked else 200) and len(calls) == 1
+    assert queue.relevance_snapshot(task.id)["closeout"]["readiness"] is None

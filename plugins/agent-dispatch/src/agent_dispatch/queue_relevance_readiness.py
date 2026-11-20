@@ -151,8 +151,8 @@ def observe_provisional(
     queue: TaskQueue, task_id: str, arguments: dict[str, Any], authority_guard: Callable[[], None],
 ) -> dict[str, Any]:
     """Point-in-time only: persisting closeout readiness would authorize claim release."""
-    from .queue_execution_custody import require_execution_send_reconciliation
     from .queue_execution_handoff import closed_execution
+    from .queue_execution_wakes import require_no_outstanding_driver_work
 
     def snapshot(conn: sqlite3.Connection) -> dict[str, Any]:
         authority_guard()
@@ -173,7 +173,7 @@ def observe_provisional(
             or closed_execution(conn, task_id) is not None
         ):
             raise TaskError("provisional observation requires an unsettled, bound driver assignment")
-        require_execution_send_reconciliation(conn, task_id, exclusive_key=task.exclusive_key)
+        require_no_outstanding_driver_work(conn, task, state["reservation"], arguments["native_id"])
         return state
 
     with queue._connect() as conn:
