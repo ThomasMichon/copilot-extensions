@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+from agent_procutil import no_window_kwargs
 from single_instance_lease import SingleInstance
 
 from agent_pull_requests.watch_storage import watch_state_paths
@@ -14,6 +17,52 @@ from agent_pull_requests.watch_writer import WatchWriter
 from test_watch_transition import writer as writer
 
 pytestmark = pytest.mark.contract("agent_pull_requests.watch.writer_handoff")
+
+_ABRUPT_WINDOWS_CONTROLLER = r"""
+import json, os, sys
+from pathlib import Path
+from agent_pull_requests import watch_windows_sealing
+from agent_pull_requests.watch_storage import watch_state_paths
+from agent_pull_requests.watch_writer import WatchWriter
+
+root, stage = Path(sys.argv[1]), sys.argv[2]
+paths = watch_state_paths(root)
+def forbidden(*args):
+    raise AssertionError("sealing must not fetch or notify")
+owner = WatchWriter(root=root, authorize=lambda _: None, fetch=forbidden, notify=forbidden)
+owner.adopt(timeout=3)
+owner.prepare_state_transition(timeout=3)
+def leave():
+    print(json.dumps(dict(stage=stage, held=owner.writer_held,
+                          lock=str(owner._lease.lock_path), ready=owner.read_ready,
+                          effects=owner.daemon.effects_enabled)), flush=True)
+    os._exit(73)
+if stage == "prepared":
+    leave()
+confirm = watch_windows_sealing.confirm_private
+def confirmed(path):
+    confirm(path)
+    if stage == "staged":
+        leave()
+watch_windows_sealing.confirm_private = confirmed
+release = owner._lease.release
+def released():
+    release()
+    if stage == "released":
+        leave()
+owner._lease.release = released
+move = watch_windows_sealing.windows_move_no_replace
+def moved(source, destination):
+    move(source, destination)
+    if (stage == "moved" and destination == paths.retained_lock) or (
+        stage == "barrier-installed" and destination == paths.historical_lock
+    ):
+        leave()
+watch_windows_sealing.windows_move_no_replace = moved
+owner.seal_state_transition(timeout=3)
+assert stage == "sealed"
+leave()
+"""
 
 
 def test_unavailable_exchange_backend_preserves_prepared_custody(
@@ -184,5 +233,68 @@ def test_native_windows_cold_recovery_never_opens_retained_inode(
         assert acquisitions == [paths.writer_lock]
         assert not recovered.read_ready and not recovered.daemon.effects_enabled
         assert not paths.isolated_subscriptions.parent.exists()
+    finally:
+        recovered.close(timeout=3)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="native Windows controller-exit qualification")
+@pytest.mark.parametrize(
+    "stage", ["prepared", "staged", "released", "moved", "barrier-installed", "sealed"],
+)
+def test_native_windows_abrupt_controller_exit_recovers_without_legacy_effects(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stage: str,
+) -> None:
+    paths = watch_state_paths(tmp_path)
+    legacy = b" [] \n"
+    paths.legacy_subscriptions.write_bytes(legacy)
+    result = subprocess.run(
+        [sys.executable, "-B", "-c", _ABRUPT_WINDOWS_CONTROLLER, str(tmp_path), stage],
+        capture_output=True, text=True, timeout=10, **no_window_kwargs(),
+    )
+    assert result.returncode == 73, result.stdout + result.stderr
+    receipt = json.loads(result.stdout)
+    assert receipt["stage"] == stage and not receipt["ready"] and not receipt["effects"]
+    assert receipt["held"] == (stage in ("prepared", "staged", "sealed"))
+    assert receipt["lock"] == str(paths.writer_lock if stage == "sealed" else paths.historical_lock)
+    interrupted = json.loads(paths.journal.read_bytes())
+    assert interrupted["phase"] == ("sealed-legacy" if stage == "sealed" else "prepared")
+    original = (interrupted["lease"]["device"], interrupted["lease"]["inode"])
+    retained = stage in ("moved", "barrier-installed", "sealed")
+    original_path = paths.retained_lock if retained else paths.historical_lock
+    info = original_path.stat()
+    assert (info.st_dev, info.st_ino) == original
+    assert paths.historical_lock.is_dir() == (stage in ("barrier-installed", "sealed"))
+    assert paths.staged_barrier.exists() == (stage in ("staged", "released", "moved"))
+    assert paths.legacy_subscriptions.read_bytes() == legacy
+    assert not paths.isolated_subscriptions.parent.exists()
+    acquisitions: list[Path] = []
+    acquire = SingleInstance.acquire
+
+    def observed(
+        instance: SingleInstance, *, expected_file_identity: tuple[int, int] | None = None,
+    ) -> None:
+        acquisitions.append(instance.lock_path)
+        acquire(instance, expected_file_identity=expected_file_identity)
+
+    monkeypatch.setattr(SingleInstance, "acquire", observed)
+    recovered = WatchWriter(
+        root=tmp_path, authorize=lambda _: None,
+        fetch=lambda *_: pytest.fail("sealing recovery must not fetch"),
+        notify=lambda *_: pytest.fail("sealing recovery must not notify"),
+    )
+    try:
+        record = recovered.seal_state_transition(timeout=3)
+        expected = [paths.writer_lock] if retained else [paths.historical_lock, paths.writer_lock]
+        assert acquisitions == expected and paths.retained_lock not in acquisitions
+        assert record["phase"] == "sealed-legacy" and record["lease"] == interrupted["lease"]
+        assert recovered.writer_held and not recovered.read_ready
+        assert not recovered.daemon.effects_enabled and recovered.daemon.quiescent
+        assert paths.historical_lock.is_dir() and not paths.staged_barrier.exists()
+        assert paths.legacy_subscriptions.read_bytes() == legacy
+        assert not paths.isolated_subscriptions.parent.exists()
+        with pytest.raises(PermissionError):
+            SingleInstance(tmp_path, service="agent-pull-requests-watch").acquire()
+        with pytest.raises(RuntimeError, match="read-ready"):
+            recovered.activate(timeout=1)
     finally:
         recovered.close(timeout=3)
