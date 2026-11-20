@@ -2,6 +2,24 @@
 
 [Back to the effort](README.md). The Plan and Validation Plan remain the completion gate.
 
+## 2026-11-20 - Host-index discovery without an attached session
+
+The installed mux consumer trial merged in [#13635](https://github.com/ThomasMichon/copilot-extensions/pull/13635).
+The next private fixture exercises the public Bridge target and session status
+routes with an empty database. A host index record with a living but unrelated
+fixture PID is listed as a candidate. A missing or unreadable-version index is
+an unavailable source, not a complete empty inventory. In all three cases,
+status returns `404 Session <id> not found`. No session or turn is created.
+
+The status handler requires a managed session before calling Driver inspection.
+The existing client's inspection credential is established during attachment;
+the host index's owner generation identifies the **frontend**, not the host
+incarnation. Neither a PID nor a saved endpoint binds a cold probe to the
+original host. Do not send an attachment credential to a candidate to find
+out who owns it. Original-versus-lookalike cold verification and installed
+host recovery remain open until the host owner supplies a read-only route
+bound independently to the original incarnation. No new store or grant.
+
 ## 2026-11-20 - Pinned mux discovery merged
 
 [#13621](https://github.com/ThomasMichon/copilot-extensions/pull/13621)
