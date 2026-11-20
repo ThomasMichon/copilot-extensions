@@ -652,6 +652,7 @@ def test_uv_capability_inspection_reads_only_its_prefix_without_a_legacy_size_li
         "static32",
         "protected-loader",
         "foreign-loader",
+        "dynamic-section",
         "script",
         "bad-layout",
     ],
@@ -675,14 +676,16 @@ def test_uv_selection_refuses_replaceable_interpreters_and_non_native_inputs(
         content = b"#!" + str(loader).encode() + b"\ncontroller code\n"
     elif case == "bad-layout":
         content = content[:32]
+    elif case == "dynamic-section":
+        dynamic = bytearray(content)
+        struct.pack_into("<I", dynamic, 64, 2)
+        content = bytes(dynamic)
     uv.write_bytes(content)
-    if case in {"foreign-loader", "script", "bad-layout"}:
-        with pytest.raises(
-            ValueError, match="interpreter|native executable|native ELF"
-        ):
-            require_native_executable(uv, check_interpreter=protected._uv_interpreter)
+    if case not in {"static64", "static32"}:
+        with pytest.raises(ValueError, match="static ELF|native executable|native ELF"):
+            require_native_executable(uv)
     else:
-        require_native_executable(uv, check_interpreter=protected._uv_interpreter)
+        require_native_executable(uv)
 
 
 @pytest.mark.parametrize(

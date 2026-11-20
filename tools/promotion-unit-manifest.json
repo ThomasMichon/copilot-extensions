@@ -5589,7 +5589,23 @@
         "tools/promotion_unit_tests/test_owned_producer_contract.py::test_owner_refusal_never_reaches_a_command",
         "tools/promotion_unit_tests/test_owned_producer_contract.py::test_abbreviated_options_refuse_before_allocation[owner-prefix]",
         "tools/promotion_unit_tests/test_owned_producer_contract.py::test_abbreviated_options_refuse_before_allocation[kind-prefix]",
-        "tools/promotion_unit_tests/test_owned_producer_contract.py::test_abbreviated_options_refuse_before_allocation[timeout-prefix]"
+        "tools/promotion_unit_tests/test_owned_producer_contract.py::test_abbreviated_options_refuse_before_allocation[timeout-prefix]",
+        "tools/promotion_unit_tests/test_protected_installation.py::test_selected_contract_probe_does_not_execute_provider[current]",
+        "tools/promotion_unit_tests/test_protected_installation.py::test_selected_contract_probe_does_not_execute_provider[old]",
+        "tools/promotion_unit_tests/test_protected_installation.py::test_policy_admission_preserves_closed_native_roles[valid]",
+        "tools/promotion_unit_tests/test_protected_installation.py::test_policy_admission_preserves_closed_native_roles[unregistered-identity]",
+        "tools/promotion_unit_tests/test_protected_installation.py::test_policy_admission_preserves_closed_native_roles[foreign-owner]",
+        "tools/promotion_unit_tests/test_protected_installation.py::test_policy_admission_preserves_closed_native_roles[default-acl]",
+        "tools/promotion_unit_tests/test_protected_installation.py::test_policy_admission_preserves_closed_native_roles[output-alias]",
+        "tools/promotion_unit_tests/test_protected_installation.py::test_policy_admission_preserves_closed_native_roles[unknown-field]",
+        "tools/promotion_unit_tests/test_protected_installation.py::test_protected_dispatch_uses_admitted_selection_without_fallback[installed]",
+        "tools/promotion_unit_tests/test_protected_installation.py::test_protected_dispatch_uses_admitted_selection_without_fallback[old-launcher]",
+        "tools/promotion_unit_tests/test_protected_installation.py::test_protected_dispatch_uses_admitted_selection_without_fallback[manager-context]",
+        "tools/promotion_unit_tests/test_protected_installation.py::test_protected_dispatch_uses_admitted_selection_without_fallback[script-uv]",
+        "tools/promotion_unit_tests/test_protected_installation.py::test_uv_requires_static_native_inputs[native64]",
+        "tools/promotion_unit_tests/test_protected_installation.py::test_uv_requires_static_native_inputs[native32]",
+        "tools/promotion_unit_tests/test_protected_installation.py::test_uv_requires_static_native_inputs[dynamic-interpreter]",
+        "tools/promotion_unit_tests/test_protected_installation.py::test_uv_requires_static_native_inputs[dynamic-section]"
     ],
     "coverage_targets": [
         "plugins/agent-index/src/agent_index/store/source_layout.py",
@@ -5972,7 +5988,9 @@
         "tools/artifact_bundle_validation.py",
         "tools/promotion_source_history.py",
         "plugins/efforts/skills/driving-effort-agendas/scripts/agenda_rescue.py",
-        "tools/owned_producer.py"
+        "tools/owned_producer.py",
+        "libs/installer-engine/installer_protected_source.py",
+        "libs/installer-engine/installer_native_executable.py"
     ],
     "sources": {
         "tools/promotion_unit_tests/test_point_source_domain_contract.py": "fc228626d6a7d08f1938ecd9c22d013d5486211c1dbef000dfae9be3625ca474",
@@ -6697,8 +6715,9 @@
         "tools/promotion_unit_tests/test_manager_activation.py": "047b6135b5882a9fb1eec41d78f331b1ed212fa4d87da07fca8902c3c07a81f5",
         "fleet-manager/setup.py": "85af516449571a6e0d3208e35fcca48d527fbfed84da5f29cce8c5c5dae93e0a",
         "libs/installer-engine/install_source.py": "60943cec50dc8df7844a57371e34e1d98260b7935f1d97c3ebd2d16a3647f95c",
-        "libs/installer-engine/installer_protected_source.py": "9b19f5626c03e64bb2e95638d0fde1a5826d92dede6e2cea1c494c2819ab7523",
-        "libs/installer-engine/installer_native_executable.py": "a3e1312dfb5d6c2a729a352feb6a01fb884c3da52657889e3967797a4816a848",
+        "libs/installer-engine/installer_protected_source.py": "d643dca2774b81ead47feb07337120756b55bdebe79e5ab19fa3e7e8bd976cf6",
+        "libs/installer-engine/installer_native_executable.py": "5d6346082632ea6e7a972b0416f14f23fea063d0023d722712e7e89ab0b1bb1f",
+        "tools/promotion_unit_tests/test_protected_installation.py": "5ce5a7b5fdf3a919bcc4f60215fc114ca6c1dc205c57f6cf896207821a40ec54",
         "libs/installer-engine/installer_driver.py": "d63882f5024114f5ab6623b95fbdb45b7322dfbffd3546ee24e1de8bd93ca98a",
         "libs/installer-engine/installer_engine_commands.py": "5d8028b9286f61480b0d19d77b82a4a932fa7ea8193635a728170afc4f61d4ed",
         "libs/installer-engine/installer_engine_stop.py": "5a563fe15a205d7168871a8e9470a286c1281bbeead93acb486bda259eaaee16",

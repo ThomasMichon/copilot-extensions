@@ -215,9 +215,9 @@ def _output_directory(path: Path) -> None:
         raise ValueError("protected output directory has a default ACL")
 
 
-def _os_file(path: Path, *, prefix: Path | None = None) -> Path:
+def _os_file(path: Path) -> Path:
     """Follow only a completely protected, bounded OS-prefix link chain."""
-    prefix = Path(sys.base_prefix) if prefix is None else prefix
+    prefix = Path(sys.base_prefix)
     _protected(prefix, directory=True)
     for _ in range(40):
         if path == prefix or not path.is_relative_to(prefix):
@@ -252,11 +252,6 @@ def _os_file(path: Path, *, prefix: Path | None = None) -> Path:
         else:
             return path
     raise ValueError("protected interpreter link chain exceeds its bound")
-
-
-def _uv_interpreter(path: Path) -> None:
-    physical = _os_file(path, prefix=Path("/"))
-    _native_mounts((physical,))
 
 
 def _tree(root: Path, *, deadline: float, internal_links: bool = False) -> None:
@@ -452,7 +447,7 @@ def install(selected: ProtectedApplication, *, code: Path) -> dict[str, str]:
     import install_source
     from installer_native_executable import require_native_executable
 
-    require_native_executable(selected.uv, check_interpreter=_uv_interpreter)
+    require_native_executable(selected.uv)
 
     source = install_source.select_project(selected.snapshot, selected.component)
     if not source.payload.is_relative_to(selected.snapshot) or any(

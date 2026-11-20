@@ -47,9 +47,13 @@ layers do not share reliable overlap coordinates. DrvFS/9p,
 network and FUSE filesystems are refused rather than treated as equivalent
 mode-bit enforcement.
 
-The selected UV must be a native ELF executable, not an interpreted script.
-Its bounded ELF program table is inspected; any declared dynamic interpreter
-must have a complete root-protected file/link chain under native OS custody.
+The selected UV must be a static native ELF executable, not an interpreted
+script or a dynamically linked binary. Its bounded ELF program table must
+contain neither `PT_INTERP` nor `PT_DYNAMIC`. Dynamic libraries, RPATH/RUNPATH
+and interpreter resolution are not supported by this initial provider;
+static-PIE binaries containing a dynamic section also refuse.
+This keeps a controller-operated intermediate mount or library search path
+out of the selected UV execution chain instead of implementing another loader.
 The native bootstrap protects this ELF-inspection helper before Python starts;
 the helper is imported only after admission of the complete protected seed.
 The OS installation, its interpreter/standard library/native dependencies and
@@ -163,7 +167,10 @@ as a pre-effect rejection after dispatch, and this wrapper never retries it.
 
 ## Qualification boundary
 
-Focused source controls exercise policy admission, native filesystem refusal,
+Required promotion-unit controls exercise selected-contract discovery, actual
+closed policy/native admission and dispatch through in-memory native
+observation actors. They contain no filesystem or subprocess execution.
+Separate focused integration controls exercise native filesystem refusal,
 selected-owner capability discovery, the real Source application adapter and
 unchanged error/custody propagation using inert metadata and constructor
 fixtures. The ordinary-UID bootstrap negative executes without privilege.
