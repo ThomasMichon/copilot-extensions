@@ -158,9 +158,19 @@ requires its separate owning preparation and is explicitly refused.
 The installed owner expands `closed-wheel-source/v1` before any consumer
 migration; no old-provider fallback or native adoption is claimed.
 
-Focused source validation passes 25 controls, strict Linux/Windows typing,
+Initial focused source validation passed 25 controls, strict Linux/Windows typing,
 the existing install contract, documentation consistency, generated-engine
 parity and changed-module size gates. The package-graph helper moved into the
 existing retained-source owner to stay within the unchanged module-size cap;
 the original engine import remains available. Required PR review/checks and a
 containing release remain C3, and actual consumer adoption remains C4.
+
+The implementation review identified two preservation gaps. Closed-wheel
+freezing and retained construction hashing now keep all admitted application
+files, including development artifacts under `build/` and `dist/`; ordinary
+source exclusions remain unchanged. Emission canonicalizes the distribution
+key while explicitly preserving the original primary-command choice.
+The expanded packet passes 29 source controls plus 152 existing admitted units,
+with both platform type checks and the unchanged contract/sync/size gates.
+Static data admission retains canonical Git/LF bytes, not local newline
+conversion. Required current-head review/CI and containing release remain open.

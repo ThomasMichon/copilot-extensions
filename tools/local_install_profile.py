@@ -347,9 +347,9 @@ def _write_snapshot(
             primary, extras=tuple(construction["extras"]), metadata=project_metadata,
         )
         emit(
-            application, distribution=metadata["name"], version=metadata["version"],
+            application, distribution=canonicalize_name(metadata["name"]), version=metadata["version"],
             requires_python=f">={environment['python_full_version']},<{major}.{int(minor) + 1}",
-            commands=commands, setup=setup, start=start,
+            commands=commands, primary=primary, setup=setup, start=start,
             callback_timeout_seconds=project_metadata.get("tool", {}).get(
                 "copilot-extensions", {},
             ).get("application", {}).get("callback_timeout_seconds"),

@@ -24,7 +24,7 @@ wheel_bytes = cast(Callable[..., bytes], _wheel_bytes)
 
 
 @pytest.fixture
-def application(tmp_path: Path) -> dict[str, Any]:
+def application(tmp_path: Path, request: pytest.FixtureRequest) -> dict[str, Any]:
     repo = tmp_path / "repository"
     package = repo / "app" / "src" / "demo_app"
     package.mkdir(parents=True)
@@ -43,8 +43,12 @@ def application(tmp_path: Path) -> dict[str, Any]:
         '[tool.setuptools.packages.find]\nwhere=["src"]\n'
         '[tool.uv.sources]\nhelper={path="legacy.whl"}\n'
     ).encode()
+    development_wheel = getattr(request, "param", "legacy.whl")
+    metadata = metadata.replace(b'path="legacy.whl"', f'path="{development_wheel}"'.encode())
     (repo / "app" / "pyproject.toml").write_bytes(metadata)
-    (repo / "app" / "legacy.whl").write_bytes(b"development-only retained bytes")
+    development = repo / "app" / development_wheel
+    development.parent.mkdir(parents=True, exist_ok=True)
+    development.write_bytes(b"development-only retained bytes")
     git = source.preparation._git
     git(repo, "init", "--quiet")
     git(repo, "add", ".")
@@ -92,16 +96,18 @@ def application(tmp_path: Path) -> dict[str, Any]:
     }
 
 
+@pytest.mark.parametrize("application", ["legacy.whl", "dist/legacy.whl", "build/legacy.whl"], indirect=True)
 def test_closed_wheels_preserve_development_source_and_real_application_lock(
     application: dict[str, Any],
 ) -> None:
     original = application["repository"] / "app"
     expected = (original / "pyproject.toml").read_bytes()
+    development_wheel = profiles.dependencies._toml(original / "pyproject.toml")["tool"]["uv"]["sources"]["helper"]["path"]
     prepared = closed.prepare(**application)
     selected = profiles.source_inputs.select_project(prepared, "demo-app")
     assert selected.closed_wheel_source
     assert (selected.payload / "pyproject.toml").read_bytes() == expected
-    assert (selected.payload / "legacy.whl").read_bytes() == (original / "legacy.whl").read_bytes()
+    assert (selected.payload / development_wheel).read_bytes() == (original / development_wheel).read_bytes()
     assert (original / "pyproject.toml").read_bytes() == expected
     emitted = prepared / selected.project["application"]
     project = profiles.dependencies._toml(emitted / "pyproject.toml")
@@ -117,6 +123,7 @@ def test_closed_wheels_preserve_development_source_and_real_application_lock(
             closed_wheel_source=True, deadline=application["deadline"],
         )
         assert (frozen.plugin / "pyproject.toml").read_bytes() == expected
+        assert (frozen.plugin / development_wheel).read_bytes() == (original / development_wheel).read_bytes()
         assert frozen.packages == (frozen.plugin,)
         from installer_source_build import retained_input_graph
 
@@ -131,6 +138,7 @@ def test_closed_wheels_preserve_development_source_and_real_application_lock(
         ) as held:
             assert held.closed_wheel_source and held.plugin != selected.payload
             assert (held.plugin / "pyproject.toml").read_bytes() == expected
+            assert (held.plugin / development_wheel).read_bytes() == (original / development_wheel).read_bytes()
             profiles.engine._revalidate_input_content(held)
     with pytest.raises(profiles.dependencies.DependencyPolicyError, match="release age"):
         profiles.engine._package_roots(selected.payload)
@@ -282,3 +290,41 @@ def test_isolated_preparation_provider_uses_its_own_siblings(tmp_path: Path) -> 
         cwd=tmp_path, capture_output=True, text=True, deadline=time.monotonic() + 15,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("spelling", ["demo_app", "Demo-App"])
+def test_equivalent_distribution_names_keep_original_primary_command(
+    application: dict[str, Any], spelling: str,
+) -> None:
+    repository = application["repository"]
+    metadata = repository / "app/pyproject.toml"
+    content = metadata.read_text().replace('name="demo-app"', f'name="{spelling}"').replace(
+        'demo-app="demo_app:main"', 'aaa-probe="demo_app:main"\ndemo-app="demo_app:main"',
+    )
+    metadata.write_text(content)
+    git = source.preparation._git
+    git(repository, "add", ".")
+    git(
+        repository, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+        "commit", "--quiet", "-m", "Equivalent distribution name",
+    )
+    application["commit"] = git(repository, "rev-parse", "HEAD")
+    app = application["archives"]["demo_app-1.0.0-py3-none-any.whl"]
+    with zipfile.ZipFile(app) as archive:
+        wheel_metadata = archive.read("demo_app-1.0.0.dist-info/METADATA")
+        body = archive.read("demo_app/__init__.py")
+    app.write_bytes(wheel_bytes(
+        name="demo_app", prefix="demo_app-1.0.0.dist-info/", metadata=wheel_metadata,
+        extra={
+            "demo_app/__init__.py": body,
+            "demo_app-1.0.0.dist-info/entry_points.txt":
+                b"[console_scripts]\naaa-probe = demo_app:main\ndemo-app = demo_app:main\n",
+        },
+    ))
+    application["digests"][app.name] = "sha256:" + hashlib.sha256(app.read_bytes()).hexdigest()
+    prepared = closed.prepare(**application)
+    selected = profiles.source_inputs.select_project(prepared, "demo-app")
+    assert (selected.payload / "pyproject.toml").read_text() == content
+    declaration = json.loads((prepared / selected.project["application"] / "application.json").read_text())
+    assert declaration["name"] == "aaa-probe"
+    assert (prepared / selected.project["application"] / "uv.lock").is_file()

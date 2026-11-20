@@ -196,7 +196,9 @@ def revalidate_input_content(engine: ModuleType, inputs: FrozenInputs) -> None:
         ) != inputs.packages
         or engine._wheel_construction_hash(
             engine._construction_hash(
-                engine._source_files(inputs.packages), inputs.extras, inputs.local_packages,
+                engine._source_input_files(
+                    inputs.packages, closed_wheel_source=inputs.closed_wheel_source,
+                ), inputs.extras, inputs.local_packages,
             ),
             inputs.wheel_inputs,
         ) != inputs.payload_hash
@@ -230,7 +232,10 @@ def retained_input_graph(
             )
             if engine._wheel_construction_hash(
                 engine._construction_hash(
-                    engine._source_files(frozen.packages, on_progress=on_progress), inputs.extras,
+                    engine._source_input_files(
+                        frozen.packages, closed_wheel_source=inputs.closed_wheel_source,
+                        on_progress=on_progress,
+                    ), inputs.extras,
                     inputs.local_packages, on_progress=on_progress,
                 ),
                 inputs.wheel_inputs,

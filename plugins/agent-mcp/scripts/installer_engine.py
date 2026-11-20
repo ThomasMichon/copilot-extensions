@@ -67,6 +67,9 @@ from installer_engine_health import (
 )
 
 _ProgressOptions = TypedDict("_ProgressOptions", {"on_progress": Callable[[], None]}, total=False)
+_SourceFileOptions = TypedDict(
+    "_SourceFileOptions", {"on_progress": Callable[[], None], "include_generated": bool}, total=False,
+)
 _GENERATED_DIRECTORIES = {
     ".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache", ".test-runs",
     "build", "dist", "node_modules",
@@ -138,7 +141,10 @@ def _excluded_packages(inputs: FrozenInputs) -> list[str]:
     return sorted({_package_name(package) for package in inputs.packages} - set(inputs.local_packages))
 
 
-def _source_files(roots: tuple[Path, ...], *, on_progress: Callable[[], None] | None = None) -> tuple[Path, ...]:
+def _source_files(
+    roots: tuple[Path, ...], *, on_progress: Callable[[], None] | None = None,
+    include_generated: bool = False,
+) -> tuple[Path, ...]:
     files: set[Path] = set()
 
     def scan_error(error: OSError) -> None:
@@ -153,17 +159,31 @@ def _source_files(roots: tuple[Path, ...], *, on_progress: Callable[[], None] | 
                 mode = Path(_native_retained_path(path)).lstat().st_mode
                 if not stat.S_ISDIR(mode):
                     raise ValueError(f"Runtime input directory is not ordinary: {path}")
-                if name in _GENERATED_DIRECTORIES or name.endswith((".egg-info", ".dist-info")):
+                if not include_generated and (
+                    name in _GENERATED_DIRECTORIES or name.endswith((".egg-info", ".dist-info"))
+                ):
                     children.remove(name)
             for name in names:
                 path = parent / name
                 if not stat.S_ISREG(Path(_native_retained_path(path)).lstat().st_mode):
                     raise ValueError(f"Runtime input file is not ordinary: {path}")
-                if not name.endswith((".pyc", ".pyo")):
+                if include_generated or not name.endswith((".pyc", ".pyo")):
                     files.add(path)
             if on_progress is not None:
                 on_progress()
     return tuple(sorted(files))
+
+
+def _source_input_files(
+    roots: tuple[Path, ...], *, closed_wheel_source: bool = False,
+    on_progress: Callable[[], None] | None = None,
+) -> tuple[Path, ...]:
+    options: _SourceFileOptions = {}
+    if on_progress is not None:
+        options["on_progress"] = on_progress
+    if closed_wheel_source:
+        options["include_generated"] = True
+    return _source_files(roots, **options)
 
 
 def freeze_inputs(
@@ -198,7 +218,7 @@ def freeze_inputs(
         if destination == root or destination.is_relative_to(root):
             raise ValueError(f"Frozen input destination is inside runtime source: {destination}")
     progress: _ProgressOptions = {"on_progress": on_progress} if on_progress is not None else {}
-    files = _source_files(roots, **progress)
+    files = _source_input_files(roots, closed_wheel_source=closed_wheel_source, **progress)
     Path(_native_retained_path(destination)).mkdir(parents=True, exist_ok=False)
     try:
         buffer_limit = 32 * 1024 * 1024
@@ -259,14 +279,16 @@ def freeze_inputs(
             )
         })) != tuple(sorted(frozen_roots)):
             raise RuntimeError("Runtime dependency graph changed while freezing inputs")
-        after_files = _source_files(roots, **progress)
+        after_files = _source_input_files(roots, closed_wheel_source=closed_wheel_source, **progress)
         if after_files != files:
             changed = sorted(set(after_files).symmetric_difference(files))
             detail = ", ".join(str(path.relative_to(common)) for path in changed[:10])
             raise RuntimeError(f"Runtime input file set changed while freezing inputs: {detail}")
         after = runtime.fingerprint_source(files, **progress)
         native_roots = tuple(Path(_native_retained_path(root)) for root in frozen_roots)
-        frozen_hash = runtime.fingerprint_source(_source_files(native_roots, **progress), **progress)
+        frozen_hash = runtime.fingerprint_source(_source_input_files(
+            native_roots, closed_wheel_source=closed_wheel_source, **progress,
+        ), **progress)
         if before != after or before != frozen_hash:
             raise RuntimeError("Runtime input content changed while freezing inputs")
         if deadline is not None:
@@ -493,7 +515,9 @@ def _construct(
                 ),
                 "payload_hash": inputs.payload_hash,
                 "source_hash": _construction_hash(
-                    _source_files(inputs.packages), inputs.extras, inputs.local_packages,
+                    _source_input_files(
+                        inputs.packages, closed_wheel_source=inputs.closed_wheel_source,
+                    ), inputs.extras, inputs.local_packages,
                 ),
                 "wheel_inputs": inputs.wheel_inputs.receipt(),
                 "extras": list(inputs.extras),
@@ -534,7 +558,9 @@ def _construct(
             _source_files((inputs.application,)) != files
             or runtime.fingerprint_source(files) != before
             or runtime.fingerprint_source(tuple(copied)) != before
-            or runtime.fingerprint_source(_source_files(inputs.packages)) != inputs.retained_hash
+            or runtime.fingerprint_source(_source_input_files(
+                inputs.packages, closed_wheel_source=inputs.closed_wheel_source,
+            )) != inputs.retained_hash
         ):
             raise RuntimeError("Application inputs changed during slot staging")
         _verify_application_wheels(inputs, slot)
@@ -569,7 +595,9 @@ def _construct(
         delays=(3, 6, 10), transient=r"SRE module mismatch",
         environment=transaction.environment, cwd=transaction.cwd,
     )
-    if runtime.fingerprint_source(_source_files(inputs.packages)) != inputs.retained_hash:
+    if runtime.fingerprint_source(_source_input_files(
+        inputs.packages, closed_wheel_source=inputs.closed_wheel_source,
+    )) != inputs.retained_hash:
         raise RuntimeError("Frozen runtime inputs changed during package construction")
     if inputs.wheel_inputs is not None:
         inputs.wheel_inputs.verify()
@@ -759,7 +787,9 @@ def _candidate(
             plugin.resolve(strict=True), packages,
             expected_payload_hash if expected_payload_hash is not None else _wheel_construction_hash(
                 _construction_hash(
-                    _source_files(packages, on_progress=selected), extras, local_packages,
+                    _source_input_files(
+                        packages, closed_wheel_source=closed_wheel_source, on_progress=selected,
+                    ), extras, local_packages,
                     on_progress=selected,
                 ), wheel_inputs,
             ),

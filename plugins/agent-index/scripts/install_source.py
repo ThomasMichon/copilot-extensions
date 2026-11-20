@@ -318,7 +318,9 @@ def _wheel_selection(
     return {
         "runtime_version": version + ".profile." + receipt["lock_id"][7:23],
         "payload_hash": engine._wheel_construction_hash(
-            engine._construction_hash(engine._source_files(packages), extras, local), inputs,
+            engine._construction_hash(engine._source_input_files(
+                packages, closed_wheel_source=closed_wheel_source,
+            ), extras, local), inputs,
         ),
         "extras": list(extras), "local_packages": list(local),
         "provider_roots": from_profile(profile, core=name),
@@ -465,7 +467,9 @@ def application_inputs(selected: ProjectSource, inputs: WheelInstallInputs) -> d
         **{key: selection[key] for key in (
             "identity", "runtime_version", "payload_hash", "extras", "local_packages",
         )},
-        "source_hash": engine._construction_hash(engine._source_files(packages), extras, local),
+        "source_hash": engine._construction_hash(engine._source_input_files(
+            packages, closed_wheel_source=selected.closed_wheel_source,
+        ), extras, local),
         "wheel_inputs": inputs.receipt(),
         "excluded_packages": sorted(
             {engine._package_name(package) for package in packages} - set(local),
