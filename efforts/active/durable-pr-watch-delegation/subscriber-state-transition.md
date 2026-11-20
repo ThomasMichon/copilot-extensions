@@ -16,8 +16,10 @@ same-original-inode prepared recovery. It is not connected to ordinary CLI or
 control-plane entry. The internal Linux source path, merged in #13594, adds physical
 sealing/recovery under the same writer. It still adds no authority selection,
 ordinary entry integration or qualification of an actual boot crossing. The follow-on
-Windows candidate implements no-delete-sharing sealing/recovery below; review,
-complete historical-runtime and controller-exit qualification remain open.
+Windows source slice merged in #13608 implements no-delete-sharing sealing/
+recovery below. Contained native Windows tests now cover abrupt current-controller
+exit at six transition boundaries and cold recovery without import or effects.
+Complete historical-runtime qualification remains open.
 Native Linux exchange/interruption qualification remains open.
 
 **Scope:** Historical-root admission, one recoverable state authority and
@@ -49,6 +51,16 @@ placing a directory at its old address makes a new historical lease open
 refuse with `PermissionError`. No daemon is constructed or backend reached.
 This is native evidence for those exact lease operations, not a complete
 Windows transition, supported-reader census or historical released install.
+
+The current-owner native Windows packet additionally exits a real child with
+`os._exit` after preparation, durable seal staging, original-lease release,
+the original-file move, barrier installation and sealed-phase publication.
+Cold recovery checks the interrupted topology, original inode and unchanged
+legacy bytes. It acquires the original lease only before the move and only
+the barrier lease afterward, with no retained-inode acquisition, fetch,
+notification, isolated state or activation. This proves those current-owner
+process-exit boundaries, not complete historical startup-family coverage,
+host power-loss durability or the POSIX boot boundary.
 
 POSIX rename does not revoke a descriptor for the original inode. A delayed
 historical acquisition can consequently succeed after the incumbent releases
@@ -367,7 +379,7 @@ Ordinary adoption, callbacks and persistence cannot bypass it. Legacy
 subscription bytes remain the sole authority, and neither isolated state nor
 callback effects are produced by sealing.
 
-### Internal Windows sealing and recovery candidate
+### Internal Windows sealing and recovery
 
 The same authorized, already-quiescent writer stages the fixed Windows barrier
 directory, applies and verifies the existing owner-private security policy, and
