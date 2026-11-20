@@ -1,12 +1,13 @@
 """A retained-driver observation is not settlement or authority to restart a goal."""
 
+import json
 import sqlite3
 from collections.abc import Callable
 from typing import Any, cast
 
 import pytest
 
-from agent_dispatch import queue_execution_wakes, submission_readiness_observation
+from agent_dispatch import provisional_driver_work, submission_readiness_observation
 from agent_dispatch.assignment_workspace import AssignmentWorkspace
 from agent_dispatch.queue import TaskQueue
 from agent_dispatch.queue_common import Task
@@ -222,10 +223,11 @@ def test_preview_reconciliations_skip_settled_transport_history(
     foreign = queue.create("unrelated", repo="example")
     assert isinstance(foreign, Task)
     costs: list[int] = []
-    reconcile = queue_execution_wakes.require_no_outstanding_driver_work
+    reconcile = provisional_driver_work.require_no_outstanding_driver_work
 
     def measured(
-        conn: sqlite3.Connection, task: Task, reservation: dict[str, Any], native: str,
+        queue: TaskQueue, conn: sqlite3.Connection, task: Task,
+        reservation: dict[str, Any], native: str,
     ) -> None:
         steps = 0
 
@@ -236,12 +238,12 @@ def test_preview_reconciliations_skip_settled_transport_history(
 
         conn.set_progress_handler(count, 1)
         try:
-            reconcile(conn, task, reservation, native)
+            reconcile(queue, conn, task, reservation, native)
         finally:
             conn.set_progress_handler(None, 0)
         costs.append(steps)
 
-    monkeypatch.setattr(queue_execution_wakes, "require_no_outstanding_driver_work", measured)
+    monkeypatch.setattr(provisional_driver_work, "require_no_outstanding_driver_work", measured)
     with transport.api(ready) as api:
         url = transport.path(ready, "/observe-provisional")
         args, headers = transport.body(ready), transport.headers(ready)
@@ -252,13 +254,18 @@ def test_preview_reconciliations_skip_settled_transport_history(
             ]
             with queue._connect() as conn:
                 conn.executemany(
+                    "INSERT INTO tasks(id,status,owner_session_id)"
+                    " VALUES (:i,'completed','native')",
+                    rows,
+                )
+                conn.executemany(
                     "INSERT INTO run_waiters(task_id,generation,pid,resume_worktree,state,"
                     "created_at,updated_at) VALUES (:task,:i,0,'w','retired',1,1)", rows,
                 )
                 conn.executemany(
                     "INSERT INTO wake_outbox(id,task_id,generation,wake_seq,owner,status,attempts,"
-                    "created_at,updated_at,execution_send_state)"
-                    " VALUES (:i,:task,1,:i,'host/w','delivered',1,1,1,'sent')", rows,
+                    "created_at,updated_at,delivered_at)"
+                    " VALUES (:i,:task,1,:i,'host/w','delivered',1,1,1,1)", rows,
                 )
                 conn.executemany(
                     "INSERT INTO run_waiter_wakes(id,task_id,waiter_generation,task_generation,"
@@ -345,3 +352,96 @@ def test_preview_rechecks_exact_wake_target_after_owner_read(
                             headers=transport.headers(ready), json=transport.body(ready))
     assert response.status_code == (409 if blocked else 200) and len(calls) == 1
     assert queue.relevance_snapshot(task.id)["closeout"]["readiness"] is None
+
+
+@pytest.mark.parametrize("retried", [False, True])
+def test_preview_after_confirmed_closeout_delivery(ready: Ready, retried: bool) -> None:
+    queue, _, _, task, _ = ready
+    wake = queue.claim_due_wake()
+    assert wake and wake.task_id == task.id and wake.delivery_token
+    if retried:
+        retry = queue.finish_wake(wake.id, wake.delivery_token, delivered=False, error="ambiguous")
+        wake = queue.claim_due_wake(now=retry.not_before + 1)
+    assert wake and wake.delivery_token
+    delivered = queue.finish_wake(wake.id, wake.delivery_token, delivered=True)
+    assert delivered.attempts == 1 + retried and delivered.execution_send_state is None
+    with transport.api(ready) as api:
+        response = api.post(transport.path(ready, "/observe-provisional"),
+                            headers=transport.headers(ready), json=transport.body(ready))
+    assert response.status_code == (409 if retried else 200), response.text
+
+
+@pytest.mark.parametrize(("worker", "native", "mode", "blocked"), [
+    ("HOST-A/worktree", "other", "claimed", True),
+    ("host-a/other", "native", "started", True),
+    ("other/worktree", "native", "started", False),
+    ("host-a/other", "other", "started", False),
+    ("HOST-A/worktree", "other", "waiter", True),
+    ("other/worktree", "native", "waiter", False),
+    ("host-a/worktree", "native", "wake", True),
+    ("host-a/worktree", "native", "retry", True),
+    ("host-a/worktree", "native", "unretryable", False),
+    ("host-a/worktree", "native", "stale", False),
+])
+def test_other_assignment_or_delivery_during_preview(
+    ready: Ready, monkeypatch: pytest.MonkeyPatch, worker: str, native: str, mode: str,
+    blocked: bool,
+) -> None:
+    queue, _, workspace, _, _ = ready
+    other = queue.create("Second assignment", repo="other")
+    assert isinstance(other, Task)
+    host, _, tree = worker.partition("/")
+    different = AssignmentWorkspace(host, "other", tree, workspace.path, "fixture-2")
+    observe = submission_readiness_observation.observe
+
+    def raced(request: dict[str, object], allocation: dict[str, object],
+              ref: str) -> dict[str, object]:
+        evidence = observe(request, allocation, ref)
+        assert queue.claim_one(worker, task_id=other.id, assignment_workspace=different)
+        if mode != "claimed":
+            queue.start(other.id, worker, owner_session_id=native)
+        if mode in {"waiter", "wake", "stale", "retry", "unretryable"}:
+            queue.suspend(other.id, worker, reason="wait", cooldown_seconds=None)
+            waiter = queue.register_run_waiter(
+                other.id, pid=1, host=host, start_token="fixture", resume_worktree=worker,
+                command=["fixture"],
+            )
+            if mode != "waiter":
+                queue.recover_dead_run_waiter(other.id, generation=waiter["generation"],
+                                              reason="finished", message="done", sender="fixture")
+                if mode in {"retry", "unretryable"}:
+                    wake = queue.claim_due_run_waiter_wake()
+                    assert wake and wake.delivery_token
+                    identity = {
+                        "outbox": "run_waiter_wakes", "wake_id": wake.id,
+                        "task_generation": wake.task_generation, "owner_session_id": native,
+                        "delivery_token": wake.delivery_token,
+                    }
+                    refusal = {
+                        "schema": "dispatch-native-prompt-refusal", "version": 1,
+                        "outcome": "refused_busy", "reason": "busy", "retryable": mode == "retry",
+                        "invocation_key": wake.id, "native_session_id": native,
+                        "bridge_session_id": "fixture",
+                    }
+                    with queue._connect() as conn:
+                        conn.execute(
+                            "UPDATE run_waiter_wakes SET execution_send=?,"
+                            " execution_send_state='not_sent', execution_send_detail=? WHERE id=?",
+                            (json.dumps(identity), json.dumps(refusal), wake.id),
+                        )
+                    queue.finish_run_waiter_wake(wake.id, wake.delivery_token, delivered=False)
+                if mode == "stale":
+                    queue.release_suspended(other.id, worker)
+        return evidence
+
+    monkeypatch.setattr(submission_readiness_observation, "observe", raced)
+    with transport.api(ready) as api:
+        response = api.post(transport.path(ready, "/observe-provisional"),
+                            headers=transport.headers(ready), json=transport.body(ready))
+        assert response.status_code == (409 if blocked else 200), response.text
+        if blocked:
+            monkeypatch.setattr(submission_readiness_observation, "observe",
+                                lambda *_: pytest.fail("preflight missed outstanding work"))
+            replay = api.post(transport.path(ready, "/observe-provisional"),
+                              headers=transport.headers(ready), json=transport.body(ready))
+            assert replay.status_code == 409
