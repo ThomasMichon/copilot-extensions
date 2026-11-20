@@ -30,6 +30,12 @@ touch below):
   a detour, a self-added prerequisite or an unrelated tangent?
 - **Projected progress.** Given the remaining acceptance and the recent rate
   of real deltas, is the goal converging, stalled or receding?
+- **Delivery evidence.** Judge closeness against the target's delivery bar
+  with live evidence: the outcome exercised through its ordinary path
+  (deployed, installed, an ordinary task actually completing). Merged source
+  changes, healthy readiness probes and checked plan boxes are not delivery.
+  Report source-only progress as such, with the validation items still
+  unproven, and steer the target to name its next live-verification step.
 
 A missing root goal, or a "root" that only restates the current activity, is
 itself a finding. The fix is a **goal-establishment steer** (below), not a
@@ -112,6 +118,30 @@ and the source of each side. Then steer the agent to reconcile its own
 charter, or correct an inactive owner's record under
 [dormant correction](dormant-correction.md). Never overwrite a live agent's
 record to match the monitor's inference.
+
+### Workspace record hygiene
+
+Every set-to-work workspace should be legible from the roster alone:
+
+- **Title names the outcome.** A blank title, a commit-subject title, or a
+  title echoing the launch prompt is a finding. Ask a live owner to set an
+  outcome-shaped title and a summary naming its charter, next acceptance item
+  and blocker, under the standing goal-establishment authority below. For an
+  inactive owner, recommend the correction or apply it under dormant
+  correction.
+- **Origin matches its creator.** A workspace an operator or interactive
+  session created must not be tracked as automation-owned, and the reverse.
+  Correct a mis-track only through the owning tool's supported setter; when
+  none exists, record the missing setter as a weak point. Never hand-edit the
+  owner's registry.
+- **Automation workspaces retire.** Automation-owned workspaces that
+  accumulate without activity are a retirement defect in the producing
+  worker. Report it to that worker's owner; the monitor does not clean it up.
+
+Inventory covers every declared host and every registered project, not only
+hosts with live sessions. A user-created workspace with no live head is still
+a target: it has a driving owner, a recorded park, or a close-out
+recommendation.
 
 ### Encourage each agent to keep its own charter
 
