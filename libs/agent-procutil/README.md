@@ -574,6 +574,13 @@ original process rather than depending on stdin EOF or rediscovering a PID.
 Unconfirmed cleanup retains the original state in the exception's
 `Data['DaemonInstanceState']`; this is live cleanup custody, not a serializable
 diagnostic or permission to replay selection.
+Transport reads use fixed 4096-character buffers, not unbounded line or
+read-to-end tasks. Qualification stdout is capped at 1024 characters; later
+protocol lines retain their 524288-character frame bound. Helper stderr has a
+separate cumulative 65536-character cap. Protocol and process-exit waits drain
+diagnostics concurrently; exceeding either capture cap fails through the same
+owned cleanup path without echoing captured content. These transport limits
+are separate from the target query's byte budgets.
 The caller still owns applicability and capability interpretation. This
 operation does not authorize installation or target effects.
 

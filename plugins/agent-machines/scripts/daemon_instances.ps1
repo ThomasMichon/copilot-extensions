@@ -12,9 +12,111 @@ function Get-DaemonInstanceProcessBirth {
     )
 }
 
+function New-DaemonInstanceReader {
+    param([IO.StreamReader]$Source, [string]$Stream, [int]$Limit)
+    $reader = [pscustomobject]@{
+        Source=$Source; Stream=$Stream; Limit=$Limit; Buffer=([char[]]::new(4096))
+        Offset=0; Count=0; Pending=$null; Ended=$false; SkipLineFeed=$false; Active=$null
+    }
+    $reader | Add-Member ScriptMethod ReadLineAsync {
+        return (New-DaemonInstanceCapture $this -Line)
+    }
+    $reader | Add-Member ScriptMethod Dispose { $this.Source.Dispose() }
+    return $reader
+}
+
+function New-DaemonInstanceCapture {
+    param($Reader, [switch]$Line)
+    if ($null -ne $Reader.Active -and -not $Reader.Active.IsCompleted) {
+        throw 'Overlapping daemon instance capture is refused.'
+    }
+    $capture = [pscustomobject]@{
+        Reader=$Reader; Line=[bool]$Line; Limit=$Reader.Limit
+        Builder=([Text.StringBuilder]::new()); Result=$null; IsCompleted=$false
+        Status=([Threading.Tasks.TaskStatus]::WaitingForActivation); Exception=$null
+    }
+    $capture | Add-Member ScriptMethod Wait {
+        param([int]$Milliseconds)
+        return (Wait-DaemonInstanceCapture $this $Milliseconds)
+    }
+    $Reader.Active = $capture
+    if (-not $Reader.Ended -and $Reader.Offset -eq $Reader.Count -and $null -eq $Reader.Pending) {
+        $Reader.Pending = $Reader.Source.ReadAsync($Reader.Buffer, 0, $Reader.Buffer.Length)
+    }
+    return $capture
+}
+
+function Wait-DaemonInstanceCapture {
+    param($Capture, [int]$Milliseconds)
+    if ($Capture.Status -eq [Threading.Tasks.TaskStatus]::Faulted) { throw $Capture.Exception }
+    if ($Capture.IsCompleted) { return $true }
+    $reader = $Capture.Reader
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    try {
+        while ($true) {
+            if ($reader.Offset -eq $reader.Count -and -not $reader.Ended) {
+                if ($null -eq $reader.Pending) {
+                    $reader.Pending = $reader.Source.ReadAsync($reader.Buffer, 0, $reader.Buffer.Length)
+                }
+                $remaining = [Math]::Max(0, $Milliseconds - $clock.ElapsedMilliseconds)
+                if (-not $reader.Pending.Wait([int]$remaining)) { return $false }
+                $reader.Count = $reader.Pending.Result
+                $reader.Offset = 0
+                $reader.Pending = $null
+                if ($reader.Count -eq 0) { $reader.Ended = $true }
+            }
+            if ($reader.Ended) {
+                if (-not $Capture.Line -or $Capture.Builder.Length -gt 0) {
+                    $Capture.Result = $Capture.Builder.ToString()
+                }
+                $Capture.IsCompleted = $true
+                $Capture.Status = [Threading.Tasks.TaskStatus]::RanToCompletion
+                return $true
+            }
+            if ($Capture.Line -and $reader.SkipLineFeed) {
+                if ($reader.Buffer[$reader.Offset] -eq [char]10) { $reader.Offset++ }
+                $reader.SkipLineFeed = $false
+                if ($reader.Offset -eq $reader.Count) { continue }
+            }
+            $end = $reader.Count
+            if ($Capture.Line) {
+                $available = $reader.Count - $reader.Offset
+                $lf = [Array]::IndexOf($reader.Buffer, [char]10, $reader.Offset, $available)
+                $cr = [Array]::IndexOf($reader.Buffer, [char]13, $reader.Offset, $available)
+                if ($lf -ge 0) { $end = $lf }
+                if ($cr -ge 0 -and $cr -lt $end) { $end = $cr }
+            }
+            $length = $end - $reader.Offset
+            if ($Capture.Builder.Length + $length -gt $Capture.Limit) {
+                throw ('Daemon instance helper ' + $reader.Stream + ' exceeded its ' +
+                    $Capture.Limit + '-character limit.')
+            }
+            [void]$Capture.Builder.Append($reader.Buffer, $reader.Offset, $length)
+            $reader.Offset = $end
+            if ($Capture.Line -and $end -lt $reader.Count) {
+                $reader.SkipLineFeed = $reader.Buffer[$reader.Offset] -eq [char]13
+                $reader.Offset++
+                $Capture.Result = $Capture.Builder.ToString()
+                $Capture.IsCompleted = $true
+                $Capture.Status = [Threading.Tasks.TaskStatus]::RanToCompletion
+                return $true
+            }
+        }
+    } catch {
+        $Capture.Exception = $_.Exception
+        $Capture.Status = [Threading.Tasks.TaskStatus]::Faulted
+        $Capture.IsCompleted = $true
+        throw
+    }
+}
+
 function Wait-DaemonInstanceTask {
-    param($Task, [Diagnostics.Stopwatch]$Clock, [double]$Seconds)
-    while (-not $Task.Wait(100)) {
+    param($Task, [Diagnostics.Stopwatch]$Clock, [double]$Seconds, [hashtable]$State)
+    $diagnostics = $null
+    if ($null -ne $State) { $diagnostics = $State['diagnostics'] }
+    while ($true) {
+        if ($null -ne $diagnostics) { [void]$diagnostics.Wait(0) }
+        if ($Task.Wait(100)) { break }
         if ($Clock.Elapsed.TotalSeconds -ge $Seconds) {
             throw 'Daemon instance helper response timed out; the operation outcome is unconfirmed.'
         }
@@ -22,6 +124,20 @@ function Wait-DaemonInstanceTask {
     if ($Clock.Elapsed.TotalSeconds -ge $Seconds) {
         throw 'Daemon instance helper response exceeded its deadline; the operation outcome is unconfirmed.'
     }
+}
+
+function Wait-DaemonInstanceProcessExit {
+    param($Process, [Diagnostics.Stopwatch]$Clock, [double]$Seconds, [hashtable]$State)
+    $diagnostics = $State['diagnostics']
+    while (-not $Process.WaitForExit(0)) {
+        if ($null -ne $diagnostics -and -not $diagnostics.IsCompleted) {
+            [void]$diagnostics.Wait(0)
+        }
+        $remaining = [Math]::Max(0, 1000 * $Seconds - $Clock.ElapsedMilliseconds)
+        if ($remaining -le 0) { return $false }
+        if ($Process.WaitForExit([int][Math]::Min(100, $remaining))) { return $true }
+    }
+    return $true
 }
 
 function Close-DaemonInstanceWorker {
@@ -48,8 +164,7 @@ function Close-DaemonInstanceWorker {
     foreach ($process in @($State.worker, $State.process)) {
         if ($null -eq $process) { continue }
         try {
-            $remaining = [Math]::Max(0, 3000 - $clock.ElapsedMilliseconds)
-            if (-not $process.WaitForExit([int]$remaining)) {
+            if (-not (Wait-DaemonInstanceProcessExit $process $clock 3.0 $State)) {
                 $errors.Add('Original helper process exit is unconfirmed.')
                 $settled = $false
             }
@@ -170,23 +285,26 @@ sys.exit(main(packet))
         $State.input = $State.process.StandardInput
         $State.input.NewLine = "`n"
         $State.input.AutoFlush = $true
-        $State.output = $State.process.StandardOutput
-        $State.error = $State.process.StandardError
-        $State.diagnostics = $State.error.ReadToEndAsync()
+        $State.output = New-DaemonInstanceReader $State.process.StandardOutput 'stdout' 1024
+        $State.error = New-DaemonInstanceReader $State.process.StandardError 'stderr' 65536
+        $State.diagnostics = New-DaemonInstanceCapture $State.error
         $qualification = $State.output.ReadLineAsync()
-        Wait-DaemonInstanceTask $qualification $clock $startupSeconds
+        Wait-DaemonInstanceTask $qualification $clock $startupSeconds $State
         if ($qualification.Result -ceq 'daemon-python-unsupported') {
             $refusalClock = [Diagnostics.Stopwatch]::StartNew()
             $refusalSeconds = if ($NoTimeout) { 3.0 } else {
                 [Math]::Max(0, [Math]::Min(3.0, 30.0 - $clock.Elapsed.TotalSeconds))
             }
-            if (-not $State.process.WaitForExit([int](1000 * $refusalSeconds))) {
+            if (-not (Wait-DaemonInstanceProcessExit $State.process $refusalClock $refusalSeconds $State)) {
                 throw 'Unsupported Python process exit is unconfirmed; selection was not retried.'
             }
             $captureClock = if ($NoTimeout) { $refusalClock } else { $clock }
             $captureSeconds = if ($NoTimeout) { $refusalSeconds } else { $startupSeconds }
-            try { Wait-DaemonInstanceTask $State.diagnostics $captureClock $captureSeconds }
-            catch { throw 'Unsupported Python diagnostic capture is unconfirmed; selection was not retried.' }
+            try { Wait-DaemonInstanceTask $State.diagnostics $captureClock $captureSeconds $State }
+            catch {
+                throw ('Unsupported Python diagnostic capture is unconfirmed; selection was not retried. ' +
+                    $_.Exception.Message)
+            }
             if ($State.process.ExitCode -ne 1) {
                 throw 'Unsupported Python returned an unexpected outcome; selection was not retried.'
             }
@@ -203,11 +321,12 @@ sys.exit(main(packet))
         break
     }
     if (-not $compatible) { throw $prerequisiteError }
+    $State.output.Limit = 524288
     $ready = $State.output.ReadLineAsync()
-    Wait-DaemonInstanceTask ($State.input.WriteLineAsync($encoded)) $clock $startupSeconds
+    Wait-DaemonInstanceTask ($State.input.WriteLineAsync($encoded)) $clock $startupSeconds $State
     $State.offerPermitted = $true
-    Wait-DaemonInstanceTask ($State.input.WriteLineAsync('offer:' + $State.nonce)) $clock $startupSeconds
-    Wait-DaemonInstanceTask $ready $clock $startupSeconds
+    Wait-DaemonInstanceTask ($State.input.WriteLineAsync('offer:' + $State.nonce)) $clock $startupSeconds $State
+    Wait-DaemonInstanceTask $ready $clock $startupSeconds $State
     if (-not $ready.Result) { throw 'Daemon instance helper startup ended before a custody receipt.' }
     $receipt = $ready.Result | ConvertFrom-Json
     if ($receipt.version -cne 1 -or $receipt.nonce -cne $State.nonce -or $receipt.owner_pid -cne $PID -or
@@ -222,7 +341,7 @@ sys.exit(main(packet))
     if ((Get-DaemonInstanceProcessBirth $State.worker) -cne $receipt.job.worker_birth -or $State.worker.HasExited) {
         throw 'Daemon instance helper birth identity changed before acknowledgement.'
     }
-    Wait-DaemonInstanceTask ($State.input.WriteLineAsync($State.nonce)) $clock $startupSeconds
+    Wait-DaemonInstanceTask ($State.input.WriteLineAsync($State.nonce)) $clock $startupSeconds $State
     $State.broken = $false
 }
 
@@ -232,7 +351,7 @@ function Read-DaemonInstanceResponse {
     $part = 0
     try {
         while ($true) {
-            Wait-DaemonInstanceTask $Read $Clock $Seconds
+            Wait-DaemonInstanceTask $Read $Clock $Seconds $State
             if (-not $Read.Result) { throw 'Daemon instance response ended before its outcome was confirmed.' }
             if ($Read.Result.Length -ge 524288) { throw 'Daemon instance response exceeds its frame bound.' }
             $response = $Read.Result | ConvertFrom-Json
@@ -331,7 +450,7 @@ function Invoke-DaemonInstanceRequest {
             $encoded = [Convert]::ToBase64String($bytes)
             if ($encoded.Length -ge 524288) { throw 'Daemon instance request exceeds its frame bound.' }
             $read = $state.output.ReadLineAsync()
-            Wait-DaemonInstanceTask ($state.input.WriteLineAsync($encoded)) $clock $seconds
+            Wait-DaemonInstanceTask ($state.input.WriteLineAsync($encoded)) $clock $seconds $state
             $response = Read-DaemonInstanceResponse $state $read $clock $seconds
             if ($response.nonce -cne $state.nonce -or $response.sequence -cne $state.sequence -or
                 $response.ok -isnot [bool]) {
