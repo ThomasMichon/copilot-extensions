@@ -216,8 +216,11 @@ After the reviewed proposal, the operator admitted execution:
   joined cleanup.
   The [selected executor/qualified-reader refinement](azure-devops-point-targets.md#selected-executor-and-qualified-reader-composition)
   now composes both actual owners through one shared in-process binding, with
-  per-read non-creating qualification and joined shutdown. Running-service
-  declarations and later wire-caller migration remain separate gates.
+  per-read non-creating qualification and joined shutdown. The
+  [running-service declaration proposal](azure-devops-point-targets.md#running-service-declaration-and-provider-rollback)
+  separately specifies selected-pair support, current admission and explicit
+  missing-support/provider-rollback refusal before implementation or later
+  wire-caller migration.
   Ordinary v2 execution and automatic partial-effect/restore
   reconciliation remain unimplemented; live-provider, broader event-delivery
   and consumer-scale qualification remain open.
