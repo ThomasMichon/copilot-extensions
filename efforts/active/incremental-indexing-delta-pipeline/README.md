@@ -188,9 +188,12 @@ After the reviewed proposal, the operator admitted execution:
   with requalifying lost-return retries. An explicit
   [retained worker](../../../plugins/agent-index/docs/component-ledger.md#explicit-retained-point-worker)
   composes fully acquired claims through prepared/native application and that
-  completion under the existing source writer. Acquisition/eligibility callers,
-  ordinary v2 execution and automatic partial-effect/restore reconciliation
-  remain unimplemented.
+  completion under the existing source writer. An explicit
+  [Azure DevOps acquisition caller](../../../plugins/agent-index/docs/component-ledger.md#explicit-azure-devops-acquisition-caller)
+  composes missing named reads with fresh eligibility checks, retained recovery
+  and that worker. Ordinary v2 execution and automatic partial-effect/restore
+  reconciliation remain unimplemented; live-provider, broader event-delivery
+  and consumer-scale qualification remain open.
 - [ ] Persist acquisition progress so retry/restart does not restart a
   corpus-wide listing.
 - [ ] Move authoritative full enumeration into separately budgeted, resumable

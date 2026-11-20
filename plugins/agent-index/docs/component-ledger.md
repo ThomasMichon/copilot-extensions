@@ -318,7 +318,8 @@ and ordinary producer/worker composition remain unqualified.
 ### Explicit retained point worker
 
 `indexing.point_worker.run_retained_point_worker(claim, scope=..., paths=...,
-tasks=..., ledger=..., clients=..., max_rows=..., progress_cb=...)` is a
+tasks=..., ledger=..., clients=..., max_rows=..., progress_cb=...,
+qualify_claim=...)` is a
 synchronous in-process boundary for an **already fully acquired** whole claim.
 The caller supplies the configured owners and owns client lifetime and provider
 eligibility qualification. It does not acquire targets, initialize a native
@@ -334,6 +335,12 @@ completion; cancellation or failure never becomes generic successful task status
 Native/checkpoint ordering, pending retirement and retry qualification remain
 with their existing owners above.
 
+An optional caller-owned `qualify_claim()` runs before preparation, before
+publication and before completion, outside native operations. A refusal retains
+the claim and recovery material. A failure after publication does not undo that
+publication or acknowledge the claim; a qualified retry reuses covered outcomes.
+Already-completed retries skip this provider callback.
+
 A completed lost-return retry goes directly to requalifying completion, without
 re-preparing, embedding or replaying native application. Uncertain native effects
 and mixed restores refuse; this worker never automatically invokes the separate
@@ -344,6 +351,38 @@ This boundary registers no detached worker and changes no runner, CLI, HTTP,
 MCP, producer, queue-selection or execution-capability declaration. Ordinary v2
 execution remains disabled. Its row cap is still per point; it does not impose
 an aggregate target, memory, elapsed-time or physical-I/O budget.
+
+### Explicit Azure DevOps acquisition caller
+
+`sources.azure_devops_point_worker.run_azure_devops_point_worker(connector,
+claim, scope=..., paths=..., tasks=..., ledger=..., clients=..., max_rows=...,
+progress_cb=...)` composes the named-version adapter with this worker. The caller
+must already select a compatible, bootstrapped point domain and own client
+lifetime. It is not a new selected-callable capability or ordinary runner path.
+
+The existing source writer spans fresh qualification of every distinct claimed
+item, exact named-version acquisition, immutable `PreparedPoints` retention and
+worker completion. A new v9 pending parent starts with the first positively
+qualified observation, never an empty component manifest. Resume reuses only
+positively retained observations and fetches missing named versions; retained
+bytes alone do not prove current eligibility. Before preparation, publication
+and acknowledgement, fresh principal/query-union/definition checks must still
+match the entire claim binding. Query exit, changed principal/context,
+ambiguous responses, unsupported identities/versions and cancellation refuse,
+without inferring deletion or invoking broad/legacy acquisition.
+
+For U distinct items and M missing targets the upper bound is 132U + 67M logical
+provider requests, each under the existing maximum of five attempts. This uses
+the existing 1,024-target envelope and per-read decoded/rendered payload caps;
+it is not a transport-memory, aggregate-payload, writer-lock-time or elapsed
+budget. Provider counters remain with the shared HTTP/acquisition owners.
+After acknowledged success, retry takes the existing local completion path
+without provider reads, preparation or native replay.
+
+Failures preserve unresolved work under the existing queue/pending/native
+owners. No polling cursor, detached-worker registration, producer, service
+contract, execution declaration, automatic repair, source activation or rollout
+is added. Ordinary v2 execution remains disabled.
 
 ### Sealed native publication suffix
 

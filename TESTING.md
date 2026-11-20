@@ -7723,6 +7723,20 @@ enables ordinary v2 execution or qualifies native Windows or live provider
 eligibility. See the [retained worker](plugins/agent-index/docs/component-ledger.md#explicit-retained-point-worker)
 for the caller and budget boundaries.
 
+The explicit `tests/test_azure_devops_point_worker.py` packet composes synthetic
+HTTP responses through the actual named-version reader, retained acquisition,
+native content/model/ledger application, completion and named reads. It covers
+new and partially acquired claims, retained-body reuse with fresh principal/
+query checks, eligibility loss during embedding and after publication,
+cancellation, trailing claims, completed retry without provider access,
+writer/owner exclusion, target limits and the shared retry cap. Select it with
+`--test-file tests/test_azure_devops_point_worker.py --allow-explicit-tiers`;
+it can share one bounded runner with the existing named-reader and retained-worker
+packets. Four actor-free cases in `test_point_completion_contract.py` cover the
+optional qualifier's three phase boundaries and completed-retry bypass. These
+are synthetic-provider/local-native evidence, not live API, native Windows,
+ordinary v2 runner, full event delivery or consumer-scale qualification.
+
 The exclusive attachment-export consumer packet executes the real export
 entrypoint, health-selected command transport, extension registry, provider
 dispatch and descriptor-pinned writer with an in-memory filesystem and
