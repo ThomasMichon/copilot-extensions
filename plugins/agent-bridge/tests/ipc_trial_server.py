@@ -90,7 +90,9 @@ def server(root: Path, phase: str, lost: bool) -> None:
         sock.bind(("127.0.0.1", 0))
         bound = root / ("endpoint-" + phase)
         instance = uvicorn.Server(uvicorn.Config(app, lifespan="off", log_level="critical"))
-        bound.write_text(str(sock.getsockname()[1]))
+        pending = bound.with_suffix(".tmp")
+        pending.write_text(str(sock.getsockname()[1]))
+        pending.replace(bound)
         async def serve() -> None:
             running = asyncio.create_task(instance.serve(sockets=[sock]))
             deadline = time.monotonic() + 120
