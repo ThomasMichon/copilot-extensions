@@ -859,7 +859,8 @@ retained installation scope under fresh current admission and native transaction
 custody without requiring the historical payload. It does not authenticate
 caller-supplied provenance or adapt a transition journal. The internal
 [prepared-only adapter](subscriber-state-transition.md#prepared-only-version-2-receiver)
-now preserves complete origin under freshly admitted current native custody.
+merged in #13639 and preserves complete origin under freshly admitted current
+native custody.
 It does not adapt sealed records, select state authority or enable ordinary
 entry. Version-2 sealing/recovery, native domain/boot qualification and every
 remaining gate still follow under the existing source-only authority.
@@ -1920,6 +1921,7 @@ callback an implicit credential store.
 
 ## Journal
 
+- [2026-11-20 - Native domain/boot source prerequisite](journal/2026/11.20%20Native%20domain%20boot%20source.md)
 - [2026-11-20 - Windows abrupt-controller qualification](journal/2026/11.20%20Windows%20abrupt-controller%20qualification.md)
 - **2026-11-20 - Proposed finite M1 source-claim acknowledgment.** The
   [current campaign reconciliation](../backlog-reconciliation/journal/2026/11.20-source-claim-and-credential-generation-receiving.md)

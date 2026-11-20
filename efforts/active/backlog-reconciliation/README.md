@@ -1316,6 +1316,15 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The [constructor-retention completion record](journal/2026/11.20-constructor-retention-and-owner-continuations.md)
+records #13648's actual reviewed merge and parent return, acknowledged whole
+#10799 source fulfillment through #10810, and seven distinct retained
+continuations. The real constructor consumer and immutable-bundle controls
+remain separate from synthetic owner data, historical notification failures,
+foreground intent and installed acceptance. No incumbent check state, actual
+source/copy restriction or custody changes. The complete 890-open census is
+161 above fixed 729; the campaign remains Active.
+
 The [changed-delivery and finite-defect unit](journal/2026/11.20-changed-deliveries-and-finite-defect-completion.md)
 records #13643's actual reviewed delivery/parent return and acknowledged
 whole #13491/#13585 fulfillment through existing merged/current source.

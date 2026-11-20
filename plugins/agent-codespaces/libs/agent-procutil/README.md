@@ -4,6 +4,17 @@ Shared **Windows-headless / detached / bounded-owned** process primitives for
 Copilot CLI plugins. One vendored helper keeps launch flags and finite child
 containment consistent instead of reimplementing them in each consumer.
 
+`command_pipe.CommandPipe` adds a continuous binary stdin owner for the optional
+consumer-telemetry command route. It reuses atomic Windows caller-owned Job
+creation or the Linux private-session guardian and parent-lifetime pipe.
+Its producer-facing owner is an existing telemetry buffer, not a per-record
+process or a pipe-writer thread. Nonblocking writes have one aggregate record
+deadline; close retains exact custody until whole-tree settlement is confirmed.
+Unsupported pipe/custody primitives refuse optional export before writing data.
+Windows callers can omit child scope-name environment publication while keeping
+the native Job and inherited-handle restrictions. Existing launches retain their
+default publication and behavior.
+
 `spawn_sync_in_kill_on_close_job(..., require_job=True, allow_breakaway=False,
 on_suspended=callback)` optionally calls an in-process creation owner with the
 original Windows `Popen`, after required Job assignment and before resume.

@@ -7,12 +7,13 @@ import math
 from collections import deque
 from contextlib import ExitStack
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal, cast
 
 from pydantic import TypeAdapter
 from zdd.private_protocol import PrivateIPCError, Refusal
 
 from .events import EventLog, SseEvent
+from process_telemetry.emission import LEGACY
 from .live_representation import LiveEventStore, MergedIds, _SEEN_ID_CAP
 from .resolver_runtime import _encode
 from .telemetry import SessionTraceReducer
@@ -57,7 +58,7 @@ class _Snapshot:
     history: dict[str, _History]
 
 
-_ADAPTER = TypeAdapter(_Snapshot)
+_ADAPTER: TypeAdapter[_Snapshot] = TypeAdapter(_Snapshot)
 
 
 def _bounded(value: object) -> None:
@@ -76,7 +77,7 @@ def _bounded(value: object) -> None:
                 raise PrivateIPCError(Refusal.AUTHORITY)
             size += 32
         elif type(item) in (list, tuple):
-            for child in item:
+            for child in cast(list[object] | tuple[object, ...], item):
                 visit(child, depth + 1)
         elif type(item) is dict:
             for key, child in item.items():
@@ -92,13 +93,13 @@ def _bounded(value: object) -> None:
     visit(value, 0)
 
 
-def _hold(stack: ExitStack, lock) -> None:
+def _hold(stack: ExitStack, lock: Any) -> None:
     if not lock.acquire(blocking=False):
         raise PrivateIPCError(Refusal.AUTHORITY)
     stack.callback(lock.release)
 
 
-def _log(record: _Log) -> EventLog:
+def _log(record: _Log, *, telemetry_legacy: bool = True) -> EventLog:
     ids = [event.id for event in record.events]
     identity = record.telemetry.get("_identity")
     if (
@@ -112,6 +113,7 @@ def _log(record: _Log) -> EventLog:
     ):
         raise PrivateIPCError(Refusal.AUTHORITY)
     log = EventLog(session_id=record.session_id, telemetry_source="represented")
+    log.bind_consumer_telemetry(LEGACY if telemetry_legacy else None)
     log._telemetry._identity = dict(identity)
     for event in record.events:
         log._events.append(event)
@@ -136,7 +138,7 @@ def _log(record: _Log) -> EventLog:
     return log
 
 
-def restore_live_events(payload: object) -> LiveEventStore:
+def restore_live_events(payload: object, *, telemetry_legacy: bool = True) -> LiveEventStore:
     """Strictly rebuild isolated ordinary logs, without emissions or subscribers."""
     try:
         _bounded(payload)
@@ -154,7 +156,7 @@ def restore_live_events(payload: object) -> LiveEventStore:
             or set(state.key_order) != set(state.bindings)
         ):
             raise PrivateIPCError(Refusal.AUTHORITY)
-        logs = [_log(record) for record in state.logs]
+        logs = [_log(record, telemetry_legacy=telemetry_legacy) for record in state.logs]
         seen = []
         order = []
         for row in state.seen:
@@ -163,8 +165,9 @@ def restore_live_events(payload: object) -> LiveEventStore:
             seen.append(set(row))
             order.append(deque(row))
         used_logs, used_seen, used_sdk = set(), set(), set()
-        seen_logs, sdk_seen = {}, {}
-        store = LiveEventStore()
+        seen_logs: dict[int, int] = {}
+        sdk_seen: dict[int, int] = {}
+        store = LiveEventStore(telemetry_legacy=telemetry_legacy)
         for sid in state.key_order:
             binding = state.bindings[sid]
             if (
@@ -185,7 +188,7 @@ def restore_live_events(payload: object) -> LiveEventStore:
                 store._seen_order[sid] = order[binding.seen]
             if binding.sdk is not None:
                 used_sdk.add(binding.sdk)
-                if sdk_seen.setdefault(binding.sdk, binding.seen) != binding.seen:
+                if sdk_seen.setdefault(binding.sdk, cast(int, binding.seen)) != binding.seen:
                     raise PrivateIPCError(Refusal.AUTHORITY)
                 mapping = state.sdk[binding.sdk]
                 if (
@@ -206,14 +209,16 @@ def restore_live_events(payload: object) -> LiveEventStore:
         heads = {log.continuity_id: log.latest_id for log in logs if log.continuity_id}
         if len(heads) != sum(bool(log.continuity_id) for log in logs):
             raise PrivateIPCError(Refusal.AUTHORITY)
-        for source, row in state.history.items():
-            keys = [key for key, _value in row.ids]
+        for source, history_entry in state.history.items():
+            keys = [key for key, _value in history_entry.ids]
             if not source or source in heads or keys != list(range(len(keys))) or not keys:
                 raise PrivateIPCError(Refusal.AUTHORITY)
-            target_head = heads.get(row.target)
-            if target_head is None and row.target in state.history:
-                target_head = len(state.history[row.target].ids) - 1
-            if target_head is None or any(not 0 <= value <= target_head for _, value in row.ids):
+            target_head = heads.get(history_entry.target)
+            if target_head is None and history_entry.target in state.history:
+                target_head = len(state.history[history_entry.target].ids) - 1
+            if target_head is None or any(
+                not 0 <= value <= target_head for _, value in history_entry.ids
+            ):
                 raise PrivateIPCError(Refusal.AUTHORITY)
             cursor, visited = source, set()
             while cursor in state.history:
@@ -223,7 +228,9 @@ def restore_live_events(payload: object) -> LiveEventStore:
                 cursor = state.history[cursor].target
             if cursor not in heads:
                 raise PrivateIPCError(Refusal.AUTHORITY)
-            store._merged_history[source] = (row.target, MergedIds(dict(row.ids)))
+            store._merged_history[source] = (
+                history_entry.target, MergedIds(dict(history_entry.ids)),
+            )
         return store
     except PrivateIPCError:
         raise
@@ -249,8 +256,13 @@ def capture_live_events(store: LiveEventStore) -> dict[str, object]:
                 or len(store._merged_history) > _MAX_KEYS
             ):
                 raise PrivateIPCError(Refusal.AUTHORITY)
-            logs, seen, sdk = [], [], []
-            log_refs, seen_refs, order_refs, sdk_refs = {}, {}, {}, {}
+            logs: list[dict[str, Any]] = []
+            seen: list[list[str]] = []
+            sdk: list[dict[str, list[int]]] = []
+            log_refs: dict[int, int] = {}
+            seen_refs: dict[int, tuple[int, int]] = {}
+            order_refs: dict[int, int] = {}
+            sdk_refs: dict[int, int] = {}
             bindings = {}
             total = 0
             for sid, log in store._logs.items():
@@ -307,26 +319,26 @@ def capture_live_events(store: LiveEventStore) -> dict[str, object]:
                     sdk_ref = sdk_refs[id(mapping)]
                 bindings[sid] = {"log": log_refs[id(log)], "seen": seen_ref, "sdk": sdk_ref}
             history = {}
-            for source, (target, mapping) in store._merged_history.items():
-                if type(mapping) is not MergedIds:
+            for source, (target, history_mapping) in store._merged_history.items():
+                if type(history_mapping) is not MergedIds:
                     raise PrivateIPCError(Refusal.AUTHORITY)
-                if len(mapping) > _MAX_EVENTS + 1:
+                if len(history_mapping) > _MAX_EVENTS + 1:
                     raise PrivateIPCError(Refusal.SIZE)
-                rebuilt = MergedIds(mapping)
+                rebuilt = MergedIds(history_mapping)
                 if (
-                    mapping.keys_sorted != rebuilt.keys_sorted
-                    or mapping.prefix_max != rebuilt.prefix_max
+                    history_mapping.keys_sorted != rebuilt.keys_sorted
+                    or history_mapping.prefix_max != rebuilt.prefix_max
                 ):
                     raise PrivateIPCError(Refusal.AUTHORITY)
-                history[source] = {"target": target, "ids": sorted(mapping.items())}
+                history[source] = {"target": target, "ids": sorted(history_mapping.items())}
             payload = {
                 "schema": 1, "logs": logs, "bindings": bindings,
                 "key_order": list(store._logs), "seen": seen, "sdk": sdk, "history": history,
             }
             _bounded(payload)
             wire = _encode(payload)
-        detached = json.loads(wire)
-        restore_live_events(detached)
+        detached = cast(dict[str, object], json.loads(wire))
+        restore_live_events(detached, telemetry_legacy=store._telemetry_legacy)
         return detached
     except PrivateIPCError:
         raise

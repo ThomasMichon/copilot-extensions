@@ -422,11 +422,14 @@ def spawn(
 
     try:
         job_name = _job_scopes.new_name()
+        publish_job_scopes = kwargs.get("publish_job_scopes", True)
+        if type(publish_job_scopes) is not bool:
+            raise ValueError("publish_job_scopes must be a boolean")
         environment = _environment_block(
             _job_scopes.child_environment(
                 kwargs.get("env"), append=job_name,
                 inherit_current=kwargs.get("inherit_job_scopes", True),
-            ),
+            ) if publish_job_scopes else kwargs.get("env"),
         )
         cwd = os.fspath(kwargs["cwd"]) if kwargs.get("cwd") is not None else None
         if cwd is not None and (not isinstance(cwd, str) or "\0" in cwd):

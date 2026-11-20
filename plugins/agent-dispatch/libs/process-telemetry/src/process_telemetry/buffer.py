@@ -126,6 +126,8 @@ class BufferedSink:
         self._thread: threading.Thread | None = None
         self._started = False
         self._closed = False
+        self._sealed = False
+        self._idle = True
         self._counts = {name: _Counter() for name in (
             "accepted", "delivered", "invalid", "full", "contended",
             "inactive", "sink_failed", "abandoned",
@@ -147,29 +149,50 @@ class BufferedSink:
         return self
 
     def __call__(self, event: dict[str, Any]) -> None:
-        if not self._started or self._closed:
+        self.offer(event)
+
+    def offer(self, event: dict[str, Any]) -> str:
+        """Return bounded admission accounting without changing callable semantics."""
+        if not self._started or self._closed or self._sealed:
             next(self._counts["inactive"])
-            return
+            return "inactive"
         try:
             record = snapshot(
                 event, max_bytes=self._max_bytes, stamp_missing_ts=self._stamp_missing_ts,
             )
         except (ValueError, UnicodeError, RuntimeError, OSError, OverflowError):
             next(self._counts["invalid"])
-            return
+            return "invalid"
         if not self._lock.acquire(blocking=False):
             next(self._counts["contended"])
-            return
+            return "contended"
         try:
-            if self._closed:
+            if self._closed or self._sealed:
                 next(self._counts["inactive"])
+                return "inactive"
             elif len(self._queue) >= self._capacity:
                 next(self._counts["full"])
+                return "full"
             else:
+                self._idle = False
                 self._queue.append(record)
                 next(self._counts["accepted"])
+                return "accepted"
         finally:
             self._lock.release()
+
+    def drain(self, timeout: float) -> bool:
+        """Seal offers and wait off-path; close remains nonflushing."""
+        if not math.isfinite(timeout) or not 0 <= timeout <= .25:
+            raise ValueError("drain timeout must be at most 250 milliseconds")
+        with self._lock:
+            self._sealed = True
+        deadline = time.monotonic() + timeout
+        while not self._idle:
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(min(.005, max(0, deadline - time.monotonic())))
+        return True
 
     def close(self) -> None:
         """Reject new events immediately; abandon queued records off-path."""
@@ -231,6 +254,9 @@ class BufferedSink:
                     self._on_iteration()
                 except Exception:
                     next(self._counts["sink_failed"])
+            with self._lock:
+                if not self._queue:
+                    self._idle = True
             self._stop.wait(0.025)
         with self._lock:
             while self._queue:
