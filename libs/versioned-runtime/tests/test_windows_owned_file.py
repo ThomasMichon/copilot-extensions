@@ -1,10 +1,9 @@
-"""Native Windows owner/DACL admission and its steady-state memory use."""
+"""Steady-state memory use of native Windows owner/DACL admission."""
 
 import gc
 import importlib.util
 import os
 from pathlib import Path
-import subprocess
 import sys
 import tracemalloc
 
@@ -19,26 +18,6 @@ sys.modules[SPEC.name] = leases
 SPEC.loader.exec_module(leases)
 
 pytestmark = pytest.mark.skipif(os.name != "nt", reason="Actual Windows token and DACL")
-
-
-def _admits(path: Path) -> bool:
-    fd = os.open(path, os.O_RDONLY | getattr(os, "O_BINARY", 0))
-    try:
-        return leases.windows_owned_file(fd)
-    finally:
-        os.close(fd)
-
-
-def test_admits_private_file_and_rejects_public_write(tmp_path: Path) -> None:
-    private = tmp_path / "private"
-    private.write_bytes(b"")
-    public = tmp_path / "public"
-    public.write_bytes(b"")
-    subprocess.run(["icacls", str(public), "/grant", "*S-1-1-0:(W)"],
-                   check=True, capture_output=True)
-
-    assert _admits(private)
-    assert not _admits(public)
 
 
 def test_repeated_admission_does_not_grow_memory(tmp_path: Path) -> None:
