@@ -66,3 +66,15 @@ def test_bad_input_never_uses_installed_inventory(roots: tuple[Path, Path]) -> N
     write(settings, {"enabledPlugins": {"agent-missing@copilot-extensions": True}})
     with pytest.raises(ValueError, match="agent-missing"):
         plan(target, source, gate_paths=(), machines=())
+
+
+def test_empty_allowlist_is_decisive_but_malformed_selector_is_not(roots: tuple[Path, Path]) -> None:
+    target, source = roots
+    gate = target / "gate.json"
+    write(gate, {"plugins": [{"name": "agent-service", "deploy_machines": []}]})
+    result = plan(target, source, gate_paths=(gate,), machines=())
+    assert result["complete"] is True
+    assert result["required"] == ["worktree-manager", "agent-utility"]
+    write(gate, {"repos": {"h": {"services": [{"name": "agent-service", "deploy_machines": "host"}]}}})
+    with pytest.raises(ValueError, match="machine selector"):
+        plan(target, source, gate_paths=(gate,), machines=("host",))

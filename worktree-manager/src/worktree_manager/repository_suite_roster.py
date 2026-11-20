@@ -44,6 +44,28 @@ def _gate(paths: tuple[Path, ...]) -> tuple[bool, dict[str, set[str]]]:
         present = True
         if data is not None and not isinstance(data, dict):
             raise ValueError("Runtime deployment manifest must be a mapping")
+        if data is not None:
+            groups = [data["plugins"]] if "plugins" in data else []
+            if "repos" in data:
+                if not isinstance(data["repos"], dict):
+                    raise ValueError("Invalid runtime policy repositories")
+                for repo in data["repos"].values():
+                    if not isinstance(repo, dict):
+                        raise ValueError("Invalid runtime policy repository")
+                    if "services" in repo:
+                        groups.append(repo["services"])
+            for entries in groups:
+                if not isinstance(entries, list):
+                    raise ValueError("Invalid runtime policy selector list")
+                for entry in entries:
+                    if not isinstance(entry, dict):
+                        raise ValueError("Invalid runtime policy selector")
+                    if "deploy_machines" in entry and (
+                        not isinstance(entry.get("name"), str) or not entry["name"].strip()
+                        or not isinstance(entry["deploy_machines"], list)
+                        or not all(isinstance(m, str) and m.strip() for m in entry["deploy_machines"])
+                    ):
+                        raise ValueError("Invalid runtime policy machine selector")
         parse_gate_manifest(data, gate)
         if gate:
             break
@@ -88,7 +110,7 @@ def plan(
             raise ValueError(f"Invalid runtime scope: {name}")
         if scope == "none":
             state = "payload-only"
-        elif present and scope == "machine-gated" and name in gate and not machines:
+        elif present and scope == "machine-gated" and gate.get(name) and not machines:
             state = "needs-machine-identity"
         elif not allows_runtime(scope, name, machines, gate, present=present):
             state = "machine-excluded"

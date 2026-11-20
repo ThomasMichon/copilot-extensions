@@ -39,7 +39,7 @@ def fingerprint(root: Path) -> dict[str, str]:
             for p in root.rglob("*") if p.is_file()}
 
 
-@pytest.mark.parametrize("case", ["fresh", "same-source-update", "missing-app", "same-pin", "switch-default"])
+@pytest.mark.parametrize("case", ["fresh", "same-source-update", "missing-app", "same-pin", "switch-default", "bare-default"])
 def test_registered_stage_matrix(case: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
                                  capsys: pytest.CaptureFixture[str]) -> None:
     root = tmp_path / "install"
@@ -101,7 +101,14 @@ def test_registered_stage_matrix(case: str, tmp_path: Path, monkeypatch: pytest.
     demand("A", OLD, "shared", "app-a")
     demand("B", OLD if case == "same-pin" else "main", "shared", "app-b")
     register(("A", "B"))
-    if case == "fresh":
+    if case == "bare-default":
+        anchor = tmp_path / "A"
+        (anchor / "objects").mkdir()
+        (anchor / "HEAD").write_text("ref: refs/heads/main\n", encoding="ascii")
+        with pytest.raises(ValueError, match="materialized worktree"):
+            suite.registered_plan(root, resolve=resolve, observe=lambda *_: pytest.fail("unexpected policy read"))
+        assert not calls and not (root / "apps").exists()
+    elif case == "fresh":
         stage(BASE, "1.0")
     elif case == "same-source-update":
         register(("A",))

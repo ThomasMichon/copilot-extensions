@@ -50,7 +50,10 @@ def registrations(root: Path) -> tuple[str, dict[str, Path]]:
         selected = harness_state.project_anchor_selection(name, input_roots=inputs, reader=docs.__getitem__)
         if not selected.anchor or not Path(selected.anchor).is_absolute() or not Path(selected.anchor).is_dir():
             raise ValueError(f"Registered harness {name} has no available anchor")
-        anchors[name] = Path(selected.anchor)
+        anchor = Path(selected.anchor)
+        if (anchor / "HEAD").is_file() and (anchor / "objects").is_dir():
+            raise ValueError(f"Registered harness {name} requires a materialized worktree, not a Git directory")
+        anchors[name] = anchor
     return default, anchors
 
 
