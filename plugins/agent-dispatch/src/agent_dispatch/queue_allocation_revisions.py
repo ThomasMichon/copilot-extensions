@@ -125,7 +125,7 @@ def _disposed_captured_revision(conn: sqlite3.Connection, rows: list[sqlite3.Row
     from .managed_assignment_proof import managed_allocation
     from .ordinary_agent_facts import identity
     from .ordinary_native_bindings import reservation_native_identity
-    from .queue_execution_custody import reservation_transport_accountable
+    from .queue_execution_custody import ReservationTransportSnapshot
     from .queue_relationship_continuation import current_binding
 
     if not revision_disposed(rows):
@@ -162,6 +162,7 @@ def _disposed_captured_revision(conn: sqlite3.Connection, rows: list[sqlite3.Row
         origin = managed_allocation(conn, root["task_id"], execution, relationship)
         if origin["key"] != root["key"] or not execution["worktree_writer_requirement"]:
             return False
+        transport = ReservationTransportSnapshot(conn)
         for row in rows:
             if (
                 row["driver"] != "ordinary-bridge"
@@ -174,7 +175,7 @@ def _disposed_captured_revision(conn: sqlite3.Connection, rows: list[sqlite3.Row
                 or row["cooling_token"]
                 or row["cleanup_claim_token"]
                 or row["conclusion_state"] in {"pending", "held"}
-                or reservation_transport_accountable(conn, row)
+                or transport.accountable(row)
             ):
                 return False
             if not row["worktree"]:

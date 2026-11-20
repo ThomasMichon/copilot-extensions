@@ -49,7 +49,18 @@ def check_intermediate_fences(q: TaskQueue, task: str, *, decline: bool) -> None
                 return not conn.execute("SELECT " + _undischarged(":id"), {"id": task}).fetchone()[0]
             return _disposed_captured_revision(conn, conn.execute(history, (task,)).fetchall())
 
-        assert accepted()
+        queries: list[str] = []
+        conn.execute("BEGIN IMMEDIATE")
+        conn.set_trace_callback(queries.append)
+        try:
+            assert accepted()
+        finally:
+            conn.set_trace_callback(None)
+            conn.rollback()
+        if not decline:
+            for table in ("wake_outbox", "run_waiter_wakes"):
+                scans = [s for s in queries if f"FROM {table} " in s and "execution_send_state" in s]
+                assert len(scans) == 1, (table, len(scans))
         # Isolated prior schemas need not have the modern immutability trigger.
         conn.execute("DROP TRIGGER spawn_allocation_cohort_retained")
         for assignment, value in (
