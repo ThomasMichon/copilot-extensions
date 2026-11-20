@@ -74,12 +74,14 @@ def delete_canonical(content: Any, predicate: str, *, return_ids: bool = False) 
 
 def sync_content_projection(
     db: Any, chunks: list[Chunk], *, source_domain: SourceDomain | None = None,
+    tables: list[Any] | None = None,
 ) -> None:
     groups: defaultdict[tuple[str, str], list[str]] = defaultdict(list)
     for chunk in chunks:
         groups[(chunk.source, chunk.language)].append(chunk.chunk_id)
-    for name in db.list_tables().tables:
-        table = db.open_table(name)
+    selected_tables = tables if tables is not None else (db.open_table(name) for name in db.list_tables().tables)
+    for table in selected_tables:
+        name = table.name
         if "vector" not in table.schema.names:
             continue
         if not {"source", "language"} <= set(table.schema.names):
