@@ -34,6 +34,9 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--version", action="version", version=f"fleet-manager {__version__}")
     commands = parser.add_subparsers(dest="command", required=True)
+    location = commands.add_parser("continuity-state-path", help="Print the legacy enrollment path; never inspect or create it")
+    location.add_argument("--repository", required=True)
+    location.add_argument("--harness", required=True)
     planning = commands.add_parser("plan", help="Compare explicit non-secret snapshots; never provision")
     planning.add_argument("--template", type=Path, required=True)
     planning.add_argument("--config", type=Path, help="Existing adopter config; omitted means no config")
@@ -70,6 +73,11 @@ def main(argv=None):
     bootstrap_parser.add_argument("--harness", required=True)
     bootstrap_parser.add_argument("--state-root", type=Path, required=True)
     bootstrap_parser.add_argument("--apply", action="store_true")
+    reconnect = commands.add_parser(
+        "continuity-reconnect", help="Authenticate with an existing repository enrollment; never enroll")
+    reconnect.add_argument("--source", type=Path, required=True)
+    reconnect.add_argument("--repository", required=True)
+    reconnect.add_argument("--harness", required=True)
     ssh_setup = commands.add_parser(
         "ssh-setup", help="Prepare explicitly selected SSH host inputs; never construct or install")
     ssh_setup.add_argument("--request", type=Path, required=True)
@@ -157,6 +165,15 @@ def main(argv=None):
         args = parser.parse_args(arguments)
     except SystemExit as exc:
         return 0 if exc.code == 0 else 1
+    if args.command == "continuity-state-path":
+        from .continuity_location import continuity_state_path
+
+        try:
+            print(continuity_state_path(args.repository, args.harness))
+        except ValueError as error:
+            print(f"fleet-manager: {error}", file=sys.stderr)
+            return 1
+        return 0
     if args.command == "gateway-host":
         try:
             from .gateway_host import main as hosting_main
@@ -165,7 +182,7 @@ def main(argv=None):
         except Exception:
             print("fleet-manager: selected Gateway hosting control failed", file=sys.stderr)
             return 1
-    if args.command in ("capabilities", "bootstrap", "ssh-setup"):
+    if args.command in ("capabilities", "bootstrap", "ssh-setup", "continuity-reconnect"):
         try:
             import asyncio
             from .continuity_bootstrap import (
@@ -199,6 +216,15 @@ def main(argv=None):
                     key_references_only=args.key_references_only,
                     expected_key_fingerprint=args.expected_key_fingerprint,
                 )
+            elif args.command == "continuity-reconnect":
+                from .continuity_location import continuity_state_path
+
+                result = asyncio.run(bootstrap(
+                    args.source.expanduser().absolute(), harness=args.harness,
+                    state_root=continuity_state_path(args.repository, args.harness), apply=False))
+                if result != {"status": "ready", "stage": "connected"}:
+                    print("fleet-manager: existing enrollment did not reconnect", file=sys.stderr)
+                    return 1
             else:
                 result = asyncio.run(bootstrap(
                     args.source.expanduser().absolute(), harness=args.harness,

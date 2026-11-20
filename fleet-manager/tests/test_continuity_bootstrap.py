@@ -197,7 +197,7 @@ def test_provider_caller_does_not_recreate_a_concurrently_removed_identity(tmp_p
     assert (retained / "machine.json").read_bytes() == before
 
 
-@pytest.mark.parametrize("consumer", ["fleet-cli", "manager-engine"])
+@pytest.mark.parametrize("consumer", ["fleet-cli", "manager-engine", "migration"])
 def test_real_cli_first_touch_check_restart_and_same_private_key(
     tmp_path: Path, consumer: str,
     sdk_runtime: tuple[Path, list[str]] | None = None,
@@ -214,6 +214,12 @@ def test_real_cli_first_touch_check_restart_and_same_private_key(
         projection_directory.mkdir(mode=0o700)
         source = projection_directory / "selected.json"
         state = tmp_path / "machine-state"
+        fixture_home = tmp_path / "home"
+        repository_url = "https://example.invalid/org/sample"
+        if consumer == "migration":
+            fixture_home.mkdir(mode=0o700)
+            identity = json.dumps([repository_url, "harness-a"], separators=(",", ":")).encode()
+            state = fixture_home / (".fleet-continuity-" + hashlib.sha256(identity).hexdigest())
         try:
             await rig.start(enrollment_journal=enrollment.ledger)
             enrollment.scope["destination"] = rig.origin
@@ -232,17 +238,20 @@ def test_real_cli_first_touch_check_restart_and_same_private_key(
             ) == {"status": "needed", "stage": "enrollment"}
             assert not state.exists()
 
-            async def process(*arguments: str) -> tuple[int, bytes, bytes]:
+            async def process(*arguments: str, migrated: bool = False) -> tuple[int, bytes, bytes]:
                 package = Path(__file__).parents[1] / "src"
                 environment = dict(os.environ)
+                if consumer == "migration":
+                    environment.update(HOME=str(fixture_home), USERPROFILE=str(fixture_home))
                 environment["PYTHONPATH"] = str(package) + os.pathsep + environment.get("PYTHONPATH", "")
                 command = (
                     sdk_runtime[1] if sdk_runtime else
                     [sys.executable, "-m", "fleet_manager"])
                 child = await asyncio.create_subprocess_exec(
-                    *command, "bootstrap",
+                    *command, "continuity-reconnect" if migrated else "bootstrap",
                     "--source", str(source), "--harness", "harness-a",
-                    "--state-root", str(state), *arguments,
+                    *(["--repository", repository_url] if migrated else ["--state-root", str(state)]),
+                    *arguments,
                     stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
                     env=environment, **no_window_kwargs())
                 stdout, stderr = await asyncio.wait_for(child.communicate(), 20)
@@ -364,7 +373,7 @@ def test_real_cli_first_touch_check_restart_and_same_private_key(
             else:
                 status, stdout, stderr = await process("--apply")
             assert status == 0, (stdout, stderr)
-            if consumer == "fleet-cli":
+            if consumer != "manager-engine":
                 assert json.loads(stdout) == {"status": "ready", "stage": "connected"}
             else:
                 assert b"authenticated outbound Gateway access" in stdout
@@ -372,6 +381,27 @@ def test_real_cli_first_touch_check_restart_and_same_private_key(
                 assert len(states) == 1
                 state = states[0]
             retained = (state / "machine.json").read_bytes()
+            if consumer == "migration":
+                def evidence():
+                    with sqlite3.connect(enrollment.ledger.path) as connection:
+                        rows = tuple(connection.execute(f"SELECT * FROM {table}").fetchall()
+                                     for table in ("machine_enrollments", "operations"))
+                    return (hashlib.sha256((state / "machine.json").read_bytes()).digest(),
+                            (state / "machine.json").stat().st_mtime_ns, tuple(state.iterdir()), rows)
+
+                original = evidence()
+                assert all(len(table) == 1 for table in original[-1])
+                for migrated in (True, False):
+                    rc, body, _ = await process(migrated=migrated)
+                    assert rc == 0 and json.loads(body) == {"status": "ready", "stage": "connected"}
+                    assert evidence() == original
+                await rig.serving.close()
+                rig.serving = None
+                for migrated in (True, False):
+                    rc, body, _ = await process(migrated=migrated)
+                    assert rc != 0 and not body
+                    assert evidence() == original
+                return
             assert GRANT.encode() not in retained
             if os.name != "nt":
                 assert (state / "machine.json").stat().st_mode & 0o077 == 0
