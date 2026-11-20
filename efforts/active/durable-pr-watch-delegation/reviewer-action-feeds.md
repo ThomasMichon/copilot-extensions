@@ -96,7 +96,7 @@ erase existing CI/follow-up/merge distinctions.
 
 This agent-recommended, review-first refinement is coordinated by
 [#13626](https://github.com/ThomasMichon/copilot-extensions/issues/13626).
-The current conservative reader returns `review-dismissed` for any dismissed
+The prior conservative reader returned `review-dismissed` for any dismissed
 record from the selected reviewer, including a historical record beside a
 different, independently qualified undismissed verdict. That can mask a
 supported follow-up even when the existing activity owner observed the live
@@ -133,18 +133,21 @@ claiming support; runtime documentation changes only with implementation.
 
 Finite delivery and validation:
 
-- [ ] Review this refinement before changing the current refusal behavior.
-- [ ] Qualify old dismissed plus independently observed undismissed evidence
+- [x] Review this refinement before changing the current refusal behavior
+  (#13628; current-head Copilot approval and required green checks).
+- [x] Qualify old dismissed plus independently observed undismissed evidence
   across a later candidate change, both review-list orders, unchanged refresh
   and fresh-reader restart. Expect the existing `new_verdict/author_update`
   cause, original pending age and `observed-before-candidate` basis.
-- [ ] Preserve dismissed-only and incomplete/malformed-history refusal,
+- [x] Preserve dismissed-only and incomplete/malformed-history refusal,
   newly observed/noncausal verdicts, another reviewer's dismissal, draft/request
   records, current-head reviewed-base uncertainty and author-owned rebase.
-- [ ] Exercise cache-only query/stream projection and continuation invalidation.
+- [x] Exercise cache-only query/stream projection and continuation invalidation.
   Queries leave durable bytes unchanged; stream samples may advance only their
   existing delivery progress. Neither rewrites cached facts/history, acquires
   a provider, ACKs delivery, emits a task or publishes feedback.
+  These three source exits are covered by `test_repository_reviewer.py` and
+  `test_repository_stream.py`; installed/provider qualification remains separate.
 - [ ] Return to the complete activity/feed, provider-comparison and parent
   gates. Source review/tests alone do not qualify installed behavior, actual
   provider evidence or consumer activation.
