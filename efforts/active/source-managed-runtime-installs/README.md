@@ -933,6 +933,10 @@ adoption. Other completed source slices remain credited in the
   proxy-backed alias: only the destination changes in Worktrees' invocation.
   An SSH failure must propagate without attempting driver setup or falling
   back to a different route.
+  Also exercise an opted-in target with no Worktrees installed or selected:
+  the target role alone must request Fleet. Upgrade and reverse selection
+  from a previously selected Fleet extra must preserve enrollment identity
+  and existing state without implicitly installing or removing Fleet.
 
 The [legacy first-use foreground controls](legacy-first-use-foreground.md#validation-plan-agent-recommended)
 specialize P4bD and L1-L6 with finite caller custody, truthful interruption,
