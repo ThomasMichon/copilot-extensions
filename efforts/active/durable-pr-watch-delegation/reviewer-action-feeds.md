@@ -141,8 +141,10 @@ Finite delivery and validation:
 - [ ] Preserve dismissed-only and incomplete/malformed-history refusal,
   newly observed/noncausal verdicts, another reviewer's dismissal, draft/request
   records, current-head reviewed-base uncertainty and author-owned rebase.
-- [ ] Exercise cache-only query/stream projection and continuation invalidation
-  with no provider call, state rewrite, ACK, task emission or publication.
+- [ ] Exercise cache-only query/stream projection and continuation invalidation.
+  Queries leave durable bytes unchanged; stream samples may advance only their
+  existing delivery progress. Neither rewrites cached facts/history, acquires
+  a provider, ACKs delivery, emits a task or publishes feedback.
 - [ ] Return to the complete activity/feed, provider-comparison and parent
   gates. Source review/tests alone do not qualify installed behavior, actual
   provider evidence or consumer activation.
