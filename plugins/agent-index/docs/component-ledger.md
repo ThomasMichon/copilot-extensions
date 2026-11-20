@@ -261,8 +261,9 @@ no migration or conversion of existing protocol-1 state.
 
 `indexing.point_completion.complete_point_claim(claim, scope=..., paths=...,
 tasks=..., ledger=..., max_rows=...)` completes only an explicitly selected,
-already applied whole typed claim. It is not called by a worker, receiver,
-ordinary recovery or producer, and advertises no v2 execution capability.
+already applied whole typed claim. The explicit retained worker below composes
+it with application; ordinary workers, receivers, recovery and producers do not
+call it. It advertises no v2 execution capability.
 Queue and path databases must be the configured owners alongside the ledger.
 The exact current task must retain the whole immutable claim and pin, remain
 parked, and have no registered worker. Cancelled, failed, interrupted, partial,
@@ -313,6 +314,36 @@ coverage, partial/stale refusal, trailing work, cancellation, separate-WAL failu
 boundaries, mixed restores and transactional-fence rollback after abrupt exit.
 Small actor-free composition controls live in required unit CI. Native Windows
 and ordinary producer/worker composition remain unqualified.
+
+### Explicit retained point worker
+
+`indexing.point_worker.run_retained_point_worker(claim, scope=..., paths=...,
+tasks=..., ledger=..., clients=..., max_rows=..., progress_cb=...)` is a
+synchronous in-process boundary for an **already fully acquired** whole claim.
+The caller supplies the configured owners and owns client lifetime and provider
+eligibility qualification. It does not acquire targets, initialize a native
+domain, open clients or declare a v2-capable ordinary indexing callable.
+
+The existing source-writer lock spans retained acquisition decoding, prepared
+application, native publication and whole-claim completion. Missing, incomplete,
+stale or foreign retained work refuses rather than fetching it or invoking
+ordinary recovery. Preparation reuses the same immutable acquired observations
+and prepared vectors after interruption. Current queue eligibility and callback
+cancellation are checked before preparation, before publication and before
+completion; cancellation or failure never becomes generic successful task status.
+Native/checkpoint ordering, pending retirement and retry qualification remain
+with their existing owners above.
+
+A completed lost-return retry goes directly to requalifying completion, without
+re-preparing, embedding or replaying native application. Uncertain native effects
+and mixed restores refuse; this worker never automatically invokes the separate
+sealed-publication reconciliation operation. Retained work stays available to
+its existing recovery owner. No polling state is read or advanced.
+
+This boundary registers no detached worker and changes no runner, CLI, HTTP,
+MCP, producer, queue-selection or execution-capability declaration. Ordinary v2
+execution remains disabled. Its row cap is still per point; it does not impose
+an aggregate target, memory, elapsed-time or physical-I/O budget.
 
 ### Sealed native publication suffix
 

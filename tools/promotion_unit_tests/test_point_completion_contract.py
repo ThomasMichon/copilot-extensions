@@ -159,6 +159,7 @@ def api(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     )
     return SimpleNamespace(
         module=module, claim=claim, content=content, state=state, events=events,
+        load=load, paths=paths, tasks=tasks, ledger=Ledger(config, store),
         complete=lambda: module.complete_point_claim(
             claim, scope="scope", paths=paths, tasks=tasks, ledger=Ledger(config, store), max_rows=8,
         ),
@@ -200,3 +201,80 @@ def test_completion_outcome_cannot_drop_or_rebind_a_claimed_logical_target(api: 
         raw["point_completion"][field] = value
         with pytest.raises(ValueError):
             cls.from_stats(raw)
+
+
+def _worker(api: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> Any:
+    events = api.events
+
+    @contextmanager
+    def writer(*args: Any, **kwargs: Any) -> Iterator[None]:
+        events.append("writer:enter")
+        try:
+            yield
+        finally:
+            events.append("writer:exit")
+
+    ownership = ModuleType("agent_index.indexing.source_ownership")
+    setattr(ownership, "source_writer", writer)
+    monkeypatch.setitem(sys.modules, ownership.__name__, ownership)
+
+    class Application:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            assert kwargs["point_claim"] == api.claim
+            events.append("application:prepare")
+
+        def publish(self) -> None:
+            events.append("application:publish")
+            if api.state.refuse:
+                raise ValueError("fixture uncertain native state")
+
+    class Pending:
+        def __init__(self, paths: object) -> None:
+            assert paths is api.paths
+
+        def read_payload(self, source: str, scope: str) -> str:
+            payload: str = api.state.parent["payload"]
+            return payload
+
+    monkeypatch.setattr(
+        sys.modules["agent_index.indexing.component_application"],
+        "PreparedComponentApplication", Application, raising=False,
+    )
+    monkeypatch.setattr(sys.modules["agent_index.indexing.pending_crawl"], "PendingCrawls", Pending)
+    monkeypatch.setattr(
+        sys.modules["agent_index.indexing.prepared_points"], "PreparedPoints",
+        lambda journal: SimpleNamespace(compose=lambda: events.append("acquisition:compose")),
+    )
+    worker = api.load("point_worker")
+    return lambda: worker.run_retained_point_worker(
+        api.claim, scope="scope", paths=api.paths, tasks=api.tasks,
+        ledger=api.ledger, clients={}, max_rows=8,
+    )
+
+
+def test_retained_worker_publishes_before_whole_completion_and_never_reapplies_success(
+    api: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run = _worker(api, monkeypatch)
+    completed = run()
+    events = api.events
+    assert events.index("writer:enter") < events.index("acquisition:compose")
+    assert events.index("application:prepare") < events.index("application:publish")
+    assert events.index("application:publish") < events.index("queue:complete")
+    assert events.index("pending:commit") < events.index("writer:exit")
+    events.clear()
+    assert run() == completed
+    assert events.count("qualify") == 2
+    assert not any(event.startswith(("acquisition:", "application:")) for event in events)
+
+
+def test_retained_worker_propagates_uncertain_application_without_false_completion(
+    api: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run = _worker(api, monkeypatch)
+    api.state.refuse = True
+    with pytest.raises(ValueError, match="uncertain native state"):
+        run()
+    assert api.state.task.status == "queued_hints_v2" and api.state.parent is not None
+    assert "queue:complete" not in api.events and "pending:retire" not in api.events
+    assert api.events[-1] == "writer:exit"

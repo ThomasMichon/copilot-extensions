@@ -2,6 +2,39 @@
 
 [Back to the effort](README.md). The Plan and Validation Plan remain the completion gate.
 
+## 2026-11-20 - Pinned mux discovery merged
+
+[#13621](https://github.com/ThomasMichon/copilot-extensions/pull/13621)
+merged to `dev` as `01bd6c08b745`. With an empty Bridge database, the
+opt-in caller used an independent pin and the Driver CLI to distinguish
+the original mux incarnation from a same-name replacement. Neither result
+added a target or verified an agent route.
+
+A Windows fixture then installed `8bced12e2eaa` (A) and `01bd6c08b745`
+(B) non-editably into separate environments. Each Bridge and Driver import
+resolved inside its selected environment. Against the same fixture-owned
+loopback endpoint and pin, B observed the original incarnation in three
+native reads. New Bridge with A's Driver returned `pinned_read_unsupported`
+without contacting the endpoint. Returning to A restored the legacy
+capability declaration; A did not have a pinned discovery caller. B later
+rejected a same-name replacement in three native reads. The Bridge session
+database stayed empty. This exercised the installed discovery function, not
+full CLI target listing, live reattachment or acknowledged application writes.
+
+The subsequent installed `agent-bridge targets --json` trial passed five
+Windows cases against the real HTTP health and target-list handlers in the
+private fixture. Ordinary inventory was unchanged on A, B and return to A.
+With an independent pin, B distinguished original, lookalike, missing and
+unreadable rendezvous; the mixed installation refused the older Driver
+without querying the fixture mux. No route, session or turn was created.
+This tests read-only discovery, not reattachment or acknowledged writes.
+
+Offline staging of both revisions initially failed: the resolver could not
+find `agent-client-protocol` in its cache. Neither failure qualified a build.
+Staging the same source revisions with the configured package source succeeded;
+the exercised console scripts came from those separate non-editable installs.
+No offline installation, live service validation or rollout is claimed.
+
 ## 2026-11-13 - Original application integration merged
 
 [Source and bounded native evidence](<journal/2026/11.13 canonical-application-integration.md>)

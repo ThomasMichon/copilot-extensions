@@ -7701,13 +7701,27 @@ then exercises queue success before exact pending retirement. It covers covered
 reopen without engines, trailing claims, cancellation, stale/partial refusal,
 lost-return retries across separate WAL commits, mixed checkpoint/native restores
 and abrupt-exit rollback of transactional schema/data transitions. Run this
-bounded native packet separately from application/preparation packets. Its two
+bounded native packet separately from application/preparation packets. Its
 actor-free `tools/promotion_unit_tests/test_point_completion_contract.py` controls
 check complete typed-target coverage and qualification/commit/retirement order
 in required unit CI; they substitute SQLite/native boundaries, not qualification
 of real restores or native Windows. See
 [explicit completion](plugins/agent-index/docs/component-ledger.md#explicit-whole-claim-completion)
 for retry and budget limits.
+
+The explicit `tests/test_point_worker.py` packet composes fully retained targets
+through the source writer, preparation, native application, whole-claim completion
+and named-component reads. It covers interrupted embedding/cache reuse,
+cancellation before publication, incomplete/foreign input refusal, retained
+uncertain effects without automatic repair, source-writer contention, trailing
+claims, requalifying completed retries and legacy-worker exclusion. Run it as a
+separate bounded packet with `--test-file tests/test_point_worker.py
+--allow-explicit-tiers`. Two additional actor-free controls in
+`test_point_completion_contract.py` qualify publication-before-completion and
+failure propagation with native/SQLite/lock effects substituted. Neither packet
+enables ordinary v2 execution or qualifies native Windows or live provider
+eligibility. See the [retained worker](plugins/agent-index/docs/component-ledger.md#explicit-retained-point-worker)
+for the caller and budget boundaries.
 
 The exclusive attachment-export consumer packet executes the real export
 entrypoint, health-selected command transport, extension registry, provider

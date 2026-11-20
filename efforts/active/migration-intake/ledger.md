@@ -1033,3 +1033,21 @@ production fallback, larger budget, lease transfer or resource release
 follows. Required CI stays unit-only and hosted-Windows execution remains
 quiesced. The [fourteen-source record](../backlog-reconciliation/journal/2026/11.20-windows-fixture-and-profile-receiving.md)
 retains original evidence, alternatives and independent obligations.
+
+## Windows fixture and native-profile receiving accepted - 2026-11-20 UTC
+
+| Source | Disposition | Primary canonical owner | Retained gates |
+|---|---|---|---|
+| #12156 | routed after actual complete reviewed delivery/readback; redundant tracker retired separately | Existing Portfolio Phase 4 Vault wave, P12156/V12156/G12156 through Phase 7 | All six technical rows unchecked; both original families, skip OR test-cipher alternative, production policy and actual custodians retained |
+| #12193 | routed after actual complete reviewed delivery/readback; redundant tracker retired separately | Existing Portfolio Phase 4 tools/workflow wave, P12193/V12193/G12193 through Phase 7 | All six technical rows unchecked; five failure groups and meaningful replacement/assertion requirements retained |
+| #12194 | routed after actual complete reviewed delivery/readback; redundant tracker retired separately | Existing Portfolio Phase 4 SSH/installer wave, P12194/V12194/G12194 through Phase 7 | All six technical rows unchecked; all seven cases, supported correction OR justified scope and actual ownership retained |
+| #12235 | routed after actual complete reviewed delivery/readback; redundant tracker retired separately | Existing Portfolio Phase 5 profile/runner wave, P12235/V12235/G12235 through Phase 7 | All five technical rows unchecked; positive Windows roster OR pre-execution unsupported boundary, exact inventory/no-skip/Linux CI retained |
+
+#13622 supplied the actual complete domain/intake delivery. Subsequent
+whole-current receiving/source/custody readback preceded four independently
+audited `NOT_PLANNED` tracking judgments, recorded in the
+[source-fulfillment unit](../backlog-reconciliation/journal/2026/11.20-source-fulfillment-and-owned-boundaries.md).
+This append preserves the earlier conditional proposal as history; it adds
+no technical completion, administrative checkbox, execution grant, owner
+appointment or resource release. OPEN #1303, all incumbent obligations,
+unit-only required CI and hosted-Windows quiescence remain.
