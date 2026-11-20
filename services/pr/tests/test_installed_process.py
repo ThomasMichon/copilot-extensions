@@ -353,6 +353,12 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
     from agent_pull_requests.workspace_tools import WorkspaceTools
 
     workspace_errors: list[Exception] = []
+
+    class ExpectedWorkspaceRefusal(AssertionError):
+        def __init__(self, response: dict[str, Any], discovery_refused: bool) -> None:
+            self.response, self.discovery_refused = response, discovery_refused
+            super().__init__("expected workspace refusal")
+
     invoke: Callable[..., Awaitable[Any]] = WorkspaceTools.invoke
 
     async def diagnostic_invoke(self: Any, *args: Any, **kwargs: Any) -> Any:
@@ -590,23 +596,39 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
                     raise AssertionError(f"{operation} remained busy")
 
                 async def workspace(
-                    operation: str, payload: dict[str, Any], *, retry_unavailable: bool = True,
+                    operation: str, payload: dict[str, Any], *, expected_refusal: str | None = None,
                 ) -> dict[str, Any]:
                     from agent_pull_requests import workspace_cli
                     from agent_pull_requests.watch_replay_binding import ReplayBinding
                     from agent_pull_requests.workspace_client import WorkspaceClient
                     from agent_pull_requests.workspace_tools import WorkspaceTools
-                    from fleet_manager.gateway_service_caller import ServiceCaller
+                    from fleet_manager.gateway_service_caller import ServiceCaller, ServiceResponse
                     responses: list[dict[str, Any]] = []
+                    discovery_refused = False
 
                     class DiagnosticCaller(ServiceCaller):
-                        async def request(self, *args: Any, **kwargs: Any) -> Any:
-                            response = await super().request(*args, **kwargs)
-                            if response.status != 200:
-                                responses.append({
-                                    "status": response.status,
-                                    "body": response.body[:4096].decode("utf-8", errors="replace"),
-                                })
+                        async def request(
+                            self, method: str, request_target: str, **kwargs: Any,
+                        ) -> ServiceResponse:
+                            nonlocal discovery_refused
+                            response = await super().request(method, request_target, **kwargs)
+                            if (
+                                expected_refusal is not None and not discovery_refused
+                                and response.status == 200 and request_target.endswith("/capabilities")
+                            ):
+                                discovery_refused = True
+                                response = ServiceResponse(
+                                    503, (("content-type", "application/json"),),
+                                    b'{"error":"workspace_owner_unavailable"}',
+                                )
+                            recorded: dict[str, Any] = {
+                                "target": request_target, "status": response.status,
+                                "body": response.body[:4096].decode("utf-8", errors="replace")
+                                if response.status != 200 else "",
+                            }
+                            if expected_refusal is not None and request_target.endswith("/" + expected_refusal):
+                                recorded["request"] = json.loads(kwargs["body"])["request"]
+                            responses.append(recorded)
                             return response
 
                     async def caller_access() -> str:
@@ -633,6 +655,7 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
                         arguments += ["--request", str(request)]
                     for _ in range(100):
                         errors_before = len(workspace_errors)
+                        responses_before = len(responses)
                         code = await asyncio.to_thread(
                             workspace_cli.main, arguments,
                             host=cast(Any, WorkspaceTools)(client),
@@ -640,14 +663,25 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
                         output = capsys.readouterr()
                         if code == 0:
                             return cast(dict[str, Any], json.loads(output.out))
+                        attempt = responses[responses_before:]
+                        if expected_refusal is not None:
+                            refused = next((value for value in attempt if (
+                                value["target"] == "/api/v2/review/project/" + expected_refusal
+                                and value["status"] == 503
+                                and json.loads(value["body"]) == {"error": "workspace_owner_unavailable"}
+                            )), None)
+                            if refused is not None and any(
+                                value["target"] == "/api/v2/review/project/capabilities"
+                                and value["status"] == 200 for value in attempt
+                            ):
+                                raise ExpectedWorkspaceRefusal(refused, discovery_refused)
                         if (
-                            retry_unavailable
-                            and operation in {"capabilities", "events", "inspect", "materialize", "retained-comment"}
+                            operation in {"capabilities", "events", "inspect", "materialize", "retained-comment"}
                             and len(workspace_errors) > errors_before
                             and getattr(workspace_errors[-1], "http_status", None) == 503
                         ):
-                            # Positive reads can race the observer's store lock.
-                            # Expected refusals opt out; never retry effectful work.
+                            # Discovery can race the observer's store lock even
+                            # when the requested lookup is expected to refuse.
                             await asyncio.sleep(0.05)
                             continue
                         raise AssertionError((output.out, output.err, workspace_errors, responses[-5:]))
@@ -945,11 +979,15 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
                         }))["result"]
                         assert before_reopen["current"]["state"] == terminal_outcome
                         failures = len(workspace_errors)
-                        with pytest.raises(AssertionError):
+                        with pytest.raises(ExpectedWorkspaceRefusal) as refused:
                             await workspace(
                                 "materialize", {"number": 42, "generation_id": generation_id},
-                                retry_unavailable=False,
+                                expected_refusal="lookup",
                             )
+                        assert refused.value.discovery_refused
+                        assert refused.value.response["target"] == "/api/v2/review/project/lookup"
+                        assert refused.value.response["request"]["number"] == 42
+                        assert refused.value.response["request"]["generation_id"] == generation_id
                         assert len(workspace_errors) > failures
                         assert getattr(workspace_errors[-1], "code", None) == "workspace_unavailable"
                         assert getattr(workspace_errors[-1], "http_status", None) == 503
