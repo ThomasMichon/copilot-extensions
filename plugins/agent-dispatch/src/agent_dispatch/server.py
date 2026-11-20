@@ -13,7 +13,7 @@ import time
 from dataclasses import replace
 from pathlib import Path
 from collections.abc import Callable
-from typing import Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from fastapi import FastAPI
 
@@ -338,9 +338,11 @@ class _Serve(Protocol):
     ) -> None: ...
 
 
-@cast(Callable[[_Serve], _Serve], daemon_entrypoint(
-    "agent-dispatch-coordinator", source=__file__, purpose="production",
-))
+if TYPE_CHECKING:
+    daemon_entrypoint = cast(Callable[..., Callable[[_Serve], _Serve]], daemon_entrypoint)
+
+
+@daemon_entrypoint("agent-dispatch-coordinator", source=__file__, purpose="production")
 def serve(cfg: Config | None = None, *, passive: bool = False, force: bool = False) -> None:
     """Bind and serve the coordinator (blocking).
 

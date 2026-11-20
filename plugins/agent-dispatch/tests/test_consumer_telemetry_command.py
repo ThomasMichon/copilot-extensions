@@ -398,6 +398,29 @@ def test_absent_policy_preserves_legacy_and_malformed_policy_refuses(
     assert consumer_telemetry.load_policy() == {}
 
 
+def test_dangling_policy_is_unreadable_not_absent_and_never_loads_legacy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert consumer_telemetry.load_policy() is LEGACY
+    directory = install_dir()
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / "consumer-telemetry.json"
+    path.symlink_to(tmp_path / "absent-policy-target.json")
+    assert path.is_symlink() and not path.exists()
+    assert consumer_telemetry.load_policy() == {}
+
+    def forbidden(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("dangling policy loaded a legacy sink")
+
+    monkeypatch.setattr(telemetry, "load_sink_from_config", forbidden)
+    monkeypatch.setattr(telemetry, "load_sink_from_env", forbidden)
+    app = build_app(Config(db_path=str(tmp_path / "tasks.db"), token="fixture-data"))
+    assert app.state.consumer_telemetry.refusal == "invalid_config"
+    assert not app.state.consumer_telemetry.legacy
+    path.unlink()
+    assert consumer_telemetry.load_policy() is LEGACY
+
+
 @pytest.mark.parametrize("behavior", ["crash", "nonreading"])
 def test_real_receiver_failure_preserves_work_and_restart_is_a_new_source(
     tmp_path: Path, behavior: str,

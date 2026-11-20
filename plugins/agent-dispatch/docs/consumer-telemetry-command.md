@@ -36,6 +36,7 @@ Absence preserves the existing convention-located factory/spool/environment
 selection. A present empty, malformed or unreadable policy **suppresses** command
 export and legacy fallback for this coordinator. An empty `repositories`
 mapping is valid and admits no initiating roots.
+A dangling policy-file symlink is unreadable, not absent.
 An embedding can supply the same trusted object as `create_app`'s
 `consumer_telemetry` argument. Omitting that argument preserves legacy behavior.
 No HTTP field, MCP argument, current working directory, task payload or sender

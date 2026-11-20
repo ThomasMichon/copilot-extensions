@@ -62,8 +62,15 @@ def capability() -> dict[str, Any]:
 def load_policy() -> Any:
     """Read only the coordinator's exact local admission file; absence is legacy."""
     try:
-        value = read_object(install_dir() / "consumer-telemetry.json", 16384)
-        return LEGACY if value is None else validate_policy(value)
+        path = install_dir() / "consumer-telemetry.json"
+        value = read_object(path, 16384)
+        if value is not None:
+            return validate_policy(value)
+        try:
+            path.lstat()
+        except FileNotFoundError:
+            return LEGACY
+        return {}
     except (OSError, ValueError, UnicodeError, TypeError, RecursionError):
         return {}
 
