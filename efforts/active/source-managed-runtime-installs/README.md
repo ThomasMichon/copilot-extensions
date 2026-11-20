@@ -17,6 +17,10 @@ Fleet Manager is an independently selected application, not a dependency of
 Fleet Manager by its assigned role (for example, controller). Installing
 Worktrees, requesting a Python extra, or running on the planning machine must
 not select Fleet for the target. Selection alone does not start a service.
+Worktrees consumes an available OpenSSH profile as `ssh <machine>`. It does
+not choose an SSH driver, configure a route, or install Fleet to connect.
+An SSH profile may use `agent-ssh` as its `ProxyCommand`; direct profiles
+work without it. Profile and driver setup remain outside Worktrees.
 
 Recover Bridge's potential agent catalog from independent registered and provider
 sources, distinguishing discovery from verified reachability. Preserve surviving
@@ -921,6 +925,10 @@ adoption. Other completed source slices remain credited in the
   unreadable required policy is unresolved, not a grant. Exercise optional
   SSH and review callers both without their provider and with an explicitly
   configured provider. No live setup, role reassignment or service start.
+  Exercise the same Worktrees operation with a direct SSH alias and a
+  proxy-backed alias: only the destination changes in Worktrees' invocation.
+  An SSH failure must propagate without attempting driver setup or falling
+  back to a different route.
 
 The [legacy first-use foreground controls](legacy-first-use-foreground.md#validation-plan-agent-recommended)
 specialize P4bD and L1-L6 with finite caller custody, truthful interruption,
