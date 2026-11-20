@@ -46,11 +46,12 @@ image stems, so even a listing can remove registrations after an unsafe rename.
 The normal installer keeps live/unknown providers on its side-by-side path;
 this runbook is not permission to bypass its native absence guard. Any
 separately approved in-place binary replacement must retain the running image
-in a non-disposable, same-volume owned directory **named `psmux.exe`**, never
-Temp or a renamed backup stem. Revalidate PID, native creation identity and
-image path before and after the move. Recovery restores that basename in a
-fresh durable directory without signals, kills, registration edits or session
-replacement. Missing registrations remain a separate recovery problem; neither
+**with executable basename `psmux.exe`** in a non-disposable, same-volume owned
+directory. Never use Temp or rename the image to a backup stem. Revalidate PID,
+native creation identity and image path before and after the move. Recovery
+restores that basename in a fresh durable directory without signals, kills,
+registration edits or session replacement. Missing registrations remain a
+separate recovery problem; neither
 `doctor --fix` nor a successful image move proves them restored. Keep retained
 images while dependent processes or owner references remain.
 
