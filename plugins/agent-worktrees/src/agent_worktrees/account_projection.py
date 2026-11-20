@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from .repos_configuration_sources import identity, resource_name
 
+if TYPE_CHECKING:
+    from .repos import ReposRegistry
 
-def snapshot(registry):
+
+def snapshot(registry: ReposRegistry) -> tuple[dict[str, str], dict[str, str], dict[str, dict[str, str]]]:
     return (
         dict(registry.account_map),
         {name: entry.account for name, entry in registry.repos.items()},
@@ -13,7 +18,7 @@ def snapshot(registry):
     )
 
 
-def prepare(registry, owner):
+def prepare(registry: ReposRegistry, owner: str) -> None:
     """Withdraw only this owner's unchanged projections before recomposition."""
     owner = resource_name(owner)
     records = registry.account_projection
@@ -42,16 +47,16 @@ def prepare(registry, owner):
         del records[key]
 
 
-def record(registry, owner, target, account):
+def record(registry: ReposRegistry, owner: str, target: str, account: str) -> None:
     owner, account = resource_name(owner), identity(account)
     if target not in registry.account_projection and len(registry.account_projection) >= 1024:
         raise ValueError("Account projection record limit exceeded")
     registry.account_projection[target] = {"owner": owner, "account": account}
 
 
-def explicit_repository(registry, name):
+def explicit_repository(registry: ReposRegistry, name: str) -> None:
     registry.account_projection.pop("repo:" + name, None)
 
 
-def explicit_default(registry):
+def explicit_default(registry: ReposRegistry) -> None:
     registry.account_projection.pop("default", None)
