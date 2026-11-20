@@ -201,6 +201,8 @@ def finish_failed_for_process(
         if record["state"] not in ("reserved", "bound", "running", "finished"):
             raise ValueError("daemon launch state changed")
         record.update(pid=str(process.pid), birth=process.birth)
+        if admission_possible:
+            record["spawn_admission_possible"] = "1"
         observed = identity_state(process.pid, process.birth)
         if observed != "dead":
             record["spawn_failure"] = "process-" + observed
@@ -208,6 +210,7 @@ def finish_failed_for_process(
             return False
         if (
             not admission_possible and record["state"] in ("reserved", "bound")
+            and record.get("spawn_admission_possible", "0") == "0"
             and record["artifact_count"] == "0" and record.get("protected", "0") == "0"
             and record.get("spawn_failure") != "exit-confirmed-effects-held"
         ):

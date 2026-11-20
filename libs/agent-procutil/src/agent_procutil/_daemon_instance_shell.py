@@ -18,12 +18,11 @@ from typing import TYPE_CHECKING, Any, BinaryIO, Callable, ContextManager, Proto
 from . import _daemon_instance_store as store
 from ._daemon_instance_clock import WallLeaseObservation
 from ._daemon_instance_records import (
-    ProcessIdentity, admit_for_process, bind_for_process, cancel_for_process,
-    finish_failed_for_process, finish_for_process, reserve_for_process,
+    ProcessIdentity, admit_for_process, bind_for_process, finish_for_process, reserve_for_process,
 )
 from .daemon_instances import (
     INSTANCE_ENV, REGISTRY_ENV, TEST_CONTEXT_ENV, DaemonInstanceReceipt,
-    DaemonInstanceSpec, DaemonLeasePolicy, Purpose,
+    DaemonInstanceSpec, DaemonLeasePolicy,
 )
 
 _MAX_FRAME = 524288
@@ -31,6 +30,7 @@ _ENVIRONMENT = {INSTANCE_ENV, REGISTRY_ENV, TEST_CONTEXT_ENV, "COPILOT_EXTENSION
 
 if TYPE_CHECKING:
     from .daemon_broker import WindowsDaemonProcess
+    from .daemon_instances import Purpose
 
 
 class ShellOwner(Protocol):
@@ -80,7 +80,7 @@ def _spec(
     lease = DaemonLeasePolicy(ttl, maximum) if ttl or maximum else None
     return DaemonInstanceSpec(
         parameters["service"], Path(parameters["runtime_root"]), Path(parameters["source"]),
-        purpose=cast(Purpose, purpose), owner=owner,
+        purpose=cast("Purpose", purpose), owner=owner,
         registry_root=Path(root) if root else None, lease=lease,
     )
 
@@ -152,6 +152,8 @@ class ShellInstanceSession:
         if command == "failed-launch-contract":
             return {"version": 1, "owner_bound": True, "pinned_exit": True}
         if command == "failed-launch":
+            from ._daemon_instance_records import cancel_for_process, finish_failed_for_process
+
             receipt = _receipt(request["receipt"])
             refused = request.get("creation_refused")
             admission = request.get("admission_possible")

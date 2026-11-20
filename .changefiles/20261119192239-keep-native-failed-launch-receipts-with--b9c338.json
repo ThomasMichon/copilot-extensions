@@ -1,8 +1,12 @@
 {
-  "comment": "Keep native failed-launch receipts with original-owner custody, settle positively refused launches, and prevent read-only Index metadata probes from changing their payload.",
+  "comment": "Keep native failed-launch receipts with original-owner custody, preserve cold Index payloads, and close Dispatch launcher-header readers before atomic publication.",
   "changes": [
     {
       "plugin": "agent-index",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-dispatch",
       "type": "dev"
     },
     {

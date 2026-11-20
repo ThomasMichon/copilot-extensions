@@ -34,7 +34,7 @@ def reserved(
         if not record.get("pid"):
             cancel_for_process(receipt, launcher, creation_refused=True)
         else:
-            monkeypatch.setattr(records, "identity_state", lambda pid, birth: "dead")
+            monkeypatch.setattr(store, "identity_state", lambda pid, birth: "dead")
             result = store.cleanup(receipt, terminate=False)
             assert result.status == "settled", result
 
@@ -63,7 +63,7 @@ def test_identified_exited_child_settles_without_touching_application_files(
     receipt, launcher = reserved
     marker = receipt.registry_root.parent / "application-state"
     marker.write_text("retained", encoding="utf-8")
-    monkeypatch.setattr(store, "identity_state", lambda pid, birth: "dead")
+    monkeypatch.setattr(records, "identity_state", lambda pid, birth: "dead")
     assert finish_failed_for_process(
         receipt, ProcessIdentity(123, "fixture-child"), launcher, admission_possible=False,
     )
@@ -103,17 +103,19 @@ def test_unconfirmed_child_remains_tracked(
 
 
 @pytest.mark.parametrize("later_observation", ["dead", "matching", "unknown"])
+@pytest.mark.parametrize("initial_observation", ["dead", "unknown"])
 def test_possible_application_admission_cannot_be_downgraded_by_a_retry(
     reserved: tuple[DaemonInstanceReceipt, ProcessIdentity], monkeypatch: pytest.MonkeyPatch,
-    later_observation: str,
+    later_observation: str, initial_observation: str,
 ) -> None:
     receipt, launcher = reserved
     child = ProcessIdentity(123, "fixture-child")
-    monkeypatch.setattr(records, "identity_state", lambda pid, birth: "dead")
+    monkeypatch.setattr(records, "identity_state", lambda pid, birth: initial_observation)
     assert not finish_failed_for_process(receipt, child, launcher, admission_possible=True)
+    assert store._read(receipt.record_path)["spawn_admission_possible"] == "1"
     if later_observation != "dead":
         monkeypatch.setattr(records, "identity_state", lambda pid, birth: later_observation)
         assert not finish_failed_for_process(receipt, child, launcher, admission_possible=False)
-        monkeypatch.setattr(records, "identity_state", lambda pid, birth: "dead")
+    monkeypatch.setattr(records, "identity_state", lambda pid, birth: "dead")
     assert not finish_failed_for_process(receipt, child, launcher, admission_possible=False)
     assert store._read(receipt.record_path)["spawn_failure"] == "exit-confirmed-effects-held"
