@@ -33,6 +33,10 @@ from .runtime_version import current_runtime_version
 if TYPE_CHECKING:
     from .indexing.point_service import PointService
 
+    daemon_entrypoint = cast(
+        Callable[..., Callable[[Callable[..., None]], Callable[..., None]]], daemon_entrypoint,
+    )
+
 log = logging.getLogger("agent-index.server")
 INSTALLATION_HEADER = "X-Agent-Index-Installation-Id"
 INSTANCE_HEADER = "X-Agent-Index-Instance-Token"
@@ -817,10 +821,7 @@ def _clear_routing() -> None:
         log.debug("Routing-table clear-on-shutdown skipped", exc_info=True)
 
 
-@cast(
-    Callable[[Callable[..., None]], Callable[..., None]],
-    daemon_entrypoint("agent-index", source=__file__, purpose="production"),
-)
+@daemon_entrypoint("agent-index", source=__file__, purpose="production")
 def serve(cfg: Config | None = None, *, passive: bool = False) -> None:
     """Bind an OS-assigned local endpoint and run the service."""
     uvicorn = importlib.import_module("uvicorn")
