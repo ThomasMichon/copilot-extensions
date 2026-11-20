@@ -286,9 +286,9 @@ pre-transition executable still refuses expanded state without rewriting it.
 
 ### Durable generation association
 
-The optional fresh-baseline writer records original associations. The
-recorded-generation adoption source is qualified locally; normal source review
-and merge remain pending. Active native-watch and unknown-effect transition,
+The optional fresh-baseline writer records original associations. Source
+controls qualify recorded-generation adoption and body reads. Active
+native-watch and unknown-effect transition,
 installed migration and full T3 remain unqualified. The unselected
 baseline `WorkspaceOperations` path publishes through `GenerationCache` before
 calling `ConversationStore.observe_workspace`. Its feedback-only
