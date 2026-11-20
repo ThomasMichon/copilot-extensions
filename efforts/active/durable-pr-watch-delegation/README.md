@@ -837,9 +837,12 @@ sealing and topology-based recovery under that same custody, without importing
 or activating state. The Windows source slice merged in #13608 adds private
 staging, normal original-lease release, no-replace sealing and topology-based
 recovery; raced historical files remain retained blockers, never another lease.
-Contained Windows current-controller abrupt-exit recovery now covers six
-transition boundaries without import or effects. Native Linux
-exchange/interruption, complete Windows historical-runtime qualification,
+Contained Windows current-controller abrupt-exit recovery, merged in #13612, covers six
+transition boundaries without import or effects. A contained Windows packet
+also covers delayed opens, gap creation and cold legacy-home `serve`/`restart`
+refusal from three complete pinned historical source closures. Native Linux
+exchange/interruption, released historical installations, governed entry and
+complete supported-window qualification,
 boot-boundary qualification and authority
 selection remain open; no
 map/cwd capability or isolated subscription publisher is activated.
