@@ -95,7 +95,7 @@ def api(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     state = SimpleNamespace(
         parent={"scope": "scope", "payload": '{"version":9}'},
         task=SimpleNamespace(status="queued_hints_v2", result_stats=None),
-        refuse=False,
+        refuse=False, applied=content,
     )
     config = SimpleNamespace(data_dir=Path("owned"))
     domain = SimpleNamespace(writing=False, _local=SimpleNamespace(), operation=operation,
@@ -108,7 +108,7 @@ def api(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
             self._config, self._store, self._source_domain = config, store, domain
 
         def get(self, source: str, path: str, *, point_scope: object) -> Any:
-            return SimpleNamespace(content=next(c for c in content if c.component.path == path))
+            return SimpleNamespace(content=next(c for c in state.applied if c.component.path == path))
 
     def qualify(*args: Any, **kwargs: Any) -> None:
         events.append("qualify")
@@ -182,6 +182,33 @@ def test_completion_qualifies_all_points_before_success_and_retirement(api: Simp
     with pytest.raises(ValueError, match="incomplete coverage"):
         api.complete()
     assert not any(event in events for event in ("queue:complete", "queue:commit", "pending:retire"))
+    api.state.task = SimpleNamespace(status="queued_hints_v2", result_stats=None)
+    api.state.refuse = False
+    requested = tuple(content.component for content in api.content)
+
+    def higher() -> Any:
+        return api.module.complete_higher_point_claim(
+            api.claim, components=requested, scope="scope", paths=api.paths,
+            tasks=api.tasks, ledger=api.ledger, max_rows=8,
+        )
+
+    events.clear()
+    assert higher() is None
+    assert "queue:complete" not in events and "qualify" not in events
+    api.state.applied = tuple(replace(
+        content, component=replace(content.component, version=content.component.version + 1),
+    ) for content in api.content)
+    completed = higher()
+    assert completed.status == "complete" and "pending:retire" not in events
+    assert completed.result_stats["point_completion"]["mode"] == "higher-covered"
+    events.clear()
+    assert api.complete() == completed and events.count("qualify") == 2
+    assert "queue:complete" not in events and "pending:retire" not in events
+    api.state.refuse = True
+    events.clear()
+    with pytest.raises(ValueError, match="incomplete coverage"):
+        api.complete()
+    assert not any(event in events for event in ("queue:complete", "queue:commit", "pending:retire"))
 
 
 def test_completion_outcome_cannot_drop_or_rebind_a_claimed_logical_target(api: SimpleNamespace) -> None:
@@ -198,6 +225,19 @@ def test_completion_outcome_cannot_drop_or_rebind_a_claimed_logical_target(api: 
             replace(valid, components=content).require_targets(api.claim)
     for field, value in (("version", True), ("components", None), ("unknown", "field")):
         raw = valid.to_stats()
+        raw["point_completion"][field] = value
+        with pytest.raises(ValueError):
+            cls.from_stats(raw)
+    higher = replace(valid, pending=None, generation=None, higher_covered=True, components=tuple(
+        replace(content, component=replace(content.component, version=content.component.version + 1))
+        for content in valid.components
+    ))
+    higher.require_targets(api.claim)
+    with pytest.raises(ValueError, match="entire typed point claim"):
+        replace(higher, components=valid.components).require_targets(api.claim)
+    assert cls.from_stats(json.loads(json.dumps(higher.to_stats()))) == higher
+    for field, value in (("mode", "acquired"), ("pending", "forged"), ("version", True)):
+        raw = higher.to_stats()
         raw["point_completion"][field] = value
         with pytest.raises(ValueError):
             cls.from_stats(raw)

@@ -8,15 +8,19 @@ from typing import TYPE_CHECKING
 from agent_index.indexing.manifest import CrawlManifest
 from agent_index.indexing.pending_crawl import PendingCrawls
 from agent_index.indexing.point_hints import CommentVersionTarget, PointTarget, WorkItemRevisionTarget
+from agent_index.indexing.point_completion import complete_higher_point_claim
 from agent_index.indexing.point_worker import _validate_owners, run_retained_point_worker
 from agent_index.indexing.prepared_journal import PreparedJournal
 from agent_index.indexing.prepared_points import PointAcquisition, PreparedPoints
 from agent_index.indexing.source_ownership import source_writer
 from agent_index.indexing.task_store import TaskStatus
-from agent_index.sources.azure_devops_points import _number, _require_selection, acquire_named_point
+from agent_index.sources.azure_devops_points import (
+    _number, _point_component, _require_selection, acquire_named_point,
+)
 
 if TYPE_CHECKING:
     from agent_index.engine.client import EngineClient
+    from agent_index.indexing.component_manifest import ComponentVersion
     from agent_index.indexing.path_index import PathIndex
     from agent_index.indexing.point_claim import PendingPointClaim
     from agent_index.indexing.runner import ProgressCallback
@@ -96,6 +100,19 @@ def run_azure_devops_point_worker(
             payload = pending.read_payload(claim.hints.source, scope)
             first = None
             if payload is None:
+                components: dict[tuple[str, str], ComponentVersion] = {}
+                for target in claim.hints.targets:
+                    component = _point_component(connector, target)
+                    key = component.source, component.path
+                    previous = components.get(key)
+                    if previous is None or previous.version < component.version:
+                        components[key] = component
+                covered = complete_higher_point_claim(
+                    claim, components=tuple(components.values()), scope=scope, paths=paths,
+                    tasks=tasks, ledger=ledger, max_rows=max_rows,
+                )
+                if covered is not None:
+                    return covered
                 first = acquire(claim.hints.targets[0])
                 pending.save(CrawlManifest(
                     claim.hints.source, accounting_family=claim.hints.canonical_family,

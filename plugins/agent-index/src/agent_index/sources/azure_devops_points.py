@@ -63,6 +63,24 @@ def _require_selection(
         raise ValueError("Azure DevOps point target account/query/representation binding changed")
 
 
+def _point_component(connector: AzureDevOpsConnector, target: PointTarget) -> ComponentVersion:
+    item_id = _number(target.item_id)
+    if isinstance(target, WorkItemRevisionTarget):
+        path, version = f"workitems/{item_id}/body.md", target.revision
+        semantics = "ado-point-components/v1:work-item-body"
+    else:
+        comment_id = _number(target.comment_id)
+        path, version = f"workitems/{item_id}/comments/{comment_id}.md", target.version
+        semantics = "ado-point-components/v1:comment"
+    return ComponentVersion(
+        connector.source_name + ":workitem-components", path, version, semantics,
+        ComponentIdentity(
+            target.kind, target.item_id,
+            target.comment_id if isinstance(target, CommentVersionTarget) else None,
+        ),
+    )
+
+
 def acquire_named_point(
     connector: AzureDevOpsConnector, *, claim: PendingPointClaim, target: PointTarget,
     expected: WorkItemEligibility, cancel_check: Callable[[], None] | None = None,
@@ -107,13 +125,11 @@ def acquire_named_point(
     if comment_id is None:
         path += f"/revisions/{version}"
         api_version, purpose = "7.1", "item_body"
-        component_path = f"workitems/{item_id}/body.md"
-        semantics = "ado-point-components/v1:work-item-body"
     else:
         path += f"/comments/{comment_id}/versions/{version}"
         api_version, purpose = "7.1-preview.1", "comment_page"
-        component_path = f"workitems/{item_id}/comments/{comment_id}.md"
-        semantics = "ado-point-components/v1:comment"
+    component = _point_component(connector, target)
+    component_path = component.path
     params = {"api-version": api_version}
     request = http.client.build_request("GET", path, params=params)
     check()
@@ -183,12 +199,5 @@ def acquire_named_point(
         raise ValueError("Azure DevOps point rendering exceeds the decoded-content budget")
     qualify()
     return NamedPointObservation(
-        claim, target, expected, ComponentVersion(
-            family, component_path, version, semantics,
-            ComponentIdentity(
-                target.kind, target.item_id,
-                target.comment_id if isinstance(target, CommentVersionTarget) else None,
-            ),
-        ),
-        entry, deletion,
+        claim, target, expected, component, entry, deletion,
     )

@@ -133,7 +133,7 @@ def test_lost_return_after_application_reopens_without_native_replay(
     assert f.config.state_file.read_bytes() == poll
 
 
-def test_queue_cancellation_during_embedding_cannot_publish_or_acknowledge(
+def test_noncurrent_queue_during_embedding_cannot_publish_or_acknowledge(
     application: prepared.Fixture,
 ) -> None:
     f = application
@@ -141,7 +141,8 @@ def test_queue_cancellation_during_embedding_cannot_publish_or_acknowledge(
     assert domain is not None
     before = domain.receipt(), f.config.state_file.read_bytes()
     def cancel(_model: str) -> None:
-        f.tasks.cancel(f.points.claim.task_id)
+        assert not f.tasks.cancel(f.points.claim.task_id)
+        f.tasks.update_status(f.points.claim.task_id, TaskStatus.CANCELLED)
 
     f.hook = cancel
     with pytest.raises(ValueError, match="no longer eligible"):
