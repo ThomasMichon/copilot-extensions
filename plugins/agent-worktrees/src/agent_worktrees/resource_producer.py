@@ -282,9 +282,11 @@ def _preserve_task_incarnations(
     current_by_ref = {
         claim.ref: claim for claim in current.resources
     } if current is not None else {}
+    incoming_bound_refs = {claim.ref for claim in record.resources if claim.claim_nonce}
     authoritative = {
         ref: claim for ref, claim in current_by_ref.items()
-        if claim.claim_nonce and not claim.has_producer and not claim.handoff_bundle
+        if (claim.claim_nonce or ref in incoming_bound_refs)
+        and not claim.has_producer and not claim.handoff_bundle
     }
     merged = []
     for claim in record.resources:

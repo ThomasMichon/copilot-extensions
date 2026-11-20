@@ -66,7 +66,7 @@ def test_importing_the_module_registers_all_three_verbs() -> None:
     assert {
         verb: tracking_write._VERB_VERSIONS[verb]
         for verb in ("claim_add", "claim_release", "claim_settle")
-    } == {"claim_add": 5, "claim_release": 4, "claim_settle": 5}
+    } == {"claim_add": 5, "claim_release": 5, "claim_settle": 5}
 
 
 @pytest.mark.parametrize("verb", ["add", "release", "settle"])
@@ -157,7 +157,6 @@ def claim_transport() -> Iterator[Callable[[str, dict[str, Any]], dict[str, Any]
     (verb, version)
     for verb in ("claim_add", "claim_release", "claim_settle")
     for version in (1, 2, 3, 4)
-    if version < 4 or verb != "claim_release"
 ])
 def test_claim_cli_never_dials_pre_paired_claim_daemon(verb: str, old_version: int, record_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_worktrees import claims_cli, locks, status_monitor_runtime
@@ -179,9 +178,21 @@ def test_claim_cli_never_dials_pre_paired_claim_daemon(verb: str, old_version: i
         "worktree_id": "wt-claim", "yaml_path": str(record_path),
         "kind": "pr", "ref": "owner/example#1", "disposition": "at-rest",
     }
+    retained_nonce = ""
+    if verb == "claim_release" and old_version == 4:
+        bound = tracking_claim_write.apply_claim_add({
+            **args, "kind": "task", "ref": "retained-task",
+        })
+        retained_nonce = bound["claim_binding"]["claim_nonce"]
     if verb != "claim_add":
         assert tracking_claim_write.apply_claim_add(args)["ok"]
     assert claims_cli._dispatch_claim(verb, args)["ok"]
+    if retained_nonce:
+        retained = next(
+            claim for claim in tracking.load_record(record_path).resources
+            if claim.ref == "retained-task"
+        )
+        assert retained.state == "active" and retained.claim_nonce == retained_nonce
 
 
 def test_add_journals_an_active_claim(record_path: Path) -> None:

@@ -21,6 +21,9 @@ Terminal nonce-bearing entries are retained until explicit native removal;
 previously read snapshots cannot recreate a removed entry. Fresh kind changes
 or reactivation retain a new incarnation even when the replacement is no
 longer a task. Changing the kind never clears its existing generation evidence.
+An older bound task snapshot also cannot overwrite a recreated different-kind
+claim that has no nonce. Claim-bundle storage retains the source nonce during
+reload and validation; the recipient journals its own fresh claim incarnation.
 
 Context-handoff records that binding once in the existing Dispatch task row's
 `handoff_claim` metadata, including when completion raced ahead of journaling.
@@ -97,8 +100,9 @@ Worktrees' additive journal result supplies the selector. The read-only binding
 operation establishes support from the selected executable before emitting new
 settlement syntax. Missing/older/rolled-back native support leaves bookkeeping
 pending; it never retries an older unpinned mutation. The resident writer's
-`claim_add` and `claim_settle` schemas are version 5, so an older writer cannot
-silently ignore the new identity pins; normal versioned dispatch selects the
+`claim_add`, `claim_release` and `claim_settle` schemas are version 5, so an
+older writer cannot silently ignore identity pins or discard nonce-bearing
+metadata during an unrelated release. Normal versioned dispatch selects the
 capable owner or current local implementation.
 
 Expand Worktrees and Dispatch providers before enabling new context-handoff

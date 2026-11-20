@@ -63,7 +63,7 @@ def dispatch_claim(verb: str, verb_args: dict[str, Any]) -> dict[str, Any]:
         verb, verb_args,
         read_lock_data=lambda: locks.read_lock(monitor._monitor_lock_path()),
         ensure_monitor=monitor._ensure_status_monitor if monitor._status_monitor_enabled() else None,
-        min_version={"claim_add": 5, "claim_settle": 5, "claim_bind": 1}.get(verb, 4),
+        min_version={"claim_add": 5, "claim_release": 5, "claim_settle": 5, "claim_bind": 1}.get(verb, 4),
     )
 
 

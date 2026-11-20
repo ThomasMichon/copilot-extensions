@@ -257,6 +257,23 @@ def test_fresh_full_record_reactivation_rotates_the_task_incarnation(
     assert _settle_binding(owners, binding)[0] != 0
 
 
+def test_stale_task_snapshot_cannot_overwrite_a_recreated_unbound_claim(
+    owners: dict[str, Any],
+) -> None:
+    binding = _journal_binding(owners)
+    stale = _record(owners, "creator")
+    assert _claims("release", binding["ref"], "--worktree", "shared-id", "--remove")[0] == 0
+    assert _claims("add", "workdir", binding["ref"], "--worktree", "shared-id")[0] == 0
+    replacement = _record(owners, "creator").resources[0]
+    assert replacement.kind == "workdir" and not replacement.claim_nonce
+    tracking.save_record(stale)
+    current = _record(owners, "creator")
+    assert current.resources[0].kind == "workdir"
+    assert not current.resources[0].claim_nonce
+    assert _settle_binding(owners, binding)[0] != 0
+    assert not _assert_obligations_settled(current, "shared-id", abandon=False)
+
+
 @pytest.mark.parametrize("replacement", ["record", "claim", "kind"])
 def test_bound_settlement_refuses_replaced_identity(
     owners: dict[str, Any], replacement: str,

@@ -332,5 +332,5 @@ def apply_claim_bind(args: dict[str, Any]) -> dict[str, Any]:
 
 tracking_write.register_verb("claim_bind", apply_claim_bind)
 tracking_write.register_verb("claim_add", apply_claim_add, version=5)
-tracking_write.register_verb("claim_release", apply_claim_release, version=4)
+tracking_write.register_verb("claim_release", apply_claim_release, version=5)
 tracking_write.register_verb("claim_settle", apply_claim_settle, version=5)

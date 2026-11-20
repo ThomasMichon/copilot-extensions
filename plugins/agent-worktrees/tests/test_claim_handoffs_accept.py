@@ -24,9 +24,10 @@ from agent_worktrees import (
     finalize,
     tracking,
     tracking_claim_write,
+    tracking_claims,
     tracking_lifecycle,
 )
-from agent_worktrees.claim_handoff_admission import snapshot_claim
+from agent_worktrees.claim_handoff_admission import parse_bundle, snapshot_claim
 from agent_worktrees.tracking_claims import ResourceClaim
 from agent_worktrees import worktree_identity
 from agent_worktrees.lease_config import LeaseSettings
@@ -268,6 +269,41 @@ def test_accept_same_project_transfers_worktree_lease_and_ledger_claims(
     assert child.owner_ref == world["consumer"]
     lease = store.inspect("codespace", "octo-space")
     assert lease is not None and lease.record.holder == world["consumer"]
+
+
+def test_task_claim_nonce_survives_bundle_reload_and_transfer(
+    handoff_world: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    world = _setup_bundle(handoff_world)
+    source = tracking.load_record(world["source_path"])
+    task = tracking_claims.add_resource_claim(
+        source, ResourceClaim(kind="task", ref="task-transfer"), save=False,
+    )
+    tracking.save_record(source, world["source_path"])
+    store = _init_lease_store(handoff_world["tmp_path"], monkeypatch)
+    store.acquire("task", task.ref, world["source"])
+    bundle = _offer(world, [task.ref])[0]
+    loaded = claim_handoffs.show(bundle.bundle_id)
+    assert loaded.claims[0]["claim_nonce"] == task.claim_nonce
+    accepted = claim_handoffs.accept(bundle.bundle_id, actor=world["consumer"], machine=MACHINE)
+    assert accepted.state == "accepted"
+    assert task.ref not in {claim.ref for claim in tracking.load_record(world["source_path"]).resources}
+    received = tracking.load_record(world["consumer_path"]).resources[0]
+    assert received.ref == task.ref and received.claim_nonce
+    assert received.claim_nonce != task.claim_nonce
+    lease = store.inspect("task", task.ref)
+    assert lease is not None and lease.record.holder == world["consumer"]
+
+
+@pytest.mark.parametrize("nonce", [None, ""])
+def test_bundle_reload_rejects_malformed_claim_generation(nonce: object) -> None:
+    raw = claim_handoffs.ClaimBundle(
+        bundle_id="bundle", state="offered", source=f"{MACHINE}/source/wt",
+        consumer=f"{MACHINE}/consumer/wt", offered_at="t", updated_at="t",
+        claims=({"kind": "task", "ref": "task-transfer", "claim_nonce": nonce},),
+    ).to_dict()
+    with pytest.raises(claim_handoffs.ClaimHandoffError, match="claim nonce"):
+        parse_bundle(raw)
 
 
 def test_accept_cross_project_worktree_transfer_rewrites_child_owner(handoff_world: dict[str, Any]) -> None:
