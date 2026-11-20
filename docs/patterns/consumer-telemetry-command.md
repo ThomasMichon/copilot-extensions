@@ -11,6 +11,10 @@ Track realization in
 (#13545), starting with U1. Do not configure a live receiver on the strength
 of this document or a package version alone.
 
+The bounded native performance, compatibility and loss packet is documented in
+[consumer telemetry qualification](consumer-telemetry-qualification.md).
+Its source measurements do not establish installed adoption or zero-loss delivery.
+
 This closes the U0 design slice of
 [Portable Telemetry](../../visions/telemetry/README.md), specifically
 `harness-owned-sink-selection`, `continuous-executable-sink` and

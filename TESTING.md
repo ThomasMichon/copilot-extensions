@@ -9,6 +9,15 @@ independent fsynced receiver files for two origins and an explicit service
 route. This source evidence is not release, installed-service qualification or
 completion of the wider consumer-telemetry U3/U4 work.
 
+The same native packet selects
+`agent-bridge/tests/test_consumer_telemetry_performance.py` and Dispatch's
+`wall_cpu_tail` / incompatible-reader controls. JUnit properties named
+`consumer_telemetry_performance` and `consumer_telemetry_http_performance`
+retain the finite measurements. See
+[`docs/patterns/consumer-telemetry-qualification.md`](docs/patterns/consumer-telemetry-qualification.md)
+for boundaries, reproduction, accounting and explicit gaps. Test success does
+not establish an overhead service-level objective or release/rollout.
+
 The manual `installation-context-acceptance.yml` `native_daemon_exit` selection
 also runs an independent `test_durable_wmi_job_survival.py` job through the leased disposable Windows
 owner. It proves WMI daemon survival after strict caller-Job closure, bounded
