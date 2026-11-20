@@ -5,7 +5,7 @@
   obligations, disposition, and source-control completion.
 - **Scope:** branch (worktree-lifetime authority; child of agent-fabric)
 - **Status:** Active
-- **Last revised:** 2026-11-16
+- **Last revised:** 2026-11-20
 - **Reality docs:** the agent-worktrees plugin `docs/`
 - **Supersedes / superseded by:** none
 
@@ -923,6 +923,15 @@ account requirement.
 A worktree may complete only when its source-control content is safe and every
 durable obligation is settled or transferred. Interactive process exit is
 neither necessary nor sufficient evidence of completion.
+
+Distinguish a driver's downstream obligations from its inbound assignment.
+Before [submitting a task](../agent-dispatch/task-outputs-and-review/README.md#submission-retains-worktree-responsibility),
+the driver finishes its own work and settles its child claims. It can then
+report readiness for cleanup **on acceptance**. The inbound assignment is
+deliberately retained: readiness must not conclude agency, detach the
+worktree or authorize its removal while the result is being evaluated.
+Acceptance allows final reclamation checks; rejection resumes the same
+workspace and conversation, even if a child checkout must be created again.
 
 Successful explicit finalization is a durable conclusion displayed as FINAL.
 Ordinary polling, expired fetch freshness, and an attached concluding shell do

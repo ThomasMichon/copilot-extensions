@@ -3,7 +3,7 @@
 - **Subject:** Durable, contract-bearing task conversations and outcomes.
 - **Scope:** leaf (child of [agent-dispatch](../README.md)).
 - **Status:** Draft
-- **Last revised:** 2026-11-03
+- **Last revised:** 2026-11-20
 - **Reality docs:** `plugins/agent-dispatch/src/agent_dispatch/`
   (`queue_steering.py`, `queue_lifecycle.py`, `queue_completion_review.py`,
   `wake.py`) and the Tasks pivot in `worktree-manager/`.
@@ -79,14 +79,17 @@ obligation, not the reverse. Submission requires mechanical closeout readiness:
 unfinished source or disallowed obligations prevent it without automatically
 repairing, merging, abandoning or discarding work.
 
-Passing readiness does not permanently finalize the worktree. Its task claim
-protects it from cleanup throughout submission review and any rejected attempt,
-even while its worker process is stopped and its execution slot is released.
-Rejection resumes the same agent there. The claim settles only when the task
-is completed, or the agent is explicitly unassigned and the task returns to
-queued with no bound agent. A stopped process or expired lease is not either
-outcome. Permanent worktree finalization follows settled responsibility;
-physical reclamation retains its independent safety gates.
+The submitting agent settles downstream obligations first: it lands its own
+changes through the required review path, reconciles its open PRs and releases
+owned child worktrees. Unresolved work blocks submission; abandoning WIP is
+not a way to pass readiness. The assigned worktree must now be cleanable if
+the evaluator accepts. It is not detached or deleted at submission.
+The task claim protects that workspace and conversation throughout evaluation,
+even with no running process. On rejection the same agent resumes there and
+can recreate disposable child state. On confirmation the worktree can be
+detached and promptly reclaimed through its owner's cleanup checks.
+Only completion, abandonment or explicit release back to queued or claimed
+work permits unassignment. Physical reclamation still has its own safety gates.
 
 ### durable-conversation-history
 
