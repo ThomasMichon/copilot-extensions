@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import time
 
+from agent_procutil.owned_budget import OwnedExecutionBudget
 from agent_procutil.owned_process import OwnedCleanupError, run_caller_owned
 
 
@@ -18,7 +19,9 @@ class NativeCommandUnavailable(ValueError):
     """A native read failed only after exact retained cleanup settled."""
 
 
-def run_command(argv: list[str], *, timeout: float) -> subprocess.CompletedProcess:
+def run_command(
+    argv: list[str], *, timeout: float, budget: OwnedExecutionBudget | None = None,
+) -> subprocess.CompletedProcess[str]:
     input_text = None
     if os.name == "nt" and Path(argv[0]).suffix.lower() == ".ps1":
         interpreter = shutil.which("pwsh")
@@ -51,13 +54,16 @@ def run_command(argv: list[str], *, timeout: float) -> subprocess.CompletedProce
     return run_caller_owned(
         argv, timeout=timeout, input_text=input_text,
         max_stdout_bytes=1_048_576, max_stderr_bytes=65_536,
+        budget=budget,
     )
 
 
-def run_observation_command(argv: list[str], *, timeout: float) -> subprocess.CompletedProcess:
+def run_observation_command(
+    argv: list[str], *, timeout: float, budget: OwnedExecutionBudget | None = None,
+) -> subprocess.CompletedProcess[str]:
     """Keep read-owner thread and writer custody until exact native cleanup joins."""
     try:
-        return run_command(argv, timeout=timeout)
+        return run_command(argv, timeout=timeout, budget=budget)
     except OwnedCleanupError as error:
         logging.getLogger(__name__).warning("native read cleanup delayed; original custody retained")
         while True:

@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 from pathlib import Path
-from subprocess import CompletedProcess
 import tempfile
-from typing import TYPE_CHECKING, Protocol, cast
+import time
+from typing import TYPE_CHECKING, cast
 
+from agent_procutil.owned_budget import OwnedExecutionBudget
 from agent_procutil.owned_process import OwnedCleanupError
 from pr_filters import Expression, PROTOCOL as FILTER_PROTOCOL
 from pr_filters.acquisition import plan
@@ -16,7 +18,7 @@ from pr_filters.acquisition import plan
 from .filtered_state import Checkpoint, Document, facts as validate_facts
 from .repository_contract import RepositoryIdentity
 from .repository_native import (
-    RepositoryNativeUnavailable, RepositoryNativeUnsupported, _invoke as _legacy_invoke,
+    RepositoryNativeUnavailable, RepositoryNativeUnsupported, _invoke,
 )
 from .watch_replay_store import json_object
 
@@ -26,24 +28,14 @@ if TYPE_CHECKING:
 PROTOCOL = "agent-worktrees.pr-population/v1"
 
 
-class _NativeInvoke(Protocol):
-    def __call__(
-        self, argv: list[str], *, timeout: int, checkpoint: Checkpoint, qualified: bool = False,
-    ) -> CompletedProcess[str]: ...
-
-
-class _UnavailableFactory(Protocol):
-    def __call__(self, *, qualified: bool) -> RepositoryNativeUnavailable: ...
-
-
-_invoke = cast(_NativeInvoke, _legacy_invoke)
-
-
-def qualify(binding: NativeObservationBinding, *, checkpoint: Checkpoint) -> Document:
+def qualify(
+    binding: NativeObservationBinding, *, checkpoint: Checkpoint,
+    budget: OwnedExecutionBudget | None = None,
+) -> Document:
     identity = cast(RepositoryIdentity, binding.repository_identity)
     result = _invoke(
         [*(binding.prefix or (binding.command,)), "pr-watch", "population", "--contract", "--json"],
-        timeout=15, checkpoint=checkpoint,
+        timeout=15, checkpoint=checkpoint, budget=budget,
     )
     try:
         value = json_object(result.stdout.encode())
@@ -66,13 +58,28 @@ def qualify(binding: NativeObservationBinding, *, checkpoint: Checkpoint) -> Doc
     return support
 
 
+def _seconds(budget: OwnedExecutionBudget, *, qualified: bool) -> int:
+    # Native startup and JSON publication happen outside its --seconds clock.
+    seconds: int = math.floor(budget.execution_deadline - time.monotonic() - 2)
+    if seconds < 1:
+        raise RepositoryNativeUnavailable(qualified=qualified)
+    return min(60, seconds)
+
+
 def population(
     binding: NativeObservationBinding, expression: Expression, *, root: Path,
     checkpoint: Checkpoint, start_checkpoint: Checkpoint | None = None, query_offset: int = 0,
+    deadline: float | None = None, on_capture: Checkpoint | None = None,
 ) -> Document:
     """Keep immutable input until the actual native reader and cleanup settle."""
     start_checkpoint = checkpoint if start_checkpoint is None else start_checkpoint
-    support = qualify(binding, checkpoint=start_checkpoint)
+    started = time.monotonic()
+    deadline = min(started + 60, deadline) if deadline is not None else started + 60
+    # Leave replay validation/publication outside the process cleanup lifetime.
+    budget = OwnedExecutionBudget(deadline - 1, 2)
+    start_checkpoint()
+    _seconds(budget, qualified=False)
+    support = qualify(binding, checkpoint=start_checkpoint, budget=budget)
     identity = cast(RepositoryIdentity, binding.repository_identity)
     expression.require(support, {identity.repo})
     plan(expression, support["acquisition"])
@@ -82,14 +89,21 @@ def population(
         with os.fdopen(descriptor, "wb") as stream:
             stream.write(expression.canonical.encode("utf-8"))
         start_checkpoint()
-        result = _invoke([
+        argv = [
             *(binding.prefix or (binding.command,)), "pr-watch", "population", identity.repo,
             "--config", cast(str, binding.inventory_config),
             "--credential-command", json.dumps(binding.credential_command),
             "--filter-file", filename,
             "--query-offset", str(query_offset),
-            "--max-pages", "4", "--max-pulls", "200", "--seconds", "60", "--json",
-        ], timeout=60, checkpoint=checkpoint, qualified=True)
+            "--max-pages", "4", "--max-pulls", "200",
+        ]
+        def capture() -> None:
+            argv.extend(["--seconds", str(_seconds(budget, qualified=True)), "--json"])
+            if on_capture is not None:
+                on_capture()
+        result = _invoke(
+            argv, timeout=60, checkpoint=checkpoint, qualified=True, budget=budget, on_admitted=capture,
+        )
     except OwnedCleanupError:
         retained = True
         raise
@@ -125,6 +139,6 @@ def population(
             numbers.add(pull["number"])
             validate_facts(pull["facts"], identity)
     except (ValueError, KeyError, TypeError, UnicodeError, RecursionError):
-        raise cast(_UnavailableFactory, RepositoryNativeUnavailable)(qualified=True) from None
+        raise RepositoryNativeUnavailable(qualified=True) from None
     checkpoint()
     return value
