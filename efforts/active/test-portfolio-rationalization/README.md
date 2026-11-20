@@ -1548,7 +1548,8 @@ original stage and independent owner.
   minimal starting state](winget-bootstrap-venue.md#provider-and-minimal-starting-state),
   without relabeling Server Core or preinstalled tools as the subject's work.
 - [ ] **P1475-2:** Preserve the [complete subject-installed Copilot, external
-  marketplace, one seed, Python/uv runtime and repository-only restore chain](winget-bootstrap-venue.md#subject-owned-bootstrap-and-repository-restore),
+  marketplace-installed seed plugin AND its Python/uv runtime setup, plus the
+  repository-only restore chain](winget-bootstrap-venue.md#subject-owned-bootstrap-and-repository-restore),
   using the actual installation owners rather than implicit plugin loading.
 - [ ] **P1475-3:** Preserve [stage attribution, literal mode, repeated-bootstrap
   alternatives, ephemeral credentials and owned disposal](winget-bootstrap-venue.md#evidence-ownership-and-independent-scope),
@@ -3075,7 +3076,8 @@ independent of #10031's large-caller startup/cutover lane.
 - [ ] **G1475:** Resolve every P1475/V1475 and continuing Coordination clause:
   the supported full-user WinGet venue; PowerShell/WinGet/Git-only baseline
   plus required checkout transport; subject WinGet Copilot, external marketplace,
-  one seed and bootstrap Python/uv runtime; repository-only plan/validate/
+  marketplace-installed seed plugin AND its bootstrap Python/uv runtime setup;
+  repository-only plan/validate/
   restore; attributed postconditions; repeat no-op OR readiness; ephemeral
   credentials, literal mode and owned disposal. Retain Server Core smoke
   without false equivalence, actual native/resource admission, independent

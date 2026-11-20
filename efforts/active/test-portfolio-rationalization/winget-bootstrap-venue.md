@@ -43,10 +43,12 @@ The driven subject must carry out the original ordered outcome:
 
 1. Install Copilot **through WinGet** from the minimal starting state.
 2. Register the configured external marketplace and install the **one declared
-   seed runtime plugin/component**, not a preassembled suite.
-3. Establish that seed's runtime through its declared installation/setup owner,
-   using the Python/uv installed by the bootstrap. Record bootstrap-installed
-   prerequisites separately from seed-installed runtime and later resources.
+   seed plugin through that marketplace**, not a preassembled suite.
+3. **AND establish that plugin's runtime** through its declared installation/
+   setup owner, using the Python/uv installed by the bootstrap. Installing the
+   plugin and setting up its runtime are BOTH required, not alternatives.
+   Record bootstrap-installed prerequisites separately from seed-installed
+   runtime and later resources.
 4. Run repository-scoped `agent-machines plan`, `validate` and `restore --apply`
    for **the checked-out repository only**, then verify its actual postconditions.
    Do not apply unrelated repositories, machine inventories or private defaults.
