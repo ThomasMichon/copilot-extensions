@@ -672,8 +672,12 @@ it never acquires the retained original inode. Prepared or moved-but-unsealed
 topologies are not inputs to this receiver.
 
 The version-2 sealed record retains the complete original version-1 journal as
-`origin`, including its `seal`, and unchanged top-level `binding`, `lease` and
-`seal`. Its separate `controller` is revalidated scope history, not admission
+`origin`, with unchanged top-level `schema`, `binding` and `lease`. An actual
+prepared origin may progress to `sealed-legacy` without rewriting its phase.
+Any seal already present in the origin remains unchanged; a newly recorded
+seal must match the actual installed Windows topology. The origin is validated
+as its original version-1 record, separately from current physical facts.
+Its separate `controller` is revalidated scope history, not admission
 authority. Publication and unchanged-record retry use the same bounded,
 guarded persistence owner as prepared adaptation. Final source validation,
 current admission, native inner-lease custody, unchanged journal and actual
