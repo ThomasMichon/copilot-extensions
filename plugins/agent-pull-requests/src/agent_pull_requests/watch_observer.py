@@ -14,7 +14,7 @@ from .watch_provider import command_path, fetch_snapshot
 from .watch_replay import ConsumerScope, ObservationTarget, ReplayEventTooLarge
 from .watch_replay_store import ReplayStore
 from single_instance_lease import OperationLockedError
-from .repository_contract import RepositoryIdentity
+from .repository_contract import RepositoryBackpressure, RepositoryIdentity
 from pathlib import Path
 from typing import Protocol, TypedDict, TypeVar, cast
 from .repository_native import (
@@ -38,6 +38,7 @@ class _LegacyProjection(Protocol):
     def plans(
         self, inventories: dict[str, Document], *, expires_at: int, checkpoint: Checkpoint | None,
     ) -> dict[TargetKey, ObservationTarget]: ...
+    def members(self, *, expires_at: int, checkpoint: Checkpoint | None) -> frozenset[TargetKey]: ...
     def apply_facts(
         self, inventories: dict[str, Document], snapshots: dict[TargetKey, Document | None], *,
         observed_at: int, expires_at: int, checkpoint: Checkpoint | None,
@@ -181,8 +182,10 @@ class ReplayObserver:
 
         prepared: dict[TargetKey, Document | None] = {}
         inventoried = False
+        backpressured = False
 
         def capture(target: ObservationTarget, snapshot: PRSnapshot | None) -> None:
+            nonlocal backpressured
             key = (target.account, target.repo, target.number)
             try:
                 prepared[key] = normalized(
@@ -191,9 +194,16 @@ class ReplayObserver:
                 ) if snapshot is not None else None
             except (ValueError, TypeError):
                 prepared[key] = None
-            self._disk_call(lambda: repositories.apply_facts(
-                {}, {key: prepared[key]}, observed_at=observed_at, **authority,
-            ), **authority)
+            if backpressured and not inventoried:
+                return
+            try:
+                self._disk_call(lambda: repositories.apply_facts(
+                    {}, {key: prepared[key]}, observed_at=observed_at, **authority,
+                ), **authority)
+            except RepositoryBackpressure:
+                if inventoried:
+                    raise
+                backpressured = True
             if inventoried:
                 prepared.pop(key)
 
@@ -252,9 +262,9 @@ class ReplayObserver:
         inventoried = True
         keys = sorted(key for key in repository_targets if key not in seen and key[:2] in qualified)
         if keys:
-            current_keys = {(key, number) for key, scan in inventories.items() for number in scan["numbers"]}
-            members = [key for key in keys if (key[0], key[2]) in current_keys]
-            reconcile = [key for key in keys if (key[0], key[2]) not in current_keys]
+            current_keys = self._disk_call(lambda: repositories.members(**authority), **authority)
+            members = [key for key in keys if key in current_keys]
+            reconcile = [key for key in keys if key not in current_keys]
             member_start = self._repository_cursor % len(members) if members else 0
             reconcile_start = self._repository_reconcile_cursor % len(reconcile) if reconcile else 0
             members = (members[member_start:] + members[:member_start])[:_MAX_REPOSITORY_READS]

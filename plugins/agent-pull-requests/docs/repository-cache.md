@@ -127,7 +127,9 @@ One cycle unions those configured targets with existing registered waits.
 The existing four-reader executor shares each account-qualified PR read across
 overlapping interests. At most 32 configured-only snapshot targets join each cycle,
 with separate rotating cursors for current inventory members and unresolved
-departures. Current members take the first slots; at most one four-reader wave
+departures. Cohorts use effective retained membership, so partial/unavailable
+inventory does not misclassify still-current rows or shrink their read allowance.
+Current members take the first slots; at most one four-reader wave
 of departure reconciliation is interleaved within that same 32-read allowance.
 Rotation advances with consumed results, with at least one slot of progress on
 an interrupted pass, rather than skipping a whole planned batch that never ran.
@@ -193,6 +195,10 @@ changing inventory coverage, timestamps or membership. Unknown PRs are not
 invented from a wait. Evidence is also retained across inventory and projected
 for every then-known cached PR, including a departed terminal summary absent
 from the current inventory plan. No duplicate acquisition is charged to that wait.
+Repository event backpressure during an early wait defers only its cache
+publication, retaining that evidence for the existing reconciliation after
+registered waits have recorded their results. It cannot starve a later
+terminal wait; expiry, cancellation and all other failures remain authoritative.
 The transient prepared bound is the existing at-most-1,024 wait targets times
 64 KiB normalized facts, plus at most 32 configured-only results; raw results
 remain limited to the four-reader phases. These phases are sequential under one

@@ -171,6 +171,20 @@ class RepositoryProjection:
             return targets
         return self._transaction(plan, **authority)
 
+    def members(self, **authority: Any) -> frozenset[ObservationKey]:
+        """Read effective membership, retaining members across incomplete scans."""
+        def selected(state: dict[str, Any]) -> frozenset[ObservationKey]:
+            result: set[ObservationKey] = set()
+            for row in state["repositories"]:
+                identity = RepositoryIdentity.parse(row["identity"])
+                if identity.key in self.identities:
+                    result.update(
+                        (identity.key, identity.repo, pull["number"])
+                        for pull in row["pulls"] if pull["member"]
+                    )
+            return frozenset(result)
+        return self._transaction(selected, **authority)
+
     def apply(
         self, inventories: dict[str, dict[str, Any]],
         snapshots: dict[ObservationKey, PRSnapshot | None], **authority: Any,

@@ -13,8 +13,10 @@ from typing import Any
 import pytest
 
 from agent_pull_requests import watch_observer as observation
-from agent_pull_requests.repository_contract import RepositoryIdentity
+from agent_pull_requests import repository_projection
+from agent_pull_requests.repository_contract import RepositoryBackpressure, RepositoryIdentity
 from agent_pull_requests.repository_projection import RepositoryProjection
+from agent_pull_requests.repository_subscriptions import RepositorySubscriptions
 from agent_pull_requests.watch_contract import PRSnapshot
 from agent_pull_requests.watch_observer import NativeObservationBinding, ReplayObserver
 from agent_pull_requests.watch_provider import decode_snapshot
@@ -228,3 +230,85 @@ def test_snapshot_only_publication_cannot_invent_inventory_or_unknown_members(
     assert after["inventory"] == before["inventory"]
     assert after["pulls"] == before["pulls"]
     assert after["cursor"] == before["cursor"]
+
+
+def test_pre_inventory_backpressure_does_not_starve_a_slower_terminal_wait(
+    case: Case, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    deadline = int(case.clock[0]) + 60
+    case.projection.apply({case.identity.key: {
+        "outcome": "complete", "numbers": case.numbers, "pages": 1, "error": "",
+    }}, {
+        (case.identity.key, case.identity.repo, number): case.snapshot(number)
+        for number in case.numbers
+    }, expires_at=deadline)
+    original_cursor = case.query()["cursor"]
+    monkeypatch.setattr(repository_projection, "MAX_EVENTS", original_cursor)
+    RepositorySubscriptions(case.projection).execute(
+        case.identity.key, "blocked-reader", "subscribe",
+        {"request_id": "pinned-journal", "ttl": 600, "after": 0}, expires_at=deadline,
+    )
+    scope = ConsumerScope("watcher", case.identity.key, case.identity.repo)
+    for number in case.numbers:
+        case.store.execute(scope, "register", {
+            "request_id": f"watch-{number}", "issued_at": case.started, "number": number,
+            "until": ("merged",), "deadline_at": case.started + 300,
+        }, expires_at=deadline)
+    blocked = threading.Event()
+    blocked_publications: list[bool] = []
+    original = case.projection.apply_facts
+
+    def publish(
+        inventories: dict[str, Document], snapshots: dict[Key, Document | None], **authority: Any,
+    ) -> Document:
+        try:
+            result: Document = original(inventories, snapshots, **authority)
+            return result
+        except RepositoryBackpressure:
+            blocked_publications.append(bool(inventories))
+            blocked.set()
+            raise
+
+    def read(repo: str, number: int, command: str, **kwargs: Any) -> PRSnapshot:
+        if number == 2:
+            assert blocked.wait(2)
+        value = case.snapshot(number).native_snapshot
+        assert value is not None
+        return decode_snapshot({
+            **value, "head_sha": "c" * 40,
+            "pr_state": "closed" if number == 2 else "open", "merged": number == 2,
+        }, repo, number)
+
+    monkeypatch.setattr(case.projection, "apply_facts", publish)
+    monkeypatch.setattr(observation, "fetch_snapshot", read)
+    with pytest.raises(RepositoryBackpressure):
+        case.observer.cycle(expires_at=deadline)
+    pending = case.store.execute(scope, "pending", {}, expires_at=deadline)["events"]
+    assert len(pending) == 1
+    assert pending[0]["number"] == 2 and not pending[0]["timed_out"]
+    assert pending[0]["transitions"] == ["merged"]
+    assert blocked_publications == [False, True]
+    assert case.query()["cursor"] == original_cursor
+    assert case.query(2)["pulls"][0]["facts"]["pr_state"] == "open"
+
+
+@pytest.mark.parametrize("outcome", ["partial", "unavailable"])
+def test_incomplete_inventory_keeps_retained_members_in_the_full_snapshot_rotation(
+    case: Case, monkeypatch: pytest.MonkeyPatch, outcome: str,
+) -> None:
+    case.numbers[:] = list(range(1, 41))
+    case.projection.apply_facts({case.identity.key: {
+        "outcome": "complete", "numbers": case.numbers, "pages": 1, "error": "",
+    }}, {}, expires_at=int(case.clock[0]) + 60)
+    monkeypatch.setattr(observation, "fetch_inventory", lambda *args, **kwargs: {
+        "outcome": outcome, "numbers": [1, 2] if outcome == "partial" else [],
+        "pages": 1 if outcome == "partial" else 0, "error": "read_unavailable",
+    })
+    for _ in range(2):
+        case.observer.cycle(expires_at=int(case.clock[0]) + 60)
+        case.clock[0] += 300
+    assert len(case.reads) == 2 * observation._MAX_REPOSITORY_READS
+    assert set(case.numbers) <= set(case.reads)
+    retained = case.query(40)["pulls"][0]
+    assert retained["member"] and retained["facts"] is not None
+    assert case.query()["inventory"]["outcome"] == outcome
