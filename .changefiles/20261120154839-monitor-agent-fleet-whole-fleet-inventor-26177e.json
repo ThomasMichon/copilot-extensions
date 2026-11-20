@@ -1,0 +1,9 @@
+{
+  "comment": "monitor-agent-fleet: whole-fleet inventory, workspace record hygiene and delivery-evidence closeness duties",
+  "changes": [
+    {
+      "plugin": "agent-roles",
+      "type": "patch"
+    }
+  ]
+}
