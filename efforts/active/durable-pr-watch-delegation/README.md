@@ -834,8 +834,14 @@ until retained legacy work has drained. Startup refusal and guard removal
 share the final admission boundary. It is not connected to ordinary CLI/control
 entry. The internal Linux source slice, merged in #13594, adds journaled atomic-exchange
 sealing and topology-based recovery under that same custody, without importing
-or activating state. Native Linux exchange/interruption qualification, Windows
-sealing, boot-boundary qualification and authority selection remain open; no
+or activating state. The Windows source slice merged in #13608 adds private
+staging, normal original-lease release, no-replace sealing and topology-based
+recovery; raced historical files remain retained blockers, never another lease.
+Contained Windows current-controller abrupt-exit recovery now covers six
+transition boundaries without import or effects. Native Linux
+exchange/interruption, complete Windows historical-runtime qualification,
+boot-boundary qualification and authority
+selection remain open; no
 map/cwd capability or isolated subscription publisher is activated.
 
 #6019 already delivered outage-independent expiry and the acknowledged-delivery
@@ -1894,6 +1900,7 @@ callback an implicit credential store.
 
 ## Journal
 
+- [2026-11-20 - Windows abrupt-controller qualification](journal/2026/11.20%20Windows%20abrupt-controller%20qualification.md)
 - **2026-11-20 - Proposed finite M1 source-claim acknowledgment.** The
   [current campaign reconciliation](../backlog-reconciliation/journal/2026/11.20-source-claim-and-credential-generation-receiving.md)
   maps #11783's complete four-stage source/synthetic request to

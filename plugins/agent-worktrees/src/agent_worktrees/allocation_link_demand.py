@@ -3,11 +3,40 @@
 from __future__ import annotations
 
 import logging
+import time
 
 from . import owned_worktree as allocation, status_monitor_runtime, worktrees_client
 from .worktrees_projection_index import ProjectionError, ProjectionUnavailable
 
 _LOG = logging.getLogger(__name__)
+
+# A freshly provisioned or just-replaced resident needs a few seconds to publish
+# its endpoint and first roster; remote creation waits for it instead of failing.
+CAPABILITY_WAIT = 60.0
+_RECOVERY_INTERVAL = 5.0
+_RESIDENT_STARTING = (ConnectionError, FileNotFoundError, TimeoutError, ProjectionUnavailable)
+
+
+def _resident_health(request: dict[str, object]) -> object:
+    deadline = time.monotonic() + CAPABILITY_WAIT
+    next_recovery = 0.0
+    delay = 0.1
+    while True:
+        try:
+            worktrees_client.read_current(request)
+            return worktrees_client.read_health()
+        except _RESIDENT_STARTING:
+            now = time.monotonic()
+            if now >= deadline:
+                raise
+            if now >= next_recovery:
+                next_recovery = now + _RECOVERY_INTERVAL
+                try:
+                    status_monitor_runtime._ensure_status_monitor()
+                except Exception as exc:  # the wait itself still decides the outcome
+                    _LOG.debug("resident wake during capability wait failed (%s)", type(exc).__name__)
+        time.sleep(min(delay, max(0.0, deadline - time.monotonic())))
+        delay = min(delay * 2, 1.0)
 
 
 def require_capability(owner_ref: str) -> None:
@@ -17,11 +46,10 @@ def require_capability(owner_ref: str) -> None:
     if not status_monitor_runtime._status_monitor_enabled():
         raise ValueError("remote creation requires the existing resident allocation linker")
     _, project, worktree_id = allocation.qualified_ref(owner_ref)
-    worktrees_client.read_current({
+    health = _resident_health({
         "contract_version": 1, "project": project, "worktree_id": worktree_id,
         "include_missing": True,
     })
-    health = worktrees_client.read_health()
     if not isinstance(health, dict):
         raise ValueError("actual resident returned invalid allocation-linker capability evidence")
     linker = health.get("allocationLinker")
