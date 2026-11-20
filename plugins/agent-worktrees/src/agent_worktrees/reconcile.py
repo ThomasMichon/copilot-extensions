@@ -57,7 +57,10 @@ import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from agent_procutil.owned_process import OwnedExecutionBudget
 
 import yaml
 
@@ -668,7 +671,7 @@ class RuntimeInstallationResolution:
     runtime_root: Path
     context: Path | None
     actual_mode: str
-    desired_mode: str
+    desired_mode: str | None
     status: str
     reason: str
 
@@ -714,7 +717,7 @@ def _run_installation_mode_helper(
     *,
     context: Path | None,
     action: str = "probe-legacy",
-    budget=None,
+    budget: OwnedExecutionBudget | None = None,
 ) -> dict[str, Any]:
     durable_home = _home() / ".copilot-extensions"
     common = {
@@ -911,7 +914,7 @@ def _select_runtime_installation(
         return RuntimeInstallationResolution(
             runtime_root=legacy_root,
             context=None,
-            actual_mode=actual_mode,
+            actual_mode="legacy",
             desired_mode=desired_mode,
             status=status,
             reason=reason,
@@ -952,7 +955,7 @@ def _select_runtime_installation(
         return RuntimeInstallationResolution(
             runtime_root=expected_root,
             context=expected_context,
-            actual_mode=actual_mode,
+            actual_mode="namespaced",
             desired_mode=desired_mode,
             status=status,
             reason=reason,
@@ -969,7 +972,7 @@ def resolve_runtime_installation(
     plugin_dir: Path,
     *,
     home: Path | None = None,
-    budget=None,
+    budget: OwnedExecutionBudget | None = None,
 ) -> RuntimeInstallationResolution:
     """Resolve the authoritative runtime root without activating any mode.
 
@@ -1081,7 +1084,7 @@ def hook_shims_drifted(plugin_dir: Path, home: Path | None = None) -> bool:
     )
 
 
-def _pid_alive(pid: int) -> bool:
+def _pid_alive(pid: object) -> bool:
     """Best-effort: is a process with ``pid`` currently running?
 
     Used to treat a stale ``running-version.json`` (whose process has exited) as
@@ -1096,7 +1099,7 @@ def _pid_alive(pid: int) -> bool:
 
             process_query = 0x1000  # PROCESS_QUERY_LIMITED_INFORMATION
             still_active = 259  # STILL_ACTIVE
-            kernel32 = ctypes.windll.kernel32
+            kernel32 = getattr(ctypes, "windll").kernel32
             handle = kernel32.OpenProcess(process_query, False, pid)
             if not handle:
                 return False
@@ -1998,15 +2001,15 @@ def apply_plan(
                 argv[0] = copilot
             _log(f"provision: {service} [{upd.get('reason', '?')}] -> {' '.join(argv)}")
             try:
-                diagnostic = execution_diagnostic(upd)
-                if diagnostic is not None:
+                execution_error = execution_diagnostic(upd)
+                if execution_error is not None:
                     _log(
-                        f"provision: {service} [{diagnostic['reason']}] "
-                        f"{diagnostic['message']}"
+                        f"provision: {service} [{execution_error['reason']}] "
+                        f"{execution_error['message']}"
                     )
                     executed.append({
                         "service": service, "argv": argv, "ok": False,
-                        "returncode": 3, "diagnostic": diagnostic,
+                        "returncode": 3, "diagnostic": execution_error,
                     })
                     continue
                 rc = (
