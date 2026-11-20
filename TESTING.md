@@ -7795,6 +7795,15 @@ sealed publication owner, then completes the retained claim without fetching
 bodies, embedding or replaying content/vector writes. Repair itself does not
 acknowledge the claim or advance polling. The contrasting unsealed-native fault
 remains dirty, parked and unchanged after both service and repair refusal.
+The superseded-claim cases send multiple older versions/correlations through
+actual HTTP intake while service admission is paused. After explicit activation,
+the existing runner completes the exact claim with a higher-covered outcome,
+two fixture eligibility requests, no body/embedding work, no prepared rows and
+unchanged native table versions/polling bytes, including an applied comment
+tombstone. The previous completed task remains unchanged. Joined shutdown closes
+the actual client; a fresh configured completed retry then needs no client or
+provider query and preserves the same projection. Ordinary v2 execution remains
+unadvertised.
 This adds no production repair path, required-unit admission, process-kill/
 cross-generation cutover, native Windows/macOS or live-provider qualification.
 

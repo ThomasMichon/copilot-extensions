@@ -81,6 +81,279 @@ def _recover(fixture: Any) -> Any:
     )
 
 
+@pytest.fixture
+def recovered_sealing(windows_sealing: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
+    fixture = _load_recovery(windows_sealing, monkeypatch)
+    _recover(fixture)
+    fixture[1]["writes"].clear()
+    fixture[1]["acquisitions"].clear()
+    return fixture
+
+
+def _seal_recovered(fixture: Any, **kwargs: Any) -> Any:
+    module, _state, root, _binding, lease = fixture
+    return module.seal_recovered(
+        root, lease, installation=None, guard=None,
+        validate=kwargs.get("validate", lambda: None),
+        check_deadline=kwargs.get("check_deadline", lambda: None),
+    )
+
+
+def test_recovered_sealing_preserves_full_origin_and_reuses_windows_owner(
+    recovered_sealing: Any,
+) -> None:
+    module, state, root, _binding, lease = recovered_sealing
+    origin = json.loads(json.dumps(state["document"]["origin"]))
+    result = _seal_recovered(recovered_sealing)
+    paths = module.watch_state_paths(root)
+    assert result["version"] == 2 and result["phase"] == "sealed-legacy"
+    assert result["origin"] == origin and result["origin"]["phase"] == "prepared"
+    assert all(result[field] == origin[field] for field in ("schema", "binding", "lease"))
+    assert state["writes"] == ["prepared", "sealed-legacy"]
+    assert state["moves"] == [
+        (paths.historical_lock, paths.retained_lock),
+        (paths.staged_barrier, paths.historical_lock),
+    ]
+    assert state["releases"] == 1 and state["acquisitions"] == [paths.writer_lock]
+    assert lease.held and lease.lock_path == paths.writer_lock
+    assert paths.isolated_subscriptions.parent not in state["paths"]
+    serialized = json.dumps(state["document"])
+    assert _seal_recovered(recovered_sealing) == result
+    assert json.dumps(state["document"]) == serialized
+    with pytest.raises(PermissionError):
+        sys.modules[f"{module.__package__}.watch_windows_sealing"].read_sealing(root, origin["binding"])
+
+
+@pytest.mark.parametrize("boundary", ["staging", "release", "move", "barrier", "acquisition", "sealed"])
+def test_recovered_sealing_resumes_each_existing_windows_crash_window(
+    recovered_sealing: Any, monkeypatch: pytest.MonkeyPatch, boundary: str,
+) -> None:
+    module, state, root, _binding, lease = recovered_sealing
+    windows = sys.modules[f"{module.__package__}.watch_windows_sealing"]
+    origin = json.loads(json.dumps(state["document"]["origin"]))
+    paths = module.watch_state_paths(root)
+    publish, move = windows.write_private, windows.windows_move_no_replace
+    release, acquire = lease.release, windows._acquire_barrier_lease
+
+    def interrupted_write(path: Path, document: Any, **kwargs: Any) -> None:
+        publish(path, document, **kwargs)
+        if (document["phase"] == "prepared") == (boundary == "staging"):
+            raise OSError("controlled v2 publication interruption")
+
+    def interrupted_move(source: Path, destination: Path) -> None:
+        move(source, destination)
+        if destination == (paths.retained_lock if boundary == "move" else paths.historical_lock):
+            raise OSError("controlled v2 move interruption")
+
+    def interrupted_release() -> None:
+        release()
+        raise OSError("controlled v2 release interruption")
+
+    def interrupted_acquire(*args: Any) -> None:
+        acquire(*args)
+        raise OSError("controlled v2 acquisition interruption")
+
+    with monkeypatch.context() as failed:
+        if boundary in ("staging", "sealed"):
+            failed.setattr(windows, "write_private", interrupted_write)
+        elif boundary == "release":
+            failed.setattr(lease, "release", interrupted_release)
+        elif boundary == "acquisition":
+            failed.setattr(windows, "_acquire_barrier_lease", interrupted_acquire)
+        else:
+            failed.setattr(windows, "windows_move_no_replace", interrupted_move)
+        with pytest.raises(OSError, match="controlled v2"):
+            _seal_recovered(recovered_sealing)
+    lease.held, lease.lock_path = False, paths.historical_lock
+    result = _seal_recovered(recovered_sealing)
+    assert result["phase"] == "sealed-legacy" and result["origin"] == origin
+    assert len(state["moves"]) == 2 and paths.retained_lock not in state["acquisitions"]
+    assert lease.held and lease.lock_path == paths.writer_lock
+    serialized = json.dumps(state["document"])
+    assert _recover_sealed(recovered_sealing) == result
+    assert json.dumps(state["document"]) == serialized
+
+
+@pytest.mark.parametrize("change", ["origin", "schema", "binding", "lease", "controller", "phase", "extra"])
+def test_recovered_sealing_refuses_changed_provenance_before_any_physical_step(
+    recovered_sealing: Any, change: str,
+) -> None:
+    _module, state, _root, _binding, lease = recovered_sealing
+    lease.held = False
+    if change == "origin":
+        state["document"]["origin"]["unexpected"] = True
+    elif change == "schema":
+        state["document"]["schema"] += "-foreign"
+    elif change in ("binding", "controller"):
+        state["document"][change] = {**state["document"][change], "stateRoot": "foreign"}
+    elif change == "lease":
+        state["document"]["lease"] = {"device": 2, "inode": 8}
+    elif change == "phase":
+        state["document"]["phase"] = "import-ready"
+    else:
+        state["document"]["unexpected"] = True
+    prior = json.dumps(state["document"])
+    with pytest.raises(PermissionError):
+        _seal_recovered(recovered_sealing)
+    assert json.dumps(state["document"]) == prior
+    assert not lease.held and state["writes"] == [] and state["moves"] == []
+    assert state["acquisitions"] == []
+
+
+@pytest.mark.parametrize("boundary", ["staging", "move", "barrier", "acquisition", "sealed"])
+def test_recovered_sealing_rechecks_admission_at_each_existing_boundary(
+    recovered_sealing: Any, monkeypatch: pytest.MonkeyPatch, boundary: str,
+) -> None:
+    module, state, root, _binding, _lease = recovered_sealing
+    windows = sys.modules[f"{module.__package__}.watch_windows_sealing"]
+    paths = module.watch_state_paths(root)
+    publish, move = windows.write_private, windows.windows_move_no_replace
+    acquire = windows._acquire_barrier_lease
+    denied = False
+
+    def validate() -> None:
+        if denied:
+            raise PermissionError("controlled v2 admission loss")
+
+    def guarded_write(path: Path, document: Any, **kwargs: Any) -> None:
+        nonlocal denied
+        denied = (document["phase"] == "prepared") == (boundary == "staging")
+        publish(path, document, **kwargs)
+
+    def guarded_move(source: Path, destination: Path) -> None:
+        nonlocal denied
+        move(source, destination)
+        denied = destination == (paths.retained_lock if boundary == "move" else paths.historical_lock)
+
+    def guarded_acquire(*args: Any) -> None:
+        nonlocal denied
+        acquire(*args)
+        denied = True
+
+    if boundary in ("staging", "sealed"):
+        monkeypatch.setattr(windows, "write_private", guarded_write)
+    elif boundary == "acquisition":
+        monkeypatch.setattr(windows, "_acquire_barrier_lease", guarded_acquire)
+    else:
+        monkeypatch.setattr(windows, "windows_move_no_replace", guarded_move)
+    with pytest.raises(PermissionError, match="controlled v2 admission"):
+        _seal_recovered(recovered_sealing, validate=validate)
+    assert state["document"]["phase"] == "prepared"
+    assert len(state["moves"]) == (0 if boundary == "staging" else 1 if boundary == "move" else 2)
+
+
+@pytest.mark.parametrize("platform", ["linux", "darwin"])
+def test_recovered_sealing_refuses_unqualified_posix_before_custody(
+    recovered_sealing: Any, monkeypatch: pytest.MonkeyPatch, platform: str,
+) -> None:
+    _module, state, _root, _binding, lease = recovered_sealing
+    lease.held = False
+    monkeypatch.setattr(sys, "platform", platform)
+    with pytest.raises(NotImplementedError, match="domain"):
+        _seal_recovered(recovered_sealing)
+    assert not lease.held and state["writes"] == [] and state["moves"] == []
+    assert state["acquisitions"] == []
+
+
+def test_recovered_sealing_writer_preserves_all_existing_effect_fences(
+    recovered_sealing: Any, writer_boundary: Any,
+) -> None:
+    _module, state, _root, _binding, _lease = recovered_sealing
+    owner, _ = writer_boundary
+    origin = json.loads(json.dumps(state["document"]["origin"]))
+    result = owner.seal_recovered_state_transition(timeout=3)
+    assert result["origin"] == origin and result["phase"] == "sealed-legacy"
+    assert owner.writer_held and not owner.read_ready
+    assert owner.daemon.quiescent and not owner.daemon.effects_enabled
+    with pytest.raises(PermissionError, match="does not authorize legacy writes"):
+        state["persistence_guard"]()
+    with pytest.raises(RuntimeError, match="read-ready"):
+        owner.activate(timeout=3)
+    with pytest.raises(PermissionError):
+        owner.seal_state_transition(timeout=3)
+
+
+def test_recovered_sealing_validates_legacy_source_before_native_acquisition(
+    recovered_sealing: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module, state, _root, _binding, lease = recovered_sealing
+    lease.held = False
+
+    def invalid(*_args: Any, **_kwargs: Any) -> Any:
+        raise ValueError("controlled invalid legacy source")
+
+    monkeypatch.setattr(module, "_read_subscriptions_state", invalid)
+    with pytest.raises(ValueError, match="controlled invalid"):
+        _seal_recovered(recovered_sealing)
+    assert state["acquisitions"] == [] and state["moves"] == [] and state["writes"] == []
+
+
+def test_recovered_sealing_cannot_downgrade_actual_sealed_origin(sealed_recovery: Any) -> None:
+    _module, state, _root, binding, lease = sealed_recovery
+    origin = json.loads(json.dumps(state["document"]))
+    state["document"].update(version=2, phase="prepared", origin=origin, controller=binding)
+    prior = json.dumps(state["document"])
+    with pytest.raises(PermissionError, match="downgrade"):
+        _seal_recovered(sealed_recovery)
+    assert not lease.held and state["acquisitions"] == [] and state["writes"] == []
+    assert json.dumps(state["document"]) == prior
+
+
+def test_recovered_sealing_preserves_original_staged_v1_receipt(
+    windows_sealing: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    windows, state, root, binding, lease = windows_sealing
+    publish = windows.write_private
+
+    def interrupted(*args: Any, **kwargs: Any) -> None:
+        publish(*args, **kwargs)
+        raise OSError("controlled v1 staging acknowledgement loss")
+
+    with monkeypatch.context() as failed:
+        failed.setattr(windows, "write_private", interrupted)
+        with pytest.raises(OSError, match="controlled v1 staging"):
+            windows.seal(root, binding, lease, validate=lambda: None, check_deadline=lambda: None)
+    origin = json.loads(json.dumps(state["document"]))
+    state["document"].update(version=2, origin=origin, controller=binding)
+    fixture = _load_recovery(windows_sealing, monkeypatch)
+    result = _seal_recovered(fixture)
+    assert result["origin"] == origin and result["seal"] == origin["seal"]
+    assert result["phase"] == "sealed-legacy" and len(state["moves"]) == 2
+    assert fixture[0].watch_state_paths(root).retained_lock not in state["acquisitions"]
+
+
+@pytest.mark.parametrize("overflow", ["seal", "phase"])
+def test_recovered_sealing_preflights_both_envelopes_before_changing_topology(
+    recovered_sealing: Any, monkeypatch: pytest.MonkeyPatch, overflow: str,
+) -> None:
+    module, state, _root, _binding, lease = recovered_sealing
+    windows = sys.modules[f"{module.__package__}.watch_windows_sealing"]
+    if overflow == "phase":
+        publish = windows.write_private
+
+        def staged(*args: Any, **kwargs: Any) -> None:
+            publish(*args, **kwargs)
+            raise OSError("controlled v2 staging acknowledgement loss")
+
+        with monkeypatch.context() as failed:
+            failed.setattr(windows, "write_private", staged)
+            with pytest.raises(OSError, match="controlled v2 staging"):
+                _seal_recovered(recovered_sealing)
+    lease.held = False
+    state["writes"].clear()
+    state["acquisitions"].clear()
+    prior = json.dumps(state["document"])
+    topology, releases = dict(state["paths"]), state["releases"]
+    # This valid prepared envelope fits exactly; its seal or final phase does not.
+    monkeypatch.setattr(windows, "_MAX_METADATA_BYTES", len(prior.encode("utf-8")))
+    with pytest.raises(ValueError, match="bounded size"):
+        _seal_recovered(recovered_sealing)
+    assert state["paths"] == topology and state["releases"] == releases
+    assert json.dumps(state["document"]) == prior
+    assert not lease.held and state["acquisitions"] == [] and state["writes"] == []
+    assert state["moves"] == []
+
+
 def test_prepared_adapter_preserves_complete_origin(recovery: Any) -> None:
     _module, state, _root, binding, lease = recovery
     original = json.loads(json.dumps(state["document"]))

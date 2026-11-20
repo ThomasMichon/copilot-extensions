@@ -870,7 +870,11 @@ The [Windows sealed receiver](subscriber-state-transition.md#windows-sealed-vers
 merged in #13662, preserving complete immutable origin and separately admitted
 current control under the qualified inner barrier lease. Actor-free and
 contained Windows receiver cases pass; this is not final import or ordinary
-entry. Version-2 sealing writers, POSIX epoch/recovery, native domain/boot
+entry. The [prepared-origin phase-progression receiver](subscriber-state-transition.md#windows-sealed-version-2-receiver)
+merged in #13668: an actual prepared origin stays unchanged while its v2
+envelope records the qualified sealed phase. Native current-controller
+publication and cold retry pass without the historical executable.
+Version-2 sealing writers, POSIX epoch/recovery, native domain/boot
 qualification and every remaining gate still follow under the existing
 source-only authority.
 
@@ -1930,6 +1934,7 @@ callback an implicit credential store.
 
 ## Journal
 
+- [2026-11-20 - Prepared-origin phase progression](journal/2026/11.20%20Prepared-origin%20phase%20progression.md)
 - [2026-11-20 - Windows sealed receiver](journal/2026/11.20%20Windows%20sealed%20receiver.md)
 - [2026-11-20 - Native domain/boot source prerequisite](journal/2026/11.20%20Native%20domain%20boot%20source.md)
 - [2026-11-20 - Windows abrupt-controller qualification](journal/2026/11.20%20Windows%20abrupt-controller%20qualification.md)

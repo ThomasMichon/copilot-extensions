@@ -18,12 +18,14 @@ from .watch_private import (
 from .watch_registry import WatchRegistry
 from .watch_sealing import _record_identity, retain_original_lease
 from .watch_storage import (
-    _read_subscriptions_state, _regular_bytes, _reject_constant, _unique_object, watch_state_paths,
+    _MAX_METADATA_BYTES, _read_subscriptions_state, _regular_bytes, _reject_constant,
+    _unique_object, watch_state_paths,
 )
 from .watch_transition import _pin_identity, _validate_binding, _validate_record, read_preparation
 
 Document = dict[str, Any]
 _BACKEND = "windows-move-no-replace"
+_IDENTITY_MAX = (1 << 128) - 1
 
 
 def _identity(path: Path, *, directory: bool = False, installed: bool = False) -> tuple[int, int]:
@@ -31,6 +33,8 @@ def _identity(path: Path, *, directory: bool = False, installed: bool = False) -
     expected = stat.S_ISDIR if directory else stat.S_ISREG
     if not expected(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
         raise PermissionError("watch Windows sealing requires plain native paths")
+    if not all(0 <= value <= _IDENTITY_MAX for value in (info.st_dev, info.st_ino)):
+        raise PermissionError("watch Windows sealing requires supported native file identities")
     if directory:
         _windows_private(path, protect=False)
         entries = list(path.iterdir())
@@ -137,7 +141,34 @@ def seal(
     validate: Callable[[], None], check_deadline: Callable[[], None],
 ) -> Document:
     """Release drained original custody, seal without replacement, then serialize recovery."""
-    document, topology = read_sealing(root, binding)
+    return _seal(
+        root, lease, read=lambda: read_sealing(root, binding),
+        validate=validate, check_deadline=check_deadline,
+    )
+
+
+def _require_sealing_space(document: Document) -> None:
+    # Reserve full Windows 128-bit file-ID widths before allocating a barrier.
+    candidate = document if "seal" in document else {
+        **document, "seal": {
+            "backend": _BACKEND,
+            "barrier": {"device": _IDENTITY_MAX, "inode": _IDENTITY_MAX}, "boot": None,
+        },
+    }
+    for phase in (candidate["phase"], "sealed-legacy"):
+        if len(json.dumps({**candidate, "phase": phase}, allow_nan=False).encode("utf-8")) > _MAX_METADATA_BYTES:
+            raise ValueError("watch Windows sealing journal exceeds its bounded size")
+
+
+def _seal(
+    root: Path, lease: SingleInstance, *,
+    read: Callable[[], tuple[Document, str]],
+    validate: Callable[[], None], check_deadline: Callable[[], None],
+) -> Document:
+    """Share the physical owner/order; each entry supplies its own strict reader."""
+    validate()
+    document, topology = read()
+    _require_sealing_space(document)
     paths = watch_state_paths(root)
     if topology == "original":
         retain_original_lease(root, document, False, lease)
@@ -146,7 +177,7 @@ def seal(
 
     def recheck(*, original_held: bool = False, barrier_held: bool = False) -> None:
         validate()
-        if read_sealing(root, binding) != (document, topology):
+        if read() != (document, topology):
             raise PermissionError("watch Windows sealing evidence changed before its boundary")
         if original_held and lease.held_file_identity() != _record_identity(document["lease"]):
             raise PermissionError("watch Windows original custody changed")
@@ -161,6 +192,12 @@ def seal(
         check_deadline()
 
     recheck(original_held=topology == "original")
+
+    def publish(value: Document, before_publish: Callable[[], None]) -> None:
+        if len(json.dumps(value, allow_nan=False).encode("utf-8")) > _MAX_METADATA_BYTES:
+            raise ValueError("watch Windows sealing journal exceeds its bounded size")
+        write_private(paths.journal, value, before_publish=before_publish, create_parent=False)
+
     if "seal" not in document:
         prior_bytes = _regular_bytes(paths.journal)
         if prior_bytes is None or json.dumps(
@@ -196,7 +233,7 @@ def seal(
             )
             check_deadline()
 
-        write_private(paths.journal, staged, before_publish=before_staging, create_parent=False)
+        publish(staged, before_staging)
         document = staged
     confirm_private(paths.journal)
     recheck(original_held=topology == "original")
@@ -218,10 +255,7 @@ def seal(
         recheck(barrier_held=True)
         return document
     sealed = {**document, "phase": "sealed-legacy"}
-    write_private(
-        paths.journal, sealed, before_publish=lambda: recheck(barrier_held=True),
-        create_parent=False,
-    )
+    publish(sealed, lambda: recheck(barrier_held=True))
     document = sealed
     recheck(barrier_held=True)
     return document

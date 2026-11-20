@@ -551,7 +551,8 @@ service operation or rollout is performed.
 
 ### Windows sealed version-2 receiver
 
-**Source merged in #13662; no installed migration or activation.**
+**Source merged in #13662, with prepared-origin progression in #13668;
+no installed migration or activation.**
 The internal `WatchWriter.recover_sealed_state_transition()` source API receives
 an already installed Windows barrier under fresh lifecycle authorization and,
 when governed, the current installation's actually held transaction. It uses
@@ -590,10 +591,52 @@ import, isolated registry or ordinary startup integration.
 POSIX sealed records refuse before custody/publication because no qualified
 domain epoch can be recovered from their v1 boot field. A current controller
 cannot fill that historical gap with its own host observation.
-Fresh POSIX epoch reconciliation and later actual same-domain boot, the v2
-sealing writer, final import/authority selection, governed entry and complete
+Fresh POSIX epoch reconciliation and later actual same-domain boot, the POSIX
+v2 sealing writer, final import/authority selection, governed entry and complete
 historical-window qualification remain open under their existing owners.
 No native domain probe or live migration/rollout is authorized.
+
+### Windows version-2 sealing writer
+
+The internal `WatchWriter.seal_recovered_state_transition()` source API progresses
+only an already adapted v2 journal. It shares the existing Windows physical
+sealing owner, no-replace moves and native lease order; it does not relax the
+strict v1 preparation or sealing readers. Current admission and the exact held
+installation transaction, when governed, remain required at every boundary.
+Only interpretation of exactly unchanged origin/controller bindings is reused
+within one sealing operation; that cache never substitutes for live admission,
+guard, journal, topology, source, native custody or deadline checks.
+Legacy source validation precedes native acquisition. POSIX refuses before
+custody or physical writes because no qualified execution-domain epoch exists.
+
+The reader validates the complete immutable v1 `origin` independently from the
+current v2 phase/topology. Schema, binding, original lease and any original seal
+remain unchanged. A prepared origin can progress through staged, moved and
+installed barrier topologies, including a prepared journal left after the
+barrier move; a sealed origin cannot regress. No unjournaled directory, raced
+historical file or conflicting isolated registry is guessed away or removed.
+Before custody acquisition, staging or either move, metadata preflight reserves
+the full Windows file-identity width and checks both staged and final envelopes,
+including any current-controller update. Near-limit refusal therefore preserves
+the actual topology and journal rather than creating an unjournaled barrier or
+stranding a moved transition. Actual publication remains bounded and guarded.
+Uncertain stage/move/acquisition/publication outcomes retain actual evidence for
+the same owner to reconcile.
+
+Original custody is released before either move. Recovery acquires the original
+inode only while it is still at the historical path, never at the retained path.
+Only the qualified installed barrier permits the inner writer lease. A later
+current controller may finish an interrupted v2 transition without the old
+executable; the existing sealed receiver updates its controller under that
+inner lease, leaving origin and any staged seal unchanged. An already-current
+completed result avoids a redundant receiver pass.
+
+This is an explicitly selected source API, not an ordinary startup integration.
+Legacy subscription bytes remain the sole authority, and persistence, read
+readiness, callbacks, isolated registry creation and final import stay fenced.
+The actual-domain/boot, complete released-history, governed-entry and final
+authority-selection gates remain open. No installation, migration, service
+change or rollout is implied.
 
 ### Internal Linux sealing and recovery
 

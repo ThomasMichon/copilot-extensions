@@ -325,19 +325,29 @@ class WatchWriter:
             timeout=timeout, installation=installation, guard=guard, sealed=True,
         )
 
+    def seal_recovered_state_transition(
+        self, *, timeout: float, installation: WatchInstallation | None = None,
+        guard: CutoverLock | None = None,
+    ) -> dict[str, Any]:
+        """Progress only an admitted v2 transition through the existing Windows sealer."""
+        return self._recover_state_transition(
+            timeout=timeout, installation=installation, guard=guard, sealed=True, sealing=True,
+        )
+
     def _recover_state_transition(
         self, *, timeout: float, installation: WatchInstallation | None,
-        guard: CutoverLock | None, sealed: bool,
+        guard: CutoverLock | None, sealed: bool, sealing: bool = False,
     ) -> dict[str, Any]:
         from zdd.cutover_lock import lock_path
 
         from .watch_transition_recovery import (
-            _controller_environment, recover_prepared, recover_sealed,
+            _controller_environment, recover_prepared, recover_sealed, seal_recovered,
         )
 
         with self._operation(timeout) as deadline:
             def validate() -> None:
                 self._validate(
+                    "seal-recovered-state-transition" if sealing else
                     "recover-sealed-state-transition" if sealed else "recover-prepared-state-transition",
                     deadline,
                 )
@@ -371,7 +381,7 @@ class WatchWriter:
             self._strict_custody = True
             self._read_ready = False
             try:
-                recover = recover_sealed if sealed else recover_prepared
+                recover = seal_recovered if sealing else recover_sealed if sealed else recover_prepared
                 return recover(
                     self.root, self._lease, installation=installation, guard=guard,
                     validate=validate, check_deadline=check_deadline,

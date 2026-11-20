@@ -111,6 +111,14 @@ def recover_prepared(
 def _read_sealed(
     root: Path, installation: WatchInstallation | None, guard: CutoverLock | None,
 ) -> tuple[Document, bytes]:
+    document, raw, _topology = _read_windows_transition(root, installation, guard, sealed=True)
+    return document, raw
+
+
+def _read_windows_transition(
+    root: Path, installation: WatchInstallation | None, guard: CutoverLock | None, *,
+    sealed: bool, validate_scope: Callable[[object], None] | None = None,
+) -> tuple[Document, bytes, str]:
     from .watch_windows_sealing import _inspect_sealing
 
     if sys.platform != "win32":
@@ -118,6 +126,7 @@ def _read_sealed(
     if not root.is_absolute() or root.resolve(strict=True) != root:
         raise PermissionError("watch sealed recovery requires its canonical state root")
     paths = watch_state_paths(root)
+    scope = validate_scope or (lambda binding: _validate_scope(root, binding, installation, guard))
     require_private(paths.journal)
     raw = _regular_bytes(paths.journal)
     if raw is None:
@@ -125,10 +134,11 @@ def _read_sealed(
     document = json.loads(raw, object_pairs_hook=_unique_object, parse_constant=_reject_constant)
     if not isinstance(document, dict) or type(document.get("version")) is not int:
         raise PermissionError("watch sealed recovery journal is invalid")
-    if document["version"] == 1:
+    if document["version"] == 1 and sealed:
         origin = document
     elif (
-        document["version"] == 2 and set(document) == _FIELDS | {"seal", "origin", "controller"}
+        document["version"] == 2
+        and set(document) == _FIELDS | {"origin", "controller"} | ({"seal"} if "seal" in document else set())
         and isinstance(document["origin"], dict)
     ):
         origin = document["origin"]
@@ -137,15 +147,17 @@ def _read_sealed(
             for field in ("schema", "binding", "lease")
         ) or (
             "seal" in origin
-            and json.dumps(document["seal"], sort_keys=True) != json.dumps(origin["seal"], sort_keys=True)
+            and json.dumps(document.get("seal"), sort_keys=True) != json.dumps(origin["seal"], sort_keys=True)
         ):
             raise PermissionError("watch sealed recovery changed immutable origin evidence")
-        _validate_scope(root, document["controller"], installation, guard)
+        scope(document["controller"])
     else:
         raise PermissionError("watch sealed recovery journal version is unsupported")
-    _validate_scope(root, origin.get("binding"), installation, guard)
+    scope(origin.get("binding"))
+    if origin.get("phase") == "sealed-legacy" and document.get("phase") != "sealed-legacy":
+        raise PermissionError("watch current sealing cannot downgrade its sealed origin")
     if "seal" in origin:
-        if _inspect_sealing(root, origin["binding"], origin) != "sealed":
+        if _inspect_sealing(root, origin["binding"], origin) != "sealed" and sealed:
             raise PermissionError("watch sealed recovery origin no longer names its installed barrier")
     else:
         _validate_record(origin, origin["binding"])
@@ -153,18 +165,80 @@ def _read_sealed(
     current = {key: value for key, value in document.items() if key in _FIELDS | {"seal"}}
     current["version"] = 1
 
-    def topology() -> None:
-        if current.get("phase") != "sealed-legacy" or _inspect_sealing(
-            root, origin["binding"], current,
-        ) != "sealed":
+    def topology() -> str:
+        if "seal" in current:
+            selected = _inspect_sealing(root, origin["binding"], current)
+        else:
+            _validate_record(current, origin["binding"])
+            identity = _historical_identity(root)
+            if identity != (origin["lease"]["device"], origin["lease"]["inode"]) or _pin_identity(root) != identity:
+                raise PermissionError("watch current sealing lost its original pinned inode")
+            for path in (paths.retained_lock, paths.staged_barrier, paths.isolated_subscriptions.parent):
+                if os.path.lexists(path):
+                    raise PermissionError("watch current sealing has unrecorded physical evidence")
+            selected = "original"
+        if sealed and (current.get("phase") != "sealed-legacy" or selected != "sealed"):
             raise PermissionError("watch sealed recovery requires its installed barrier")
+        return selected
 
-    topology()
+    selected = topology()
     require_private(paths.journal)
     if _regular_bytes(paths.journal) != raw:
         raise PermissionError("watch sealed recovery journal changed during admission")
-    topology()
-    return cast(Document, document), raw
+    if topology() != selected:
+        raise PermissionError("watch current sealing topology changed during admission")
+    return cast(Document, document), raw, selected
+
+
+def seal_recovered(
+    root: Path, lease: SingleInstance, *,
+    installation: WatchInstallation | None, guard: CutoverLock | None,
+    validate: Callable[[], None], check_deadline: Callable[[], None],
+) -> Document:
+    """Progress a v2 envelope through the existing Windows owner, never its v1 reader."""
+    from .watch_windows_sealing import _require_sealing_space, _seal
+
+    validated_scopes: set[str] = set()
+    controller: Document = {"kind": "legacy", "stateRoot": str(root)}
+    if installation is not None:
+        controller.update(kind="installation", installation=installation.evidence())
+
+    def scope(binding: object) -> None:
+        # Only immutable provenance interpretation is reused, within this one operation.
+        key = json.dumps(binding, sort_keys=True, allow_nan=False)
+        if key not in validated_scopes:
+            _validate_scope(root, binding, installation, guard)
+            validated_scopes.add(key)
+
+    def read() -> tuple[Document, str]:
+        if installation is not None:
+            from zdd.cutover_lock import lock_path
+
+            if guard is None or guard.path != lock_path(installation.run_root) or installation.state_root != root:
+                raise PermissionError("watch current sealing requires its installation transaction")
+            guard.require_owned()
+            installation.require_current(environment=_controller_environment())
+            guard.require_owned()
+        elif guard is not None:
+            raise PermissionError("watch legacy sealing has no installation transaction")
+        document, _raw, topology = _read_windows_transition(
+            root, installation, guard, sealed=False, validate_scope=scope,
+        )
+        _require_sealing_space({**document, "controller": controller})
+        WatchRegistry().restore_state(
+            _read_subscriptions_state(watch_state_paths(root).legacy_subscriptions, require_plain=True),
+            strict=True,
+        )
+        check_deadline()
+        return document, topology
+
+    document = _seal(root, lease, read=read, validate=validate, check_deadline=check_deadline)
+    if document["controller"] == controller:
+        return document
+    return recover_sealed(
+        root, lease, installation=installation, guard=guard,
+        validate=validate, check_deadline=check_deadline,
+    )
 
 
 def recover_sealed(
