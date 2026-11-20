@@ -5,9 +5,12 @@ Back to [Source-Managed Runtime Installs](README.md) and the
 Tracked within [#13504](https://github.com/ThomasMichon/copilot-extensions/issues/13504);
 the broader Manager and provider/profile programs remain with #12905 and #12900.
 
-**Status: proposal; no new preparation API or native qualification is claimed.**
-This source prerequisite supports capable-consumer adoption without introducing
-another constructor or changing the ordinary source-building path.
+**Status: source implementation; review, containing release and consumer
+qualification remain open.** `local_install_closed_wheels.prepare` composes the
+existing owners without introducing another constructor or changing the
+ordinary source-building path. The
+[install contract](../../../docs/install-contract.md#explicit-manager-source-install-integration)
+records its selected-provider declaration and effect boundary.
 
 ## Gap and intent
 
@@ -25,11 +28,11 @@ dependency sources belong to the project's `pyproject.toml`.
 Component archive/profile inspection helpers alone are not a supported
 downstream preparation entry.
 
-Add an explicit artifact-first input path through the existing canonical
-Source/profile and input-retention owners. It must preserve the application's
+The explicit artifact-first input path uses the existing canonical
+Source/profile and input-retention owners. It preserves the application's
 original development metadata while admitting the independently selected
-wheel-only runtime graph. The exact callable API and support declaration belong
-to the implementation, not to an adopter-specific wrapper.
+wheel-only runtime graph. The callable API and support declaration belong to
+that provider, not to an adopter-specific wrapper.
 
 This closes the installer's
 [independent installation intent](../../../visions/installer/README.md#purpose--intent)
@@ -86,9 +89,9 @@ a new manual-update veto.
 
 ## Plan
 
-- [ ] C1: Review the explicit input contract and identify the existing
+- [x] C1: Review the explicit input contract and identify the existing
   Source/profile, retention, identity, application and lock owners to compose.
-- [ ] C2: Implement the bounded provider and selected-owner support declaration,
+- [x] C2: Implement the bounded provider and selected-owner support declaration,
   retaining original development metadata and unchanged ordinary defaults.
 - [ ] C3: Qualify the actual owning functions and readers with focused inert
   controls; complete normal review, required CI, merge and containing release.
@@ -132,3 +135,32 @@ policy, source, interpreter/toolchain and addressed installation.
 Provider/profile persistence and the Manager reference remain separately owned.
 Installation success remains incoming readiness and complete current selection,
 with preserved user state and independently scoped outgoing retirement.
+
+## Journal
+
+The proposal merged in
+[13669](https://github.com/ThomasMichon/copilot-extensions/pull/13669) as
+`631f9bbeb4cdba5abdddad9cede06e124411240d` after current-head Copilot approval
+and required checks. C1 is complete for the reviewed contract and existing
+owner composition. C2 implementation is next; C3 qualification/release, C4
+consumer adoption, protected P4 and the parent acceptance remain open.
+
+The implementation retains the original manifest rather than projecting a
+different one. An explicit `closed-wheels` input mode spans the canonical
+freezer, retained Source readers and numbered constructor. Existing wheel,
+source-member, profile/target, application-emission and finite process owners
+produce the associated application and actual offline UV lock. Original artifact
+provenance is distinct from the Source/runtime identity. Missing/foreign wheel
+bytes, unsupported input modes, changed retained associations, occupied output
+and partial/unknown lock outcomes refuse without construction or replay.
+One independent application is supported; nonempty `application-sources`
+requires its separate owning preparation and is explicitly refused.
+The installed owner expands `closed-wheel-source/v1` before any consumer
+migration; no old-provider fallback or native adoption is claimed.
+
+Focused source validation passes 25 controls, strict Linux/Windows typing,
+the existing install contract, documentation consistency, generated-engine
+parity and changed-module size gates. The package-graph helper moved into the
+existing retained-source owner to stay within the unchanged module-size cap;
+the original engine import remains available. Required PR review/checks and a
+containing release remain C3, and actual consumer adoption remains C4.

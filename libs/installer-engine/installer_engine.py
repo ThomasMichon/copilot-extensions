@@ -32,7 +32,7 @@ import versioned_runtime as versioned_runtime
 import versioned_runtime_source as versioned_runtime_source
 runtime, runtime_source = versioned_runtime, versioned_runtime_source
 from installer_dependency_policy import (
-    DependencyPolicyError, RetainedUVInstall, _bundled_dbus_next, _contained, _file_uri, _native_retained_path as _native_retained_path,
+    DependencyPolicyError as DependencyPolicyError, RetainedUVInstall, _file_uri, _native_retained_path as _native_retained_path,
     _bounded_content_map as _bounded_content_map,
     _private_retained_root as _private_retained_root, _select_uv_executable,
     _temporary_inputs as _temporary_inputs,
@@ -51,6 +51,7 @@ from installer_wheel_snapshot import (
 
 _open, _unchanged, _digest = _snapshot_open, _snapshot_unchanged, _snapshot_digest
 from installer_source_build import (
+    _package_roots as _package_roots,
     SourceWheelInputs, _selected_extras as _selected_extras,
     _source_deadline, _source_phase, retained_input_graph, retained_source_wheels,
     revalidate_input_content, check_dev_owner,
@@ -82,6 +83,7 @@ class FrozenInputs:
     wheel_inputs: WheelInstallInputs | WheelReuseInputs | None = None
     source_wheels: SourceWheelInputs | None = None
     application: Path | None = None
+    closed_wheel_source: bool = False
 
 
 @dataclass(frozen=True)
@@ -97,62 +99,6 @@ class ReadyCandidate:
 
 class ContentRepairRequired(RuntimeError):
     """Published bytes differ; a caller must select a distinct generation."""
-
-
-def _package_roots(plugin: Path) -> tuple[Path, ...]:
-    pending: list[tuple[Path, str | None]] = [(plugin, None)]
-    roots: set[Path] = set()
-    names: dict[str, Path] = {}
-    while pending:
-        declared, expected_name = pending.pop()
-        if declared.is_symlink():
-            raise ValueError(f"Runtime package input is a symlink: {declared}")
-        root = declared.resolve(strict=True)
-        manifest = root / "pyproject.toml"
-        if not stat.S_ISREG(manifest.lstat().st_mode):
-            raise ValueError(f"Runtime package manifest is not a regular file: {manifest}")
-        data = tomllib.loads(manifest.read_text(encoding="utf-8"))
-        project = data.get("project", {})
-        if not isinstance(project, dict):
-            raise ValueError(f"Runtime package project metadata must be a table: {manifest}")
-        name = project.get("name")
-        if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", name):
-            raise ValueError(f"Runtime package has no ordinary distribution name: {manifest}")
-        key = re.sub(r"[-_.]+", "-", name).lower()
-        if expected_name is not None and key != re.sub(r"[-_.]+", "-", expected_name).lower():
-            raise ValueError(f"Runtime dependency {expected_name} resolves to {name}: {manifest}")
-        if root in roots:
-            continue
-        if key in names and names[key] != root:
-            raise ValueError(f"Runtime input declares two sources for {name}: {names[key]}, {root}")
-        names[key] = root
-        roots.add(root)
-        tool = data.get("tool", {})
-        if not isinstance(tool, dict):
-            raise ValueError(f"Runtime package tool metadata must be a table: {manifest}")
-        uv = tool.get("uv", {})
-        if not isinstance(uv, dict):
-            raise ValueError(f"Runtime package uv metadata must be a table: {manifest}")
-        sources = uv.get("sources", {})
-        if not isinstance(sources, dict):
-            raise ValueError(f"Runtime package sources must be a table: {manifest}")
-        for dependency, source in sources.items():
-            if not isinstance(source, dict):
-                raise ValueError(f"Unsupported runtime source for {dependency}: {manifest}")
-            if "path" not in source:
-                raise ValueError(f"Unsupported nonlocal runtime source for {dependency}: {manifest}")
-            path = source["path"]
-            if not isinstance(path, str) or not path:
-                raise ValueError(f"Runtime dependency path is invalid for {dependency}: {manifest}")
-            child = root / path
-            if child.is_file():
-                child = _contained(child, (root,))
-                if not cast(Callable[[str, str, Path], bool], _bundled_dbus_next)(key, dependency, child):
-                    raise DependencyPolicyError("local UV artifacts cannot prove release age")
-                # The admitted artifact is already covered by its owning package's files.
-                continue
-            pending.append((child, dependency))
-    return tuple(sorted(roots))
 
 
 def _package_name(root: Path) -> str:
@@ -224,6 +170,7 @@ def freeze_inputs(
     plugin: Path, destination: Path, *, deadline: float | None = None,
     on_progress: Callable[[], None] | None = None,
     additional_plugins: tuple[Path, ...] = (),
+    closed_wheel_source: bool = False,
 ) -> FrozenInputs:
     """Copy and verify all local package inputs before admitting a numbered build.
 
@@ -234,11 +181,15 @@ def freeze_inputs(
     """
     if deadline is not None:
         _check_deadline(deadline)
+    if type(closed_wheel_source) is not bool:
+        raise ValueError("Closed-wheel source selection must be a boolean")
     if not isinstance(additional_plugins, tuple):
         raise ValueError("Additional frozen applications must be an immutable tuple")
     applications = (plugin, *additional_plugins)
     roots = tuple(sorted({
-        package for application in applications for package in _package_roots(application)
+        package for application in applications for package in _package_roots(
+            application, **({"closed_wheels": True} if closed_wheel_source else {}),
+        )
     }))
     plugin = plugin.resolve(strict=True)
     common = Path(os.path.commonpath(roots))
@@ -303,7 +254,9 @@ def freeze_inputs(
             for application in applications
         )
         if tuple(sorted({
-            package for application in frozen_applications for package in _package_roots(application)
+            package for application in frozen_applications for package in _package_roots(
+                application, **({"closed_wheels": True} if closed_wheel_source else {}),
+            )
         })) != tuple(sorted(frozen_roots)):
             raise RuntimeError("Runtime dependency graph changed while freezing inputs")
         after_files = _source_files(roots, **progress)
@@ -318,7 +271,10 @@ def freeze_inputs(
             raise RuntimeError("Runtime input content changed while freezing inputs")
         if deadline is not None:
             _check_deadline(deadline)
-        return FrozenInputs(frozen_plugin, frozen_roots, frozen_hash)
+        return FrozenInputs(
+            frozen_plugin, frozen_roots, frozen_hash,
+            closed_wheel_source=closed_wheel_source,
+        )
     except BaseException:
         shutil.rmtree(_native_retained_path(destination))
         raise
@@ -676,6 +632,7 @@ def numbered_candidate(
     local_packages: tuple[str, ...] | None = None,
     wheel_inputs: WheelInstallInputs | WheelReuseInputs | None = None,
     application: Path | None = None,
+    closed_wheel_source: bool = False,
     nested_environment: bool = False,
     source_wheel_cache_root: Path | None = None,
     expected_payload_hash: str | None = None,
@@ -699,6 +656,7 @@ def numbered_candidate(
         local_packages=local_packages,
         wheel_inputs=wheel_inputs,
         application=application,
+        closed_wheel_source=closed_wheel_source,
         nested_environment=nested_environment,
         source_wheel_cache_root=source_wheel_cache_root,
         expected_payload_hash=expected_payload_hash,
@@ -735,6 +693,7 @@ def _candidate(
     local_packages: tuple[str, ...] | None = None,
     wheel_inputs: WheelInstallInputs | WheelReuseInputs | None = None,
     application: Path | None = None,
+    closed_wheel_source: bool = False,
     nested_environment: bool = False,
     source_wheel_cache_root: Path | None = None,
     expected_payload_hash: str | None = None,
@@ -743,6 +702,10 @@ def _candidate(
     if expected_payload_hash is not None and not re.fullmatch(r"[0-9a-f]{64}", expected_payload_hash):
         raise ValueError("Expected runtime payload hash must be a full source SHA256")
     root = root.resolve()
+    if type(closed_wheel_source) is not bool or closed_wheel_source and (
+        dev_owner is not None or not isinstance(wheel_inputs, (WheelInstallInputs, WheelReuseInputs))
+    ):
+        raise ValueError("Closed-wheel source construction requires immutable inspected wheels")
     if type(nested_environment) is not bool or (nested_environment and (
         application is not None or not isinstance(wheel_inputs, (WheelInstallInputs, WheelReuseInputs))
     )):
@@ -762,7 +725,7 @@ def _candidate(
         return python
     if dev_owner is not None and (extras or local_packages is not None or wheel_inputs is not None):
         raise ValueError("Dependency profiles require an immutable numbered runtime")
-    packages = _package_roots(plugin)
+    packages = _package_roots(plugin, **({"closed_wheels": True} if closed_wheel_source else {}))
     if wheel_inputs is not None and local_packages == ():
         if extras:
             raise ValueError("A third-party-only wheel closure cannot select local extras")
@@ -802,6 +765,7 @@ def _candidate(
             ),
             extras=extras, local_packages=local_packages, wheel_inputs=wheel_inputs,
             application=application,
+            closed_wheel_source=closed_wheel_source,
         )
     with ExitStack() as retained:
         if dev_owner is not None:
@@ -878,6 +842,7 @@ def _candidate(
                             frozen = freeze_inputs(
                                 inputs.plugin, _private_retained_root(Path(temporary)) / "source",
                                 deadline=deadline, on_progress=progress.renew,
+                                closed_wheel_source=inputs.closed_wheel_source,
                             )
                         payload = replace(inputs, plugin=frozen.plugin, packages=frozen.packages)
                         _revalidate_input_content(payload)
