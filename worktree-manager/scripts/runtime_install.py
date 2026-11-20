@@ -2,6 +2,7 @@
 # copilot-extensions:bootstrap-uv=1
 # copilot-extensions:toolchain-config=1
 # copilot-extensions:toolchain-context=1
+# copilot-extensions:toolchain-bootstrap-only=1
 
 from __future__ import annotations
 
@@ -928,6 +929,17 @@ def main(argv: list[str] | None = None) -> int:
     os.environ.pop("__PYVENV_LAUNCHER__", None)
     os.environ["WORKTREE_MANAGER_ROOT"] = str(args.root.resolve())
     sys.path.insert(0, str(SCRIPTS.parent / "src"))
+    if command[:1] == ["setup"] and "--toolchain-only" in command[1:]:
+        from worktree_manager.setup_arguments import parse
+        from worktree_manager.toolchain_config import configure_setup
+
+        try:
+            setup = parse(command[1:])
+        except SystemExit as error:
+            return error.code if isinstance(error.code, int) else (0 if error.code is None else 1)
+        return configure_setup(
+            root=args.root.resolve(), apply=setup.apply, configuration_only=setup.toolchain_only,
+        )
     if not args.install_only:
         args.skip_instance_reconcile = bool(command and command[:1] not in (["update"], ["self-install"]))
     driver = _execution_driver(SCRIPTS.parent)

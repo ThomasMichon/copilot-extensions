@@ -92,7 +92,7 @@ credential ownership and dependency-age policy remain unchanged. Configuration
 success is not evidence that any application or engine is ready or selected.
 Adopter migration waits for reviewed implementation and release availability.
 
-## Native configuration-only entry - proposed refinement
+## Native configuration-only entry - reviewed refinement
 
 A lightweight adopter may need native feed configuration before provisioning
 its own tools, without installing desktop Manager. Installed configuration-only
@@ -125,8 +125,9 @@ shared staging directory. Retained native configuration and the selected
 input remain outside application versions; no Manager version or binstub,
 application alias/registration, service, adopter repository or current
 application selection is created or changed. Plan-only configuration remains
-read-only after normal bootstrap preparation. Keep strict parsing, native conflicts/locks, independent credential
-and source owners, and all existing package/TLS policy.
+read-only after normal bootstrap preparation. Keep strict parsing, native
+conflicts/locks, independent credential and source owners, and all existing
+package/TLS policy.
 
 This closes the same finite configuration and independent application intent;
 it does not revise the installation model or take over application conversion.
@@ -154,7 +155,8 @@ callers, and retain prior-provider refusal and rollback coverage.
   Accepted in #13480; implementation/release and adopter qualification remain open.
 - [ ] Implement and release the additive installed setup mode and safe help
   declaration, then qualify conditional adopter reuse without acquisition files.
-- [ ] Review the native configuration-only refinement before implementation.
+- [x] Review the native configuration-only refinement before implementation.
+  Accepted in #13552; implementation, release and caller qualification remain open.
 - [ ] Implement and release bootstrap capability/source-skew admission and
   configuration-only dispatch without Manager construction, then migrate
   lightweight adopters conditionally.
@@ -194,6 +196,27 @@ callers, and retain prior-provider refusal and rollback coverage.
   provider rollback; do not infer support from package versions.
 
 ## Journal
+
+2026-11-20: The native configuration-only refinement merged in #13552 after
+exact-head Copilot approval, required CI and resolved review threads. Four
+focused regressions then failed against the previous provider: unrelated
+staging was removed, an older routing-capable source reached execution, native
+metadata omitted the required capability, and the real source entry tried UV
+lookup instead of configuration-only dispatch. This is measured pre-fix
+evidence, not implementation, release or installed adoption.
+
+2026-11-20: The standard provider now has capability/source-skew admission,
+isolated configuration acquisition and early configuration-only dispatch.
+The first implementation passed 110 selected controls but the real `-I -S`
+source entry found an eager process-package import. The existing parser was
+then extracted unchanged into a dependency-free shared module, and the same
+configuration/error-reporting stage serves both source and installed setup.
+Parser and automatic-update policy function ASTs remain identical.
+The four-file configuration, handoff, repository and provisioning packet
+passes 245 tests with 28 platform skips in 121.95 seconds on Windows.
+Bash syntax, install-contract and changed-Python lint pass. Native Linux
+execution remains for the existing path-gated hosted lane; source review/CI,
+merge, release and caller adoption remain open. No live installation occurred.
 
 2026-11-19: The installed configuration-only refinement merged in #13480 after
 current-head Copilot approval and required CI. It preserves the native
