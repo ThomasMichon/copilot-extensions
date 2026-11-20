@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import json
+import sys
+from collections import Counter
 from dataclasses import replace
 from pathlib import Path
+from time import perf_counter, process_time
 from typing import Any, cast
 
 import numpy as np
@@ -18,7 +22,7 @@ from agent_index.indexing.path_index import PathIndex
 from agent_index.indexing.work_counts import measure_reindex
 from agent_index.store.ingestion_index import prepare_ingestion_indices
 from agent_index.store.multi_model_store import MultiModelStore
-from agent_index.store.scalar_index import ScalarIndexPreparationRequired, prepare_index
+from agent_index.store.scalar_index import ScalarIndexPreparationRequired, inspect_index, prepare_index
 from agent_index.store.source_layout import SourceLayoutError
 from agent_index.store.vector_table import VectorTable
 
@@ -48,6 +52,7 @@ def receipts(coverage: EmbeddingCoverage) -> list[tuple[Any, ...]]:
 
 def test_selected_pairs_route_reuse_and_reopen_without_trusting_facade_caches(
     selected: tuple[IndexConfig, MultiModelStore, list[Chunk]], tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config, original, chunks = selected
     owner = domain(original)
@@ -67,12 +72,30 @@ def test_selected_pairs_route_reuse_and_reopen_without_trusting_facade_caches(
     clients = {key: Client(profile.dim) for key, profile in models.items()}
     paths = tmp_path / "paths.db"
     ready: list[str] = []
+    samples: list[dict[str, Any]] = []
     for run in range(2):
         store = MultiModelStore(owner.path, content_table="canonical", point_scope=SCOPE)
-        store.content_store._table = store.content_store.db.open_table("vectors_second")
+        db = store.content_store.db
+        store.content_store._table = db.open_table("vectors_second")
         coverage = EmbeddingCoverage(PathIndex(paths))
         with owner._write(store.content_store.db, point_scope=SCOPE):
             before = snapshot(owner.path) if run else {}
+            native = {name: db.open_table(name) for name in db.list_tables().tables}
+            footprint = {
+                name: {
+                    "fragments": len(list(table.to_lance().get_fragments())),
+                    "segments": inspect_index(
+                        table, column="point_key" if name == "component_ordering_evidence" else "chunk_id",
+                    )[0].segments,
+                } for name, table in native.items()
+            }
+            opens: Counter[str] = Counter()
+            open_table = type(db).open_table
+
+            def observe(connection: Any, name: str, *args: Any, **kwargs: Any) -> Any:
+                opens[name] += 1
+                return open_table(connection, name, *args, **kwargs)
+
             @measure_reindex
             def write() -> dict[str, object]:
                 return {"written": embed_and_store_pairs(
@@ -80,7 +103,17 @@ def test_selected_pairs_route_reuse_and_reopen_without_trusting_facade_caches(
                     point_scope=SCOPE, after_store=prepare, before_model_embed=ready.append,
                     stream_batch_size=2,
                 )}
-            result = write()
+            with monkeypatch.context() as patch:
+                patch.setattr(type(db), "open_table", observe)
+                started, cpu_started = perf_counter(), process_time()
+                result = write()
+                elapsed, cpu = perf_counter() - started, process_time() - cpu_started
+            samples.append({
+                "pair_receipts": "covered-reopen" if run else "cold",
+                "wall_seconds": elapsed, "process_cpu_seconds": cpu,
+                "opens_by_table": dict(opens), "native_before": footprint,
+                "work_counts": result["work_counts"],
+            })
             counts = cast(dict[str, Any], result["work_counts"])
             written = result["written"]
             if run:
@@ -109,6 +142,11 @@ def test_selected_pairs_route_reuse_and_reopen_without_trusting_facade_caches(
     assert len(clients["first"].calls) == 2
     assert clients["second"].calls[-1] == [items[1].content, items[2].content]
     assert snapshot(before_content) == content_bytes
+    print("selected_pair_measurements=" + json.dumps({
+        "platform": sys.platform, "models": 2, "chunks": 3, "batch_size": 2,
+        "cache_boundary": "receipt-cold first pair write versus covered fresh-facade reopen; OS cache uncontrolled",
+        "samples": samples,
+    }, sort_keys=True))
 
 
 @pytest.mark.parametrize("obstruction", [

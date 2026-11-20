@@ -7658,6 +7658,15 @@ write/preparation/receipt order and actual-vector-before-receipt composition.
 They do not qualify provider ordering, whole-claim/checkpoint completion,
 ordinary point application, a live directory or native Windows.
 
+For individual native performance samples, run the existing routing/reopen case:
+`PYTEST_ADDOPTS=-s python tools/run-plugin-tests.py agent-index --test-file tests/test_point_embedding.py -k selected_pairs_route --allow-explicit-tiers`.
+It prints receipt-cold first-write and covered fresh-facade reopen wall/process
+CPU time, table opens, fragment/index-segment counts and work counters for two
+models, three chunks and batch size two. Timed work includes the open observer
+and pair composition, not fixture setup or outer writer entry/exit. OS cache is
+uncontrolled and inference is a fixture; two samples are insufficient for tail,
+large-corpus, real-model, writer-contention or native Windows qualification.
+
 The exclusive attachment-export consumer packet executes the real export
 entrypoint, health-selected command transport, extension registry, provider
 dispatch and descriptor-pinned writer with an in-memory filesystem and
