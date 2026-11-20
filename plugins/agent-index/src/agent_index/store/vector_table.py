@@ -90,7 +90,6 @@ class VectorTable:
     def upsert(
         self, chunks: list[Chunk], vectors: np.ndarray[Any, Any], *,
         bounded_provenance: bool = False, bounded_input: bool = False,
-        point_scope: PointScope | None = None,
     ) -> int:
         """Insert or update vectors by chunk_id.
 
@@ -98,25 +97,17 @@ class VectorTable:
             chunks: Chunk objects; selected bounded modes validate canonical fields.
             vectors: Embedding vectors, shape ``(n, dim)``, float32.
             bounded_input: Also verify raw canonical input under writer exclusion.
-            point_scope: Exact selected domain under an already-owned source writer.
 
         Returns:
             Number of rows written.
         """
-        domain = self._source_domain
-        if point_scope is not None:
-            if domain is None or not domain.writing or not bounded_input:
-                raise SourceLayoutError("Point vectors require current input and the owning source writer")
-            with domain.read(self._db, point_scope=point_scope):
-                if any(chunk.source != point_scope[1] for chunk in chunks):
-                    raise SourceLayoutError("Vector input is outside its selected family")
-                self._require_point_binding()
         if not (bounded_provenance or bounded_input):
             return self._upsert(chunks, vectors)
         from .scalar_index import ScalarIndexPreparationRequired as ChunkIdIndexPreparationRequired
         from .content_store import ContentStore
         from .source_projection import projection_records
 
+        domain = self._source_domain
         if domain is None:
             raise ChunkIdIndexPreparationRequired(
                 "Bounded vector provenance requires a participating source store",
@@ -124,25 +115,20 @@ class VectorTable:
         self._validate(chunks, vectors)
         if len({chunk.chunk_id for chunk in chunks}) != len(chunks):
             raise ValueError("Bounded vector provenance requires unique chunk IDs")
-        content = ContentStore(domain.path, table_name=self._content_table, point_scope=point_scope)
-        with domain.read(self._db, point_scope=point_scope):
+        content = ContentStore(domain.path, table_name=self._content_table)
+        with domain.read(self._db):
             if not chunks:
                 return 0
-            if point_scope is None:
-                projection_records(
-                    self._db, self._content_table, chunks, bounded_content=content,
-                    require_current_input=bounded_input,
-                )
+            projection_records(
+                self._db, self._content_table, chunks, bounded_content=content,
+                require_current_input=bounded_input,
+            )
         refusal: ChunkIdIndexPreparationRequired | SourceLayoutError
-        writer = domain.write(self._db) if point_scope is None else domain._write(
-            self._db, point_scope=point_scope,
-        )
-        with writer:
+        with domain.write(self._db):
             try:
                 canonical = projection_records(
                     self._db, self._content_table, chunks, bounded_content=content,
                     require_current_input=bounded_input,
-                    point_scope=point_scope,
                 )
             except (ChunkIdIndexPreparationRequired, SourceLayoutError) as exc:
                 refusal = exc
@@ -150,9 +136,35 @@ class VectorTable:
                 return self._write_vectors(chunks, vectors, canonical=canonical)
         raise refusal
 
-    def _require_point_binding(self) -> None:
+    def preflight_point_upsert(
+        self, chunks: list[Chunk], vectors: np.ndarray[Any, Any], *,
+        point_scope: PointScope | None,
+    ) -> dict[str, dict[str, Any]]:
+        """Read current canonical input only; never authorize or execute a point write."""
+        from .content_store import ContentStore
+        from .source_projection import projection_records
+
+        domain = self._source_domain
+        if point_scope is None or domain is None or not domain.writing:
+            raise SourceLayoutError("Point vector preflight requires the owning source writer and scope")
+        with domain.read(self._db, point_scope=point_scope):
+            if any(chunk.source != point_scope[1] for chunk in chunks):
+                raise SourceLayoutError("Vector input is outside its selected family")
+            self._validate(chunks, vectors)
+            if len({chunk.chunk_id for chunk in chunks}) != len(chunks):
+                raise ValueError("Point vector preflight requires unique chunk IDs")
+            self._require_point_binding(reserve_segment=bool(chunks))
+            content = ContentStore(
+                domain.path, table_name=self._content_table, point_scope=point_scope,
+            )
+            return projection_records(
+                self._db, self._content_table, chunks, bounded_content=content,
+                require_current_input=True, point_scope=point_scope,
+            )
+
+    def _require_point_binding(self, *, reserve_segment: bool) -> None:
         from .content_store import _CONTENT_SCHEMA
-        from .scalar_index import ScalarIndexPreparationRequired, inspect_index, require_budget
+        from .scalar_index import MAX_SEGMENTS, ScalarIndexPreparationRequired, inspect_index, require_budget
 
         domain = self._source_domain
         assert domain is not None
@@ -171,6 +183,8 @@ class VectorTable:
         if not state.prepared:
             raise ScalarIndexPreparationRequired("Point vectors require a prepared chunk-ID index")
         require_budget(state, 0)
+        if reserve_segment and state.segments >= MAX_SEGMENTS:
+            raise ScalarIndexPreparationRequired("Point vector preflight needs a reserved index segment")
 
     @source_write
     def _upsert(self, chunks: list[Chunk], vectors: np.ndarray[Any, Any]) -> int:

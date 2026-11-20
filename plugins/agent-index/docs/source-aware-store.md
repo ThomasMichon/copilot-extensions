@@ -82,23 +82,22 @@ through applied-version qualification. Explicit
 selection through its existing owners and budgets, without admitting ordinary
 data writers.
 
-The existing `VectorTable.upsert` and `MultiModelStore.upsert_vectors` accept
-an explicit `point_scope` only with `bounded_input=True` under an already-owned
-matching source writer. They reject another family or scope, including empty
-batches, and compare every canonical embedding-input field through the prepared
-chunk-ID index before reusing the existing vector mutation path. They never
-acquire outer point-writer ownership, prepare indices or mutate canonical
-content. Both the vector and active-writer connections must resolve to the
-selected domain; content/vector tables must already be prepared, have distinct
-names and match their expected schemas. Point model registration also refuses
-aliases of canonical content or another model's table before returning a handle.
-The vector chunk-ID index must have no uncovered physical rows and stay within
-the existing segment budget; later writes need explicit budgeted tail preparation.
-Selected writes qualify canonical input once under their already-owned writer;
-ordinary unscoped writes retain their separate preflight and writer recheck.
-An interrupted vector effect retains the existing dirty recovery
-boundary. Default vector writes and reads remain refused; selected reads still
-require their explicit prepared-index path.
+`VectorTable.preflight_point_upsert` and
+`MultiModelStore.preflight_point_vectors` inspect current canonical input only,
+under an already-owned matching source writer and explicit `point_scope`.
+They reject another family/scope, including empty input; both connection URIs
+must resolve to the domain, and distinct prepared content/vector tables must
+match their expected schemas. The vector chunk-ID index needs zero uncovered
+physical rows; nonempty input also reserves room below the existing segment cap.
+Canonical fields are compared once through the prepared chunk-ID index.
+
+Preflight returns selected raw canonical fields at that read boundary, not a
+durable receipt, model-to-table ownership proof or permission to write.
+It performs no content/vector mutation, index preparation or writer acquisition.
+The existing mutation APIs still refuse point domains. Enabling point writes
+first requires durable cross-facade/reopen model ownership and a post-effect
+failure latch that cannot be cleared by catching a nested exception.
+Selected reads retain their separate explicit prepared-index path.
 
 Qualified point application and every v2 executor/producer remain unsupported.
 The binding is not
