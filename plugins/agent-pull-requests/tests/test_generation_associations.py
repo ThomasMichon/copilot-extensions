@@ -191,11 +191,27 @@ def test_reservation_failure_and_capacity_refuse_before_cache_publication(
     first = generation(evidence)
     publish(store, cache, first)
     before = store.path.read_bytes()
-    with pytest.raises(ReplayStoreInvalid, match="capacity"):
-        publish(store, cache, generation(evidence, 2), first["id"])
+    result, observed = publish(store, cache, generation(evidence, 2), first["id"])
+    assert result["status"] == "full" and observed["status"] == "not_observed"
     assert store.path.read_bytes() == before
     assert len(list(cache.generations.iterdir())) == 1
     assert cache.lookup(first["scope"])["current_id"] == first["id"]
+
+
+def test_definite_conflict_preserves_capacity_for_corrected_cas_after_restart(
+    tmp_path: Path, evidence: Document,
+) -> None:
+    store, cache = fresh(tmp_path, count=1)
+    value = generation(evidence)
+    before = store.path.read_bytes()
+    result, observed = publish(store, cache, value, "f" * 64)
+    assert result["status"] == "conflict" and observed["status"] == "not_observed"
+    assert store.path.read_bytes() == before and not list(cache.generations.iterdir())
+    assert state(store)["generation_associations"]["records"] == []
+    assert publish(owner(tmp_path), cache, value)[0]["status"] == "published"
+    rows = state(store)["generation_associations"]["records"]
+    assert len(rows) == 1 and rows[0]["publication"] == "confirmed"
+    assert len(state(store)["conversations"]["records"][0]["events"]) == 1
 
 
 def test_conflict_unavailable_and_stale_observations_never_gain_confirmed_associations(
@@ -213,7 +229,7 @@ def test_conflict_unavailable_and_stale_observations_never_gain_confirmed_associ
     assert publish(store, cache, conflict, "f" * 64)[0]["status"] == "conflict"
     rows = state(store)["generation_associations"]["records"]
     assert [(row["generation_id"], row["publication"]) for row in rows] == [
-        (first["id"], "confirmed"), (conflict["id"], "pending"),
+        (first["id"], "confirmed"),
     ]
     assert len(list(cache.generations.iterdir())) == 1
 
@@ -256,7 +272,7 @@ def test_old_reader_and_foreign_cache_refuse_without_rewriting_original_state(
 def test_withdrawn_cache_checkpoint_preserves_pending_identity_without_publication(
     tmp_path: Path, evidence: Document, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    store, cache = fresh(tmp_path)
+    store, cache = fresh(tmp_path, count=1)
     original = watch_replay_store._atomic_write_json
 
     def withdrawn() -> None:
@@ -274,6 +290,10 @@ def test_withdrawn_cache_checkpoint_preserves_pending_identity_without_publicati
     assert pending["publication"] == "pending" and not list(cache.generations.iterdir())
     cache.checkpoint = None
     monkeypatch.setattr(watch_replay_store, "_atomic_write_json", original)
+    before = store.path.read_bytes()
+    with pytest.raises(ReplayStoreInvalid, match="association capacity"):
+        publish(store, cache, generation(evidence, 2))
+    assert store.path.read_bytes() == before and not list(cache.generations.iterdir())
     assert publish(owner(tmp_path), cache, value)[0]["status"] == "published"
     assert state(store)["generation_associations"]["records"][0]["cursor"] == pending["cursor"]
 
@@ -296,6 +316,6 @@ def test_concurrent_original_cas_admits_one_confirmed_publication(
         results = [future.result(timeout=3)[0] for future in futures]
     assert sorted(result["status"] for result in results) == ["conflict", "published"]
     rows = state(store)["generation_associations"]["records"]
-    assert sorted(row["publication"] for row in rows) == ["confirmed", "pending"]
+    assert [row["publication"] for row in rows] == ["confirmed"]
     assert len(state(store)["conversations"]["records"][0]["events"]) == 1
     assert len(list(cache.generations.iterdir())) == 1

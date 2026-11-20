@@ -322,7 +322,9 @@ Association must be durable before a generation is reported as successfully
 published under this profile. Reuse the existing ReplayStore-before-cache lock
 order, staged complete-envelope transaction and finite publication checkpoint;
 do not hold the cache lock while acquiring the replay lock. Validate and reserve
-bounded association capacity before cache IO. Failed, stale or conflicting
+bounded association capacity before cache writes, after the cache owner's
+guarded CAS/capacity admission. Definite conflicts or full-cache outcomes
+record no observation or new reservation. Failed, stale or conflicting
 observations and failed cache CAS must not create usable associations. An
 uncertain write remains uncertain until readback through those same owners;
 retry reconciles its original generation and observation rather than appending

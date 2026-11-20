@@ -23,6 +23,10 @@ _FIELDS = {
 }
 
 
+class _ObservationRefused(RuntimeError):
+    """A read-only observation refusal prevents the enclosing cache write."""
+
+
 def contract() -> Document:
     """Declare optional support from the executing core, independently of its build."""
     return {
@@ -138,7 +142,7 @@ def publish(
     owner: ReplayStore, cache: GenerationCache, generation: Document, *,
     expected_current: str | None, expires_at: int, checkpoint: Callable[[], None],
 ) -> tuple[Document, Document]:
-    """Reserve original observation custody before cache IO; confirm only real publication."""
+    """Reserve original custody after cache CAS admission but before its writes."""
     if not owner.workspace_generation_associations:
         raise ValueError("generation associations require explicit selection")
     _bound(owner, cache)
@@ -159,51 +163,65 @@ def publish(
             row["scope"] != scope or record is None or row["cursor"]["epoch"] != record["epoch"]
         ):
             raise ReplayStoreInvalid("generation belongs to a different original scope or epoch")
-        if row is not None and row["publication"] == "pending":
+        pending = row is not None and row["publication"] == "pending"
+        if pending and row is not None:
             if row["expected_current"] != expected_current:
                 raise ReplayStoreInvalid("uncertain generation publication requires its original CAS")
             if record is None or row["state"] != record["current"]["state"]:
                 raise ReplayStoreInvalid("original publication no longer has its observed state")
-            observation = {"status": "unchanged", "cursor": copy.deepcopy(row["cursor"])}
-        else:
-            observation = ConversationStore(owner)._observe_workspace(document, generation)
-            if observation["status"] not in ("observed", "unchanged"):
-                return {"status": "not_published", "effects": "none"}, observation
-            if row is not None and row["cursor"]["epoch"] != observation["cursor"]["epoch"]:
-                raise ReplayStoreInvalid("generation cannot be reassigned to a new observation epoch")
-            record = ConversationJournal(document["conversations"])._find(
-                conversation_key(scope, owner.namespace),
-            )
-            if record is None:
-                raise ReplayStoreInvalid("original generation observation unavailable")
-            if row is None:
-                if len(state["records"]) >= state["limits"]["max_generations"]:
-                    raise ReplayStoreInvalid("generation association capacity exhausted")
-                row = {
-                    "scope": copy.deepcopy(scope), "generation_id": generation["id"],
-                    "cursor": copy.deepcopy(observation["cursor"]),
-                    "observation_id": _digest(record["current"]),
-                    "complete": record["current"]["complete"],
-                    "state": record["current"]["state"],
-                    "expected_current": expected_current, "publication": "pending",
-                }
-                state["records"].append(row)
-                commit()
+        observation: Document = {
+            "status": "not_observed", "reason": "cache_publication_not_confirmed",
+        }
         current = cache.lookup(scope)["current_id"]
         # A lost pointer result can be re-acknowledged, never promoted over a newer pointer.
         expected = (
-            generation["id"] if row["expected_current"] == expected_current and current == generation["id"]
+            generation["id"] if row is not None and row["expected_current"] == expected_current
+            and current == generation["id"]
             else expected_current
         )
-        if row["publication"] == "pending" and record is not None and (
+        if pending and row is not None and record is not None and (
             row["cursor"] != {"epoch": record["epoch"], "sequence": record["sequence"]}
             and current != generation["id"]
         ):
             return {"status": "not_published", "effects": "none"}, {
                 "status": "unavailable", "reason": "original_publication_no_longer_current",
             }
-        publication = cache.publish(generation, expected_current=expected)
+        def reserve() -> None:
+            nonlocal row, observation
+            if pending and row is not None:
+                observation = {"status": "unchanged", "cursor": copy.deepcopy(row["cursor"])}
+                return
+            observation = ConversationStore(owner)._observe_workspace(document, generation)
+            if observation["status"] not in ("observed", "unchanged"):
+                raise _ObservationRefused
+            if row is not None and row["cursor"]["epoch"] != observation["cursor"]["epoch"]:
+                raise ReplayStoreInvalid("generation cannot be reassigned to a new observation epoch")
+            if row is None:
+                if len(state["records"]) >= state["limits"]["max_generations"]:
+                    raise ReplayStoreInvalid("generation association capacity exhausted")
+                original = ConversationJournal(document["conversations"])._find(
+                    conversation_key(scope, owner.namespace),
+                )
+                if original is None:
+                    raise ReplayStoreInvalid("original generation observation unavailable")
+                row = {
+                    "scope": copy.deepcopy(scope), "generation_id": generation["id"],
+                    "cursor": copy.deepcopy(observation["cursor"]),
+                    "observation_id": _digest(original["current"]),
+                    "complete": original["current"]["complete"],
+                    "state": original["current"]["state"],
+                    "expected_current": expected_current, "publication": "pending",
+                }
+                state["records"].append(row)
+                commit()
+
+        try:
+            publication = cache.publish(generation, expected_current=expected, before_write=reserve)
+        except _ObservationRefused:
+            return {"status": "not_published", "effects": "none"}, observation
         if publication["status"] == "published":
+            if row is None:
+                raise ReplayStoreInvalid("publication has no original generation reservation")
             row["publication"] = "confirmed"
         return publication, observation
 

@@ -349,8 +349,10 @@ Omitting the field retains the existing workspace behavior and wire contract.
 This profile cannot compose with terminal reads, preparation or comment
 mappings.
 
-The existing service writer lease and ReplayStore reserve body-free original
-generation/scope/observation/cursor identities before cache publication.
+The existing cache owner rejects definite CAS conflicts and full-cache outcomes
+before recording an observation or reservation. After that guarded admission,
+the service writer and ReplayStore reserve body-free original
+generation/scope/observation/cursor identities before cache writes.
 Only confirmed publication marks an association confirmed. Distinct immutable
 generations retain separate identities even when their rounded observations
 share a journal cursor. Cache objects, digest inputs and pointer formats do
