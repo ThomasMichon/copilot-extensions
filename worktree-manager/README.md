@@ -67,6 +67,18 @@ remain active. Installer readiness and background service deadlines are unchange
 
 ## Prepared application installation
 
+To inspect what a particular worktree needs, invoke
+`python -m worktree_manager.repository_suite_roster` with the staged Manager's
+Python. `--worktree` selects the checkout with the composed plugin settings;
+`--source` selects the promoted suite folder. Both paths must be absolute.
+Supply the repository owner's ordered `--gate-path` candidates, or `--no-gate`
+when the owner established there is no gate. `--machine` accepts the qualified
+execution and physical machine names. `--index-role` and `--vault-state` carry
+the app owners' observations, not requests to enable them. The JSON result
+distinguishes required runtimes, payload-only plugins, exclusions and missing
+policy observations. An incomplete result exits 2 and is not an install list.
+This operation reads metadata only; it does not fetch, install or activate.
+
 `worktree-manager-install FOOTPRINT` is Manager's finite, noninteractive
 frontdoor for an already prepared application footprint. It is separate from
 the interactive/operational command entry and does not discover, repair, import
