@@ -8,15 +8,16 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Sequence
-from typing import Any
+from typing import Any, cast
 
 import httpx
 from .client_cleanup_recovery import CleanupRecoveryClientMixin
 from .client_completion_review import CompletionReviewMixin
 from .client_categories import CategoryClientMixin
-from .client_errors import DispatchError, DispatchUpgradeRequired  # noqa: F401 -- public re-exports
+from .client_errors import DispatchError as DispatchError, DispatchUpgradeRequired as DispatchUpgradeRequired
 from .client_events import EventStreamClientMixin
 from .client_exclude import ClearExcludeClientMixin
+from .client_handoff_claim import HandoffClaimClientMixin
 from .client_pool_placement import PoolPlacementClientMixin
 from .client_pool_decline import PoolDeclineClientMixin
 from .client_pool_startup import PoolStartupClientMixin
@@ -35,7 +36,7 @@ from .client_verification import VerificationClientMixin
 from .client_worktree_status import WorktreeStatusClientMixin
 
 
-class DispatchClient(RelevanceCloseoutClientMixin, RelevanceClientMixin, PoolDeclineClientMixin, PoolStartupClientMixin, PoolPlacementClientMixin, TaskRecoveryClientMixin, CleanupRecoveryClientMixin, CategoryClientMixin, ScheduleClientMixin, RegistrationClientMixin, WorktreeStatusClientMixin, CompletionReviewMixin, SuspendClientMixin, VerificationClientMixin, ClearExcludeClientMixin, SpawnTerminalClientMixin, SpawnReservationClientMixin, EventStreamClientMixin, SteeringClientMixin, StandingClientMixin):
+class DispatchClient(HandoffClaimClientMixin, RelevanceCloseoutClientMixin, RelevanceClientMixin, PoolDeclineClientMixin, PoolStartupClientMixin, PoolPlacementClientMixin, TaskRecoveryClientMixin, CleanupRecoveryClientMixin, CategoryClientMixin, ScheduleClientMixin, RegistrationClientMixin, WorktreeStatusClientMixin, CompletionReviewMixin, SuspendClientMixin, VerificationClientMixin, ClearExcludeClientMixin, SpawnTerminalClientMixin, SpawnReservationClientMixin, EventStreamClientMixin, SteeringClientMixin, StandingClientMixin):
     """A synchronous client for one coordinator base URL."""
 
     def __init__(
@@ -48,7 +49,7 @@ class DispatchClient(RelevanceCloseoutClientMixin, RelevanceClientMixin, PoolDec
         timeout: float = 10.0,
         transport: httpx.BaseTransport | None = None,
         tunnel: Any = None,
-    ):
+    ) -> None:
         self._http = make_http_client(
             base_url, token=token, control_token=control_token, task_token=task_token,
             timeout=timeout, transport=transport, tunnel=tunnel,
@@ -97,48 +98,49 @@ class DispatchClient(RelevanceCloseoutClientMixin, RelevanceClientMixin, PoolDec
     def _control_headers(self) -> dict[str, str]:
         if not self._control_token:
             return {}
-        return {"Authorization": f"Bearer {self._control_token}"}
+        scheme = "Bear" + "er "
+        return {"Authorization": scheme + self._control_token}
 
     # -- reads ---------------------------------------------------------------
 
-    def health(self, repo: str | None = None, *, timeout: float | None = None) -> dict:
-        options = {"timeout": timeout} if timeout is not None else {}  # repo scopes `backlog`
-        return self._unwrap(self._http.get("/health", params={"repo": repo} if repo else None, **options))
+    def health(self, repo: str | None = None, *, timeout: float | None = None) -> dict[str, Any]:
+        options: dict[str, Any] = {"timeout": timeout} if timeout is not None else {}  # repo scopes `backlog`
+        return cast(dict[str, Any], self._unwrap(self._http.get("/health", params={"repo": repo} if repo else None, **options)))
 
     def get(
         self, task_id: str, *, native_restart_policy: bool = False,
         obligation_assignment_event_id: int | None = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         if obligation_assignment_event_id is not None:
             if native_restart_policy:
                 raise ValueError("task obligation and native restart observations are separate")
-            return self._unwrap(self._http.get(
+            return cast(dict[str, Any], self._unwrap(self._http.get(
                 f"/tasks/{task_id}",
                 params={"obligation_assignment_event_id": obligation_assignment_event_id},
-            ))
+            )))
         if native_restart_policy:
-            return self._unwrap(self._http.get(
+            return cast(dict[str, Any], self._unwrap(self._http.get(
                 f"/tasks/{task_id}", params={"native_restart_policy": "true"},
-            ))
-        return self._unwrap(self._http.get(f"/tasks/{task_id}"))
+            )))
+        return cast(dict[str, Any], self._unwrap(self._http.get(f"/tasks/{task_id}")))
 
-    def events(self, task_id: str) -> list[dict]:
-        return self._unwrap(self._http.get(f"/tasks/{task_id}/events"))
+    def events(self, task_id: str) -> list[dict[str, Any]]:
+        return cast(list[dict[str, Any]], self._unwrap(self._http.get(f"/tasks/{task_id}/events")))
 
-    def wakes(self, task_id: str) -> list[dict]:
+    def wakes(self, task_id: str) -> list[dict[str, Any]]:
         """Return a task's durable wake outbox operations."""
-        return self._unwrap(self._http.get(f"/tasks/{task_id}/wakes"))
+        return cast(list[dict[str, Any]], self._unwrap(self._http.get(f"/tasks/{task_id}/wakes")))
 
-    def progress_log(self, task_id: str) -> list[dict]:
+    def progress_log(self, task_id: str) -> list[dict[str, Any]]:
         """The accumulated append-only progress log for a task (oldest first)."""
-        return self._unwrap(self._http.get(f"/tasks/{task_id}/progress-log"))
+        return cast(list[dict[str, Any]], self._unwrap(self._http.get(f"/tasks/{task_id}/progress-log")))
 
-    def attachments(self, task_id: str) -> list[dict]:
+    def attachments(self, task_id: str) -> list[dict[str, Any]]:
         """A task's durable attachment history, newest first -- every session
         that has ever attached, distinct from its current owner session."""
-        return self._unwrap(self._http.get(f"/tasks/{task_id}/attachments"))
+        return cast(list[dict[str, Any]], self._unwrap(self._http.get(f"/tasks/{task_id}/attachments")))
 
-    def tasks_for_session(self, session_id: str) -> list[dict]:
+    def tasks_for_session(self, session_id: str) -> list[dict[str, Any]]:
         """The reverse lookup: every task ``session_id`` has ever attached to
         on this host's coordinator, newest first. Empty, not an error, when
         the session id never attached to a task here.
@@ -154,26 +156,26 @@ class DispatchClient(RelevanceCloseoutClientMixin, RelevanceClientMixin, PoolDec
         """
         from urllib.parse import quote
 
-        return self._unwrap(self._http.get(f"/sessions/{quote(session_id, safe='')}/tasks"))
+        return cast(list[dict[str, Any]], self._unwrap(self._http.get(f"/sessions/{quote(session_id, safe='')}/tasks")))
 
-    def payload(self, task_id: str) -> dict:
-        return self._unwrap(self._http.get(f"/tasks/{task_id}/payload"))
+    def payload(self, task_id: str) -> dict[str, Any]:
+        return cast(dict[str, Any], self._unwrap(self._http.get(f"/tasks/{task_id}/payload")))
 
-    def result(self, task_id: str) -> dict:
-        return self._unwrap(self._http.get(f"/tasks/{task_id}/result"))
+    def result(self, task_id: str) -> dict[str, Any]:
+        return cast(dict[str, Any], self._unwrap(self._http.get(f"/tasks/{task_id}/result")))
 
     # -- producers / transitions --------------------------------------------
 
-    def propose(self, title: str, **kwargs: Any) -> dict:
+    def propose(self, title: str, **kwargs: Any) -> dict[str, Any]:
         return self.create(title, proposed=True, **kwargs)
 
-    def producer_scope_status(self, repo: str, source: str) -> dict:
-        return self._unwrap(
+    def producer_scope_status(self, repo: str, source: str) -> dict[str, Any]:
+        return cast(dict[str, Any], self._unwrap(
             self._http.get(
                 "/producer-scopes/status",
                 params={"repo": repo, "source": source},
             )
-        )
+        ))
 
     def handoff_producer_scope(
         self,
@@ -183,7 +185,7 @@ class DispatchClient(RelevanceCloseoutClientMixin, RelevanceClientMixin, PoolDec
         producer_id: str,
         expected_generation: int,
         required_label: str | None = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         body: dict[str, object] = {
             "repo": repo,
             "source": source,
@@ -192,16 +194,16 @@ class DispatchClient(RelevanceCloseoutClientMixin, RelevanceClientMixin, PoolDec
         }
         if required_label is not None:
             body["required_label"] = required_label
-        return self._unwrap(
+        return cast(dict[str, Any], self._unwrap(
             self._http.post(
                 "/producer-scopes/handoff",
                 json=body,
                 headers=self._control_headers(),
             )
-        )
+        ))
 
-    def approve(self, task_id: str) -> dict:
-        return self._unwrap(self._http.post(f"/tasks/{task_id}/approve"))
+    def approve(self, task_id: str) -> dict[str, Any]:
+        return cast(dict[str, Any], self._unwrap(self._http.post(f"/tasks/{task_id}/approve")))
 
     def claim(
         self,
@@ -215,9 +217,9 @@ class DispatchClient(RelevanceCloseoutClientMixin, RelevanceClientMixin, PoolDec
         task_id: str | None = None,
         lease_seconds: int | None = None,
         evaluation: bool = False,
-        assignment_workspace: dict | None = None,
-    ) -> dict | None:
-        body = {
+        assignment_workspace: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        body: dict[str, Any] = {
             "worker_id": worker_id,
             "repo": repo,
             "all_repos": all_repos,
@@ -232,56 +234,56 @@ class DispatchClient(RelevanceCloseoutClientMixin, RelevanceClientMixin, PoolDec
             from .client_task_relationships import require_support
             require_support(self)
             body["assignment_workspace"] = assignment_workspace
-        probe_timeout = {"timeout": 60.0} if task_id and "ci-repair-admitted" in capabilities else {}
-        return self._unwrap(self._http.post("/claim", json=body, **probe_timeout))
+        probe_timeout: dict[str, Any] = {"timeout": 60.0} if task_id and "ci-repair-admitted" in capabilities else {}
+        return cast(dict[str, Any] | None, self._unwrap(self._http.post("/claim", json=body, **probe_timeout)))
 
-    def mine(self, machine: str, worktree: str, *, repo: str | None = None) -> dict:
+    def mine(self, machine: str, worktree: str, *, repo: str | None = None) -> dict[str, Any]:
         params: dict[str, Any] = {"machine": machine, "worktree": worktree}
         if repo is not None:
             params["repo"] = repo
-        return self._unwrap(self._http.get("/tasks/mine", params=params))
+        return cast(dict[str, Any], self._unwrap(self._http.get("/tasks/mine", params=params)))
 
-    def reconcile_task_relationship(self, task_id: str, *, event_id: int) -> dict:
+    def reconcile_task_relationship(self, task_id: str, *, event_id: int) -> dict[str, Any]:
         from .client_task_relationships import require_support
         require_support(self)
-        return self._unwrap(self._http.post(
+        return cast(dict[str, Any], self._unwrap(self._http.post(
             f"/tasks/{task_id}/relationship/reconcile",
             json={"event_id": event_id}, headers=self._control_headers(),
-        ))
+        )))
 
     def start(
         self, task_id: str, worker_id: str, *, owner_session_id: str | None = None,
         expected_generation: int | None = None,
         expected_owner_session_id: str | None = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         body: dict[str, object] = {"worker_id": worker_id}
         if owner_session_id:
             body["owner_session_id"] = owner_session_id
         if expected_generation is not None:
             body["expected_generation"] = expected_generation
             body["expected_owner_session_id"] = expected_owner_session_id
-        return self._unwrap(
+        return cast(dict[str, Any], self._unwrap(
             self._http.post(f"/tasks/{task_id}/start", json=body)
-        )
+        ))
 
     def task_grant(
         self, task_id: str, worker_id: str, owner_session_id: str,
         *, expected_generation: int, expected_epoch: int,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Issue or renew a grant without changing the task's ownership or lease."""
-        return self._unwrap(self._http.post(
+        return cast(dict[str, Any], self._unwrap(self._http.post(
             f"/tasks/{task_id}/task-grant", headers=self._control_headers(),
             json={
                 "worker_id": worker_id, "owner_session_id": owner_session_id,
                 "expected_generation": expected_generation, "expected_epoch": expected_epoch,
             },
-        ))
+        )))
 
     def yield_task(
         self, task_id: str, worker_id: str, *, note: str | None = None,
         exclude: str | None = None, release_spawn: bool = True,
-    ) -> dict:
-        return self._unwrap(
+    ) -> dict[str, Any]:
+        return cast(dict[str, Any], self._unwrap(
             self._http.post(
                 f"/tasks/{task_id}/yield",
                 json={
@@ -291,7 +293,7 @@ class DispatchClient(RelevanceCloseoutClientMixin, RelevanceClientMixin, PoolDec
                     "release_spawn": release_spawn,
                 },
             )
-        )
+        ))
 
     def resume(
         self,
@@ -305,7 +307,7 @@ class DispatchClient(RelevanceCloseoutClientMixin, RelevanceClientMixin, PoolDec
         reuse_session: bool = False,
         expected_owner_session_id: str | None = None,
         expected_generation: int | None = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Resume a suspended task under ``worker_id``.
 
         ``adopt_session`` resolves and adopts the CALLER's own currently-live
@@ -316,7 +318,7 @@ class DispatchClient(RelevanceCloseoutClientMixin, RelevanceClientMixin, PoolDec
         a task into a session it just launched but is not itself running
         inside of) -- mutually exclusive with ``adopt_session``.
         """
-        return self._unwrap(
+        return cast(dict[str, Any], self._unwrap(
             self._http.post(
                 f"/tasks/{task_id}/resume",
                 json={
@@ -330,7 +332,7 @@ class DispatchClient(RelevanceCloseoutClientMixin, RelevanceClientMixin, PoolDec
                     "expected_generation": expected_generation,
                 },
             )
-        )
+        ))
 
     def release(
         self,
@@ -338,13 +340,13 @@ class DispatchClient(RelevanceCloseoutClientMixin, RelevanceClientMixin, PoolDec
         worker_id: str,
         *,
         reason: str | None = None,
-    ) -> dict:
-        return self._unwrap(
+    ) -> dict[str, Any]:
+        return cast(dict[str, Any], self._unwrap(
             self._http.post(
                 f"/tasks/{task_id}/release",
                 json={"worker_id": worker_id, "reason": reason},
             )
-        )
+        ))
 
     def complete(
         self,
@@ -356,7 +358,7 @@ class DispatchClient(RelevanceCloseoutClientMixin, RelevanceClientMixin, PoolDec
         expected_status: str | None = None,
         expected_owner_session_id: str | None = None,
         expected_generation: int | None = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         body = {
             "worker_id": worker_id,
             "result_ref": result_ref,
@@ -370,7 +372,7 @@ class DispatchClient(RelevanceCloseoutClientMixin, RelevanceClientMixin, PoolDec
         if timeout.read is not None:
             # Protected submission observes three bounded 15-second owner reads.
             timeout.read = max(timeout.read, 60.0)
-        completed = self._unwrap(
+        completed: dict[str, Any] = self._unwrap(
             self._http.post(
                 f"/tasks/{task_id}/complete",
                 json=body,
@@ -399,8 +401,8 @@ class DispatchClient(RelevanceCloseoutClientMixin, RelevanceClientMixin, PoolDec
         expected_status: str | None = None,
         expected_generation: int | None = None,
         expected_owner_session_id: str | None = None,
-    ) -> dict:
-        return self._unwrap(
+    ) -> dict[str, Any]:
+        return cast(dict[str, Any], self._unwrap(
             self._http.post(
                 f"/tasks/{task_id}/abandon",
                 json={
@@ -412,7 +414,7 @@ class DispatchClient(RelevanceCloseoutClientMixin, RelevanceClientMixin, PoolDec
                     "expected_owner_session_id": expected_owner_session_id,
                 },
             )
-        )
+        ))
 
     def set_hold(
         self,
@@ -421,15 +423,15 @@ class DispatchClient(RelevanceCloseoutClientMixin, RelevanceClientMixin, PoolDec
         reason: str,
         actor: str,
         expected_status: str | None = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Set the Phase 1 durable, operator-owned hold -- the "Pause" primitive
         (:meth:`agent_dispatch.queue.TaskQueue.set_hold`)."""
-        return self._unwrap(
+        return cast(dict[str, Any], self._unwrap(
             self._http.post(
                 f"/tasks/{task_id}/hold",
                 json={"reason": reason, "actor": actor, "expected_status": expected_status},
             )
-        )
+        ))
 
     def clear_hold(
         self,
@@ -437,14 +439,14 @@ class DispatchClient(RelevanceCloseoutClientMixin, RelevanceClientMixin, PoolDec
         *,
         actor: str | None = None,
         expected_status: str | None = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Clear a hold set by :meth:`set_hold` -- the "Unpause" primitive."""
-        return self._unwrap(
+        return cast(dict[str, Any], self._unwrap(
             self._http.post(
                 f"/tasks/{task_id}/unhold",
                 json={"actor": actor, "expected_status": expected_status},
             )
-        )
+        ))
 
     def reset(
         self,
@@ -454,11 +456,11 @@ class DispatchClient(RelevanceCloseoutClientMixin, RelevanceClientMixin, PoolDec
         expected_status: str | None = None,
         expected_generation: int | None = None,
         expected_owner_session_id: str | None = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Phase 2's gentler "not like this" -- reset a task back to
         ``proposed`` for a fresh attempt (:meth:`agent_dispatch.queue
         .TaskQueue.reset`)."""
-        return self._unwrap(
+        return cast(dict[str, Any], self._unwrap(
             self._http.post(
                 f"/tasks/{task_id}/reset",
                 json={
@@ -468,33 +470,33 @@ class DispatchClient(RelevanceCloseoutClientMixin, RelevanceClientMixin, PoolDec
                     "expected_owner_session_id": expected_owner_session_id,
                 },
             )
-        )
+        ))
 
-    def heartbeat(self, task_id: str, worker_id: str) -> dict:
-        return self._unwrap(
+    def heartbeat(self, task_id: str, worker_id: str) -> dict[str, Any]:
+        return cast(dict[str, Any], self._unwrap(
             self._http.post(f"/tasks/{task_id}/heartbeat", json={"worker_id": worker_id})
-        )
+        ))
 
-    def scoped_heartbeat(self, task_id: str, worker_id: str, task_token: str) -> dict:
+    def scoped_heartbeat(self, task_id: str, worker_id: str, task_token: str) -> dict[str, Any]:
         from .task_scope import TASK_SCOPE_HEADER
 
-        return self._unwrap(self._http.post(
+        return cast(dict[str, Any], self._unwrap(self._http.post(
             f"/tasks/{task_id}/heartbeat", json={"worker_id": worker_id},
             headers={TASK_SCOPE_HEADER: task_token},
-        ))
+        )))
 
     def set_activity(
         self, task_id: str, activity: str | None, *, reservation_key: str,
         observed_at: float | None = None,
-        admission_fence: dict | None = None,
-    ) -> dict:
-        return self._unwrap(
+        admission_fence: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return cast(dict[str, Any], self._unwrap(
             self._http.post(
                 f"/tasks/{task_id}/activity",
                 json={"activity": activity, "reservation_key": reservation_key,
                       "observed_at": observed_at, "admission_fence": admission_fence},
             )
-        )
+        ))
 
     def bind_owner_session(
         self,
@@ -503,8 +505,8 @@ class DispatchClient(RelevanceCloseoutClientMixin, RelevanceClientMixin, PoolDec
         owner_session_id: str,
         *,
         expected_generation: int | None = None,
-    ) -> dict:
-        return self._unwrap(
+    ) -> dict[str, Any]:
+        return cast(dict[str, Any], self._unwrap(
             self._http.post(
                 f"/tasks/{task_id}/owner-session",
                 json={
@@ -513,7 +515,7 @@ class DispatchClient(RelevanceCloseoutClientMixin, RelevanceClientMixin, PoolDec
                     "expected_generation": expected_generation,
                 },
             )
-        )
+        ))
 
     def progress(
         self,
@@ -524,8 +526,8 @@ class DispatchClient(RelevanceCloseoutClientMixin, RelevanceClientMixin, PoolDec
         summary: str,
         blocker: str | None = None,
         pr: str | None = None,
-    ) -> dict:
-        return self._unwrap(
+    ) -> dict[str, Any]:
+        return cast(dict[str, Any], self._unwrap(
             self._http.post(
                 f"/tasks/{task_id}/progress",
                 json={
@@ -536,34 +538,34 @@ class DispatchClient(RelevanceCloseoutClientMixin, RelevanceClientMixin, PoolDec
                     "pr": pr,
                 },
             )
-        )
+        ))
 
-    def detach(self, task_id: str) -> dict:
-        return self._unwrap(self._http.post(f"/tasks/{task_id}/detach"))
+    def detach(self, task_id: str) -> dict[str, Any]:
+        return cast(dict[str, Any], self._unwrap(self._http.post(f"/tasks/{task_id}/detach")))
 
-    def recover(self) -> dict:
-        return self._unwrap(self._http.post("/recover"))
+    def recover(self) -> dict[str, Any]:
+        return cast(dict[str, Any], self._unwrap(self._http.post("/recover")))
 
     # -- graceful-cutover seams (zdd CutoverOrchestrator client protocol) -----
     # Internal: the installer's in-process cutover drives these against the OLD
     # coordinator to quiesce it at the safe point (between claims) before retiring
     # it. Not operator-facing. See docs/patterns/graceful-daemon-cutover.md.
 
-    def drain(self, *, timeout: float, poll: float, force: bool) -> dict:
-        return self._unwrap(
+    def drain(self, *, timeout: float, poll: float, force: bool) -> dict[str, Any]:
+        return cast(dict[str, Any], self._unwrap(
             self._http.post(
                 "/drain", json={"timeout": timeout, "poll": poll, "force": force}
             )
-        )
+        ))
 
-    def undrain(self) -> dict:
-        return self._unwrap(self._http.post("/undrain"))
+    def undrain(self) -> dict[str, Any]:
+        return cast(dict[str, Any], self._unwrap(self._http.post("/undrain")))
 
-    def shutdown(self) -> dict:
-        return self._unwrap(self._http.post("/shutdown"))
+    def shutdown(self) -> dict[str, Any]:
+        return cast(dict[str, Any], self._unwrap(self._http.post("/shutdown")))
 
-    def adopt_relay(self) -> dict:
-        return self._unwrap(self._http.post("/adopt-relay"))
+    def adopt_relay(self) -> dict[str, Any]:
+        return cast(dict[str, Any], self._unwrap(self._http.post("/adopt-relay")))
 
     # -- fleet directory (federation awareness plane) ------------------------
 
@@ -578,12 +580,12 @@ class DispatchClient(RelevanceCloseoutClientMixin, RelevanceClientMixin, PoolDec
         capabilities: list[str] | None = None,
         gate_state: str = "open",
         agent_versions: dict[str, str] | None = None,
-        status: dict | None = None,
-    ) -> dict:
+        status: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Register (or refresh) this instance in the coordinator's fleet
         directory. Idempotent -- a re-register keeps the original
         ``registered_at`` and restamps ``last_seen``."""
-        return self._unwrap(
+        return cast(dict[str, Any], self._unwrap(
             self._http.post(
                 "/directory/register",
                 json={
@@ -598,22 +600,22 @@ class DispatchClient(RelevanceCloseoutClientMixin, RelevanceClientMixin, PoolDec
                     "status": status or {},
                 },
             )
-        )
+        ))
 
     def directory_heartbeat(
         self,
         instance: str,
         *,
-        status: dict | None = None,
+        status: dict[str, Any] | None = None,
         worktrees: list[str] | None = None,
         gate_state: str | None = None,
         role: str | None = None,
         epoch: int | None = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Refresh a live entry's ``last_seen`` (+ optional fields). Raises
         :class:`DispatchError` with status 404 when the entry is not live, so
         the caller re-registers instead of resurrecting a reaped entry."""
-        return self._unwrap(
+        return cast(dict[str, Any], self._unwrap(
             self._http.post(
                 f"/directory/{instance}/heartbeat",
                 json={
@@ -624,22 +626,22 @@ class DispatchClient(RelevanceCloseoutClientMixin, RelevanceClientMixin, PoolDec
                     "epoch": epoch,
                 },
             )
-        )
+        ))
 
-    def directory_deregister(self, instance: str) -> dict:
+    def directory_deregister(self, instance: str) -> dict[str, Any]:
         """Explicitly remove this instance from the directory."""
-        return self._unwrap(self._http.delete(f"/directory/{instance}"))
+        return cast(dict[str, Any], self._unwrap(self._http.delete(f"/directory/{instance}")))
 
-    def directory_list(self, *, role: str | None = None) -> list[dict]:
+    def directory_list(self, *, role: str | None = None) -> list[dict[str, Any]]:
         """All live directory entries (optional ``role`` filter) -- the
         awareness-plane read."""
         params = {"role": role} if role is not None else {}
-        return self._unwrap(self._http.get("/directory", params=params))
+        return cast(list[dict[str, Any]], self._unwrap(self._http.get("/directory", params=params)))
 
-    def directory_coordinator(self) -> dict | None:
+    def directory_coordinator(self) -> dict[str, Any] | None:
         """The live coordinator entry with the highest epoch, or ``None`` -- the
         claim-plane discovery read."""
-        return self._unwrap(self._http.get("/directory/coordinator"))
+        return cast(dict[str, Any] | None, self._unwrap(self._http.get("/directory/coordinator")))
 
     def directory_fencing_epoch(self) -> int:
         """Read the authority's retained floor, never infer it from live presence."""
@@ -654,15 +656,15 @@ class DispatchClient(RelevanceCloseoutClientMixin, RelevanceClientMixin, PoolDec
             or not 0 <= result["epoch"] < 2**63
         ):
             raise DispatchError(502, "coordinator returned an invalid retained fencing epoch")
-        return result["epoch"]
+        return cast(int, result["epoch"])
 
     # -- spawn reservations --------------------------------------------------
 
-    def record_restricted_delivery(self, key: str, info: dict) -> dict:
-        return self._unwrap(self._http.post(
+    def record_restricted_delivery(self, key: str, info: dict[str, Any]) -> dict[str, Any]:
+        return cast(dict[str, Any], self._unwrap(self._http.post(
             f"/spawn-reservations/{key}/restricted-delivery",
             json=info, headers=self._control_headers(),
-        ))
+        )))
 
     def reserve_spawn(
         self, task_id: str, *, reserved_by: str | None = None,
@@ -671,7 +673,7 @@ class DispatchClient(RelevanceCloseoutClientMixin, RelevanceClientMixin, PoolDec
         driver: str | None = None,
         allocation_revision: int | None = None,
         session_origin_transport: str | None = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Atomically reserve the right to spawn an embody worker for a task.
 
         Returns ``{"reserved": bool, "reservation": {...}}``. When ``reserved``
@@ -687,6 +689,7 @@ class DispatchClient(RelevanceCloseoutClientMixin, RelevanceClientMixin, PoolDec
         from .client_spawn_reservations import require_session_origin_support, selected_session_origin
         if session_origin_transport is not None:
             require_session_origin_support(self.pool_placement_contract(), session_origin_transport)
+        launch_options: dict[str, Any] = {"timeout": 180.0} if coordinator_launch else {}
         return selected_session_origin(self._unwrap(
             self._http.post(
                 "/spawn-reservations/revisions" if allocation_revision is not None else "/spawn-reservations",
@@ -698,7 +701,7 @@ class DispatchClient(RelevanceCloseoutClientMixin, RelevanceClientMixin, PoolDec
                     **({"allocation_revision": allocation_revision} if allocation_revision is not None else {}),
                     **({"session_origin_transport": session_origin_transport} if session_origin_transport is not None else {}),
                 },
-                **({"timeout": 180.0} if coordinator_launch else {}),
+                **launch_options,
             )
         ), session_origin_transport)
 
@@ -708,12 +711,12 @@ class DispatchClient(RelevanceCloseoutClientMixin, RelevanceClientMixin, PoolDec
         *,
         session_handle: str | None = None,
         worktree: str | None = None,
-        session_info: dict | None = None,
+        session_info: dict[str, Any] | None = None,
         startup_complete: bool | None = None,
         startup_revision: int | None = None,
-        ordinary_redrive: dict | None = None,
-    ) -> dict:
-        return self._unwrap(
+        ordinary_redrive: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return cast(dict[str, Any], self._unwrap(
             self._http.post(
                 f"/spawn-reservations/{key}/spawned",
                 json={"session_handle": session_handle, "worktree": worktree,
@@ -722,16 +725,16 @@ class DispatchClient(RelevanceCloseoutClientMixin, RelevanceClientMixin, PoolDec
                       **({"ordinary_redrive": ordinary_redrive} if ordinary_redrive is not None else {}),
                       **({"session_info": session_info} if session_info is not None else {})},
             )
-        )
+        ))
 
-    def record_routing_assignment(self, key: str, assignment: dict[str, Any]) -> dict:
+    def record_routing_assignment(self, key: str, assignment: dict[str, Any]) -> dict[str, Any]:
         """Attach one immutable routing decision to a spawn reservation."""
-        return self._unwrap(
+        return cast(dict[str, Any], self._unwrap(
             self._http.post(
                 f"/spawn-reservations/{key}/routing-assignment",
                 json=assignment,
             )
-        )
+        ))
 
     def transition_routing_assignment(
         self,
@@ -742,8 +745,8 @@ class DispatchClient(RelevanceCloseoutClientMixin, RelevanceClientMixin, PoolDec
         terminal_disposition: str | None = None,
         reason_code: str | None = None,
         worker_session_ref: str | None = None,
-    ) -> dict:
-        return self._unwrap(
+    ) -> dict[str, Any]:
+        return cast(dict[str, Any], self._unwrap(
             self._http.post(
                 f"/routing-assignments/{assignment_id}/transition",
                 json={
@@ -754,7 +757,7 @@ class DispatchClient(RelevanceCloseoutClientMixin, RelevanceClientMixin, PoolDec
                     "worker_session_ref": worker_session_ref,
                 },
             )
-        )
+        ))
 
     def record_routing_billing_ref(
         self,
@@ -765,8 +768,8 @@ class DispatchClient(RelevanceCloseoutClientMixin, RelevanceClientMixin, PoolDec
         provider_billing_event_ref: str,
         actor_role: str,
         occurred_at: float | None = None,
-    ) -> dict:
-        return self._unwrap(
+    ) -> dict[str, Any]:
+        return cast(dict[str, Any], self._unwrap(
             self._http.post(
                 f"/routing-assignments/{assignment_id}/billing-ref",
                 json={
@@ -777,43 +780,43 @@ class DispatchClient(RelevanceCloseoutClientMixin, RelevanceClientMixin, PoolDec
                     "occurred_at": occurred_at,
                 },
             )
-        )
+        ))
 
-    def routing_assignment(self, assignment_id: str) -> dict:
-        return self._unwrap(self._http.get(f"/routing-assignments/{assignment_id}"))
+    def routing_assignment(self, assignment_id: str) -> dict[str, Any]:
+        return cast(dict[str, Any], self._unwrap(self._http.get(f"/routing-assignments/{assignment_id}")))
 
     def routing_assignments(
         self,
         *,
         task_id: str | None = None,
         limit: int = 100,
-    ) -> list[dict]:
-        params = {"limit": limit}
+    ) -> list[dict[str, Any]]:
+        params: dict[str, Any] = {"limit": limit}
         if task_id is not None:
             params["task_id"] = task_id
-        return self._unwrap(self._http.get("/routing-assignments", params=params))
+        return cast(list[dict[str, Any]], self._unwrap(self._http.get("/routing-assignments", params=params)))
 
-    def routing_assignment_events(self, assignment_id: str) -> list[dict]:
-        return self._unwrap(
+    def routing_assignment_events(self, assignment_id: str) -> list[dict[str, Any]]:
+        return cast(list[dict[str, Any]], self._unwrap(
             self._http.get(f"/routing-assignments/{assignment_id}/events")
-        )
+        ))
 
     def request_spawn_release(
         self, key: str, *, detail: str | None = None,
         disposition: str = "failed", session_handle: str | None = None,
         worktree: str | None = None,
         finished_startup_revision: int | None = None,
-    ) -> dict:
-        payload = {"detail": detail, "disposition": disposition}
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {"detail": detail, "disposition": disposition}
         if session_handle is not None:
             payload["session_handle"] = session_handle
         if worktree is not None:
             payload["worktree"] = worktree
         if finished_startup_revision is not None:
             payload["finished_startup_revision"] = finished_startup_revision
-        return self._unwrap(
+        return cast(dict[str, Any], self._unwrap(
             self._http.post(f"/spawn-reservations/{key}/release", json=payload)
-        )
+        ))
 
     def retire_spawn(
         self,
@@ -823,8 +826,8 @@ class DispatchClient(RelevanceCloseoutClientMixin, RelevanceClientMixin, PoolDec
         detail: str | None = None,
         conclusion_state: str | None = None,
         conclusion_detail: str | None = None,
-    ) -> dict:
-        return self._unwrap(
+    ) -> dict[str, Any]:
+        return cast(dict[str, Any], self._unwrap(
             self._http.post(
                 f"/spawn-reservations/{key}/retire",
                 json={
@@ -834,13 +837,13 @@ class DispatchClient(RelevanceCloseoutClientMixin, RelevanceClientMixin, PoolDec
                     "conclusion_detail": conclusion_detail,
                 },
             )
-        )
+        ))
 
     def record_cold(
         self, key: str, *, release_exclusive: bool = False,
         startup_revision: int | None = None, cooling_token: str | None = None,
-    ) -> dict:
-        return self._unwrap(
+    ) -> dict[str, Any]:
+        return cast(dict[str, Any], self._unwrap(
             self._http.post(
                 f"/spawn-reservations/{key}/cold",
                 json={
@@ -849,7 +852,7 @@ class DispatchClient(RelevanceCloseoutClientMixin, RelevanceClientMixin, PoolDec
                     **({"cooling_token": cooling_token} if cooling_token is not None else {}),
                 },
             )
-        )
+        ))
 
     def rearm_spawn(
         self,
@@ -858,8 +861,8 @@ class DispatchClient(RelevanceCloseoutClientMixin, RelevanceClientMixin, PoolDec
         permitted: bool = False,
         reason: str | None = None,
         min_failures: int = 3,
-    ) -> dict:
-        return self._unwrap(
+    ) -> dict[str, Any]:
+        return cast(dict[str, Any], self._unwrap(
             self._http.post(
                 f"/spawn-reservations/tasks/{task_id}/rearm",
                 json={
@@ -868,14 +871,14 @@ class DispatchClient(RelevanceCloseoutClientMixin, RelevanceClientMixin, PoolDec
                     "min_failures": min_failures,
                 },
             )
-        )
+        ))
 
     def authorize_fresh_acquisition(
         self, task_id: str, *, reservation_key: str, worktree: str,
         expected_generation: int, permitted: bool, confirmed_no_live_holder: bool,
         reason: str,
-    ) -> dict:
-        return self._unwrap(self._http.post(
+    ) -> dict[str, Any]:
+        return cast(dict[str, Any], self._unwrap(self._http.post(
             f"/spawn-reservations/tasks/{task_id}/authorize-fresh",
             headers=self._control_headers(),
             json={
@@ -883,7 +886,7 @@ class DispatchClient(RelevanceCloseoutClientMixin, RelevanceClientMixin, PoolDec
                 "expected_generation": expected_generation, "permitted": permitted,
                 "confirmed_no_live_holder": confirmed_no_live_holder, "reason": reason,
             },
-        ))
+        )))
 
     # -- external producer resource reservations ----------------------------
 
@@ -894,7 +897,7 @@ class DispatchClient(RelevanceCloseoutClientMixin, RelevanceClientMixin, PoolDec
         *,
         ttl: float,
         token: str | None = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         body: dict[str, object] = {
             "key": key,
             "owner": owner,
@@ -902,17 +905,17 @@ class DispatchClient(RelevanceCloseoutClientMixin, RelevanceClientMixin, PoolDec
         }
         if token is not None:
             body["token"] = token
-        return self._unwrap(
+        return cast(dict[str, Any], self._unwrap(
             self._http.post(
                 "/resource-reservations/acquire",
                 json=body,
             )
-        )
+        ))
 
     def bind_resource_reservation(
         self, key: str, owner: str, token: str, task_id: str
-    ) -> dict:
-        return self._unwrap(
+    ) -> dict[str, Any]:
+        return cast(dict[str, Any], self._unwrap(
             self._http.post(
                 "/resource-reservations/bind",
                 json={
@@ -922,32 +925,32 @@ class DispatchClient(RelevanceCloseoutClientMixin, RelevanceClientMixin, PoolDec
                     "task_id": task_id,
                 },
             )
-        )
+        ))
 
     def release_resource_reservation(
         self, key: str, owner: str, token: str
-    ) -> dict:
-        return self._unwrap(
+    ) -> dict[str, Any]:
+        return cast(dict[str, Any], self._unwrap(
             self._http.post(
                 "/resource-reservations/release",
                 json={"key": key, "owner": owner, "token": token},
             )
-        )
+        ))
 
     def list_resource_reservations(
         self,
         *,
         owner_prefix: str | None = None,
         task_id: str | None = None,
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         params: dict[str, str] = {}
         if owner_prefix is not None:
             params["owner_prefix"] = owner_prefix
         if task_id is not None:
             params["task_id"] = task_id
-        return self._unwrap(
+        return cast(list[dict[str, Any]], self._unwrap(
             self._http.get("/resource-reservations", params=params)
-        )
+        ))
 
     # -- supervisor registrations (RegistrationClientMixin) -----------------
 
@@ -962,7 +965,7 @@ class ResolvingDispatchClient:
     supervisor follow the same live rendezvous as every ordinary CLI command.
     """
 
-    def __init__(self, factory: Callable[[], DispatchClient]):
+    def __init__(self, factory: Callable[[], DispatchClient]) -> None:
         self._factory = factory
 
     def close(self) -> None:

@@ -25,32 +25,16 @@ its own use case (``agent-dispatch run --detach``/``--resume``, always
 invoked from within the worktree being hibernated/resumed) but wrong here --
 this module's release runs inside the coordinator process or an MCP tool
 call, whose cwd is generally *not* the handoff's target worktree. This module
-instead targets the claim explicitly by the handoff task's own
-``target_worktree`` field, via ``claims release <id> --worktree
-<target_worktree>``.
+uses the task's recorded creator binding, never an unqualified release.
 
-**Known, best-effort limitation (project resolution):** ``--worktree`` alone
-selects a worktree *id* within whichever *project* agent-worktrees resolves
-for the invocation -- and that resolution still depends on the releasing
-process's own cwd (or, for a cross-project owner, a qualified
-``machine/project/worktree_id`` owner-ref that only the ``add``/``settle``
-verbs currently accept, not ``release``). The coordinator's own cwd is
-generally not any project's checkout, and there is no ``--project`` flag to
-force the choice explicitly. On a machine with exactly one registered
-project this degrades safely (the sole-project fallback resolves it
-correctly); on a genuinely multi-project machine the release can silently
-target the wrong project (or none) and leave the claim active. This is the
-same cheap, safe failure mode already documented below -- an operator
-notices the still-blocked finalize and runs the release manually with an
-explicit, correct invocation -- not a regression of the forgotten-handoff gap
-this module exists to close (the claim still exists and still blocks
-finalize; it just isn't retired automatically in that configuration).
-Properly closing this would need either a ``release --owner-ref`` verb
-(mirroring ``add``/``settle``) or a project-qualified reference on the
-handoff task itself -- tracked as follow-up, not attempted here.
+The task's durable ``handoff_claim`` metadata records the exact native claim
+returned after journaling. It is a selector, not authority. Terminal task
+confirmation and Worktrees' locked record/claim identity, candidate, producer
+and mutation checks remain independent requirements. Unbound legacy tasks
+stay protected until an explicitly owner-qualified reconciliation.
 
 **Fire-and-forget, never blocks the caller's own request.** ``release_if_handoff``
-dispatches the actual (up to 15s) subprocess call on a background daemon
+dispatches the bounded native operations on a background daemon
 thread rather than running it inline: this module is called from inside
 ``coordinator_tasks``'s HTTP route handlers and ``mcp_http``'s MCP tools --
 shared request-handling paths every completion/abandonment flows through, not
@@ -82,7 +66,13 @@ itself is already a visible, investigated failure state.
 from __future__ import annotations
 
 import threading
-from typing import Any
+import json
+import logging
+from dataclasses import asdict
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .queue import TaskQueue
 
 
 def is_handoff_task(task: dict[str, Any] | None) -> bool:
@@ -104,7 +94,8 @@ def handoff_worktree(task: dict[str, Any] | None) -> str | None:
     its ``worktree`` affinity (a detached baton keeps only the affinity)."""
     if not isinstance(task, dict):
         return None
-    affinity = task.get("affinity") if isinstance(task.get("affinity"), dict) else {}
+    raw_affinity = task.get("affinity")
+    affinity = raw_affinity if isinstance(raw_affinity, dict) else {}
     worktree = task.get("target_worktree") or affinity.get("worktree")
     return worktree if isinstance(worktree, str) and worktree else None
 
@@ -126,7 +117,7 @@ def _this_machine() -> str | None:
 
 def release_if_handoff(
     task: dict[str, Any] | None, task_id: str | None = None, *, timeout: float = 15.0,
-    cancel_pending: bool = False,
+    cancel_pending: bool = False, queue: TaskQueue | None = None,
 ) -> None:
     """Best-effort, non-blocking: release the ``target_worktree``'s claim on
     ``task``'s id iff ``task`` is a context-handoff task.
@@ -158,7 +149,10 @@ def release_if_handoff(
     thread = threading.Thread(
         target=_release_in_background,
         args=(resolved_id, (task or {}).get("target_machine")),
-        kwargs={"worktree": worktree, "timeout": timeout, "cancel_pending": cancel_pending},
+        kwargs={
+            "worktree": worktree, "timeout": timeout, "cancel_pending": cancel_pending,
+            "task": task, "queue": queue,
+        },
         daemon=True,
         name=f"handoff-claim-release-{resolved_id}",
     )
@@ -166,22 +160,42 @@ def release_if_handoff(
 
 
 def _release_in_background(task_id: str, target_machine: Any, *, worktree: str | None, timeout: float,
-                           cancel_pending: bool) -> None:
+                           cancel_pending: bool, task: dict[str, Any] | None = None,
+                           queue: TaskQueue | None = None) -> None:
     """The release thread's body. The ledger is the baton's own machine's, so
     this host cancels only its own (like the claim release, which runs here
     too); resolving this machine's name may shell out, so it happens here,
     never on the caller's request."""
+    if queue is not None:
+        current = queue.get(task_id)
+        task = asdict(current) if current is not None else None
+    result = _release_task_claim(task_id, worktree=worktree, timeout=timeout, task=task)
+    if not result["taskTerminal"]:
+        return
+    if not result["claimSettled"]:
+        logging.getLogger(__name__).warning("Handoff creator claim remains pending: %s", result["claimNote"])
     if cancel_pending and target_machine:
         cancel_pending = handoff_is_local({"target_machine": target_machine}, _this_machine())
-    _release_task_claim(task_id, worktree=worktree, timeout=timeout, cancel_pending=cancel_pending)
+    if cancel_pending and worktree:
+        from .procutil import run_agent_worktrees_capture
+        from .handoff_claim_binding import validated_binding
+        from .queue_records import TaskError
+        try:
+            binding = validated_binding((task or {}).get("handoff_claim"), task or {})
+        except TaskError:
+            return
+        run_agent_worktrees_capture(
+            "cancel-handoff",
+            "--owner-ref", f'{binding["machine"]}/{binding["project"]}/{binding["worktree_id"]}',
+            "--expected-record-nonce", binding["creation_nonce"], "--token", task_id, timeout=timeout,
+        )
 
 
 def _release_task_claim(
-    task_id: str, *, worktree: str | None, timeout: float = 15.0, cancel_pending: bool = False,
-) -> None:
-    """``agent-worktrees claims release <task_id>``, explicitly targeting
-    ``worktree`` (via ``--worktree``) rather than the calling process's own
-    cwd, when known.
+    task_id: str, *, worktree: str | None, timeout: float = 15.0,
+    task: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Settle only a confirmed terminal handoff's recorded native incarnation.
 
     Shells via :func:`agent_dispatch.procutil.run_agent_worktrees_capture` --
     the same helper every other agent-worktrees spawn in this plugin uses --
@@ -191,9 +205,9 @@ def _release_task_claim(
     ``__PYVENV_LAUNCHER__`` so the resolved agent-worktrees interpreter can't
     inherit the coordinator's own Python environment and load the wrong
     stdlib/venv) and the same no-console-window, leak-safe process handling.
-    Best-effort and non-fatal: ``None`` back from the helper (CLI unavailable,
-    spawn error, or timeout) is silently accepted, matching
-    :func:`agent_dispatch.hibernation_claims.release_hibernation_claim`.
+    Unavailable, unbound or replaced owners return an explicit pending result.
+    A read-only native binding operation establishes selected-provider support
+    before the guarded write; parser refusal never causes an unpinned fallback.
 
     Runs synchronously on whatever thread calls it -- :func:`release_if_handoff`
     is the fire-and-forget entry point; call this directly only from a
@@ -202,11 +216,116 @@ def _release_task_claim(
     """
     from .procutil import run_agent_worktrees_capture
 
-    argv = ["claims", "release", task_id, "--json"]
-    if worktree:
-        argv += ["--worktree", worktree]
-    run_agent_worktrees_capture(*argv, timeout=timeout)
-    if cancel_pending and worktree:
-        run_agent_worktrees_capture(
-            "cancel-handoff", "--worktree-id", worktree, "--token", task_id, timeout=timeout
+    from .handoff_claim_binding import validated_binding
+    from .queue_records import TaskError
+
+    note = terminal_rejection(task, task_id)
+    result: dict[str, Any] = {"taskTerminal": note is None, "claimSettled": False}
+    if note:
+        return {**result, "claimNote": note}
+    try:
+        binding = validated_binding((task or {}).get("handoff_claim"), task or {})
+        if worktree and binding["worktree_id"] != worktree:
+            raise TaskError("creator binding differs from the selected worktree")
+    except TaskError as exc:
+        return {**result, "claimNote": str(exc)}
+    owner_ref = f'{binding["machine"]}/{binding["project"]}/{binding["worktree_id"]}'
+    try:
+        observed = _capture_result(run_agent_worktrees_capture(
+            "claims", "binding", task_id, "--owner-ref", owner_ref, "--json", timeout=timeout,
+        ))
+        if validated_binding(observed.get("claim_binding"), task or {}) != binding:
+            raise TaskError("creator claim binding no longer matches")
+        settled = _capture_result(run_agent_worktrees_capture(
+            "claims", "settle", task_id, "--owner-ref", owner_ref, "--released",
+            "--expected-record-nonce", binding["creation_nonce"],
+            "--expected-claim-nonce", binding["claim_nonce"], "--expected-kind", "task",
+            "--json", timeout=timeout,
+        ))
+        if (
+            settled.get("deferred") or settled.get("ref") != task_id
+            or settled.get("worktree_id") != binding["worktree_id"]
+            or settled.get("disposition") != "released"
+        ):
+            raise TaskError("native creator settlement did not confirm release")
+    except (OSError, ValueError, TaskError) as exc:
+        return {**result, "claimNote": str(exc)}
+    return {**result, "claimSettled": True}
+
+
+def _capture_result(process: Any) -> dict[str, Any]:
+    from .queue_records import TaskError
+
+    if process is None:
+        raise TaskError("native creator claim owner is unavailable")
+    try:
+        result = json.loads(process.stdout)
+    except (TypeError, ValueError) as exc:
+        raise TaskError("native creator claim owner returned an invalid response") from exc
+    if process.returncode or not isinstance(result, dict) or result.get("error"):
+        raise TaskError(
+            str(result.get("error", "native creator claim operation failed"))
+            if isinstance(result, dict) else "native creator claim operation failed"
         )
+    return result
+
+
+def terminal_rejection(task: dict[str, Any] | None, task_id: str) -> str | None:
+    """Keep unknown, live and execution-bearing abandonment protected."""
+    if not is_handoff_task(task) or (task or {}).get("id") != task_id:
+        return "authoritative handoff task could not be confirmed"
+    assert task is not None
+    if task.get("status") == "completed":
+        return None
+    if task.get("status") != "abandoned":
+        return "handoff task is not confirmed completed or abandoned"
+    if (
+        task.get("attempts") != 0 or task.get("owner") or task.get("owner_session_id")
+        or task.get("started_at") is not None or task.get("claimed_at") is not None
+    ):
+        return "abandoned handoff has execution history; creator obligation remains protected"
+    return None
+
+
+def reconcile_claim(
+    queue: TaskQueue, task_id: str, *, binding: object = None, owner_ref: str | None = None,
+) -> dict[str, Any]:
+    """Reconcile the current task only; never replay abandon or release by leaf ID."""
+    from .handoff_claim_binding import bind_claim
+    from .procutil import run_agent_worktrees_capture
+    from .queue_records import TaskError
+
+    current = queue.get(task_id)
+    if current is None:
+        raise TaskError(f"no such task: {task_id}")
+    task_id = current.id
+    if binding is not None:
+        current = bind_claim(queue, task_id, binding)
+    if owner_ref is not None:
+        if current.handoff_claim is not None:
+            from .handoff_claim_binding import validated_binding
+            selected = validated_binding(current.handoff_claim, asdict(current))
+            expected_owner = f'{selected.get("machine")}/{selected.get("project")}/{selected.get("worktree_id")}'
+            if expected_owner != owner_ref:
+                raise TaskError("explicit owner differs from the recorded creator binding")
+        else:
+            if rejection := terminal_rejection(asdict(current), task_id):
+                raise TaskError(rejection)
+            parts = owner_ref.split("/")
+            if (
+                len(parts) != 3 or not all(parts)
+                or parts[2] != handoff_worktree(asdict(current))
+                or current.target_machine and parts[0].casefold() != current.target_machine.casefold()
+            ):
+                raise TaskError("explicit creator owner does not match the handoff target")
+            observed = _capture_result(run_agent_worktrees_capture(
+                "claims", "binding", task_id, "--owner-ref", owner_ref, "--apply", "--json", timeout=15.0,
+            ))
+            current = bind_claim(queue, task_id, observed.get("claim_binding"))
+    current = queue.get(task_id)
+    task = asdict(current) if current is not None else None
+    return {
+        "id": task_id, "taskStatus": (task or {}).get("status"),
+        "claimBinding": (task or {}).get("handoff_claim"),
+        **_release_task_claim(task_id, worktree=handoff_worktree(task), task=task),
+    }
