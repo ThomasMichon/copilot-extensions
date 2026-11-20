@@ -675,7 +675,7 @@ identity before `renameat2(RENAME_EXCHANGE)` atomically swaps the historical
 lock and retained path. Every pre-exchange attempt confirms journal durability
 and rechecks custody, including retries after an uncertain staging commit.
 No move/mkdir or no-replace fallback exists.
-Unsupported platforms refuse before staging or acquisition. A filesystem
+Other unsupported platforms refuse before staging or acquisition. A filesystem
 that refuses exchange retains the staged evidence and original lock.
 Recovery validates the journal, original pin and both actual path identities
 before reusing or acquiring only the original inode; it never creates the new
@@ -690,11 +690,24 @@ Readiness and all persistent-write/callback fences remain closed after success
 or uncertain failure. Legacy subscriptions remain the only authority; neither
 registry adoption nor isolated-state publication follows from a seal.
 
+On Windows the same internal operation stages an owner-private directory and
+durably records its identity before releasing the already-drained original
+lease. Native write-through, no-replace moves first retain the original file
+and then install that directory at the historical name. An open historical
+handle refuses the first move. A cold caller that creates a file in the gap
+blocks the second; both files are preserved, and recovery never opens the
+retained inode as another lease. Only the exact installed barrier permits
+acquiring `writer.lock` inside it for final journal publication. Recovery
+inspects actual topology rather than trusting a prepared/sealed label.
+Windows records no boot epoch. This native guard is not a complete historical
+runtime census, migration command or activation qualification.
+
 No CLI or control-plane operation invokes preparation or sealing yet, and
 ordinary startup/restart still refuses every present phase. Do not write markers
-by hand or delete evidence to regain startup. Windows sealing, native Linux
-exchange/interruption qualification, boot qualification and authority selection
-remain open. Preparation itself performs no boot probe, lease transfer, import
+by hand or delete evidence to regain startup. Full Windows historical-runtime/
+controller-exit qualification, native Linux exchange/interruption qualification,
+boot qualification and authority selection remain open.
+Preparation itself performs no boot probe, lease transfer, import
 or automatic migration; neither internal API changes installation selection.
 Preparation is not an authoritative
 subscription snapshot: later historical writes remain in the sole legacy file

@@ -164,6 +164,21 @@ def confirm_private(path: Path) -> None:
         raise PermissionError("watch capability changed during durability confirmation")
 
 
+def windows_move_no_replace(source: Path, destination: Path) -> None:
+    """Use the native sharing check and write-through without replacing custody."""
+    if sys.platform != "win32":
+        raise NotImplementedError("Windows capability publication requires Windows")
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    move = kernel.MoveFileExW
+    move.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_ulong]
+    move.restype = ctypes.c_int
+    if not move(str(source), str(destination), 0x8):
+        error = ctypes.get_last_error()
+        if error in (80, 183):
+            raise FileExistsError("watch capability custody already exists")
+        raise ctypes.WinError(error)
+
+
 def write_private(
     path: Path, document: dict[str, Any], *, replace: bool = True,
     before_publish: Callable[[], None] | None = None,
@@ -201,18 +216,7 @@ def write_private(
                 os.replace(temporary, path)
         else:
             if os.name == "nt":
-                if sys.platform != "win32":
-                    raise NotImplementedError("Windows capability publication requires Windows")
-                kernel = ctypes.WinDLL("kernel32", use_last_error=True)
-                move = kernel.MoveFileExW
-                move.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_ulong]
-                move.restype = ctypes.c_int
-                # WRITE_THROUGH without REPLACE_EXISTING preserves prior custody.
-                if not move(str(temporary), str(path), 0x8):
-                    error = ctypes.get_last_error()
-                    if error in (80, 183):
-                        raise FileExistsError("watch capability custody already exists")
-                    raise ctypes.WinError(error)
+                windows_move_no_replace(temporary, path)
             else:
                 os.link(temporary, path)
         _sync_directory(path.parent)

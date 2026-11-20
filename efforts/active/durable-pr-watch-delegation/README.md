@@ -832,7 +832,7 @@ history, fence and concurrency limits only after old workers settle. Only
 authorized activation/resumption unfences it; preparation refuses publication
 until retained legacy work has drained. Startup refusal and guard removal
 share the final admission boundary. It is not connected to ordinary CLI/control
-entry. The next internal Linux source slice adds journaled atomic-exchange
+entry. The internal Linux source slice, merged in #13594, adds journaled atomic-exchange
 sealing and topology-based recovery under that same custody, without importing
 or activating state. Native Linux exchange/interruption qualification, Windows
 sealing, boot-boundary qualification and authority selection remain open; no
