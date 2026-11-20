@@ -10,8 +10,10 @@ from pathlib import Path
 import sys
 import threading
 import time
+from contextlib import asynccontextmanager, nullcontext
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
+from collections.abc import AsyncIterator
 
 import pytest
 
@@ -290,6 +292,103 @@ def test_constructor_failure_closes_optional_writer(
         db.close()
 
 
+@pytest.mark.parametrize("malformed", [True, False])
+def test_nonstrict_service_loading_preserves_bound_intent(
+    tmp_path: Path, malformed: bool,
+) -> None:
+    import yaml
+    from agent_bridge import telemetry
+    from agent_bridge.config import config_dir, load_config
+    from agent_bridge.consumer_telemetry import close
+    from agent_bridge.events import EventLog
+
+    data = {
+        "consumer_telemetry_harnesses": [] if malformed else {"fixture-caller": str(tmp_path)},
+        "port": 0 if malformed else "invalid-port",
+    }
+    (config_dir() / "config.yaml").write_text(yaml.safe_dump(data), encoding="utf-8")
+    cfg = load_config()
+    assert cfg.consumer_telemetry_harnesses == {}
+    assert getattr(cfg, "_consumer_telemetry_invalid")
+    legacy: list[dict[str, Any]] = []
+    telemetry.set_telemetry_sink(legacy.append)
+    db = Database(tmp_path / "fallback.db")
+    manager = session_manager_from_config(
+        db, cfg, session_host_state_dir=str(tmp_path / "hosts"),
+    )
+    try:
+        EventLog(db=db).append("session_state_changed", {"status": "idle"})
+        assert legacy == []
+        assert manager._consumer_telemetry.status()["refusal"] == "invalid_config"
+    finally:
+        close(manager)
+        telemetry.clear_telemetry_sink()
+        db.close()
+
+
+def test_represented_and_restored_logs_preserve_explicit_owner_mode(tmp_path: Path) -> None:
+    from agent_bridge import telemetry
+    from agent_bridge.app_routes import configure_serving_app
+    from agent_bridge.live_representation import LiveEventStore
+    from agent_bridge.live_runtime import capture_live_events, restore_live_events
+
+    legacy: list[dict[str, Any]] = []
+    telemetry.set_telemetry_sink(legacy.append)
+    try:
+        app = configure_serving_app(
+            ServiceConfig(consumer_telemetry_harnesses={}), "fixture", lifespan=None,
+        )
+        store = app.state.live_event_store
+        store.get_or_create("represented-fixture").append(
+            "session_state_changed", {"status": "idle"},
+        )
+        restored = restore_live_events(capture_live_events(store), telemetry_legacy=False)
+        log = restored.get("represented-fixture")
+        assert log is not None
+        log.append("session_state_changed", {"status": "stopped"})
+        assert legacy == []
+        LiveEventStore().get_or_create("legacy-fixture").append(
+            "session_state_changed", {"status": "idle"},
+        )
+        assert legacy and legacy[0]["session_id"] == "legacy-fixture"
+    finally:
+        telemetry.clear_telemetry_sink()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_telemetry_cleanup_still_closes_database(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from fastapi import FastAPI
+    from agent_bridge import app as application, app_lifecycle, app_agent_roster
+
+    order: list[str] = []
+
+    @asynccontextmanager
+    async def serving(_app: Any) -> AsyncIterator[None]:
+        yield
+
+    async def cancelled(*args: Any, **kwargs: Any) -> None:
+        order.append("telemetry")
+        raise asyncio.CancelledError
+
+    async def database(_db: Any) -> None:
+        order.append("database")
+
+    monkeypatch.setattr(app_lifecycle, "admit_daemon_instance", lambda *a, **k: nullcontext())
+    monkeypatch.setattr(application, "_lifespan", serving)
+    monkeypatch.setattr(app_agent_roster, "stop_agent_roster_cache", AsyncMock())
+    monkeypatch.setattr(app_lifecycle, "settled_thread_call", cancelled)
+    monkeypatch.setattr(app_lifecycle, "close_database", database)
+    app = SimpleNamespace(state=SimpleNamespace(session_manager=object(), db=object()))
+    with pytest.raises(asyncio.CancelledError):
+        async with app_lifecycle.lifespan(cast(FastAPI, app)):
+            pass
+    assert order == ["telemetry", "database"]
+
+
 def test_route_cap_does_not_scan_an_extra_root(monkeypatch: pytest.MonkeyPatch) -> None:
     from process_telemetry import command
     from process_telemetry.command_config import Selection
@@ -397,6 +496,7 @@ while True:
         output.write((json.dumps({
             "pid":os.getpid(),"cwd":os.getcwd(),"literal":sys.argv[1],
             "secret_inherited":"TEST_RECEIVER_SECRET" in os.environ,
+            "environment_keys":list(os.environ),
             "record":record
         },ensure_ascii=False)+"\n").encode())
         os.fsync(output.fileno())
@@ -415,6 +515,8 @@ async def test_real_bridge_stop_reaches_one_neutral_receiver(
     from agent_bridge.app_routes import configure_serving_app
     from agent_bridge.config import load_config, save_config
     from agent_bridge.consumer_telemetry import close
+    from agent_procutil._job_scopes import ENVIRONMENT_KEY
+    from process_telemetry.command_config import ENVIRONMENT_KEYS
 
     root = tmp_path / "harness with spaces"
     root.mkdir()
@@ -449,6 +551,23 @@ async def test_real_bridge_stop_reaches_one_neutral_receiver(
     manager = session_manager_from_config(
         db, cfg, session_host_state_dir=str(tmp_path / "hosts"),
     )
+    from agent_bridge import cold_outages
+
+    session = manager.get_session("fixture-one")
+    assert session is not None
+    before_log = session.event_log
+    outage = {"replacement_json": None}
+
+    async def recovered(_manager: Any, _session_id: str) -> Any:
+        return session
+
+    with monkeypatch.context() as recovery:
+        recovery.setattr(cold_outages, "latest", lambda *a, **k: outage)
+        recovery.setattr(cold_outages, "_assert_recovery_current", lambda *a, **k: None)
+        recovery.setattr(cold_outages, "operation", lambda *a, **k: nullcontext())
+        recovery.setattr(cold_outages, "claim", lambda *a, **k: outage)
+        await cold_outages.guarded_resume(recovered)(manager, "fixture-one")
+    assert session.event_log is not before_log
     app = configure_serving_app(cfg, "fixture-bearer", lifespan=None)
     app.state.session_manager = manager
     app.state.db = db
@@ -488,6 +607,11 @@ async def test_real_bridge_stop_reaches_one_neutral_receiver(
         assert len({row["pid"] for row in rows}) == 1
         assert all(Path(row["cwd"]).resolve() == root.resolve() for row in rows)
         assert all(row["literal"] == literal and not row["secret_inherited"] for row in rows)
+        allowed = {key.upper() for key in ENVIRONMENT_KEYS} | {"LC_CTYPE"}
+        for row in rows:
+            keys = {key.upper() for key in row["environment_keys"]}
+            assert keys <= allowed
+            assert ENVIRONMENT_KEY.upper() not in keys
         records = [row["record"] for row in rows]
         assert [row["sequence"] for row in records] == [1, 2, 3, 4]
         assert [row["event"]["name"] for row in records] == [

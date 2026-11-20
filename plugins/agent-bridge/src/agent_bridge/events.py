@@ -235,7 +235,7 @@ class EventLog:
         if not hasattr(self, "_consumer_telemetry_binding"):
             owner = getattr(self._db, "_consumer_telemetry_owner", None)
             self._consumer_telemetry_binding = (
-                LEGACY if owner is None or owner.legacy else owner.unavailable
+                LEGACY if owner is None else owner.binding_for_log(self._session_id)
             )
         telemetry.emit(record, binding=self._consumer_telemetry_binding)
 

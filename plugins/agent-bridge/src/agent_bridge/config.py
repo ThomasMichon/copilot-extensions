@@ -7,7 +7,7 @@ import logging
 import os
 import secrets
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import yaml
 from agent_procutil import no_window_kwargs
@@ -133,6 +133,7 @@ def load_config(*, strict: bool = False) -> ServiceConfig:
     cfg_path = root / "config.yaml"
     if cfg_path.exists():
         data = None
+        telemetry_invalid = False
         try:
             data = yaml.safe_load(cfg_path.read_text())
             data = {} if data is None else data
@@ -145,8 +146,17 @@ def load_config(*, strict: bool = False) -> ServiceConfig:
 
             data = config_migrations.migrate_loaded(data)
             if isinstance(data, dict):
+                value = data.get("consumer_telemetry_harnesses")
+                if value is not None and not (
+                    type(value) is dict
+                    and all(type(key) is str and type(root) is str for key, root in value.items())
+                ):
+                    data = {**data, "consumer_telemetry_harnesses": {}}
+                    telemetry_invalid = True
                 data = _normalize_service_config(data, root=root)
-            return _remember_session_modes(ServiceConfig(**data))
+            return _remember_session_modes(
+                ServiceConfig(**cast(dict[str, Any], data)), telemetry_invalid=telemetry_invalid,
+            )
         except (OSError, yaml.YAMLError) as exc:
             raise ValueError(
                 "Cannot establish preference authority from configuration; "
@@ -192,13 +202,21 @@ def load_config(*, strict: bool = False) -> ServiceConfig:
                     "Invalid explicit preference policy; refusing caller-settings fallback"
                 ) from exc
             log.warning("Failed to parse %s, using defaults", cfg_path)
+            if isinstance(data, dict) and data.get("consumer_telemetry_harnesses") is not None:
+                return _remember_session_modes(ServiceConfig(
+                    db_path=str(default_db_path(root)), consumer_telemetry_harnesses={},
+                ), telemetry_invalid=True)
     return _remember_session_modes(ServiceConfig(
         db_path=str(default_db_path(root)),
     ))
 
 
-def _remember_session_modes(cfg: ServiceConfig) -> ServiceConfig:
-    cfg._session_modes_at_load = cfg.session_modes.model_copy(deep=True)
+def _remember_session_modes(
+    cfg: ServiceConfig, *, telemetry_invalid: bool = False,
+) -> ServiceConfig:
+    setattr(cfg, "_session_modes_at_load", cfg.session_modes.model_copy(deep=True))
+    if telemetry_invalid:
+        setattr(cfg, "_consumer_telemetry_invalid", True)
     return cfg
 
 
@@ -230,7 +248,7 @@ def load_repo_bridge_config(repo_root: Path) -> RepoBridgeConfig | None:
             if "preference_source" in data:
                 raise ValueError("repo preference policy belongs in default_env")
             merged = _deep_merge_dicts(merged, data)
-        config = RepoBridgeConfig(**merged)
+        config = RepoBridgeConfig(**cast(dict[str, Any], merged))
         if ordinary is not None:
             from configuration_layers import compose
 
@@ -244,7 +262,7 @@ def load_repo_bridge_config(repo_root: Path) -> RepoBridgeConfig | None:
             config = config.model_copy(update=result["values"])
             object.__setattr__(config, "_ordinary_layers", ordinary)
             object.__setattr__(config, "_configuration_provenance", result["provenance"])
-        from .session_preferences import SOURCE_ENV, SOURCES
+        from agent_remote_driver.session_preferences import SOURCE_ENV, SOURCES
 
         if SOURCE_ENV in config.default_env and config.default_env[SOURCE_ENV] not in SOURCES:
             raise ValueError("unsupported preference_source")

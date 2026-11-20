@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from collections.abc import Iterator
 from contextlib import contextmanager, suppress
+from weakref import WeakValueDictionary
 from typing import Any
 
 from process_telemetry.command import Binding, CommandRoutes
@@ -26,6 +27,7 @@ class ConsumerTelemetry:
         self.bindings: dict[str, Binding] = {}
         self.unavailable: Binding | None = None
         self.refusal: str | None = None
+        self._sessions: WeakValueDictionary[str, Any] = WeakValueDictionary()
         if self.legacy:
             return
         assert harnesses is not None
@@ -49,8 +51,18 @@ class ConsumerTelemetry:
         binding = LEGACY if self.legacy else self.bindings.get(
             session.caller_id, self.unavailable,
         )
+        session._consumer_telemetry_binding = binding
+        self._sessions[session.session_id] = session
         if session.event_log is not None:
             session.event_log.bind_consumer_telemetry(binding)
+
+    def binding_for_log(self, session_id: str | None) -> Any:
+        """Retain session admission across whole-log replacement without a new lookup."""
+        session = self._sessions.get(session_id) if session_id is not None else None
+        return (
+            session._consumer_telemetry_binding if session is not None
+            else LEGACY if self.legacy else self.unavailable
+        )
 
     @contextmanager
     def admission(self, db: Any) -> Iterator[None]:

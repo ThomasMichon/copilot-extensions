@@ -64,6 +64,8 @@ def session_manager_from_config(
     from .consumer_telemetry import ConsumerTelemetry
 
     consumer = ConsumerTelemetry(cfg.consumer_telemetry_harnesses)
+    if getattr(cfg, "_consumer_telemetry_invalid", False):
+        consumer.refusal = "invalid_config"
     with consumer.admission(db):
         manager = SessionManager(
             db,
