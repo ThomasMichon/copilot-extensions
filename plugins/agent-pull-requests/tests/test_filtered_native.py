@@ -6,7 +6,9 @@ import json
 import sys
 import time
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -125,9 +127,11 @@ def test_population_refuses_insufficient_lifetime_without_launching(
 ) -> None:
     binding, log, _control = native
     selected = Expression.parse({"protocol": PROTOCOL, "where": {"repo": ["Project/repo"]}})
+    captured: list[bool] = []
     with pytest.raises(RepositoryNativeUnavailable):
         population(binding, selected, root=tmp_path, checkpoint=lambda: None,
-                   deadline=time.monotonic() + 1)
+                   deadline=time.monotonic() + 1, on_capture=lambda: captured.append(True))
+    assert not captured
     assert not log.exists()
     assert not list(tmp_path.glob(".population-*.json"))
 
@@ -160,12 +164,15 @@ def test_population_timeout_settles_before_enclosing_deadline(
         monkeypatch.setattr(filtered_native, "qualify", lambda *_a, **_kw: SUPPORT)
     selected = Expression.parse({"protocol": PROTOCOL, "where": {"repo": ["Project/repo"]}})
     deadline = time.monotonic() + 8
+    captured: list[bool] = []
     with pytest.raises(RepositoryNativeUnavailable):
-        population(binding, selected, root=tmp_path, checkpoint=lambda: None, deadline=deadline)
+        population(binding, selected, root=tmp_path, checkpoint=lambda: None, deadline=deadline,
+                   on_capture=lambda: captured.append(True))
     assert time.monotonic() < deadline
     calls = [json.loads(line) for line in log.read_text().splitlines()]
     assert len(calls) == 1
     assert ("--contract" in calls[0]) is (phase == "qualification_delay")
+    assert captured == ([True] if phase == "population_delay" else [])
     assert not list(tmp_path.glob(".population-*.json"))
 
 
@@ -224,6 +231,57 @@ def test_observer_has_no_provider_reads_for_inert_definitions_and_coalesces_live
     assert [command[command.index("--query-offset") + 1] for command in acquisitions] == ["0", "1"]
 
 
+@pytest.mark.parametrize("fail_first", [False, True])
+def test_query_rotation_does_not_skip_branches_when_another_repository_uses_the_deadline(
+    native: Native, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fail_first: bool,
+) -> None:
+    from agent_pull_requests import filtered_native, watch_observer
+
+    first, _log, _control = native
+    identity = replace(cast(RepositoryIdentity, first.repository_identity), repo="Project/other")
+    second = replace(first, account=identity.key, repo=identity.repo, repository_identity=identity)
+    elapsed = [0.0]
+    monkeypatch.setattr(watch_observer, "time", SimpleNamespace(
+        monotonic=lambda: elapsed[0], sleep=time.sleep,
+    ))
+    store = ReplayStore(tmp_path / "state", "test", clock=lambda: 100 + elapsed[0],
+                        repository_cache=True, repository_continuing=True, repository_filtered=True)
+    store.provision()
+    observer = ReplayObserver(store, bindings=(first, second))
+    projection = cast(FilteredProjection, observer.repositories)
+    registry = FilteredSubscriptions(projection)
+    offsets: dict[str, list[int]] = {}
+    for binding in (first, second):
+        projection.capabilities[binding.account] = SUPPORT
+        offsets[binding.repo] = []
+        registry.execute(binding.account, "consumer", "subscribe", {
+            "request_id": binding.account, "ttl": 60,
+            "filter": {"protocol": PROTOCOL, "where": {"from": {"users": [
+                "11111111-1111-1111-1111-111111111111",
+                "22222222-2222-2222-2222-222222222222",
+            ]}}},
+        }, expires_at=10000)
+
+    def acquire(
+        binding: NativeObservationBinding, _expression: Expression, *, deadline: float,
+        query_offset: int, on_capture: Callable[[], None] | None = None, **_kwargs: object,
+    ) -> dict[str, Any]:
+        if deadline - elapsed[0] < 5:
+            raise RepositoryNativeUnavailable(qualified=True)
+        if on_capture is not None:
+            on_capture()
+        offsets[binding.repo].append(query_offset)
+        elapsed[0] += 7
+        if fail_first and sum(map(len, offsets.values())) == 1:
+            raise RepositoryNativeUnavailable(qualified=True)
+        return {"outcome": "partial", "error": "deadline_exhausted", "pages": 1, "pulls": []}
+
+    monkeypatch.setattr(filtered_native, "population", acquire)
+    for _ in range(4):
+        observer.cycle(expires_at=int(store.clock()) + 10)
+    assert offsets == {first.repo: [0, 1], second.repo: [0, 1]}
+
+
 @pytest.mark.parametrize("withdraw_all", [False, True])
 def test_inflight_read_keeps_results_for_remaining_captured_demand(
     native: Native, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, withdraw_all: bool,
@@ -249,9 +307,10 @@ def test_inflight_read_keeps_results_for_remaining_captured_demand(
     def acquire(
         _binding: NativeObservationBinding, _expression: Expression, *, root: Path,
         checkpoint: Callable[[], None], start_checkpoint: Callable[[], None], query_offset: int,
-        deadline: float,
+        deadline: float, on_capture: Callable[[], None],
     ) -> dict[str, Any]:
         start_checkpoint()
+        on_capture()
         reads.append("once")
         for consumer in ("first", "second") if withdraw_all else ("first",):
             registry.execute(binding.account, consumer, "cancel", {

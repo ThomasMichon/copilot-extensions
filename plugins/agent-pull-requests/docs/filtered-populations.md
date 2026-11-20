@@ -33,6 +33,9 @@ The executing descriptor must also advertise `query_rotation: offset/v1`.
 Successive bounded cycles rotate the native query cover, so one author's pages
 cannot indefinitely prevent later authors from being observed. Incomplete
 cycles still report partial coverage rather than proving absence.
+Rotation advances only when population capture is admitted, including a failed
+capture attempt. Qualification or insufficient-lifetime refusal leaves that
+repository's next query branch unchanged.
 
 The initial native population driver is Azure DevOps. Its user IDs are native
 canonical lowercase IdentityRef UUIDs; assignment means reviewer users, not

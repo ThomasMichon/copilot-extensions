@@ -69,7 +69,7 @@ def _seconds(budget: OwnedExecutionBudget, *, qualified: bool) -> int:
 def population(
     binding: NativeObservationBinding, expression: Expression, *, root: Path,
     checkpoint: Checkpoint, start_checkpoint: Checkpoint | None = None, query_offset: int = 0,
-    deadline: float | None = None,
+    deadline: float | None = None, on_capture: Checkpoint | None = None,
 ) -> Document:
     """Keep immutable input until the actual native reader and cleanup settle."""
     start_checkpoint = checkpoint if start_checkpoint is None else start_checkpoint
@@ -97,7 +97,7 @@ def population(
             "--filter-file", filename,
             "--query-offset", str(query_offset),
             "--max-pages", "4", "--max-pulls", "200", "--seconds", str(seconds), "--json",
-        ], timeout=60, checkpoint=checkpoint, qualified=True, budget=budget)
+        ], timeout=60, checkpoint=checkpoint, qualified=True, budget=budget, on_admitted=on_capture)
     except OwnedCleanupError:
         retained = True
         raise

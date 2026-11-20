@@ -303,11 +303,12 @@ class ReplayObserver:
                     raise Withdrawn()
             try:
                 offset = self._query_cursors.get(key, 0)
-                self._query_cursors[key] = (offset + 1) % 64
+                def captured() -> None:
+                    self._query_cursors[key] = (offset + 1) % 64
                 scan = population(
                     binding, demand["filter"], root=self.store.root,
                     checkpoint=interested, start_checkpoint=starting, query_offset=offset,
-                    deadline=deadline,
+                    deadline=deadline, on_capture=captured,
                 )
             except Withdrawn:
                 continue

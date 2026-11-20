@@ -33,13 +33,15 @@ class RepositoryNativeUnavailable(ValueError):
 
 def _invoke(
     argv: list[str], *, timeout: float, checkpoint: Checkpoint, qualified: bool = False,
-    budget: OwnedExecutionBudget | None = None,
+    budget: OwnedExecutionBudget | None = None, on_admitted: Checkpoint | None = None,
 ) -> subprocess.CompletedProcess[str]:
     checkpoint()
     if budget is not None:
         timeout = min(timeout, budget.execution_deadline - time.monotonic())
         if timeout <= 0:
             raise RepositoryNativeUnavailable(qualified=qualified)
+    if on_admitted is not None:
+        on_admitted()
     try:
         result = run_command(argv, timeout=timeout, budget=budget)
     except (OwnedCleanupError, ReplayCallerExpired):
