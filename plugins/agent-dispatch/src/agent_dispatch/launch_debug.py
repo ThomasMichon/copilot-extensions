@@ -13,7 +13,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from agent_procutil.startup import StartupTimeouts
@@ -66,21 +66,21 @@ def _enabled(root: Path) -> bool:
     except (ValueError, RecursionError):
         log.warning("launch-debug config invalid; tracing disabled")
         return False
-    return config["bridge_cli_trace"]
+    return config["bridge_cli_trace"] is True
 
 
-def _metadata(value: str | bytes | None) -> dict:
+def _metadata(value: str | bytes | None) -> dict[str, object]:
     raw = value.encode("utf-8", errors="surrogatepass") if isinstance(value, str) else value
     return {"bytes": len(raw or b""), "sha256": hashlib.sha256(raw or b"").hexdigest()}
 
 
 def _streams(value: str | bytes | None, environment: dict[str, str], *,
-             stderr: bool = False, complete: bool = True) -> dict:
+             stderr: bool = False, complete: bool = True) -> dict[str, Any]:
     """Retain causal diagnostics without dumping stdout envelopes or inputs."""
     if value is None:
         return {"capture": "unavailable", "bytes": None, "sha256": None,
                 "content": "unavailable", "diagnostics": []}
-    result = {**_metadata(value), "capture": "complete" if complete else "partial",
+    result: dict[str, Any] = {**_metadata(value), "capture": "complete" if complete else "partial",
               "content": "omitted", "diagnostics": []}
     text = value.decode("utf-8", errors="replace") if isinstance(value, bytes) else value
     result["fields"] = structured_diagnostic_fields(text, environment=environment)
@@ -142,15 +142,15 @@ class Trace:
     started: float
     environment: dict[str, str]
 
-    def finish(self, *, result: subprocess.CompletedProcess | None = None,
-               error: subprocess.TimeoutExpired | OSError | None = None) -> None:
-        timeout = isinstance(error, subprocess.TimeoutExpired)
+    def finish(self, *, result: subprocess.CompletedProcess[str] | None = None,
+               error: subprocess.SubprocessError | OSError | None = None) -> None:
+        timeout = error if isinstance(error, subprocess.TimeoutExpired) else None
         record = {
             "event": "finished", "elapsed_seconds": time.monotonic() - self.started,
             "outcome": "unknown_timeout" if timeout else "os_error" if error else "exited",
             "returncode": result.returncode if result is not None else None,
-            "stdout": _streams(result.stdout if result is not None else error.output if timeout else None, self.environment, complete=result is not None),
-            "stderr": _streams(result.stderr if result is not None else error.stderr if timeout else None, self.environment, stderr=True, complete=result is not None),
+            "stdout": _streams(result.stdout if result is not None else timeout.output if timeout else None, self.environment, complete=result is not None),
+            "stderr": _streams(result.stderr if result is not None else timeout.stderr if timeout else None, self.environment, stderr=True, complete=result is not None),
         }
         if isinstance(error, OSError):
             record["errno"] = error.errno
