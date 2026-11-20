@@ -488,6 +488,47 @@ Their detached-worker stop/drain semantics remain unchanged and do not qualify
 in-process cutover. No automatic task selection, shared-queue coordination,
 ordinary v2 capability, process adoption or runtime activation is added.
 
+### Explicit point queue consumer
+
+`indexing.point_queue_consumer.PointQueueConsumer(config=..., point_scope=...,
+point_executor=...)` composes the joined host with caller-scheduled bounded
+queue consumption. Enter its single-use async context inside the configured
+connector/client lifetime. Every instance starts paused, including after
+reconstruction. Explicitly `await consumer.resume()`, then
+`await consumer.run_pending(max_tasks=...)` to complete at most that many claims
+(default one). Empty batches return zero; successful batches return their
+completed-task count. It creates no timer, task loop or process.
+
+The read-only `TaskStore.next_point_task(point_scope=...)` selects parked v2
+work FIFO by creation time and ID, matching source, family, account and the
+entire endpoint/query binding. It neither pins nor changes status. Queue reads
+run off the event loop; admission is rechecked afterward so drain or stop cannot
+be followed by a late dispatch. The dispatcher checks the current whole scope
+again before invoking the bound executor. Its existing snapshot comparison,
+runtime pinning, source writer and completion verification remain authoritative;
+later arrivals never mutate an existing pin. Legacy/v1 tasks, other scopes and
+terminal rows are not selected.
+
+A nonzero dispatch result raises with its task ID and exit code and pauses
+consumption. Any exception or cancellation also pauses it; repeated scheduling
+cannot retry that parked claim without explicit resume. Retained bodies and
+pins remain with their current recovery owners. Reconstruction and resume do
+not repair dirty native state, reconcile partial effects, or infer restore
+currentness. Supported retained retry still requires the existing qualification.
+
+Drain pauses this consumer and observes the host's active native operation;
+stop permanently closes admission and joins effects. Neither cancels the thread
+or revokes its queue pin. Resume refuses an active batch. Keep clients alive
+until context exit or stop settles, even after a drain timeout.
+
+The task limit bounds dispatch count, not candidate-queue reads, provider
+requests, total elapsed time or native I/O. Selection may inspect parked rows
+for the selected source to find an exact binding; it does not scan indexed
+content or provider history. This is not a transactional dequeue lease or
+cross-consumer scheduling coordinator. Service construction, notifications,
+cutover/adoption and ordinary v2 execution advertisement remain unimplemented.
+The detached runner, CLI and default ingestion behavior are unchanged.
+
 ### Sealed native publication suffix
 
 After qualifying all selected native content, routed vectors, cleanup and
