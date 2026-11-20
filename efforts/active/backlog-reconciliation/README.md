@@ -410,6 +410,12 @@ the non-public approval conversation.
 
 ## Plan
 
+The [fixture-authority and cleanup receiving proposal](journal/2026/11.20-fixture-authority-and-cleanup-receiving.md)
+maps four complete source contracts to the existing Portfolio and intake,
+with twenty new unchecked technical rows and nine independent retained
+outcomes. Normal reviewed complete delivery and separate source judgments
+remain; no prospective retirement or technical/resource credit is recorded.
+
 The [registration and selected peer-launch unit](journal/2026/11.20-registration-and-peer-launch-completions.md)
 records two independently acknowledged finite source completions and nine
 distinct retained contracts, with a complete 888-open census. Existing owner,

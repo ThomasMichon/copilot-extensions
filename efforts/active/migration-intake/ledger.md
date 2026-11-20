@@ -1051,3 +1051,29 @@ This append preserves the earlier conditional proposal as history; it adds
 no technical completion, administrative checkbox, execution grant, owner
 appointment or resource release. OPEN #1303, all incumbent obligations,
 unit-only required CI and hosted-Windows quiescence remain.
+
+## Proposed finite fixture-authority and cleanup receiving - 2026-11-20 UTC
+
+| Source | Disposition | Primary canonical owner | Retained gates |
+|---|---|---|---|
+| #9348 historical workflow fixtures | routed (proposed; effective after actual reviewed complete domain acceptance) | [Test Portfolio Rationalization](../test-portfolio-rationalization/README.md), Phase 4 tools/workflow wave, P9348/V9348/G9348 through Phase 7 | Original three-file 65-failure family, explicit bounded historical recipes and current unit declarations; separate adjacent 19-failure claimant and #3336/#6237 coordination; no restored gates, skips or wider permissions |
+| #12968 publication execution-identity fixtures | routed (proposed; effective after actual reviewed complete domain acceptance) | Existing Portfolio Phase 4 Worktrees wave, P12968/V12968/G12968 through Phase 7 | Both exact TestCreatePRAutoOpen cases, distinct portable host/execution identity and unchanged raw/codename privacy; current #13297 correction and its Draft/older-publisher/review hold, without a new implementation owner |
+| #13164 session-command receiving fixtures | routed (proposed; effective after actual reviewed complete domain acceptance) | Existing Portfolio Phase 4 Worktrees wave, P13164/V13164/G13164 through Phase 7 | Unchanged register/bind two-module packet AND independent authority controls; canonical tracking/project/record subjects, fresh trusted-identity success, omitted foreign-project identity fields, unchanged binding under optional-stamp lock contention and actual stale/foreign negatives; distinct #13300/#12879 families |
+| #12973 finished-daemon cleanup qualification | routed (proposed; effective after actual reviewed complete domain acceptance) | Existing Portfolio Phase 5 owning-runner lane, P12973/V12973/G12973 through Phase 7 | Attempt-bound daemon/process-birth/supervisor/settlement/artifact evidence from available CI material OR an instrumented bounded Windows reproduction; retain historical failure and unknown old cause, distinguish that attempt's fixture failure OR proven-dead-identity cleanup cause; assertion success distinct from final cleanup, all identity/descendant/artifact refusals and original bounds |
+
+This same planning unit delivers complete direct domain Plan, local and
+actual global Validation, continuing Coordination and dated Journal for
+review. Ledger-only publication is not domain acceptance. All four sources
+remain OPEN during proposal; permitted current whole receiving/source/custody
+readback and four separate judgments follow actual reviewed complete delivery.
+All twenty new technical rows remain unchecked. Preserve OPEN #1303, all
+incumbent history/checks/holds, unit-only required CI, hosted-Windows quiescence,
+existing contributors and actual native/release/source/resource custodians.
+No generic ACK, unrelated whole-portfolio or legacy-recovery prerequisite,
+new tracker, implementation appointment, native/test execution, cleanup,
+guard/deadline change or resource transfer is introduced.
+The [thirteen-source crosswalk](../backlog-reconciliation/journal/2026/11.20-fixture-authority-and-cleanup-receiving.md)
+retains the evidence limits and independent unresolved outcomes.
+The [canonical P/V details](../test-portfolio-rationalization/fixture-authority-and-cleanup.md)
+belong to the same Phase 4/5 domain Plan; its sixteen P/V state anchors and
+four actual global G rows remain solely in the Portfolio README.
