@@ -410,15 +410,25 @@ the non-public approval conversation.
 
 ## Plan
 
+The [independent inference-identity and custody unit](journal/2026/11.20-independent-inference-identity-and-custody.md)
+proposes complete #3296 receiving in existing Account-Aware Operations
+Phase 6, with nine unchecked technical rows and no new effort or credential
+owner. Nine complete current source/discussion unions retain the distinct
+custodian, architecture, repair-reservation and final-open incident gates.
+The complete 08:18 PT census remains 883 open, 154 above fixed 729, with no
+new arrivals, departures or campaign disposition in this unit.
+
 The [full-user WinGet venue receiving unit](journal/2026/11.20-winget-venue-and-retained-contracts.md)
-records #13701's actual reviewed receiving and the complete 884-open census.
-Current whole-source readback requires an explicit conjunction: install the
+records #13701's actual reviewed receiving and the historical 884-open census.
+The explicit conjunction was then clarified through reviewed #13703: install the
 seed plugin through the external marketplace AND establish its runtime through
-the declared installation owner. The scoped clarification changes no technical
-state, native/resource custodian or original outcome. All six Portfolio rows
-remain unchecked and #1475 stays OPEN pending corrected reviewed receiving/
-readback and a separate judgment. #688's independent gates, #2612's actual
-mapping condition and the distinct canonicals remain.
+the declared installation owner. Complete current receiving/original/custody
+readback and a separate judgment preceded #1475's acknowledged NOT_PLANNED
+tracking retirement. All six Portfolio technical rows remain unchecked;
+the clarification and retirement change no native/resource custodian or
+original outcome. #688's independent gates, #2612's actual mapping condition
+and the distinct canonicals remain. The new unit above records this follow-through,
+not a repeated disposition or claim of technical completion.
 
 The [local transport and complete rendezvous planning unit](journal/2026/11.20-local-transport-and-rendezvous-planning.md)
 records #13690's actual reviewed delivery, #12042's separately audited tracking
