@@ -57,7 +57,10 @@ can also inspect readiness: the recorded submitter, native session and generatio
 must still match the captured assignment, even though its lease has ended.
 Dispatch checks its held assignments, detached waiters and wake/send records
 on both sides of the owner read. Other work holding the same worker or native
-on the same host blocks even without a corresponding Worktrees claim. A
+on the same host blocks even without a corresponding Worktrees claim. Suspension
+retains the assignment independently of any waiter or wake. A submitted task
+retaining its submitter and native return identity also blocks until that binding
+is discharged; a completed task's historical submitter is not a current assignment. A
 current pending delivery (including a qualified retry) also blocks; a stale
 unattempted wake or this observation's own pending closeout notification does
 not. A confirmed single-attempt delivery settles an unqualified wake; a later

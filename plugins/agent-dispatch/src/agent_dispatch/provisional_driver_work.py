@@ -19,7 +19,12 @@ if TYPE_CHECKING:
 _TREE = "substr(owner,instr(owner,'/')+1)"
 _TARGET = f"COALESCE(NULLIF(owner_session_id,''),{_TREE})"
 _LIVE_WAITER = "state IN ('preparing','active')"
-_HELD_ASSIGNMENT = "status IN ('claimed','started')"
+_RETAINED_ASSIGNMENT = (
+    "(status IN ('claimed','started','suspended') OR"
+    " (status='submitted' AND completed_by IS NOT NULL AND owner_session_id IS NOT NULL))"
+)
+_ASSIGNED_WORKER = "CASE WHEN status='submitted' THEN completed_by ELSE owner END"
+_ASSIGNED_TREE = f"substr({_ASSIGNED_WORKER},instr({_ASSIGNED_WORKER},'/')+1)"
 # A terminal first delivery can settle an unqualified send, but a later
 # successful retry says nothing about the outcome of an earlier attempt.
 _AMBIGUOUS = (
@@ -48,12 +53,17 @@ def migrate(conn: sqlite3.Connection) -> None:
         f"CREATE INDEX IF NOT EXISTS idx_run_waiters_driver_work"
         f" ON run_waiters(task_id) WHERE {_LIVE_WAITER}"
     )
-    for table, predicate in (("tasks", _HELD_ASSIGNMENT), ("run_waiters", _LIVE_WAITER)):
-        for suffix, key in (("native", "owner_session_id"), ("tree", _TREE)):
-            conn.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_{table}_driver_{suffix}"
-                f" ON {table}({key}) WHERE {predicate}"
-            )
+    for suffix, key in (("native", "owner_session_id"), ("tree", _TREE)):
+        conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_run_waiters_driver_{suffix}"
+            f" ON run_waiters({key}) WHERE {_LIVE_WAITER}"
+        )
+    for suffix, key in (("native", "owner_session_id"), ("tree", _ASSIGNED_TREE)):
+        conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_tasks_driver_{suffix}_v2"
+            f" ON tasks({key}) WHERE {_RETAINED_ASSIGNMENT}"
+        )
+        conn.execute(f"DROP INDEX IF EXISTS idx_tasks_driver_{suffix}")
 
 
 def _pending_delivery(queue: TaskQueue, conn: sqlite3.Connection, row: sqlite3.Row,
@@ -86,9 +96,13 @@ def require_no_outstanding_driver_work(
     tree = reservation["worktree"]
     worker = f"{reservation['execution_machine']}/{tree}"
     # A waiter may still hold the driver after the task's active lease ended.
+    # Separate probes keep SQLite from scanning all submitted tasks by status.
+    assignments = (
+        f"SELECT id AS task_id,COALESCE({_ASSIGNED_WORKER},'') AS owner,owner_session_id"  # noqa: S608 -- fixed SQL predicates
+        f" FROM tasks WHERE {_RETAINED_ASSIGNMENT} AND id<>:task AND "
+    )
     for row in conn.execute(
-        "SELECT id AS task_id,COALESCE(owner,'') AS owner,owner_session_id FROM tasks"  # noqa: S608 -- fixed SQL predicates
-        f" WHERE {_HELD_ASSIGNMENT} AND id<>:task AND (owner_session_id=:native OR {_TREE}=:tree)"
+        f"{assignments}owner_session_id=:native UNION ALL {assignments}{_ASSIGNED_TREE}=:tree"  # noqa: S608 -- fixed SQL; caller data is bound
         " UNION ALL SELECT task_id,owner,owner_session_id FROM run_waiters"
         f" WHERE {_LIVE_WAITER} AND (task_id=:task OR owner_session_id=:native OR {_TREE}=:tree)",
         {"task": task.id, "native": native, "tree": tree},

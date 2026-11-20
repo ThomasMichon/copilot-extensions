@@ -259,6 +259,11 @@ def test_preview_reconciliations_skip_settled_transport_history(
                     rows,
                 )
                 conn.executemany(
+                    "INSERT INTO tasks(id,status,completed_by,owner_session_id)"
+                    " VALUES ('submitted-' || :i,'submitted','host/other','unrelated')",
+                    rows,
+                )
+                conn.executemany(
                     "INSERT INTO run_waiters(task_id,generation,pid,resume_worktree,state,"
                     "created_at,updated_at) VALUES (:task,:i,0,'w','retired',1,1)", rows,
                 )
@@ -376,11 +381,14 @@ def test_preview_after_confirmed_closeout_delivery(ready: Ready, retried: bool) 
     ("host-a/other", "native", "started", True),
     ("other/worktree", "native", "started", False),
     ("host-a/other", "other", "started", False),
+    ("HOST-A/worktree", "other", "suspended", True),
+    ("host-a/other", "native", "suspended", True),
+    ("other/worktree", "native", "suspended", False),
     ("HOST-A/worktree", "other", "waiter", True),
     ("other/worktree", "native", "waiter", False),
     ("host-a/worktree", "native", "wake", True),
     ("host-a/worktree", "native", "retry", True),
-    ("host-a/worktree", "native", "unretryable", False),
+    ("host-a/worktree", "native", "unretryable", True),
     ("host-a/worktree", "native", "stale", False),
 ])
 def test_other_assignment_or_delivery_during_preview(
@@ -400,6 +408,9 @@ def test_other_assignment_or_delivery_during_preview(
         assert queue.claim_one(worker, task_id=other.id, assignment_workspace=different)
         if mode != "claimed":
             queue.start(other.id, worker, owner_session_id=native)
+        if mode == "suspended":
+            queue.suspend(other.id, worker, reason="awaiting input", cooldown_seconds=None)
+            assert queue.get_active_run_waiter(other.id) is None
         if mode in {"waiter", "wake", "stale", "retry", "unretryable"}:
             queue.suspend(other.id, worker, reason="wait", cooldown_seconds=None)
             waiter = queue.register_run_waiter(
@@ -432,6 +443,14 @@ def test_other_assignment_or_delivery_during_preview(
                     queue.finish_run_waiter_wake(wake.id, wake.delivery_token, delivered=False)
                 if mode == "stale":
                     queue.release_suspended(other.id, worker)
+                with queue._connect() as conn:
+                    row = conn.execute(
+                        "SELECT * FROM run_waiter_wakes WHERE task_id=?", (other.id,),
+                    ).fetchone()
+                    assert row is not None
+                    assert provisional_driver_work._pending_delivery(
+                        queue, conn, row, "run_waiter_wakes", ready[3].id,
+                    ) == (mode in {"wake", "retry"})
         return evidence
 
     monkeypatch.setattr(submission_readiness_observation, "observe", raced)
@@ -445,3 +464,42 @@ def test_other_assignment_or_delivery_during_preview(
             replay = api.post(transport.path(ready, "/observe-provisional"),
                               headers=transport.headers(ready), json=transport.body(ready))
             assert replay.status_code == 409
+            if mode == "unretryable":
+                queue.release_suspended(other.id, worker)
+                monkeypatch.setattr(submission_readiness_observation, "observe", observe)
+                released = api.post(transport.path(ready, "/observe-provisional"),
+                                    headers=transport.headers(ready), json=transport.body(ready))
+                assert released.status_code == 200
+
+
+def test_other_submitted_return_binding_blocks_until_confirmed(
+    assignment: Assignment, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    queue, _, workspace, other = assignment
+    observer = queue.create("Observer", repo="other")
+    assert isinstance(observer, Task)
+    start = cast(Callable[[TaskQueue, AssignmentWorkspace, Task], Task], start_managed)
+    start(queue, workspace, other)
+    monkeypatch.setattr(submission_readiness_observation, "observe", lambda *_: {"ready": True})
+    submitted = queue.complete(other.id, workspace.worker_id, result={"answer": 1})
+    assert submitted.status == Status.SUBMITTED and submitted.owner is None
+    relationship = queue.task_relationship(other.id)
+    assert relationship is not None and relationship["state"] == "bound"
+    assert queue.task_pool_assignment(other.id) is not None
+
+    def check(host: str, native: str, tree: str = workspace.worktree) -> None:
+        identity = {
+            "execution_machine": host, "worktree": tree, "task_id": observer.id,
+        }
+        with queue._connect() as conn:
+            provisional_driver_work.require_no_outstanding_driver_work(
+                queue, conn, observer, identity, native,
+            )
+
+    check("other-host", "native")
+    with pytest.raises(TaskError, match="outstanding assignment"):
+        check(workspace.machine, "different-native")
+    with pytest.raises(TaskError, match="outstanding assignment"):
+        check(workspace.machine, "native", "other-tree")
+    queue.confirm(other.id, actor="fixture")
+    check(workspace.machine, "native")
