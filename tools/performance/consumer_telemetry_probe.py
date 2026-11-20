@@ -61,6 +61,8 @@ with Path("readback.jsonl").open("wb") as output:
             time.sleep(.002)
         output.write(line)
         output.flush()
+        if mode == "fsync-failed":
+            raise OSError("fixture fsync refusal after readable write")
         os.fsync(output.fileno())
         count += 1
 Path("receiver-cost.json").write_text(json.dumps({

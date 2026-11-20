@@ -185,21 +185,26 @@ def test_ordinary_dispatch_create_wall_cpu_tail(
         assert owner.writer is None or owner.writer.join(0)
         assert all(item.pipe is None or item.pipe.closed for item in owner.bindings)
     rows = readback(root) if (root / "readback.jsonl").exists() else []
+    cost = root / "receiver-cost.json"
+    receiver_cost = json.loads(cost.read_text(encoding="utf-8")) if cost.exists() else None
+    if receiver_cost is not None:
+        assert receiver_cost["records"] == len(rows)
     if mode == "reading":
         assert len(rows) == 49
+        assert receiver_cost is not None
     elif mode == "bridge-only":
         assert not rows
         assert json.loads((root / "schema-rejection.json").read_text(encoding="utf-8")) == {
             "observed_source_schema": "dispatch.lifecycle.v1", "rejected": True,
         }
-    cost = root / "receiver-cost.json"
     record_property("consumer_telemetry_http_performance", json.dumps({
         "version": 1, "source": "agent-dispatch", "mode": mode,
         "boundary": "authenticated HTTP task creation; 49 distinct tasks",
         "cold_operation": cold, "measurement": measured, "shutdown_wall_ns": shutdown_ns,
-        "persisted_records": len(rows),
+        "readback_records": len(rows),
+        "fsync_confirmed_records": receiver_cost["records"] if receiver_cost is not None else None,
         "producer_counters": owner.stats() if owner is not None else {},
-        "receiver_cost": json.loads(cost.read_text(encoding="utf-8")) if cost.exists() else None,
+        "receiver_cost": receiver_cost,
         "includes_http_database_and_timer": True,
         "http_tail_sample_insufficient_for_tail_qualification": True,
         "not_installed_service": True,

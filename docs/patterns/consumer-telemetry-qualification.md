@@ -31,7 +31,7 @@ collector, credentials or network sink is a fixture.
 
 The shared-offer packet measures each registered source separately with no sink
 (legacy), disabled admission, fsync-per-record, delayed fsync-per-record,
-nonreading and immediately failing receivers. Admission and first offer are
+nonreading, immediately failing and post-write fsync-failing receivers. Admission and first offer are
 separate from a finite unpaced burst of 4,096 offers. This is an intentional
 queue-pressure workload, not a steady-state throughput claim.
 The first offer starts receiver construction asynchronously; the following
@@ -69,9 +69,15 @@ owned shutdown are separate boundaries.
 ## Loss and compatibility
 
 Readback comes from the independently opened receiver file after owned teardown,
-not from a pipe-write counter. Records retain increasing unique sequence
-numbers. Properties expose actual producer counters, persisted count, sequence
-gaps and offered-minus-persisted count. Terminal-route counters can overlap
+not from a pipe-write counter. Readable bytes alone do not prove fsync completed.
+Properties distinguish `readback_records` from `fsync_confirmed_records`: the
+latter is known only when the receiver completed its EOF summary after successful
+per-record fsync and its count matches readback. Otherwise confirmation and
+offered-minus-confirmed counts remain unavailable, not zero. The injected
+post-write fsync refusal proves that readable records can coexist with unknown
+persistence. Records retain increasing unique sequence numbers. Properties
+expose actual producer counters, readback count, sequence gaps and both available
+loss counts. Terminal-route counters can overlap
 previously enqueued observations; do not sum them into a fabricated loss
 identity. A receiver can persist a prefix before failure. A pressure trial with
 loss explicitly reports delivery as unqualified, not successful delivery.

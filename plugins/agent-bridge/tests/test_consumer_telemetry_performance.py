@@ -26,7 +26,9 @@ def probe() -> Any:
 
 
 @pytest.mark.parametrize("source", ["agent-bridge", "agent-dispatch"])
-@pytest.mark.parametrize("mode", ["legacy", "disabled", "reading", "slow", "nonreading", "failed"])
+@pytest.mark.parametrize("mode", [
+    "legacy", "disabled", "reading", "slow", "nonreading", "failed", "fsync-failed",
+])
 def test_native_offer_wall_cpu_tail_and_loss(
     tmp_path: Path, source: str, mode: str,
     record_property: Callable[[str, object], None],
@@ -112,15 +114,18 @@ def test_native_offer_wall_cpu_tail_and_loss(
             stats, [(item.state, item.started) for item in owner.bindings],
         )
         assert stats["start_failed"] == stats["write_failed"] == 0
-    record_property("consumer_telemetry_performance", json.dumps({
+    confirmed = receiver_cost["records"] if receiver_cost is not None else None
+    report: dict[str, Any] = {
         "version": 1, "source": source, "mode": mode,
         "platform": platform.system(), "python": platform.python_version(),
         "boundary": "shared producer offer; finite unpaced burst",
         "admission_wall_ns": admission_ns, "cold_offer": cold, "burst": burst,
         "close_wall_ns": close_ns, "total_wall_ns": total_wall,
         "total_process_cpu_ns": total_cpu, "receiver_cost": receiver_cost,
-        "producer_counters": stats, "persisted_records": len(rows),
-        "not_persisted": 4097 - len(rows) if owner is not None else None,
+        "producer_counters": stats, "readback_records": len(rows),
+        "fsync_confirmed_records": confirmed,
+        "not_read_back": 4097 - len(rows) if owner is not None else None,
+        "not_fsync_confirmed": 4097 - confirmed if confirmed is not None else None,
         "sequence_gaps": (
             max(sequences) - min(sequences) + 1 - len(sequences) if sequences else None
         ),
@@ -129,9 +134,14 @@ def test_native_offer_wall_cpu_tail_and_loss(
         "receiver_cost_unavailable": receiver_cost is None,
         "loss_counters_are_not_additive": True,
         "delivery_qualification": (
-            "not-qualified-under-pressure" if len(rows) != 4097 else "complete-finite-readback"
+            "not-qualified-under-pressure" if confirmed != 4097 else "complete-finite-readback"
         ) if mode not in ("legacy", "disabled") else "not-applicable",
-    }, sort_keys=True))
+    }
+    if mode == "fsync-failed":
+        assert report["readback_records"] > 0
+        assert report["fsync_confirmed_records"] is None
+        assert report["not_fsync_confirmed"] is None
+    record_property("consumer_telemetry_performance", json.dumps(report, sort_keys=True))
 
 
 @pytest.mark.parametrize("mode", ["legacy", "disabled", "reading", "slow", "failed", "nonreading"])
@@ -199,16 +209,21 @@ def test_ordinary_bridge_stop_wall_cpu_tail(
         assert all(item.pipe is None or item.pipe.closed for item in owner.bindings)
     output = root / "readback.jsonl"
     rows = output.read_text(encoding="utf-8").splitlines() if output.exists() else []
+    cost = root / "receiver-cost.json"
+    receiver_cost = json.loads(cost.read_text(encoding="utf-8")) if cost.exists() else None
+    if receiver_cost is not None:
+        assert receiver_cost["records"] == len(rows)
     if mode == "reading":
         assert len(rows) == 98
-    cost = root / "receiver-cost.json"
+        assert receiver_cost is not None
     record_property("consumer_telemetry_http_performance", json.dumps({
         "version": 1, "source": "agent-bridge", "mode": mode,
         "boundary": "authenticated stopped-session HTTP stop; 49 distinct sessions",
         "cold_operation": cold, "measurement": measured, "shutdown_wall_ns": shutdown_ns,
-        "persisted_records": len(rows),
+        "readback_records": len(rows),
+        "fsync_confirmed_records": receiver_cost["records"] if receiver_cost is not None else None,
         "producer_counters": owner.stats() if owner is not None else {},
-        "receiver_cost": json.loads(cost.read_text(encoding="utf-8")) if cost.exists() else None,
+        "receiver_cost": receiver_cost,
         "includes_http_database_and_timer": True,
         "http_tail_sample_insufficient_for_tail_qualification": True,
         "not_live_session_stop_or_installed_service": True,
