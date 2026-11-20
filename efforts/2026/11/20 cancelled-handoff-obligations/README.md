@@ -12,8 +12,8 @@ and ordinary finalization gates.
 - **Repo:** copilot-extensions
 - **Branch(es):** serial plan, source and acceptance PRs
 - **Created:** 2026-11-20
-- **Status:** Active
-- **Vision:** [Worktrees claims and obligations](../../../visions/plugins/agent-worktrees/README.md#claims-leases-and-obligations), [Handoff cancellation](../../../visions/plugins/context-handoff/README.md#extension-independent-recovery)
+- **Status:** Done
+- **Vision:** [Worktrees claims and obligations](../../../../visions/plugins/agent-worktrees/README.md#claims-leases-and-obligations), [Handoff cancellation](../../../../visions/plugins/context-handoff/README.md#extension-independent-recovery)
 - **Umbrella issue:** #4619, finite OS3-OS4/OSV2 only
 
 ## Guiding Intent
@@ -110,10 +110,10 @@ not authority for live task or runtime changes.
   targeted retry idempotent. Unknown, mismatched, claimed/running,
   contradictory or replaced state retains the obligation; no blind replay,
   forced release or new source of authority.
-- [ ] Clear focused real-consumer regressions, affected suites, whole-file
+- [x] Clear focused real-consumer regressions, affected suites, whole-file
   strict checking where Python changes, contract/documentation guards,
   exact-source qualification and normal review/required CI before merge.
-- [ ] Read the complete current parent and discussion before accepting only
+- [x] Read the complete current parent and discussion before accepting only
   proved OS3-OS4/OSV2 clauses at their actual evidence tier. Complete only
   the original finite reservation; preserve all other rows/custodians.
 
@@ -133,7 +133,7 @@ not authority for live task or runtime changes.
   file-backed/manual/off behavior, exact candidate checks and ordinary task
   responsibility semantics intact. Retain all applicable no-live-effect and
   unchanged-state controls.
-- [ ] V5: Focused fail-first proof for any correction, affected source suites,
+- [x] V5: Focused fail-first proof for any correction, affected source suites,
   lint and complete-file strict analysis where applicable; qualify the actual
   published source on supported disposable platforms, then genuine current-head
   review and required CI. Distinguish source evidence from productive
@@ -147,7 +147,7 @@ Archive publication is a closeout action, not a pre-Done checkbox.
 
 This closes the existing Worktrees creator-obligation and extension-independent
 handoff cancellation intent, not a new lifecycle architecture. The
-[patterns](../../../docs/patterns/README.md) require independent plugin operation,
+[patterns](../../../../docs/patterns/README.md) require independent plugin operation,
 shared owner authority, truthful uncertainty, economical evidence and parity.
 Use the smallest demonstrated correction after P1. A callback retry is not
 proof of settlement; a new receipt protocol, registry, polling worker or
@@ -158,4 +158,4 @@ choice before a production correction.
 
 ## Journal
 
-- [2026-11-20 - Source proposal, creator-binding decision and qualification](journal/2026/11.20-source-qualification.md)
+- [2026-11-20 - Source proposal, creator-binding decision, qualification and finite acceptance](journal/2026/11.20-source-qualification.md)

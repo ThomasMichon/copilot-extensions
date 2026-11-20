@@ -256,10 +256,10 @@ insufficient substitutes.
 This is an unwired source prerequisite, not actual native qualification or
 subscriber migration support. Actor-free native-call and serialized-record
 controls cannot close the actual provider, same-domain reboot, cloned/moved
-root, container-restart or Linux-provider gates. The sealed-record receiver,
-fresh sealed epoch, original/current controller separation, guarded final
-source import and authority selection remain under the same writer owner;
-ordinary entry and map/cwd writes remain unchanged.
+root, container-restart or Linux-provider gates. The Windows sealed receiver and original/current controller separation are
+documented below. Fresh POSIX sealed epoch, guarded final source import and
+authority selection remain under the same writer owner; ordinary entry and
+map/cwd writes remain unchanged.
 
 ## One owner, explicit phases
 
@@ -551,15 +551,26 @@ service operation or rollout is performed.
 
 ### Windows sealed version-2 receiver
 
+**Source merged in #13662; no installed migration or activation.**
 The internal `WatchWriter.recover_sealed_state_transition()` source API receives
 an already installed Windows barrier under fresh lifecycle authorization and,
 when governed, the current installation's actually held transaction. It uses
 the same original v1 record/topology validator as Windows sealing rather than
-weakening or bypassing the v1 readers. The complete original private journal,
-including its no-delete-sharing seal, remains immutable `origin`; top-level
-`binding`, `lease` and `seal` remain equal to that origin. A separately validated
+weakening or bypassing the v1 readers. The complete original private journal
+remains immutable `origin`; top-level `schema`, `binding` and `lease` remain
+equal to that origin. A separately validated
 `controller` records the admitted current executor without requiring the old
 executable to exist.
+
+The receiver also accepts phase progression from an actual v1 prepared origin,
+with or without an already staged seal, to a v2 `sealed-legacy` envelope.
+It validates the original receipt under the strict v1 schema and does not
+relabel its phase as an invented sealed receipt. Any seal in that origin must
+remain exactly unchanged; otherwise the current seal is validated solely
+against the actual installed barrier and original pin/retained file. A
+temporary v1-shaped view validates those current physical facts, not origin
+provenance or current admission. A sealed origin cannot downgrade or change
+its seal. This receiver creates no seal and performs no move.
 
 Only the qualified installed barrier permits acquisition of the inner writer
 lease. No original/retained lease is acquired, and an incomplete preparation or
