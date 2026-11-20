@@ -205,6 +205,10 @@ After the reviewed proposal, the operator admitted execution:
   retry. An explicit [service binding](../../../plugins/agent-index/docs/component-ledger.md#explicit-service-binding)
   composes isolated exact-scope HTTP intake, the existing governed runner and
   joined client lifetime, with paused reconstruction and no ordinary activation.
+  Fresh entirely superseded claims can now select qualified higher-version
+  completion before named-body acquisition; equal versions retain canonical
+  comparison, mixed claims retain whole acquisition and existing pending work
+  is never bypassed.
   Ordinary v2 execution and automatic partial-effect/restore
   reconciliation remain unimplemented; live-provider, broader event-delivery
   and consumer-scale qualification remain open.
@@ -348,7 +352,7 @@ Merged #13659 composes explicit service construction, isolated exact-scope
 HTTP intake, the existing governed runner and joined client lifetime.
 Ordinary activation, cross-generation recovery and broader acceptance remain
 separate.
-The same entry records explicit service reconstruction around sealed native
+Merged #13665 qualifies explicit service reconstruction around sealed native
 publication and unchanged refusal of an unsealed partial write.
 
 Append-only entries are preserved in dated files, newest first.
