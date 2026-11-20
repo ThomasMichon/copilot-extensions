@@ -153,8 +153,10 @@ The standalone host can explicitly provision
 [fresh-baseline generation associations](../../services/pr/README.md#optional-fresh-baseline-generation-associations).
 The executing core records original immutable generation/observation identities
 before cache publication, with bounded pending/confirmed custody and no legacy
-backfill. This does not enable populated terminal adoption or change default
-workspace publication.
+backfill. A separately selected
+[recorded-generation terminal transition](../../services/pr/README.md#recorded-generation-terminal-transition)
+preserves associated cache reads without manufacturing native watch targets.
+Default workspace publication is unchanged.
 
 Source embeddings additionally expose the finite
 [workspace service/client API](docs/workspace-integration.md) through the

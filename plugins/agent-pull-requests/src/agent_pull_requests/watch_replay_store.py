@@ -118,11 +118,20 @@ class ReplayStore:
         repository_filtered: bool = False,
         repository_activity: bool = False,
         workspace_generation_associations: bool = False,
+        recorded_terminal_cache: bool = False,
     ) -> None:
+        if type(recorded_terminal_cache) is not bool or recorded_terminal_cache and (
+            not workspace_generation_associations or not terminal_retention
+            or not terminal_recovery or not terminal_cache_retirement or terminal_comment_mapping
+        ):
+            raise ValueError("recorded cache requires its selected association and terminal readers")
+        self.recorded_terminal_cache = recorded_terminal_cache
         if type(workspace_generation_associations) is not bool:
             raise ValueError("explicit generation association selection required")
         if workspace_generation_associations and any((
-            terminal_retention, terminal_recovery, terminal_cache_retirement,
+            terminal_retention and not recorded_terminal_cache,
+            terminal_recovery and not recorded_terminal_cache,
+            terminal_cache_retirement and not recorded_terminal_cache,
             terminal_comment_mapping, repository_cache, repository_continuing,
             repository_filtered, repository_activity,
         )):
@@ -284,8 +293,20 @@ class ReplayStore:
         recovery = "terminal_recovery_version" in document
         retirement = "terminal_cache_retirement_version" in document
         associations = "generation_associations_version" in document
+        recorded = "recorded_terminal_cache_version" in document
+        if recorded:
+            if (
+                not self.recorded_terminal_cache or not associations or not terminal
+                or type(document["recorded_terminal_cache_version"]) is not int
+                or document["recorded_terminal_cache_version"] != 1
+            ):
+                raise ReplayStoreInvalid("recorded terminal cache reader unavailable for adopted owner")
+            names.add("recorded_terminal_cache_version")
         if associations:
-            if not self.workspace_generation_associations or terminal or prepared or version != 3:
+            if (
+                not self.workspace_generation_associations or prepared or version != 3
+                or terminal and not recorded
+            ):
                 raise ReplayStoreInvalid("generation association reader unavailable for adopted owner")
             names.update(("generation_associations_version", "generation_associations"))
         if "terminal_comment_mapping_version" in document:

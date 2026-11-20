@@ -6725,6 +6725,16 @@ runner/workflow budgets are unchanged; this is not a production database change.
 
 ## Optional PR service lifecycle
 
+`services/pr/tests/test_recorded_terminal_cache.py` belongs to this existing
+explicit process lane. It provisions the selected baseline through the actual
+CLI, transitions current/noncurrent recorded generations, reconstructs all
+chunks in a fresh reader and exercises retained sync/native epoch fencing.
+Interruption before/after each adoption replacement retries through the same
+owner without changing original cache, replay or association bytes.
+`plugins/agent-pull-requests/tests/test_recorded_terminal_cache.py` supplies the
+focused core contracts, including body-only admission and original-reader
+refusals. Neither packet qualifies installed migration or a live provider.
+
 The existing `pr_service=true` manual selector retains two disposable jobs
 (Linux and Windows), each capped at 10 minutes. Its source-pinned standalone
 acceptance first runs `PYTEST_ADDOPTS="-k filtered"` with a 180-second runner

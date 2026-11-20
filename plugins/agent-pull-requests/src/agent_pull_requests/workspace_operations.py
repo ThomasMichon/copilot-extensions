@@ -124,7 +124,8 @@ class WorkspaceOperations:
             or type(terminal_reads) is not bool
             or type(terminal_mapping_reads) is not bool
             or store.workspace_generation_associations and (
-                not conversations or terminal_reads or prepared_reviews or comment_mappings
+                not conversations or terminal_reads and not store.recorded_terminal_cache
+                or prepared_reviews or comment_mappings
                 or attention_owner is not None or feedback_owner is not None
                 or any(writers) or selection_preparer is not None
             )
@@ -417,7 +418,7 @@ class WorkspaceOperations:
             _generation(generation, scope)
             check()
             retention_observation = None
-            if self.store.workspace_generation_associations:
+            if self.store.workspace_generation_associations and retention_epoch is None:
                 from .generation_associations import publish
                 publication, retention_observation = publish(
                     self.store, cache, generation, expected_current=payload["expected_current"],
