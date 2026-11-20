@@ -106,7 +106,7 @@ Write-Output 'identical-preserved changed-refused reader-preserved changed-publi
         capture_output=True,
         text=True,
         timeout=15,
-        creationflags=subprocess.CREATE_NO_WINDOW,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW"),
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert (
