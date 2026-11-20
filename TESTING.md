@@ -7642,6 +7642,22 @@ native owners while executing cleanup composition, including a saturated later
 model and vector-before-canonical effects. Neither packet qualifies provider
 ordering, complete point application, a live directory or native Windows.
 
+`plugins/agent-index/tests/test_point_embedding.py` separately composes selected
+pair writes against the real cold two-model store and nonempty component ledger.
+It covers routed/unclaimed pairs, fresh facades and poisoned caches, reopen
+reuse, changed-profile backfill, prepared-vector counts, current canonical
+input and exact writer/scope/family/model/index refusal before inference.
+Native coverage publication checks prepared actual vectors before SQLite
+receipts; wrong/missing vectors and stale input refuse. Caught post-write
+preparation failure latches the outer writer dirty instead of publishing
+coverage. `test_embedding_pair_reuse.py` retains the default pair/batch controls.
+The actor-free controls in
+`tools/promotion_unit_tests/test_point_embedding_contract.py` substitute native
+and SQLite boundaries while executing scope forwarding, no-op selection,
+write/preparation/receipt order and actual-vector-before-receipt composition.
+They do not qualify provider ordering, whole-claim/checkpoint completion,
+ordinary point application, a live directory or native Windows.
+
 The exclusive attachment-export consumer packet executes the real export
 entrypoint, health-selected command transport, extension registry, provider
 dispatch and descriptor-pinned writer with an in-memory filesystem and
