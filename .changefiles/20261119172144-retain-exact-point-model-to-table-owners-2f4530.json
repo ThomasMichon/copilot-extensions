@@ -1,0 +1,9 @@
+{
+  "comment": "Retain exact point model-to-table ownership across bootstrap, facades and receipt saves",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

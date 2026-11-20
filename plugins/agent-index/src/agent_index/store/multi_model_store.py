@@ -129,6 +129,17 @@ class MultiModelStore(_ItemRepresentationMixin):
 
         Returns the VectorTable instance for direct access if needed.
         """
+        domain = self._source_domain
+        if domain is not None and domain._point_scope is not None:
+            from .source_layout import SourceLayoutError
+
+            binding = domain.receipt().get("point_models")
+            if (binding is None or type(profile.dim) is not int or profile.dim <= 0
+                    or binding["content_table"] != self._content._table_name
+                    or binding["models"].get(profile.model_id) != {
+                        "table_name": profile.table_name, "dim": profile.dim,
+                    }):
+                raise SourceLayoutError("model registration differs from its retained point binding")
         if profile.model_id in self._vector_tables:
             return self._vector_tables[profile.model_id]
 

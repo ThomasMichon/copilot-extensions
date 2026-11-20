@@ -178,10 +178,10 @@ def test_point_vectors_refuse_unprepared_or_colliding_table_bindings_before_effe
         store.content_store._get_or_create_table().add([{**content_record(item), "indexed_at": 0.0}])
     prepare_ingestion_indices(store, max_rows=1, point_scope=scope)
     if binding == "missing-vector":
-        store.register_model(ModelProfile(
-            "late", "fixture", dim=2, table_name="unprepared_vectors",
-        ))
-        owner = store.get_vector_table("late")
+        owner = VectorTable(
+            store.content_store.db, table_name="unprepared_vectors", dim=2,
+            source_domain=domain, content_table=config.content_table,
+        )
     else:
         owner = VectorTable(
             store.content_store.db,
@@ -531,6 +531,8 @@ def test_point_schema_bootstrap_never_rebinds_legacy_or_replays_interruption(
 def test_point_schema_bootstrap_rechecks_an_interleaved_initializer(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, same_table: bool,
 ) -> None:
+    from agent_index.store import source_layout
+
     monkeypatch.setenv("AGENT_INDEX_STORE_LAYOUT", LAYOUT)
     profile = ModelProfile("small", "fixture", dim=2)
     config = IndexConfig(data_dir=tmp_path / "point", model_profiles={"small": profile})
@@ -538,19 +540,20 @@ def test_point_schema_bootstrap_rechecks_an_interleaved_initializer(
         profile, dim=3 if same_table else 2,
         table_name=profile.table_name if same_table else "other_vectors",
     )})
-    register = MultiModelStore.register_model
+    initialize = source_layout.initialize_source_layout
     before: dict[str, bytes] = {}
     interleaved = False
 
-    def interleave(self: MultiModelStore, selected: ModelProfile) -> VectorTable:
+    def interleave(path: str | Path, **kwargs: Any) -> dict[str, Any]:
         nonlocal before, interleaved
+        receipt = initialize(path, **kwargs)
         if not interleaved:
             interleaved = True
             initialize_source_store(competing, point_scope=claim().scope)
             before = snapshot(config.data_dir)
-        return register(self, selected)
+        return receipt
 
-    monkeypatch.setattr(MultiModelStore, "register_model", interleave)
+    monkeypatch.setattr(source_layout, "initialize_source_layout", interleave)
     with pytest.raises(SourceLayoutError, match="bootstrap"):
         initialize_source_store(config, point_scope=claim().scope)
     assert interleaved and before
@@ -569,7 +572,7 @@ def test_point_schema_bootstrap_refuses_vector_table_as_content(
     initialize_source_store(config, point_scope=claim().scope)
     before = snapshot(config.data_dir)
     changed = replace(config, content_table=second.table_name, model_profiles={"first": first})
-    with pytest.raises(SourceLayoutError, match="schema (?:changed|is incompatible)"):
+    with pytest.raises(SourceLayoutError, match="bootstrap model binding"):
         initialize_source_store(changed, point_scope=claim().scope)
     assert snapshot(config.data_dir) == before
 
@@ -1110,6 +1113,13 @@ def test_query_frontdoors_refuse_point_domains_without_empty_success(
     assert legacy_domain is not None
     # Simulate externally changed selection without applying or migrating point data.
     point_receipt["versions"] = legacy_domain.receipt()["versions"]
+    point_receipt["point_models"] = {
+        "protocol": 1, "content_table": config.content_table,
+        "models": {
+            key: {"table_name": profile.table_name, "dim": profile.dim}
+            for key, profile in config.model_profiles.items()
+        },
+    }
     (config.lance_dir / MARKER).write_text(json.dumps(point_receipt))
     selected = domain_for(config.lance_dir, point_scope=claim().scope)
     assert selected is not None

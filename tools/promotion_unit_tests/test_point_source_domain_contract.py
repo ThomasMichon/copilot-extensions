@@ -147,6 +147,59 @@ def test_point_selection_and_receipt_save_never_admit_legacy_operations(
     assert guards.count("enter") == guards.count("exit") == 4
 
 
+def test_point_model_binding_shape_refuses_ambiguous_table_ownership(
+    api: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    layout = api.layout
+    selected = layout.SourceDomain(Path("unused-point-domain"), point_scope=api.claim.scope)
+    binding: dict[str, Any] = {
+        "protocol": 1, "content_table": "chunks",
+        "models": {"first": {"table_name": "vectors_first", "dim": 2}},
+    }
+    raw = json.dumps({**api.receipt, "point_models": binding}).encode()
+    monkeypatch.setattr(layout, "_open_receipt", lambda _path: io.BytesIO(raw))
+    assert selected.receipt()["point_models"] == binding
+    for changed in (
+        None, {}, {**binding, "protocol": True}, {**binding, "protocol": 2},
+        {**binding, "extra": "ignored"}, {**binding, "content_table": ""},
+        {**binding, "models": {"first": {"table_name": "chunks", "dim": 2}}},
+        {**binding, "models": {**binding["models"], "alias": binding["models"]["first"]}},
+        *({**binding, "models": {"first": {"table_name": "vectors_first", "dim": dim}}}
+          for dim in (0, -1, True, 2.0, "2")),
+    ):
+        raw = json.dumps({**api.receipt, "point_models": changed}).encode()
+        with pytest.raises(layout.SourceLayoutError, match="invalid point model"):
+            selected.receipt()
+
+
+def test_point_model_binding_save_rechecks_retained_ownership_before_effects(
+    api: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    layout = api.layout
+    selected = layout.SourceDomain(Path("unused-point-domain"), point_scope=api.claim.scope)
+    selected._local.exclusion_owned = True
+    binding: dict[str, Any] = {
+        "protocol": 1, "content_table": "chunks",
+        "models": {"first": {"table_name": "vectors_first", "dim": 2}},
+    }
+    unbound = dict(api.receipt)
+    retained = {**api.receipt, "point_models": binding}
+    raw = json.dumps(retained).encode()
+    monkeypatch.setattr(layout, "_open_receipt", lambda _path: io.BytesIO(raw))
+    monkeypatch.setattr(Path, "exists", lambda path: path == selected.path / layout.MARKER)
+    for value in (unbound, {**retained, "point_models": {**binding, "models": {}}}):
+        with pytest.raises(layout.SourceLayoutError, match="changed or removed"):
+            selected.save(value)
+    raw = json.dumps(unbound).encode()
+    with pytest.raises(layout.SourceLayoutError, match="empty owning writer"):
+        selected.save(retained)
+    selected._local.depth = 1
+    selected._local.db = object()
+    monkeypatch.setattr(layout, "_versions", lambda _db: {"native": 1})
+    with pytest.raises(layout.SourceLayoutError, match="empty owning writer"):
+        selected.save(retained)
+
+
 def test_nested_default_reads_recheck_receipt_before_returning_legacy_results(
     api: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
