@@ -12,7 +12,7 @@ existing loop does not necessarily abort on one error.
 - **Repo:** copilot-extensions
 - **Branch(es):** independent reviewed plan, implementation and acceptance PRs
 - **Created:** 2026-11-19
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** [Repository identity and ownership](../../../visions/plugins/agent-worktrees/README.md#repository-and-worktree-identity)
 - **Umbrella issue:** #4173; original source #4228
 
@@ -72,7 +72,7 @@ candidate and all existing resource/native obligations remain unchanged.
 
 ## Plan
 
-- [ ] **P1:** Land this finite design through normal planning review before
+- [x] **P1:** Land this finite design through normal planning review before
   source implementation.
 - [ ] **P2:** After the existing bare/dirty/detached guards, inspect the
   checkout's configured remote names through the existing isolated local
@@ -125,6 +125,14 @@ the existing effectful work; no network, tree walk, daemon or startup work
 is added. Existing remote timeouts and credential selection are unchanged.
 
 ## Journal
+
+### 2026-11-19 - Reviewed plan accepted
+
+Planning #13543 actually merged as `88ad885c362a8bb2b934a9e0a4028465d78f2abe`
+after current-head approval and required CI. The added Active effort index
+entry makes this bounded lane discoverable; its review thread is resolved.
+The source worktree is pulled forward onto that accepted plan. Only P1 is
+complete; implementation, validation and finite canonical acceptance remain.
 
 ### 2026-11-19 - Finite proposal
 

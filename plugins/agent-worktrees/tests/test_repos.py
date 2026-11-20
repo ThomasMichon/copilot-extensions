@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 from pathlib import Path
 from unittest.mock import patch
@@ -13,9 +14,9 @@ from agent_worktrees import installer, repos
 
 
 @pytest.fixture
-def home(tmp_path: Path, monkeypatch) -> Path:
+def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Redirect ~ so the registry reads/writes under a tmp dir."""
-    monkeypatch.setattr(repos.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
     monkeypatch.setenv("AGENT_HOME", str(tmp_path))
     return tmp_path
 
@@ -62,7 +63,7 @@ def _bare_anchor_from_clone(upstream: Path, dest: Path, branch: str = "main") ->
     _git(dest, "config", "core.bare", "true")
 
 
-def test_migration_uses_adoptions_from_agent_home(home: Path, monkeypatch):
+def test_migration_uses_adoptions_from_agent_home(home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     legacy_source = home / ".git-repos"
     legacy_source.write_text(
         "srcroot: /example\nrepos:\n  selected: {}\n  host-only: {}\n",
@@ -103,7 +104,7 @@ def test_migration_uses_adoptions_from_agent_home(home: Path, monkeypatch):
     (None, "reference"),
     ("", "reference"),
 ])
-def test_normalize_class(raw, expected):
+def test_normalize_class(raw: str | None, expected: str) -> None:
     assert repos.normalize_class(raw) == expected
 
 
@@ -111,7 +112,7 @@ def test_normalize_class(raw, expected):
 # Round-trip read/write
 # ---------------------------------------------------------------------------
 
-def test_write_read_roundtrip(home: Path):
+def test_write_read_roundtrip(home: Path) -> None:
     repos.set_srcroot("D:/Src", plat="windows")
     repos.add_repo(
         "copilot-extensions", "D:/Src/copilot-extensions",
@@ -132,7 +133,7 @@ def test_write_read_roundtrip(home: Path):
     assert reg.srcroot["windows"] == "D:/Src"
 
 
-def test_legacy_type_field_is_mapped(home: Path):
+def test_legacy_type_field_is_mapped(home: Path) -> None:
     """A registry written with the old `type:` key still loads."""
     reg_path = home / ".agent-worktrees" / "repos.yaml"
     reg_path.parent.mkdir(parents=True, exist_ok=True)
@@ -155,7 +156,7 @@ def test_legacy_type_field_is_mapped(home: Path):
 # agent classification
 # ---------------------------------------------------------------------------
 
-def test_agent_defaults_by_class(home: Path):
+def test_agent_defaults_by_class(home: Path) -> None:
     repos.add_repo("wt", "/home/u/wt", repo_class="worktree", plat="wsl")
     repos.add_repo("sg", "/home/u/sg", repo_class="singleton", plat="wsl")
     repos.add_repo("ref", "/home/u/ref", repo_class="reference", plat="wsl")
@@ -166,7 +167,7 @@ def test_agent_defaults_by_class(home: Path):
     assert reg.repos["ref"].agent is False
 
 
-def test_no_agent_flag_overrides_and_roundtrips(home: Path):
+def test_no_agent_flag_overrides_and_roundtrips(home: Path) -> None:
     # A worktree repo can be adopted reference-style (no agent).
     repos.add_repo("plugin-src", "/home/u/plugin-src",
                    repo_class="worktree", agent=False, plat="wsl")
@@ -179,7 +180,7 @@ def test_no_agent_flag_overrides_and_roundtrips(home: Path):
 
 
 @pytest.mark.parametrize("repo_class", ["reference", "singleton", "worktree", "knowledge"])
-def test_explicit_agent_true_persisted_for_each_class(home: Path, repo_class: str):
+def test_explicit_agent_true_persisted_for_each_class(home: Path, repo_class: str) -> None:
     repos.add_repo("ref-agent", "/home/u/ref-agent",
                    repo_class=repo_class, agent=True, plat="wsl")
     text = (home / ".agent-worktrees" / "repos.yaml").read_text()
@@ -187,69 +188,79 @@ def test_explicit_agent_true_persisted_for_each_class(home: Path, repo_class: st
     assert repos.read_registry().repos["ref-agent"].agent is True
 
 
-def test_add_repo_no_agent_preserved_on_reregister(home: Path):
+def test_add_repo_no_agent_preserved_on_reregister(home: Path) -> None:
     repos.add_repo("r", "/home/u/r", repo_class="worktree", agent=False, plat="wsl")
     # Re-registering without an agent flag must preserve the deliberate choice.
     repos.add_repo("r", "D:/Src/r", plat="windows")
-    assert repos.find_repo("r").agent is False
+    entry = repos.find_repo("r")
+    assert entry is not None
+    assert entry.agent is False
 
 
 # ---------------------------------------------------------------------------
 # visibility (audience-exposure tier)
 # ---------------------------------------------------------------------------
 
-def test_normalize_visibility_accepts_known_tiers():
+def test_normalize_visibility_accepts_known_tiers() -> None:
     assert repos.normalize_visibility("public") == "public"
     assert repos.normalize_visibility("Internal") == "internal"
     assert repos.normalize_visibility("PRIVATE") == "private"
 
 
-def test_normalize_visibility_rejects_unknown():
+def test_normalize_visibility_rejects_unknown() -> None:
     assert repos.normalize_visibility("secret") == ""
     assert repos.normalize_visibility(None) == ""
     assert repos.normalize_visibility("") == ""
 
 
-def test_add_repo_persists_visibility(home: Path):
+def test_add_repo_persists_visibility(home: Path) -> None:
     repos.add_repo("r", "D:/Src/r", repo_class="worktree", visibility="public",
                    plat="windows")
-    assert repos.find_repo("r").visibility == "public"
+    entry = repos.find_repo("r")
+    assert entry is not None
+    assert entry.visibility == "public"
 
 
-def test_add_repo_visibility_roundtrips_through_registry(home: Path):
+def test_add_repo_visibility_roundtrips_through_registry(home: Path) -> None:
     repos.add_repo("r", "D:/Src/r", repo_class="worktree", visibility="internal",
                    plat="windows")
     # Re-read from disk (not just the in-memory entry) to prove persistence.
     reloaded = repos.find_repo("r")
+    assert reloaded is not None
     assert reloaded.visibility == "internal"
 
 
-def test_add_repo_visibility_unset_by_default(home: Path):
+def test_add_repo_visibility_unset_by_default(home: Path) -> None:
     repos.add_repo("r", "D:/Src/r", repo_class="worktree", plat="windows")
-    assert repos.find_repo("r").visibility == ""
+    entry = repos.find_repo("r")
+    assert entry is not None
+    assert entry.visibility == ""
 
 
-def test_add_repo_ignores_invalid_visibility(home: Path):
+def test_add_repo_ignores_invalid_visibility(home: Path) -> None:
     repos.add_repo("r", "D:/Src/r", repo_class="worktree", visibility="bogus",
                    plat="windows")
-    assert repos.find_repo("r").visibility == ""
+    entry = repos.find_repo("r")
+    assert entry is not None
+    assert entry.visibility == ""
 
 
 # ---------------------------------------------------------------------------
 # add_repo merge semantics
 # ---------------------------------------------------------------------------
 
-def test_add_repo_preserves_deliberate_class(home: Path):
+def test_add_repo_preserves_deliberate_class(home: Path) -> None:
     repos.add_repo("r", "D:/Src/r", repo_class="worktree", plat="windows")
     # Re-registering a path with the default class must not downgrade it.
     repos.add_repo("r", "/home/u/r", plat="wsl")
     e = repos.find_repo("r")
+    assert e is not None
     assert e.repo_class == "worktree"
     assert e.local_path("windows") == "D:/Src/r"
     assert e.local_path("wsl") == "/home/u/r"
 
 
-def test_local_path_expands_home_relative(home: Path, monkeypatch):
+def test_local_path_expands_home_relative(home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A home-relative registry path (``~/src/...``) must resolve to an absolute
     path, not the literal tilde (#4190): ``pathlib.Path`` does not expand ``~``,
     so a raw return breaks every ``Path(local_path()).is_dir()`` consumer and
@@ -268,10 +279,12 @@ def test_local_path_expands_home_relative(home: Path, monkeypatch):
     # expanduser is a no-op on an already-absolute path.
     assert e.local_path("linux") == "/home/tester/src/test-chamber"
     # No tilde ever leaks through to a consumer.
-    assert "~" not in e.local_path("wsl")
+    local_path = e.local_path("wsl")
+    assert local_path is not None
+    assert "~" not in local_path
 
 
-def test_list_filter_by_class(home: Path):
+def test_list_filter_by_class(home: Path) -> None:
     repos.add_repo("a", "D:/a", repo_class="worktree", plat="windows")
     repos.add_repo("b", "D:/b", repo_class="reference", plat="windows")
     worktrees = repos.list_repos(class_filter="worktree")
@@ -284,7 +297,7 @@ def test_list_filter_by_class(home: Path):
 # Migration from ~/.git-repos
 # ---------------------------------------------------------------------------
 
-def test_migrate_git_repos(home: Path):
+def test_migrate_git_repos(home: Path) -> None:
     (home / ".git-repos").write_text(
         "srcroot: D:/Src\n"
         "repos:\n"
@@ -324,7 +337,7 @@ def test_migrate_git_repos(home: Path):
     assert (home / ".git-repos").exists()
 
 
-def test_migrate_no_legacy_file(home: Path):
+def test_migrate_no_legacy_file(home: Path) -> None:
     assert repos.migrate_git_repos() == (0, 0)
 
 
@@ -344,7 +357,7 @@ def test_migrate_no_legacy_file(home: Path):
     ("git@evilgithub.com:example-org/proj.git", None),   # lookalike host, ssh
     ("", None),
 ])
-def test_github_owner(remote, owner):
+def test_github_owner(remote: str, owner: str | None) -> None:
     assert repos.github_owner(remote) == owner
 
 
@@ -358,11 +371,11 @@ def test_github_owner(remote, owner):
     ("git@evilgithub.com:example-org/proj.git", None),   # lookalike host, ssh
     ("", None),
 ])
-def test_github_slug(remote, slug):
+def test_github_slug(remote: str, slug: str | None) -> None:
     assert repos.github_slug(remote) == slug
 
 
-def test_resolve_account_explicit_wins():
+def test_resolve_account_explicit_wins() -> None:
     entry = repos.RepoEntry(
         name="proj", account="host-acct",
         remote="https://github.com/example-org/proj.git",
@@ -370,26 +383,26 @@ def test_resolve_account_explicit_wins():
     assert repos.resolve_account(entry) == "host-acct"
 
 
-def test_resolve_account_does_not_infer_login_from_owner():
+def test_resolve_account_does_not_infer_login_from_owner() -> None:
     entry = repos.RepoEntry(
         name="proj", remote="https://github.com/example-org/proj.git",
     )
     assert repos.resolve_account(entry) is None
 
 
-def test_resolve_account_none_for_non_github():
+def test_resolve_account_none_for_non_github() -> None:
     entry = repos.RepoEntry(name="proj", remote="https://gitlab.com/o/r.git")
     assert repos.resolve_account(entry) is None
 
 
-def test_resolve_account_none_for_missing_entry():
+def test_resolve_account_none_for_missing_entry() -> None:
     assert repos.resolve_account(None) is None
 
 
 # --- account_map (decoupled org -> gh login) --------------------------------
 
 
-def test_account_map_round_trips(home: Path):
+def test_account_map_round_trips(home: Path) -> None:
     repos.set_account_map("github", "ThomasMichon")
     repos.set_account_map("example-org", "example-operator")
     reg = repos.read_registry()
@@ -399,7 +412,7 @@ def test_account_map_round_trips(home: Path):
     }
 
 
-def test_account_map_resolves_org_owned_repo(home: Path):
+def test_account_map_resolves_org_owned_repo(home: Path) -> None:
     """An org-owned repo resolves to the mapped login, not the org name."""
     repos.set_account_map("github", "ThomasMichon")
     assert repos.account_for_github_slug("github/example-private-runtime") == "ThomasMichon"
@@ -407,17 +420,17 @@ def test_account_map_resolves_org_owned_repo(home: Path):
     assert repos.account_for_github_owner("github") == "ThomasMichon"
 
 
-def test_account_map_case_insensitive(home: Path):
+def test_account_map_case_insensitive(home: Path) -> None:
     repos.set_account_map("Example-Org", "example-operator")
     assert repos.account_for_github_owner("example-org") == "example-operator"
     assert repos.account_from_map("example-org") == "example-operator"
 
 
-def test_unmapped_personal_namespace_is_not_an_account_choice(home: Path):
+def test_unmapped_personal_namespace_is_not_an_account_choice(home: Path) -> None:
     assert repos.account_for_github_slug("example-operator/dotfiles") is None
 
 
-def test_explicit_repo_account_beats_map(home: Path):
+def test_explicit_repo_account_beats_map(home: Path) -> None:
     """A per-repo account: override wins over the org map (finest grain)."""
     repos.set_account_map("example-org", "map-login")
     repos.add_repo(
@@ -429,7 +442,7 @@ def test_explicit_repo_account_beats_map(home: Path):
     assert repos.account_for_github_owner("example-org") == "map-login"
 
 
-def test_resolve_account_uses_map_over_owner(home: Path):
+def test_resolve_account_uses_map_over_owner(home: Path) -> None:
     repos.set_account_map("example-org", "mapped-acct")
     entry = repos.RepoEntry(
         name="proj", remote="https://github.com/example-org/proj.git",
@@ -437,7 +450,7 @@ def test_resolve_account_uses_map_over_owner(home: Path):
     assert repos.resolve_account(entry) == "mapped-acct"
 
 
-def test_set_account_map_replaces_case_variant(home: Path):
+def test_set_account_map_replaces_case_variant(home: Path) -> None:
     repos.set_account_map("github", "old")
     repos.set_account_map("GitHub", "new")
     reg = repos.read_registry()
@@ -445,7 +458,7 @@ def test_set_account_map_replaces_case_variant(home: Path):
     assert list(reg.account_map.values()) == ["new"]
 
 
-def test_unset_account_map(home: Path):
+def test_unset_account_map(home: Path) -> None:
     repos.set_account_map("github", "ThomasMichon")
     assert repos.unset_account_map("GITHUB") is True
     assert repos.read_registry().account_map == {}
@@ -457,11 +470,11 @@ def test_unset_account_map(home: Path):
 _AUTHED = ("ThomasMichon", "example-operator")
 
 
-def _fake_token(login):
+def _fake_token(login: str) -> str | None:
     return "tok" if login in _AUTHED else None
 
 
-def test_registration_org_owner_needs_clarify(home: Path):
+def test_registration_org_owner_needs_clarify(home: Path) -> None:
     with patch("agent_worktrees.git_ops.gh_token_for_account", side_effect=_fake_token), \
          patch("agent_worktrees.repos.shutil.which", return_value="gh"):
         r = repos.resolve_registration_account(
@@ -472,7 +485,7 @@ def test_registration_org_owner_needs_clarify(home: Path):
     assert r.needs_clarify is True
 
 
-def test_registration_personal_namespace_does_not_select_an_account(home: Path):
+def test_registration_personal_namespace_does_not_select_an_account(home: Path) -> None:
     with patch("agent_worktrees.git_ops.gh_token_for_account", side_effect=_fake_token), \
          patch("agent_worktrees.repos.shutil.which", return_value="gh"):
         r = repos.resolve_registration_account(
@@ -481,7 +494,7 @@ def test_registration_personal_namespace_does_not_select_an_account(home: Path):
     assert r.needs_clarify is True
 
 
-def test_registration_account_map_resolves(home: Path):
+def test_registration_account_map_resolves(home: Path) -> None:
     repos.set_account_map("github", "ThomasMichon")
     with patch("agent_worktrees.git_ops.gh_token_for_account", side_effect=_fake_token), \
          patch("agent_worktrees.repos.shutil.which", return_value="gh"):
@@ -492,7 +505,7 @@ def test_registration_account_map_resolves(home: Path):
     assert r.needs_clarify is False
 
 
-def test_registration_explicit_account_is_clean(home: Path):
+def test_registration_explicit_account_is_clean(home: Path) -> None:
     with patch("agent_worktrees.git_ops.gh_token_for_account", side_effect=_fake_token), \
          patch("agent_worktrees.repos.shutil.which", return_value="gh"):
         r = repos.resolve_registration_account(
@@ -501,7 +514,7 @@ def test_registration_explicit_account_is_clean(home: Path):
     assert r.needs_clarify is False
 
 
-def test_registration_does_not_copy_a_siblings_explicit_account(home: Path):
+def test_registration_does_not_copy_a_siblings_explicit_account(home: Path) -> None:
     repos.add_repo(
         "sib", str(home / "sib"), repo_class="worktree",
         remote="https://github.com/github/other.git",
@@ -516,14 +529,14 @@ def test_registration_does_not_copy_a_siblings_explicit_account(home: Path):
     assert r.needs_clarify is True
 
 
-def test_registration_non_github_is_none(home: Path):
+def test_registration_non_github_is_none(home: Path) -> None:
     r = repos.resolve_registration_account(
         "https://my-org.visualstudio.com/x/_git/y")
     assert r.source == "none"
     assert r.needs_clarify is False
 
 
-def test_registration_without_gh_does_not_guess_an_identity(home: Path):
+def test_registration_without_gh_does_not_guess_an_identity(home: Path) -> None:
     with patch("agent_worktrees.repos.shutil.which", return_value=None):
         r = repos.resolve_registration_account(
             "https://github.com/github/example-private-runtime.git")
@@ -531,11 +544,11 @@ def test_registration_without_gh_does_not_guess_an_identity(home: Path):
     assert r.needs_clarify is True
 
 
-def test_account_for_github_slug_without_policy_is_unpinned(home: Path):
+def test_account_for_github_slug_without_policy_is_unpinned(home: Path) -> None:
     assert repos.account_for_github_slug("example-org/proj") is None
 
 
-def test_account_for_github_slug_honors_override(home: Path):
+def test_account_for_github_slug_honors_override(home: Path) -> None:
     repos.add_repo(
         "proj", "D:/Src/proj", repo_class="worktree",
         remote="https://github.com/example-org/proj.git",
@@ -550,13 +563,13 @@ def test_account_for_github_slug_honors_override(home: Path):
 # --- bare registered repo name resolution (#3032) ---------------------------
 
 
-def test_resolve_slug_owner_bare_owner_unregistered(home: Path):
+def test_resolve_slug_owner_bare_owner_unregistered(home: Path) -> None:
     # No registered repo by that name -> treated as a literal owner, exactly
     # as before (personal/org owners keep resolving this way).
     assert repos.resolve_slug_owner("ThomasMichon") == "ThomasMichon"
 
 
-def test_resolve_slug_owner_bare_registered_repo_name_derives_owner(home: Path):
+def test_resolve_slug_owner_bare_registered_repo_name_derives_owner(home: Path) -> None:
     # A bare registered repo *name* is not itself an owner: resolve through
     # the registry -> remote -> owner chain, the same one `repos find` uses.
     repos.add_repo(
@@ -567,7 +580,7 @@ def test_resolve_slug_owner_bare_registered_repo_name_derives_owner(home: Path):
     assert repos.resolve_slug_owner("copilot-extensions") == "ThomasMichon"
 
 
-def test_bare_registered_dependency_does_not_select_its_publisher(home: Path):
+def test_bare_registered_dependency_does_not_select_its_publisher(home: Path) -> None:
     repos.add_repo(
         "copilot-extensions", "D:/Src/copilot-extensions", repo_class="reference",
         remote="https://github.com/ThomasMichon/copilot-extensions.git",
@@ -576,7 +589,7 @@ def test_bare_registered_dependency_does_not_select_its_publisher(home: Path):
     assert repos.account_for_github_slug("copilot-extensions") is None
 
 
-def test_resolve_slug_owner_registered_non_github_remote_is_none(home: Path):
+def test_resolve_slug_owner_registered_non_github_remote_is_none(home: Path) -> None:
     # A registered repo whose remote isn't github.com has no github owner to
     # resolve -- returning the bare name itself here would be just as wrong as
     # the original bug, so this must be None (account_for_github_slug then
@@ -590,7 +603,7 @@ def test_resolve_slug_owner_registered_non_github_remote_is_none(home: Path):
     assert repos.account_for_github_slug("azdo-proj") is None
 
 
-def test_resolve_slug_owner_empty_and_slash_forms():
+def test_resolve_slug_owner_empty_and_slash_forms() -> None:
     assert repos.resolve_slug_owner("") is None
     assert repos.resolve_slug_owner(None) is None
     # An owner/name slug is unaffected -- the owner is taken verbatim, never
@@ -600,7 +613,7 @@ def test_resolve_slug_owner_empty_and_slash_forms():
 
 def test_is_unresolved_registered_target_true_for_non_github_registered_repo(
     home: Path,
-):
+) -> None:
     repos.add_repo(
         "azdo-proj", "D:/Src/azdo-proj", repo_class="reference",
         remote="https://my-org.visualstudio.com/x/_git/azdo-proj",
@@ -611,7 +624,7 @@ def test_is_unresolved_registered_target_true_for_non_github_registered_repo(
 
 def test_is_unresolved_registered_target_false_with_explicit_account_override(
     home: Path,
-):
+) -> None:
     # An explicit per-repo `account:` is a real, resolvable identity even
     # without a derivable github owner -- it must not be treated as unresolved.
     repos.add_repo(
@@ -625,7 +638,7 @@ def test_is_unresolved_registered_target_false_with_explicit_account_override(
 
 def test_account_for_github_slug_preserves_matched_entry_own_override(
     home: Path,
-):
+) -> None:
     # Two registered repos share a github owner but have different explicit
     # `account:` overrides -- resolving the second by its bare registered name
     # must return *its own* account, not whichever entry the owner-wide
@@ -646,7 +659,7 @@ def test_account_for_github_slug_preserves_matched_entry_own_override(
 
 def test_account_for_github_slug_unoverridden_entry_ignores_sibling_override(
     home: Path,
-):
+) -> None:
     # The reported follow-up bug: an entry with NO account: of its own must
     # not silently borrow a *different* registered sibling's explicit
     # override just because they share a github owner.
@@ -665,7 +678,7 @@ def test_account_for_github_slug_unoverridden_entry_ignores_sibling_override(
 
 def test_account_for_github_slug_unoverridden_entry_still_honors_account_map(
     home: Path,
-):
+) -> None:
     # An unoverridden entry still benefits from the decoupled account_map
     # (org identity layer), just resolved through its own remote's owner --
     # not through scanning sibling repos' explicit overrides.
@@ -681,7 +694,7 @@ def test_account_for_github_slug_unoverridden_entry_still_honors_account_map(
 
 def test_is_unresolved_registered_target_false_for_github_registered_repo(
     home: Path,
-):
+) -> None:
     repos.add_repo(
         "copilot-extensions", "D:/Src/copilot-extensions", repo_class="reference",
         remote="https://github.com/ThomasMichon/copilot-extensions.git",
@@ -690,20 +703,20 @@ def test_is_unresolved_registered_target_false_for_github_registered_repo(
     assert repos.is_unresolved_registered_target("copilot-extensions") is False
 
 
-def test_is_unresolved_registered_target_false_for_unregistered_name(home: Path):
+def test_is_unresolved_registered_target_false_for_unregistered_name(home: Path) -> None:
     # No registered repo by this name -> not a "known but unresolvable"
     # target; it is just an ordinary (possibly personal) bare owner, and
     # ambient auth remains the safe, documented fallback.
     assert repos.is_unresolved_registered_target("ThomasMichon") is False
 
 
-def test_is_unresolved_registered_target_false_for_slug_and_empty():
+def test_is_unresolved_registered_target_false_for_slug_and_empty() -> None:
     assert repos.is_unresolved_registered_target("owner/name") is False
     assert repos.is_unresolved_registered_target("") is False
     assert repos.is_unresolved_registered_target(None) is False
 
 
-def test_add_repo_persists_account(home: Path):
+def test_add_repo_persists_account(home: Path) -> None:
     repos.add_repo(
         "proj", "D:/Src/proj", repo_class="worktree",
         remote="https://github.com/example-org/proj.git",
@@ -716,8 +729,8 @@ def test_add_repo_persists_account(home: Path):
 
 @pytest.mark.parametrize("interactive", [False, True])
 def test_cli_reregistration_preserves_saved_account_and_git_pin(
-    home: Path, monkeypatch, capsys, interactive,
-):
+    home: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], interactive: bool,
+) -> None:
     from agent_procutil import no_window_kwargs
     from agent_worktrees import __main__ as cli, git_ops
 
@@ -725,22 +738,27 @@ def test_cli_reregistration_preserves_saved_account_and_git_pin(
     _init_config_repo(work)
     remote = "https://github.com/publisher/pinned.git"
     monkeypatch.setattr(git_ops, "_active_gh_account", lambda: None)
-    monkeypatch.setattr(git_ops.shutil, "which", lambda name: name)
+    monkeypatch.setattr(shutil, "which", lambda name: name)
     monkeypatch.setattr(git_ops, "gh_token_for_account", lambda login: "fixture")
     monkeypatch.setattr(git_ops, "list_gh_accounts", lambda: ["other-work"])
     monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: interactive)
-    prompts = []
-    monkeypatch.setattr("builtins.input", lambda message: prompts.append(message) or "other-work")
+    prompts: list[str] = []
+
+    def prompt(message: str) -> str:
+        prompts.append(message)
+        return "other-work"
+
+    monkeypatch.setattr("builtins.input", prompt)
     repos.add_repo(
         "pinned", str(work), remote=remote, account="operator-public",
     )
 
-    def credential_pin():
+    def credential_pin() -> dict[str, list[str]]:
         result = subprocess.run(
             ["git", "-C", str(work), "config", "--local", "--get-regexp", "^credential\\."],
             check=True, capture_output=True, text=True, **no_window_kwargs(),
         )
-        values = {}
+        values: dict[str, list[str]] = {}
         for line in result.stdout.splitlines():
             key, _, value = line.partition(" ")
             values.setdefault(key, []).append(value)
@@ -761,7 +779,7 @@ def test_cli_reregistration_preserves_saved_account_and_git_pin(
 # --- backfill_credential_pins ------------------------------------------------
 
 
-def test_backfill_pins_a_resolvable_repo(home: Path, tmp_path: Path):
+def test_backfill_pins_a_resolvable_repo(home: Path, tmp_path: Path) -> None:
     registry = repos.read_registry()
     registry.default_account = "example-operator"
     repos.write_registry(registry)
@@ -788,7 +806,7 @@ def test_backfill_pins_a_resolvable_repo(home: Path, tmp_path: Path):
     assert username == "example-operator"
 
 
-def test_backfill_restricts_to_named_repo(home: Path, tmp_path: Path):
+def test_backfill_restricts_to_named_repo(home: Path, tmp_path: Path) -> None:
     work_a = tmp_path / "a"
     work_b = tmp_path / "b"
     _init_config_repo(work_a)
@@ -804,7 +822,7 @@ def test_backfill_restricts_to_named_repo(home: Path, tmp_path: Path):
     assert [r.name for r in results] == ["a"]
 
 
-def test_backfill_skips_org_owner_needing_clarify(home: Path, tmp_path: Path):
+def test_backfill_skips_org_owner_needing_clarify(home: Path, tmp_path: Path) -> None:
     work = tmp_path / "org-owned"
     work.mkdir()
     repos.add_repo(
@@ -818,7 +836,7 @@ def test_backfill_skips_org_owner_needing_clarify(home: Path, tmp_path: Path):
     assert "repos account set" in results[0].detail
 
 
-def test_backfill_skips_non_github_remote(home: Path, tmp_path: Path):
+def test_backfill_skips_non_github_remote(home: Path, tmp_path: Path) -> None:
     work = tmp_path / "ado-repo"
     work.mkdir()
     repos.add_repo(
@@ -829,7 +847,7 @@ def test_backfill_skips_non_github_remote(home: Path, tmp_path: Path):
     assert results[0].status == "not_github"
 
 
-def test_backfill_skips_missing_local_path(home: Path, tmp_path: Path):
+def test_backfill_skips_missing_local_path(home: Path, tmp_path: Path) -> None:
     repos.add_repo(
         "gone", str(tmp_path / "does-not-exist"), repo_class="worktree",
         remote="https://github.com/example-operator/gone.git", plat="windows",
@@ -838,7 +856,7 @@ def test_backfill_skips_missing_local_path(home: Path, tmp_path: Path):
     assert results[0].status == "no_path"
 
 
-def test_backfill_skips_ssh_remote(home: Path, tmp_path: Path):
+def test_backfill_skips_ssh_remote(home: Path, tmp_path: Path) -> None:
     """The pin only ever writes credential.https://<host>.*, which an SSH
     transport never consults -- treating it as pinned would be a false
     positive that reports success while changing nothing."""
@@ -852,7 +870,7 @@ def test_backfill_skips_ssh_remote(home: Path, tmp_path: Path):
     assert results[0].status == "ssh_remote"
 
 
-def test_is_https_remote():
+def test_is_https_remote() -> None:
     assert repos.is_https_remote("https://github.com/o/r.git") is True
     assert repos.is_https_remote("http://github.com/o/r.git") is False
     assert repos.is_https_remote("git@github.com:o/r.git") is False
@@ -860,7 +878,7 @@ def test_is_https_remote():
     assert repos.is_https_remote("") is False
 
 
-def test_derive_https_host():
+def test_derive_https_host() -> None:
     assert repos.derive_https_host("https://github.com/o/r.git") == "github.com"
     assert repos.derive_https_host("https://www.github.com/o/r.git") == "www.github.com"
     assert repos.derive_https_host("https://ghe.example.com/o/r.git") == "ghe.example.com"
@@ -868,7 +886,7 @@ def test_derive_https_host():
     assert repos.derive_https_host("") is None
 
 
-def test_backfill_distinguishes_http_from_ssh_remote(home: Path, tmp_path: Path):
+def test_backfill_distinguishes_http_from_ssh_remote(home: Path, tmp_path: Path) -> None:
     """is_https_remote() rejects both SSH and plain http:// remotes, but the
     backfill report must never claim 'SSH remote' for an unencrypted HTTP
     checkout -- distinguish the two skip reasons."""
@@ -882,7 +900,7 @@ def test_backfill_distinguishes_http_from_ssh_remote(home: Path, tmp_path: Path)
     assert results[0].status == "not_https"
 
 
-def test_backfill_pins_with_derived_host_not_hardcoded_github_com(home: Path, tmp_path: Path):
+def test_backfill_pins_with_derived_host_not_hardcoded_github_com(home: Path, tmp_path: Path) -> None:
     """A www.github.com checkout must be pinned under credential.https://
     www.github.com, not the hardcoded 'github.com' default -- git's
     credential store matches by literal hostname."""
@@ -907,7 +925,7 @@ def test_backfill_pins_with_derived_host_not_hardcoded_github_com(home: Path, tm
     assert username == "example-operator"
 
 
-def test_backfill_unknown_name_never_falls_back_to_all(home: Path, tmp_path: Path):
+def test_backfill_unknown_name_never_falls_back_to_all(home: Path, tmp_path: Path) -> None:
     """A typo in the requested name must report 'not found', never silently
     expand to every registered repo."""
     work = tmp_path / "real-one"
@@ -925,7 +943,7 @@ def test_backfill_unknown_name_never_falls_back_to_all(home: Path, tmp_path: Pat
 # --- add_repo auto-pins (every registration path, not just repos add/clone) --
 
 
-def test_add_repo_pins_credential_for_a_resolvable_owner(home: Path, tmp_path: Path):
+def test_add_repo_pins_credential_for_a_resolvable_owner(home: Path, tmp_path: Path) -> None:
     """Every caller of add_repo -- repos add/clone, plugin install/adoption,
     project-entry registration -- gets the pin, not only the CLI paths that
     separately call _clarify_registration_account."""
@@ -947,7 +965,7 @@ def test_add_repo_pins_credential_for_a_resolvable_owner(home: Path, tmp_path: P
     assert username == "example-operator"
 
 
-def test_add_repo_does_not_pin_when_account_needs_clarify(home: Path, tmp_path: Path):
+def test_add_repo_does_not_pin_when_account_needs_clarify(home: Path, tmp_path: Path) -> None:
     """An org-owned remote with no account_map entry must not guess -- no
     pin is written until an operator resolves it (repos account set /
     the interactive _clarify_registration_account flow)."""
@@ -967,7 +985,7 @@ def test_add_repo_does_not_pin_when_account_needs_clarify(home: Path, tmp_path: 
     assert result.returncode != 0  # key was never set
 
 
-def test_add_repo_does_not_pin_ssh_remote(home: Path, tmp_path: Path):
+def test_add_repo_does_not_pin_ssh_remote(home: Path, tmp_path: Path) -> None:
     """An SSH remote's registration must not attempt (and falsely report) a
     pin that credential.https://... can never affect."""
     work = tmp_path / "ssh-auto"
@@ -987,7 +1005,7 @@ def test_add_repo_does_not_pin_ssh_remote(home: Path, tmp_path: Path):
     assert result.returncode != 0  # key was never set
 
 
-def test_add_repo_pin_expands_home_relative_path(home: Path, tmp_path: Path, monkeypatch):
+def test_add_repo_pin_expands_home_relative_path(home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Path('~/src/repo').is_dir() is always False -- add_repo must resolve
     through entry.local_path() (which expands '~' via os.path.expanduser)
     rather than the raw caller-supplied path string, or a home-relative
@@ -995,11 +1013,11 @@ def test_add_repo_pin_expands_home_relative_path(home: Path, tmp_path: Path, mon
     work = tmp_path / "home-rel"
     _init_config_repo(work)
     monkeypatch.setattr(
-        repos.os.path, "expanduser",
+        os.path, "expanduser",
         lambda p: str(work) if p == "~/home-rel" else os.path.expanduser(p),
     )
 
-    def unexpected_auth(*args, **kwargs):
+    def unexpected_auth(*args: object, **kwargs: object) -> None:
         pytest.fail("The pin fixture must not inspect ambient authentication.")
 
     monkeypatch.setattr("agent_worktrees.git_ops.gh_token_for_account", unexpected_auth)
@@ -1022,7 +1040,7 @@ def test_add_repo_pin_expands_home_relative_path(home: Path, tmp_path: Path, mon
     assert username == "example-operator"
 
 
-def test_add_repo_pin_failure_never_raises(home: Path, tmp_path: Path):
+def test_add_repo_pin_failure_never_raises(home: Path, tmp_path: Path) -> None:
     """A broken resolver/pin call must never break registration itself."""
     with patch("agent_worktrees.repos.resolve_registration_account",
                side_effect=RuntimeError("boom")):
@@ -1037,15 +1055,15 @@ def test_add_repo_pin_failure_never_raises(home: Path, tmp_path: Path):
 # --- clone_repo injects cross-account auth before the pin exists ------------
 
 
-def test_clone_repo_injects_auth_args_into_initial_clone(home: Path, tmp_path: Path):
+def test_clone_repo_injects_auth_args_into_initial_clone(home: Path, tmp_path: Path) -> None:
     """The repo-local credential pin only exists *after* add_repo runs, which
     is after the clone -- a private repo owned by a different account than
     gh's active one needs a one-shot override on the clone itself."""
     home_srcroot = tmp_path / "src"
     repos.set_srcroot(str(home_srcroot), plat="windows")
-    calls: list[list] = []
+    calls: list[list[str]] = []
 
-    def fake_run(argv, **kwargs):
+    def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         calls.append(argv)
         if "clone" in argv:
             (Path(argv[-1])).mkdir(parents=True, exist_ok=True)
@@ -1070,12 +1088,12 @@ def test_clone_repo_injects_auth_args_into_initial_clone(home: Path, tmp_path: P
     assert argv[argv.index("clone")] == "clone"
 
 
-def test_clone_repo_no_extra_args_for_same_account(home: Path, tmp_path: Path):
+def test_clone_repo_no_extra_args_for_same_account(home: Path, tmp_path: Path) -> None:
     home_srcroot = tmp_path / "src"
     repos.set_srcroot(str(home_srcroot), plat="windows")
-    calls: list[list] = []
+    calls: list[list[str]] = []
 
-    def fake_run(argv, **kwargs):
+    def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         calls.append(argv)
         if "clone" in argv:
             (Path(argv[-1])).mkdir(parents=True, exist_ok=True)
@@ -1093,13 +1111,13 @@ def test_clone_repo_no_extra_args_for_same_account(home: Path, tmp_path: Path):
     ]
 
 
-def test_clone_repo_redacts_extraheader_from_stderr_on_failure(home: Path, tmp_path: Path):
+def test_clone_repo_redacts_extraheader_from_stderr_on_failure(home: Path, tmp_path: Path) -> None:
     """A failed clone's stderr must never surface the injected token, even
     if git itself echoes the -c argument back (e.g. with tracing enabled)."""
     home_srcroot = tmp_path / "src"
     repos.set_srcroot(str(home_srcroot), plat="windows")
 
-    def fake_run(argv, **kwargs):
+    def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(
             argv, 128,
             "", "fatal: could not clone (args were: "
@@ -1121,14 +1139,14 @@ def test_clone_repo_redacts_extraheader_from_stderr_on_failure(home: Path, tmp_p
     assert "<redacted>" in logged
 
 
-def test_clone_repo_redacts_authorization_header_trace_from_stderr(home: Path, tmp_path: Path):
+def test_clone_repo_redacts_authorization_header_trace_from_stderr(home: Path, tmp_path: Path) -> None:
     """With GIT_TRACE_CURL/GIT_CURL_VERBOSE, git can echo the literal
     resolved 'Authorization: Basic <token>' request header into stderr,
     independent of the -c argv form -- that must be redacted too."""
     home_srcroot = tmp_path / "src"
     repos.set_srcroot(str(home_srcroot), plat="windows")
 
-    def fake_run(argv, **kwargs):
+    def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(
             argv, 128, "",
             "=> Send header: Authorization: Basic eC1hY2Nlc3MtdG9rZW46c2VjcmV0\r\n"
@@ -1147,7 +1165,7 @@ def test_clone_repo_redacts_authorization_header_trace_from_stderr(home: Path, t
     assert "<redacted>" in logged
 
 
-def test_clone_repo_redacts_url_userinfo_from_exception_message(home: Path, tmp_path: Path):
+def test_clone_repo_redacts_url_userinfo_from_exception_message(home: Path, tmp_path: Path) -> None:
     """A remote URL with embedded userinfo (https://user:token@host/...) is
     a second, independent credential surface from the injected extraheader
     -- the logged argv/exception text must never leak it either."""
@@ -1155,7 +1173,7 @@ def test_clone_repo_redacts_url_userinfo_from_exception_message(home: Path, tmp_
     repos.set_srcroot(str(home_srcroot), plat="windows")
     remote = "https://x-access-token:realtoken@github.com/example-operator/leak-test.git"
 
-    def fake_run(argv, **kwargs):
+    def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         raise subprocess.TimeoutExpired(cmd=argv, timeout=300)
 
     with patch("agent_worktrees.repos._current_platform", return_value="windows"), \
@@ -1174,7 +1192,7 @@ def test_clone_repo_redacts_url_userinfo_from_exception_message(home: Path, tmp_
 # Git hygiene: status + sync
 # ---------------------------------------------------------------------------
 
-def test_repo_status_present_and_missing(home: Path, tmp_path: Path):
+def test_repo_status_present_and_missing(home: Path, tmp_path: Path) -> None:
     work = tmp_path / "work" / "repo-a"
     _init_repo(work, branch="main")
     repos.add_repo("repo-a", str(work), repo_class="singleton",
@@ -1188,7 +1206,7 @@ def test_repo_status_present_and_missing(home: Path, tmp_path: Path):
     assert statuses["repo-gone"].present is False
 
 
-def test_sync_repo_skips_dirty(home: Path, tmp_path: Path):
+def test_sync_repo_skips_dirty(home: Path, tmp_path: Path) -> None:
     work = tmp_path / "repo-b"
     _init_repo(work, branch="main")
     (work / "dirty.txt").write_text("x\n")  # untracked -> dirty
@@ -1199,14 +1217,14 @@ def test_sync_repo_skips_dirty(home: Path, tmp_path: Path):
     assert state == "skipped"
 
 
-def test_sync_repo_missing(home: Path, tmp_path: Path):
+def test_sync_repo_missing(home: Path, tmp_path: Path) -> None:
     e = repos.RepoEntry(name="x", repo_class="reference",
                         paths={"windows": str(tmp_path / "absent")})
     state, _ = repos.sync_repo(e, plat="windows")
     assert state == "missing"
 
 
-def test_sync_repo_skips_detached_head(home: Path, tmp_path: Path):
+def test_sync_repo_skips_detached_head(home: Path, tmp_path: Path) -> None:
     """A detached HEAD (pinned reference checkout) must never be ff-merged."""
     work = tmp_path / "repo-detached"
     _init_repo(work, branch="main")
@@ -1227,7 +1245,7 @@ def test_sync_repo_skips_detached_head(home: Path, tmp_path: Path):
     assert before == after  # HEAD was not moved
 
 
-def test_sync_repo_fetches_and_fast_forwards_via_git_ops(home: Path, tmp_path: Path):
+def test_sync_repo_fetches_and_fast_forwards_via_git_ops(home: Path, tmp_path: Path) -> None:
     """``sync_repo`` must route its fetch through ``git_ops.fetch`` (not a bare,
     unauthenticated ``git fetch``) so a cross-account remote gets the same
     credential resolution every other agent-worktrees git flow uses
@@ -1258,7 +1276,7 @@ def test_sync_repo_fetches_and_fast_forwards_via_git_ops(home: Path, tmp_path: P
     assert head == "second"
 
 
-def test_sync_repo_surfaces_git_ops_fetch_error(home: Path, tmp_path: Path):
+def test_sync_repo_surfaces_git_ops_fetch_error(home: Path, tmp_path: Path) -> None:
     """A fetch failure raised as ``git_ops.GitError`` must still be reported as
     an ``"error"`` state with readable detail, not propagate uncaught."""
     work = tmp_path / "repo-d"
@@ -1272,7 +1290,7 @@ def test_sync_repo_surfaces_git_ops_fetch_error(home: Path, tmp_path: Path):
     assert detail
 
 
-def test_sync_repo_bare_anchor_already_up_to_date(home: Path, tmp_path: Path):
+def test_sync_repo_bare_anchor_already_up_to_date(home: Path, tmp_path: Path) -> None:
     """A bare worktree-class anchor already level with its upstream must
     report ``synced`` -- ``git merge --ff-only`` cannot run on a bare repo
     (no work tree), so this path must never fall through to it and mistake
@@ -1290,7 +1308,7 @@ def test_sync_repo_bare_anchor_already_up_to_date(home: Path, tmp_path: Path):
     assert detail == "main; files=current"
 
 
-def test_sync_repo_bare_anchor_fast_forwards(home: Path, tmp_path: Path):
+def test_sync_repo_bare_anchor_fast_forwards(home: Path, tmp_path: Path) -> None:
     """A bare anchor behind its upstream must have its branch ref moved
     forward directly (no work tree to run `git merge` against)."""
     upstream = tmp_path / "upstream"
@@ -1315,7 +1333,7 @@ def test_sync_repo_bare_anchor_fast_forwards(home: Path, tmp_path: Path):
     assert head == "second"
 
 
-def test_sync_repo_bare_anchor_skips_detached_head(home: Path, tmp_path: Path):
+def test_sync_repo_bare_anchor_skips_detached_head(home: Path, tmp_path: Path) -> None:
     """A detached-HEAD bare anchor (no branch to advance) must be skipped,
     not raise -- `git checkout` itself can't run on a bare repo, so detach
     by writing a raw commit id straight into `.git/HEAD`."""
@@ -1337,7 +1355,7 @@ def test_sync_repo_bare_anchor_skips_detached_head(home: Path, tmp_path: Path):
     assert "detached" in detail
 
 
-def test_sync_repo_bare_anchor_skips_when_diverged(home: Path, tmp_path: Path):
+def test_sync_repo_bare_anchor_skips_when_diverged(home: Path, tmp_path: Path) -> None:
     """A bare anchor's branch ref carrying a commit the real upstream never
     saw (e.g. advanced out of band) must never be silently overwritten --
     the same no-clobber contract the non-bare path already guarantees."""
@@ -1380,7 +1398,7 @@ def test_sync_repo_bare_anchor_skips_when_diverged(home: Path, tmp_path: Path):
 
 def test_sync_repo_bare_anchor_mirror_refspec_cannot_clobber_diverged_ref(
     home: Path, tmp_path: Path,
-):
+) -> None:
     """A bare anchor configured with a mirror-style ``+refs/*:refs/*`` fetch
     refspec (as a mirror clone can carry) must not have its diverged branch
     ref force-overwritten by the fetch itself before the ancestry/CAS checks
@@ -1440,26 +1458,26 @@ def _write_inrepo_default_branch(path: Path, branch: str, *, commit: bool = Fals
         _git(path, "commit", "-m", "declare default_branch")
 
 
-def test_inrepo_declared_default_branch_reads_legacy_config(tmp_path: Path):
+def test_inrepo_declared_default_branch_reads_legacy_config(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     _write_inrepo_default_branch(repo, "dev")
     assert repos.inrepo_declared_default_branch(str(repo)) == "dev"
 
 
-def test_inrepo_declared_default_branch_empty_when_undeclared(tmp_path: Path):
+def test_inrepo_declared_default_branch_empty_when_undeclared(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     assert repos.inrepo_declared_default_branch(str(repo)) == ""
 
 
-def test_inrepo_declared_default_branch_never_raises_on_bad_path(tmp_path: Path):
+def test_inrepo_declared_default_branch_never_raises_on_bad_path(tmp_path: Path) -> None:
     assert repos.inrepo_declared_default_branch(str(tmp_path / "nonexistent")) == ""
 
 
 def test_sync_repo_self_heals_branch_drift_to_inrepo_declared_default(
     home: Path, tmp_path: Path,
-):
+) -> None:
     """A checkout left on the wrong branch (e.g. GitHub's advertised HEAD,
     `main`, when the repo actually declares `dev` as its contribution
     branch) is corrected back onto the declared branch instead of being
@@ -1503,12 +1521,13 @@ def test_sync_repo_self_heals_branch_drift_to_inrepo_declared_default(
 
 def test_sync_repo_reports_checkout_failure_when_declared_branch_unreachable(
     home: Path, tmp_path: Path,
-):
+) -> None:
     """When the declared branch can't actually be checked out (e.g. it was
     never fetched/doesn't exist), sync_repo must report a clear skip reason
     rather than raising or silently proceeding on the wrong branch."""
     work = tmp_path / "repo-f"
     _init_repo(work, branch="main")
+    _git(work, "remote", "add", "origin", str(tmp_path / "upstream"))
     _write_inrepo_default_branch(work, "nonexistent-branch", commit=True)
     e = repos.RepoEntry(name="repo-f", repo_class="singleton",
                         default_branch="main",
@@ -1520,7 +1539,7 @@ def test_sync_repo_reports_checkout_failure_when_declared_branch_unreachable(
 
 def test_add_repo_cli_auto_derives_default_branch_from_inrepo_config(
     home: Path, tmp_path: Path,
-):
+) -> None:
     """``repos add`` without --default-branch should pick up a repo's own
     declared default_branch instead of leaving it empty (and requiring the
     operator to duplicate a value the repo already states)."""
@@ -1539,7 +1558,7 @@ def test_add_repo_cli_auto_derives_default_branch_from_inrepo_config(
 
 def test_add_repo_cli_explicit_flag_wins_over_inrepo_declaration(
     home: Path, tmp_path: Path,
-):
+) -> None:
     """An explicit --default-branch always overrides auto-derivation."""
     from agent_worktrees import repos_cli
 
@@ -1556,7 +1575,7 @@ def test_add_repo_cli_explicit_flag_wins_over_inrepo_declaration(
     assert entry.default_branch == "release"
 
 
-def test_add_repo_cli_accepts_visibility_flag(home: Path, tmp_path: Path):
+def test_add_repo_cli_accepts_visibility_flag(home: Path, tmp_path: Path) -> None:
     from agent_worktrees import repos_cli
 
     repo = tmp_path / "pub-repo"
@@ -1565,10 +1584,12 @@ def test_add_repo_cli_accepts_visibility_flag(home: Path, tmp_path: Path):
         ["add", "pub-repo", str(repo), "--visibility", "public"]
     )
     assert rc == 0
-    assert repos.find_repo("pub-repo").visibility == "public"
+    entry = repos.find_repo("pub-repo")
+    assert entry is not None
+    assert entry.visibility == "public"
 
 
-def test_add_repo_cli_rejects_invalid_visibility(home: Path, tmp_path: Path):
+def test_add_repo_cli_rejects_invalid_visibility(home: Path, tmp_path: Path) -> None:
     from agent_worktrees import repos_cli
 
     repo = tmp_path / "bogus-repo"
@@ -1580,7 +1601,7 @@ def test_add_repo_cli_rejects_invalid_visibility(home: Path, tmp_path: Path):
     assert repos.find_repo("bogus-repo") is None
 
 
-def test_add_repo_cli_rejects_missing_visibility_value(home: Path, tmp_path: Path):
+def test_add_repo_cli_rejects_missing_visibility_value(home: Path, tmp_path: Path) -> None:
     from agent_worktrees import repos_cli
 
     repo = tmp_path / "missing-value-repo"
@@ -1592,32 +1613,36 @@ def test_add_repo_cli_rejects_missing_visibility_value(home: Path, tmp_path: Pat
     assert repos.find_repo("missing-value-repo") is None
 
 
-def test_repos_set_visibility_cli(home: Path):
+def test_repos_set_visibility_cli(home: Path) -> None:
     from agent_worktrees import repos_cli
 
     repos.add_repo("r", "D:/Src/r", repo_class="worktree", plat="windows")
     rc = repos_cli.cmd_repos_dispatch(["set-visibility", "r", "public"])
     assert rc == 0
-    assert repos.find_repo("r").visibility == "public"
+    entry = repos.find_repo("r")
+    assert entry is not None
+    assert entry.visibility == "public"
 
 
-def test_repos_set_visibility_cli_rejects_unknown_tier(home: Path):
+def test_repos_set_visibility_cli_rejects_unknown_tier(home: Path) -> None:
     from agent_worktrees import repos_cli
 
     repos.add_repo("r", "D:/Src/r", repo_class="worktree", plat="windows")
     rc = repos_cli.cmd_repos_dispatch(["set-visibility", "r", "bogus"])
     assert rc == 1
-    assert repos.find_repo("r").visibility == ""
+    entry = repos.find_repo("r")
+    assert entry is not None
+    assert entry.visibility == ""
 
 
-def test_repos_set_visibility_cli_unknown_repo(home: Path):
+def test_repos_set_visibility_cli_unknown_repo(home: Path) -> None:
     from agent_worktrees import repos_cli
 
     rc = repos_cli.cmd_repos_dispatch(["set-visibility", "nope", "public"])
     assert rc == 1
 
 
-def test_sync_all_filters_to_named_repos_only(home: Path, tmp_path: Path):
+def test_sync_all_filters_to_named_repos_only(home: Path, tmp_path: Path) -> None:
     """``sync_all(names=...)`` must sync exactly the requested repos, not
     every registered one -- the safe, no-new-commit way to fast-forward a
     single anchor (e.g. ``repos sync <name>``) without touching unrelated
@@ -1638,7 +1663,7 @@ def test_sync_all_filters_to_named_repos_only(home: Path, tmp_path: Path):
 
 def test_sync_all_reports_a_requested_but_unregistered_name(
     home: Path, tmp_path: Path,
-):
+) -> None:
     """A name that doesn't match any registered repo is surfaced as its own
     ``not registered`` result, not silently dropped (so a caller can tell
     "nothing to sync" apart from "no such repo -- likely a typo")."""
@@ -1657,7 +1682,7 @@ def test_sync_all_reports_a_requested_but_unregistered_name(
     assert by_name["nonexistent"] == ("error", "not registered")
 
 
-def test_sync_all_combines_names_with_class_filter(home: Path, tmp_path: Path):
+def test_sync_all_combines_names_with_class_filter(home: Path, tmp_path: Path) -> None:
     """``names`` narrows within, not instead of, an existing ``class_filter``
     -- a repo matching the name but not the class is excluded."""
     a = tmp_path / "repo-a"
@@ -1673,8 +1698,8 @@ def test_sync_all_combines_names_with_class_filter(home: Path, tmp_path: Path):
 
 
 def test_repos_cli_sync_accepts_a_positional_repo_name(
-    home: Path, tmp_path: Path, capsys,
-):
+    home: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
     """``repos sync <name>`` (CLI dispatch) fast-forwards just that repo."""
     from agent_worktrees import repos_cli
 
@@ -1701,8 +1726,8 @@ def test_repos_cli_sync_accepts_a_positional_repo_name(
 
 
 def test_repos_cli_sync_preserves_unquoted_multi_word_tag_value(
-    home: Path, tmp_path: Path, monkeypatch,
-):
+    home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A regression the name-filter parsing must not introduce: the
     pre-existing `repos sync --tag multi-machine system` documented usage
     (an unquoted, space-separated tag value, not a trailing repo name) must
@@ -1712,7 +1737,10 @@ def test_repos_cli_sync_preserves_unquoted_multi_word_tag_value(
 
     captured: dict[str, object] = {}
 
-    def fake_sync_all(*, tag=None, class_filter=None, names=None, plat=None):
+    def fake_sync_all(
+        *, tag: str | None = None, class_filter: str | None = None,
+        names: tuple[str, ...] | None = None, plat: str | None = None,
+    ) -> list[tuple[str, str, str]]:
         captured["tag"] = tag
         captured["names"] = names
         return []
@@ -1728,8 +1756,8 @@ def test_repos_cli_sync_preserves_unquoted_multi_word_tag_value(
 
 
 def test_repos_cli_sync_combines_leading_names_with_a_multi_word_tag(
-    home: Path, tmp_path: Path, monkeypatch,
-):
+    home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Explicit repo names and an unquoted multi-word `--tag` value can
     combine unambiguously as long as the names come first (the CLI's
     documented positionals-then-flags convention) -- the ordering
@@ -1738,7 +1766,10 @@ def test_repos_cli_sync_combines_leading_names_with_a_multi_word_tag(
 
     captured: dict[str, object] = {}
 
-    def fake_sync_all(*, tag=None, class_filter=None, names=None, plat=None):
+    def fake_sync_all(
+        *, tag: str | None = None, class_filter: str | None = None,
+        names: tuple[str, ...] | None = None, plat: str | None = None,
+    ) -> list[tuple[str, str, str]]:
         captured["tag"] = tag
         captured["names"] = names
         return []
@@ -1755,7 +1786,7 @@ def test_repos_cli_sync_combines_leading_names_with_a_multi_word_tag(
 
 
 
-def test_repo_git_ignores_an_inherited_git_dir(tmp_path: Path, monkeypatch) -> None:
+def test_repo_git_ignores_an_inherited_git_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # A hook or parent git process can export GIT_DIR/GIT_WORK_TREE; registry
     # status and sync must still act on the registered checkout.
     target = tmp_path / "target"
@@ -1768,7 +1799,7 @@ def test_repo_git_ignores_an_inherited_git_dir(tmp_path: Path, monkeypatch) -> N
     assert repos._git(str(target), "branch", "--show-current").stdout.strip() == "main"
 
 def test_sync_repo_fetches_its_own_checkout_despite_an_inherited_git_dir(
-    home: Path, tmp_path: Path, monkeypatch
+    home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     upstream = tmp_path / "upstream"
     _init_repo(upstream, branch="main")
