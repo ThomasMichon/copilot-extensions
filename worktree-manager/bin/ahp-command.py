@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import getopt
 import json
 from pathlib import PureWindowsPath
@@ -12,6 +13,9 @@ import sys
 from agent_worktrees.native_arguments import (
     SETUP_VALUE_OPTIONS, VALUE_OPTIONS, append_native_arguments, bash_command_index,
 )
+
+# The shared helper is unannotated; pin the contract used here for strict typing.
+_bash_command_index: Callable[..., int | None] = bash_command_index
 
 
 def _option_start(command: list[str]) -> int:
@@ -45,7 +49,7 @@ def _option_start(command: list[str]) -> int:
             if start + 1 < len(command) and not command[start + 1].startswith("-"):
                 script = start + 1
             else:
-                boundary = bash_command_index(command, start=start)
+                boundary = _bash_command_index(command, start=start)
                 if boundary is not None:
                     return boundary + 2
         if script is not None and script < len(command):
