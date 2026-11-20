@@ -34,7 +34,7 @@ from .bridge_agent_registry import (
 from .procutil import (
     agent_bridge_launch_prefix,
     no_window_kwargs,
-    run_ssh_command,
+    run_ssh_command as run_ssh_command,
 )
 from .worker_charter import OPERATING_PROCEDURES_CHARTER_NAME
 from .startup_process import StartupOutcomeUnknown as StartupOutcomeUnknown, run_startup

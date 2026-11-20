@@ -8,17 +8,12 @@ import shlex
 import shutil
 import subprocess
 from collections.abc import Callable
-from typing import Any, Protocol
+from typing import Any
 
 from . import bridge_remote, remote_dispatch
 from .procutil import no_window_kwargs
 
 log = logging.getLogger(__name__)
-
-
-class PeerCommandTransport(Protocol):
-    def run_ssh_command(self, argv: list[str], *, timeout: float | None,
-                        input: str | None = None) -> subprocess.CompletedProcess[str]: ...
 
 
 class NativePromptNotSent(RuntimeError):
@@ -118,7 +113,6 @@ def native_prompt_receipt(
     from . import bridge
     from .queue_records import TaskError
 
-    transport: PeerCommandTransport = bridge
     result = _command_result(
         [
             "--json", "send", bridge_session,
@@ -128,7 +122,7 @@ def native_prompt_receipt(
             "--prompt-file", "-", *(["--no-resume"] if no_resume else []), "--receipt-only", "--no-wait",
         ],
         prompt, machine=machine, launch_prefix=bridge._agent_bridge_launch_prefix,
-        run_ssh=transport.run_ssh_command, timeout=20.0,
+        run_ssh=bridge.run_ssh_command, timeout=20.0,
     )
     if result is None or result.returncode:
         raise TaskError("Bridge receipt observation unavailable; retained send remains unknown")
