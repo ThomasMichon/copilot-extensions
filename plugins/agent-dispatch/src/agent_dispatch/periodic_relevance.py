@@ -69,7 +69,7 @@ def _publish(bus: EventBus, outcome: Any, queue: TaskQueue) -> None:
     release_if_handoff(task, cancel_pending=True, queue=queue)
     event_task = _event_task_dict(task)
     bus.publish({"type": outcome.event_type, "task": event_task})
-    telemetry.emit(telemetry.task_lifecycle_event(outcome.event_type, event_task))
+    telemetry.emit_for(bus, telemetry.task_lifecycle_event(outcome.event_type, event_task))
 
 
 def reconsider_unbound_tasks(
