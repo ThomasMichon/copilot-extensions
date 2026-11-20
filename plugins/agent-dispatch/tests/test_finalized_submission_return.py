@@ -18,6 +18,7 @@ from agent_dispatch.review_closeout_submission import SUBMIT
 from agent_dispatch.task_obligations import read_snapshot
 from tests import test_task_relevance_closeout_transport as transport
 from tests.test_assignment_relationships import start_managed
+from tests.test_pool_placement import place, pool
 from tests.test_task_relevance import report
 from tests.test_task_relevance_binding import Assignment, _scope
 from tests.test_task_relevance_closeout_readiness import Ready
@@ -216,8 +217,8 @@ def test_submitted_original_driver_can_observe_without_a_lease(
         assert denied.status_code == 403
 
 
-def test_preview_reconciliations_skip_settled_transport_history(
-    ready: Ready, monkeypatch: pytest.MonkeyPatch,
+def test_preview_reconciliations_skip_unrelated_live_and_settled_history(
+    ready: Ready, monkeypatch: pytest.MonkeyPatch, record_property: Callable[[str, object], None],
 ) -> None:
     queue = ready[0]
     foreign = queue.create("unrelated", repo="example")
@@ -264,6 +265,29 @@ def test_preview_reconciliations_skip_settled_transport_history(
                     rows,
                 )
                 conn.executemany(
+                    "INSERT INTO tasks(id,status,owner,owner_session_id)"
+                    " VALUES ('live-' || :i,'started','different/worktree','native')", rows,
+                )
+                conn.executemany(
+                    "INSERT INTO tasks(id,status,generation) VALUES ('claim-'||:i,'claimed',1)",
+                    rows,
+                )
+                conn.executemany(
+                    "INSERT INTO spawn_reservations(key,task_id,attempt,state,reserved_at,"
+                    "updated_at,worktree) VALUES ('key-'||:i,'claim-'||:i,1,'reserving',1,1,"
+                    "'different-tree')", rows,
+                )
+                conn.executemany(
+                    "INSERT INTO task_pool_assignments(task_id,registration_id,machine,env,"
+                    "reservation_key,task_generation,catalog_revision)"
+                    " VALUES ('claim-'||:i,'pool','host-a','linux','key-'||:i,1,1)", rows,
+                )
+                conn.executemany(
+                    "INSERT INTO run_waiters(task_id,generation,pid,owner,owner_session_id,"
+                    "resume_worktree,state,created_at,updated_at) VALUES ('live-' || :i,1,0,"
+                    "'different/worktree','native','different/worktree','active',1,1)", rows,
+                )
+                conn.executemany(
                     "INSERT INTO run_waiters(task_id,generation,pid,resume_worktree,state,"
                     "created_at,updated_at) VALUES (:task,:i,0,'w','retired',1,1)", rows,
                 )
@@ -290,6 +314,7 @@ def test_preview_reconciliations_skip_settled_transport_history(
             response = api.post(url, json=args, headers=headers)
             assert response.status_code == 200, response.text
     assert len(costs) == 4
+    record_property("pre_post_vm_steps_20_then_2000", costs)
     for small, large in zip(costs[:2], costs[2:], strict=True):
         assert large <= small * 2, costs
 
@@ -319,6 +344,7 @@ def test_preview_waits_for_detached_work_even_without_workspace_claim(
     (True, "HOST-A/other", "native", "unknown", True),
     (True, "host-a/worktree", None, "pending", True),
     (True, "other/worktree", "native", "unknown", False),
+    (True, "worker-1", "native", "unknown", True),
     (True, "other/worktree", None, "unknown", False),
     (True, "host-a/worktree", "different", "unknown", False),
 ])
@@ -440,6 +466,13 @@ def test_other_assignment_or_delivery_during_preview(
                             " execution_send_state='not_sent', execution_send_detail=? WHERE id=?",
                             (json.dumps(identity), json.dumps(refusal), wake.id),
                         )
+                        settling = conn.execute(
+                            "SELECT * FROM run_waiter_wakes WHERE id=?", (wake.id,)
+                        ).fetchone()
+                        assert settling["status"] == "delivering"
+                        assert provisional_driver_work._pending_delivery(
+                            queue, conn, settling, "run_waiter_wakes", ready[3].id,
+                        ) == (mode == "retry")
                     queue.finish_run_waiter_wake(wake.id, wake.delivery_token, delivered=False)
                 if mode == "stale":
                     queue.release_suspended(other.id, worker)
@@ -503,3 +536,67 @@ def test_other_submitted_return_binding_blocks_until_confirmed(
         check(workspace.machine, "native", "other-tree")
     queue.confirm(other.id, actor="fixture")
     check(workspace.machine, "native")
+
+
+@pytest.mark.parametrize("kind", ["task", "waiter"])
+def test_unqualified_owner_matching_native_cannot_prove_different_host(
+    ready: Ready, kind: str,
+) -> None:
+    queue, _, _, _, calls = ready
+    with queue._connect() as conn:
+        if kind == "task":
+            conn.execute("INSERT INTO tasks(id,status,owner,owner_session_id)"
+                         " VALUES ('legacy','started','worker-1','native')")
+        else:
+            conn.execute(
+                "INSERT INTO run_waiters(task_id,generation,pid,owner,owner_session_id,"
+                "resume_worktree,state,created_at,updated_at)"
+                " VALUES ('legacy',1,0,'worker-1','native','worker-1','active',1,1)"
+            )
+    with transport.api(ready) as api:
+        response = api.post(transport.path(ready, "/observe-provisional"),
+                            headers=transport.headers(ready), json=transport.body(ready))
+    assert response.status_code == 409 and not calls
+
+
+def test_other_pool_claim_can_reserve_driver_before_binding(
+    ready: Ready, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    queue, _, workspace, _, _ = ready
+    [scope] = queue.pool_catalog_snapshot().scopes
+    queue.publish_pool_catalog_scope(
+        scope.machine, scope.env, scope.publisher_id, generation=scope.generation,
+        expected_revision=scope.revision, registration_revision=queue.pool_registration_revision(),
+        expected_cohort_revision=1, input_revision="two", definitions=(pool(capacity=2),),
+    )
+    other = queue.create("Second allocation", repo=workspace.project,
+                         target_worktree=workspace.worktree)
+    assert isinstance(other, Task)
+    observe = submission_readiness_observation.observe
+
+    def raced(request: dict[str, object], allocation: dict[str, object],
+              ref: str) -> dict[str, object]:
+        value = observe(request, allocation, ref)
+        reservation, _ = place(queue, other)
+        assert reservation.worktree == workspace.worktree
+        claim = queue.get(other.id)
+        assert claim and claim.status == "claimed"
+        assert claim.owner is None and claim.owner_session_id is None
+        assert queue.task_relationship(other.id) is None
+        return value
+
+    monkeypatch.setattr(submission_readiness_observation, "observe", raced)
+    with transport.api(ready) as api:
+        response = api.post(transport.path(ready, "/observe-provisional"),
+                            headers=transport.headers(ready), json=transport.body(ready))
+        assert response.status_code == 409
+        assert len(ready[4]) == 1
+        again = api.post(transport.path(ready, "/observe-provisional"),
+                         headers=transport.headers(ready), json=transport.body(ready))
+        assert again.status_code == 409 and len(ready[4]) == 1
+    with queue._connect() as conn:
+        provisional_driver_work.require_no_outstanding_driver_work(
+            queue, conn, ready[3],
+            {"task_id": ready[3].id, "worktree": workspace.worktree,
+             "execution_machine": "different"}, "native",
+        )

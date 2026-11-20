@@ -5,10 +5,9 @@ from __future__ import annotations
 import sqlite3
 from typing import TYPE_CHECKING, Any
 
-from .assignment_workspace import same_assignment_worker
 from .queue_common import RunWaiterWakeOperation, Task, WakeOperation
 from .queue_execution_custody import require_execution_send_reconciliation
-from .queue_execution_wakes import TABLES, _known_native_retry, _wake_targets_reservation
+from .queue_execution_wakes import TABLES, _retryable_native_refusal, _wake_targets_reservation
 from .queue_records import TaskError
 from .queue_relevance_delivery import closeout_wake
 from .queue_run_waiter_transition_cleanup import CLAIM_RELEASE_SENDER
@@ -25,6 +24,17 @@ _RETAINED_ASSIGNMENT = (
 )
 _ASSIGNED_WORKER = "CASE WHEN status='submitted' THEN completed_by ELSE owner END"
 _ASSIGNED_TREE = f"substr({_ASSIGNED_WORKER},instr({_ASSIGNED_WORKER},'/')+1)"
+
+
+def _host_sql(owner: str) -> str:
+    # Bridge routes a bare/partially qualified owner by native ID, not to that hostname.
+    slash = f"instr({owner},'/')"
+    return (f"CASE WHEN {slash}>0 AND length({owner})>{slash} THEN"
+            f" lower(trim(substr({owner},1,{slash}-1))) ELSE '' END")
+
+
+_ASSIGNED_HOST = _host_sql(_ASSIGNED_WORKER)
+_WAITER_HOST = _host_sql("owner")
 # A terminal first delivery can settle an unqualified send, but a later
 # successful retry says nothing about the outcome of an earlier attempt.
 _AMBIGUOUS = (
@@ -53,17 +63,18 @@ def migrate(conn: sqlite3.Connection) -> None:
         f"CREATE INDEX IF NOT EXISTS idx_run_waiters_driver_work"
         f" ON run_waiters(task_id) WHERE {_LIVE_WAITER}"
     )
-    for suffix, key in (("native", "owner_session_id"), ("tree", _TREE)):
-        conn.execute(
-            f"CREATE INDEX IF NOT EXISTS idx_run_waiters_driver_{suffix}"
-            f" ON run_waiters({key}) WHERE {_LIVE_WAITER}"
-        )
-    for suffix, key in (("native", "owner_session_id"), ("tree", _ASSIGNED_TREE)):
-        conn.execute(
-            f"CREATE INDEX IF NOT EXISTS idx_tasks_driver_{suffix}_v2"
-            f" ON tasks({key}) WHERE {_RETAINED_ASSIGNMENT}"
-        )
-        conn.execute(f"DROP INDEX IF EXISTS idx_tasks_driver_{suffix}")
+    for table, predicate, host, tree, previous in (
+        ("tasks", _RETAINED_ASSIGNMENT, _ASSIGNED_HOST, _ASSIGNED_TREE, "_v2"),
+        ("run_waiters", _LIVE_WAITER, _WAITER_HOST, _TREE, ""),
+    ):
+        for suffix, key in (("native", "owner_session_id"), ("tree", tree)):
+            conn.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_{table}_driver_{suffix}_host"
+                f" ON {table}({key},{host}) WHERE {predicate}"
+            )
+            conn.execute(f"DROP INDEX IF EXISTS idx_{table}_driver_{suffix}{previous}")
+            if previous:
+                conn.execute(f"DROP INDEX IF EXISTS idx_{table}_driver_{suffix}")
 
 
 def _pending_delivery(queue: TaskQueue, conn: sqlite3.Connection, row: sqlite3.Row,
@@ -84,7 +95,7 @@ def _pending_delivery(queue: TaskQueue, conn: sqlite3.Connection, row: sqlite3.R
             return False
     return (
         (row["execution_send"] is None and row["execution_send_state"] is None)
-        or _known_native_retry(row, wake, current)
+        or _retryable_native_refusal(row, wake, current, observing_delivery=True)
     )
 
 
@@ -94,39 +105,49 @@ def require_no_outstanding_driver_work(
 ) -> None:
     require_execution_send_reconciliation(conn, task.id, exclusive_key=task.exclusive_key)
     tree = reservation["worktree"]
-    worker = f"{reservation['execution_machine']}/{tree}"
-    # A waiter may still hold the driver after the task's active lease ended.
-    # Separate probes keep SQLite from scanning all submitted tasks by status.
-    assignments = (
-        f"SELECT id AS task_id,COALESCE({_ASSIGNED_WORKER},'') AS owner,owner_session_id"  # noqa: S608 -- fixed SQL predicates
-        f" FROM tasks WHERE {_RETAINED_ASSIGNMENT} AND id<>:task AND "
-    )
-    for row in conn.execute(
-        f"{assignments}owner_session_id=:native UNION ALL {assignments}{_ASSIGNED_TREE}=:tree"  # noqa: S608 -- fixed SQL; caller data is bound
-        " UNION ALL SELECT task_id,owner,owner_session_id FROM run_waiters"
-        f" WHERE {_LIVE_WAITER} AND (task_id=:task OR owner_session_id=:native OR {_TREE}=:tree)",
-        {"task": task.id, "native": native, "tree": tree},
+    host = reservation["execution_machine"].strip().lower()
+    params = {"task": task.id, "native": native, "tree": tree, "host": host}
+    if conn.execute(
+        "SELECT 1 FROM spawn_reservations s CROSS JOIN task_pool_assignments a"
+        " ON a.reservation_key=s.key AND a.task_id=s.task_id JOIN tasks t ON t.id=a.task_id"
+        " WHERE s.worktree=:tree AND a.task_id<>:task AND a.assignment_released=0"
+        " AND lower(trim(a.machine))=:host AND t.generation=a.task_generation"
+        " AND t.status='claimed' AND t.owner IS NULL LIMIT 1", params,
+    ).fetchone():
+        raise TaskError("provisional observation has an outstanding pool placement")
+    for table, predicate, owner_host, owner_tree in (
+        ("tasks", _RETAINED_ASSIGNMENT + " AND id<>:task", _ASSIGNED_HOST, _ASSIGNED_TREE),
+        ("run_waiters", _LIVE_WAITER, _WAITER_HOST, _TREE),
     ):
-        if (
-            row["task_id"] == task.id or same_assignment_worker(row["owner"], worker)
-            or (row["owner_session_id"] == native and _wake_targets_reservation(
-                row, reservation, native,
-            ))
-        ):
-            raise TaskError("provisional observation has an outstanding assignment or waiter")
+        probes = [
+            f"owner_session_id=:native AND {owner_host} IN (:host,'')",
+            f"{owner_tree}=:tree AND {owner_host}=:host",
+        ]
+        if table == "run_waiters":
+            probes.append("task_id=:task")
+        for probe in probes:
+            if conn.execute(
+                f"SELECT 1 FROM {table} WHERE {predicate} AND {probe} LIMIT 1", params,  # noqa: S608 -- fixed SQL; caller data is bound
+            ).fetchone():
+                raise TaskError("provisional observation has an outstanding assignment or waiter")
     for table in TABLES:
         bookkeeping = (
             " AND (sender<>? OR execution_send_state IN ('pending','unknown'))"
             if table == "run_waiter_wakes" else ""
         )
-        params = (task.id, native, tree)
+        wake_params = (task.id, native, tree)
         for row in conn.execute(
             f"SELECT *, {_AMBIGUOUS} AS uncertain FROM {table} WHERE {_CANDIDATE}{bookkeeping}"  # noqa: S608 -- fixed SQL and outbox names
             f" AND (task_id=? OR {_TARGET} IN (?,?))",
-            (CLAIM_RELEASE_SENDER, *params) if bookkeeping else params,
+            (CLAIM_RELEASE_SENDER, *wake_params) if bookkeeping else wake_params,
         ):
-            if row["task_id"] != task.id and not _wake_targets_reservation(
-                row, reservation, native,
+            machine, slash, address = row["owner"].partition("/")
+            ambiguous_native = (
+                row["owner_session_id"] == native and not (slash and machine and address)
+            )
+            if (
+                row["task_id"] != task.id and not ambiguous_native
+                and not _wake_targets_reservation(row, reservation, native)
             ):
                 continue
             if row["uncertain"] or _pending_delivery(queue, conn, row, table, task.id):

@@ -57,7 +57,11 @@ can also inspect readiness: the recorded submitter, native session and generatio
 must still match the captured assignment, even though its lease has ended.
 Dispatch checks its held assignments, detached waiters and wake/send records
 on both sides of the owner read. Other work holding the same worker or native
-on the same host blocks even without a corresponding Worktrees claim. Suspension
+on the same host blocks even without a corresponding Worktrees claim.
+An unreleased pre-start placement targeting
+that tree on its selected machine blocks before the task has an owner or native.
+A bare legacy owner is not a hostname: a matching native without a qualified
+route cannot prove the drivers are independent. Suspension
 retains the assignment independently of any waiter or wake. A submitted task
 retaining its submitter and native return identity also blocks until that binding
 is discharged; a completed task's historical submitter is not a current assignment. A
