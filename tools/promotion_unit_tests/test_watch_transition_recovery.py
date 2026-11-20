@@ -322,6 +322,38 @@ def test_recovered_sealing_preserves_original_staged_v1_receipt(
     assert fixture[0].watch_state_paths(root).retained_lock not in state["acquisitions"]
 
 
+@pytest.mark.parametrize("overflow", ["seal", "phase"])
+def test_recovered_sealing_preflights_both_envelopes_before_changing_topology(
+    recovered_sealing: Any, monkeypatch: pytest.MonkeyPatch, overflow: str,
+) -> None:
+    module, state, _root, _binding, lease = recovered_sealing
+    windows = sys.modules[f"{module.__package__}.watch_windows_sealing"]
+    if overflow == "phase":
+        publish = windows.write_private
+
+        def staged(*args: Any, **kwargs: Any) -> None:
+            publish(*args, **kwargs)
+            raise OSError("controlled v2 staging acknowledgement loss")
+
+        with monkeypatch.context() as failed:
+            failed.setattr(windows, "write_private", staged)
+            with pytest.raises(OSError, match="controlled v2 staging"):
+                _seal_recovered(recovered_sealing)
+    lease.held = False
+    state["writes"].clear()
+    state["acquisitions"].clear()
+    prior = json.dumps(state["document"])
+    topology, releases = dict(state["paths"]), state["releases"]
+    # This valid prepared envelope fits exactly; its seal or final phase does not.
+    monkeypatch.setattr(windows, "_MAX_METADATA_BYTES", len(prior.encode("utf-8")))
+    with pytest.raises(ValueError, match="bounded size"):
+        _seal_recovered(recovered_sealing)
+    assert state["paths"] == topology and state["releases"] == releases
+    assert json.dumps(state["document"]) == prior
+    assert not lease.held and state["acquisitions"] == [] and state["writes"] == []
+    assert state["moves"] == []
+
+
 def test_prepared_adapter_preserves_complete_origin(recovery: Any) -> None:
     _module, state, _root, binding, lease = recovery
     original = json.loads(json.dumps(state["document"]))

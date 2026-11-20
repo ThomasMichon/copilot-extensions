@@ -196,9 +196,12 @@ def seal_recovered(
     validate: Callable[[], None], check_deadline: Callable[[], None],
 ) -> Document:
     """Progress a v2 envelope through the existing Windows owner, never its v1 reader."""
-    from .watch_windows_sealing import _seal
+    from .watch_windows_sealing import _require_sealing_space, _seal
 
     validated_scopes: set[str] = set()
+    controller: Document = {"kind": "legacy", "stateRoot": str(root)}
+    if installation is not None:
+        controller.update(kind="installation", installation=installation.evidence())
 
     def scope(binding: object) -> None:
         # Only immutable provenance interpretation is reused, within this one operation.
@@ -221,6 +224,7 @@ def seal_recovered(
         document, _raw, topology = _read_windows_transition(
             root, installation, guard, sealed=False, validate_scope=scope,
         )
+        _require_sealing_space({**document, "controller": controller})
         WatchRegistry().restore_state(
             _read_subscriptions_state(watch_state_paths(root).legacy_subscriptions, require_plain=True),
             strict=True,
@@ -229,9 +233,6 @@ def seal_recovered(
         return document, topology
 
     document = _seal(root, lease, read=read, validate=validate, check_deadline=check_deadline)
-    controller: Document = {"kind": "legacy", "stateRoot": str(root)}
-    if installation is not None:
-        controller.update(kind="installation", installation=installation.evidence())
     if document["controller"] == controller:
         return document
     return recover_sealed(

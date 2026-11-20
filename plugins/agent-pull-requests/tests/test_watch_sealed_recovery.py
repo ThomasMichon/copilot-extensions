@@ -250,6 +250,44 @@ def test_later_current_sealer_recovers_interrupted_v2_without_original_executor(
         successor.close(timeout=3)
 
 
+@pytest.mark.parametrize("overflow", ["seal", "phase"])
+def test_current_sealer_size_refusal_preserves_actual_native_topology(
+    prepared: tuple[WatchInstallation, WatchInstallation, Document],
+    monkeypatch: pytest.MonkeyPatch, overflow: str,
+) -> None:
+    _, current, _ = prepared
+    paths = watch_state_paths(current.state_root)
+    owner = _writer(current.state_root)
+    try:
+        with current.transaction(timeout=3, environment={}) as guard:
+            owner.recover_prepared_state_transition(timeout=10, installation=current, guard=guard)
+            if overflow == "phase":
+                def staged(*args: Any, **kwargs: Any) -> None:
+                    write_private(*args, **kwargs)
+                    raise StateCommitUncertain("controlled size fixture staging acknowledgement loss")
+
+                with monkeypatch.context() as failed:
+                    failed.setattr(watch_windows_sealing, "write_private", staged)
+                    with pytest.raises(StateCommitUncertain):
+                        owner.seal_recovered_state_transition(timeout=10, installation=current, guard=guard)
+    finally:
+        owner.close(timeout=3)
+    prior = paths.journal.read_bytes()
+    topology = sorted((path.name, path.lstat().st_ino) for path in current.state_root.iterdir())
+    # Keep a valid prepared journal exactly within budget, without oversized fixture data.
+    monkeypatch.setattr(watch_windows_sealing, "_MAX_METADATA_BYTES", len(prior))
+    successor = _writer(current.state_root)
+    try:
+        with current.transaction(timeout=3, environment={}) as guard:
+            with pytest.raises(ValueError, match="bounded size"):
+                successor.seal_recovered_state_transition(timeout=10, installation=current, guard=guard)
+        assert not successor.writer_held and not successor.read_ready
+        assert paths.journal.read_bytes() == prior
+        assert sorted((path.name, path.lstat().st_ino) for path in current.state_root.iterdir()) == topology
+    finally:
+        successor.close(timeout=3)
+
+
 def test_current_sealed_receiver_keeps_origin_and_native_barrier_without_old_executor(
     sealed: tuple[WatchInstallation, WatchInstallation, Document], receiver: WatchWriter,
     monkeypatch: pytest.MonkeyPatch,

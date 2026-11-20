@@ -27,6 +27,8 @@
         "tools/promotion_unit_tests/test_watch_transition_recovery.py::test_recovered_sealing_validates_legacy_source_before_native_acquisition",
         "tools/promotion_unit_tests/test_watch_transition_recovery.py::test_recovered_sealing_cannot_downgrade_actual_sealed_origin",
         "tools/promotion_unit_tests/test_watch_transition_recovery.py::test_recovered_sealing_preserves_original_staged_v1_receipt",
+        "tools/promotion_unit_tests/test_watch_transition_recovery.py::test_recovered_sealing_preflights_both_envelopes_before_changing_topology[seal]",
+        "tools/promotion_unit_tests/test_watch_transition_recovery.py::test_recovered_sealing_preflights_both_envelopes_before_changing_topology[phase]",
         "tools/promotion_unit_tests/test_watch_transition_recovery.py::test_prepared_adapter_preserves_complete_origin",
         "tools/promotion_unit_tests/test_watch_transition_recovery.py::test_prepared_adapter_final_guard_preserves_concurrent_journal",
         "tools/promotion_unit_tests/test_watch_transition_recovery.py::test_prepared_adapter_current_retry_confirms_without_rewriting",
@@ -6301,8 +6303,8 @@
         "plugins/agent-worktrees/src/agent_worktrees/prune.py": "933a34e607f4eebb34e967d8920132bf4695842f6e0897e19ff718daadcfe049",
         "plugins/agent-pull-requests/src/agent_pull_requests/watch_storage.py": "d287472e7ff9029b8f5d0d8fc07a6570520a8fb93176088192372e553153666c",
         "tools/promotion_unit_tests/test_watch_storage_contract.py": "b4ecc5a1eec12a6278469746846033c32957f94e42103c5a4ce60fdaf9f1e302",
-        "plugins/agent-pull-requests/src/agent_pull_requests/watch_transition_recovery.py": "997664fae2512b3964abfc4baf48afb017980a492eb7d8d8d9c2b54d70dbce7f",
-        "tools/promotion_unit_tests/test_watch_transition_recovery.py": "f100acb2c64434c4e09c01982173070def9edb34cd35ef4733a44603e1f98082",
+        "plugins/agent-pull-requests/src/agent_pull_requests/watch_transition_recovery.py": "f514ae161f562c4379165e160825c4548acf7aeb52d374a3e26c63b81c9ada3b",
+        "tools/promotion_unit_tests/test_watch_transition_recovery.py": "50279e310f8f7c9f0d8d3baf4dab4e2d99de24b89c91af8ea423014debe9d4b2",
         "plugins/agent-worktrees/src/agent_worktrees/git_process.py": "6cc675a4d988e7d1fd6b0d76a48fde5909f78f085ef194ec69625c6334b4f80f",
         "plugins/agent-worktrees/src/agent_worktrees/daemon_launch_context.py": "b8250e9aaef5fdc70f881b979d52d164c408aa08cf8322278be11569a01c3d30",
         "tools/promotion_unit_tests/test_git_launch_composition.py": "13cc8825da50b3d667d10ef7d38dedd9d52d98bcbef961535c9cc53834e76531",
@@ -7229,7 +7231,7 @@
         "tools/promotion_unit_tests/test_watch_sealing.py": "f4895f9bf3f8cc7f204ebcf4f0e8b6a2838631a9e52e3d05be1b4074f9da7572",
         "libs/update-driver/src/update_driver/boot.py": "ea3957d4a7458566a4cf844c7c94ceb1b6363bec93265f30087d062e32c5037b",
         "plugins/agent-pull-requests/src/agent_pull_requests/watch_private.py": "9e45fa5807c7ecd0bb7d870450f562bd004528005510f35dc2df0b733f34741b",
-        "plugins/agent-pull-requests/src/agent_pull_requests/watch_windows_sealing.py": "f2e9b26f6bf55152ad37f7c8b482dd4f0f6c6aa8a24857b780cb02903a62e2a0",
+        "plugins/agent-pull-requests/src/agent_pull_requests/watch_windows_sealing.py": "892d522e26ab426018652c34c05f8f0c4cb3f3c9e943addaaa5b7ca0d67ff5d7",
         "tools/promotion_unit_tests/test_boot_domain.py": "42da2cacbbdb6ff58618fabe1552530f2500bfea5cd6d16edabe18a291610e1d"
     }
 }

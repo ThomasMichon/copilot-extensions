@@ -25,6 +25,7 @@ from .watch_transition import _pin_identity, _validate_binding, _validate_record
 
 Document = dict[str, Any]
 _BACKEND = "windows-move-no-replace"
+_IDENTITY_MAX = (1 << 128) - 1
 
 
 def _identity(path: Path, *, directory: bool = False, installed: bool = False) -> tuple[int, int]:
@@ -32,6 +33,8 @@ def _identity(path: Path, *, directory: bool = False, installed: bool = False) -
     expected = stat.S_ISDIR if directory else stat.S_ISREG
     if not expected(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
         raise PermissionError("watch Windows sealing requires plain native paths")
+    if not all(0 <= value <= _IDENTITY_MAX for value in (info.st_dev, info.st_ino)):
+        raise PermissionError("watch Windows sealing requires supported native file identities")
     if directory:
         _windows_private(path, protect=False)
         entries = list(path.iterdir())
@@ -144,6 +147,19 @@ def seal(
     )
 
 
+def _require_sealing_space(document: Document) -> None:
+    # Reserve full Windows 128-bit file-ID widths before allocating a barrier.
+    candidate = document if "seal" in document else {
+        **document, "seal": {
+            "backend": _BACKEND,
+            "barrier": {"device": _IDENTITY_MAX, "inode": _IDENTITY_MAX}, "boot": None,
+        },
+    }
+    for phase in (candidate["phase"], "sealed-legacy"):
+        if len(json.dumps({**candidate, "phase": phase}, allow_nan=False).encode("utf-8")) > _MAX_METADATA_BYTES:
+            raise ValueError("watch Windows sealing journal exceeds its bounded size")
+
+
 def _seal(
     root: Path, lease: SingleInstance, *,
     read: Callable[[], tuple[Document, str]],
@@ -152,6 +168,7 @@ def _seal(
     """Share the physical owner/order; each entry supplies its own strict reader."""
     validate()
     document, topology = read()
+    _require_sealing_space(document)
     paths = watch_state_paths(root)
     if topology == "original":
         retain_original_lease(root, document, False, lease)

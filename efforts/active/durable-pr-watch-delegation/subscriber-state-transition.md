@@ -615,8 +615,13 @@ remain unchanged. A prepared origin can progress through staged, moved and
 installed barrier topologies, including a prepared journal left after the
 barrier move; a sealed origin cannot regress. No unjournaled directory, raced
 historical file or conflicting isolated registry is guessed away or removed.
-Journal publication is bounded and guarded. Uncertain stage/move/acquisition/
-publication outcomes retain actual evidence for the same owner to reconcile.
+Before custody acquisition, staging or either move, metadata preflight reserves
+the full Windows file-identity width and checks both staged and final envelopes,
+including any current-controller update. Near-limit refusal therefore preserves
+the actual topology and journal rather than creating an unjournaled barrier or
+stranding a moved transition. Actual publication remains bounded and guarded.
+Uncertain stage/move/acquisition/publication outcomes retain actual evidence for
+the same owner to reconcile.
 
 Original custody is released before either move. Recovery acquires the original
 inode only while it is still at the historical path, never at the retained path.
