@@ -283,9 +283,8 @@ def test_terminal_gateway_rejects_incompatible_new_registration_before_commit(
         assert not selected.store.execute(
             config.bindings[0].scope, "pending", {}, expires_at=expires(),
         )["events"]
-        scope = config.bindings[0].scope
         selected.store.observe(
-            ObservationTarget(scope.account, scope.repo, 42, frozenset({receipt["registration_id"]})),
+            selected.store.observation_targets(expires_at=expires())[0],
             PRSnapshot(pr_state="closed", merged=True), expires_at=expires(),
         )
         pending = selected.store.execute(

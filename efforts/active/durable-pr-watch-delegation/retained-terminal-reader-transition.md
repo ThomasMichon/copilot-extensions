@@ -94,6 +94,9 @@ the existing native observer continues evaluating fresh predicates, including
 after an unmerged workspace closure, and supplies the complete native snapshot
 and triggering head. Retirement and native application resolve elapsed original
 deadlines before success evidence. No retired workspace bodies are restored.
+Native observation also retains its original pre-IO epoch fence: a delayed read
+spanning workspace close/reopen refuses unchanged, while a freshly captured read
+keeps its complete native payload.
 
 ## Interrupted adoption and skew
 

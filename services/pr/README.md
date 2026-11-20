@@ -544,7 +544,9 @@ in the internal retirement delivery ledger; acquisition does not replace them.
 Workspace retirement sweeps elapsed original watch deadlines under that same
 custody, but does not fire a synthetic watch success. Success still comes from
 the existing native observer, with its complete native notification and head
-SHA. Fresh native observations remain usable after an unmerged workspace
+SHA. Its actual pre-IO captured retention epoch must still match the current
+workspace epoch; a delayed read spanning close/reopen refuses unchanged.
+Fresh native observations remain usable after an unmerged workspace
 closure, without reopening or restoring retired workspace content. Native
 application also resolves elapsed deadlines before applying success evidence.
 

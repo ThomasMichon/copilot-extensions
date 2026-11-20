@@ -816,11 +816,13 @@ class ReplayStore:
         selected_snapshot: PRSnapshot | None = snapshot
         def prepare(document: Document) -> None:
             nonlocal selected_snapshot
-            from .terminal_retention import replay_observation
-            selected_snapshot = (
-                snapshot if self.terminal_native_watches
-                else replay_observation(document, target, snapshot)
-            )
+            from .terminal_retention import replay_epoch, replay_observation
+            if self.terminal_native_watches:
+                selected_snapshot = (
+                    snapshot if target.retention_epoch == replay_epoch(document, target) else None
+                )
+            else:
+                selected_snapshot = replay_observation(document, target, snapshot)
 
         def apply(core: WatchReplay) -> Document:
             if selected_snapshot is None:

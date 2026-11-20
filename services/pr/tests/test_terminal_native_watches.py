@@ -110,3 +110,62 @@ def test_original_watch_timeout_wins_over_workspace_terminal_evidence(
         PRSnapshot(pr_state="closed", merged=True), expires_at=expires(),
     )
     assert selected.store.execute(scope, "pending", {}, expires_at=expires())["events"] == events
+
+
+def test_native_read_captured_before_workspace_reopen_cannot_freeze_stale_success(
+    configuration: Configuration, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, _, config, baseline, evidence = configured(configuration)
+    receipt = register(baseline, config, "original-epoch")
+    adopt(config)
+    selected, _ = gateway(config, evidence, monkeypatch)
+    scope = config.bindings[0].scope
+
+    def evidence_at(state: str, second: int) -> None:
+        evidence["sections"]["pull_request"]["data"]["status"] = state
+        for section in evidence["sections"].values():
+            section.update(
+                observed_from=f"2026-10-30T00:00:{second:02d}.100001Z",
+                observed_to=f"2026-10-30T00:00:{second:02d}.900001Z",
+            )
+
+    async def scenario() -> None:
+        evidence_at("active", 0)
+        first = await selected.handle(request(config, "load", {
+            "number": 42, "expected_current": None, "budget_seconds": 10,
+        }, workspace=True))
+        assert first.status == 200
+        original_generation = json.loads(first.body)["result"]["descriptor"]["id"]
+        captured = selected.store.observation_targets(expires_at=expires())[0]
+        assert captured.retention_epoch is not None
+        for state, second in (("abandoned", 2), ("active", 4)):
+            evidence_at(state, second)
+            response = await selected.handle(request(config, "load", {
+                "number": 42, "expected_current": original_generation, "budget_seconds": 10,
+            }, workspace=True))
+            assert response.status == 200
+        before = selected.store.path.read_bytes()
+        stale = selected.store.observe(captured, PRSnapshot(
+            pr_state="closed", merged=True, native_snapshot={"old": "retired native payload"},
+        ), expires_at=expires())
+        assert stale["status"] == "stale_observation"
+        assert selected.store.path.read_bytes() == before
+        assert not selected.store.execute(scope, "pending", {}, expires_at=expires())["events"]
+        fresh = selected.store.observation_targets(expires_at=expires())[0]
+        assert fresh.retention_epoch != captured.retention_epoch
+        native: dict[str, Any] = {
+            "schema": "agent-worktrees.pr-snapshot", "version": 1,
+            "repo": scope.repo, "pr": 42, "provider": "azure-devops",
+            "pr_state": "closed", "merged": True, "mergeable": None,
+            "head_sha": "b" * 40, "base_ref": "main", "checks_state": "",
+            "title": "fresh native notification", "draft": False,
+        }
+        selected.store.observe(fresh, PRSnapshot(
+            pr_state="closed", merged=True, head_sha="b" * 40, native_snapshot=native,
+        ), expires_at=expires())
+        event = selected.store.execute(scope, "pending", {}, expires_at=expires())["events"][0]
+        assert event["registration_id"] == receipt["registration_id"]
+        assert event["snapshot"] == native and event["transitions"] == ["merged"]
+        await selected.drain(timeout=2)
+
+    asyncio.run(scenario())
