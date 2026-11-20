@@ -7748,6 +7748,16 @@ not implicitly initialized. Select this bounded integration packet with
 It does not enlarge required unit CI or qualify ordinary v2 worker admission,
 native Windows, live APIs or runtime activation.
 
+The same runtime packet composes `PointQueueConsumer` with actual retained
+acquisition, native application and durable completion. It covers exact-scope
+FIFO selection, bounded batches and untouched trailing/other-account work,
+failure pause, explicit retained retry after reconstruction, and joined
+cancellation/drain/stop. A blocked queue-read control proves paused/stopped
+admission is rechecked before native dispatch. Lightweight selection and
+failure-latch controls remain in `tests/test_point_hints.py`; these additions
+do not themselves enlarge required CI admission. Neither packet qualifies
+automatic service scheduling, cross-consumer coordination or restore repair.
+
 The exclusive attachment-export consumer packet executes the real export
 entrypoint, health-selected command transport, extension registry, provider
 dispatch and descriptor-pinned writer with an in-memory filesystem and

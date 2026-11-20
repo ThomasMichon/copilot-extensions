@@ -15,6 +15,7 @@ import test_azure_devops_point_worker as worker
 
 from agent_index.engine.client import EngineClient
 from agent_index.indexing.point_hints import WorkItemRevisionTarget
+from agent_index.indexing.point_queue_consumer import PointQueueConsumer
 from agent_index.indexing.point_worker_host import PointWorkerHost
 from agent_index.indexing.task_store import TaskRecord, TaskStatus, TaskStore
 from agent_index.indexing.worker import run_worker
@@ -122,6 +123,193 @@ def test_fresh_composition_reuses_retained_acquisition_after_interruption(
     completed = f.tasks.get_task(task.id)
     assert completed is not None and completed.status == TaskStatus.COMPLETE
     assert f.provider.body_reads == 0 and f.calls
+
+
+def test_consumer_selects_whole_scope_fifo_and_leaves_trailing_arrivals_for_next_batch(
+    application: worker.Fixture,
+) -> None:
+    f = application
+    other_hints = replace(f.claim.hints, account_id="another-account")
+    other = f.tasks.enqueue(other_hints.source, change_hints=other_hints)
+    selected_ids: list[str] = []
+    trailing: list[TaskRecord] = []
+
+    def execute(selected: TaskRecord) -> TaskRecord:
+        selected_ids.append(selected.id)
+        if not trailing:
+            trailing.append(f.tasks.enqueue(f.claim.hints.source, change_hints=f.claim.hints))
+        return run(f, selected)
+
+    async def exercise() -> None:
+        async with PointQueueConsumer(
+            config=f.config, point_scope=f.claim.hints.scope, point_executor=execute,
+        ) as consumer:
+            await consumer.resume()
+            assert await consumer.run_pending() == 1
+            assert selected_ids == [f.claim.task_id]
+            assert f.tasks.get_task(trailing[0].id) == trailing[0]
+            assert f.tasks.get_task(other.id) == other
+            assert await consumer.run_pending(max_tasks=2) == 1
+            assert selected_ids == [f.claim.task_id, trailing[0].id]
+            assert await consumer.run_pending() == 0
+            assert f.tasks.get_task(other.id) == other
+
+    poll = f.config.state_file.read_bytes()
+    asyncio.run(exercise())
+    assert f.config.state_file.read_bytes() == poll
+    for task_id in selected_ids:
+        completed = f.tasks.get_task(task_id)
+        assert completed is not None and completed.status == TaskStatus.COMPLETE
+
+
+def test_consumer_failure_pauses_and_reconstruction_requires_explicit_retained_retry(
+    application: worker.Fixture,
+) -> None:
+    f = application
+
+    def interrupt() -> None:
+        raise RuntimeError("fixture interrupted embedding")
+
+    f.hook = interrupt
+
+    async def exercise() -> None:
+        async with PointQueueConsumer(
+            config=f.config, point_scope=f.claim.hints.scope,
+            point_executor=lambda selected: run(f, selected),
+        ) as consumer:
+            await consumer.resume()
+            with pytest.raises(RuntimeError, match="exited with code 1"):
+                await consumer.run_pending(max_tasks=2)
+            parked = f.tasks.get_task(f.claim.task_id)
+            assert parked is not None and parked.point_claim_id == f.claim.point_claim_id
+            assert parked.status == TaskStatus.QUEUED_HINTS_V2 and f.retained_count() == 2
+            before = list(f.provider.requests)
+            with pytest.raises(RuntimeError, match="explicit resume"):
+                await consumer.run_pending()
+            assert f.provider.requests == before
+        f.reopen()
+        f.hook = None
+        async with PointQueueConsumer(
+            config=f.config, point_scope=f.claim.hints.scope,
+            point_executor=lambda selected: run(f, selected),
+        ) as restored:
+            with pytest.raises(RuntimeError, match="explicit resume"):
+                await restored.run_pending()
+            assert not f.provider.requests and not f.calls
+            await restored.resume()
+            assert await restored.run_pending() == 1
+            assert f.provider.body_reads == 0 and f.calls
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("exit_mode", ["cancel", "drain", "stop"])
+def test_consumer_quiescence_joins_native_effects_and_never_admits_trailing_work(
+    application: worker.Fixture, exit_mode: str,
+) -> None:
+    f = application
+    entered, release = threading.Event(), threading.Event()
+    clients_closed = False
+    trailing = f.tasks.enqueue(f.claim.hints.source, change_hints=f.claim.hints)
+
+    def block_embedding() -> None:
+        entered.set()
+        assert release.wait(8), "Test did not release its native worker"
+        assert not clients_closed
+
+    f.hook = block_embedding
+
+    async def exercise() -> None:
+        nonlocal clients_closed
+        active: asyncio.Task[int] | None = None
+        stopping: asyncio.Task[None] | None = None
+        try:
+            async with PointQueueConsumer(
+                config=f.config, point_scope=f.claim.hints.scope,
+                point_executor=lambda selected: run(f, selected),
+            ) as consumer:
+                await consumer.resume()
+                active = asyncio.create_task(consumer.run_pending(max_tasks=2))
+                assert await asyncio.to_thread(entered.wait, 5)
+                with pytest.raises(RuntimeError, match="active batch"):
+                    await consumer.run_pending()
+                assert not await consumer.drain(timeout=0)
+                with pytest.raises(RuntimeError, match="active batch"):
+                    await consumer.resume()
+                if exit_mode == "cancel":
+                    for _ in range(2):
+                        active.cancel()
+                        await asyncio.sleep(0)
+                    assert not active.done()
+                elif exit_mode == "stop":
+                    stopping = asyncio.create_task(consumer.stop())
+                    await asyncio.sleep(0)
+                    assert not stopping.done()
+                assert f.tasks.get_task(trailing.id) == trailing
+                release.set()
+                if exit_mode == "cancel":
+                    with pytest.raises(asyncio.CancelledError):
+                        await active
+                else:
+                    assert await active == 1
+                if stopping is not None:
+                    await stopping
+                assert consumer.paused and await consumer.drain(timeout=0)
+                assert f.tasks.get_task(trailing.id) == trailing
+            clients_closed = True
+        finally:
+            release.set()
+            if active is not None:
+                with suppress(asyncio.CancelledError):
+                    await active
+            if stopping is not None:
+                await stopping
+
+    asyncio.run(exercise())
+    completed = f.tasks.get_task(f.claim.task_id)
+    assert completed is not None and completed.status == TaskStatus.COMPLETE
+    assert clients_closed and f.tasks.get_task(trailing.id) == trailing
+
+
+@pytest.mark.parametrize("stop", [False, True])
+def test_consumer_rechecks_admission_after_read_only_selection(
+    application: worker.Fixture, monkeypatch: pytest.MonkeyPatch, stop: bool,
+) -> None:
+    f = application
+    entered, release = threading.Event(), threading.Event()
+    select = TaskStore.next_point_task
+    calls: list[TaskRecord] = []
+
+    def blocked_select(tasks: TaskStore, **kwargs: Any) -> TaskRecord | None:
+        entered.set()
+        assert release.wait(8), "Test did not release its queue read"
+        return select(tasks, **kwargs)
+
+    monkeypatch.setattr(TaskStore, "next_point_task", blocked_select)
+
+    async def exercise() -> None:
+        active: asyncio.Task[int] | None = None
+        try:
+            async with PointQueueConsumer(
+                config=f.config, point_scope=f.claim.hints.scope, point_executor=calls.append,
+            ) as consumer:
+                await consumer.resume()
+                active = asyncio.create_task(consumer.run_pending())
+                assert await asyncio.to_thread(entered.wait, 5)
+                if stop:
+                    await consumer.stop()
+                else:
+                    assert await consumer.drain(timeout=0)
+                release.set()
+                assert await active == 0
+                assert not calls and not f.provider.requests and not f.calls
+                assert f.tasks.next_point_task(point_scope=f.claim.hints.scope) is not None
+        finally:
+            release.set()
+            if active is not None:
+                await active
+
+    asyncio.run(exercise())
 
 
 def test_selected_point_dispatch_owns_synchronous_lifetime_without_process_setup(
