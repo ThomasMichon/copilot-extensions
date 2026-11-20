@@ -344,14 +344,18 @@ records actual queue/caller/worker/reader operation-count qualification beside
 observed process-byte growth. Additional fixture setup populates the same
 unrelated ordering-ledger cardinalities and preserves sampled raw records;
 broader acceptance remains open. Merged #13678 supplies the initial native
-corpus qualification, not constant
-total-cost or consumer acceptance.
+corpus qualification, not constant total-cost or consumer acceptance.
 The same journal now records a separate no-replay completed-retry control and
 per-query/index-inspection attribution. Representative B-tree plans preserve
 bounded canonical rows while process bytes grow; no production cache, currentness
 shortcut or ordinary activation is justified by these observations.
 Merged #13683 supplies that fixture-only attribution; the broader count/consumer
 matrix remains open.
+Merged #13685 supplies unrelated ordering-ledger scale with sampled raw-record
+preservation. The separate HTTP/service scale packet now exercises the existing
+higher-covered path and client-free completed retry at those same cardinalities,
+with equal logical/native query metrics and separately reported process-byte
+growth. Ordinary activation, automatic repair and broader acceptance remain open.
 
 ### 2026-11-20 - Point-worker dispatch and lifetime
 
