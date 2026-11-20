@@ -34,6 +34,9 @@ The shared-offer packet measures each registered source separately with no sink
 nonreading and immediately failing receivers. Admission and first offer are
 separate from a finite unpaced burst of 4,096 offers. This is an intentional
 queue-pressure workload, not a steady-state throughput claim.
+The first offer starts receiver construction asynchronously; the following
+burst does not establish a warm or ready receiver. Startup and writer scheduling
+can overlap it.
 
 For each trial the property records aggregate wall time, caller-thread CPU,
 whole-process CPU, first-operation time and nearest-rank p50/p95/p99/max wall
