@@ -392,6 +392,7 @@ class TerminalRetentionStore:
             raise ValueError("retained cache and original target bindings are required together")
 
         def current() -> None:
+            self.owner.check_current(expires_at, None)
             if checkpoint is not None:
                 checkpoint()
             lifecycle_checkpoint()
@@ -417,8 +418,21 @@ class TerminalRetentionStore:
                 }
                 document["capacities"]["terminal_retention_bytes"] = retention_bytes
             if retained_cache is not None and retained_targets is not None:
-                from .retained_live_cache import bind
-                bind(document, retained_cache, retained_targets, current)
+                from .generation_cache import GenerationCache as RequestCache
+                from .retained_live_cache import validate as validate_metadata
+                original_cache = retained_cache
+
+                def cache_current() -> None:
+                    current()
+                    if original_cache.checkpoint is not None:
+                        original_cache.checkpoint()
+
+                request_cache = RequestCache(
+                    original_cache.owner_root, self.owner.namespace,
+                    max_bytes=original_cache.max_bytes, max_generations=original_cache.max_generations,
+                    service_identity=self.owner.service_identity, checkpoint=cache_current,
+                )
+                validate_metadata(document, request_cache, retained_targets, current)
                 from .terminal_recovery import PROTOCOL as RECOVERY
                 from .terminal_cache_retirement import PROTOCOL as CACHE
                 complete = copy.deepcopy(document)

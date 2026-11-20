@@ -34,16 +34,19 @@ or expose retirement as an HTTP/CLI operation. Installed reader/lifecycle
 transition and consumer qualification remain separate.
 
 The optional executing-core declaration
-`agent-pull-requests.retained-live-cache-adoption/v1` supports an existing-owner
+`agent-pull-requests.retained-cache-metadata-adoption/v1` supports an existing-owner
 transition through that same adoption transaction. Its optional `retained_cache`
 and `retained_targets` inputs must be supplied together and retain the original
-root, namespace and service identity. Complete nonterminal generations are
-validated once under their cache lock and bound only when their normalized
-observation matches the existing complete open first-epoch journal head.
-An older timestamp or equal candidate alone is not that evidence. Ambiguous
-historical generations refuse unchanged. A selected null rebuild pointer with
-no generation content needs no journal and creates no admission.
-No observation is added and no cache bytes change. Adoption
+root, namespace and service identity. This finite transition preserves complete
+open first-epoch journal metadata and selected null rebuild pointers only when
+no generation objects remain. It creates no live admission or generation
+binding. Every legacy generation refuses until durable original observation
+association is supported; even equal normalized metadata can hide distinct
+same-second acquisitions. A selected null rebuild pointer needs no journal.
+No observation is added and no cache bytes change. Configured growth beyond the
+terminal generation-binding limit refuses rather than reducing capacity.
+Request-local validation composes owner expiry, lifecycle and the original
+cache checkpoint without rewriting the shared cache object. Adoption
 reserves the complete terminal-reader envelope before its first commit; explicit
 retry reconciles compatible partial metadata under the caller's original
 lifecycle/deadline. Active or compact operations, terminal/reopened histories and

@@ -1,5 +1,5 @@
 {
-  "comment": "Preserve original journal and immutable live-cache reads during explicit terminal reader adoption.",
+  "comment": "Preserve retained conversation metadata and cache misses during explicit terminal adoption without inferring legacy generation bindings.",
   "changes": [
     {
       "plugin": "agent-pull-requests",

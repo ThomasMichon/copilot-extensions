@@ -4,16 +4,13 @@ from __future__ import annotations
 
 import json
 import math
-from typing import Any
 
 from .attention import Candidate, PRKey
 from .conversation_journal import Observation
 from .review_workspace import _digest, _generation, _instant, _scope
 
-Document = dict[str, Any]
 
-
-def conversation_key(scope: Document, namespace: str) -> PRKey:
+def conversation_key(scope: dict, namespace: str) -> PRKey:
     scope = _scope(scope)
     return PRKey(
         scope["provider"],
@@ -25,7 +22,7 @@ def conversation_key(scope: Document, namespace: str) -> PRKey:
     )
 
 
-def observation_interval(sections: Document) -> tuple[int, int] | None:
+def observation_interval(sections: dict) -> tuple[int, int] | None:
     """Conservative bounds over the data-bearing sections of a validated generation."""
     intervals = []
     for section in sections.values():
@@ -47,37 +44,28 @@ def observation_interval(sections: Document) -> tuple[int, int] | None:
 
 
 def project_generation(
-    generation: Document, namespace: str, previous: Observation | None
+    generation: dict, namespace: str, previous: Observation | None
 ) -> Observation | None:
     """Missing candidate/state/time is unavailable, never an invented empty PR."""
     scope = _scope(generation["scope"])
     _generation(generation, scope)
-    return _project_validated_generation(generation, namespace, previous)
-
-
-def _project_validated_generation(
-    generation: Document, namespace: str, previous: Observation | None,
-) -> Observation | None:
-    """Internal composition after the existing cache owner validates the object."""
-    scope = _scope(generation["scope"])
     key = conversation_key(scope, namespace)
     if previous is not None and previous.key != key:
         raise ValueError("previous conversation differs from workspace scope")
     sections, revision = generation["sections"], generation["revision"]
     pull = sections["pull_request"]["data"] or {}
-    states: dict[str | None, str] = {
+    state = {
         "active": "open",
         "completed": "merged",
         "abandoned": "closed-unmerged",
-    }
-    state = states.get(pull.get("status"))
+    }.get(pull.get("status"))
     if state is None or not revision["head_sha"] or not revision["target_sha"]:
         return None
     interval = observation_interval(sections)
     if interval is None:
         return None
 
-    def evidence(name: str, data: Any = None) -> Document:
+    def evidence(name, data=None):
         section = sections[name]
         return {
             "data": section["data"] if data is None else data,

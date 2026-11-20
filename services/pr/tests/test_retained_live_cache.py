@@ -1,4 +1,4 @@
-"""Positive retained-cache reader continuity without observations or cleanup."""
+"""Metadata continuity and safe refusal of unassociated legacy generations."""
 
 from __future__ import annotations
 
@@ -101,6 +101,20 @@ def reader(config: HostConfig) -> WorkspaceOperations:
     return config.workspaces.operations(config.store(), lambda: None, 60)[("caller-a", "repository-a")]
 
 
+def metadata_only(
+    configuration: Configuration,
+) -> tuple[Path, dict[str, Any], HostConfig, list[dict[str, Any]]]:
+    path, value, baseline, values = populated(configuration)
+    assert baseline.workspaces is not None
+    cache = baseline.workspaces.cache(baseline.store())
+    pointer = cache.targets / (_digest(values[0]["scope"]) + ".json")
+    retained = json.loads(pointer.read_bytes())
+    cache.rebuild()
+    retained["generation_id"] = None
+    _atomic_write_json(pointer, retained)
+    return path, value, baseline, values
+
+
 def materialized(operations: WorkspaceOperations, selected: dict[str, Any]) -> tuple[dict[str, Any], bytes]:
     payload = {"number": selected["scope"]["number"], "generation_id": selected["id"]}
     expires_at = int(time.time()) + 60
@@ -116,11 +130,14 @@ def materialized(operations: WorkspaceOperations, selected: dict[str, Any]) -> t
     return descriptor, b"".join(chunks)
 
 
-def test_actual_cli_preserves_current_noncurrent_and_original_journal_after_restart(
+def test_actual_cli_preserves_original_metadata_and_replay_after_reader_restart(
     configuration: Configuration,
 ) -> None:
-    path, _, baseline, values = populated(configuration)
-    original = [materialized(reader(baseline), selected) for selected in values]
+    path, _, baseline, values = metadata_only(configuration)
+    payload = {"number": values[0]["scope"]["number"], "after": None, "limit": 16}
+    original = reader(baseline).execute(
+        "events", payload, expires_at=int(time.time()) + 60, checkpoint=lambda: None,
+    )["result"]
     store = baseline.store()
     scope = baseline.bindings[0].scope
     identity = {"request_id": "original-populated", "issued_at": time.time()}
@@ -141,39 +158,29 @@ def test_actual_cli_preserves_current_noncurrent_and_original_journal_after_rest
     assert result.returncode == 0, result.stderr
     process = subprocess.run(
         [sys.executable, "-I", "-c", """
-import base64, json, sys, time
+import json, sys, time
 from agent_pull_requests_service.config import load_config
-from agent_pull_requests.workspace_operations import CHUNK_BYTES
 config = load_config(sys.argv[1])
 reader = config.workspaces.operations(config.store(), lambda: None, 60)[("caller-a", "repository-a")]
 reader.validate_storage(expires_at=int(time.time()) + 60, checkpoint=lambda: None)
-output = []
-for number, identity in json.loads(sys.argv[2]):
-    payload = {"number": number, "generation_id": identity}
-    def execute(operation, selected):
-        return reader.execute(operation, selected, expires_at=int(time.time()) + 60, checkpoint=lambda: None)["result"]
-    descriptor = execute("lookup", payload)["descriptor"]
-    data = b"".join(base64.b64decode(execute("chunk", {**payload, "offset": offset})["data"])
-                    for offset in range(0, descriptor["bytes"], CHUNK_BYTES))
-    output.append([descriptor, base64.b64encode(data).decode("ascii")])
-print(json.dumps(output))
-""", str(path), json.dumps([(value["scope"]["number"], value["id"]) for value in values])],
+print(json.dumps(reader.execute("events", json.loads(sys.argv[2]),
+    expires_at=int(time.time()) + 60, checkpoint=lambda: None)["result"]))
+""", str(path), json.dumps(payload)],
         capture_output=True, text=True, timeout=15,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
     )
     assert process.returncode == 0, process.stderr
-    assert json.loads(process.stdout) == [
-        [descriptor, base64.b64encode(data).decode("ascii")] for descriptor, data in original
-    ]
+    assert json.loads(process.stdout) == original
     restarted = load_config(path)
-    assert [materialized(reader(restarted), selected) for selected in values] == original
     assert reader(restarted).execute(
-        "lookup", {"number": values[0]["scope"]["number"]},
+        "events", payload,
         expires_at=int(time.time()) + 60, checkpoint=lambda: None,
-    )["result"]["descriptor"] == original[1][0]
+    )["result"] == original
     after = json.loads(store.path.read_bytes())
     for field in ("replay", "reviews", "conversations"):
         assert after[field] == before[field]
+    assert after["terminal_retention"]["admissions"] == []
+    assert after["terminal_retention"]["generations"] == []
     assert cache_bytes(restarted) == objects
     assert restarted.store().execute(scope, "inspect", identity, expires_at=int(time.time()) + 60) == receipt
     assert restarted.store().execute(scope, "pending", {}, expires_at=int(time.time()) + 60) == pending
@@ -183,27 +190,47 @@ print(json.dumps(output))
         reader(baseline).validate_storage(expires_at=int(time.time()) + 60, checkpoint=lambda: None)
 
 
-def test_retained_generation_is_usable_for_selected_sync_comparison(
+def test_actual_cli_refuses_legacy_generations_without_losing_original_reads(
+    configuration: Configuration,
+) -> None:
+    path, _, baseline, values = populated(configuration)
+    original = [materialized(reader(baseline), value) for value in values]
+    before, objects = baseline.store().path.read_bytes(), cache_bytes(baseline)
+    result = command(path)
+    assert result.returncode == 1
+    assert baseline.store().path.read_bytes() == before and cache_bytes(baseline) == objects
+    assert [materialized(reader(baseline), value) for value in values] == original
+
+
+def test_fresh_load_and_sync_work_after_metadata_only_transition(
     configuration: Configuration, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    path, _, _, values = populated(configuration)
+    path, _, _, _ = metadata_only(configuration)
     assert main(["adopt-terminal", "--config", str(path)]) == 0
-    fresh = generation(2)
+    fresh, latest = generation(2), generation(3)
     reads = []
 
     def read(self: NativeReadHandler, request: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
         reads.append(request)
-        return {"generation": fresh, "acquisition": {"source": "synthetic-owner"}}
+        return {
+            "generation": fresh if len(reads) == 1 else latest,
+            "acquisition": {"source": "synthetic-owner"},
+        }
 
     monkeypatch.setattr(NativeReadHandler, "read", read)
-    result = reader(load_config(path)).execute("sync", {
-        "number": fresh["scope"]["number"], "previous_id": values[0]["id"],
-        "expected_current": values[1]["id"], "budget_seconds": 30,
+    selected = reader(load_config(path))
+    loaded = selected.execute("load", {
+        "number": fresh["scope"]["number"], "expected_current": None, "budget_seconds": 30,
     }, expires_at=int(time.time()) + 60, checkpoint=lambda: None)["result"]
-    assert len(reads) == 1
-    assert result["comparison"]["generation_id"] == fresh["id"]
+    assert loaded["publication"]["status"] == "published"
+    result = selected.execute("sync", {
+        "number": fresh["scope"]["number"], "previous_id": fresh["id"],
+        "expected_current": fresh["id"], "budget_seconds": 30,
+    }, expires_at=int(time.time()) + 60, checkpoint=lambda: None)["result"]
+    assert len(reads) == 2
+    assert result["comparison"]["generation_id"] == latest["id"]
     assert result["publication"]["status"] == "published"
-    assert materialized(reader(load_config(path)), values[0])[0]["id"] == values[0]["id"]
+    assert materialized(reader(load_config(path)), fresh)[0]["id"] == fresh["id"]
 
 
 @pytest.mark.parametrize("uncertain", [False, True])
@@ -213,7 +240,7 @@ def test_populated_partial_adoption_and_lost_replace_retry_keep_original_binding
 ) -> None:
     from agent_pull_requests import watch_replay_store
 
-    path, _, baseline, values = populated(configuration)
+    path, _, baseline, _ = metadata_only(configuration)
     before, objects = json.loads(baseline.store().path.read_bytes()), cache_bytes(baseline)
     with monkeypatch.context() as patch:
         if uncertain:
@@ -239,11 +266,11 @@ def test_populated_partial_adoption_and_lost_replace_retry_keep_original_binding
             patch.setattr(selected, "adopt", interrupted)
         assert main(["adopt-terminal", "--config", str(path)]) == 1
     partial = json.loads(baseline.store().path.read_bytes())
-    assert len(partial["terminal_retention"]["generations"]) == 2
+    assert partial["terminal_retention"]["generations"] == []
     assert partial["conversations"] == before["conversations"]
     assert command(path).returncode == 0
     assert json.loads(baseline.store().path.read_bytes())["terminal_retention"] == partial["terminal_retention"]
-    assert materialized(reader(load_config(path)), values[0])[0]["id"] == values[0]["id"]
+    reader(load_config(path)).validate_storage(expires_at=int(time.time()) + 60, checkpoint=lambda: None)
     assert cache_bytes(baseline) == objects
 
 
@@ -253,7 +280,7 @@ def test_optional_mapping_adoption_preserves_live_cache_through_final_boundary(
     from agent_pull_requests.review_comment_mapping import CommentMappingStore
     from agent_pull_requests.terminal_comment_mapping import TerminalCommentMappingStore
 
-    path, value, baseline, values = populated(configuration)
+    path, value, baseline, _ = metadata_only(configuration)
     owner = baseline.store()
     expires_at = int(time.time()) + 60
     owner.adopt_prepared_reviews(lifecycle_checkpoint=lambda: None, expires_at=expires_at)
@@ -272,7 +299,7 @@ def test_optional_mapping_adoption_preserves_live_cache_through_final_boundary(
         assert main(["adopt-terminal", "--config", str(path)]) == 1
     assert command(path).returncode == 0
     reopened = load_config(path)
-    assert materialized(reader(reopened), values[0])[0]["id"] == values[0]["id"]
+    reader(reopened).validate_storage(expires_at=int(time.time()) + 60, checkpoint=lambda: None)
     after = json.loads(owner.path.read_bytes())
     assert after["terminal_comment_mapping_version"] == 1
     for field in ("replay", "reviews", "conversations", "review_intent_version", "review_comment_mapping_version"):
@@ -308,30 +335,34 @@ def test_core_adoption_refuses_another_cache_owner_even_with_identical_generatio
 
 
 @pytest.mark.parametrize("failure", [
-    "missing-conversation", "closed", "reopened", "dangling", "staged", "scope",
+    "closed", "reopened", "dangling", "staged", "scope", "incomplete-head",
     "incomplete", "terminal", "corrupt",
 ])
 def test_populated_incompatible_inputs_refuse_before_adoption(
     configuration: Configuration, failure: str,
 ) -> None:
-    path, value, baseline, values = populated(configuration)
+    path, value, baseline, values = metadata_only(configuration)
     store = baseline.store()
     assert baseline.workspaces is not None
     cache = baseline.workspaces.cache(store)
     expires_at = int(time.time()) + 60
-    if failure == "missing-conversation":
-        store._review_transaction(lambda doc: doc["conversations"]["records"].clear(), expires_at=expires_at)
-    elif failure in ("closed", "reopened"):
-        ConversationStore(store).observe_workspace(generation(2, terminal=True), expires_at=expires_at)
+    if failure in ("closed", "reopened", "incomplete-head"):
+        if failure == "incomplete-head":
+            ConversationStore(store).observe_workspace(generation(2, complete=False), expires_at=expires_at)
+        else:
+            ConversationStore(store).observe_workspace(generation(2, terminal=True), expires_at=expires_at)
         if failure == "reopened":
             ConversationStore(store).observe_workspace(generation(3), expires_at=expires_at)
     elif failure == "dangling":
-        (cache.generations / (values[1]["id"] + ".json")).unlink()
+        pointer = cache.targets / (_digest(values[0]["scope"]) + ".json")
+        document = json.loads(pointer.read_bytes())
+        document["generation_id"] = values[1]["id"]
+        _atomic_write_json(pointer, document)
     elif failure == "staged":
         (cache.generations / ".unfinished.tmp").write_text("uncommitted")
     elif failure in ("incomplete", "terminal"):
         selected = generation(2, terminal=failure == "terminal", complete=failure != "incomplete")
-        assert cache.publish(selected, expected_current=values[1]["id"])["status"] == "published"
+        assert cache.publish(selected, expected_current=None)["status"] == "published"
     elif failure == "corrupt":
         (cache.generations / (values[0]["id"] + ".json")).write_text("{}")
     else:
@@ -345,7 +376,7 @@ def test_populated_incompatible_inputs_refuse_before_adoption(
 def test_generation_scan_obeys_original_budget_before_visiting_later_objects(
     configuration: Configuration, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    path, _, baseline, _ = populated(configuration)
+    path, _, baseline, _ = metadata_only(configuration)
     before, objects = baseline.store().path.read_bytes(), cache_bytes(baseline)
     clock = [0.0]
     reads: list[Path] = []
@@ -353,7 +384,7 @@ def test_generation_scan_obeys_original_budget_before_visiting_later_objects(
 
     def read(self: GenerationCache, selected: Path, limit: int) -> dict[str, Any]:
         result: dict[str, Any] = original(self, selected, limit)
-        if selected.parent == self.generations:
+        if selected.parent == self.targets:
             reads.append(selected)
             clock[0] = 1000.0
         return result
@@ -385,37 +416,34 @@ def test_unknown_selected_core_keeps_populated_refusal_and_original_reads(
     assert materialized(reader(baseline), values[0]) == original
 
 
-def test_null_current_pointer_preserves_cache_miss_and_explicit_retained_read(
+def test_null_current_pointer_without_journal_preserves_cache_miss_without_admission(
     configuration: Configuration,
 ) -> None:
-    path, _, baseline, values = populated(configuration)
+    path, _, baseline, values = metadata_only(configuration)
     assert baseline.workspaces is not None
     cache = baseline.workspaces.cache(baseline.store())
-    pointer = cache.targets / (_digest(values[0]["scope"]) + ".json")
-    document = json.loads(pointer.read_bytes())
-    document["generation_id"] = None
-    _atomic_write_json(pointer, document)
+    baseline.store()._review_transaction(
+        lambda document: document["conversations"]["records"].clear(), expires_at=int(time.time()) + 60,
+    )
     original = cache.lookup(values[0]["scope"])
     assert original["found"] is False
     objects = cache_bytes(baseline)
     assert command(path).returncode == 0
     assert cache.lookup(values[0]["scope"]) == original
-    assert materialized(reader(load_config(path)), values[0])[0]["id"] == values[0]["id"]
+    assert json.loads(baseline.store().path.read_bytes())["terminal_retention"]["admissions"] == []
     assert cache_bytes(baseline) == objects
 
 
-@pytest.mark.parametrize("capacity", ["bytes", "generations"])
-def test_populated_capacity_refuses_without_adoption_or_eviction(
-    configuration: Configuration, capacity: str,
+def test_populated_byte_capacity_refuses_without_adoption_or_eviction(
+    configuration: Configuration,
 ) -> None:
-    path, value, baseline, _ = populated(configuration, padding=70000 if capacity == "bytes" else 0)
+    path, value, baseline, _ = populated(configuration, padding=70000)
     assert baseline.workspaces is not None
     cache = baseline.workspaces.cache(baseline.store())
     descriptor = json.loads(cache.descriptor.read_bytes())
-    name = "max_bytes" if capacity == "bytes" else "max_generations"
-    limit = 65536 if capacity == "bytes" else 1
-    descriptor["limits"][name] = limit
-    value["workspaces"]["cache_bytes" if capacity == "bytes" else "cache_generations"] = limit
+    limit = 65536
+    descriptor["limits"]["max_bytes"] = limit
+    value["workspaces"]["cache_bytes"] = limit
     _atomic_write_json(cache.descriptor, descriptor)
     path.write_text(json.dumps(value))
     before, objects = baseline.store().path.read_bytes(), cache_bytes(baseline)

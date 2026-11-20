@@ -1,16 +1,14 @@
-"""Compatibility bindings from retained evidence, never a new observation."""
+"""Metadata-only transition; legacy generations lack durable observation binding."""
 
 from __future__ import annotations
 
-import copy
 from collections.abc import Callable
 from typing import Any
 
 from .conversation_journal import ConversationJournal, Observation
-from .generation_cache import GenerationCache
-from .review_workspace import _digest, _scope
+from .generation_cache import CacheInvalid, GenerationCache
 from .terminal_retention import MAX_RECORDS
-from .workspace_conversation import conversation_key, _project_validated_generation
+from .workspace_conversation import conversation_key
 
 Document = dict[str, Any]
 
@@ -18,19 +16,19 @@ Document = dict[str, Any]
 def contract() -> dict[str, str]:
     """Declare executing-core support separately from terminal read selection."""
     return {
-        "protocol": "agent-pull-requests.retained-live-cache-adoption/v1",
-        "source": "original_first_epoch", "effects": "compatibility_metadata_only",
+        "protocol": "agent-pull-requests.retained-cache-metadata-adoption/v1",
+        "source": "original_first_epoch", "effects": "no_observations_or_bindings",
     }
 
 
-def bind(
+def validate(
     document: Document, cache: GenerationCache, targets: list[Document],
     checkpoint: Callable[[], None],
 ) -> None:
     """Run inside the existing replay adoption and exclusive service lifecycle."""
-    from .terminal_retention import PROTOCOL
-
     checkpoint()
+    if cache.max_generations > MAX_RECORDS:
+        raise ValueError("configured cache growth exceeds terminal generation binding capacity")
     if (
         document["version"] != 3 or document["reviews"]
         or document.get("terminal_recovery", {}).get("operations")
@@ -38,8 +36,6 @@ def bind(
     ):
         raise ValueError("retained cache transition requires the original standalone recovery-free owner")
     journal = ConversationJournal(document["conversations"])
-    admissions: list[Document] = []
-    by_scope: dict[str, Document] = {}
     for record in journal.records:
         checkpoint()
         observed = Observation.restore(record["current"])
@@ -55,56 +51,20 @@ def bind(
         ]
         if len(matches) != 1:
             raise ValueError("retained conversation is outside the selected workspace scope")
-        target = matches[0]
-        scope = _scope({**target["scope"], "number": observed.key.number})
-        row = {
-            "scope": scope, "cursor": {"epoch": record["epoch"], "sequence": record["sequence"]},
-            "target": {"account": target["account"], "repo": target["repo"], "number": scope["number"]},
-        }
-        admissions.append(row)
-        by_scope[_digest(scope)] = record
-
-    generations: list[Document] = []
 
     def visit(generation: Document) -> None:
         checkpoint()
-        scope = generation["scope"]
-        record = by_scope.get(_digest(scope))
-        observed = _project_validated_generation(
-            generation, document["namespace"],
-            Observation.restore(record["current"]) if record is not None else None,
-        )
-        if (
-            record is None or not generation["complete"] or observed is None
-            or observed.state != "open" or not observed.complete
-            or observed.document() != record["current"]
-        ):
-            raise ValueError("populated cache requires matching original complete live conversation evidence")
-        if len(generations) >= MAX_RECORDS:
-            raise ValueError("retained generation bindings exceed terminal capacity")
-        generations.append({"scope": scope, "generation_id": generation["id"], "epoch": record["epoch"]})
+        raise CacheInvalid("retained generations require durable original observation association")
 
     def visit_pointer(pointer: Document) -> None:
         checkpoint()
         scope = pointer["scope"]
         if not any({**target["scope"], "number": scope["number"]} == scope for target in targets):
             raise ValueError("retained pointer is outside the selected workspace scope")
-        if pointer["generation_id"] is not None and _digest(scope) not in by_scope:
-            raise ValueError("retained pointer requires original selected conversation evidence")
 
     cache.inspect_retained(visit, visit_pointer)
     checkpoint()
-    admissions.sort(key=lambda row: _digest(row["scope"]))
-    generations.sort(key=lambda row: row["generation_id"])
-    expected = {"protocol": PROTOCOL, "records": [], "generations": generations, "admissions": admissions}
     state = document["terminal_retention"]
-    if state["records"]:
-        raise ValueError("populated terminal state differs from original retained evidence")
-    for name in ("generations", "admissions"):
-        expected_rows = {_digest(row) for row in expected[name]}
-        for row in state[name]:
-            checkpoint()
-            if _digest(row) not in expected_rows:
-                raise ValueError("populated terminal state differs from original retained evidence")
-    document["terminal_retention"] = copy.deepcopy(expected)
+    if any(state[name] for name in ("records", "generations", "admissions")):
+        raise ValueError("populated terminal state requires its original lifecycle transition")
     checkpoint()

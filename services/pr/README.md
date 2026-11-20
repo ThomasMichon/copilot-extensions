@@ -490,24 +490,24 @@ An explicitly stopped standalone workspace owner can instead run
 `agent-pull-requests-service adopt-terminal --config /run/config/pr-service.json`
 against an eligible existing version-three conversation volume and empty workspace cache.
 With the executing core's optional
-`agent-pull-requests.retained-live-cache-adoption/v1` declaration, that same
-command also accepts populated live caches and their original complete open
-first-epoch conversation journal. Each generation must match the journal's
-committed normalized observation, including its original interval; older or
-ambiguous generations remain with their original reader rather than being
-assigned an inferred epoch. It validates every committed generation/current pointer
-once within the existing byte/count limits and deadline, then imports terminal
-admissions and generation bindings from the original journal without changing
-events, cursors, observations or cache bytes. Current/noncurrent lookup, framed
-reads and later sync comparisons remain usable after reader restart. A valid
-null current pointer remains a cache miss; a selected null pointer with no
-generation content requires no journal and creates no admission.
+`agent-pull-requests.retained-cache-metadata-adoption/v1` declaration, that same
+command also preserves an existing complete open first-epoch conversation
+journal and valid null rebuild pointers when no generation objects remain.
+It creates no observation, live admission or generation binding. Original
+metadata/events, replay positions and cache misses survive reader restart;
+later fresh acquisition uses the ordinary terminal-aware load/sync owner.
+A selected null pointer needs no journal and remains a cache miss.
+Legacy generation objects still refuse unchanged: their original observation
+association cannot be recovered from rounded journal timestamps or normalized
+projection equality, including same-second close/reopen cases. Their original
+readers remain usable. Positive generation migration needs a separately
+reviewed durable association contract.
 Missing/incompatible optional core
 support retains bootstrap-only eligibility and its first-entry empty-cache
 check; baseline hosting is unaffected.
 
-Active/compact review operations, closed/reopened conversation histories,
-incomplete/terminal generations, unknown scopes, unsupported extension state
+Active/compact review operations, closed/reopened or incomplete conversation histories,
+all legacy generations, unknown scopes, unsupported extension state
 and corrupt/dangling/staged cache objects refuse before adoption. Keep those
 volumes with their original usable owner pending a compatible transition.
 Selected workspace scopes and account/repository targets must form
@@ -527,9 +527,10 @@ It preserves the original service/namespace binding, eligible replay/delivery
 positions and cache scaffold, and performs no acquisition, compaction
 or cache retirement. It neither provisions missing state nor repairs it.
 Native callback state, unsafe linked lease files and incompatible cache
-descriptors also refuse before adoption. Populated validation checks the original
-budget during enumeration and decodes each generation once, retaining only
-bounded compatibility metadata. It does not repair or remove unsupported objects.
+descriptors also refuse before adoption. Configured cache growth must fit the
+core's terminal binding capacity. Request-local cache validation checks both the
+original cache checkpoint and owner expiry during enumeration, without mutating
+a shared checkpoint. It does not repair or remove unsupported objects.
 The exact monotonic operation deadline remains enforced; integer storage
 expiry is rounded up so a short budget is not lost at a wall-clock boundary.
 The host-local lease does not fence another host or unsupported direct volume

@@ -54,8 +54,8 @@ def retained_cache_supported() -> bool:
     try:
         from agent_pull_requests.retained_live_cache import contract
         return contract() == {
-            "protocol": "agent-pull-requests.retained-live-cache-adoption/v1",
-            "source": "original_first_epoch", "effects": "compatibility_metadata_only",
+            "protocol": "agent-pull-requests.retained-cache-metadata-adoption/v1",
+            "source": "original_first_epoch", "effects": "no_observations_or_bindings",
         }
     except (ImportError, AttributeError, TypeError, ValueError, RuntimeError):
         return False

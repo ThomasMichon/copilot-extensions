@@ -1,4 +1,4 @@
-"""Core-owned retained binding, refusal, retry and bounded scan controls."""
+"""Core-owned metadata transition, generation refusal and bounded scan controls."""
 
 from __future__ import annotations
 
@@ -14,10 +14,11 @@ from test_review_workspace import evidence as evidence
 
 from agent_pull_requests import generation_cache, review_workspace, watch_replay_store, workspace_conversation
 from agent_pull_requests.conversation_store import ConversationStore
-from agent_pull_requests.generation_cache import GenerationCache
+from agent_pull_requests.generation_cache import CacheFull, GenerationCache, POINTER_SCHEMA
 from agent_pull_requests.review_workspace import _digest, build_generation
-from agent_pull_requests.terminal_retention import TerminalRetentionStore
-from agent_pull_requests.watch_replay_store import ReplayServiceIdentity, ReplayStore
+from agent_pull_requests.terminal_retention import MAX_RECORDS, TerminalRetentionStore
+from agent_pull_requests.watch_replay_store import ReplayCallerExpired, ReplayServiceIdentity, ReplayStore
+from agent_pull_requests.watch_storage import _atomic_write_json
 
 Document = dict[str, Any]
 
@@ -74,21 +75,24 @@ def adopt(owner: ReplayStore, cache: GenerationCache, bindings: list[Document]) 
         )
 
 
-def populated(owner: ReplayStore, evidence: Document) -> tuple[GenerationCache, list[Document]]:
+def prepared(
+    owner: ReplayStore, evidence: Document, *, with_generations: bool = False,
+) -> tuple[GenerationCache, list[Document]]:
     cache = cache_for(owner)
     values = [selected(evidence), selected(evidence, offset="200000")]
     previous = None
     for value in values:
-        assert cache.publish(value, expected_current=previous)["status"] == "published"
+        if with_generations:
+            assert cache.publish(value, expected_current=previous)["status"] == "published"
         ConversationStore(owner).observe_workspace(value, expires_at=100)
         previous = value["id"]
     return cache, values
 
 
-def test_scan_work_counts_and_original_committed_projection_bindings(
+def test_cache_inspection_reads_each_object_once_without_changing_owner(
     owner: ReplayStore, evidence: Document, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    cache, values = populated(owner, evidence)
+    cache, values = prepared(owner, evidence, with_generations=True)
     before = json.loads(owner.path.read_bytes())
     validated: list[str] = []
     reads: list[str] = []
@@ -103,25 +107,23 @@ def test_scan_work_counts_and_original_committed_projection_bindings(
         reads.append(path.parent.name if path != cache.descriptor else "descriptor")
         return read(path, limit)
 
-    def redundant_validation(*args: Any, **kwargs: Any) -> None:
-        raise AssertionError("projection repeated full generation validation")
-
     monkeypatch.setattr(generation_cache, "_generation", validate_once)
     monkeypatch.setattr(cache, "_read", read_once)
-    monkeypatch.setattr(workspace_conversation, "_generation", redundant_validation)
-    adopt(owner, cache, targets(values[0]))
+    seen: list[str] = []
+    cache.inspect_retained(lambda value: seen.append(value["id"]), lambda pointer: None)
     after = json.loads(owner.path.read_bytes())
     assert sorted(validated) == sorted(value["id"] for value in values)
     assert reads.count("descriptor") == 1 and reads.count("generations") == 2 and reads.count("targets") == 1
     assert after["conversations"] == before["conversations"]
-    assert {row["generation_id"] for row in after["terminal_retention"]["generations"]} == set(validated)
+    assert set(seen) == set(validated)
+    assert after == before
 
 
 @pytest.mark.parametrize("mismatch", ["root", "namespace", "service", "scope"])
 def test_core_owner_and_scope_refusal_preserve_original_state(
     owner: ReplayStore, evidence: Document, mismatch: str,
 ) -> None:
-    cache, values = populated(owner, evidence)
+    cache, values = prepared(owner, evidence, with_generations=True)
     bindings = targets(values[0])
     selected_cache = cache
     if mismatch == "scope":
@@ -142,10 +144,10 @@ def test_core_owner_and_scope_refusal_preserve_original_state(
 
 
 @pytest.mark.parametrize("uncertain", [False, True])
-def test_core_explicit_retry_preserves_original_journal_and_bindings(
+def test_core_explicit_retry_preserves_metadata_without_inventing_bindings(
     owner: ReplayStore, evidence: Document, monkeypatch: pytest.MonkeyPatch, uncertain: bool,
 ) -> None:
-    cache, values = populated(owner, evidence)
+    cache, values = prepared(owner, evidence)
     before = json.loads(owner.path.read_bytes())
     original = watch_replay_store._atomic_write_json
 
@@ -163,11 +165,13 @@ def test_core_explicit_retry_preserves_original_journal_and_bindings(
     adopt(owner, cache, targets(values[0]))
     after = json.loads(owner.path.read_bytes())
     assert after["conversations"] == before["conversations"]
+    assert after["terminal_retention"]["admissions"] == []
+    assert after["terminal_retention"]["generations"] == []
     if uncertain:
         assert after["terminal_retention"] == partial["terminal_retention"]
 
 
-@pytest.mark.parametrize("failure", ["partial-head", "uncommitted-before-reopen"])
+@pytest.mark.parametrize("failure", ["partial-head", "uncommitted-before-reopen", "same-second-reopen"])
 def test_no_live_admission_from_partial_or_unassociated_journal_evidence(
     owner: ReplayStore, evidence: Document, monkeypatch: pytest.MonkeyPatch, failure: str,
 ) -> None:
@@ -188,11 +192,16 @@ def test_no_live_admission_from_partial_or_unassociated_journal_evidence(
                     value["sections"]["pull_request"]["data"]["status"] = "abandoned"
                 with pytest.raises(OSError):
                     ConversationStore(owner).observe_workspace(selected(value), expires_at=100)
-        reopened = selected(evidence, 4)
+        reopened = selected(evidence, 0 if failure == "same-second-reopen" else 4, offset="200000")
         assert reopened["revision"] == old["revision"]
+        if failure == "same-second-reopen":
+            left = workspace_conversation.project_generation(old, owner.namespace, None)
+            right = workspace_conversation.project_generation(reopened, owner.namespace, None)
+            assert left is not None and right is not None
+            assert old["id"] != reopened["id"] and left.document() == right.document()
         ConversationStore(owner).observe_workspace(reopened, expires_at=100)
     before = owner.path.read_bytes()
-    with pytest.raises(ValueError, match="complete"):
+    with pytest.raises(ValueError, match="complete" if failure == "partial-head" else "association"):
         adopt(owner, cache, targets(old))
     assert owner.path.read_bytes() == before
     assert cache.lookup(old["scope"], generation_id=old["id"])["generation"] == old
@@ -228,8 +237,80 @@ def test_null_rebuild_pointer_with_failed_journal_needs_no_admission(
     assert cache.lookup(value["scope"]) == original
 
 
-def test_untrusted_projection_still_validates_generation_identity(evidence: Document) -> None:
+def test_configured_growth_beyond_terminal_binding_capacity_refuses_before_adoption(
+    owner: ReplayStore, evidence: Document,
+) -> None:
+    cache, values = prepared(owner, evidence)
+    cache = GenerationCache(
+        owner.root, owner.namespace, max_bytes=cache.max_bytes, max_generations=MAX_RECORDS + 1,
+        service_identity=owner.service_identity,
+    )
+    _atomic_write_json(cache.descriptor, cache.expected_descriptor)
+    before = owner.path.read_bytes()
+    with pytest.raises(ValueError, match="growth"):
+        adopt(owner, cache, targets(values[0]))
+    assert owner.path.read_bytes() == before
+
+
+@pytest.mark.parametrize("expire_during", ["descriptor", "pointer"])
+def test_core_scan_stops_on_owner_expiry_without_a_cache_checkpoint(
+    owner: ReplayStore, evidence: Document, monkeypatch: pytest.MonkeyPatch, expire_during: str,
+) -> None:
+    cache = cache_for(owner)
     value = selected(evidence)
-    value["sections"]["pull_request"]["data"]["title"] = "changed without original generation identity"
-    with pytest.raises(ValueError, match="corrupt"):
-        workspace_conversation.project_generation(value, "original-owner", None)
+    for number in (1, 2):
+        scope = {**value["scope"], "number": number}
+        _atomic_write_json(cache.targets / (_digest(scope) + ".json"), {
+            "schema": POINTER_SCHEMA, "version": 1, "scope": scope, "generation_id": None,
+        })
+    before = owner.path.read_bytes()
+    reads = []
+    original = GenerationCache._read
+
+    def read(selected_cache: GenerationCache, path: Path, limit: int) -> Document:
+        result = original(selected_cache, path, limit)
+        if path.parent == cache.targets:
+            reads.append(path)
+        if path == cache.descriptor and expire_during == "descriptor" or (
+            path.parent == cache.targets and expire_during == "pointer"
+        ):
+            owner.clock = lambda: 101
+        return result
+
+    assert cache.checkpoint is None
+    monkeypatch.setattr(GenerationCache, "_read", read)
+    with pytest.raises(ReplayCallerExpired):
+        adopt(owner, cache, targets(value))
+    assert len(reads) == (0 if expire_during == "descriptor" else 1)
+    assert owner.path.read_bytes() == before
+
+
+def test_cache_inspection_enforces_the_configured_generation_count(
+    owner: ReplayStore, evidence: Document,
+) -> None:
+    cache, values = prepared(owner, evidence, with_generations=True)
+    cache = GenerationCache(
+        owner.root, owner.namespace, max_bytes=cache.max_bytes, max_generations=1,
+        service_identity=owner.service_identity,
+    )
+    _atomic_write_json(cache.descriptor, cache.expected_descriptor)
+    before = owner.path.read_bytes()
+    with pytest.raises(CacheFull):
+        cache.inspect_retained(lambda value: None, lambda pointer: None)
+    assert owner.path.read_bytes() == before
+    assert cache.lookup(values[0]["scope"], generation_id=values[0]["id"])["found"]
+
+
+def test_metadata_adoption_preserves_the_original_cache_checkpoint(
+    owner: ReplayStore, evidence: Document,
+) -> None:
+    cache, values = prepared(owner, evidence)
+    before = owner.path.read_bytes()
+
+    def withdrawn() -> None:
+        raise ValueError("original cache owner withdrew")
+
+    cache.checkpoint = withdrawn
+    with pytest.raises(ValueError, match="cache owner withdrew"):
+        adopt(owner, cache, targets(values[0]))
+    assert owner.path.read_bytes() == before
