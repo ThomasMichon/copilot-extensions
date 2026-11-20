@@ -203,10 +203,13 @@ class QueueTaskRelationshipsMixin:
 
         if allocation_key == key:
             required = writer is not None and (not native or self._ordinary_capture.selects(winner))
+            if required and ordinary and not policy:
+                raise TaskError("ordinary capture requires a stable admission policy")
         else:
             prior = conn.execute(
-                "SELECT task_id, driver, task_relationship_required, ordinary_admission_policy"
-                " FROM spawn_reservations WHERE key=?", (allocation_key,),
+                "SELECT task_id, driver, task_relationship_required, ordinary_admission_policy,"
+                " reserved_by=(SELECT reserved_by FROM spawn_reservations WHERE key=?) AS same_allocator"
+                " FROM spawn_reservations WHERE key=?", (key, allocation_key),
             ).fetchone()
             if prior is None:
                 raise TaskError("ordinary capture cannot confirm the original allocation")
@@ -214,6 +217,8 @@ class QueueTaskRelationshipsMixin:
             if required:
                 if prior["task_id"] != task.id or prior["driver"] != driver:
                     raise TaskError("captured allocation requires its original task and driver")
+                if ordinary and not prior["same_allocator"]:
+                    raise TaskError("captured ordinary allocation requires its original allocator")
                 if writer is None:
                     raise TaskError("captured allocation requires its original relationship writer")
                 if ordinary and (policy is None or prior["ordinary_admission_policy"] != policy):

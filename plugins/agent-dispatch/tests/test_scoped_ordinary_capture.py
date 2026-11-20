@@ -312,6 +312,11 @@ def test_retry_of_same_allocation_keeps_initial_capture(
     renew(q, queued.not_before)
     q._ordinary_capture = drain if initially_selected else OrdinaryCapture()
     if initially_selected:
+        before = (q.get(task.id), q.list_reservations(task_id=task.id), q.task_pool_assignment(task.id))
+        with pytest.raises(TaskError, match="requires its original allocator"):
+            q.reserve_spawn(task.id, pool_catalog_revision=q.pool_catalog_snapshot().revision,
+                            reserved_by="replacement", driver="ordinary-bridge", now=queued.not_before)
+        assert (q.get(task.id), q.list_reservations(task_id=task.id), q.task_pool_assignment(task.id)) == before
         with pytest.raises(TaskError, match="requires its original task and driver"):
             q.reserve_spawn(
                 task.id,
@@ -341,7 +346,6 @@ def test_retry_of_same_allocation_keeps_initial_capture(
     ("policy:factory", "local-ordinary", "ordinary-bridge", True, "original admission policy"),
     ("policy:factory", "policy:other", "ordinary-bridge", True, "original admission policy"),
     ("policy:factory", "central/policy:factory", "ordinary-bridge", True, "original admission policy"),
-    ("anonymous", "policy:factory", "ordinary-bridge", True, "original admission policy"),
     ("policy:factory", "policy:factory", "ordinary-bridge", True, None),
 ])
 def test_ordinary_allocation_decision_survives_factory_cutover(
@@ -361,12 +365,10 @@ def test_ordinary_allocation_decision_survives_factory_cutover(
     cfg = Config(db_path=str(tmp_path / "queue.db"), relationship_authority="local")
 
     def opened(spec: str) -> TaskQueue:
-        if spec == "anonymous":
-            queue = TaskQueue(cfg.db_path, relationship_writer=owner, relationship_authority="local")
-        else:
-            selected_authority = "central" if spec.startswith("central/") else "local"
-            queue = server.build_app(replace(cfg, relationship_admission=spec.removeprefix("central/"),
-                                             relationship_authority=selected_authority)).state.queue
+        selected_authority = "central" if spec.startswith("central/") else "local"
+        queue = server.build_app(replace(cfg, relationship_admission=spec.removeprefix("central/"),
+                                         relationship_authority=selected_authority)).state.queue
+        assert isinstance(queue, TaskQueue)
         monkeypatch.setattr(queue, "_now", lambda now=None: 100.0 if now is None else now)
         return queue
 

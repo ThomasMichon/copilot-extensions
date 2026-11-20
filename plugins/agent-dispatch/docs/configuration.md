@@ -94,13 +94,22 @@ workspace and retain its writer requirement before the first prompt. Changing
 the selector does not reclassify reservations or repair ungoverned history.
 Retrying an allocation keeps its original decision, even in all-pool mode;
 re-emitting work against an old ungoverned workspace does not retrofit it.
-A captured allocation cannot switch tasks or startup drivers on retry. For a
-governed ordinary root the queue also retains the admission selection (native
+A captured ordinary allocation cannot switch tasks, allocators or startup drivers on retry.
+An embedded general writer without a stable admission selection cannot reserve governed ordinary work.
+For a governed ordinary root the queue also retains the admission selection (native
 local, or a fingerprint of the configured factory and its queue authority). Changing between
 native rollout scopes is not a change of writer policy. A different or unknown
 selection, including a historical root without this evidence, cannot authorize
 a new same-allocation attempt or select a relationship writer for an existing reservation. A matching selection does not prove a writer's
 identity: the original workspace, writer and receipt checks still apply.
+
+**Before upgrading a coordinator that already captures ordinary work**, stop new placement
+and let its original coordinator finish the tasks, reconcile their claims and retire their natives.
+The new coordinator checks unattributed governed reservations before changing the queue schema.
+If retirement, terminal task status or claim settlement is unconfirmed, startup refuses and
+leaves the old schema intact. Keep the original coordinator and writer configuration for settlement,
+then retry the upgrade. Neither drain nor switching writers can infer a missing historical policy.
+Settled history remains unattributed; do not backfill policy or edit receipts.
 
 After a confirmed worker decline, a *new* unselected allocation may proceed only once the old claim is
 closed and its native is retired. This remains true when the admission settings

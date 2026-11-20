@@ -106,29 +106,15 @@ def test_original_policy_checked_before_any_writer_contact(
         )
 
 
-def test_unattributed_captured_root_never_uses_new_policy(tmp_path: Path) -> None:
-    a, b = RecordedWriter(), RecordedWriter()
+def test_embedding_without_policy_cannot_reserve_governed_ordinary(tmp_path: Path) -> None:
+    a = RecordedWriter()
     q = TaskQueue(tmp_path / "db", relationship_writer=a, relationship_authority="local")
     t = task(q)
-    key = q.reserve_spawn(
-        t.id,
-        reserved_by="allocator",
-        driver="ordinary-bridge",
-        pool_catalog_revision=publish(q, pool()),
-    )[0].key
-    restarted = TaskQueue(
-        q.db_path, ordinary_relationship_writer=b, relationship_authority="local"
-    )
-    with pytest.raises(TaskError, match="admission policy"):
-        restarted.record_spawn_worktree(
-            key,
-            "work",
-            driver="ordinary-bridge",
-            ownership="created",
-            execution_machine="host-a",
-            allocation_project="example",
-            worktree_path=str(tmp_path / "work"),
-            creation_nonce="incarnation",
+    revision = publish(q, pool())
+    with pytest.raises(TaskError, match="stable admission policy"):
+        q.reserve_spawn(
+            t.id, reserved_by="allocator", driver="ordinary-bridge", pool_catalog_revision=revision,
         )
-    assert (a.selections, a.calls, b.selections, b.calls) == (0, [], 0, [])
-    assert q.task_relationship(t.id) is None
+    assert q.get(t.id) == t and not q.list_reservations(task_id=t.id)
+    assert q.task_pool_assignment(t.id) is None and q.task_relationship(t.id) is None
+    assert (a.selections, a.calls) == (0, [])

@@ -81,7 +81,6 @@ def migrate_relationships(conn: sqlite3.Connection) -> None:
                 "creation_nonce": "TEXT",
                 "task_relationship_event_id": "INTEGER",
                 "task_relationship_required": "INTEGER NOT NULL DEFAULT 0",
-                "ordinary_admission_policy": "TEXT",
                 "task_relationship_generation": "INTEGER",
             },
         ),
@@ -95,6 +94,8 @@ def migrate_relationships(conn: sqlite3.Connection) -> None:
             except sqlite3.OperationalError as exc:
                 if "duplicate column name" not in str(exc).lower():
                     raise
+    from .ordinary_policy_upgrade import install_policy_boundary
+    install_policy_boundary(conn)
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_task_relationships ON task_events(task_id, id)"
         " WHERE task_relationship IS NOT NULL"
