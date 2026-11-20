@@ -218,6 +218,17 @@ Bash syntax, install-contract and changed-Python lint pass. Native Linux
 execution remains for the existing path-gated hosted lane; source review/CI,
 merge, release and caller adoption remain open. No live installation occurred.
 
+2026-11-20: The implementation's first published head passed exact-head
+Copilot approval and all eight active Windows/Linux native jobs. Required CI
+then stopped on the 1,000-line module cap: the installation entry had grown
+to 1,009 lines. Its unchanged operation-admission block now lives with the
+existing native input admission helpers, reducing the entry to 993 lines
+without changing validation or widening the baseline. The admission ASTs
+match; both real source/installed configuration entry controls pass again,
+and module size, changed-Python lint and whitespace pass. The source pin
+is refreshed. The corrected published head still needs fresh review and CI;
+the earlier native pass is not its qualification.
+
 2026-11-19: The installed configuration-only refinement merged in #13480 after
 current-head Copilot approval and required CI. It preserves the native
 acquisition-free reuse obligation and does not claim implementation, release,
