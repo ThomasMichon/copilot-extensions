@@ -240,6 +240,26 @@ physical barrier, not JSON negotiation. Test both rollback directions through
 the actual persistence boundary. No ordinary CLI syntax, map/cwd advertisement,
 automatic migration or installer veto is added by this proposal.
 
+#### Initial native-domain source scope
+
+The additive source API and its limits are documented by the
+[existing boot-evidence owner](../../../libs/update-driver/README.md#execution-domain-boot-observations).
+Its version-1 observation pairs the Windows VM Generation Counter with the
+native kernel boot UUID, checking both for changes during sampling. The
+counter's native contract separates ordinary reboot from clone/restore; a
+changed generation conservatively refuses continuity. Device absence or
+access denial has no fallback or elevation. Linux/WSL and macOS have no
+implemented provider. Firmware IDs, machine IDs and movable state remain
+insufficient substitutes.
+
+This is an unwired source prerequisite, not actual native qualification or
+subscriber migration support. Actor-free native-call and serialized-record
+controls cannot close the actual provider, same-domain reboot, cloned/moved
+root, container-restart or Linux-provider gates. The sealed-record receiver,
+fresh sealed epoch, original/current controller separation, guarded final
+source import and authority selection remain under the same writer owner;
+ordinary entry and map/cwd writes remain unchanged.
+
 ## One owner, explicit phases
 
 Extend the watch owner's existing journal/storage/adoption boundary. The
