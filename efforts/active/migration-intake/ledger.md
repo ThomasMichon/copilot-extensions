@@ -1374,3 +1374,18 @@ pending receiving gate. Preserve OPEN #1303, all fifteen technical rows,
 incumbent states/holds, unit-only CI, hosted-Windows quiescence and actual
 source/native/release/resource custody. Planned intake is not fulfillment,
 fixture correction, execution, claim release or deployment.
+
+### 2026-11-20 - Accepted idle slice and current roadmap gaps
+
+| Source | Class | Existing route and explicit limit |
+|---|---|---|
+| #13734 | partial receiving accepted; source remains OPEN | Reviewed #13740 accepted only P13734-1..2/V13734-1..2/G13734 in existing [Queued Steering](../bridge-queued-steering/README.md#coordination), all five technical rows unchecked. Complete source/discussion and finite receiving readback retain the distinct carrier 503/hello-read observation as unreceived under actual carrier owners. No whole-source retirement, acknowledgment, claim release or technical completion; [additive evidence](../backlog-reconciliation/journal/2026/11.20-idle-steering-and-existing-keepers.md#reviewed-idle-only-receiving-and-distinct-carrier-gap). |
+| #5512 | existing accepted route corrected; no new disposition | The historical shortlist now points through its already acknowledged NOT_PLANNED retirement to the unchanged Draft [singleton-correctness effort](../status-monitor-singleton-correctness/README.md). Sole owner/public successor handoff, restart Phase 1, sequential replacement/cutover Phase 2 and complete validation remain. No replay, implementation or new credit; [current route and coverage](../backlog-reconciliation/roadmap-current-qualification.md#2026-11-20-singleton-tracking-route-and-current-coverage). |
+
+The [current integration assessment](../backlog-reconciliation/stabilization-roadmap.md#2026-11-20-integration-assessment)
+keeps all six execution-plan gates unchecked. Complete 15:09 PT metadata
+counts 882 open: 292 retained historical assignments, 153 other creator-eligible
+identities and 437 excluded metadata-only, with 408 baseline and 474 inflow.
+There are no new dispositions in this assessment; 153 above fixed 729 is not
+a proposed closure cohort. Existing Goal, source/copy and ownership/resource
+limits remain.
