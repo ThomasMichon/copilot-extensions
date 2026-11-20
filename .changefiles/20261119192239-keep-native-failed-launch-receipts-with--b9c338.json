@@ -1,0 +1,17 @@
+{
+  "comment": "Keep native failed-launch receipts with original-owner custody, settle positively refused launches, and prevent read-only Index metadata probes from changing their payload.",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "dev"
+    },
+    {
+      "plugin": "libs/agent-procutil",
+      "type": "dev"
+    },
+    {
+      "plugin": "wsl-setup",
+      "type": "dev"
+    }
+  ]
+}
