@@ -7,6 +7,7 @@ import json
 import os
 import stat
 import sys
+import threading
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any
@@ -266,3 +267,101 @@ def test_preparation_checks_deadline_after_the_last_journal_read(
     with pytest.raises(TimeoutError, match="final reads"):
         module.prepare(root, binding, lease, validate=lambda: None, check_deadline=deadline)
     assert state["writes"] == 0
+
+
+@pytest.fixture
+def delivery_guards(monkeypatch: pytest.MonkeyPatch) -> Any:
+    package = ModuleType("promotion_watch_delivery_guards")
+    package.__path__ = [str(SOURCE)]
+    monkeypatch.setitem(sys.modules, package.__name__, package)
+    for name in ("watch_registry", "watch_notification", "watch_storage"):
+        module = ModuleType(f"{package.__name__}.{name}")
+        monkeypatch.setitem(sys.modules, module.__name__, module)
+        if name == "watch_registry":
+            setattr(module, "FiredEvent", object)
+            setattr(module, "WatchRegistry", object)
+        elif name == "watch_notification":
+            setattr(module, "event_payload", lambda _event: {"event_id": "event"})
+        else:
+            class CommitUncertain(OSError):
+                pass
+
+            setattr(module, "StateCommitUncertain", CommitUncertain)
+    spec = importlib.util.spec_from_file_location(
+        f"{package.__name__}.watch_delivery", SOURCE / "watch_delivery.py",
+    )
+    assert spec and spec.loader
+    result = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(result)
+    return result
+
+
+def _delivery_fixture(module: Any, *, before_notify: Any = None, retained: Any = None) -> Any:
+    return module.Deliveries(
+        SimpleNamespace(is_current=lambda _event: True),
+        lambda _event: pytest.fail("unselected callback"),
+        lambda _entries=None: None, threading.RLock(), threading.Event(),
+        before_notify=before_notify, retained_legacy=retained,
+    )
+
+
+def _delivery_event() -> Any:
+    return SimpleNamespace(
+        key=SimpleNamespace(repo="example/project", number=1),
+        subscriber=SimpleNamespace(
+            registration_id="registration", subscriber_id="caller",
+            pending={"next_attempt": 0.0, "attempts": 3},
+        ),
+    )
+
+
+def test_callback_guard_retains_unattempted_legacy_work(delivery_guards: Any) -> None:
+    def refused() -> None:
+        raise PermissionError("controlled owner refusal")
+
+    owner = _delivery_fixture(delivery_guards, before_notify=refused)
+    event = _delivery_event()
+    owner._run_legacy(event)
+    assert list(owner.legacy_queue) == [event]
+    assert owner.legacy_fenced and owner.shutdown.is_set()
+    assert not owner.legacy_outcomes and not owner.workers
+
+
+@pytest.mark.parametrize("preserve", [False, True])
+def test_fenced_close_never_starts_queued_work(delivery_guards: Any, preserve: bool) -> None:
+    owner = _delivery_fixture(delivery_guards)
+    event = _delivery_event()
+    owner.legacy_queue.append(event)
+    owner.fence_legacy()
+    blocked = owner.close(
+        delivery_guards.time.monotonic() + 1, bounded=True, preserve_queued=preserve,
+    )
+    assert bool(blocked) is not preserve
+    assert list(owner.legacy_queue) == [event] and not owner.workers
+
+
+def test_readoption_transfers_retained_legacy_custody_and_limits(delivery_guards: Any) -> None:
+    old = _delivery_fixture(delivery_guards)
+    event = _delivery_event()
+    old.legacy_queue.append(event)
+    old.legacy_outcomes.append({"registration_id": "earlier", "outcome": "unknown"})
+    old.max_workers = 1
+    old.legacy_evicted = 4
+    old.fence_legacy()
+    current = _delivery_fixture(delivery_guards, retained=old)
+    assert not old.legacy_queue and list(current.legacy_queue) == [event]
+    assert list(current.legacy_outcomes) == list(old.legacy_outcomes)
+    assert current.max_workers == old.max_workers and current.legacy_evicted == old.legacy_evicted
+    assert current.legacy_fenced
+
+
+def test_callback_guard_keeps_acknowledged_event_pending(delivery_guards: Any) -> None:
+    def refused() -> None:
+        raise PermissionError("controlled owner refusal")
+
+    owner = _delivery_fixture(delivery_guards, before_notify=refused)
+    event = _delivery_event()
+    original = dict(event.subscriber.pending)
+    owner._run(event)
+    assert event.subscriber.pending == original
+    assert owner.shutdown.is_set() and not owner.workers

@@ -262,8 +262,22 @@ state, retaining the native lease for unfinished work. Safe timeout abort
 requires another descriptor/path check, both after the failed drain and before
 resume. A storage validation refusal invalidates readiness even when it occurs
 before the final callback; repaired state must be strictly readopted, not
-overwritten from the old registry. Successful readoption or safe resume clears
-this preparation-only guard.
+overwritten from the old registry. Readoption must load a stable plain source
+and revalidate native custody before clearing the full snapshot/installation
+guard. The instance retains strict native effects/storage admission and
+refusal propagation afterward; activation cannot bypass a still-pending
+preparation guard through a weaker operation.
+
+Every new callback admission is guarded. Rejected ownership/readiness fences
+queued legacy callbacks, including the cleanup path that normally drains them.
+Keep unattempted events process-local and transfer them exactly once, with
+history and concurrency limits, through valid readoption; do not report an
+attempt or outcome that never occurred. Acknowledged events remain pending
+without an acknowledgement or spent attempt. Normal authorized drains can
+still finish accepted work. Closure/release must settle running workers
+without first committing an irreversible shutdown intent, then refuse
+discarding a retained fenced queue. An actual external shutdown request is
+never cleared. This does not turn legacy delivery into the reliable protocol.
 
 Preparation pins the prechecked historical inode through existing-only native
 acquisition, including descriptor/path comparison before PID publication.

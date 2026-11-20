@@ -282,10 +282,12 @@ def _read_subscriptions_state(
     return _subscription_entries(_read_subscriptions_document(path, require_plain=require_plain)[1])
 
 
-def read_subscriptions_state(root: Path | None = None) -> list[dict[str, Any]]:
+def read_subscriptions_state(
+    root: Path | None = None, *, require_plain: bool = False,
+) -> list[dict[str, Any]]:
     with _ATOMIC_REPLACE_LOCK:
         _require_legacy_state(root)
-        return _read_subscriptions_state(subscriptions_path(root))
+        return _read_subscriptions_state(subscriptions_path(root), require_plain=require_plain)
 
 
 def write_subscriptions_state(

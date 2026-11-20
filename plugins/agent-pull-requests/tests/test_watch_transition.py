@@ -100,14 +100,15 @@ def test_failed_preparation_retains_custody_and_publishes_no_marker(
     def refused(*_args: Any, **_kwargs: Any) -> None:
         raise PermissionError("controlled preparation refusal")
 
-    if stage == "authority":
-        writer.authorize = refused
-    elif stage == "drain":
-        monkeypatch.setattr(writer.daemon, "quiesce", refused)
-    else:
-        monkeypatch.setattr(watch_transition, "write_private", refused)
-    with pytest.raises(PermissionError, match="controlled"):
-        writer.prepare_state_transition(timeout=1)
+    with monkeypatch.context() as failed:
+        if stage == "authority":
+            failed.setattr(writer, "authorize", refused)
+        elif stage == "drain":
+            failed.setattr(writer.daemon, "quiesce", refused)
+        else:
+            failed.setattr(watch_transition, "write_private", refused)
+        with pytest.raises(PermissionError, match="controlled"):
+            writer.prepare_state_transition(timeout=1)
     assert writer.writer_held
     assert not watch_state_paths(tmp_path).journal.exists()
     if stage == "commit":

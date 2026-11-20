@@ -55,8 +55,13 @@ def validate_versioned_entries(entries: list[dict[str, Any]]) -> None:
         WatchRegistry().restore_state(entries, strict=True)
 
 
-def read_watch_state(root: Path | None = None) -> list[dict[str, Any]]:
-    entries = read_subscriptions_state() if root is None else read_subscriptions_state(root)
+def read_watch_state(
+    root: Path | None = None, *, require_plain: bool = False,
+) -> list[dict[str, Any]]:
+    entries = (
+        read_subscriptions_state(root, require_plain=True) if require_plain
+        else read_subscriptions_state() if root is None else read_subscriptions_state(root)
+    )
     validate_versioned_entries(entries)
     return entries
 
@@ -123,10 +128,14 @@ class WatchDaemon:
         active: bool = True,
         state_root: Path | None = None,
         native_fetch: NativeFetch | None = None,
+        effect_guard: Callable[[], None] | None = None,
+        on_storage_refusal: Callable[[], None] | None = None,
     ) -> None:
         self._registry = WatchRegistry()
         self._fetch = fetch
         self._native_fetch = native_fetch
+        self._effect_guard = effect_guard
+        self._storage_refusal = on_storage_refusal
         self._notify = notify
         self._poll_interval = poll_interval
         self._idle_exit = idle_exit
@@ -136,6 +145,7 @@ class WatchDaemon:
         self._observation_errors: dict[str, str] = {}
         self._persist_lock = threading.RLock()
         self._persistence_guard: Callable[[], None] | None = None
+        self._guarded_storage = False
         self._pollers: dict[WatchKey, threading.Thread] = {}
         self._native_pollers: set[threading.Thread] = set()
         self._pollers_lock = threading.Lock()
@@ -151,6 +161,7 @@ class WatchDaemon:
             self._shutdown_event.set()
         self._deliveries = Deliveries(
             self._registry, self._notify, self._persist, self._persist_lock, self._shutdown_event,
+            before_notify=self._before_notify,
         )
         if persist and active:
             try:
@@ -174,6 +185,8 @@ class WatchDaemon:
             self._ensure_poller(key)
 
     def _read_state(self) -> list[dict[str, Any]]:
+        if self._guarded_storage:
+            return read_watch_state(self._state_root, require_plain=True)
         return read_watch_state(self._state_root)
 
     def set_persistence_guard(
@@ -184,8 +197,47 @@ class WatchDaemon:
             raise TimeoutError("PR watch persistence boundary is busy")
         try:
             self._persistence_guard = guard
+            if guard is not None:
+                self._guarded_storage = True
+            if guard is None:
+                self._deliveries.unfence_legacy()
         finally:
             self._persist_lock.release()
+
+    def fence_deliveries(self) -> None:
+        self._deliveries.fence_legacy()
+
+    def has_legacy_pending(self) -> bool:
+        return self._deliveries.has_legacy_pending()
+
+    def stop_guarded_work(self) -> None:
+        self._guarded_storage = True
+        self.stop_admission()
+        self.fence_deliveries()
+
+    def _refuse_guarded_work(self) -> None:
+        self.stop_guarded_work()
+        if self._storage_refusal is not None:
+            self._storage_refusal()
+
+    @staticmethod
+    def _check_guard(guard: Callable[[], None] | None) -> None:
+        if guard is not None and guard() is not None:
+            raise PermissionError("watch source guard validation did not complete")
+
+    def _before_notify(self) -> None:
+        if self._persistence_guard is None and self._effect_guard is None:
+            return
+        try:
+            if self._persistence_guard is None:
+                self._check_guard(self._effect_guard)
+            else:
+                with self._persist_lock:
+                    self._check_guard(self._effect_guard)
+                    self._check_guard(self._persistence_guard)
+        except Exception:
+            self._refuse_guarded_work()
+            raise
 
     def _persist(
         self, entries: list[dict[str, Any]] | None = None, *,
@@ -204,13 +256,13 @@ class WatchDaemon:
         with self._persist_lock:
             try:
                 guard = self._persistence_guard
-                if guard is not None:
-                    guard()
+                self._check_guard(self._effect_guard)
+                self._check_guard(guard)
                 snapshot = self._registry.snapshot_state() if entries is None else entries
-                if before_replace is not None or guard is not None:
+                if before_replace is not None or self._guarded_storage:
                     def check() -> None:
-                        if guard is not None:
-                            guard()
+                        self._check_guard(self._effect_guard)
+                        self._check_guard(guard)
                         if before_replace is not None:
                             before_replace()
 
@@ -222,8 +274,12 @@ class WatchDaemon:
                     write_subscriptions_state(snapshot)
                 else:
                     write_subscriptions_state(snapshot, self._state_root)
-            except OSError:
-                self._persistence_error = "state_write_failed"
+            except Exception as error:
+                if self._guarded_storage:
+                    self._persistence_error = "state_write_failed"
+                    self._refuse_guarded_work()
+                elif isinstance(error, OSError):
+                    self._persistence_error = "state_write_failed"
                 raise
             self._persistence_error = None
 
@@ -508,6 +564,7 @@ class WatchDaemon:
         self, timeout: float = _SHUTDOWN_REQUEST_DEADLINE_S, *,
         before_persist: Callable[[], None] | None = None,
         persist: bool = True,
+        preserve_queued: bool = False,
     ) -> None:
         """Retain ownership until admitted writes and accepted callbacks have stopped."""
         with self._lifecycle_operation(timeout) as deadline:
@@ -515,7 +572,10 @@ class WatchDaemon:
                 raise RuntimeError("PR watch owner is shutting down")
             self._quiescent = False
             self._close_mutation_admission(deadline)
-            self._stop_workers(deadline, bounded=True)
+            if preserve_queued:
+                self._stop_workers(deadline, bounded=True, preserve_queued=True)
+            else:
+                self._stop_workers(deadline, bounded=True)
             self._check_lifecycle_deadline(deadline)
             if self._lifecycle_shutdown_event.is_set():
                 raise RuntimeError("PR watch shutdown interrupted quiescence")
@@ -527,7 +587,11 @@ class WatchDaemon:
             self._check_lifecycle_deadline(deadline)
             self._quiescent = True
 
-    def reload_state(self, timeout: float = _SHUTDOWN_REQUEST_DEADLINE_S) -> None:
+    def reload_state(
+        self, timeout: float = _SHUTDOWN_REQUEST_DEADLINE_S, *,
+        read_state: Callable[[], list[dict[str, Any]]] | None = None,
+        retain_legacy: bool = False,
+    ) -> None:
         """Read the final state without effects, after the owner acquires its writer lease."""
         with self._lifecycle_operation(timeout) as deadline:
             if not self._quiescent or self._lifecycle_shutdown_event.is_set():
@@ -536,16 +600,29 @@ class WatchDaemon:
                 raise RuntimeError("PR watch state adoption requires durable persistence")
             self._state_loaded = False
             registry = WatchRegistry()
-            registry.restore_state(self._read_state(), strict=True)
+            registry.restore_state(
+                self._read_state() if read_state is None else read_state(), strict=True,
+            )
             self._check_lifecycle_deadline(deadline)
             self._registry = registry
             self._deliveries = Deliveries(
                 registry, self._notify, self._persist, self._persist_lock, self._shutdown_event,
+                before_notify=self._before_notify,
+                retained_legacy=self._deliveries if retain_legacy else None,
             )
             with self._pollers_lock:
                 self._pollers.clear()
             self._check_lifecycle_deadline(deadline)
             self._state_loaded = True
+
+    def settle_workers(self, *, timeout: float, preserve_queued: bool) -> None:
+        """Stop accepted work without committing persistence or a shutdown intent."""
+        with self._lifecycle_operation(timeout) as deadline:
+            self._quiescent = False
+            self._close_mutation_admission(deadline)
+            self._stop_workers(deadline, bounded=True, preserve_queued=preserve_queued)
+            self._check_lifecycle_deadline(deadline)
+            self._quiescent = True
 
     def resume_effects(self, timeout: float = _SHUTDOWN_REQUEST_DEADLINE_S) -> None:
         """Resume the retained registry only after the owner's transaction authorizes effects."""
@@ -593,7 +670,9 @@ class WatchDaemon:
             self._close_mutation_admission(deadline)
             self._stop_workers(deadline, bounded=False)
 
-    def _stop_workers(self, deadline: float, *, bounded: bool) -> None:
+    def _stop_workers(
+        self, deadline: float, *, bounded: bool, preserve_queued: bool = False,
+    ) -> None:
         with self._pollers_lock:
             pollers = list(self._native_pollers)
         for thread in pollers:
@@ -601,7 +680,10 @@ class WatchDaemon:
                 thread.join(timeout=max(0.0, deadline - time.monotonic()))
         native = threading.enumerate()
         live = [thread.name for thread in pollers if thread in native]
-        live.extend(self._deliveries.close(deadline, bounded=bounded))
+        if preserve_queued:
+            live.extend(self._deliveries.close(deadline, bounded=bounded, preserve_queued=True))
+        else:
+            live.extend(self._deliveries.close(deadline, bounded=bounded))
         with self._pollers_lock:
             self._native_pollers.difference_update(thread for thread in pollers if thread not in native)
         if live:

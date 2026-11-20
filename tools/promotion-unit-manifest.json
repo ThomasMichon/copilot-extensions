@@ -2,6 +2,11 @@
     "profile": "copilot-extensions.promotion-units/v1",
     "max_seconds": 300,
     "nodes": [
+        "tools/promotion_unit_tests/test_watch_preparation.py::test_callback_guard_retains_unattempted_legacy_work",
+        "tools/promotion_unit_tests/test_watch_preparation.py::test_fenced_close_never_starts_queued_work[False]",
+        "tools/promotion_unit_tests/test_watch_preparation.py::test_fenced_close_never_starts_queued_work[True]",
+        "tools/promotion_unit_tests/test_watch_preparation.py::test_readoption_transfers_retained_legacy_custody_and_limits",
+        "tools/promotion_unit_tests/test_watch_preparation.py::test_callback_guard_keeps_acknowledged_event_pending",
         "tools/promotion_unit_tests/test_watch_storage_contract.py::test_unjournaled_transition_is_not_legacy_absence[pin]",
         "tools/promotion_unit_tests/test_watch_preparation.py::test_prepared_pin_is_required_even_when_recorded_device_inode_matches[missing]",
         "tools/promotion_unit_tests/test_watch_preparation.py::test_prepared_pin_is_required_even_when_recorded_device_inode_matches[different]",
@@ -6016,7 +6021,8 @@
         "libs/installer-engine/installer_protected_source.py",
         "libs/installer-engine/installer_native_executable.py",
         "plugins/agent-pull-requests/src/agent_pull_requests/watch_transition.py",
-        "libs/single-instance-lease/src/single_instance_lease/lease.py"
+        "libs/single-instance-lease/src/single_instance_lease/lease.py",
+        "plugins/agent-pull-requests/src/agent_pull_requests/watch_delivery.py"
     ],
     "sources": {
         "tools/promotion_unit_tests/test_point_source_domain_contract.py": "38a5fecf1cda2a6457237ec9726071b54c8a9d18f1c4c396f7f6eb2f1d9dacbd",
@@ -6031,7 +6037,7 @@
         "plugins/agent-index/src/agent_index/indexing/acquisition_requirement.py": "c04cac55a9dd6682eb7d3e354c450b8488cdef6e0905f0a80874e781d124207c",
         "tools/promotion_unit_tests/test_checkout_disposition.py": "6fb76b462dbf84919ededfe62ecc181aa51533c61d71489b6d7dc140c70c8bc9",
         "plugins/agent-worktrees/src/agent_worktrees/prune.py": "933a34e607f4eebb34e967d8920132bf4695842f6e0897e19ff718daadcfe049",
-        "plugins/agent-pull-requests/src/agent_pull_requests/watch_storage.py": "c549fe17354d7420346ca92e34f80caa35a88f8c0862c0b53bc3415e5c9956af",
+        "plugins/agent-pull-requests/src/agent_pull_requests/watch_storage.py": "c0e8122756e9c17b5ca2846093d35e853addcfbf3ac0cfab86aa5dbd4cdfbec7",
         "tools/promotion_unit_tests/test_watch_storage_contract.py": "92238ddd8ca9564b04ba1cc2b48807815c8203d1a727d1a19463ecbb81842302",
         "plugins/agent-worktrees/src/agent_worktrees/git_process.py": "6cc675a4d988e7d1fd6b0d76a48fde5909f78f085ef194ec69625c6334b4f80f",
         "plugins/agent-worktrees/src/agent_worktrees/daemon_launch_context.py": "b8250e9aaef5fdc70f881b979d52d164c408aa08cf8322278be11569a01c3d30",
@@ -6940,6 +6946,7 @@
         "libs/agent-procutil/src/agent_procutil/python_cache_legacy.py": "258d2046cbdebb005cbb65cdbce0827121b896f17234d97b6585eafef3a6d14c",
         "libs/agent-procutil/src/agent_procutil/scratch.py": "3d4f488761f75b4e743feb22bbffaf8de903b39ed34be6a6bc2bc7c84a6af58f",
         "plugins/agent-pull-requests/src/agent_pull_requests/watch_transition.py": "17c61b2a4e65cd2de4834c2b99bbf7fc73f0aacf30906e563d8c387a01b40c88",
-        "tools/promotion_unit_tests/test_watch_preparation.py": "06ac647e04e727145c8c88a176e3eac02c8b3de1bc3cefca11c7ad94c607b499"
+        "tools/promotion_unit_tests/test_watch_preparation.py": "922ecd434c3063dcac8d47c71a1ce4124e54dfbbb052cee4def9043efe9bda26",
+        "plugins/agent-pull-requests/src/agent_pull_requests/watch_delivery.py": "ae78116c7ec3c05c088455ce58b54e27a817f179e18019c022b069e5eee196d0"
     }
 }

@@ -42,6 +42,8 @@ class WatchWriter:
             fetch=fetch, notify=notify, poll_interval=poll_interval,
             active=False, state_root=root,
             native_fetch=native_fetch,
+            effect_guard=self._check_callback_effects,
+            on_storage_refusal=self._reject_preparation,
         )
         self._lease = SingleInstance(root, service="agent-pull-requests-watch")
         self._lifecycle = threading.Lock()
@@ -49,6 +51,7 @@ class WatchWriter:
         self._read_ready = False
         self._drain_started = False
         self._preparation_guard: Callable[[], None] | None = None
+        self._strict_custody = False
         self._closed = False
 
     @property
@@ -94,22 +97,78 @@ class WatchWriter:
 
     def _acquire_and_reload(self, deadline: float) -> None:
         self._read_ready = False
-        if not self.writer_held:
-            self._lease.acquire()
-        self._lease.held_file_identity()
-        self._remaining(deadline)
-        self.daemon.reload_state(timeout=self._remaining(deadline))
-        self._remaining(deadline)
+        guard = self._preparation_guard
+        try:
+            from .watch_storage import _require_legacy_state
+
+            _require_legacy_state(self.root)
+            if not self.writer_held:
+                self._lease.acquire()
+            self._lease.held_file_identity()
+            self._remaining(deadline)
+            if not self._strict_custody:
+                self.daemon.reload_state(timeout=self._remaining(deadline))
+            else:
+                from .watch_storage import read_subscriptions_state
+
+                if guard is not None:
+                    guard()
+                self.daemon.reload_state(
+                    timeout=self._remaining(deadline),
+                    read_state=lambda: read_subscriptions_state(self.root, require_plain=True),
+                    retain_legacy=True,
+                )
+                self._lease.held_file_identity()
+                if guard is not None:
+                    guard()
+            self._remaining(deadline)
+        except Exception:
+            if self._strict_custody:
+                self._reject_preparation()
+            raise
         self.daemon.set_persistence_guard(None, timeout=self._remaining(deadline))
         self._preparation_guard = None
         self._read_ready = True
+
+    def _reject_preparation(self) -> None:
+        self._assert_process()
+        self._strict_custody = True
+        self._read_ready = False
+        self.daemon.stop_guarded_work()
+
+    def _check_callback_effects(self) -> None:
+        if not self._strict_custody:
+            return
+        try:
+            self._assert_process()
+            self._lease.held_file_identity()
+            if not self.read_ready:
+                raise PermissionError("watch writer requires readoption before callback effects")
+        except Exception:
+            self._reject_preparation()
+            raise
+
+    def _settle_preparation(self, deadline: float) -> None:
+        if not self._strict_custody:
+            return
+        if not self.daemon.quiescent or self.daemon.has_legacy_pending():
+            self.daemon.settle_workers(
+                timeout=self._remaining(deadline), preserve_queued=True,
+            )
+        if self.daemon.has_legacy_pending():
+            raise RuntimeError("guarded legacy work requires readoption before closure or release")
 
     def adopt(self, *, timeout: float) -> None:
         """Acquire the real writer lock before reading the final snapshot."""
         with self._operation(timeout) as deadline:
             self._validate("adopt", deadline)
             if not self.daemon.quiescent:
-                raise RuntimeError("watch writer adoption requires completed quiescence")
+                if not self._strict_custody or self.daemon.effects_enabled:
+                    raise RuntimeError("watch writer adoption requires completed quiescence")
+                self._reject_preparation()
+                self.daemon.settle_workers(
+                    timeout=self._remaining(deadline), preserve_queued=True,
+                )
             self._acquire_and_reload(deadline)
 
     def activate(self, *, timeout: float) -> None:
@@ -118,8 +177,16 @@ class WatchWriter:
             self._validate("activate", deadline)
             if not self.read_ready:
                 raise RuntimeError("watch writer must be read-ready before activation")
-            self.daemon.resume_effects(timeout=self._remaining(deadline))
-            self._remaining(deadline)
+            if self._preparation_guard is not None:
+                raise RuntimeError("watch preparation requires guarded resume or readoption")
+            try:
+                self._check_callback_effects()
+                self.daemon.resume_effects(timeout=self._remaining(deadline))
+                self._remaining(deadline)
+            except Exception:
+                if self._strict_custody:
+                    self._reject_preparation()
+                raise
             self._drain_started = False
 
     def prepare_state_transition(
@@ -141,6 +208,9 @@ class WatchWriter:
 
             def guard_source() -> None:
                 try:
+                    self._assert_process()
+                    if installation is not None:
+                        installation.require_current()
                     held = self._lease.held_file_identity()
                     if held != _historical_identity(self.root) or (
                         identity is not None and held != identity
@@ -156,8 +226,7 @@ class WatchWriter:
                         strict=True,
                     )
                 except Exception:
-                    self._read_ready = False
-                    self.daemon.stop_admission()
+                    self._reject_preparation()
                     raise
 
             def validate_legacy() -> None:
@@ -183,8 +252,11 @@ class WatchWriter:
                 if installation.state_root != self.root:
                     raise PermissionError("watch preparation installation state root differs")
                 binding.update(kind="installation", installation=installation.evidence())
-            self.daemon.set_persistence_guard(guard_source, timeout=self._remaining(deadline))
+            self.daemon.set_persistence_guard(
+                guard_source, timeout=self._remaining(deadline),
+            )
             self._preparation_guard = guard_source
+            self._strict_custody = True
             try:
                 identity = _historical_identity(self.root)
                 prior = read_preparation(self.root, binding)
@@ -205,13 +277,15 @@ class WatchWriter:
                 self.daemon.stop_admission()
                 self._drain_started = True
                 if not isinstance(error, TimeoutError):
-                    self._read_ready = False
+                    self._reject_preparation()
                 try:
                     guard_source()
                 except Exception:
-                    self._read_ready = False
+                    self._reject_preparation()
                 try:
-                    self.daemon.quiesce(timeout=self._remaining(deadline), persist=False)
+                    self.daemon.quiesce(
+                        timeout=self._remaining(deadline), persist=False, preserve_queued=True,
+                    )
                 except BaseException as drain_error:
                     raise error from drain_error
                 raise
@@ -222,6 +296,7 @@ class WatchWriter:
             self._validate("drain", deadline)
             if not self.writer_held:
                 raise RuntimeError("watch writer does not hold predecessor authority")
+            self._settle_preparation(deadline)
             self._drain_started = True
             self.daemon.quiesce(timeout=self._remaining(deadline))
             self._remaining(deadline)
@@ -248,13 +323,18 @@ class WatchWriter:
                 if self._preparation_guard is not None:
                     self._preparation_guard()
             except Exception:
-                self._read_ready = False
-                self.daemon.stop_admission()
+                self._reject_preparation()
                 raise
-            self.daemon.resume_effects(timeout=self._remaining(deadline))
-            self._remaining(deadline)
-            self.daemon.set_persistence_guard(None, timeout=self._remaining(deadline))
-            self._preparation_guard = None
+            try:
+                self.daemon.resume_effects(timeout=self._remaining(deadline))
+                self._remaining(deadline)
+                self.daemon.set_persistence_guard(None, timeout=self._remaining(deadline))
+                self._remaining(deadline)
+                self._preparation_guard = None
+            except Exception:
+                if self._strict_custody:
+                    self._reject_preparation()
+                raise
             self._drain_started = False
 
     def compute(self, kind: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -267,7 +347,7 @@ class WatchWriter:
         """Never treat a journal phase as proof that writer/effect adoption did not run."""
         if (
             self.writer_held or self.read_ready or self.daemon.effects_enabled
-            or not self.daemon.quiescent
+            or not self.daemon.quiescent or self.daemon.has_legacy_pending()
         ):
             raise PermissionError("watch cleanup requires an effect-free passive writer")
 
@@ -285,6 +365,7 @@ class WatchWriter:
         with self._operation(timeout) as deadline:
             if self._closed:
                 return
+            self._settle_preparation(deadline)
             self.daemon.close(timeout=self._remaining(deadline))
             self._remaining(deadline)
             self._lease.release()
@@ -295,6 +376,7 @@ class WatchWriter:
         """Revalidate stop custody after all accepted work has quiesced."""
         with self._operation(timeout) as deadline:
             self._validate("withdraw", deadline)
+            self._settle_preparation(deadline)
             self.daemon.close(timeout=self._remaining(deadline))
             self._validate("withdraw", deadline)
             self._lease.release()

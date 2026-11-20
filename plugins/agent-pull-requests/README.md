@@ -641,9 +641,26 @@ closes admission and drains without persisting rejected state; an unfinished
 worker retains the lease and the guard. Safe timeout abort rechecks actual
 descriptor/path custody again before resume. Storage validation failures
 invalidate readiness, so a later repair requires strict state readoption
-instead of resuming a stale registry. Successful readoption or safe authorized
-resume clears the preparation-only guard; ordinary operation does not retain
-its repeated validation work.
+instead of resuming a stale registry. Activation cannot substitute for the
+separately authorized guarded resume. Readoption itself uses the plain-file
+reader, validates custody on both sides, and refuses transition evidence
+before opening or recreating a historical lease.
+
+Successful readoption or safe resume clears the full preparation snapshot/
+installation guard, not the recovery safety boundary. That writer instance
+keeps native custody checks before notification and persistent-write admission,
+plain-file/existing-parent storage, and refusal-to-readiness propagation.
+Healthy writers that have never entered guarded recovery keep the ordinary
+legacy path; no periodic validation worker is added.
+
+Rejected callback admission fences queued legacy work instead of starting it
+during cleanup. Already-running callbacks must still settle under the retained
+lease. Strict readoption transfers unattempted legacy work, its process-local
+history and concurrency limit without duplication; a later authorized
+activation may continue it. Closure, release and passive cleanup cannot discard
+that retained queue. Guard rejection does not spend a legacy attempt or falsely
+acknowledge/increment an acknowledged event. This adds no durable legacy
+delivery guarantee or new callback wire fields.
 
 No CLI or control-plane operation invokes preparation yet, and ordinary
 startup/restart still refuses every present phase. Do not write markers by
