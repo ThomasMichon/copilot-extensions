@@ -35,11 +35,15 @@ nonreading and immediately failing receivers. Admission and first offer are
 separate from a finite unpaced burst of 4,096 offers. This is an intentional
 queue-pressure workload, not a steady-state throughput claim.
 
-For each trial the property records aggregate wall time, producer-thread CPU,
+For each trial the property records aggregate wall time, caller-thread CPU,
 whole-process CPU, first-operation time and nearest-rank p50/p95/p99/max wall
 time. Per-operation timer/dispatch costs are included. Whole-process CPU
-includes the writer but not the receiver process; thread CPU isolates the
-invoking producer thread. No baseline is subtracted. Compare modes only within
+includes the writer but not the receiver process. Caller-thread CPU measures the
+invoking thread: this is the emitting producer in direct-offer trials, but only
+the HTTP client thread in HTTP trials, not the application/handler threads.
+Whole-process CPU includes those handler threads. Windows CPU values can be
+quantized, including observed zero values; zero is not proof of no CPU cost.
+No baseline is subtracted. Compare modes only within
 the same native run, and report absolute observations and sample count rather
 than inferring overhead from a timeout or test count.
 
@@ -76,8 +80,10 @@ environment, literal argv, independent admitted origins, missing origin,
 receiver failure, bounded queue and custody teardown, restart source identity,
 legacy factory/spool behavior and selected/running capability discovery.
 The added descriptor matrix refuses unknown major versions, transport and
-source schema. A real Bridge-only receiver rejects Dispatch while ordinary
-authenticated task creation still succeeds. This is a mixed-schema reader
+source schema. A real Bridge-only receiver records and fsyncs the observed
+Dispatch schema before rejecting it, while ordinary authenticated task creation
+still succeeds. The test checks that independent rejection witness, not merely
+empty readback. This is a mixed-schema reader
 fixture, not an installed historical provider. Old providers that ignore the
 new admission policy still cannot enforce its disable; rollback must follow
 the provider-first instructions in the producer references.

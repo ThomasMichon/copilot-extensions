@@ -24,7 +24,7 @@ def measure(action: Callable[[], Any], count: int) -> dict[str, Any]:
     ordered = sorted(samples)
     return {
         "operations": count, "wall_ns": elapsed,
-        "producer_thread_cpu_ns": thread_cpu, "process_cpu_ns": process_cpu,
+        "caller_thread_cpu_ns": thread_cpu, "process_cpu_ns": process_cpu,
         "operation_wall_ns": {
             name: ordered[min(count - 1, math.ceil(count * fraction) - 1)]
             for name, fraction in (("p50", .5), ("p95", .95), ("p99", .99), ("max", 1))
@@ -49,8 +49,14 @@ wall = time.perf_counter_ns()
 count = 0
 with Path("readback.jsonl").open("wb") as output:
     for line in sys.stdin.buffer:
-        if mode == "bridge-only" and json.loads(line)["source_schema"] != "bridge.lifecycle.v1":
-            raise SystemExit(8)
+        if mode == "bridge-only":
+            schema = json.loads(line)["source_schema"]
+            if schema != "bridge.lifecycle.v1":
+                with Path("schema-rejection.json").open("w", encoding="utf-8") as witness:
+                    json.dump({"observed_source_schema": schema, "rejected": True}, witness)
+                    witness.flush()
+                    os.fsync(witness.fileno())
+                raise SystemExit(8)
         if mode == "slow":
             time.sleep(.002)
         output.write(line)

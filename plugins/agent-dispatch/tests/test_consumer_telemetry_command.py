@@ -176,6 +176,8 @@ def test_ordinary_dispatch_create_wall_cpu_tail(
 
         cold = helper["measure"](operation, 1)
         measured = helper["measure"](operation, 48)
+        if mode == "bridge-only":
+            wait_for(lambda: (root / "schema-rejection.json").exists())
         teardown_start = time.perf_counter_ns()
     shutdown_ns = time.perf_counter_ns() - teardown_start
     owner = consumer.owner
@@ -187,6 +189,9 @@ def test_ordinary_dispatch_create_wall_cpu_tail(
         assert len(rows) == 49
     elif mode == "bridge-only":
         assert not rows
+        assert json.loads((root / "schema-rejection.json").read_text(encoding="utf-8")) == {
+            "observed_source_schema": "dispatch.lifecycle.v1", "rejected": True,
+        }
     cost = root / "receiver-cost.json"
     record_property("consumer_telemetry_http_performance", json.dumps({
         "version": 1, "source": "agent-dispatch", "mode": mode,
