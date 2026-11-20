@@ -102,7 +102,7 @@ def application(
         binding=PointBinding("https://example.test", "project", "eligible-query/v1"),
         targets=targets,
     )
-    tasks = TaskStore(tmp_path / "tasks.db")
+    tasks = TaskStore(tmp_path / "owned" / "tasks.db")
     task = tasks.enqueue(hints.source, change_hints=hints)
     claim = PendingPointClaim.from_task(tasks.pin_point_claim(task.id, expected_hints=hints))
     config = IndexConfig(

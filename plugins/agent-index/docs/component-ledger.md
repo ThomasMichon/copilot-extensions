@@ -174,8 +174,8 @@ committed native application can reopen and qualify as covered while that exact
 parent remains retained. A dirty/incoherent native state refuses ordinary
 reopening; prepared vectors never clear uncertainty. The explicit sealed
 publication suffix below is narrower than arbitrary partial-effect
-reconciliation. Mixed checkpoint/native restore qualification, whole-claim
-completion and explicit reader isolation remain unfinished under
+reconciliation. Mixed checkpoint/native restore recovery and broader consumer/read composition
+remain unfinished under
 [#13386](https://github.com/ThomasMichon/copilot-extensions/issues/13386).
 The ordinary engine, recovery and pending-completion entrypoints still refuse
 components. No v2 execution declaration, connector, producer, service/CLI form,
@@ -253,9 +253,66 @@ routes remain unsupported for point domains. The separate
 [cold schema bootstrap](source-aware-store.md#point-domain-binding-foundation)
 creates only configured content/model tables, not this ledger or its indices.
 Protocol-2 ledger/index bootstrap and typed-claim application are separate
-explicit prerequisites above. V2 execution/producer and current-claim completion
+explicit prerequisites above. V2 execution/producer and ordinary current-claim completion
 remain disabled; there is
 no migration or conversion of existing protocol-1 state.
+
+### Explicit whole-claim completion
+
+`indexing.point_completion.complete_point_claim(claim, scope=..., paths=...,
+tasks=..., ledger=..., max_rows=...)` completes only an explicitly selected,
+already applied whole typed claim. It is not called by a worker, receiver,
+ordinary recovery or producer, and advertises no v2 execution capability.
+Queue and path databases must be the configured owners alongside the ledger.
+The exact current task must retain the whole immutable claim and pin, remain
+parked, and have no registered worker. Cancelled, failed, interrupted, partial,
+unbound and changed claims refuse; cancellation never certifies application.
+
+The existing prepared owner reopens its retained incarnation without creating
+missing cache state, recomposes **every** named version and correlation, and
+requires the existing immutable complete application binding. Completion binds
+each selected component's typed logical identity, rendering semantics, provider
+version and canonical fingerprint. Every component must have matching applied
+or higher-covered native ordering evidence and pass the existing applied
+snapshot's raw-point, canonical, routed-vector, coverage and checkpoint checks.
+Missing or untyped history is not absence or deletion proof.
+
+The operation takes the existing queue/path SQLite writer transactions before
+native exclusion, then holds all three owners through qualification. It performs
+no embedding, native mutation, polling-cursor save or repair. Queue success and
+a compact versioned outcome in its existing `result_stats` commit **before**
+pending retirement. The databases use separate WALs; this is deliberately not
+described as a crash-atomic cross-database commit. The outcome retains claim and
+parent digests/incarnation, scope, policy, native domain and per-component
+version/fingerprint/deletion summaries, not copies of acquired bodies.
+Completed v2 outcomes reject later updates, including from older status writers.
+
+Only the owning transaction temporarily removes its exact legacy status or
+pending-delete fence, performs the qualified transition, then reinstalls the
+same trigger before commit. Both schema and data roll back on interruption.
+Ordinary completion, processing, worker registration, v9 clear/discard,
+replacement and legacy decoding retain their refusal behavior. Pending deletion
+uses the existing same-transaction prepared-row/incarnation retirement triggers.
+
+A failure between queue commit and pending retirement leaves the exact parent
+retained. A fresh explicit call requalifies all current evidence and finishes
+retirement without replaying application. After retirement, a lost-return retry
+uses the queue's retained summary and again qualifies every point; it cannot
+clear a newer pending claim. Mixed stale checkpoints, native-directory restores,
+policy changes or missing coverage refuse rather than repairing or recertifying
+them. This does not undo a historical queue success or qualify arbitrary backup
+restoration; it blocks that retry/retirement until the existing owner resolves
+the discrepancy. A coherent obsolete copy of every owner still needs an external
+freshness oracle, not inference from internal agreement.
+
+Work scales with the claimed target set, not unrelated source history.
+`max_rows` retains its existing **per-point** meaning, not an aggregate claim,
+payload-memory, lock-duration or physical-I/O budget. The focused native
+`tests/test_point_completion.py` packet covers real completion/reopen, higher
+coverage, partial/stale refusal, trailing work, cancellation, separate-WAL failure
+boundaries, mixed restores and transactional-fence rollback after abrupt exit.
+Small actor-free composition controls live in required unit CI. Native Windows
+and ordinary producer/worker composition remain unqualified.
 
 ### Sealed native publication suffix
 
