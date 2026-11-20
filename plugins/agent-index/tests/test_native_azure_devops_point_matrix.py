@@ -22,6 +22,8 @@ import test_azure_devops_point_worker as worker
 from test_native_delta_matrix import io_counts, measure_round
 
 from agent_index.chunking.base import Chunk
+from agent_index.indexing.component_application import _policy
+from agent_index.indexing.component_manifest import ComponentContent, ComponentVersion
 from agent_index.indexing.component_read import read_component
 from agent_index.indexing.path_index import PathIndex
 from agent_index.indexing.pending_crawl import PendingCrawls
@@ -30,9 +32,12 @@ from agent_index.indexing.point_hints import CommentVersionTarget, WorkItemRevis
 from agent_index.indexing.point_queue_consumer import PointQueueConsumer
 from agent_index.indexing.task_store import TaskRecord, TaskStatus, TaskStore
 from agent_index.indexing.work_counts import measure_reindex
-from agent_index.store.component_ledger import ComponentLedger, initialize_component_ledger
+from agent_index.store.component_ledger import (
+    IDENTITY, TABLE, ComponentEvidence, ComponentLedger, _encode, _key, initialize_component_ledger,
+)
 from agent_index.store.file_projection import capture_file_projection
 from agent_index.store.ingestion_index import prepare_ingestion_indices
+from agent_index.store.scalar_index import prepare_index
 from agent_index.store.source_layout import initialize_source_store
 
 application = worker.application
@@ -66,6 +71,32 @@ def _seed(template: worker.Fixture, directory: Path, size: int) -> tuple[worker.
                 model, chunks, np.ones((size, 2), dtype=np.float32), point_scope=hints.scope,
             ) == size
         prepare_ingestion_indices(store, max_rows=size, point_scope=hints.scope)
+    ledger = ComponentLedger(config, store)
+    absent = capture_file_projection(
+        config, store, hints.canonical_family, "unrelated-ledger/template.md",
+        max_rows=1, point_scope=hints.scope,
+    )
+    records = []
+    policy = _policy(config)
+    for index in range(size):
+        path = f"unrelated-ledger/{index}.md"
+        evidence = ComponentEvidence(
+            ComponentContent(
+                ComponentVersion(hints.canonical_family, path, 1, "fixture/v1"), "deleted", True,
+            ),
+            worker.SCOPE, policy, replace(absent, file_path=path),
+        )
+        records.append({
+            "point_key": _key(hints.canonical_family, path), "record": _encode(evidence),
+        })
+    # Bulk fixture history is not an ordinary application or a production batch API.
+    with domain._write(store.content_store.db, point_scope=hints.scope):
+        table = ledger._bound_table()
+        identity = table.schema.metadata[IDENTITY].decode("ascii")
+        domain.effect("component-evidence:" + TABLE)
+        table.add(records)
+        prepare_index(ledger, column="point_key", max_rows=size, point_scope=hints.scope)
+        ledger._bind(ledger._get_or_create_table(), identity)
     paths.mark_indexed_batch([
         (hints.canonical_family, chunk.file_path, "unchanged-fixture", 1) for chunk in chunks
     ])
@@ -74,13 +105,22 @@ def _seed(template: worker.Fixture, directory: Path, size: int) -> tuple[worker.
     ), [chunks[0], chunks[size // 2], chunks[-1]]
 
 
-def _samples(f: worker.Fixture, chunks: list[Chunk]) -> Any:
+def _samples(f: worker.Fixture, chunks: list[Chunk], size: int) -> Any:
     scope = f.claim.hints.scope
+    table = ComponentLedger(f.config, f.store)._bound_table()
+    ledger_rows = [
+        table.search().where(
+            f"point_key = '{_key(scope[1], f'unrelated-ledger/{index}.md')}'",
+        ).limit(2).to_list()
+        for index in (0, size // 2, size - 1)
+    ]
+    assert all(len(rows) == 1 for rows in ledger_rows)
     return (
         [capture_file_projection(
             f.config, f.store, chunk.source, chunk.file_path, max_rows=1, point_scope=scope,
         ) for chunk in chunks],
         [f.paths.get_entry(chunk.source, chunk.file_path) for chunk in chunks],
+        ledger_rows,
     )
 
 
@@ -100,7 +140,7 @@ def test_point_consumer_work_is_independent_of_unrelated_native_corpus(
         started = perf_counter()
         f, samples = _seed(template, tmp_path / str(size), size)
         setup_seconds = perf_counter() - started
-        before_samples = _samples(f, samples)
+        before_samples = _samples(f, samples, size)
         poll = f.config.state_file.read_bytes()
         completed: TaskRecord | None = None
         for name in ("apply", "duplicate", "superseded", "completed-retry"):
@@ -285,8 +325,9 @@ def test_point_consumer_work_is_independent_of_unrelated_native_corpus(
                     "size": size, "deleted": deleted, "round": name,
                     "setup_seconds": setup_seconds, **measurement,
                 }, sort_keys=True))
-        after_samples = _samples(f, samples)
+        after_samples = _samples(f, samples, size)
         assert before_samples == after_samples
+        assert ComponentLedger(f.config, f.store)._bound_table().count_rows() == size + 2
         assert f.store.content_store.db.open_table(f.config.content_table).count_rows() == (
             size + selected_rows
         )

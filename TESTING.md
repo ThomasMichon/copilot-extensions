@@ -7814,12 +7814,18 @@ It composes the actual finite queue consumer, configured acquisition caller,
 worker, native point store and named reader with two injected models.
 Outside measurement, the existing scoped mutation/index owners prepare
 100/10,000/100,000 unrelated content rows, corresponding vectors and path
-checkpoints. First application, equal-version duplicate, superseded claim and
+checkpoints, plus the same number of unrelated canonical ordering records.
+The latter are synthetic tombstone history for absent paths, bulk-seeded only
+in fixture setup through the existing writer, evidence serializer, scalar
+preparation and ledger binding; this is not a production batch application API.
+First application, equal-version duplicate, superseded claim and
 completed retry must have identical logical counts and measured native query
 counts/rows/read I/Os across those sizes, for live content and a comment
 tombstone. Whole-checkpoint enumeration is trapped. Native versions remain
 unchanged on duplicate/superseded/retry; full native row counts and sampled raw
 content/vector/checkpoint bytes preserve the unrelated corpus.
+Sampled raw ordering records also stay byte-identical, and the final ledger
+contains exactly the unrelated rows plus both selected components.
 
 The packet emits `POINT_NATIVE_WORK` records with Linux process I/O, elapsed
 wall/process-CPU time and separately reported setup time. Process bytes include
@@ -7836,8 +7842,8 @@ shows index/query and metadata read growth. OS/process caches are uncontrolled,
 and inclusive process counters include instrumentation overhead, not exclusively
 physical disk reads or whole-CPU/memory acceptance. Stage counters retain their
 existing instrumentation scope; the point checkpoint owner's writes are not
-inferred from a zero shared-engine counter. This packet does not populate
-100,000 ordering-evidence entries, exercise HTTP service intake, replace the
+inferred from a zero shared-engine counter. This packet does not exercise
+HTTP service intake, replace the
 service/recovery packet above, enable ordinary v2 execution, or qualify broader
 provider/consumer rollout.
 
