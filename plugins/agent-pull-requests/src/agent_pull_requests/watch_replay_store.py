@@ -629,6 +629,24 @@ class ReplayStore:
             expires_at=expires_at, checkpoint=checkpoint, persist=False,
         )
 
+    def inspect_retained_review(
+        self, operation_id: str, scope: Document, *, expires_at: int,
+        checkpoint: Checkpoint | None = None,
+    ) -> Document:
+        """Read an original v1 operation without live execution admission."""
+        def inspect(document: Document) -> Document:
+            operation = self._review_operation(document, operation_id, scope)
+            if (
+                operation["intent"]["version"] != 1
+                or "selection" in operation or "comment_observations" in operation
+            ):
+                raise ReplayStoreInvalid("retained inspection requires an original v1 operation")
+            return operation
+
+        return self._review_transaction(
+            inspect, expires_at=expires_at, checkpoint=checkpoint, persist=False,
+        )
+
     def review_intent_versions(
         self, *, expires_at: int, checkpoint: Callable[[], None] | None = None,
     ) -> tuple[int, ...]:

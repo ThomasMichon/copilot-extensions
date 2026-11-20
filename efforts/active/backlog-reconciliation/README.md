@@ -410,6 +410,21 @@ the non-public approval conversation.
 
 ## Plan
 
+The [current roadmap integration assessment](stabilization-roadmap.md#2026-11-20-integration-assessment)
+separates all six unfinished execution-plan gates from the reviewed historical
+research. The complete 15:09 PT inventory has 882 open: 292 retained historical
+assignments, 153 other creator-eligible identities and 437 excluded metadata-only
+records. A [finite research queue](roadmap-sequencing.md#finite-integration-research-queue)
+reconciles existing later coverage before new studies, refreshes selected
+priority/receiver deltas and composes only actual scoped prerequisites.
+#5512's already accepted NOT_PLANNED route continues in the unchanged Draft
+singleton effort; eight original shortlist trackers and four receiving routes
+remain, without technical completion or new disposition credit.
+The [dated journal](journal/2026/11.20-roadmap-integration-gaps.md) also follows
+through reviewed #13740's accepted idle-only slice, five unchecked technical
+rows and OPEN #13734's unreceived carrier observation. The campaign remains
+Active, 153 above fixed 729; all Plan/Validation and source/custody gates remain.
+
 The [idle-steering and existing-keeper unit](journal/2026/11.20-idle-steering-and-existing-keepers.md)
 proposes the finite #13734 idle/hint slice in the existing Active Queued
 Steering owner: supported idle submission without another unrelated turn,
