@@ -114,4 +114,107 @@ ordering, without repeating unrelated-corpus scale or adding live-provider work.
 Keep every independent parent Plan/Validation gate open; this contract grants no
 new caller, wire read, automatic recovery, source activation, repair or rollout.
 
+## Explicit caller migration proposal
+
+This **agent-recommended, review-first caller step** builds on the receiver
+merged in #13715. This proposal changes no runtime behavior. Implement it only
+after its separate review merges; caller implementation still needs its own
+focused validation and review. It closes the existing incremental-ingestion
+vision through the same operation and contract-evolution pattern, not a new
+discovery service or a general v2 client conversion.
+
+### API and ownership
+
+Add `AgentIndexClient.reindex_points(change_hints: PointChangeHints)` returning
+the existing dictionary-shaped response. The typed envelope supplies the exact
+source and complete scope; the method always submits incremental work.
+Leave `reindex(...)`, its v1 `ChangeHints` parser, ordinary CLI/MCP callers and
+all absent-requirement behavior unchanged. No caller is automatically migrated.
+Reuse `_request` and its existing identity headers and read-client restrictions.
+Do not introduce a command, endpoint, transport, registry or lifecycle operation.
+
+Keep the method as orchestration in `client.py`; put its small capability and
+receipt checks beside the existing `require_point_service` and
+`point_scope_fingerprint` helpers in `indexing/point_service_contract.py`.
+Reuse the actual `PointChangeHints` decoder and union, not a parallel DTO.
+These checks inspect values only: no store open, source acquisition, model
+initialization, activation or repair.
+
+### Selected-peer discovery and submission
+
+Require a `PointChangeHints` value and the client's already-selected
+installation/instance identity before submission. An empty installation ID is
+valid where the existing owner permits it; the instance token must be a nonempty
+string. Do not copy identity from health into the client or guess it from package
+versions. Compare both `installationId` and `instanceToken` from that selected
+peer's health response to the bound client identity.
+
+For each explicit call, use the existing health operation once and require
+`require_point_service(..., operation="execute")` for the submitted complete
+scope. In addition require a list-valued `required_admission_versions` containing
+exact integer `1`, not boolean `true`. Existing point-service v1 metadata alone
+is insufficient. Missing/malformed support, another peer, wrong scope or inactive
+execution refuses this optional feature before POST with a specific capability
+or admission explanation and the existing explicit-selection/recovery guidance.
+It must not disable the ordinary v1 API or start a service to make the check pass.
+
+Submit exactly one `POST /reindex/hints` using the existing bound headers,
+`source: change_hints.source`, `full: false`, the typed v2 `change_hints` body
+and `required_point_service_version: 1`. Health is an observation, not an
+admission reservation: the receiver's effect-side peer, pair, scope and
+lifecycle checks remain authoritative. No extra preflight or lifecycle
+transaction is introduced. One call costs one health request and at most one
+POST, independent of corpus size; it does not enumerate or fetch source history.
+
+### Receipt and failure classification
+
+Require an exact boolean `accepted`. For `true`, validate both selected-peer
+identity fields and the receiver's explicit `point_service_admission` contract
+ID, exact integer version `1` and complete scope fingerprint. Decode
+`task.change_hints` as `PointChangeHints`; require the submitted source,
+`task.full is False`, the same complete scope and
+`stored.union(submitted) == stored`, including every target and correlation.
+Return the response only after these checks. This confirms queue admission,
+not applied content, completed acquisition or continued activation.
+
+A valid `accepted: false` is refusal, not authorization to retry or downgrade.
+A missing, malformed, contradictory or lost post-submission result is unknown
+acceptance. Preserve that distinction in the caller's error rather than
+presenting it as a safe pre-submission capability refusal. Transport/status
+exceptions after submission must not imply that no effect occurred.
+Never retry automatically, send an alternate old body, switch generations,
+acknowledge work or discard a retained claim. Existing queue/pending recovery
+owners retain the uncertain operation. A capability failure before POST has
+submitted no indexing effect; it likewise does not authorize automatic upgrade,
+activation or fallback.
+
+### Focused caller qualification and sequence
+
+Receiver expansion is complete at the source boundary; it is not proof of an
+installed running version. After this caller proposal merges, implement and
+qualify the explicit API conditionally against the actual selected peer.
+Retain all old forms without deprecation in this slice. Provider rollback either
+refuses discovery or rejects the new required property through the prior strict
+DTO; it must never cause old-form replay. Runtime replacement remains independent
+of optional feature availability and preserved pending state.
+
+| Control | Caller assertion |
+|---------|------------------|
+| Old API/new receiver | Existing v1 method/parser and paused-retention behavior remain unchanged |
+| Explicit caller/current receiver | Real HTTP serialization carries bound headers and required v2 body; accepted receipt confirms peer, complete scope and full typed union |
+| Missing or declaration-only capability | No POST; exact-version checks reject malformed lists and boolean-only support without disabling ordinary calls |
+| Stale discovery | Changed peer, wrong scope or closed admission refuses the required request without legacy enqueue |
+| Rollback after positive health | A prior strict DTO that accepts ordinary v2 rejects the new property without queue writes/notification; no alternate body follows |
+| False, missing, malformed or lost receipt | Refusal or unknown acceptance remains truthful; at most one POST, no generation switch, claim discard or false completion |
+| Identity and read-only clients | Empty installation/nonempty instance follows the existing identity owner; missing instance, mismatched peer and read-only write attempts cannot bypass it |
+
+Use small pure helper and actual-method tests with inert request owners in
+required unit CI. Include malformed acceptance, identity, admission version,
+scope and missing target/correlation controls without a combinatorial matrix.
+Reuse the existing bounded opt-in HTTP/native lane for actual request headers,
+the real strict prior DTO and queue-effect assertions. A test helper that
+bypasses `_request` headers does not qualify identity-bound HTTP behavior.
+No new full-corpus/native required-CI lane, live-provider experiment, HTTP
+component read, automatic caller activation or rollout belongs in this step.
+
 Parent: [Incremental Indexing Delta Pipeline](README.md).
