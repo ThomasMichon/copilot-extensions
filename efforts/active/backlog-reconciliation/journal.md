@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-20 - Complete orphan-task adoption planning](journal/2026/11.20-orphan-task-adoption-planning.md)
+
 - [2026-11-20 - Independent inference identity and retained custody](journal/2026/11.20-independent-inference-identity-and-custody.md)
 
 - [2026-11-20 - Full-user WinGet venue and retained contracts](journal/2026/11.20-winget-venue-and-retained-contracts.md)
