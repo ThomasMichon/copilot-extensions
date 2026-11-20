@@ -136,6 +136,16 @@ native/fleet switch alone does not deliver this service intake model.
 
 ## Coordination
 
+The proposed #13487 tracking refinement retains the original finite
+existing-owner terminal-reader transition in its already-reviewed T3 home.
+Preserve the current transition driver, writer/reader/cache/ReplayStore,
+native and resource custodians, all actual holds and every broader parent
+gate. Bootstrap and metadata-only adoption do not qualify populated generation
+or active-native-watch transition. Normal reviewed complete domain/intake
+delivery and current applicable source/receiver/custody readback precede a
+separate administrative source judgment; no claim expiry, generic ACK,
+implementation appointment, service stop or installed migration follows.
+
 The proposed finite #11711 terminal-mapping result lane below stays with this
 existing PR-service process/workspace, observer/store and terminal-retirement
 owner. It does not duplicate the forge client, move a workspace, take over
@@ -756,6 +766,11 @@ No remote source mutation, merge evidence, claim settlement or finalization is i
   shadow qualification; no shadow-triggered mutations.
 - [ ] Complete P6 optional policy-gated automation, thin presentation and staged
   legacy retirement only after compatibility and consumer-dependency proof.
+
+#### Finite existing-owner retained-reader transition - #13487
+
+- [ ] **P13487:** Complete the [original finite retained-volume transition](retained-terminal-reader-transition.md), preserving its existing owner, explicit stopped-service selection, writer lease, adoption transactions and all original state/unknown-effect custody.
+- [ ] **V13487:** Qualify the [existing interruption/retry, concurrent-owner and rollback controls](retained-terminal-reader-transition.md#serial-delivery-and-acceptance), retaining current narrower source credit and unchecked positive populated/native-active acceptance without substituting whole-parent completion.
 
 ### Governed watch-owner cutover prerequisite
 
@@ -1507,6 +1522,14 @@ or silently expanding a bounded source claim.
 
 ## Validation Plan
 
+- [ ] **G13487:** Resolve P13487/V13487 and continuing Coordination against
+  the complete original transition and applicable existing T3 child clauses.
+  Preserve namespace/service identity, cache bytes, registrations/events/ACKs,
+  unknown recovery, actual reader/writer exclusion, old-reader/layout/capacity
+  refusal and original finite bounds. Bootstrap/metadata-only source does not
+  qualify the unchecked positive generation/native-active outcomes; source
+  acceptance, full T3, provider/installed and whole-parent gates stay distinct.
+
 - [ ] **G11711:** Resolve every P11711/V11711 and continuing Coordination
   clause at its original standalone process/TLS and bounded-operation tier:
   actual interleaving qualification, deterministic original operation OR
@@ -1944,6 +1967,7 @@ callback an implicit credential store.
 
 - [2026-11-20 - Windows version-2 sealing](journal/2026/11.20%20Windows%20version-2%20sealing.md)
 - [2026-11-20 - Prepared-origin phase progression](journal/2026/11.20%20Prepared-origin%20phase%20progression.md)
+- [2026-11-20 - Finite retained-reader tracking proposed](../backlog-reconciliation/journal/2026/11.20-path-attribution-and-retained-transitions.md)
 - [2026-11-20 - Windows sealed receiver](journal/2026/11.20%20Windows%20sealed%20receiver.md)
 - [2026-11-20 - Native domain/boot source prerequisite](journal/2026/11.20%20Native%20domain%20boot%20source.md)
 - [2026-11-20 - Windows abrupt-controller qualification](journal/2026/11.20%20Windows%20abrupt-controller%20qualification.md)

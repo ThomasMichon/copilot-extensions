@@ -1077,3 +1077,40 @@ retains the evidence limits and independent unresolved outcomes.
 The [canonical P/V details](../test-portfolio-rationalization/fixture-authority-and-cleanup.md)
 belong to the same Phase 4/5 domain Plan; its sixteen P/V state anchors and
 four actual global G rows remain solely in the Portfolio README.
+
+## Fixture-authority and cleanup receiving accepted - 2026-11-20 UTC
+
+| Source | Disposition | Primary canonical owner | Current tracker outcome |
+|---|---|---|---|
+| #9348 | routed after actual complete reviewed delivery/readback | Existing Portfolio Phase 4 tools/workflow P9348/V9348/G9348 | Separate `NOT_PLANNED` retirement; audited explanation 7038245608; all five technical rows remain unchecked |
+| #12968 | routed after actual complete reviewed delivery/readback | Existing Portfolio Phase 4 Worktrees P12968/V12968/G12968 | Separate `NOT_PLANNED` retirement; audited explanation 7038271959; existing #13297 Draft/older-publisher/review hold and actual source owner retained |
+| #12973 | routed after actual complete reviewed delivery/readback | Existing Portfolio Phase 5 owning-runner P12973/V12973/G12973 | Separate `NOT_PLANNED` retirement; audited explanation 7038279947; historical unknown cause, attempt-bound evidence alternatives and actual cleanup custody retained |
+| #13164 | routed after actual complete reviewed delivery/readback | Existing Portfolio Phase 4 Worktrees P13164/V13164/G13164 | Separate `NOT_PLANNED` retirement; audited explanation 7038288323; distinct positive/unchanged/negative outcomes and neighboring families retained |
+
+#13663 supplied the complete six-document domain/intake delivery after
+current-head Copilot approval, all four findings resolved and all required
+checks green. Complete current receiving/source/custody readback preceded
+each independently audited explanation and closure. Original reports and all
+prior authored discussions remain exact; all twenty technical rows remain
+unchecked. This append preserves every earlier conditional row and actual
+owner/hold, with no implementation, native run, cleanup or resource release.
+
+## Proposed Windows attribution and retained-transition receiving - 2026-11-20 UTC
+
+| Source | Disposition | Primary canonical owner | Retained gates |
+|---|---|---|---|
+| #13598 observed Windows bytecode attribution | routed (proposed; effective after actual reviewed complete domain acceptance) | Existing Portfolio Phase 4 tools/shared-observer P13598/V13598/G13598 through Phase 7 | Exact CPython 3.11.9 original observed profile, relocated cache prefix, declared-source binding and fail-closed negatives; operator-selected separate tracking from #6237 preserved, source remains OPEN |
+| #13667 retained-capture Windows spelling | routed (proposed; effective after actual reviewed complete domain acceptance) | Existing Installer Upgrade Recovery Phase 2 source-only U6-13667/P13667/V13667/G13667, outside the selected whole-update cases | Same admitted completed directory, all existing identity checks, actual capture AND validation/negative fixture; no latest-update-entry/installed-consumer/whole-update prerequisite for this finite result; parent incoming/master-cycle readiness and actual custodians remain separate |
+| #13487 finite retained-reader transition | routed (proposed; effective after actual reviewed complete domain acceptance) | Existing Durable PR-Watch T3 P13487/V13487/G13487 and already-reviewed transition child | Existing bounded driver and complete lease/adoption/state/unknown-effect/interruption/retry/rollback contract; narrower source credit is not positive generation/native-active or full T3/provider/installed acceptance |
+
+These are three distinct contracts, not one Windows or retention cause.
+Normal review must deliver the complete direct domain Plan, local and actual
+global Validation, continuing Coordination, dated Journal and these routes.
+Ledger-only publication is not domain acceptance. All ten new technical
+rows remain unchecked. Keep all three source trackers OPEN during proposal;
+current applicable source/receiver/custody readback and separate source-specific
+judgments remain, and this intake does not override #13598's selected separate
+tracking. No new issue, executor, generic ACK, unrelated whole-parent gate,
+runtime/observer change, native test, migration or source/resource transfer
+follows. The [complete source crosswalk](../backlog-reconciliation/journal/2026/11.20-path-attribution-and-retained-transitions.md)
+retains evidence tiers, prior outcomes and current ownership.
