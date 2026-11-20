@@ -219,7 +219,8 @@ do not stringify objects, run `repr`, or add missing source identities.
   `trigger` admits `daemon_restart`, `handoff`, `interrupt`, `resume`,
   `resync`, `other`. `stop_reason` admits `end_turn`, `max_tokens`,
   `max_turn_requests`, `refusal`, `cancelled`, `canceled`, `interrupted`,
-  `other`. `event_log.from` is a log epoch, not a state; omit it.
+  `other`. For `event_log`, both `from` and `to` are log epochs, not states;
+  omit both before validating the remaining fields.
 * Optional nonnegative integer: `event_id`, `event_count`. Preserve original
   cursor values up to `2^53-1`; never use a timestamp as a duplicate key.
 * Health fields: finite numeric `context_pct` and `threshold` in 0–100,
@@ -229,7 +230,9 @@ do not stringify objects, run `repr`, or add missing source identities.
   Their presence in a legacy reducer is not shared-export permission.
 * Unknown record families, unknown enum values and invalid admitted values
   drop the record with accounting. Unknown fields in a known reducer record
-  are omitted, not passed through. Missing optional fields stay absent.
+  are omitted, not passed through. Missing or null optional fields stay absent;
+  this includes empty-rebuild state summaries. Omission precedes type/enum
+  validation; a non-null invalid admitted value still drops the record.
 
 The reducer can currently forward other session status strings. This narrower
 projection deliberately drops those records rather than export arbitrary text;
@@ -397,7 +400,7 @@ exit on direct helper calls or a mock sink alone.
 | Lane/owner | Required finite witnesses |
 |---|---|
 | U0 documentation checks | Resolve changed local links, parse synthetic JSON examples, check configuration/framing/budget/compatibility consistency, preserve reserved source diff; normal current-head review and required CI |
-| U1 focused shared/Bridge unit packet | Table-driven precedence, invalid/duplicate/oversized config, literal argv, snapshot bounds, framing/Unicode/partial writes, missing origin, disabled no-op work counts, old factory/spool controls, route/queue cap and loss accounting |
+| U1 focused shared/Bridge unit packet | Table-driven precedence, invalid/duplicate/oversized config, literal argv, snapshot bounds, framing/Unicode/partial writes, populated/empty rebuild projection, missing origin, disabled no-op work counts, old factory/spool controls, route/queue cap and loss accounting |
 | U1 real consumer boundary | In an isolated fixture root, use normal Bridge owner config/admission and an actual existing lifecycle transition; independent stdlib-only receiver reads stdin and writes fixture-owned evidence; read it back and match schema, cwd, source and sequence; importing an adopter package into Bridge is forbidden |
 | U2 coverage | Dispatch through the same parser/runner; two interleaved admitted origins, explicit service-only binding, deferred work and unbound legacy controls; inventory every actual shared-seam consumer as adopted, inapplicable or tracked |
 | U3 selected native Windows/Linux | Literal paths with spaces, exact environment/handle isolation, one reused child, crash/nonreader/large-output controls, full queue, partial/broken pipe, timeout/cancel/parent-loss, descendant cleanup and finite exit drain |
