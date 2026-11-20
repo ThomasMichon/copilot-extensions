@@ -153,16 +153,17 @@ class VectorTable:
             self._validate(chunks, vectors)
             if len({chunk.chunk_id for chunk in chunks}) != len(chunks):
                 raise ValueError("Point vector preflight requires unique chunk IDs")
-            self._require_point_binding(reserve_segment=bool(chunks))
+            canonical_table = self._require_point_binding(reserve_segment=bool(chunks))
             content = ContentStore(
                 domain.path, table_name=self._content_table, point_scope=point_scope,
             )
+            content._table = canonical_table
             return projection_records(
                 self._db, self._content_table, chunks, bounded_content=content,
                 require_current_input=True, point_scope=point_scope,
             )
 
-    def _require_point_binding(self, *, reserve_segment: bool) -> None:
+    def _require_point_binding(self, *, reserve_segment: bool) -> Any:
         from .content_store import _CONTENT_SCHEMA
         from .scalar_index import MAX_SEGMENTS, ScalarIndexPreparationRequired, inspect_index, require_budget
 
@@ -176,15 +177,18 @@ class VectorTable:
         if (len(names) != 2 or not names <= set(self._db.list_tables().tables)
                 or not names <= domain.receipt()["versions"].keys()):
             raise SourceLayoutError("Point vectors require distinct prepared content and vector tables")
-        if (not self._db.open_table(self._content_table).schema.equals(_CONTENT_SCHEMA)
-                or not self._db.open_table(self._table_name).schema.equals(self._schema)):
+        canonical = self._db.open_table(self._content_table)
+        vector = self._db.open_table(self._table_name)
+        if (not canonical.schema.equals(_CONTENT_SCHEMA)
+                or not vector.schema.equals(self._schema)):
             raise SourceLayoutError("Point vector content or model schema is incompatible")
-        state, _ = inspect_index(self._db.open_table(self._table_name), column="chunk_id")
+        state, _ = inspect_index(vector, column="chunk_id")
         if not state.prepared:
             raise ScalarIndexPreparationRequired("Point vectors require a prepared chunk-ID index")
         require_budget(state, 0)
         if reserve_segment and state.segments >= MAX_SEGMENTS:
             raise ScalarIndexPreparationRequired("Point vector preflight needs a reserved index segment")
+        return canonical
 
     @source_write
     def _upsert(self, chunks: list[Chunk], vectors: np.ndarray[Any, Any]) -> int:

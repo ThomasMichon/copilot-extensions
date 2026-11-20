@@ -90,6 +90,8 @@ must resolve to the domain, and distinct prepared content/vector tables must
 match their expected schemas. The vector chunk-ID index needs zero uncovered
 physical rows; nonempty input also reserves room below the existing segment cap.
 Canonical fields are compared once through the prepared chunk-ID index.
+The canonical table handle opened during binding is reused for that lookup;
+an open failure propagates without the generic create-table fallback.
 
 Preflight returns selected raw canonical fields at that read boundary, not a
 durable receipt, model-to-table ownership proof or permission to write.

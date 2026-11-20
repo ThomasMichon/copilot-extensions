@@ -10,7 +10,8 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from types import SimpleNamespace
+from typing import Any, cast
 
 import numpy as np
 import pytest
@@ -247,7 +248,42 @@ def test_point_vector_preflight_requires_prepared_index_and_one_canonical_read(
         assert snapshot(config.data_dir) == before
     prepare_ingestion_indices(store, max_rows=len(items) + 1, point_scope=scope)
     calls: list[int] = []
+    plans: list[str] = []
     projection = source_projection.projection_records
+    search = type(table).search
+
+    class ObservedQuery:
+        def __init__(self, query: Any) -> None:
+            self.query = query
+
+        def where(self, predicate: str) -> ObservedQuery:
+            assert predicate.startswith("chunk_id IN ("), predicate
+            self.query = self.query.where(predicate)
+            return self
+
+        def select(self, columns: list[str]) -> ObservedQuery:
+            assert set(columns) == set(content_record(items[0]))
+            self.query = self.query.select(columns)
+            return self
+
+        def limit(self, rows: int) -> ObservedQuery:
+            assert rows == 2
+            self.query = self.query.limit(rows)
+            return self
+
+        def to_list(self) -> list[dict[str, Any]]:
+            plan = self.query.analyze_plan()
+            assert "ScalarIndexQuery" in plan, plan
+            scanned = re.findall(r"\brows_scanned=(\d+)", plan)
+            assert scanned and sum(map(int, scanned)) <= 1, plan
+            plans.append(plan)
+            return cast(list[dict[str, Any]], self.query.to_list())
+
+    def observed_search(self: Any, *args: Any, **kwargs: Any) -> Any:
+        query = search(self, *args, **kwargs)
+        if self.name == config.content_table:
+            return ObservedQuery(query)
+        return query
 
     def counted(*args: Any, **kwargs: Any) -> Any:
         calls.append(1)
@@ -257,6 +293,7 @@ def test_point_vector_preflight_requires_prepared_index_and_one_canonical_read(
         raise AssertionError("point preflight must not perform native mutations")
 
     monkeypatch.setattr(source_projection, "projection_records", counted)
+    monkeypatch.setattr(type(table), "search", observed_search)
     for method in ("delete", "add", "update", "create_scalar_index", "create_index"):
         monkeypatch.setattr(type(table), method, forbidden)
     with domain._write(store.content_store.db, point_scope=scope):
@@ -266,13 +303,66 @@ def test_point_vector_preflight_requires_prepared_index_and_one_canonical_read(
             point_scope=scope,
         ) == {items[0].chunk_id: content_record(items[0])}
         assert snapshot(config.data_dir) == before
-        plan = (
-            table.search().where(f"chunk_id = '{items[0].chunk_id}'")
-            .select(["chunk_id"]).limit(3).analyze_plan()
+    assert calls == [1] and len(plans) == 1
+
+
+def test_point_vector_preflight_reuses_open_canonical_table_without_creation_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_index.store import content_store
+
+    monkeypatch.setenv("AGENT_INDEX_STORE_LAYOUT", LAYOUT)
+    profile = ModelProfile("small", "fixture", dim=2)
+    config = IndexConfig(data_dir=tmp_path / "point", model_profiles={"small": profile})
+    scope = claim().scope
+    store = initialize_source_store(config, point_scope=scope)
+    domain = store._source_domain
+    assert domain is not None
+    item = Chunk("retained text", "one.md", "text", "markdown", 1, 1, scope[1])
+    with domain._write(store.content_store.db, point_scope=scope):
+        domain.effect("fixture-canonical-seed")
+        store.content_store._get_or_create_table().add([{**content_record(item), "indexed_at": 0.0}])
+    prepare_ingestion_indices(store, max_rows=1, point_scope=scope)
+    opens: list[int] = []
+    open_table = type(store.content_store.db).open_table
+    content_type = ContentStore
+
+    def unavailable(*_args: Any, **_kwargs: Any) -> Any:
+        opens.append(1)
+        raise OSError("fixture canonical table open unavailable")
+
+    def forbidden(*_args: Any, **_kwargs: Any) -> Any:
+        raise AssertionError("read-only preflight attempted canonical table creation")
+
+    def existing_content(*args: Any, **kwargs: Any) -> ContentStore:
+        content = content_type(*args, **kwargs)
+        content._db = SimpleNamespace(
+            uri=content._db.uri, open_table=unavailable, create_table=forbidden,
         )
-        assert "ScalarIndexQuery" in plan, plan
-        assert sum(int(n) for n in re.findall(r"\brows_scanned=(\d+)", plan)) <= 2, plan
-    assert calls == [1]
+        return content
+
+    def failed_binding_open(self: Any, name: str, *args: Any, **kwargs: Any) -> Any:
+        if name == config.content_table:
+            return unavailable()
+        return open_table(self, name, *args, **kwargs)
+
+    with domain._write(store.content_store.db, point_scope=scope):
+        before = snapshot(config.data_dir)
+        with monkeypatch.context() as patch:
+            patch.setattr(content_store, "ContentStore", existing_content)
+            assert store.preflight_point_vectors(
+                "small", [item], np.ones((1, 2), dtype=np.float32), point_scope=scope,
+            ) == {item.chunk_id: content_record(item)}
+            assert opens == []
+            assert snapshot(config.data_dir) == before
+            patch.setattr(type(store.content_store.db), "open_table", failed_binding_open)
+            patch.setattr(type(store.content_store.db), "create_table", forbidden)
+            with pytest.raises(OSError, match="canonical table open unavailable"):
+                store.preflight_point_vectors(
+                    "small", [item], np.ones((1, 2), dtype=np.float32), point_scope=scope,
+                )
+            assert opens == [1]
+            assert snapshot(config.data_dir) == before
 
 
 def test_point_vector_preflight_reserves_a_segment_only_for_nonempty_input(
