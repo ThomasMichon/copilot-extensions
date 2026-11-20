@@ -10,6 +10,7 @@ from typing import Any
 
 from .ordinary_native_bindings import reservation_native_identity
 from .queue_pool_placement import pool_worker_matches
+from .queue_records import TaskError
 
 # LEFT JOIN is deliberate: an unattributable preparation is unknown, not absent.
 # Origin is the immutable acquisition event; continuation can change the native
@@ -95,13 +96,13 @@ def _terminal_origin(
         JOIN pool_reservation_bindings b ON b.reservation_key=s.key AND b.registration_id=p.registration_id
           AND b.machine=p.machine AND b.env=p.env
         JOIN workspace_queue_identity q ON q.singleton=1
-        JOIN task_events e ON e.task_id=t.id AND e.worker=t.completed_by AND e.ts=t.completed_at
+        JOIN task_events e INDEXED BY idx_task_events_task ON e.task_id=t.id AND e.worker=t.completed_by AND e.ts=t.completed_at
             AND e.note='complete' AND e.from_status IN ('started','suspended') AND e.to_status='submitted'
         WHERE t.id=? AND t.status='completed' AND t.owner IS NULL
           AND s.driver IN ('cli','ordinary-bridge') AND s.task_relationship_required=0
           AND s.task_relationship_event_id IS NULL AND s.state IN ('failed','settled','rearmed')
           AND s.release_requested=1 AND s.native_release_pending=0 AND s.cooling_token IS NULL
-          AND NOT EXISTS (SELECT 1 FROM task_events later WHERE later.task_id=t.id AND later.id>e.id
+          AND NOT EXISTS (SELECT 1 FROM task_events later INDEXED BY idx_task_events_task WHERE later.task_id=t.id AND later.id>e.id
                           AND (later.note='complete' OR later.note='complete retry: result recorded'
                                OR later.to_status NOT IN ('submitted','completed')))
         LIMIT 2""",
@@ -114,8 +115,13 @@ def _terminal_origin(
         not isinstance(r["execution_machine"], str)
         or not pool_worker_matches(r["completed_by"], r["execution_machine"], r["worktree"])
         or not pool_worker_matches(r["completed_by"], r["pool_machine"], r["worktree"])
-        or reservation_native_identity(conn, r) != native_id
     ):
+        return None
+    try:
+        observed_native = reservation_native_identity(conn, r)
+    except TaskError:
+        return None
+    if observed_native != native_id:
         return None
     return {
         "version": 1,
