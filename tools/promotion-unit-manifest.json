@@ -5963,6 +5963,7 @@
         "fleet-manager/src/fleet_manager/client_construction.py",
         "tools/native_qualification_receiver.py",
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_shell.py",
+        "libs/agent-procutil/src/agent_procutil/_job_scopes.py",
         "tools/native_qualification_contract.py",
         "tools/plugin_test_containment.py",
         "tools/plugin_test_lifecycle.py",
