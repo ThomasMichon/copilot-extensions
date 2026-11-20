@@ -12,12 +12,16 @@ confirmed missing patches, implementation assignments or an exhaustive
 execution order. The original issue, all refinements, canonical effort and
 actual custodian retain authority over each selected slice.
 
-**Continuing routing:** The [current routing correction](roadmap-current-qualification.md#2026-11-15-routing-and-completed-nomination-correction)
+**Continuing routing:** The [current routing correction](roadmap-current-qualification.md#2026-11-20-singleton-tracking-route-and-current-coverage)
 retains #9323 to OPEN #9295 and #3002 to OPEN #2879, and adds #4220 to
-OPEN #5768 and the existing Index standalone-service effort. All three are
-tracking consolidations, not completed fixes or new hard prerequisites.
+OPEN #5768 and the existing Index standalone-service effort. The already
+retired #5512 nomination continues in the existing Draft singleton-correctness
+effort, with sole ownership, both implementation phases and all validation
+unchanged. All four are tracking routes, not completed fixes or new hard
+prerequisites.
 The pinned twelve-row nomination below remains historical; nine original
-selections remain open alongside those three receiving routes.
+selections were open at the earlier route refresh; the current complete
+inventory has eight open originals and those four continuing routes.
 
 **Reviewed publication:** #9408 merged on 2026-10-28 at 17:36:32 UTC
 (10:36:32 PDT) as `86a0145e35df097d1749dfc141fcee3b608d3dec`, after
