@@ -156,7 +156,7 @@ After the reviewed proposal, the operator admitted execution:
   application candidate without replacing the pending parent. Explicit
   `PreparedApplication` consumption now requalifies that complete binding before
   chunking/embedding and uses scoped native vector reads; ordinary point-domain
-  execution and current-claim completion coverage remain open.
+  execution and acquisition-to-worker composition remain open.
   A [retained component carrier](../../../plugins/agent-index/docs/architecture.md#component-recovery-carrier-application-unsupported)
   preserves ordering inputs behind pre-application refusal, including changed
   replacement and premature-completion refusal. Pure content/version comparison
@@ -185,8 +185,12 @@ After the reviewed proposal, the operator admitted execution:
   plus explicitly budgeted point-index preparation, typed-claim application
   and its exact sealed publication suffix, are available. A separate explicit
   whole-claim completion composes current queue/pending/native/checkpoint owners
-  with requalifying lost-return retries; ordinary v2 execution and automatic
-  partial-effect/restore reconciliation remain unimplemented.
+  with requalifying lost-return retries. An explicit
+  [retained worker](../../../plugins/agent-index/docs/component-ledger.md#explicit-retained-point-worker)
+  composes fully acquired claims through prepared/native application and that
+  completion under the existing source writer. Acquisition/eligibility callers,
+  ordinary v2 execution and automatic partial-effect/restore reconciliation
+  remain unimplemented.
 - [ ] Persist acquisition progress so retry/restart does not restart a
   corpus-wide listing.
 - [ ] Move authoritative full enumeration into separately budgeted, resumable
