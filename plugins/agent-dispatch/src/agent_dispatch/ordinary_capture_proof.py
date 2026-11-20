@@ -55,7 +55,9 @@ def original_evidence(conn: sqlite3.Connection, request: dict[str, Any]) -> dict
             for item in (current, prepared)
         )
         or current["allocation_reservation_key"] != root["key"]
-        or any(
+        # All three SELECT * rows share one physical schema. A pre-cohort
+        # producer had no cohort to compare; never project one onto its history.
+        or "allocation_cohort" in root.keys() and any(
             item["allocation_cohort"] != root["allocation_cohort"] for item in (current, prepared)
         )
         or any(

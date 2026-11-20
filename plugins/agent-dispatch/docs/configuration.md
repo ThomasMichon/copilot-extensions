@@ -110,6 +110,12 @@ If retirement, terminal task status or claim settlement is unconfirmed, startup 
 leaves the old schema intact. Keep the original coordinator and writer configuration for settlement,
 then retry the upgrade. Neither drain nor switching writers can infer a missing historical policy.
 Settled history remains unattributed; do not backfill policy or edit receipts.
+For a retried allocation, the closed claim must identify its preparing attempt and
+any continuation. The executing native's retained creation record must attest the
+original allocation stamp, workspace incarnation and writer. This can account for
+a retired project-bound root that never recorded a workspace itself. A project
+name or terminal task alone cannot: missing native creation evidence, conflicting
+receipts or unresolved sends still block the upgrade.
 
 After a confirmed worker decline, a *new* unselected allocation may proceed only once the old claim is
 closed and its native is retired. This remains true when the admission settings
