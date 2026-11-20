@@ -598,6 +598,7 @@ No native domain probe or live migration/rollout is authorized.
 
 ### Windows version-2 sealing writer
 
+**Source merged in #13674; no installed migration or activation.**
 The internal `WatchWriter.seal_recovered_state_transition()` source API progresses
 only an already adapted v2 journal. It shares the existing Windows physical
 sealing owner, no-replace moves and native lease order; it does not relax the
@@ -637,6 +638,20 @@ readiness, callbacks, isolated registry creation and final import stay fenced.
 The actual-domain/boot, complete released-history, governed-entry and final
 authority-selection gates remain open. No installation, migration, service
 change or rollout is implied.
+
+The contained Windows historical-source packet exercises both journal versions
+against all six pinned historical closures, including three released-source
+snapshots with their own vendored lease/startup dependencies. A delayed native
+open prevents sealing until it closes; a raced cold creation remains blocking
+after release rather than being overwritten or adopted. After successful
+sealing, each historical `serve` and `restart` entry refuses at the physical
+barrier. Separate real child processes exit abruptly at preparation, staging,
+release, original-file move, barrier installation and completed sealing; cold
+recovery of both journal versions preserves the original inode, legacy bytes
+and disabled effects. Version 2 additionally preserves its exact prepared
+origin and current-controller record. The combined packet passes 42 cases
+with one Linux-specific skip on Windows. These are source-closure and native
+process proofs, not complete released-install or domain/boot qualification.
 
 ### Internal Linux sealing and recovery
 
