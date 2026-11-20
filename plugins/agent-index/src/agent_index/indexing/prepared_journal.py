@@ -31,6 +31,7 @@ class PreparedJournal:
         self, paths: PathIndex, source: str, scope: str, payload: str, *,
         manifest: CrawlManifest | None = None, full: bool | None = None,
         point_claim: PendingPointClaim | None = None,
+        require_existing: bool = False,
     ) -> None:
         if (manifest is None) != (full is None) or full is not None and type(full) is not bool:
             raise ValueError("Prepared manifest and boolean full mode must be supplied together")
@@ -54,6 +55,21 @@ class PreparedJournal:
         self.point_claim = point_claim
         self._batch_plan: bytes | None = None
         with closing(paths._connect()) as conn, conn:
+            if require_existing:
+                conn.execute("BEGIN")
+                row = conn.execute(
+                    "SELECT scope, payload FROM pending_crawls WHERE source = ?", (source,),
+                ).fetchone()
+                bound = conn.execute(
+                    "SELECT scope, generation FROM prepared_crawl_parents WHERE source = ?", (source,),
+                ).fetchone()
+                if (
+                    row is None or (row["scope"], row["payload"]) != (scope, payload)
+                    or bound is None or bound["scope"] != scope
+                ):
+                    raise PendingCrawlConflict("Prepared completion requires its existing pending parent")
+                self.generation = bound["generation"]
+                return
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
                 "SELECT scope, payload FROM pending_crawls WHERE source = ?", (source,),

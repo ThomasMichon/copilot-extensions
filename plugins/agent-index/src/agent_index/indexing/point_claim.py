@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -10,6 +11,7 @@ from agent_index.indexing.point_hints import PointChangeHints
 
 if TYPE_CHECKING:
     import sqlite3
+    from collections.abc import Iterator
 
     from agent_index.indexing.task_store import TaskRecord
 
@@ -77,3 +79,23 @@ def protect_point_parents(conn: sqlite3.Connection) -> None:
             f"BEFORE {action} ON pending_crawls WHEN {condition} BEGIN "
             "SELECT RAISE(ABORT, 'Point-claim pending completion is not supported'); END",
         )
+
+
+@contextmanager
+def _point_completion_transition(conn: sqlite3.Connection, fence: str) -> Iterator[None]:
+    """Keep the legacy fence installed except inside one owning writer transaction."""
+    if not conn.in_transaction or fence not in {
+        "tasks_point_execution_unsupported_update", "pending_point_claim_delete",
+    }:
+        raise ValueError("Point completion requires its owning transaction and exact fence")
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = ?", (fence,),
+    ).fetchone()
+    if row is None or not isinstance(row[0], str):
+        raise ValueError("Point completion fence is missing")
+    # SQLite rolls back both the schema and data on interruption before commit.
+    conn.execute(f"DROP TRIGGER {fence}")
+    try:
+        yield
+    finally:
+        conn.execute(row[0])

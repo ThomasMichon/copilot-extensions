@@ -191,11 +191,12 @@ Chunking and embedding remain outside native writer exclusion.
 Restart can reuse completed model pairs without changing canonical rows, file
 checkpoints, source state, pending work or the parked queue claim.
 Default preparation still refuses point envelopes, and
-`PreparedComponentApplication` does not yet compose point-domain publication.
-No native application, task acknowledgement, pending retirement, cursor advance,
-executor admission or capability advertisement follows from preparation. Application and
-completion still need their own owner-qualified transition and per-target
-applied/higher-covered proof. Ordinary recovery is not that transition.
+the separate explicit
+[typed-claim application and completion](component-ledger.md#explicit-native-application)
+compose point-domain publication and whole-claim qualification through their
+existing owners. No native application, task acknowledgement, pending retirement,
+cursor advance, executor admission or capability advertisement follows from
+preparation alone. Ordinary recovery is not either explicit transition.
 `tests/test_prepared_points.py` covers restart, exact-target completeness,
 conflicts and stale parents; `tests/test_azure_devops_points.py` connects the
 named-version HTTP mock reader to this retention path and proves body reuse.
