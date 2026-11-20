@@ -44,6 +44,18 @@ These are candidate families, not assertions that each needs a new defect or
 issue. Each implementation unit must identify a
 specific failing boundary, supported contract and unconflicted owner.
 
+## U13617 - Retained legacy supervisor
+
+The [complete planned case](legacy-supervisor-upgrade.md) joins the existing
+ordinary-update recovery objective, not the optional source-only capture
+subcase below. All seven P13617/V13617/G13617 technical checks remain
+unchecked in the ROOT. The existing selected-case controls still apply at
+their actual scope; no implementation or native operation is appointed.
+
+| Before-state | Required outcome and distinct evidence | Existing coordination |
+|---|---|---|
+| An incoming Windows Dispatch coordinator is healthy, but post-install reconciliation encounters a retained legacy master without completed-cycle support or an acceptable prepared record. | Supported owner-controlled transition OR actionable prerequisite, actual legacy/current native and cycle evidence, protected workers/accepted operations, truthful full-update and immediate-repeat results. Keep the separately reported coordinator-only preservation result and optional capture independent; old support cannot veto authoritative incoming replacement. | #13617 under #10377; existing Dispatch supervisor, installer, completed-cycle, worker, native-process and capture/restoration owners. No fabricated preparation, duplicate master, process action or claim release follows from planning. |
+
 ## Finite source-only capture subcase
 
 U6-13667 is an optional capture/validation subcase of the existing
