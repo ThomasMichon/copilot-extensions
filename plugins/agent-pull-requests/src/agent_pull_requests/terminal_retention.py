@@ -396,6 +396,8 @@ class TerminalRetentionStore:
             if checkpoint is not None:
                 checkpoint()
             lifecycle_checkpoint()
+            if retained_cache is not None and retained_cache.checkpoint is not None:
+                retained_cache.checkpoint()
 
         def adopt(document: Document) -> Document:
             lifecycle_checkpoint()
@@ -422,15 +424,10 @@ class TerminalRetentionStore:
                 from .retained_live_cache import validate as validate_metadata
                 original_cache = retained_cache
 
-                def cache_current() -> None:
-                    current()
-                    if original_cache.checkpoint is not None:
-                        original_cache.checkpoint()
-
                 request_cache = RequestCache(
                     original_cache.owner_root, self.owner.namespace,
                     max_bytes=original_cache.max_bytes, max_generations=original_cache.max_generations,
-                    service_identity=self.owner.service_identity, checkpoint=cache_current,
+                    service_identity=self.owner.service_identity, checkpoint=current,
                 )
                 validate_metadata(document, request_cache, retained_targets, current)
                 from .terminal_recovery import PROTOCOL as RECOVERY

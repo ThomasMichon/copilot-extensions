@@ -267,8 +267,11 @@ class GenerationCache:
 
     def inspect_retained(
         self, visit: Callable[[Document], None], visit_pointer: Callable[[Document], None],
+        *, allow_generations: bool = True,
     ) -> None:
         """Validate committed cache objects once under the original finite owner."""
+        if type(allow_generations) is not bool:
+            raise ValueError("explicit retained generation inspection mode required")
         with self._transaction() as lock:
             self._check(lock)
             total = self.descriptor.stat().st_size
@@ -288,6 +291,8 @@ class GenerationCache:
                     total += path.stat().st_size
                     if total > self.max_bytes:
                         raise CacheFull("retained cache exceeds its configured capacity")
+                    if not allow_generations:
+                        raise CacheInvalid("retained generations require durable original observation association")
                     generation = self._read(path, MAX_GENERATION_BYTES)
                     scope = _scope(generation.get("scope"))
                     _generation(generation, scope)

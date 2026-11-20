@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 
 
 def _validate_cache(cache: GenerationCache, checkpoint: Callable[[], None]) -> None:
+    checkpoint()
     with cache._transaction():
         checkpoint()
         if cache.descriptor.stat().st_size > cache.max_bytes:
@@ -99,20 +100,25 @@ def adopt(config: HostConfig) -> None:
             validate, expires_at=expires_at, checkpoint=lifecycle, persist=False,
         )
         cache = workspace.cache(store)
-        cache.checkpoint = lifecycle
+
+        def cache_current() -> None:
+            lifecycle()
+            if cache.checkpoint is not None:
+                cache.checkpoint()
+
         if retained:
             terminal.adopt(
-                store, lifecycle, expires_at, retained_cache=cache,
+                store, cache_current, expires_at, retained_cache=cache,
                 retained_targets=[
                     {"scope": scope, "account": account, "repo": repo}
                     for (account, repo), scope in scopes.items()
                 ],
             )
         else:
-            _validate_cache(cache, lifecycle)
-            terminal.adopt(store, lifecycle, expires_at)
+            _validate_cache(cache, cache_current)
+            terminal.adopt(store, cache_current, expires_at)
         if mapping is not None:
             mapping(store).adopt(
-                lifecycle_checkpoint=lifecycle, expires_at=expires_at, checkpoint=lifecycle,
+                lifecycle_checkpoint=cache_current, expires_at=expires_at, checkpoint=cache_current,
             )
-        lifecycle()
+        cache_current()

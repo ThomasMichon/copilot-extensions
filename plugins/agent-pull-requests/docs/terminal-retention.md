@@ -37,16 +37,21 @@ The optional executing-core declaration
 `agent-pull-requests.retained-cache-metadata-adoption/v1` supports an existing-owner
 transition through that same adoption transaction. Its optional `retained_cache`
 and `retained_targets` inputs must be supplied together and retain the original
-root, namespace and service identity. This finite transition preserves complete
+root, namespace and service identity. Target bindings validate canonical scope,
+account/repository identity and both directions of the mapping even when the
+journal is empty. This finite transition preserves complete
 open first-epoch journal metadata and selected null rebuild pointers only when
 no generation objects remain. It creates no live admission or generation
 binding. Every legacy generation refuses until durable original observation
 association is supported; even equal normalized metadata can hide distinct
-same-second acquisitions. A selected null rebuild pointer needs no journal.
+same-second acquisitions. Metadata-only adoption refuses generation presence
+before decoding or hashing those objects; the full inspection utility remains
+available to its other callers. A selected null rebuild pointer needs no journal.
 No observation is added and no cache bytes change. Configured growth beyond the
 terminal generation-binding limit refuses rather than reducing capacity.
 Request-local validation composes owner expiry, lifecycle and the original
-cache checkpoint without rewriting the shared cache object. Adoption
+cache checkpoint without rewriting the shared cache object, through replay
+validation and precommit as well as file inspection. Adoption
 reserves the complete terminal-reader envelope before its first commit; explicit
 retry reconciles compatible partial metadata under the caller's original
 lifecycle/deadline. Active or compact operations, terminal/reopened histories and
@@ -393,6 +398,10 @@ have compact recovery representations. The call rejoins actual admitted work;
 a prior durable drain is insufficient. It then retains the lifecycle condition,
 replay custody, materialization lock and cache lock in that order. No disk lock
 is held while waiting for drain or performing forge IO.
+The selected terminal epoch is validated once within that replay transaction;
+per-entry checkpoints retain expiry and lifecycle authority without repeatedly
+reconstructing the full conversation journal. Physical and memory mutation
+boundaries retain those checks and the existing file/owner locks.
 
 Before any physical mutation, the replay envelope durably captures the exact
 terminal cursor, bounded validated generation IDs and original current pointer.

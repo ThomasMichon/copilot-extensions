@@ -8,6 +8,8 @@ from typing import Any
 from .conversation_journal import ConversationJournal, Observation
 from .generation_cache import CacheInvalid, GenerationCache
 from .terminal_retention import MAX_RECORDS
+from .review_workspace import _scope
+from .watch_replay import ConsumerScope
 from .workspace_conversation import conversation_key
 
 Document = dict[str, Any]
@@ -21,12 +23,36 @@ def contract() -> dict[str, str]:
     }
 
 
+def _targets(targets: list[Document]) -> list[Document]:
+    if not isinstance(targets, list) or not 1 <= len(targets) <= 128:
+        raise ValueError("retained cache transition requires bounded original target bindings")
+    accounts: dict[tuple[str, str], Document] = {}
+    scopes: dict[tuple[tuple[str, str], ...], tuple[str, str]] = {}
+    for target in targets:
+        if not isinstance(target, dict) or set(target) != {"scope", "account", "repo"}:
+            raise ValueError("invalid retained target binding")
+        selected = ConsumerScope("retained-transition", target["account"], target["repo"])
+        scope = target["scope"]
+        if not isinstance(scope, dict):
+            raise ValueError("invalid retained workspace scope")
+        canonical = _scope({**scope, "number": 1})
+        canonical.pop("number")
+        if canonical != scope:
+            raise ValueError("retained workspace scope must be canonical")
+        account = selected.account, selected.repo
+        key = tuple(sorted(canonical.items()))
+        if accounts.setdefault(account, canonical) != canonical or scopes.setdefault(key, account) != account:
+            raise ValueError("retained targets must map accounts and workspace scopes unambiguously")
+    return targets
+
+
 def validate(
     document: Document, cache: GenerationCache, targets: list[Document],
     checkpoint: Callable[[], None],
 ) -> None:
     """Run inside the existing replay adoption and exclusive service lifecycle."""
     checkpoint()
+    targets = _targets(targets)
     if cache.max_generations > MAX_RECORDS:
         raise ValueError("configured cache growth exceeds terminal generation binding capacity")
     if (
@@ -62,7 +88,7 @@ def validate(
         if not any({**target["scope"], "number": scope["number"]} == scope for target in targets):
             raise ValueError("retained pointer is outside the selected workspace scope")
 
-    cache.inspect_retained(visit, visit_pointer)
+    cache.inspect_retained(visit, visit_pointer, allow_generations=False)
     checkpoint()
     state = document["terminal_retention"]
     if any(state[name] for name in ("records", "generations", "admissions")):
