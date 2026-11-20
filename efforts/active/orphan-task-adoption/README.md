@@ -4,7 +4,8 @@
 
 Give an operator an ordinary interactive place to inspect and steer an
 existing headless ACP task or bare scripted task after its original
-controlling worktree is gone. Resolve the existing resource, create OR reuse
+controlling worktree is gone, including recovery from a different machine.
+Resolve the existing resource, create OR reuse
 the appropriate controlling worktree, establish explicit authorized
 stewardship, and present an interactive session without silently replacing or
 resuming the remote job.
@@ -114,6 +115,8 @@ implementation, launch, resource-transfer or rollout grant.
   results and uncertain effects. Do not guess orphanhood from timestamps,
   missing panes, controller disappearance or a reachable endpoint; unsupported
   resource shapes and unreadable authority remain explicit.
+  A controller on a different machine must resolve back to the original task
+  authority and venue; its own machine-local queue is not a substitute.
 - [ ] **OA3443-P3:** Create OR reuse an appropriate controlling-repository
   worktree through Worktrees, preserving its actual repository, custody and
   logical creation identity across retries. The task's producing queue and a
@@ -144,6 +147,10 @@ implementation, launch, resource-transfer or rollout grant.
 ### Direct four-stage examples
 
 These are design/validation cases, not commands run or resources acquired.
+Apply BOTH columns and ALL four rows with a controller on the original
+machine AND with one on a different machine. Cross-machine lookup and control
+route through the original task/resource authority and existing secured
+transport; an unavailable authority is reported, not recreated locally.
 
 | Stage | Existing headless ACP task | Existing bare scripted task |
 |---|---|---|
@@ -155,9 +162,13 @@ These are design/validation cases, not commands run or resources acquired.
 ## Validation Plan
 
 - [ ] **OA3443-V1:** For BOTH examples, verify every one of the four stages
-  through the actual supported ordinary entrypoint, preserving original
+  from the original machine AND a different controller machine through the
+  actual supported ordinary entrypoint, preserving original
   task/resource/result identity and the final interactive inspect/steer
-  experience. Separate source/fixture evidence from any later explicitly
+  experience. Verify that cross-machine resolution reaches the original
+  authority and venue rather than a new machine-local queue, and that
+  unavailable authority is reported truthfully without replacement execution.
+  Separate source/fixture evidence from any later explicitly
   authorized native/provider proof; record unavailable tiers rather than
   claiming them from internal reattachment alone.
 - [ ] **OA3443-V2:** Verify already-adopted/repeated requests, concurrent
