@@ -23,7 +23,7 @@ from agent_index.indexing.point_claim import PendingPointClaim
 from agent_index.indexing.prepared_application import PreparedApplication
 from agent_index.indexing.prepared_points import PreparedPoints
 from agent_index.store.component_ledger import ComponentEvidence, ComponentLedger
-from agent_index.store.content_mutations import content_record
+from agent_index.store.content_mutations import coalesce_chunks, content_record
 from agent_index.store.file_projection import (
     RawFileProjection, capture_file_projection, require_file_projection_capacity,
 )
@@ -42,6 +42,7 @@ if TYPE_CHECKING:
     from agent_index.indexing.manifest import CrawlManifest
     from agent_index.indexing.path_index import PathIndex
     from agent_index.indexing.runner import ProgressCallback
+    from agent_index.store.content_store import ContentStore
     from agent_index.store.multi_model_store import MultiModelStore
     from agent_index.store.vector_table import VectorTable
 
@@ -290,33 +291,102 @@ class PreparedComponentApplication:
             if not self.selected and self.point_scope is None:
                 return 0, len(self.contents)
             # Selected capacity and task-local native owners require the existing writer.
+            refusal: Exception | None = None
             with self.domain._write(
                 self.store.content_store.db, point_scope=self.point_scope,
             ) if self.point_scope is not None else nullcontext():
-                store = self.store if self.point_scope is None else _point_pair_store(
-                    self.store, self.config.model_profiles, point_scope=self.point_scope,
-                )
-                ledger = self.ledger if self.point_scope is None else ComponentLedger(self.config, store)
-                if self.point_scope is not None:
-                    for point in self.contents:
-                        if (ledger.get(*point, point_scope=self.point_scope) != self.previous[point]
-                                or self._capture(point, self.previous[point], store=store)
-                                != self.projections[point]):
-                            raise PendingCrawlConflict("Component native point changed during preparation")
-                if not self.selected:
-                    return 0, len(self.contents)
-                require_file_projection_capacity(
-                    store, {point: len(chunks) for point, chunks in self.chunks.items()},
-                    max_rows=self.max_rows, point_scope=self.point_scope,
-                )
-                planned_rows = sum(len(chunks) for chunks in self.chunks.values())
-                prepare_ingestion_indices(
-                    store, max_rows=0, reserve_segment=planned_rows > 0, point_scope=self.point_scope,
-                )
-                ledger_state, _ = inspect_index(ledger._bound_table(), column="point_key")
-                if ledger_state.segments + len(self.selected) > MAX_SEGMENTS:
-                    raise ScalarIndexPreparationRequired("Component ledger needs explicit index consolidation")
-                return self._publish(store, ledger, planned_rows)
+                sequence = self.domain._local.effect_sequence if self.point_scope is not None else None
+                try:
+                    store = self.store if self.point_scope is None else _point_pair_store(
+                        self.store, self.config.model_profiles, point_scope=self.point_scope,
+                    )
+                    ledger = self.ledger if self.point_scope is None else ComponentLedger(self.config, store)
+                    if self.point_scope is not None:
+                        for point in self.contents:
+                            if (ledger.get(*point, point_scope=self.point_scope) != self.previous[point]
+                                    or self._capture(point, self.previous[point], store=store)
+                                    != self.projections[point]):
+                                raise PendingCrawlConflict("Component native point changed during preparation")
+                    planned_rows = sum(len(chunks) for chunks in self.chunks.values())
+                    if self.selected:
+                        require_file_projection_capacity(
+                            store, {point: len(chunks) for point, chunks in self.chunks.items()},
+                            max_rows=self.max_rows, point_scope=self.point_scope,
+                        )
+                        prepare_ingestion_indices(
+                            store, max_rows=0,
+                            reserve_segment=self.point_scope is None and planned_rows > 0,
+                            point_scope=self.point_scope,
+                        )
+                        if self.point_scope is not None:
+                            self._require_point_segments(store)
+                        ledger_state, _ = inspect_index(ledger._bound_table(), column="point_key")
+                        if ledger_state.segments + len(self.selected) > MAX_SEGMENTS:
+                            raise ScalarIndexPreparationRequired("Component ledger needs explicit index consolidation")
+                except Exception as exc:
+                    if (self.point_scope is None or self.domain._local.effect_sequence != sequence
+                            or self.domain._local.failed_effect):
+                        raise
+                    # Only no-effect preflight may finish the writer before refusing.
+                    refusal = exc
+                else:
+                    return self._publish(store, ledger, planned_rows) if self.selected else (0, len(self.contents))
+            assert refusal is not None
+            raise refusal
+
+    def _require_point_segments(self, store: MultiModelStore) -> None:
+        """Reserve the whole selected plan, including each routed batch and cleanup."""
+        assert self.point_scope is not None
+        growth = {self.config.content_table: 0, **{
+            profile.table_name: 0 for profile in self.config.model_profiles.values()
+        }}
+        required = dict(growth)
+        for point in sorted(self.selected):
+            chunks = coalesce_chunks(self.chunks[point])
+            projection = self.projections[point]
+            old = {
+                row["chunk_id"]: {key: value for key, value in row.items() if key != "indexed_at"}
+                for row in json.loads(projection.content_rows)
+            }
+            keep = {chunk.chunk_id for chunk in chunks}
+            name = self.config.content_table
+            growth[name] += int(any(old.get(chunk.chunk_id) != content_record(chunk) for chunk in chunks))
+            required[name] = max(required[name], growth[name] + bool(old.keys() - keep))
+            for model in projection.models:
+                name = model.table_name
+                rows = {row["chunk_id"]: row for row in json.loads(model.rows)}
+                growth[name] += int(any(
+                    chunk.chunk_id in rows and (
+                        rows[chunk.chunk_id]["source"], rows[chunk.chunk_id]["language"]
+                    ) != (chunk.source, chunk.language)
+                    for chunk in chunks
+                ))
+                for start in range(0, len(chunks), self.config.stream_batch_size):
+                    routed = routed_model_chunks(
+                        chunks[start:start + self.config.stream_batch_size],
+                        model.model_id, self.config.model_profiles,
+                    )
+                    if routed and self.coverage.missing(
+                        store.get_vector_table(model.model_id), routed,
+                        self.config.model_profiles[model.model_id], bounded=True,
+                        point_scope=self.point_scope, wal_aware=True,
+                    ):
+                        growth[name] += 1
+                # Cleanup reserves a free slot even when native deletion adds no segment.
+                required[name] = max(required[name], growth[name] + bool(rows.keys() - keep))
+        owners: list[ContentStore | VectorTable] = [
+            store.content_store, *(store.get_vector_table(model) for model in store.model_ids),
+        ]
+        for owner in owners:
+            columns = ["chunk_id", "file_path", "source"] if owner is store.content_store else ["chunk_id"]
+            for column in columns:
+                state, _ = inspect_index(owner._get_or_create_table(), column=column)
+                if column == "source" and not state.prepared:
+                    continue
+                if state.segments + required[owner._table_name] > MAX_SEGMENTS:
+                    raise ScalarIndexPreparationRequired(
+                        f"Component {owner._table_name} {column} index needs explicit consolidation"
+                    )
 
     def _publish(
         self, store: MultiModelStore, ledger: ComponentLedger, planned_rows: int,

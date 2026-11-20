@@ -6,6 +6,7 @@ from contextlib import closing
 from dataclasses import replace
 import json
 import time
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -18,7 +19,7 @@ from agent_index.chunking.base import Chunk
 from agent_index.indexing.component_application import (
     PreparedComponentApplication, _policy, qualify_applied_component,
 )
-from agent_index.indexing.component_manifest import ComponentContent
+from agent_index.indexing.component_manifest import ComponentContent, ComponentVersion
 from agent_index.indexing.component_publication import reconcile_component_publication
 from agent_index.indexing.embedding_batch import embed_and_store_pairs
 from agent_index.indexing.embedding_coverage import EmbeddingCoverage
@@ -32,8 +33,8 @@ from agent_index.store.component_ledger import ComponentEvidence, ComponentLedge
 from agent_index.store.file_projection import capture_file_projection
 from agent_index.store.ingestion_index import prepare_ingestion_indices
 from agent_index.store.multi_model_store import MultiModelStore
-from agent_index.store.scalar_index import prepare_index
-from agent_index.store.source_layout import SourceLayoutError
+from agent_index.store.scalar_index import ScalarIndexPreparationRequired, inspect_index, prepare_index
+from agent_index.store.source_layout import MARKER, SourceLayoutError
 from agent_index.store.vector_table import VectorTable
 
 FAMILY, SCOPE = prepared_fixture.FAMILY, prepared_fixture.SCOPE
@@ -184,6 +185,133 @@ def test_concurrent_application_observation_cannot_replace_newer_applied_evidenc
     with pytest.raises(PendingCrawlConflict):
         stale.publish()
     assert (domain.receipt(), f.paths.get_all_entries()) == before
+
+
+def test_full_ledger_refusal_preserves_clean_receipt_and_checkpoints(
+    application: prepared_fixture.Fixture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    f = application
+    scope = f.points.claim.hints.scope
+    domain = f.store._source_domain
+    assert domain is not None
+    ledger = ComponentLedger(f.config, f.store)
+    with domain._write(f.store.content_store.db, point_scope=scope):
+        for index in range(3):
+            path = f"unrelated-tombstone-{index}"
+            projection = capture_file_projection(
+                f.config, f.store, FAMILY, path, max_rows=8, point_scope=scope,
+            )
+            ledger.put(ComponentEvidence(
+                ComponentContent(ComponentVersion(FAMILY, path, 1, "fixture/v1"), "deleted", True),
+                SCOPE, _policy(f.config), projection,
+            ), expected=None, max_rows=8, point_scope=scope)
+    state, _ = inspect_index(ledger._bound_table(), column="point_key")
+    prepared = prepare(f)
+    before = (domain.path / MARKER).read_bytes(), domain.receipt(), f.paths.get_all_entries()
+    with monkeypatch.context() as patch:
+        patch.setattr("agent_index.indexing.component_application.MAX_SEGMENTS", state.segments)
+        with pytest.raises(ScalarIndexPreparationRequired, match="ledger"):
+            prepared.publish()
+    assert ((domain.path / MARKER).read_bytes(), domain.receipt(), f.paths.get_all_entries()) == before
+    reopen(f)
+    assert prepare(f).publish() == (2, 0)
+
+
+@pytest.mark.parametrize("point_preparation", [False], indirect=True)
+@pytest.mark.parametrize("bottleneck", ["canonical", "vectors_first"])
+def test_whole_plan_capacity_refuses_before_first_point_effect(
+    application: prepared_fixture.Fixture, monkeypatch: pytest.MonkeyPatch, bottleneck: str,
+) -> None:
+    f = application
+    scope = f.points.claim.hints.scope
+    domain = f.store._source_domain
+    assert domain is not None
+    seed_count = 2 if bottleneck == "canonical" else 3
+    chunks = [Chunk(f"seed {index}", f"seed-{index}", "text", "text", 0, 1, FAMILY)
+              for index in range(seed_count)]
+    with domain._write(f.store.content_store.db, point_scope=scope):
+        content_batches = [[chunk] for chunk in chunks] if bottleneck == "canonical" else [chunks]
+        for batch in content_batches:
+            f.store.upsert_point_content(batch, point_scope=scope)
+            prepare_ingestion_indices(f.store, max_rows=len(batch), point_scope=scope)
+        for model in f.store.model_ids:
+            batches = [[chunk] for chunk in chunks] if bottleneck != "canonical" else [chunks]
+            for batch in batches:
+                f.store.upsert_point_vectors(
+                    model, batch, np.ones((len(batch), 2), dtype=np.float32), point_scope=scope,
+                )
+                prepare_index(
+                    f.store.get_vector_table(model), column="chunk_id", max_rows=len(batch),
+                    point_scope=scope,
+                )
+    table = f.store.content_store.db.open_table(bottleneck)
+    state, _ = inspect_index(table, column="chunk_id")
+    assert state.segments == seed_count
+    prepared = prepare(f)
+    if bottleneck != "canonical":
+        canonical, _ = inspect_index(f.store.content_store._get_or_create_table(), column="chunk_id")
+        assert canonical.segments + 2 <= state.segments + 1
+    before = (domain.path / MARKER).read_bytes(), domain.receipt(), f.paths.get_all_entries()
+    with monkeypatch.context() as patch:
+        # A smaller test budget retains real native segments and the two-point plan.
+        patch.setattr("agent_index.indexing.component_application.MAX_SEGMENTS", state.segments + 1)
+        with pytest.raises(ScalarIndexPreparationRequired, match=bottleneck):
+            prepared.publish()
+    assert ((domain.path / MARKER).read_bytes(), domain.receipt(), f.paths.get_all_entries()) == before
+    reopen(f)
+    assert prepare(f).publish() == (2, 0)
+
+
+def test_single_point_reserves_each_routed_stream_batch(
+    application: prepared_fixture.Fixture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    f = application
+    domain = f.store._source_domain
+    assert domain is not None
+
+    def split(content: str, file_path: str, *, source: str) -> list[Chunk]:
+        return [Chunk(f"{content} part {index}", file_path, "text", "text", index, index, source)
+                for index in range(3)]
+
+    monkeypatch.setattr(
+        "agent_index.chunking.get_chunker", lambda path: (SimpleNamespace(chunk=split), "text"),
+    )
+    prepared = prepare(f)
+    assert sorted(len(chunks) for chunks in prepared.chunks.values()) == [0, 3]
+    before = (domain.path / MARKER).read_bytes(), domain.receipt(), f.paths.get_all_entries()
+    with monkeypatch.context() as patch:
+        patch.setattr("agent_index.indexing.component_application.MAX_SEGMENTS", 2)
+        with pytest.raises(ScalarIndexPreparationRequired, match="vectors_first"):
+            prepared.publish()
+    assert ((domain.path / MARKER).read_bytes(), domain.receipt(), f.paths.get_all_entries()) == before
+    assert prepared.publish() == (2, 0)
+
+
+@pytest.mark.parametrize("stage", ["preflight-effect", "path", "native"])
+def test_application_failure_after_preflight_keeps_dirty_latch(
+    application: prepared_fixture.Fixture, monkeypatch: pytest.MonkeyPatch, stage: str,
+) -> None:
+    f = application
+    prepared = prepare(f)
+    domain = f.store._source_domain
+    assert domain is not None
+    original = prepared._publish_point
+
+    def interrupt(*args: Any, **kwargs: Any) -> None:
+        if stage == "native":
+            original(*args, **kwargs)
+        elif stage == "preflight-effect":
+            domain.effect("fixture-unexpected-preflight-effect")
+        raise RuntimeError("fixture unsealed interruption")
+
+    monkeypatch.setattr(
+        prepared, "_require_point_segments" if stage == "preflight-effect" else "_publish_point", interrupt,
+    )
+    with pytest.raises(RuntimeError, match="unsealed interruption"):
+        prepared.publish()
+    assert domain.receipt()["state"] == "dirty"
+    assert "reconciliation" not in domain.receipt()
+    assert bool(f.store.content_store.db.open_table(f.config.content_table).count_rows()) == (stage == "native")
 
 
 def test_selected_replacement_cleans_prior_vectors_and_retains_ordered_history(

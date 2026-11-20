@@ -7678,6 +7678,9 @@ cleanup, tombstones, covered reopen, concurrent application refusal, unchanged
 parent/polling state and pinned/trailing queue separation. Sealed ordering,
 checkpoint and final-clean interruptions reopen without engines or native data
 replay; changed claim/acquisition/native/coverage/checkpoint owners refuse.
+Real native segment fixtures cover full-ledger and near-capacity multi-point
+canonical/vector refusals, per-stream-batch demand, clean retry after no-effect
+refusal, and dirty retention after unexpected preflight or publication effects.
 Run it separately from `test_component_application.py` and
 `test_point_prepared_application.py` so each native packet retains a bounded
 execution window. Use `PYTEST_ADDOPTS='-vv --durations=10'` for named progress

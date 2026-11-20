@@ -157,7 +157,14 @@ Publication recomposes the retained target set and rechecks policy, checkpoints,
 ordering and raw points before effects. Unlike protocol-1 preflight, selected
 capacity and qualified task-local table handles require the already-owned point
 writer. They preserve the retained complete model binding without trusting or
-changing caller caches. The selected path composes native content, prepared pair
+changing caller caches. Before path invalidation, point preflight reserves the
+whole selected plan's per-index segment demand: changed canonical points,
+vector-provenance upkeep, every routed batch with missing pairs, and the free
+slot required for stale-ID cleanup. It does not consolidate indices. A no-effect
+preflight refusal exits the writer cleanly before propagating, preserving the
+receipt and checkpoints. Any unexpected preflight effect or subsequent
+publication failure retains the dirty latch.
+The selected path composes native content, prepared pair
 publication, bounded index upkeep and stale-ID cleanup before the same sealed
 ordering/checkpoint suffix. No engine call occurs inside publication.
 
