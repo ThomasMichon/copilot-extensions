@@ -7738,6 +7738,16 @@ optional qualifier's three phase boundaries and completed-retry bypass. These
 are synthetic-provider/local-native evidence, not live API, native Windows,
 ordinary v2 runner, full event delivery or consumer-scale qualification.
 
+`tests/test_azure_devops_point_runtime.py` exercises explicit configuration through
+the same native/HTTP fixture. It covers unpinned whole-snapshot selection,
+completed local retries, retained-acquisition recovery across fresh composition,
+changed queue snapshots, scope/model/connector/client refusal and separate
+legacy/point directories including symlink aliases. Missing configuration is
+not implicitly initialized. Select this bounded integration packet with
+`--test-file tests/test_azure_devops_point_runtime.py --allow-explicit-tiers`.
+It does not enlarge required unit CI or qualify ordinary v2 worker admission,
+native Windows, live APIs or runtime activation.
+
 The exclusive attachment-export consumer packet executes the real export
 entrypoint, health-selected command transport, extension registry, provider
 dispatch and descriptor-pinned writer with an in-memory filesystem and

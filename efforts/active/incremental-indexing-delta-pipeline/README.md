@@ -156,7 +156,7 @@ After the reviewed proposal, the operator admitted execution:
   application candidate without replacing the pending parent. Explicit
   `PreparedApplication` consumption now requalifies that complete binding before
   chunking/embedding and uses scoped native vector reads; ordinary point-domain
-  execution and acquisition-to-worker composition remain open.
+  execution remains open; the explicit acquisition caller is described below.
   A [retained component carrier](../../../plugins/agent-index/docs/architecture.md#component-recovery-carrier-application-unsupported)
   preserves ordering inputs behind pre-application refusal, including changed
   replacement and premature-completion refusal. Pure content/version comparison
@@ -191,7 +191,10 @@ After the reviewed proposal, the operator admitted execution:
   completion under the existing source writer. An explicit
   [Azure DevOps acquisition caller](../../../plugins/agent-index/docs/component-ledger.md#explicit-azure-devops-acquisition-caller)
   composes missing named reads with fresh eligibility checks, retained recovery
-  and that worker. Ordinary v2 execution and automatic partial-effect/restore
+  and that worker; an explicit
+  [configured composition](../../../plugins/agent-index/docs/component-ledger.md#configured-in-process-azure-devops-composition)
+  opens isolated prepared owners and pins the expected whole parked snapshot.
+  Ordinary v2 execution and automatic partial-effect/restore
   reconciliation remain unimplemented; live-provider, broader event-delivery
   and consumer-scale qualification remain open.
 - [ ] Persist acquisition progress so retry/restart does not restart a

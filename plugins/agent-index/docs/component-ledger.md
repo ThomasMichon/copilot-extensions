@@ -386,6 +386,41 @@ owners. No polling cursor, detached-worker registration, producer, service
 contract, execution declaration, automatic repair, source activation or rollout
 is added. Ordinary v2 execution remains disabled.
 
+### Configured in-process Azure DevOps composition
+
+`sources.azure_devops_point_runtime.run_configured_azure_devops_points(connector,
+task_id, expected_hints=..., config=..., legacy_data_dir=..., point_scope=...,
+scope=..., clients=..., max_rows=..., progress_cb=...)` selects the owners above
+from an explicit `IndexConfig`. Its complete configured `point_scope` must match
+the expected whole queue snapshot, the prepared protocol-2 domain and the
+connector's endpoint/family/query union. Fresh principal and resolved-definition
+qualification remains with the acquisition caller, not this static comparison.
+
+The selected data directory must be disjoint from the explicitly supplied
+legacy directory, including ancestor/descendant and resolved symlink aliases.
+Derived content/model, cluster, polling-state, queue and path locations must
+remain inside the selected directory. Queue/path databases and the native
+domain, exact model mapping, indices and component ledger must already be
+prepared by their existing owners. This entrypoint never initializes a domain,
+converts legacy state or opens embedding clients; callers own connector/client
+lifetime. Legacy `SourceSpec`, source hashes and environment defaults do not
+change.
+
+Under the existing source writer it qualifies native readiness, opens configured
+queue/path owners, then uses `pin_point_claim` to compare and freeze the exact
+parked snapshot before acquisition. A changed snapshot refuses rather than
+pinning a subset or widening the request. Failures retain the parked pin and
+recovery material; fresh composition reuses retained observations. A matching
+completed pin takes the existing local completion retry without clients or
+provider work. Native exclusion is not held during provider or embedding calls.
+
+This is an explicit synchronous Python operation, not a `run_reindex`-shaped
+callable. `TaskRunner` still delegates ordinary tasks to its versioned detached
+worker; registering its in-process callback does not select this entrypoint.
+No ordinary v2 dequeue, execution-version advertisement, producer, service
+configuration/wire form, automatic repair or runtime activation is added.
+The acquisition and per-point row budgets above remain unchanged.
+
 ### Sealed native publication suffix
 
 After qualifying all selected native content, routed vectors, cleanup and
