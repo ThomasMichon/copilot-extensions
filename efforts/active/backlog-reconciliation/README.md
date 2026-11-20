@@ -410,6 +410,14 @@ the non-public approval conversation.
 
 ## Plan
 
+The [shared-context and registry-default unit](journal/2026/11.20-shared-context-and-registry-default-receiving.md)
+records #13680's actual reviewed delivery, two separately audited tracking
+retirements and the complete 884-open census. It proposes one canonical
+configuration-reader plan under OPEN #12920, retaining the complete #12042
+registry-default residual and existing native-default/cache/write authorities.
+Every new technical row stays unchecked; #13075's historical timeout and
+#13598's selected separate tracking remain OPEN.
+
 The [Windows attribution and retained-transition unit](journal/2026/11.20-path-attribution-and-retained-transitions.md)
 records #13663's actual reviewed receiving and four separate audited
 tracking retirements, while proposing three distinct finite contracts in
