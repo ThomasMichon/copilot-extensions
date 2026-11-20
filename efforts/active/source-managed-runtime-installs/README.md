@@ -12,6 +12,11 @@
 
 ## Goal
 
+Recover Bridge's potential agent catalog from independent registered and provider
+sources, distinguishing discovery from verified reachability. Preserve surviving
+mux sessions and session hosts across version changes: reattach only to the
+verified original; never create a replacement as a side effect of recovery.
+
 Complete the source-managed runtime installation and wheel-first acceptance
 for an addressed inventory of installed services and tools, including Manager,
 through small, independently validated contributions. Select immutable,
@@ -676,6 +681,18 @@ other protected work.
 recorded evidence; the open rows are finite work, not new completion claims.
 The [disposition map](finite-scope.md) identifies replaced gate families and
 preserves the complete pre-amendment record.
+
+### Installed portfolio recovery and reversal
+
+- [x] Recover a recorded Dispatch wake through a separately installed Bridge
+  (#13581). With the queue withheld, the original wake receipt survived both
+  installed candidate directions on Windows. An ambiguous admission stayed
+  unknown until the original journal returned, with no second prompt. This
+  qualifies historical admission only, not discovery or a live session route.
+- [ ] Qualify [cold discovery and survivor-only reattachment](shadow-observation.md#bridge-discovery-from-zero)
+  independently of receipt recovery. Start with an empty Bridge database and
+  an original mux session absent from it. Compare inventory and verified routes
+  separately; count prohibited effects on success and failure.
 
 ### Manager-owned application footprints
 
