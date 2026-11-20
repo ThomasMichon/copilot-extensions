@@ -3,6 +3,8 @@ import { pathToFileURL } from "node:url";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
+process.on("uncaughtExceptionMonitor", error => process.stderr.write(`${error.stack || error}\n`));
+
 await import(pathToFileURL(process.argv[2]).href);
 const session = globalThis.nativeTestSession;
 const tools = session.config.tools.definitions ?? session.config.tools;

@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import Any
 
 from .tracking_claims import ResourceClaim
 
 
-def parse_mapping(raw: dict, *, claim_factory: Callable[..., ResourceClaim]) -> ResourceClaim:
+def parse_mapping(raw: dict[str, Any], *, claim_factory: Callable[..., ResourceClaim]) -> ResourceClaim:
     kind = str(raw.get("kind", "worktree")) or "worktree"
     state_raw = raw.get("state")
     state = state_raw if state_raw in ("active", "at-rest", "released", "abandoned") else "active"
@@ -19,12 +20,14 @@ def parse_mapping(raw: dict, *, claim_factory: Callable[..., ResourceClaim]) -> 
         handoff_bundle=str(raw.get("handoff_bundle", "")),
         producer=raw.get("producer"),
         producer_present="producer" in raw,
+        claim_nonce=raw.get("claim_nonce", "") if isinstance(raw.get("claim_nonce", ""), str) else "",
         metadata_opaque=(
             raw.get("metadata_opaque", False) is not False
             or "state" in raw and state_raw not in ("active", "at-rest", "released", "abandoned")
             or not isinstance(raw.get("kind", "worktree"), str) or not raw.get("kind", "worktree")
             or not isinstance(raw.get("ref", ""), str)
             or not raw.get("ref") and "producer" not in raw
+            or not isinstance(raw.get("claim_nonce", ""), str)
         ),
     )
 
@@ -50,6 +53,8 @@ def yaml_mapping(claim: ResourceClaim) -> dict[str, object]:
         data["note"] = claim.note
     if claim.handoff_bundle:
         data["handoff_bundle"] = claim.handoff_bundle
+    if claim.claim_nonce:
+        data["claim_nonce"] = claim.claim_nonce
     if claim.has_producer:
         data["producer"] = claim.producer
     if claim.metadata_opaque:
