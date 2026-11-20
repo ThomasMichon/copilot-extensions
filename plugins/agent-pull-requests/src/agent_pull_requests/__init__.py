@@ -1,3 +1,3 @@
 """agent-pull-requests package."""
 
-__version__ = "0.3.345-dev1"
+__version__ = "0.3.346-dev1"

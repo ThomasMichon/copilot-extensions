@@ -50,6 +50,18 @@ enrollment or admit the remaining platform/UI/migration campaign by implication.
 
 ## Coordination
 
+The proposed finite #11816 generation/freshness lane stays with the existing
+`agent-vault` credential read/rotation, cache and consumer custodians under P2,
+with direct P11816/V11816/G11816 below. It does not assign that correction to
+the federated-relay implementer, change the current R1-R4 priority or grant
+credential/runtime authority. Preserve the existing P0 design and applicable
+owner/slice admission gates; recording finite requirements does not require
+completing the unrelated relay/browser/native/migration portfolio.
+Keep #11816 OPEN during proposal. Ordinary reviewed complete receiving and
+permitted current source/ROOT/custody readback precede a separate tracking
+judgment, not a generic ACK, receipt PR, new implementation appointment or
+resource release.
+
 <!-- backlog-reconciliation:7556:qualified-sixteen:3979:Coordination -->
 
 The separate proposed finite #3979 headless/provider-miss family retains the actual
@@ -173,6 +185,45 @@ not narrow the complete effort.
   retry/polling, service restart, uncertain replies and replacement handover;
   migrate no production queue merely because these tests pass.
 
+#### Finite credential generation and freshness from #11816
+
+Agent-recommended owner-side correctness receiving, outside the separately
+admitted relay implementation. This is proposed source/fixture work, not
+permission to read, rotate or cache an actual credential.
+
+- [ ] **P11816-1:** Audit EVERY consumer of credential generation/freshness
+  fences and both the live-read and password-rotation allocation paths.
+  Retain the reported old-value/equal-generation observation under
+  `time.time_ns()`, without interpreting it as lock bypass, credential
+  disclosure or backend data loss. Nanosecond units prove neither unique
+  ticks nor monotonic wall-clock movement.
+- [ ] **P11816-2:** Select and document the production semantics needed by
+  those consumers so an old credential remains distinguishable from a newer
+  mutation. If strict generation order is required, allocate independently
+  of wall-clock resolution, including persistent-cache and restart boundaries.
+  Preserve the selected owner/domain rather than imposing an unexplained
+  global counter or replacing one ambient assumption with another.
+- [ ] **P11816-3:** Preserve existing read/rotation serialization, bounded
+  offline-cache and ordinary consumer behavior through the smallest
+  attributable correction. An advancing synthetic clock may remove an
+  unrelated test assumption; it is not a production allocation repair.
+  Existing credential, cache, source and mutation custody remains unchanged.
+
+##### Local Validation for #11816
+
+- [ ] **V11816-1:** With synthetic storage and one constant clock tick,
+  exercise actual `get_with_generation` then `_set_password` and compare
+  the old returned generation with the current credential generation.
+  Cover a backwards clock and each selected production freshness consumer;
+  assert the chosen old/new distinction without mocking past allocation
+  or changing the clock merely to make the control pass.
+- [ ] **V11816-2:** Qualify persistent-cache and restart boundaries wherever
+  the selected ordering/freshness contract requires them. Preserve existing
+  read/rotation locking and offline-cache tests, with attributable failed/
+  positive controls and secret-free synthetic results. No real secret read,
+  rotation, cache mutation, provider/native probe, rollout or new resource
+  operation follows from this planned receiving.
+
 ### P3 - Standalone and central service construction
 
 - [ ] Construct independently installable local service/CLI and container
@@ -287,6 +338,14 @@ from retaining it._
 
 ## Validation Plan
 
+- [ ] **G11816:** Resolve every P11816/V11816 and continuing Coordination
+  clause: all relevant consumers and allocation paths, selected production
+  old/new distinction, constant/backwards-clock controls, applicable cache/
+  restart proof and unchanged locking/offline behavior. Preserve existing
+  owner/admission and credential/resource boundaries. Documentary
+  consolidation is neither a generation fix nor evidence of disclosure,
+  lock bypass, live rotation or whole-service acceptance.
+
 - [ ] Qualify the [federated-relay matrix](federated-relay.md#validation):
   actual service startup/channel/readiness/demand/result, exact grants,
   standalone compatibility, disconnect/reconnect, uncertain delivery and
@@ -360,6 +419,17 @@ qualification sequence. Outside it, operator design review and explicit
 implementation admission remain the next gate; publication does not start P1.
 
 ## Journal
+
+### 2026-11-20 - Proposed finite generation/freshness receiving
+
+The complete qualified #11816 original is retained directly in the existing
+P2 credential-lifecycle owner, local and actual global Validation and
+continuing Coordination. All six technical rows remain unchecked. The
+[campaign record](../backlog-reconciliation/journal/2026/11.20-source-claim-and-credential-generation-receiving.md)
+preserves the original conditional ordering requirement, synthetic tier and
+actual credential/cache/consumer custodians. The relay implementer receives
+no new assignment; current priorities and P0/owner admission remain.
+No secret, cache, native, runtime or resource operation occurred.
 
 ### 2026-11-16 - Closed-wheel dependency-profile source qualification
 

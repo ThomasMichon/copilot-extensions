@@ -44,16 +44,6 @@ class _LegacyProjection(Protocol):
     ) -> Document: ...
 
 
-class _Inventory(Protocol):
-    def __call__(
-        self, binding: NativeObservationBinding, *, checkpoint: Checkpoint, _qualified: bool = False,
-    ) -> Document: ...
-
-
-class _Qualify(Protocol):
-    def __call__(self, binding: NativeObservationBinding, *, checkpoint: Checkpoint) -> None: ...
-
-
 class _SnapshotConfig(TypedDict, total=False):
     config_file: str
 
@@ -204,7 +194,7 @@ class ReplayObserver:
             if binding.repository_identity is None:
                 continue
             try:
-                cast(_Qualify, qualify_native)(binding, checkpoint=check)
+                qualify_native(binding, checkpoint=check)
                 qualified.add((binding.account, binding.repo))
             except RepositoryNativeUnsupported:
                 raise
@@ -227,7 +217,7 @@ class ReplayObserver:
             if (binding.account, binding.repo) not in qualified:
                 continue
             try:
-                inventories[binding.account] = cast(_Inventory, fetch_inventory)(
+                inventories[binding.account] = fetch_inventory(
                     binding, checkpoint=check, _qualified=True,
                 )
             except RepositoryNativeUnsupported:
@@ -273,6 +263,7 @@ class ReplayObserver:
     def _observe_filtered(self, *, expires_at: int, checkpoint: Checkpoint | None) -> Document:
         from .filtered_native import population
         from .repository_native import RepositoryNativeUnavailable
+        deadline = time.monotonic() + max(0, expires_at - self.store.clock())
         authority: Authority = {"expires_at": expires_at, "checkpoint": checkpoint}
         repositories = cast(FilteredProjection, self.repositories)
         def check() -> None:
@@ -312,10 +303,12 @@ class ReplayObserver:
                     raise Withdrawn()
             try:
                 offset = self._query_cursors.get(key, 0)
-                self._query_cursors[key] = (offset + 1) % 64
+                def captured() -> None:
+                    self._query_cursors[key] = (offset + 1) % 64
                 scan = population(
                     binding, demand["filter"], root=self.store.root,
                     checkpoint=interested, start_checkpoint=starting, query_offset=offset,
+                    deadline=deadline, on_capture=captured,
                 )
             except Withdrawn:
                 continue
