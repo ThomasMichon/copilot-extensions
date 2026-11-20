@@ -9,6 +9,9 @@ A lost create response replays that key rather than allocating again, and a
 routing change cannot replace the recorded execution project. The created-agent
 receipt retains the owner repository/worktree/path for retries and cleanup.
 Older coordinators lacking keyed-allocation recording fail closed.
+Once the execution project is bound, continuation does not require fresh
+agent-registry discovery. Current hosting-policy, workspace, native-identity
+and prompt-admission checks still apply.
 
 An already assigned ordinary worktree is reconciled through the ground owner's
 version-1 exact record API in its recorded execution project. Existing
