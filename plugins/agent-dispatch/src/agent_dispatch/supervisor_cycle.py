@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from .client_errors import DispatchError
 from .action_controls import action_inhibited
+from .admission_holds import supervisor_inhibited
 from .spawn_diagnostics import SpawnDiagnostics, diagnostic_text
 
 if TYPE_CHECKING:
@@ -144,6 +145,9 @@ def _poll(self: Supervisor, *, now: float, trace: SpawnDiagnostics) -> list[str]
             if action_inhibited("worker-admission", logger=log):
                 task_trace.event("scheduling", "blocked", reason="worker_admission_inhibited")
                 break
+            if supervisor_inhibited(self, task):
+                task_trace.event("scheduling", "blocked", reason="scoped_worker_admission_hold")
+                continue
             with task_trace.stage("reserve") as reserved:
                 resp = reserve_for_backend(
                     self.client, task, self.supervisor_id,

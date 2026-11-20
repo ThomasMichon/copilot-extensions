@@ -85,8 +85,116 @@ def test_read_owner_pid_records_holder(tmp_path: Path) -> None:
     lease.release()
 
 
+def test_held_file_identity_requires_current_native_custody(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lease = SingleInstance(tmp_path, service="svc")
+    with pytest.raises(PermissionError):
+        lease.held_file_identity()
+    lease.acquire()
+    try:
+        info = lease.lock_path.lstat()
+        assert lease.held_file_identity() == (info.st_dev, info.st_ino)
+        with monkeypatch.context() as child:
+            child.setattr(os, "getpid", lambda: -1)
+            with pytest.raises(PermissionError):
+                lease.held_file_identity()
+    finally:
+        lease.release()
+    with pytest.raises(PermissionError):
+        lease.held_file_identity()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows prevents moving an open lease")
+def test_held_file_identity_refuses_replaced_or_linked_path(tmp_path: Path) -> None:
+    lease = SingleInstance(tmp_path, service="svc")
+    lease.acquire()
+    retained = tmp_path / "retained"
+    try:
+        lease.lock_path.rename(retained)
+        lease.lock_path.write_text("replacement", encoding="ascii")
+        with pytest.raises(PermissionError):
+            lease.held_file_identity()
+        lease.lock_path.unlink()
+        lease.lock_path.symlink_to(retained)
+        with pytest.raises(PermissionError):
+            lease.held_file_identity()
+    finally:
+        lease.release()
+
+
 def test_read_owner_pid_missing_file_is_none(tmp_path: Path) -> None:
     assert read_owner_pid(tmp_path / "nope.lock") is None
+
+
+@pytest.mark.parametrize("change", ["missing", "replacement", "link"])
+def test_existing_identity_acquisition_never_creates_or_writes_a_changed_file(
+    tmp_path: Path, change: str,
+) -> None:
+    lease = SingleInstance(tmp_path, service="svc")
+    lease.lock_path.write_bytes(b"original")
+    info = lease.lock_path.stat()
+    original = tmp_path / "original.lock"
+    lease.lock_path.rename(original)
+    if change == "replacement":
+        lease.lock_path.write_bytes(b"replacement")
+    elif change == "link":
+        if sys.platform == "win32":
+            pytest.skip("symlink creation requires separate Windows privilege")
+        lease.lock_path.symlink_to(original)
+    try:
+        with pytest.raises((OSError, PermissionError)):
+            lease.acquire(expected_file_identity=(info.st_dev, info.st_ino))
+        assert not lease.held
+        assert original.read_bytes() == b"original"
+        if change == "replacement":
+            assert lease.lock_path.read_bytes() == b"replacement"
+        elif change == "missing":
+            assert not lease.lock_path.exists()
+    finally:
+        lease.release()
+
+
+def _release_inherited(lease: SingleInstance) -> None:
+    lease.release()
+
+
+def test_existing_identity_acquisition_holds_and_records_only_that_file(tmp_path: Path) -> None:
+    lease = SingleInstance(tmp_path, service="svc")
+    lease.lock_path.write_bytes(b"original")
+    info = lease.lock_path.stat()
+    identity = (info.st_dev, info.st_ino)
+    lease.acquire(expected_file_identity=identity)
+    try:
+        assert lease.held_file_identity() == identity
+        assert read_owner_pid(lease.lock_path) == os.getpid()
+    finally:
+        lease.release()
+
+
+def test_inherited_release_does_not_unlock_the_parent(tmp_path: Path) -> None:
+    if sys.platform == "win32":
+        pytest.skip("forked flock descriptions are POSIX-only")
+    owner = SingleInstance(tmp_path, service="svc")
+    owner.acquire()
+    identity = owner.held_file_identity()
+    child = mp.get_context("fork").Process(target=_release_inherited, args=(owner,))
+    contender = SingleInstance(tmp_path, service="svc")
+    child.start()
+    try:
+        child.join(10)
+        assert child.exitcode == 0
+        assert owner.held_file_identity() == identity
+        with pytest.raises(AlreadyRunningError):
+            contender.acquire()
+    finally:
+        if child.is_alive():
+            child.terminate()
+            child.join(10)
+        owner.release()
+        contender.release()
+    contender.acquire()
+    contender.release()
 
 
 def test_context_manager(tmp_path: Path) -> None:

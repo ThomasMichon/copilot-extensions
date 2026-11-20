@@ -214,6 +214,17 @@ the portable `KEY=VALUE` line for the Source installation's `service.env` is:
 AGENT_DISPATCH_POOL_ALLOCATION={"registration_id":"review","machine":"build-host","env":"linux"}
 ```
 
+For several eligible pools, use an `instances` list rather than the
+system-wide boolean:
+
+```dotenv
+AGENT_DISPATCH_POOL_ALLOCATION={"instances":[{"registration_id":"review","machine":"build-host","env":"linux"},{"registration_id":"docs","machine":"build-host","env":"linux"}]}
+```
+
+List 1 to 128 distinct exact instances. An invalid or duplicate entry
+invalidates the entire list; an unlisted pool gets no allocation permission.
+This is the positive allocation policy, not a way to clear an admission hold.
+
 In that file the double quotes are JSON; **do not** wrap the value in shell
 quotes or add `export`. Source startup captures the service environment for
 the master and its children. For other launchers, set the same value in the

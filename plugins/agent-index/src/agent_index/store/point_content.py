@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 
 
 def _prepared_tables(content: ContentStore, *, point_scope: PointScope) -> tuple[ContentStore, list[VectorTable]]:
+    from .component_ledger import BINDING, TABLE, qualified_component_table
     from .content_store import ContentStore, _CONTENT_SCHEMA
     from .vector_table import VectorTable
 
@@ -39,8 +40,12 @@ def _prepared_tables(content: ContentStore, *, point_scope: PointScope) -> tuple
     if binding is None or binding["content_table"] != content._table_name:
         raise SourceLayoutError("Point content differs from its retained model binding")
     names = {content._table_name, *(model["table_name"] for model in binding["models"].values())}
-    if names != set(db.list_tables().tables) or names != set(receipt["versions"]):
+    actual = set(db.list_tables().tables)
+    auxiliary = actual - names
+    if actual != set(receipt["versions"]) or not names <= actual or auxiliary - {TABLE}:
         raise SourceLayoutError("Point content requires exactly its prepared bound tables")
+    if auxiliary or BINDING in receipt:
+        qualified_component_table(domain, db)
     table = db.open_table(content._table_name)
     if not table.schema.equals(_CONTENT_SCHEMA):
         raise SourceLayoutError("Point content schema is incompatible")

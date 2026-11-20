@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import logging
 import os
+import stat
 import sys
 from pathlib import Path
 from typing import BinaryIO, TextIO
@@ -150,23 +151,46 @@ class SingleInstance:
             lock_name = f"{stem}.lock" if port is None else f"{stem}.{port}.lock"
         self.lock_path = Path(lock_dir) / lock_name
         self._fh: TextIO | None = None
+        self._owner_pid: int | None = None
 
-    def acquire(self) -> None:
-        """Acquire the lease or raise :class:`AlreadyRunningError`."""
-        self.lock_path.parent.mkdir(parents=True, exist_ok=True)
+    def acquire(self, *, expected_file_identity: tuple[int, int] | None = None) -> None:
+        """Acquire a lease, optionally requiring an already-existing exact inode."""
+        if expected_file_identity is None:
+            self.lock_path.parent.mkdir(parents=True, exist_ok=True)
         # O_RDWR|O_CREAT (not "a+") so writes honor an explicit seek(0) -- POSIX
         # append mode would force every write to EOF and clobber the pid record.
-        fd = os.open(str(self.lock_path), os.O_RDWR | os.O_CREAT, 0o644)
+        flags = os.O_RDWR | (
+            os.O_CREAT if expected_file_identity is None else getattr(os, "O_NOFOLLOW", 0)
+        )
+        fd = os.open(str(self.lock_path), flags, 0o644)
         fh = os.fdopen(fd, "r+", encoding="ascii")
+
+        def require_expected_file() -> None:
+            if expected_file_identity is None:
+                return
+            opened = os.fstat(fh.fileno())
+            current = self.lock_path.lstat()
+            if (
+                not stat.S_ISREG(current.st_mode)
+                or getattr(current, "st_file_attributes", 0) & 0x400
+                or not os.path.samestat(opened, current)
+                or (opened.st_dev, opened.st_ino) != expected_file_identity
+            ):
+                raise PermissionError("single-instance lease no longer names the expected file")
+
         try:
-            _acquire_os_lock(fh)
-        except OSError as exc:
-            holder = read_owner_pid(self.lock_path)
+            require_expected_file()
+            try:
+                _acquire_os_lock(fh)
+            except OSError as exc:
+                raise AlreadyRunningError(self.lock_path, read_owner_pid(self.lock_path)) from exc
+            require_expected_file()
+        except BaseException:
             try:
                 fh.close()
             except OSError:
                 pass
-            raise AlreadyRunningError(self.lock_path, holder) from exc
+            raise
 
         # We own the lease. Record our pid (fixed width, no truncate) so a future
         # contender can name us in its error message.
@@ -178,7 +202,29 @@ class SingleInstance:
         except OSError:
             pass
         self._fh = fh
+        self._owner_pid = os.getpid()
         self.log.debug("Acquired single-instance lease: %s", self.lock_path)
+
+    def held_file_identity(self) -> tuple[int, int]:
+        """Identify this process's held file, refusing path replacement or links.
+
+        This does not acquire another descriptor, transfer custody, or make a
+        PID record authoritative. Callers must still serialize their lifecycle.
+        """
+        if self._fh is None or self._owner_pid != os.getpid():
+            raise PermissionError("single-instance lease is not held by this process")
+        try:
+            opened = os.fstat(self._fh.fileno())
+            current = self.lock_path.lstat()
+        except (OSError, ValueError) as error:
+            raise PermissionError("single-instance lease identity is unavailable") from error
+        if (
+            not stat.S_ISREG(current.st_mode)
+            or getattr(current, "st_file_attributes", 0) & 0x400
+            or not os.path.samestat(opened, current)
+        ):
+            raise PermissionError("single-instance lease path no longer names its held file")
+        return opened.st_dev, opened.st_ino
 
     @property
     def held(self) -> bool:
@@ -189,12 +235,15 @@ class SingleInstance:
         """Release the lease (idempotent)."""
         if self._fh is None:
             return
-        _release_os_lock(self._fh)
+        # A fork shares the parent's flock description; only its owner may unlock it.
+        if self._owner_pid == os.getpid():
+            _release_os_lock(self._fh)
         try:
             self._fh.close()
         except OSError:
             pass
         self._fh = None
+        self._owner_pid = None
         self.log.debug("Released single-instance lease: %s", self.lock_path)
 
     def __enter__(self) -> SingleInstance:

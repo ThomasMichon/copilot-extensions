@@ -348,6 +348,83 @@ def test_point_content_preflights_every_model_before_native_effects(
     ]
 
 
+def test_point_content_inventory_reuses_ledger_qualification_without_adopting_other_tables(
+    api: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    package = "_promotion_point_domain.store"
+    events: list[str] = []
+    schema = SimpleNamespace(equals=lambda _other: True)
+    names = {"chunks", "vectors"}
+    receipt: dict[str, Any] = {
+        "versions": dict.fromkeys(names, 1),
+        "point_models": {
+            "content_table": "chunks", "models": {"first": {"table_name": "vectors", "dim": 2}},
+        },
+    }
+
+    def qualify(_domain: object, _db: object) -> None:
+        events.append("ledger")
+        if "component_ordering_evidence" not in names or receipt.get("component_ordering") != "bound":
+            raise api.layout.SourceLayoutError("unqualified ledger")
+
+    def open_table(name: str) -> SimpleNamespace:
+        events.append("open:" + name)
+        return SimpleNamespace(schema=schema)
+
+    db = SimpleNamespace(uri=Path("unused-point-domain"), list_tables=lambda: SimpleNamespace(tables=names),
+                         open_table=open_table)
+    domain = SimpleNamespace(path=db.uri, receipt=lambda: receipt, _local=SimpleNamespace(db=db))
+    content = SimpleNamespace(_source_domain=domain, _table_name="chunks", db=db)
+    for suffix, attributes in (
+        ("chunk_id_index", {"indexed_chunk_rows": None}),
+        ("content_mutations", {"coalesce_chunks": None, "content_record": None}),
+        ("repo_filter", {"_sql_str": None}),
+        ("scalar_index", {"MAX_SEGMENTS": 32, "ScalarIndexPreparationRequired": ValueError,
+                          "ScalarIndexState": object, "inspect_index": None, "require_budget": None}),
+        ("source_projection", {"sync_content_projection": None}),
+        ("component_ledger", {"BINDING": "component_ordering", "TABLE": "component_ordering_evidence",
+                              "qualified_component_table": qualify}),
+        ("content_store", {"_CONTENT_SCHEMA": schema, "ContentStore": lambda *_args, **_kwargs: SimpleNamespace()}),
+        ("vector_table", {"VectorTable": lambda _db, **kwargs: SimpleNamespace(
+            table_name=kwargs["table_name"], _schema=schema,
+        )}),
+    ):
+        stub = ModuleType(package + "." + suffix)
+        for key, value in attributes.items():
+            setattr(stub, key, value)
+        monkeypatch.setitem(sys.modules, stub.__name__, stub)
+    spec = importlib.util.spec_from_file_location(package + ".point_content", SOURCE / "store/point_content.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module._prepared_tables(content, point_scope=api.claim.scope)
+    assert events == ["open:chunks", "open:vectors"]
+    events.clear()
+    names.add("component_ordering_evidence")
+    receipt["versions"] = dict.fromkeys(names, 1)
+    with pytest.raises(api.layout.SourceLayoutError, match="unqualified ledger"):
+        module._prepared_tables(content, point_scope=api.claim.scope)
+    assert events == ["ledger"]
+    events.clear()
+    receipt["component_ordering"] = "bound"
+    module._prepared_tables(content, point_scope=api.claim.scope)
+    assert events == ["ledger", "open:chunks", "open:vectors"]
+    for obstruction in ("unknown-table", "missing-inventory", "missing-data"):
+        events.clear()
+        with monkeypatch.context() as patch:
+            if obstruction == "unknown-table":
+                patch.setattr(db, "list_tables", lambda: SimpleNamespace(tables=names | {"unknown"}))
+                patch.setitem(receipt, "versions", dict.fromkeys(names | {"unknown"}, 1))
+            elif obstruction == "missing-inventory":
+                patch.setitem(receipt, "versions", {"chunks": 1, "vectors": 1})
+            else:
+                patch.setattr(db, "list_tables", lambda: SimpleNamespace(tables=names - {"vectors"}))
+                patch.setitem(receipt, "versions", dict.fromkeys(names - {"vectors"}, 1))
+            with pytest.raises(api.layout.SourceLayoutError, match="prepared bound tables"):
+                module._prepared_tables(content, point_scope=api.claim.scope)
+        assert events == []
+
+
 def test_nested_default_reads_recheck_receipt_before_returning_legacy_results(
     api: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

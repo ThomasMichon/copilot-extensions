@@ -20,7 +20,9 @@ on:
       - "plugins/agent-worktrees/scripts/hook-facts.ps1"
       - "plugins/agent-worktrees/scripts/post-tool-hook.ps1"
       - "plugins/agent-worktrees/tests/test_post_tool_shell.py"
+      - "plugins/agent-worktrees/tests/test_native_tool_hook_transport.py"
       - "plugins/agent-worktrees/src/agent_worktrees/hook_ipc.py"
+      - "plugins/agent-worktrees/src/agent_worktrees/native_tool_policy.py"
       - "plugins/agent-worktrees/src/agent_worktrees/status_monitor_wake.py"
 
 permissions:
@@ -52,7 +54,7 @@ jobs:
           - packet: write-name-policy
             select: "registered_file_local_write_reuses_original_guard_facts and write-name and real-policy"
           - packet: patch-positive
-            select: "native_write_fixture_launch or native_write_fixture_stderr_survives_timeout or (registered_file_local_write_reuses_original_guard_facts and (patch-input or patch-patch or patch-command or patch-json or patch-freeform or patch-crlf or patch-headers or patch-union or patch-batch or patch-duplicates or patch-limit or patch-field-bound) and not (protected or overflow or nonobject))"
+            select: "native_write_fixture_launch or native_write_fixture_stderr or (registered_file_local_write_reuses_original_guard_facts and (patch-input or patch-patch or patch-command or patch-json or patch-freeform or patch-crlf or patch-headers or patch-union or patch-batch or patch-duplicates or patch-limit or patch-field-bound) and not (protected or overflow or nonobject))"
           - packet: patch-protected
             select: "registered_file_local_write_reuses_original_guard_facts and patch and protected"
           - packet: patch-fallback
@@ -143,6 +145,16 @@ jobs:
           --test-file tests/test_hook_ipc.py
           --test-file tests/test_status_monitor.py
           -k "(mixed and not registered_prepared_cell) or batch-unknown or batch-malformed"
+          --allow-explicit-tiers --test-timeout 30 --timeout 300
+      - name: Qualify retained native admission, live grants and two-cycle protection
+        env:
+          PYTHONUTF8: "0"
+          PYTEST_ADDOPTS: "-vv --tb=short --durations=10"
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees
+          --test-file tests/test_managed_session.py
+          --test-file tests/test_native_tool_hook_transport.py
+          -k "native_batch_entry_and_live_scoped_grants or real_powershell_hook_does_not_activate_unmanaged_repo or real_powershell_managed_pretool_preserves_protection or native_entry_resolves_caller_session_before_resident_admission or native_entry_resolves_caller_directory_before_resident_admission or original_guards_execute_without_any_process or command_entry_never_launches_python"
           --allow-explicit-tiers --test-timeout 30 --timeout 300
 
   prepared-membership-linux:

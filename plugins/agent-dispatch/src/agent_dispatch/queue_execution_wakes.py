@@ -376,6 +376,10 @@ class QueueExecutionWakesMixin:
                     or assignment["recovery_revision"] != wake.pool_recovery_revision
                 ):
                     raise TaskError("pool recovery send incarnation changed")
+                from .retained_admission import require_retained
+                if reservation is None or reservation["key"] != assignment["reservation_key"]:
+                    raise TaskError("pool recovery reservation changed before send")
+                require_retained(cast("TaskQueue", self), conn, task, reservation, resume=True)
             if provenance is None:
                 if task.repo is not None and task.source is not None and execution_scope_qualified(conn, task.repo, task.source):
                     raise TaskError("qualified wake send requires coordinator provenance")

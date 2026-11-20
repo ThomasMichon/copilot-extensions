@@ -15,6 +15,7 @@ from tests.test_pool_placement import pool, publish, task
 q = controls.q
 api = controls.api
 SELECTOR = '{"registration_id":"worker","machine":"host-a","env":"linux"}'
+SELECTOR_SET = '{"instances":[' + SELECTOR + ',' + SELECTOR.replace('"worker"', '"other"') + ']}'
 SETTING = "AGENT_DISPATCH_POOL_ALLOCATION"
 
 
@@ -23,6 +24,10 @@ SETTING = "AGENT_DISPATCH_POOL_ALLOCATION"
     (SELECTOR, "other", "host-a", "linux", False),
     (SELECTOR, "worker", "host-b", "linux", False),
     (SELECTOR, "worker", "host-a", "other", False),
+    (SELECTOR_SET, "worker", "host-a", "linux", True),
+    (SELECTOR_SET, "other", "host-a", "linux", True),
+    (SELECTOR_SET, "third", "host-a", "linux", False),
+    (SELECTOR_SET, "other", "host-b", "linux", False),
     (" YeS ", "other", "host-b", "other", True),
     ("0", "worker", "host-a", "linux", False),
     (None, "worker", "host-a", "linux", False),
@@ -63,6 +68,10 @@ def test_managed_cli_cycle_selects_exact_caller(
     SELECTOR.replace('"env":', '"extra":true,"env":'),
     SELECTOR.replace('"env":', '"env":"other","env":'),
     SELECTOR.replace('"env":', '"env":"linux","env":'),
+    '{"instances":[' + SELECTOR + ',null]}',
+    '{"instances":[' + SELECTOR + ',' + SELECTOR + ']}',
+    '{"instances":[' + SELECTOR + '],"extra":true}',
+    '{"instances":[]}',
 ])
 def test_invalid_selector_never_authorizes(monkeypatch: pytest.MonkeyPatch, setting: str) -> None:
     monkeypatch.setenv(SETTING, setting)

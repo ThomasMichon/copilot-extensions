@@ -10,9 +10,10 @@ older-engine restart/per-version state amendment is reviewed in #13310.
 **Current direction:** Continue the version-aware design with older-engine
 restart refusal and per-version overwrite isolation under that reviewed
 contract. The receiver-only expansion landed in #13320; physical historical
-isolation and recoverable migration design is reviewed in #13493, while its
-runtime implementation and qualification remain open. The preserved provider
-prototype is not delivered and map writes are not enabled.
+isolation and recoverable migration design is reviewed in #13493. Its
+effect-free marker/path observation and legacy-absence receiver landed in
+#13508; guarded migration/recovery and qualification remain open. The preserved
+provider prototype is not delivered and map writes are not enabled.
 **Scope:** P5947-3/4, V5947-3/4 and G5947-3/4. This does not complete those
 items, expiry acceptance, M1, or the parent effort.
 **Vision reconciliation:** Closes the existing
@@ -70,7 +71,7 @@ service's pull/replay API. The relevant source seams are:
 | `watch_notification.validate_notify` | Acknowledged notify accepts only `argv` and `timeout`; legacy notify tolerates other keys. |
 | `watch_notification.default_notify` | Neither callback launch path supplies cwd. An absolute executable does not fix a relative script argument. |
 | `watch_state.RegistryState` | Serializes per-subscriber notify. Legacy restore can ignore unknown entry fields; adding a field is not a downgrade fence. |
-| `watch_storage.read_subscriptions_state` | Requires a top-level JSON list. It rejects a versioned object before registry restoration. |
+| `watch_storage.read_subscriptions_state` | Accepts legacy lists and the present-only versioned legacy partition; transition markers and orphan artifacts refuse before authority selection. |
 | `WatchDaemon._reattach_from_disk` / `reload_state` | Reads before resuming callbacks/pollers; lifecycle reload builds a separate strict registry before installing it. |
 | `agent_procutil.owned_process.run_owned` | Already accepts explicit cwd and owns bounded child lifetime. No process-runner API extension is needed. |
 
