@@ -2,6 +2,16 @@
 
 [Back to the effort](README.md). The Plan and Validation Plan remain the completion gate.
 
+## 2026-11-20 - Compatible Dispatch handoff retains a cleared card draft
+
+Two installed Windows fixture wheels transferred an unowned proposal A -> B
+-> A using the outgoing queue each time. B read the exact draft saved by A
+and cleared it against the observed card and draft revisions. Returning A
+read the same task with the draft absent. The keyed steer receipt remained
+unchanged and the wake outbox stayed empty. This covers the task's draft
+field, not task deletion. Both queues used format 1; the independent
+proposal and steer records do not witness a draft clear after queue loss.
+
 ## 2026-11-20 - Host-index discovery without an attached session
 
 The installed mux consumer trial merged in [#13635](https://github.com/ThomasMichon/copilot-extensions/pull/13635).

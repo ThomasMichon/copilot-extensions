@@ -312,31 +312,53 @@ class WatchWriter:
         guard: CutoverLock | None = None,
     ) -> dict[str, Any]:
         """Receive a prepared journal under fresh admission, without restoring effects."""
+        return self._recover_state_transition(
+            timeout=timeout, installation=installation, guard=guard, sealed=False,
+        )
+
+    def recover_sealed_state_transition(
+        self, *, timeout: float, installation: WatchInstallation | None = None,
+        guard: CutoverLock | None = None,
+    ) -> dict[str, Any]:
+        """Receive a qualified Windows sealed journal, without importing either registry."""
+        return self._recover_state_transition(
+            timeout=timeout, installation=installation, guard=guard, sealed=True,
+        )
+
+    def _recover_state_transition(
+        self, *, timeout: float, installation: WatchInstallation | None,
+        guard: CutoverLock | None, sealed: bool,
+    ) -> dict[str, Any]:
         from zdd.cutover_lock import lock_path
 
-        from .watch_transition_recovery import _controller_environment, recover_prepared
+        from .watch_transition_recovery import (
+            _controller_environment, recover_prepared, recover_sealed,
+        )
 
         with self._operation(timeout) as deadline:
             def validate() -> None:
-                self._validate("recover-prepared-state-transition", deadline)
+                self._validate(
+                    "recover-sealed-state-transition" if sealed else "recover-prepared-state-transition",
+                    deadline,
+                )
                 if installation is not None:
                     if guard is None:
-                        raise PermissionError("watch prepared recovery requires an installation transaction")
+                        raise PermissionError("watch transition recovery requires an installation transaction")
                     guard.require_owned()
                     if guard.path != lock_path(installation.run_root):
-                        raise PermissionError("watch prepared recovery requires its own installation transaction")
+                        raise PermissionError("watch transition recovery requires its own installation transaction")
                     installation.require_current(environment=_controller_environment())
                     if installation.state_root != self.root:
-                        raise PermissionError("watch prepared recovery installation state root differs")
+                        raise PermissionError("watch transition recovery installation state root differs")
                 elif guard is not None:
-                    raise PermissionError("watch legacy prepared recovery has no installation transaction")
+                    raise PermissionError("watch legacy transition recovery has no installation transaction")
                 if not self.daemon.quiescent or self.daemon.effects_enabled:
-                    raise PermissionError("watch prepared recovery requires completed quiescence")
+                    raise PermissionError("watch transition recovery requires completed quiescence")
                 if self.daemon.has_legacy_pending():
-                    raise RuntimeError("watch prepared recovery cannot discard queued legacy callbacks")
+                    raise RuntimeError("watch transition recovery cannot discard queued legacy callbacks")
 
             def refuse_persistence() -> None:
-                raise PermissionError("watch prepared recovery does not authorize legacy writes")
+                raise PermissionError("watch transition recovery does not authorize legacy writes")
 
             def check_deadline() -> None:
                 self._remaining(deadline)
@@ -349,7 +371,8 @@ class WatchWriter:
             self._strict_custody = True
             self._read_ready = False
             try:
-                return recover_prepared(
+                recover = recover_sealed if sealed else recover_prepared
+                return recover(
                     self.root, self._lease, installation=installation, guard=guard,
                     validate=validate, check_deadline=check_deadline,
                 )

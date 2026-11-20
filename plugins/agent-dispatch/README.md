@@ -65,6 +65,11 @@ For bounded task evidence and distinct assignment-detach, Proposed/Queued
 reset and original-wake reconciliation, see [task recovery](docs/task-recovery.md).
 These controls do not stop agents, erase unknown sends or authorize live recovery.
 
+Task-backed context handoffs retain an exact creator binding in existing task
+metadata. Their nonblocking terminal hook and explicit `handoff-claim` retry use
+the actual task owner and guarded native settlement; unbound legacy tasks stay
+protected. See the [creator-claim contract](../context-handoff/docs/creator-claim-closeout.md).
+
 The optional [execution handoff construction APIs](docs/execution-handoff.md)
 define the effect-adapter boundary and durable queue-level admission closure.
 They expose no live handoff command, destination activation or acknowledgement;

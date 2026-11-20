@@ -53,12 +53,11 @@ from .coordinator_task_models import (
 from .coordinator_task_views import _bulk_task_dict, _event_task_dict, _task_dict
 from .coordinator_verification import register_verification_routes
 from .events import EventBus
-from .queue_records import WorkerAdmissionInhibited
 from .lease import FencingGuard
 from .queue import TaskQueue
 from .queue_common import CompletionOutcome, ResultTooLargeError, ResultValidationError, Task, worker_id_for
 from .queue_producer_fences import ProducerFenceError, ProducerScopeValidationError
-from .queue_records import TaskError
+from .queue_records import TaskError, WorkerAdmissionInhibited
 from .task_authority import (
     mint_task_token, register_task_grant_route, resolve_task_authority, start_incarnation,
 )
@@ -123,6 +122,8 @@ def register_task_routes(
     register_task_recovery_routes(app, queue, bus, control_token=control_token)
     from .acquisition_receipts import register_routes
     register_routes(app, queue)
+    from .coordinator_handoff_claim import register_routes as register_handoff_claim_routes
+    register_handoff_claim_routes(app, queue, bus, control_token=control_token)
     register_category_routes(app, queue, control_token=control_token,
                              emit=lambda kind, data: bus.publish({"type": kind, **data}))
     def _require(task: Task | None) -> Task:
@@ -194,7 +195,9 @@ def register_task_routes(
             # mutation succeeds.
             from . import handoff_claim_release
 
-            handoff_claim_release.release_if_handoff(result, cancel_pending=event_type == "task.abandoned")
+            handoff_claim_release.release_if_handoff(
+                result, cancel_pending=event_type == "task.abandoned", queue=queue,
+            )
         if event_type is not None:
             _emit(event_type, result)
         return result

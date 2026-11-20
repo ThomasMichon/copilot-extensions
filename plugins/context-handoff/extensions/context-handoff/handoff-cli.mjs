@@ -522,7 +522,13 @@ async function cmdAbort(args) {
   process.stdout.write(
     `Aborted ${result.kind}-backed handoff ${result.id}. It will not be offered for consumption again.\n` +
     (result.ledgerCancelled ? "Cancelled the matching agent-worktrees pending-handoff ledger entry.\n" : "") +
-    (result.ledgerNote ? `\n${result.ledgerNote}\n` : ""),
+    (result.ledgerNote ? `\n${result.ledgerNote}\n` : "") +
+    (result.claimSettled ? "Settled the exact originating creator claim.\n" : "") +
+    (result.kind === "task" && !result.claimSettled
+      ? `Creator claim remains pending: ${result.claimNote || "settlement was not confirmed"}. ` +
+        `Retry this exact abort; an unbound legacy task needs an explicit ` +
+        `\`agent-dispatch handoff-claim ${result.id} --owner-ref <machine/project/worktree>\`.\n`
+      : ""),
   );
 }
 

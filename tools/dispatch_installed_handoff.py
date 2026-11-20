@@ -42,6 +42,21 @@ def worker(root: Path, phase: str, expected: str) -> dict[str, Any]:
     assert task is not None and task.title == "schema trial" and task.status == "proposed" and task.owner is None
     assert intake.queue.read_payload(task) == payload
     receipt = None
+    if expected == "compatible-import":
+        if phase == "seed":
+            intake.steer("answer", fields)
+            saved = intake.queue.save_card_draft(task.id, fields={"answer": "original draft"})
+            assert saved.card_draft is not None
+            (root / "expected-draft.json").write_text(json.dumps(saved.card_draft), encoding="utf-8")
+        elif phase == "incoming":
+            assert task.card_draft == json.loads((root / "expected-draft.json").read_bytes())
+            cleared = intake.queue.clear_card_draft(task.id, expected_revision=task.steering_revision,
+                                                    expected_draft_revision=task.card_draft_revision)
+            assert cleared.card_draft is None
+            persisted = intake.queue.get(task.id)
+            assert persisted is not None and persisted.card_draft is None
+        else:
+            assert task.card_draft is None and task.card_draft_revision == "absent"
     if phase == "return":
         assert intake.queue.steer_receipt(task.id, "answer") == json.loads((root / "expected.json").read_bytes())
     if phase != "seed":
