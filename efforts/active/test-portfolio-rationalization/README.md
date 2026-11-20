@@ -55,6 +55,24 @@ release gates, or count unexecuted native coverage as passing.
 
 ## Coordination
 
+The proposed complete #1475 full-user Windows WinGet bootstrap-venue family
+enters Phase 5's owning-runner/native-workflow lane through existing Phase 7
+migration intake and domain review. Preserve the primary maintainer and actual
+clean-room/provider, bootstrap/installer, repository-resource, credential,
+native, source and cleanup custodians. No VM/provider, machine, implementer,
+resource, access or budget is appointed. OPEN #1303, all incumbent states/holds,
+unit-only required CI and hosted-Windows quiescence remain.
+
+This is separate from #5921's finite verdict-reducer case and preserves that
+case's independent #1475 contract rather than absorbing it. #688's own cost,
+precondition, native and downstream F3-E ownership gates remain independent;
+its received #1192 remote Windows container path is not a full-user WinGet
+venue. Normal review must deliver every P1475/V1475/G1475 clause, this
+Coordination, Phase 7 route and dated Journal. Keep #1475 OPEN during proposal;
+current whole applicable receiving/original/custody readback and a separate
+source judgment follow actual complete delivery. No new generic ACK,
+whole-Portfolio prerequisite or execution/resource transfer follows.
+
 The proposed finite #13598 observed-collection attribution family enters the
 existing Phase 4 tools/shared-observer wave through Phase 7 migration intake.
 Preserve the actual source-admission, observer, fixture, runner, native and
@@ -1520,6 +1538,32 @@ a different selection. Any changed controlled selection must be named as changed
 - [ ] Add contribution guidance requiring new test families to declare their
   contract, tier, effects, and expected budget impact.
 
+#### Complete full-user WinGet bootstrap venue from #1475
+
+Agent-recommended owning-runner/native-workflow receiving through Phase 7.
+The [complete finite contract](winget-bootstrap-venue.md) preserves every
+original stage and independent owner.
+
+- [ ] **P1475-1:** Provide the [supported full-user Windows venue and exact
+  minimal starting state](winget-bootstrap-venue.md#provider-and-minimal-starting-state),
+  without relabeling Server Core or preinstalled tools as the subject's work.
+- [ ] **P1475-2:** Preserve the [complete subject-installed Copilot, external
+  marketplace-installed seed plugin AND its Python/uv runtime setup, plus the
+  repository-only restore chain](winget-bootstrap-venue.md#subject-owned-bootstrap-and-repository-restore),
+  using the actual installation owners rather than implicit plugin loading.
+- [ ] **P1475-3:** Preserve [stage attribution, literal mode, repeated-bootstrap
+  alternatives, ephemeral credentials and owned disposal](winget-bootstrap-venue.md#evidence-ownership-and-independent-scope),
+  retaining #688/#1192 and downstream F3-E as independent contracts.
+
+##### Local Validation for #1475
+
+- [ ] **V1475-1:** Exercise the [actual fresh Windows start and complete native
+  bootstrap/restore outcome](winget-bootstrap-venue.md#native-start-and-full-bootstrap),
+  including the non-equivalent Server Core/preinstalled-tool control.
+- [ ] **V1475-2:** Verify [repeatability, literal and safe failure/cleanup
+  outcomes](winget-bootstrap-venue.md#repeatability-and-safe-outcomes),
+  without changing existing CI, native admission, budgets or resource custody.
+
 #### Finite finished-daemon cleanup qualification from #12973
 
 Agent-recommended Phase 5 owning-runner receiving through Phase 7.
@@ -1674,6 +1718,15 @@ an assertion that the historical source defect remains current._
   effort Done, and archive it.
 
 ### Phase 7 — Reconcile deferred backlog
+
+The proposed complete P1475/V1475/G1475 family has one primary placement in
+Phase 5's owning-runner/native-workflow lane. The append-only migration-intake
+route records full-user WinGet provider/bootstrap acceptance, not generic
+Windows transport equivalence, and retains existing custodians. This same
+planning unit supplies complete Plan, local/actual global Validation,
+Coordination and dated Journal for ordinary domain review. Existing #1475
+supplies the tracker during proposal; no new issue, administrative checkbox,
+implementer or execution authority is added.
 
 The proposed P9348/V9348/G9348, P12968/V12968/G12968 and
 P13164/V13164/G13164 families each have one primary Phase 4 placement;
@@ -3020,6 +3073,18 @@ independent of #10031's large-caller startup/cutover lane.
 
 ## Validation Plan
 
+- [ ] **G1475:** Resolve every P1475/V1475 and continuing Coordination clause:
+  the supported full-user WinGet venue; PowerShell/WinGet/Git-only baseline
+  plus required checkout transport; subject WinGet Copilot, external marketplace,
+  marketplace-installed seed plugin AND its bootstrap Python/uv runtime setup;
+  repository-only plan/validate/
+  restore; attributed postconditions; repeat no-op OR readiness; ephemeral
+  credentials, literal mode and owned disposal. Retain Server Core smoke
+  without false equivalence, actual native/resource admission, independent
+  #688/#1192/downstream F3-E owners, Phase 7 review, unit-only CI and all existing
+  holds. Planned receiving is not an implemented provider, native pass,
+  installation, source/resource handback or whole-Portfolio completion.
+
 - [ ] **G13598:** Resolve P13598/V13598 and continuing Coordination at the
   original CPython 3.11.9 observed-collection boundary, including relocated
   cache-prefix and supported extended spelling, exact declared-source binding
@@ -3456,6 +3521,8 @@ with another unbounded full-suite run. Portfolio reductions follow only after
 the inventory and evidence gates are available.
 
 ## Journal
+
+### [2026-11-20 UTC - Proposed complete full-user WinGet bootstrap venue](../backlog-reconciliation/journal/2026/11.20-winget-venue-and-retained-contracts.md)
 
 ### [2026-11-20 UTC - Windows attribution and retained-transition receiving](../backlog-reconciliation/journal/2026/11.20-path-attribution-and-retained-transitions.md)
 

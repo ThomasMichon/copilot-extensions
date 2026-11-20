@@ -410,6 +410,16 @@ the non-public approval conversation.
 
 ## Plan
 
+The [full-user WinGet venue receiving unit](journal/2026/11.20-winget-venue-and-retained-contracts.md)
+records #13701's actual reviewed receiving and the complete 884-open census.
+Current whole-source readback requires an explicit conjunction: install the
+seed plugin through the external marketplace AND establish its runtime through
+the declared installation owner. The scoped clarification changes no technical
+state, native/resource custodian or original outcome. All six Portfolio rows
+remain unchecked and #1475 stays OPEN pending corrected reviewed receiving/
+readback and a separate judgment. #688's independent gates, #2612's actual
+mapping condition and the distinct canonicals remain.
+
 The [local transport and complete rendezvous planning unit](journal/2026/11.20-local-transport-and-rendezvous-planning.md)
 records #13690's actual reviewed delivery, #12042's separately audited tracking
 retirement and a complete unchanged 884-open census. One canonical Draft plan
