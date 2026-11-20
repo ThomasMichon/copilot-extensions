@@ -204,7 +204,7 @@ def main(argv=None):
                           "capabilities": [
                               CAPABILITY, PROVIDER, MACHINE_CALLER_CAPABILITY, MACHINE_REFERENCE_CAPABILITY,
                               SSH_SETUP_CAPABILITY, SSH_SETUP_PIN_CAPABILITY, SSH_KEY_REFERENCE_CAPABILITY,
-                              SSH_KEY_PIN_CAPABILITY,
+                              SSH_KEY_PIN_CAPABILITY, "repository-continuity-reconnect-v1",
                           ]}
             elif args.command == "ssh-setup":
                 from .ssh_setup import run as setup_ssh

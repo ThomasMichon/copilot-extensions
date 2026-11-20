@@ -7,6 +7,17 @@ import pytest
 from fleet_manager.__main__ import main
 
 
+def test_reconnect_is_discoverable_without_touching_enrollment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    assert main(["capabilities"]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["schema"] == "fleet-manager.capabilities" and result["version"] == 1
+    assert "repository-continuity-reconnect-v1" in result["capabilities"]
+    assert not list(tmp_path.iterdir())
+
+
 def test_legacy_location_without_creating_state(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:
