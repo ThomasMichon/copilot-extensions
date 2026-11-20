@@ -227,6 +227,12 @@ behind a malformed tuple or an owner filter. Producer scans reconcile an
 unchanged creator/transfer chain against its exact local receiving subjects
 before projecting current owner names; they preserve historical metadata and
 report ambiguous chains as unknown.
+When a transfer actor requires historical-name resolution, its exact accepted
+bundle and original producer snapshot supply the independent evidence in the
+existing handoff store. The read-only scan checks that evidence without rewriting
+names or probing execution; a same-project/worktree match alone cannot verify
+a substituted transfer actor. Unavailable or contradictory evidence remains
+an incomplete ownership snapshot.
 Session reactivation and End retain the original qualified self-session claim
 for the tracked session and proven receiving project/worktree, rather than
 reconstructing it from a renamed reporter. Other projects, worktrees, sessions
