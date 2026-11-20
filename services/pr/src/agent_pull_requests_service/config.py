@@ -107,6 +107,7 @@ class WorkspaceConfig:
     comment_mappings: tuple[tuple[str, str], ...] = ()
     terminal_targets: tuple[WatchScopeBinding, ...] = ()
     terminal_mapping_reads: bool = False
+    generation_associations: bool = False
 
     def cache(self, store: ReplayStore) -> GenerationCache:
         return GenerationCache(
@@ -209,9 +210,15 @@ class HostConfig:
                 terminal_retention=True, terminal_recovery=True, terminal_cache_retirement=True,
                 **mapping_options,
             )
+        association_options: dict[str, Any] = {}
+        if self.workspaces and self.workspaces.generation_associations:
+            from .generation_associations import core
+            core()
+            association_options["workspace_generation_associations"] = True
         return ReplayStore(
             self.root, self.namespace,
             service_identity=ReplayServiceIdentity(self.fleet, self.gateway, self.slot),
+            **association_options,
         )
 
     def provision(self) -> None:
@@ -228,6 +235,7 @@ class HostConfig:
             raise ValueError("workspace provisioning requires a fresh dedicated root")
         if self.workspaces is not None and (
             self.workspaces.preparations or self.workspaces.terminal_targets
+            or self.workspaces.generation_associations
         ):
             lease = SingleInstance(self.root, service="agent-pull-requests-watch")
             pid, deadline = os.getpid(), time.monotonic() + self.operation_seconds
@@ -250,6 +258,12 @@ class HostConfig:
                         store.adopt_prepared_reviews(
                             lifecycle_checkpoint=lifecycle, expires_at=expires_at, checkpoint=lifecycle,
                         )
+                elif self.workspaces.generation_associations:
+                    from .generation_associations import core
+                    core().provision(
+                        store, self.workspaces.cache(store), expires_at=expires_at,
+                        checkpoint=lifecycle, lifecycle_checkpoint=lifecycle,
+                    )
                 else:
                     store.adopt_prepared_reviews(
                         lifecycle_checkpoint=lifecycle, expires_at=expires_at, checkpoint=lifecycle,
@@ -276,7 +290,7 @@ class HostConfig:
 def _workspaces(value: object, bindings: list[WatchScopeBinding],
                 observations: list[NativeObservationBinding], seconds: int) -> WorkspaceConfig:
     selected = _fields(value, {"bindings", "cache_bytes", "cache_generations"}, {
-        "terminal_reads", "terminal_mapping_reads",
+        "terminal_reads", "terminal_mapping_reads", "generation_associations",
     })
     terminal_reads = selected.get("terminal_reads", False)
     if type(terminal_reads) is not bool:
@@ -286,6 +300,12 @@ def _workspaces(value: object, bindings: list[WatchScopeBinding],
         raise ValueError("terminal_mapping_reads requires a JSON boolean")
     if terminal_mapping_reads and not terminal_reads:
         raise ValueError("terminal_mapping_reads requires terminal_reads")
+    generation_associations = selected.get("generation_associations", False)
+    if type(generation_associations) is not bool or generation_associations and terminal_reads:
+        raise ValueError("generation_associations requires an explicit baseline selection")
+    if generation_associations:
+        from .generation_associations import core
+        core()
     cache_bytes, cache_generations = selected["cache_bytes"], selected["cache_generations"]
     if (
         type(cache_bytes) is not int or not 65536 <= cache_bytes <= 1024 * 1024 * 1024
@@ -308,6 +328,8 @@ def _workspaces(value: object, bindings: list[WatchScopeBinding],
             raise ValueError("comment_mappings requires explicit preparation hosting")
         if terminal_reads and ("preparation" in entry or mapping):
             raise ValueError("terminal_reads cannot select preparation or comment mappings")
+        if generation_associations and ("preparation" in entry or mapping):
+            raise ValueError("generation_associations requires an unextended baseline workspace")
         key = (entry["principal"], entry["target"])
         if key not in scopes or any((p, t) == key for p, t, _ in readers):
             raise ValueError("workspace requires one existing admitted caller/target")
@@ -345,6 +367,7 @@ def _workspaces(value: object, bindings: list[WatchScopeBinding],
             (p, t) == (b.principal, b.target) for p, t, _ in readers
         )) if terminal_reads else (),
         terminal_mapping_reads,
+        generation_associations,
     )
 
 

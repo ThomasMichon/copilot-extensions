@@ -303,3 +303,25 @@ evidence. HTTP is outside this initial scope, not an unchecked prerequisite.
   sub-daemons without changing unbound legacy mode, and retain Linux lifetime
   custody through the bounded stdin-EOF flush grace before forced retirement.
   Their native regression persists and reads back the receiver's final batch.
+
+### 2026-11-20 - U2 Dispatch source adoption
+
+- Claimed only U2 on #13545 in managed source worktree codename
+  `clanking-compass`. U1 retains no shared-command source reservation.
+  Current Dispatch work on assignment capture and placement retains its own
+  expression; this slice does not change those integration hunks.
+- Added the independent closed `dispatch.lifecycle.v1` projection and explicit
+  coordinator-owned admission through the existing shared parser, bounded
+  writer and native process owner. Bridge remains the default shared API and
+  advertises only its own schema.
+- Real ordinary configured HTTP mutations exercise interleaved stored-task
+  origins and an explicit service-owned fence route, with independent
+  receiver-file readback. Disabled/invalid/local opt-out, legacy compatibility,
+  failure, nonreading receiver and new-source restart are finite controls.
+- Reconciled actual shared-library imports in the command contract inventory:
+  participating lifecycle owners, deliberately separate diagnostic/reporting
+  readers and validation-only consumers, and explicitly unknown/unobserved
+  instrumentation or installed generations.
+- Current-head review, required CI, native evidence, merge and finalization
+  remain publication obligations for this slice. U3/U4 and the umbrella stay
+  open; no installed runtime, receiver, daemon or release was changed.

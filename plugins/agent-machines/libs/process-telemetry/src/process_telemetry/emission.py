@@ -25,7 +25,7 @@ class SinkSlot:
         self._configuration_lock = threading.RLock()
         self._command_owner: CommandRoutes | None = None
 
-    def configure_commands(self) -> CommandRoutes:
+    def configure_commands(self, *, source: str = "agent-bridge") -> CommandRoutes:
         """Create one bound-route owner without replacing the legacy sink."""
         from .command import CommandRoutes
 
@@ -39,7 +39,7 @@ class SinkSlot:
                 for binding in self._command_owner.bindings
             ):
                 raise RuntimeError("previous command custody is unconfirmed")
-            self._command_owner = CommandRoutes(self)
+            self._command_owner = CommandRoutes(self, source=source)
             return self._command_owner
 
     def command_buffer(

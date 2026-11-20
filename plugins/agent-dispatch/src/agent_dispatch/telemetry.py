@@ -31,12 +31,17 @@ import os
 import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 from process_telemetry import SinkSlot
 from process_telemetry.append import append_bytes
 
 from .install_paths import install_dir
+
+if TYPE_CHECKING:
+    from typing_extensions import Unpack
+    from process_telemetry.buffer import BufferBounds, BufferedSink
+    from process_telemetry.retained_spool import RetainedSpool
 
 log = logging.getLogger("agent-dispatch.telemetry")
 
@@ -72,7 +77,7 @@ def close_configured_retained_sink() -> None:
     close_configured(_slot)
 
 
-def configured_sink_inventory() -> dict:
+def configured_sink_inventory() -> dict[str, Any]:
     from process_telemetry.configured_spool import configured_inventory
 
     return configured_inventory(
@@ -99,7 +104,9 @@ def clear_telemetry_sink() -> None:
     set_telemetry_sink(None)
 
 
-def set_buffered_telemetry_sink(sink: TelemetrySink, **bounds):
+def set_buffered_telemetry_sink(
+    sink: TelemetrySink, **bounds: Unpack[BufferBounds],
+) -> BufferedSink:
     """Explicit owner initialization; clear/replacement closes this buffer."""
     return _slot.set_buffered(sink, **bounds)
 
@@ -116,6 +123,18 @@ def emit(event: dict[str, Any]) -> None:
     telemetry is best-effort and must never perturb the coordinator.
     """
     _slot.emit(event)
+
+
+def emit_for(owner: Any, event: dict[str, Any]) -> None:
+    """Keep the coordinator's immutable admission, including background producers."""
+    consumer = getattr(owner, "_consumer_telemetry", None)
+    if consumer is None or consumer.legacy:
+        emit(event)
+    else:
+        try:
+            consumer.emit(event)
+        except Exception:
+            pass
 
 
 def load_sink_from_spec(spec: str) -> TelemetrySink | None:
@@ -146,7 +165,7 @@ def load_sink_from_spec(spec: str) -> TelemetrySink | None:
         log.warning("telemetry sink factory %r did not return a callable; ignoring",
                     spec)
         return None
-    return sink
+    return cast(TelemetrySink, sink)
 
 
 def load_sink_from_env(var: str = SINK_ENV_VAR) -> bool:
@@ -252,7 +271,7 @@ def make_spool_sink(spool: str | os.PathLike[str] | None = None) -> TelemetrySin
     return sink
 
 
-def make_retained_spool_sink(directory):
+def make_retained_spool_sink(directory: Path) -> RetainedSpool:
     """Explicit API opt-in; owner provisions directory/retained and maintenance."""
     from process_telemetry.retained_spool import RetainedSpool
     from .diagnostic_logs import operation_custody

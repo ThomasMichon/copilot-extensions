@@ -129,11 +129,11 @@ def build_coordinator_mcp(
         # Skip it for periodic, non-state-transition event types (e.g. a
         # heartbeat lease extension) -- see `_NO_TELEMETRY_EVENT_TYPES`.
         if event_type not in _NO_TELEMETRY_EVENT_TYPES:
-            telemetry.emit(telemetry.task_lifecycle_event(event_type, event_task))
+            telemetry.emit_for(bus, telemetry.task_lifecycle_event(event_type, event_task))
 
     def _emit_producer_event(event_type: str, detail: dict[str, object]) -> None:
         bus.publish({"type": event_type, "producer_fence": detail})
-        telemetry.emit(telemetry.producer_fence_event(event_type, detail))
+        telemetry.emit_for(bus, telemetry.producer_fence_event(event_type, detail))
 
     def _control_error(ctx: Context) -> dict[str, object] | None:
         if control_token is None:
