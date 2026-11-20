@@ -24,7 +24,7 @@ def _prompt(task_id: str, native: str) -> str:
     )
 
 
-def redrive_invocation(row: Any, machine: str) -> dict:
+def redrive_invocation(row: Any, machine: str) -> dict[str, Any]:
     """Keep accepted/UNKNOWN retry bytes even when the supervisor changes."""
     info = json.loads(row["agent_info"])
     actual = identity(info)
@@ -56,7 +56,7 @@ def redrive_invocation(row: Any, machine: str) -> dict:
     return invocation
 
 
-def require_pending_redrive(before: dict, facts: dict, pending: dict) -> None:
+def require_pending_redrive(before: dict[str, Any], facts: dict[str, Any], pending: dict[str, Any]) -> None:
     """Confirm the executing provider retained this operation before transport."""
     revision = before["startup_revision"] + int(before["startup_complete"])
     info = pending.get("agent_info")
@@ -77,7 +77,7 @@ def require_pending_redrive(before: dict, facts: dict, pending: dict) -> None:
 
 
 def record_redrive(
-    queue: Any, key: str, *, ordinary_redrive: dict, startup_complete: bool,
+    queue: Any, key: str, *, ordinary_redrive: dict[str, Any], startup_complete: bool,
     startup_revision: int, session_handle: str | None, worktree: str | None,
     now: float | None,
 ) -> SpawnReservation:
@@ -110,11 +110,14 @@ def record_redrive(
                 or marker.get("startup_revision") != revision
                 or marker.get("invocation") != invocation
                 or not isinstance(invocation, dict)
-                or redrive_invocation(row, invocation.get("machine")) != invocation
+                or not isinstance(invocation.get("machine"), str)
+                or redrive_invocation(row, invocation["machine"]) != invocation
             ):
                 raise TaskError("retained native redrive completion does not own this startup")
         else:
             queue.require_worker_admission()
+            if queue._spawn_admission is not None:
+                queue._spawn_admission(task, row["reserved_by"], None, row["driver"], {"agent_info": info})
             if retained_redrive_facts(conn, row, task) != ordinary_redrive:
                 raise TaskError("retained native redrive admission changed")
             if not row["startup_complete"]:

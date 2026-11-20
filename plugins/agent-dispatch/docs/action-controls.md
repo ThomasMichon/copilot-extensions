@@ -229,6 +229,89 @@ full Windows rotation or authorize a production installation.
 
 ## Worker admission
 
+### Stop selected new workers without winding down a pool
+
+Use the updated `agent-dispatch` **on the installation making the decision**.
+These commands reread/write local state without contacting a coordinator or
+restarting a supervisor. Examples (the stops may coexist):
+
+```bash
+agent-dispatch actions hold --pool review --reason "Review intake paused"
+agent-dispatch actions hold --instance review host-a linux --reason "Host maintenance"
+agent-dispatch actions hold --label review-request --reason "Quarantine new requests"
+agent-dispatch actions hold --kind finite --reason "Pause finite task launches"
+agent-dispatch actions hold --agent reviewer --reason "Investigating worker startup"
+agent-dispatch actions holds
+agent-dispatch actions holds --agent reviewer
+agent-dispatch actions resume --agent reviewer
+agent-dispatch actions resume --kind finite
+agent-dispatch actions resume --label review-request
+agent-dispatch actions resume --instance review host-a linux
+agent-dispatch actions resume --pool review
+```
+
+`--pool` matches the registration/supervisor ID; `--instance` matches the
+entire **registration ID, machine, environment** tuple, in that order. A bare
+legacy supervisor has an ID but not a managed instance. `--label` matches
+**any** exact stored task label, not just its first routing label. `--kind`
+matches the stored queue kind; the ordinary automatic scheduler selects
+`finite`, not standing charters. A task's prompt, title, payload, repo,
+source and capability requests are not worker-type selectors.
+
+`--agent` matches the selected headless Bridge agent (`--headless-agent`,
+default `task-worker`) or the selected body: `acp`, `cli`, `script`,
+`restricted-bridge`, `ci-repair`, `handoff-fallback`, `fleet-headless`, or `fleet-cli`.
+Fleet headless also matches the configured agent name. A charter overlay is
+not the Bridge agent name. For per-label overrides, the first overridden
+label in the task's stored order selects a **configured** backend; task text
+cannot name an arbitrary agent. CI repair uses its coordinator-selected body
+class, not an agent name supplied by a task.
+
+All selectors are exact and case-sensitive, without globs. **Any** matching
+hold denies a new admission. `resume` removes that exact key; it does not
+clear sibling holds, start a pool, change the positive
+[allocation selector](pool-claim-start.md), or override a global stop.
+A held managed placement is not permission to claim through the legacy API,
+change the global winner, or borrow capacity from another pool.
+
+**Enforcement:** Each supervisor checks just before asking for a reservation,
+including label-routed, fleet, restricted and coordinator-launched CI work.
+It checks before restricted startup retries, unclaimed-body redrive and new
+managed startup retry/nudge attempts. The production coordinator separately
+checks fresh reservations before insertion, using the task row and, for
+managed placement, the actual selected instance even if the request omits
+one. It also checks the bound instance before admitting a new pool retry.
+Retained retries include the original allocator and recorded Bridge agent
+selection when available. The coordinator's one-shot handoff fallback checks
+its stored task and actual default worker before consuming its launch attempt.
+The coordinator can check its known body class; it cannot attest an unnamed
+remote supervisor's selected agent. Set named-agent holds on every executing
+supervisor installation; set placement holds on the coordinator as well for
+direct placement clients. There is no distributed policy replication.
+
+**In flight:** A reservation request or retry already admitted at its check
+can finish its original launch/send; a file update and a remote launch are
+not one transaction. No process is killed, attempt reset, task canceled or
+custody cleared. Existing claims, same-owner continuations, observation of
+an already-issued retry, exhaustion, retirement and cleanup keep their normal
+rules. Clear the last applicable hold to allow the next eligible attempt.
+This is not a switch for task enqueue, direct execution claims, standing
+attachments, manual external launchers, or older runtimes. Use the existing
+global admission control when its broader semantics are needed.
+
+`actions holds [selector]` reports explicit stops (not effective eligibility).
+`worker-admission-holds.json` is a sibling of the global action file under
+the selected installation, so even clearing a global action cannot erase its
+scoped stops. The store uses the action reader's 64 KiB limit and the existing
+override writer's lock and atomic replace. Specify a short **nonsecret**
+single-line reason (1–240 printable characters); it is stored and displayed
+as entered, not redacted. A malformed/unreadable file refuses admission and
+ordinary edits; inspect the reported state path and restore the last known
+valid policy before retrying. Do not remove the file as a generic recovery:
+absence means no scoped stops. Other installation controls remain independent.
+
+### Global admission
+
 The production coordinator checks `worker-admission` before execution claims
 and before minting a new spawn reservation or one-shot handoff-fallback attempt.
 An inhibited fallback retains its sole attempt for a later poll.

@@ -1054,7 +1054,9 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 self._retain_terminal_startup(res, task)
                 continue
             if res.get("driver") == "restricted-bridge":
-                reconciled += self._reconcile_restricted_start(res, task)
+                from .admission_holds import supervisor_inhibited
+                if not supervisor_inhibited(self, task, res):
+                    reconciled += self._reconcile_restricted_start(res, task)
                 continue
             if res.get("agent_info") or res.get("driver") == "ordinary-bridge":
                 from .ordinary_bridge import reconcile_created
@@ -3352,6 +3354,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
         identity and clear custody; Bridge owns same-native stopped recovery.
         """
         from .action_controls import action_inhibited
+        from .admission_holds import supervisor_inhibited
 
         redriven = 0
         for res in self._pool_reservations(state=SpawnState.SPAWNED):
@@ -3393,6 +3396,8 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                         continue
                     if action_inhibited("worker-admission", logger=log):
                         break
+                    if supervisor_inhibited(self, task, current):
+                        continue
                     pending = self.client.record_spawn(
                         key, session_handle=current["session_handle"], worktree=current["worktree"],
                         startup_complete=False, startup_revision=session["startup_revision"],
@@ -3438,6 +3443,8 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 continue
             if action_inhibited("worker-admission", logger=log):
                 break
+            if supervisor_inhibited(self, task, res):
+                continue
             try:
                 pending = self.client.record_spawn(
                     key,
