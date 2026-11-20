@@ -421,6 +421,41 @@ No ordinary v2 dequeue, execution-version advertisement, producer, service
 configuration/wire form, automatic repair or runtime activation is added.
 The acquisition and per-point row budgets above remain unchanged.
 
+### Explicit in-process worker dispatch
+
+`indexing.worker.run_worker(task_id, config=..., point_executor=...)` selects a
+point executor only for that explicit Python invocation. Supply the actual
+`IndexConfig` and a synchronous callable accepting the selected `TaskRecord`;
+the callable binds the connector, complete point scope, legacy directory,
+application scope, row budget and caller-owned clients required above. It can
+call `run_configured_azure_devops_points` with the selected task's ID and exact
+typed hints. It cannot be combined with the legacy `indexer` injection.
+
+Dispatch holds the configured source writer from snapshot recheck through the
+callable's return and durable queue verification. The configured runtime still
+qualifies and pins the whole snapshot before effects. The dispatcher ignores
+the callable's return value: success requires the existing queue owner to
+confirm completion against the original task ID, exact immutable hints and pin,
+captured before the callback can mutate its `TaskRecord`. Exceptions leave
+the claim and recovery material as the execution owners retained them; dispatch
+does not write generic failed, cancelled or successful status. Return codes are
+0 for verified completion, 1 for an execution exception and 2 for an unsupported
+selection or a callback returning without durable completion.
+
+The caller owns the synchronous invocation's lifetime and must keep its clients
+alive until it returns, including during cancellation or service shutdown. An
+async host must offload and join this blocking operation; abandoning a thread
+does not stop its effects. This path neither changes process priority/signal
+handlers nor registers a worker PID. It is not a detached-worker or cutover
+adoption contract. A process interruption retains the pin; a fresh explicit
+invocation can resume through the existing recovery owners.
+
+`index-worker --task` supplies no executor, reconstructs its legacy config and
+continues to refuse parked v2 work. Existing v1 callable negotiation, ordinary
+dequeue, worker-generation selection and execution advertisement are unchanged.
+No new CLI syntax, serialized configuration, service selector, producer or
+automatic v2 scheduling is enabled.
+
 ### Sealed native publication suffix
 
 After qualifying all selected native content, routed vectors, cleanup and

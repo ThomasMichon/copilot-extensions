@@ -38,6 +38,30 @@ def hints(**kwargs: Any) -> PointChangeHints:
     })
 
 
+def test_point_dispatch_requires_explicit_config_before_opening_queue() -> None:
+    calls: list[TaskRecord] = []
+    assert run_worker("not-selected", point_executor=calls.append) == 2
+    assert calls == []
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_point_dispatch_cannot_fabricate_completion_or_select_legacy_work(
+    tmp_path: Path, legacy: bool,
+) -> None:
+    config = IndexConfig(data_dir=tmp_path)
+    tasks = TaskStore(tmp_path / "tasks.db")
+    task = tasks.enqueue("git:sample") if legacy else enqueue(tasks)
+    calls: list[TaskRecord] = []
+
+    def execute(selected: TaskRecord) -> TaskRecord:
+        calls.append(selected)
+        return replace(selected, status="complete", point_claim_id="not-a-receipt")
+
+    assert run_worker(task.id, config=config, point_executor=execute) == 2
+    assert tasks.get_task(task.id) == task
+    assert calls == ([] if legacy else [task])
+
+
 def enqueue(store: TaskStore, value: PointChangeHints | None = None) -> TaskRecord:
     value = value if value is not None else hints()
     return store.enqueue(value.source, change_hints=value)

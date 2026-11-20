@@ -194,6 +194,9 @@ After the reviewed proposal, the operator admitted execution:
   and that worker; an explicit
   [configured composition](../../../plugins/agent-index/docs/component-ledger.md#configured-in-process-azure-devops-composition)
   opens isolated prepared owners and pins the expected whole parked snapshot.
+  An explicit [in-process worker hook](../../../plugins/agent-index/docs/component-ledger.md#explicit-in-process-worker-dispatch)
+  selects that bound composition without detached-worker registration and verifies
+  completion through the queue rather than the callable's return value.
   Ordinary v2 execution and automatic partial-effect/restore
   reconciliation remain unimplemented; live-provider, broader event-delivery
   and consumer-scale qualification remain open.
