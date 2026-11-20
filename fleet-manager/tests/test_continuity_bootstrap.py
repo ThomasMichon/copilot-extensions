@@ -257,6 +257,15 @@ def test_real_cli_first_touch_check_restart_and_same_private_key(
                 stdout, stderr = await asyncio.wait_for(child.communicate(), 20)
                 return child.returncode, stdout, stderr
 
+            if consumer == "migration":
+                rc, body, diagnostic = await process(migrated=True)
+                assert rc != 0 and not body
+                assert b"existing enrollment did not reconnect" in diagnostic
+                assert not state.exists()
+                with sqlite3.connect(enrollment.ledger.path) as connection:
+                    for table in ("machine_enrollments", "operations"):
+                        assert connection.execute(f"SELECT count(*) FROM {table}").fetchone() == (0,)
+
             if consumer == "manager-engine":
                 repository = Path(__file__).parents[2]
                 engine_python = _prepared_engine_python()

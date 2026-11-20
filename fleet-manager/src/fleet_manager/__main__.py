@@ -1,6 +1,7 @@
 """Thin fleet planning, explicit client lifecycle and opt-in NEW Gateway serving."""
 
 import argparse
+from collections.abc import Mapping, Sequence
 import sys
 import time
 from pathlib import Path
@@ -18,7 +19,7 @@ def read(path, label):
         raise PlanError(f"{label} file could not be read") from None
 
 
-def main(argv=None):
+def main(argv: Sequence[str] | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
     if arguments and arguments[0] in ("__source-setup", "__source-start"):
         if len(arguments) != 1:
@@ -139,9 +140,9 @@ def main(argv=None):
         if operation in ("initialize", "install"):
             forward.add_argument("--legacy-root", type=Path)
         if operation == "inspect":
-            inspection = forward.add_mutually_exclusive_group()
-            inspection.add_argument("--generation")
-            inspection.add_argument("--after")
+            generation_filter = forward.add_mutually_exclusive_group()
+            generation_filter.add_argument("--generation")
+            generation_filter.add_argument("--after")
         if operation in ("construct", "install"):
             forward.add_argument("--generation", required=True)
             forward.add_argument("--request", required=True)
@@ -183,6 +184,7 @@ def main(argv=None):
             print("fleet-manager: selected Gateway hosting control failed", file=sys.stderr)
             return 1
     if args.command in ("capabilities", "bootstrap", "ssh-setup", "continuity-reconnect"):
+        continuity_result: Mapping[str, object]
         try:
             import asyncio
             from .continuity_bootstrap import (
@@ -200,7 +202,7 @@ def main(argv=None):
             return 1
         try:
             if args.command == "capabilities":
-                result = {"schema": "fleet-manager.capabilities", "version": 1,
+                continuity_result = {"schema": "fleet-manager.capabilities", "version": 1,
                           "capabilities": [
                               CAPABILITY, PROVIDER, MACHINE_CALLER_CAPABILITY, MACHINE_REFERENCE_CAPABILITY,
                               SSH_SETUP_CAPABILITY, SSH_SETUP_PIN_CAPABILITY, SSH_KEY_REFERENCE_CAPABILITY,
@@ -209,7 +211,7 @@ def main(argv=None):
             elif args.command == "ssh-setup":
                 from .ssh_setup import run as setup_ssh
 
-                result = setup_ssh(
+                continuity_result = setup_ssh(
                     args.request.expanduser().absolute(), source=args.source.expanduser().absolute(),
                     harness=args.harness, state_root=args.state_root.expanduser().absolute(),
                     apply=args.apply, expected_request_digest=args.expected_request_digest,
@@ -219,17 +221,17 @@ def main(argv=None):
             elif args.command == "continuity-reconnect":
                 from .continuity_location import continuity_state_path
 
-                result = asyncio.run(bootstrap(
+                continuity_result = asyncio.run(bootstrap(
                     args.source.expanduser().absolute(), harness=args.harness,
                     state_root=continuity_state_path(args.repository, args.harness), apply=False))
-                if result != {"status": "ready", "stage": "connected"}:
+                if continuity_result != {"status": "ready", "stage": "connected"}:
                     print("fleet-manager: existing enrollment did not reconnect", file=sys.stderr)
                     return 1
             else:
-                result = asyncio.run(bootstrap(
+                continuity_result = asyncio.run(bootstrap(
                     args.source.expanduser().absolute(), harness=args.harness,
                     state_root=args.state_root.expanduser().absolute(), apply=args.apply))
-            print(canonical(result).decode("utf-8"))
+            print(canonical(continuity_result).decode("utf-8"))
             return 0
         except ImportError:
             print("fleet-manager: selected continuity runtime closure is unavailable", file=sys.stderr)
