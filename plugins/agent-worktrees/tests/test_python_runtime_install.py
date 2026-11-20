@@ -2418,8 +2418,17 @@ def test_prepared_bootstrap_loads_actual_installer_without_source(tmp_path: Path
     from agent_worktrees import runtime_candidate as installer, update_stage
 
     plugin = Path(__file__).resolve().parents[1]
-    frozen = tmp_path / "frozen-plugin"
+    monkeypatch.syspath_prepend(str(plugin.parents[1] / "tools"))
+    import materialize_installer_engine
+
+    release = tmp_path / "release"
+    frozen = release / "plugins" / plugin.name
     shutil.copytree(plugin / "scripts", frozen / "scripts")
+    log = materialize_installer_engine.materialize_refs(
+        release, canonical_root=plugin.parents[1],
+    )
+    assert log and not any(line.startswith("SKIP") for line in log), log
+    assert not (release / "libs").exists()
     package = tmp_path / "site-packages" / "agent_worktrees"
     package.mkdir(parents=True)
     bootstrap = tmp_path / ".runtime-bootstrap"
