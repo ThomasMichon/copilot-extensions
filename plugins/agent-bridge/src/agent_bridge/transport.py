@@ -402,7 +402,7 @@ async def _resolve_worktree_remote(
         cmd = " ".join(shlex.quote(a) for a in base_args + extra)
         log.info("Resolving remote worktree on %s: %s", target.host, cmd)
         from .startup_progress import current, preparation_output
-        options = {}
+        options: dict[str, Any] = {}
         if current() is not None:
             options["on_output"] = lambda name, chunk: preparation_output(
                 chunk, parse_phase=name == "stderr",
@@ -714,7 +714,7 @@ def _build_remote_cmd(target: SpawnTarget, session_id: str = "") -> str:
     return f"{shlex.join(check)} >&2 && {command}"
 
 
-async def _stage_windows_launch(manager, target: SpawnTarget, script: str) -> str:
+async def _stage_windows_launch(manager: Any, target: SpawnTarget, script: str) -> str:
     """Write a long Windows launch script to the receiver; return a short launcher.
 
     The script travels over a separate SSH exec channel's stdin, so its length

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -54,7 +55,7 @@ class TestBreadcrumb:
 
 class TestSpawnSshStaged:
     @pytest.fixture
-    def mock_manager(self, monkeypatch):
+    def mock_manager(self, monkeypatch: pytest.MonkeyPatch) -> MagicMock:
         # Stub the receiving owner's answer, not hosting-policy validation.
         monkeypatch.setattr(
             "agent_bridge.hosting_policy.query_ssh_policy",
@@ -71,7 +72,7 @@ class TestSpawnSshStaged:
         return mgr
 
     @pytest.mark.asyncio
-    async def test_single_attempt_no_timeout_fast_fail(self, mock_manager) -> None:
+    async def test_single_attempt_no_timeout_fast_fail(self, mock_manager: MagicMock) -> None:
         """Without connect_timeout, a connect failure fails fast (no retry)."""
         mock_manager.ensure_connected = AsyncMock(
             side_effect=ConnectionError("refused")
@@ -90,7 +91,7 @@ class TestSpawnSshStaged:
         assert mock_manager.ensure_connected.call_count == 1
 
     @pytest.mark.asyncio
-    async def test_connect_error_is_runtimeerror(self, mock_manager) -> None:
+    async def test_connect_error_is_runtimeerror(self, mock_manager: MagicMock) -> None:
         """ConnectError still satisfies legacy except RuntimeError handlers."""
         mock_manager.ensure_connected = AsyncMock(
             side_effect=ConnectionError("ControlMaster failed")
@@ -105,8 +106,8 @@ class TestSpawnSshStaged:
                 await spawn_ssh(target)
 
     @pytest.mark.asyncio
-    async def test_checkpoints_emitted_on_success(self, mock_manager) -> None:
-        events: list[tuple[str, dict]] = []
+    async def test_checkpoints_emitted_on_success(self, mock_manager: MagicMock) -> None:
+        events: list[tuple[str, dict[str, Any]]] = []
         tracker = ConnectTracker(lambda e, d: events.append((e, d)))
         target = SpawnTarget(
             type="ssh", host="h", project="proj", cwd="/w", explicit_cwd=True,
@@ -126,8 +127,8 @@ class TestSpawnSshStaged:
         assert ssh_reached
 
     @pytest.mark.asyncio
-    async def test_dead_auth_port_emits_failed_checkpoint(self, mock_manager) -> None:
-        events: list[tuple[str, dict]] = []
+    async def test_dead_auth_port_emits_failed_checkpoint(self, mock_manager: MagicMock) -> None:
+        events: list[tuple[str, dict[str, Any]]] = []
         tracker = ConnectTracker(lambda e, d: events.append((e, d)))
         target = SpawnTarget(
             type="ssh", host="h", project="proj", cwd="/w", explicit_cwd=True,
