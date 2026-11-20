@@ -7847,6 +7847,29 @@ HTTP service intake, replace the
 service/recovery packet above, enable ordinary v2 execution, or qualify broader
 provider/consumer rollout.
 
+`tests/test_native_azure_devops_point_service_matrix.py` separately qualifies
+the existing higher-covered HTTP/service path beside the same three native
+content/vector/checkpoint/ordering-ledger cardinalities. Select this Linux T3
+filesystem/service packet with `--test-file
+tests/test_native_azure_devops_point_service_matrix.py --allow-explicit-tiers`;
+run it separately from the native consumer matrix to retain the existing caps.
+Initial application and corpus setup are outside operation measurement.
+Actual HTTP intake stays parked until explicit service activation, completes
+through the governed runner, and closes the joined client. Reopened completed
+retry then uses no client or provider request. Content and applied-comment
+tombstone cases preserve exact hints, the old completed task, native versions,
+polling bytes, full native row counts and sampled unrelated raw records.
+Whole-checkpoint enumeration is trapped during the measured operation.
+
+The six `POINT_SERVICE_NATIVE_WORK` records measure the combined service
+lifetime and local retry, including diagnostic native plan replay; they are
+not exclusive per-phase costs. Logical counts and native queries/scanned rows/
+read I/Os must match across cardinalities. Linux process I/O, wall/process-CPU
+time and separate setup time are observations, not flat-byte, physical-disk
+or whole-resource acceptance. Ordinary v2 execution remains unadvertised.
+No new required-unit node, production repair, provider activation or rollout
+is introduced; the small service/recovery controls remain separate.
+
 The exclusive attachment-export consumer packet executes the real export
 entrypoint, health-selected command transport, extension registry, provider
 dispatch and descriptor-pinned writer with an in-memory filesystem and
