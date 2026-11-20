@@ -15,6 +15,39 @@ metadata-only pool catalog contract. It explicitly does not advertise automatic
 lane migration or the complete startup retry policy. The placement response
 carries the same protocol/version.
 
+### Current driver lookup (internal)
+
+`current_driver_lookup.current_driver_match(conn, task_id=..., machine=..., worktree=...,
+native_id=...)` reads one existing SQLite transaction. It looks for **other**
+retained assignments and pre-start placements on that driver, plus **any** active
+or preparing detached waiter on the driver or the caller's task. `MATCH` identifies
+outstanding work, `UNKNOWN` means it could not be ruled out, and `CLEAR` means no
+such binding was found in that snapshot. None grants readiness, release or delivery.
+The helper does not inspect wake or transport custody, mutate records or contact a worker.
+
+Claimed, started and suspended work retains its assigned worker. For a submission
+with a return binding, lookup uses `completed_by` and the retained native, not a
+live lease. A qualified owner takes precedence over pins. An unqualified owner's
+tree falls back to a retained pin, then its bare name. An ambiguous native target
+is not treated as a foreign host. A pre-start allocation uses the reservation's
+tree and the selected pool's machine, not a conjectured native.
+
+Tasks and waiters use partial expression indexes on their own rows. Only the
+ownerless claim's effective pool target or fallback pin needs a joined projection.
+Queue migration seeds it under a write transaction. Plain SQLite triggers maintain
+it on changes to the task, placement and reservation, including writes by an older
+queue implementation. No writer needs a custom collation, function or second write.
+
+The indexes fold only printable ASCII in SQLite. Lookup compares other host
+spellings in Python using the routing normalizer or the pin matcher, seeking over
+duplicates rather than scanning history. A pin comparison case-folds both machine
+names without trimming whitespace; routing comparisons still trim. New pin indexes
+coexist with the original indexes so older readers can finish using their own
+comparison semantics. For each matching tree or native probe,
+more than 32 distinct unusual spellings without a proven match yields `UNKNOWN`,
+not `CLEAR`. Consumers must use a fresh snapshot after independent I/O and treat
+anything other than `CLEAR` as a blocker when establishing absence.
+
 The queue rechecks due time, holds, producer admission, the complete configured
 catalog and its revision under the reservation's `BEGIN IMMEDIATE` transaction.
 HTTP placement uses the same in-flight claim/drain gate as direct claims: a
