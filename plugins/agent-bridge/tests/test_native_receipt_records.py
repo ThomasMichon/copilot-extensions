@@ -11,6 +11,22 @@ from test_native_send_admission import native_send as native_send
 
 
 @pytest.mark.asyncio
+async def test_alias_refused_before_record_or_admission(
+    native_send: tuple[Any, Any, NativeSendPrompt], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager, session, original = native_send
+    req = original.model_copy(update={"no_resume": True})
+    store = owner.NativeReceiptRecords.create(tmp_path / "records")
+    monkeypatch.setattr(manager, "get_session", lambda _: session)
+    with pytest.raises(ValueError, match="canonical_bridge_session_required"):
+        await store.submit_once(manager, req.expected_native_session_id, req)
+    with pytest.raises(KeyError, match="no retained"):
+        store.inspect(req.expected_native_session_id, req)
+    manager._run_prompt.assert_not_awaited()
+    assert session.turn_count == 0
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("lost", [False, True])
 async def test_retained_native_receipt_never_readmits(
     native_send: tuple[Any, Any, NativeSendPrompt], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, lost: bool,

@@ -84,6 +84,12 @@ class NativeReceiptRecords:
             inserted = db.execute("INSERT INTO native_v1(delivery,digest) VALUES(?,?) "
                                   "ON CONFLICT(delivery) DO NOTHING",
                                   (request.delivery_id(), request_digest(session, request))).rowcount
+            if inserted:
+                holder = manager.get_session(session)
+                if holder is None or holder.session_id != session:
+                    raise ValueError("canonical_bridge_session_required")
+                if holder.acp_session_id != request.expected_native_session_id:
+                    raise ValueError("expected_native_mismatch")
             self._read(db, session, request)
             db.commit()
         if not inserted:
