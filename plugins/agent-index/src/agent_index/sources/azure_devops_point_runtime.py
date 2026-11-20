@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from agent_index.indexing.path_index import PathIndex
+from agent_index.indexing.component_read import ComponentRead, read_component
 from agent_index.indexing.point_claim import PendingPointClaim
 from agent_index.indexing.point_hints import PointChangeHints
 from agent_index.indexing.point_service import require_point_isolation
@@ -38,6 +39,33 @@ def _require_connector_binding(
         or point_scope[3].query_scope != json.dumps(connector._work_item_queries, sort_keys=True)
     ):
         raise ValueError("Point runtime connector differs from its configured binding")
+
+
+def read_configured_azure_devops_component(
+    path: str, *, config: IndexConfig, legacy_data_dir: Path, point_scope: PointScope,
+    scope: str, max_rows: int,
+) -> ComponentRead:
+    """Open existing owners for one qualification, without acquisition or preparation."""
+    if type(scope) is not str or not scope.strip() or type(max_rows) is not int or max_rows < 1:
+        raise ValueError("Point reader requires its application scope and finite row budget")
+    require_point_isolation(config, legacy_data_dir)
+    paths = PathIndex(config.data_dir / "path_index.db", read_only=True)
+    store = MultiModelStore(
+        config.lance_dir, content_table=config.content_table, point_scope=point_scope,
+    )
+    with store.content_store.db:
+        # This configures in-memory routing; retained native model bindings are never created.
+        for profile in config.model_profiles.values():
+            store.register_model(profile)
+        ledger = ComponentLedger(config, store)
+        domain = ledger._source_domain
+        with domain.operation(store.content_store.db, point_scope=point_scope):
+            if domain.receipt().get("point_models") != _configured_point_models(config):
+                raise SourceLayoutError("Point reader model selection differs from its retained binding")
+            return read_component(
+                ledger, paths, path, point_scope=point_scope,
+                application_scope=scope, max_rows=max_rows,
+            )
 
 
 def run_configured_azure_devops_points(
