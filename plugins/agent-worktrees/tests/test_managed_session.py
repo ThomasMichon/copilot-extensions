@@ -37,6 +37,10 @@ PATCH_PROTECTED_CASES = (
     "patch-protected-move", "patch-protected-direct", "patch-protected-structured",
     "patch-protected-batch", "patch-protected-freeform", "patch-protected-commented-json",
 )
+NATIVE_RPC_PHASES = (
+    "rpc-context", "rpc-dispatch", "rpc-entry", "rpc-payload", "rpc-elevation",
+    "rpc-encoded", "rpc-connected", "rpc-sent", "rpc-received", "rpc-result",
+)
 NATIVE_WRITE_PHASES = {
     "command-entry", "helper-loaded", "input-complete", "output-complete",
     "script-entry", "membership-start", "membership-complete",
@@ -47,7 +51,7 @@ NATIVE_WRITE_PHASES = {
     "command-complete", "admission-start", "admission-complete", "read-proof-start",
     "read-proof-complete", "source-proof-start", "source-proof-complete", "policy-complete",
     "runtime-start", "runtime-complete",
-}
+} | set(NATIVE_RPC_PHASES)
 NATIVE_WRITE_PHASE_WRITER = (
     "function Write-NativeWriteFixturePhase([string]$Name) { "
     "[Console]::Error.WriteLine('NATIVE_WRITE_FIXTURE_PHASE ' + "
@@ -210,6 +214,7 @@ def native_write_fixture_stderr(stderr: bytes) -> tuple[str, bytes]:
                     b"json-web-load", b"json-resolver-type", b"json-resolver-create",
                     b"json-serializer-create", b"json-deserialize", b"json-deserialized",
                 }
+                or not match[4] and match[2].decode("ascii") in NATIVE_RPC_PHASES
             )
         ):
             phases.append(
@@ -262,6 +267,27 @@ def instrument_prepared_admission(source: str) -> str:
     return NATIVE_WRITE_LOAD_WRITER + source
 
 
+def instrument_native_transport(source: str) -> str:
+    for phase, statement, after in (
+        ("rpc-context", "    if (-not (Test-PostToolDiscoveryContext -Discovery $endpoint -RuntimeRoot $runtime)) {", False),
+        ("rpc-dispatch", "    return Invoke-ResidentPostTool -Endpoint $endpoint -PayloadJson $payload -Kind $Kind -ValidatedContext", False),
+        ("rpc-entry", "    $timer = [Diagnostics.Stopwatch]::StartNew()", True),
+        ("rpc-payload", "    $payload = ConvertFrom-PostToolJson $PayloadJson", True),
+        ("rpc-elevation", "        } finally { $identity.Dispose() }", True),
+        ("rpc-encoded", '    $bytes = $utf8.GetBytes((ConvertTo-PostToolJson $request) + "`n")', True),
+        ("rpc-connected", "        $offset = 0", False),
+        ("rpc-sent", "        $buffer = [byte[]]::new(4096)", False),
+        ("rpc-received", "        if (-not $complete) { return $null }", True),
+        ("rpc-result", "        $resultJson = ConvertTo-PostToolJson $reply.result", True),
+    ):
+        assert source.count(statement) == 1
+        marker = f"Write-NativeWriteFixtureCpuPhase '{phase}'"
+        source = source.replace(
+            statement, statement + "\n" + marker if after else marker + "\n" + statement, 1,
+        )
+    return source
+
+
 def qualify_complete_native_entry(
     scripts: Path, entry: str, executable: str, event: dict[str, Any], env: dict[str, str], workspace: Path, capsys: pytest.CaptureFixture[str], *, literal_read: bool=False,
     command_key: str="command", literal_batch: bool=False, argument_read: bool=False,
@@ -292,6 +318,7 @@ def qualify_complete_native_entry(
     contract = (scripts / "hook-read-policy.json").read_bytes()
     assert contract == (SCRIPTS / "hook-read-policy.json").read_bytes()
     instrumented = {name: content.decode("utf-8") for name, content in original.items()}
+    instrumented["post-tool-hook.ps1"] = instrument_native_transport(instrumented["post-tool-hook.ps1"])
     for filename, name, parameters, phase in (
         ("managed-session.ps1", "Test-PreparedManagedWorktreesSession",
          "[Parameter(Mandatory = $true)][AllowEmptyString()][string]$Raw, [ref]$Facts",
@@ -337,6 +364,8 @@ function FixtureOriginalReadPreToolJson""", 1)
             statement, "            $global:batchSourceReads++\n" + statement, 1,
         )
     writer = "$global:nativeEntryClock=[Diagnostics.Stopwatch]::StartNew(); " + NATIVE_WRITE_PHASE_WRITER.replace(
+        "[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()", "$global:nativeEntryClock.ElapsedMilliseconds",
+    ) + NATIVE_WRITE_LOAD_WRITER.replace(
         "[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()", "$global:nativeEntryClock.ElapsedMilliseconds",
     )
     samples = []
@@ -455,7 +484,10 @@ function FixtureOriginalReadPreToolJson""", 1)
             assert len(management) == 1, (variant, management, result.stderr)
             assert not management[0], (variant, sample)
             assert [tick for tick, _ in phases] == sorted(tick for tick, _ in phases), phases
-            names = [name for _, name in phases]
+            names = [
+                name.split(" ", 1)[0] if name.split(" ", 1)[0] in NATIVE_RPC_PHASES else name
+                for _, name in phases
+            ]
             if attributed:
                 required = [
                     "command-entry", "script-entry", "admission-start", "admission-complete",
@@ -475,6 +507,9 @@ function FixtureOriginalReadPreToolJson""", 1)
                         "policy-start", "policy-complete",
                     ]
                 required += ["command-complete"]
+                if "policy-start" in required:
+                    position = required.index("policy-start") + 1
+                    required[position:position] = NATIVE_RPC_PHASES
                 assert names == required, (variant, phases)
             else:
                 assert not phases, (variant, phases)
@@ -534,6 +569,8 @@ def test_native_write_fixture_stderr_preserves_errors(newline: bytes) -> None:
     minimal = b"NATIVE_WRITE_FIXTURE_PHASE 126 json-web-load cpu_ticks=500000" + newline
     deserialize = b"NATIVE_WRITE_FIXTURE_PHASE 126 json-deserialize cpu_ticks=625000" + newline
     decoded = b"NATIVE_WRITE_FIXTURE_PHASE 127 json-deserialized cpu_ticks=750000" + newline
+    rpc_start = b"NATIVE_WRITE_FIXTURE_PHASE 128 rpc-context cpu_ticks=800000" + newline
+    rpc_end = b"NATIVE_WRITE_FIXTURE_PHASE 129 rpc-result cpu_ticks=900000" + newline
     errors = (
         newline + b"real error\xff" + newline
         + b"NATIVE_WRITE_FIXTURE_PHASE 124 unknown-stage" + newline
@@ -544,13 +581,18 @@ def test_native_write_fixture_stderr_preserves_errors(newline: bytes) -> None:
         + b"NATIVE_WRITE_FIXTURE_PHASE 130 json-web-load cpu_ticks=" + b"1" * 21 + b" utility=1 web=0" + newline
         + b"NATIVE_WRITE_FIXTURE_PHASE 131 json-deserialize cpu_ticks=1 utility=1 web=0" + newline
         + b"NATIVE_WRITE_FIXTURE_PHASE 132 command-entry cpu_ticks=1" + newline
+        + b"NATIVE_WRITE_FIXTURE_PHASE 133 rpc-unknown cpu_ticks=1" + newline
+        + b"NATIVE_WRITE_FIXTURE_PHASE 134 rpc-result cpu_ticks=1 utility=1 web=0" + newline
         + b"NATIVE_WRITE_FIXTURE_PHASE 125 json-entry"
     )
-    assert native_write_fixture_stderr(phase + before + after + minimal + deserialize + decoded + errors) == (
+    assert native_write_fixture_stderr(
+        phase + before + after + minimal + deserialize + decoded + rpc_start + rpc_end + errors,
+    ) == (
         "123 command-entry\n124 json-web-load cpu_ticks=250000 utility=1 web=0\n"
         "126 json-resolver-type cpu_ticks=500000 utility=1 web=1\n"
         "126 json-web-load cpu_ticks=500000\n"
-        "126 json-deserialize cpu_ticks=625000\n127 json-deserialized cpu_ticks=750000", errors,
+        "126 json-deserialize cpu_ticks=625000\n127 json-deserialized cpu_ticks=750000\n"
+        "128 rpc-context cpu_ticks=800000\n129 rpc-result cpu_ticks=900000", errors,
     )
 
 
@@ -2379,6 +2421,10 @@ def test_registered_file_local_write_reuses_original_guard_facts(
     admission.write_text(
         instrument_prepared_admission(admission.read_text(encoding="utf-8")), encoding="utf-8",
     )
+    transport = scripts / "post-tool-hook.ps1"
+    transport.write_text(
+        instrument_native_transport(transport.read_text(encoding="utf-8")), encoding="utf-8",
+    )
     raw = json.dumps(event, ensure_ascii=False, indent=2).encode("utf-8")
     started = time.monotonic()
     started_ms = time.time_ns() // 1_000_000
@@ -2403,6 +2449,10 @@ def test_registered_file_local_write_reuses_original_guard_facts(
     progress, result.stderr = native_write_fixture_stderr(result.stderr)
     assert " command-entry" in progress, result.stderr
     phase_names = [line.split(" ", 1)[1] for line in progress.splitlines()]
+    if case == "patch-protected-input":
+        assert set(NATIVE_RPC_PHASES) <= {
+            line.split(" ", 2)[1] for line in progress.splitlines()
+        }, progress
     if "prepared-marker-json" in phase_names:
         assert "prepared-marker-opened" in phase_names, progress
         assert phase_names.index("prepared-marker-opened") < phase_names.index("prepared-marker-json"), progress

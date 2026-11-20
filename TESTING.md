@@ -110,6 +110,15 @@ child deadline. Use the contained runner with `--allow-explicit-tiers
 These observations do not explain an earlier timeout, waive a failed run or
 replace the complete prepared-membership acceptance portfolio.
 
+Registered-write fixtures also record fixed, content-free RPC phases with
+wall-clock and process-CPU observations in their disposable script copies.
+The phases distinguish endpoint validation, function entry, caller elevation,
+request encoding, connection, send, receive and result encoding. Unknown or
+malformed stderr remains an error. Phase-free comparison controls retain the
+original scripts without these probes. Probe overhead is included in diagnostic
+timings; passing observations are nonreproduction, not an explanation or fix
+for an earlier timeout. Production scripts, retries and deadlines are unchanged.
+
 The same file's `-k registered_policy_timeout_observation` selection invokes
 the unchanged `cross-modes` cell composition on both engines. Only that test
 module's subprocess namespace is adapted. If its original ten-second entry
