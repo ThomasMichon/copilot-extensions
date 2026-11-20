@@ -170,8 +170,9 @@ The reviewed intent under #13487/#13560 remains open. The bootstrap
 implementation merged in #13495. Implementation review proved that the baseline
 journal cannot durably associate a legacy generation with an observation:
 distinct same-second acquisitions can share its rounded normalized projection.
-Positive generation migration therefore remains unimplemented; do not infer
-bindings or restore the unsafe projection-equality path.
+Unassociated legacy generation migration remains unsupported; the separately
+selected recorded-association transition below does not infer bindings or
+restore the unsafe projection-equality path.
 
 The finite source leaf is narrowed to retained journal metadata and cache
 misses, not generation content. This preserves useful original state without
@@ -253,13 +254,15 @@ pre-transition executable still refuses expanded state without rewriting it.
 - [x] Review the [durable generation association](#durable-generation-association)
   refinement before changing baseline writers, storage or populated transition
   (#13724; current-head approval and required green CI).
-- [ ] Transition a durably associated populated baseline through the actual CLI, then serve current
+- [x] Transition a durably associated populated baseline through the actual CLI, then serve current
   and explicit noncurrent `lookup`/all `chunk` reads after a fresh-reader restart.
   Compare original descriptors, reconstructed bytes, pointers, journal/events,
-  replay identities/deadlines/delivery positions and cache freshness.
-- [ ] Exercise the actual selected workspace `sync` comparison against a retained
+  replay identities/deadlines/delivery positions and cache freshness (#13741;
+  recorded body-only source qualification, not native target migration).
+- [x] Exercise the actual selected workspace `sync` comparison against a retained
   generation, with new synthetic acquisition and existing CAS/epoch fences.
-  Transition itself performs no acquisition, write, ACK or cache retirement.
+  Transition itself performs no acquisition, write, ACK or cache retirement
+  (#13741; partial-refresh recovery and pre-IO native fencing included).
 - [ ] Qualify active legacy native-watch migration with its original
   workspace/epoch association; the metadata-only leaf refuses that unqualified
   combination rather than inventing a mapping or canceling original work.
@@ -285,8 +288,10 @@ pre-transition executable still refuses expanded state without rewriting it.
 
 ### Durable generation association
 
-The optional fresh-baseline writer records original associations; positive
-populated terminal adoption remains unimplemented. The unselected
+The optional fresh-baseline writer records original associations. Source
+controls qualify recorded-generation adoption and body reads. Active
+native-watch and unknown-effect transition,
+installed migration and full T3 remain unqualified. The unselected
 baseline `WorkspaceOperations` path publishes through `GenerationCache` before
 calling `ConversationStore.observe_workspace`. Its feedback-only
 `_generation_positions` map is process-local. `project_generation` rounds native
@@ -352,7 +357,8 @@ objects remain readable through their original compatible baseline reader;
 this proposal supplies no backfill, re-acquisition or timestamp/projection
 matching shortcut. Empty-cache and metadata-only transitions remain supported.
 Active native waits and unknown-effect operations keep their separate current
-refusals and acceptance obligations.
+refusals and acceptance obligations. The proposed native-target expansion below
+must clear its own writer and reader qualification before that refusal changes.
 
 **Validation before claiming positive compatibility:** exercise the actual
 baseline CLI with the selected profile, multiple current/noncurrent generations
@@ -369,6 +375,203 @@ CI and the existing explicit process lane for restart/interruption controls.
 No provider request, protected send, ACK, cache retirement, service stop or
 installed migration is part of this source qualification. Keep P13487/V13487/
 G13487 and both parents open until their own remaining gates are satisfied.
+
+### Original native-target association refinement
+
+This is the reviewed source refinement for original native-watch adoption,
+not installed migration. `HostConfig` already relates each admitted caller/target's
+`ConsumerScope` to a `NativeReadHandler` with an immutable full workspace scope.
+`NativeReadHandler.read` verifies the acquired evidence against that scope, but
+its result does not preserve the native account/repository association.
+The baseline generation-association publication path runs only after acquisition
+and records no native target. The terminal path separately calls `terminal.target`
+before acquisition; baseline selection does not call it.
+`WatchReplay.observation_targets` coalesces actual waiting registrations by native
+account/repository/PR, excluding frozen pending deliveries. These existing
+boundaries supply the capture and eligibility seams; today's configuration alone
+cannot establish the association for previously acquired content.
+
+**Expand the original writer, then the transition reader.** Add a separately
+declared, explicitly selected fresh-baseline native-target profile to the
+existing generation-association owner. Evolve that owner's versioned records,
+not a second ledger, mapping file, provider registry or prerequisite RPC.
+Retain the existing v1 writer selection and recorded body-only transition.
+The new profile is not an implicit upgrade of a populated v1 volume.
+Missing executing-core support, incompatible storage or an old strict reader
+refuses unchanged. Ordinary startup validates; it does not adopt or backfill.
+Implement and qualify the fresh writer before selecting the later adoption
+reader. Neither phase changes workspace or watch wire contracts.
+
+For each new load/sync acquisition, capture the full workspace scope, native
+account/repository/PR and existing namespace/service binding from the trusted
+host's admitted mapping before any native capability discovery, credential work
+or exporter IO. Preserve the journal epoch/absence and terminal state visible at
+that boundary within the original request checkpoint and expiry. The capture is
+request-local until publication, not evidence that a read occurred or a durable terminal
+admission. Verify the acquired generation's full scope against that capture.
+At publication, reject an incompatible original epoch, intervening closure,
+changed target or missing capture before observation/reservation or cache writes;
+a close/reopen during acquisition must not relabel old work into a new epoch.
+An originally absent conversation cannot be guessed from a subsequently created one.
+
+Reserve the target association with the exact generation's original observation,
+cursor and publication identity using the existing ReplayStore-before-cache
+transaction and guarded cache admission. Confirm it only with confirmed cache
+publication. Preserve original pending CAS/readback custody and immutable IDs
+after uncertain replacement. Failed acquisition, stale epoch, definite CAS
+conflict or capacity refusal creates no usable association. A repeated immutable
+ID cannot change its original native target, scope or epoch. Retain the original
+byte/count/deadline limits and all pending/confirmed association lifetime
+obligations through rebuild and retirement; absence of a current cache pointer
+does not authorize dropping unresolved identity metadata.
+
+Only a subsequent explicitly selected `adopt-terminal` reader may consume those
+recorded targets. Keep the existing service writer lease and exclusion of
+in-flight native reads through the original lifecycle; record preservation does
+not itself fence a reader. Preflight every retained generation and every
+actually waiting target from `WatchReplay.observation_targets`, not only the
+current cache pointer or the selected configuration. Each waiting native target
+must resolve unambiguously to original confirmed complete, open, first-epoch
+workspace evidence. Historical target conflicts for a workspace, missing
+associations, pending publications, ambiguous scopes or incompatible current
+selection refuse before adoption. A newer capture for native target B cannot
+justify adopting an old still-waiting target A, even when today's configuration
+maps B to the same workspace. Unassociated v1/legacy native waits retain their
+original usable reader; no resample, timestamp match, cancellation or empty
+inventory inference repairs them.
+
+Stage eligible native admissions and generation bindings together within the
+existing adoption owner and complete-capacity checks, preserving all original
+watch registrations, event/request identities, predicates, deadlines, delivery
+and ACK positions. This imports original evidence; it creates no observation or
+successful native event. After adoption, native target capture must carry the
+recorded workspace epoch before IO, and the existing observation owner must
+refuse a stale sample across close/reopen, including a sample captured without
+the new binding. A fresh native read keeps its complete native snapshot and
+triggering head. Frozen deliveries keep their original receipt and deadline
+semantics; do not broaden predicate support or synthesize workspace-derived
+native notifications.
+
+Unknown-effect/prepared operations remain a separate unresolved transition.
+`terminal_transition.adopt` and the selected terminal workspace receiver
+currently exclude their original recovery interfaces. Retaining those bytes
+alone is insufficient: a later review-first refinement must preserve their
+actual inspect/readback/reconciliation paths and original operation authority
+before relaxing that refusal. This native-target proposal neither sends nor
+replays an operation, adds an effect receiver or declares full T3 complete.
+
+**Source acceptance, in delivery order:**
+
+- [x] Review this native-target contract before changing writer/storage or
+  admitting active native waits (#13748; current-head approval and required
+  green CI). Fresh-writer qualification does not admit its later adoption reader.
+- [x] Qualify the selected fresh writer through actual load/sync and fresh
+  process reconstruction, proving capture precedes native discovery/IO.
+  Include original absence, close/reopen during acquisition, scope/target
+  mismatch, repeated IDs, shared native targets, definite CAS/capacity refusal
+  and every uncertain publication boundary. Preserve v1/default behavior and
+  missing/skewed-core/old-reader refusal. #13751 delivered the writer; the
+  subsequent native-adoption packet adds the shared-native/full-scope control.
+- [x] Qualify the later actual transition CLI with current/noncurrent recorded
+  generations and active coalesced native waits. Cover target-A/target-B
+  configuration changes, unmatched old waits, conflicting historical mappings,
+  frozen deliveries, partial/uncertain adoption and retry, competing lifecycle
+  owners, deadline expiry and rollback. Verify refusal preserves original
+  usable readers and bytes; successful adoption changes no replay/ACK position
+  (#13755; finite source/process controls, not installed migration).
+- [x] Exercise native pre-IO fencing after fresh-reader restart: delayed old
+  samples refuse across adoption or close/reopen, fresh samples retain their
+  full native payload, and original registration/deadline/receipt semantics
+  survive. Use finite synthetic process fixtures, not a live provider request
+  or production watch (#13755).
+- [ ] Return to original unknown-effect recovery, association lifetime and
+  full T3/provider/installed acceptance. Neither writer nor native-adoption
+  source completion closes P13487/V13487/G13487 or either parent.
+
+### Original operation-recovery reader refinement
+
+This is the next review-first proposal, not implemented operation adoption.
+The native reader in #13755 still refuses active and compact review operations.
+That refusal prevents a real interface loss: `ReplayStore.inspect_review` and
+`ReviewSelectionStore.inspect` require live admission, while the selected
+terminal workspace receiver does not expose ordinary operation inspection.
+`execute_review` also begins with live execution admission before reaching its
+unknown-attempt readback branch. Retaining those JSON records alone would not
+keep their original inspection and reconciliation usable.
+
+Existing compact recovery is a different representation and authority path.
+`TerminalRecoveryStore.inspect/record` retains original compact identities,
+policy and receipt reservations. `reconcile_terminal` uses the actual protected
+context but currently attempts attributable identity readback only for compact
+comment actions. Neither that source capability nor a newly successful ordinary
+client proves all prepared, reply, edit and verdict recovery is supported.
+
+**Expand the original readers before relaxing adoption.** Reuse the existing
+ReplayStore envelope, scope checks, request budgets, protected context boundary
+and local `adopt-terminal` lifecycle. Supply a separate executing-core declaration
+for retained operation inspection/recovery; terminal body-reading support alone
+is insufficient. Preserve defaults, strict older-core refusal and the existing
+v1/v2 recorded-cache selections. Ordinary startup validates; it does not adopt
+operations or silently enable a write receiver.
+
+The first finite source leaf may admit already retained version-one active
+operations alongside an otherwise eligible recorded-cache volume. Keep prepared
+selection/mapping and existing compact-operation volumes refused unchanged until
+their own compatible readers are qualified. Validate original operation scope
+and every selected reader/interface before the first adoption commit. Preserve
+the complete original operation/intent/action/attempt identities, generation,
+source and revision bindings, outcomes, native IDs, receipt reservations and
+unattempted-versus-unknown distinction. Do not rewrite an old operation into a
+new intent or manufacture a native acquisition/terminal admission from it.
+All existing generation, native-watch, historical-epoch and complete-capacity
+preflight remains applicable.
+
+Provide explicitly negotiated scoped inspection through the existing workspace
+receiver and client seams. A recovery selection is not submission, allocation,
+preparation, cancellation, receipt confirmation or fresh native proof.
+Recovered operations cannot acquire a new attempt or become sendable after
+terminal adoption or reopen. Preserve the existing original receipt inspector
+where its selected representation is supported; otherwise refuse that
+representation before migration, rather than advertise generic recovery.
+
+For an original unknown active attempt, separate readback from `execute_review`
+instead of re-entering execution admission. Reuse an explicitly supplied actual
+protected context and its existing reconciliation method against the original
+operation/action and attempt. Check current authenticated scope through that
+owner, preserve retained native-ID conflicts, and record only attributable
+confirmation through the existing original-attempt receipt transaction.
+No call may enter a sender, allocate another attempt, accept caller-asserted
+confirmation or equate matching current text/vote/actor with historical proof.
+Unknown or unsupported readback remains unknown. The standalone observer has no
+protected context configured by this proposal; its observation credential is
+never a substitute. Retained active operations have invocation budgets, not a
+new migration-created recovery deadline. Preserve any original compact recovery
+policy/deadline/escalation unchanged; do not invent, reset or discard it.
+
+Later actual terminal compaction remains with its original drain, operation and
+recovery owners. This leaf neither compacts operations nor enables a remote
+retirement command. It does not claim prepared/compact readback, every provider,
+body-free retention or installed migration. Subsequent expansion must preserve
+the original compact inspect/readback interfaces and each unsupported action
+class before selecting that broader transition.
+
+**Serial source acceptance:**
+
+- [x] Review this refinement before changing operation eligibility, serving
+  selection or recovery behavior (#13757; current-head approval and all
+  required checks green).
+- [ ] Expand and qualify the actual scoped active-operation inspection and
+  original-attempt readback owners, including unsupported native attribution,
+  current authority withdrawal, expiry, partial/unknown results and zero sends.
+- [ ] Only then select the compatible retained transition and actual negotiated
+  receiver/client path. Qualify original inspection before/after actual CLI
+  adoption and fresh-reader restart, same-operation retry after every uncertain
+  boundary, scope/attempt/native-ID conflicts, capacity/deadline/lifecycle
+  refusal, old/new cores and rollback. Refusal preserves usable original readers
+  and bytes; successful adoption creates no native receipt or effect.
+- [ ] Return to prepared/compact representation compatibility, association
+  lifetime, full T3 and both parent gates. Original unresolved effects remain
+  with their owners, not satisfied by this finite active-operation source leaf.
 
 ## See Also
 

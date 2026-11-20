@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 from typing import Any
 
+from .attention import PRKey
 from .conversation_journal import ConversationJournal, Observation
 from .generation_cache import CacheInvalid, GenerationCache
 from .terminal_retention import MAX_RECORDS
@@ -49,12 +51,47 @@ def _targets(targets: list[Document]) -> list[Document]:
 def validate(
     document: Document, cache: GenerationCache, targets: list[Document],
     checkpoint: Callable[[], None],
+    *, recorded_generations: bool = False, recorded_native_targets: bool = False,
 ) -> None:
     """Run inside the existing replay adoption and exclusive service lifecycle."""
     checkpoint()
+    if type(recorded_generations) is not bool:
+        raise ValueError("explicit retained generation adoption selection required")
+    if type(recorded_native_targets) is not bool or recorded_native_targets and not recorded_generations:
+        raise ValueError("native adoption requires the recorded generation reader")
     targets = _targets(targets)
+    keys = {
+        conversation_key({**target["scope"], "number": 1}, document["namespace"])
+        for target in targets
+    }
+
+    def visit_pointer(pointer: Document) -> None:
+        checkpoint()
+        scope = {**pointer["scope"], "number": 1}
+        if conversation_key(scope, document["namespace"]) not in keys:
+            raise ValueError("retained pointer is outside the selected workspace scope")
+
     if cache.max_generations > MAX_RECORDS:
         raise ValueError("configured cache growth exceeds terminal generation binding capacity")
+    from .recorded_terminal_cache import complete, stage
+    if recorded_generations and complete(document):
+        from .generation_associations import selected
+        from .recorded_terminal_cache import readable_bindings
+        from .review_intent import encoded
+        selected(document, cache)
+        if recorded_native_targets:
+            from .recorded_native_cache import original_targets
+            original_targets(document, targets, checkpoint)
+        readable = readable_bindings(document, checkpoint)
+
+        def existing(value: Document) -> None:
+            visit_pointer(value)
+            if (encoded(value["scope"]), value["id"]) not in readable:
+                raise CacheInvalid("retained generation is not bound to a live workspace epoch")
+
+        cache.inspect_retained(existing, visit_pointer)
+        checkpoint()
+        return
     if (
         document["version"] != 3 or document["reviews"]
         or document.get("terminal_recovery", {}).get("operations")
@@ -62,6 +99,7 @@ def validate(
     ):
         raise ValueError("retained cache transition requires the original standalone recovery-free owner")
     journal = ConversationJournal(document["conversations"])
+    records: dict[PRKey, Document] = {}
     for record in journal.records:
         checkpoint()
         observed = Observation.restore(record["current"])
@@ -70,14 +108,10 @@ def validate(
             or observed.state != "open" or not observed.complete
         ):
             raise ValueError("retained conversations require a complete nonterminal original first epoch")
-        matches = [
-            target for target in targets
-            if conversation_key({**target["scope"], "number": observed.key.number}, document["namespace"])
-            == observed.key
-        ]
-        if len(matches) != 1:
+        if replace(observed.key, number=1) not in keys:
             raise ValueError("retained conversation is outside the selected workspace scope")
-    if journal.records and WatchReplay(
+        records[observed.key] = record
+    if not recorded_native_targets and journal.records and WatchReplay(
         document["namespace"], state=document["replay"], commit=lambda state: None,
     ).observation_targets():
         raise ValueError("retained active native watches require their original workspace association")
@@ -86,12 +120,12 @@ def validate(
         checkpoint()
         raise CacheInvalid("retained generations require durable original observation association")
 
-    def visit_pointer(pointer: Document) -> None:
-        checkpoint()
-        scope = pointer["scope"]
-        if not any({**target["scope"], "number": scope["number"]} == scope for target in targets):
-            raise ValueError("retained pointer is outside the selected workspace scope")
-
+    if recorded_generations:
+        stage(
+            document, cache, records, visit_pointer, checkpoint,
+            native_targets=targets if recorded_native_targets else None,
+        )
+        return
     cache.inspect_retained(visit, visit_pointer, allow_generations=False)
     checkpoint()
     state = document["terminal_retention"]

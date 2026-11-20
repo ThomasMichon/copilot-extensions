@@ -14,6 +14,7 @@ from .generation_cache import GenerationCache
 from .review_workspace import _digest, _generation, _scope
 from .watch_replay_store import ReplayStore, ReplayStoreInvalid
 from .workspace_conversation import conversation_key
+from . import generation_native_targets as native
 
 Document = dict[str, Any]
 PROTOCOL = "agent-pull-requests.workspace-generation-associations/v1"
@@ -55,10 +56,12 @@ def validate(document: Document, namespace: str) -> None:
     state = document["generation_associations"]
     if (
         type(document["generation_associations_version"]) is not int
-        or document["generation_associations_version"] != 1
+        or document["generation_associations_version"] not in (1, 2)
         or document["version"] != 3
         or not isinstance(state, dict) or set(state) != {"protocol", "limits", "records"}
-        or state["protocol"] != PROTOCOL
+        or state["protocol"] != (
+            native.PROTOCOL if document["generation_associations_version"] == 2 else PROTOCOL
+        )
     ):
         raise ValueError("invalid generation association contract")
     limits = state["limits"]
@@ -74,7 +77,9 @@ def validate(document: Document, namespace: str) -> None:
     records = {PRKey(**item["current"]["key"]): item for item in journal.records}
     seen: set[str] = set()
     for row in state["records"]:
-        if not isinstance(row, dict) or set(row) != _FIELDS:
+        if not isinstance(row, dict) or set(row) != _FIELDS | (
+            native.FIELDS if document["generation_associations_version"] == 2 else set()
+        ):
             raise ValueError("invalid generation association")
         scope = _scope(row["scope"])
         cursor = row["cursor"]
@@ -95,6 +100,8 @@ def validate(document: Document, namespace: str) -> None:
         ):
             raise ValueError("invalid original generation association")
         seen.add(row["generation_id"])
+        if document["generation_associations_version"] == 2:
+            native.validate(row)
     from .review_intent import encoded
     if len(encoded(state)) > document["capacities"]["generation_association_bytes"]:
         raise ValueError("generation associations exceed their reserved capacity")
@@ -113,7 +120,7 @@ def provision(
     checkpoint: Callable[[], None], lifecycle_checkpoint: Callable[[], None],
 ) -> None:
     """Initialize only the explicitly selected fresh baseline under its writer lease."""
-    if not owner.workspace_generation_associations:
+    if not owner.workspace_generation_associations or owner.recorded_terminal_cache:
         raise ValueError("generation associations require explicit selection")
     _bound(owner, cache)
 
@@ -127,9 +134,10 @@ def provision(
         ):
             raise ReplayStoreInvalid("generation associations require a fresh baseline owner")
         limits = {"max_bytes": cache.max_bytes, "max_generations": cache.max_generations}
-        document["generation_associations_version"] = 1
+        document["generation_associations_version"] = 2 if owner.native_generation_associations else 1
         document["generation_associations"] = {
-            "protocol": PROTOCOL, "limits": limits, "records": [],
+            "protocol": native.PROTOCOL if owner.native_generation_associations else PROTOCOL,
+            "limits": limits, "records": [],
         }
         document["capacities"]["generation_association_bytes"] = (
             1024 + 4096 * limits["max_generations"]
@@ -142,9 +150,10 @@ def provision(
 def publish(
     owner: ReplayStore, cache: GenerationCache, generation: Document, *,
     expected_current: str | None, expires_at: int, checkpoint: Callable[[], None],
+    native_capture: native.NativeGenerationCapture | None = None,
 ) -> tuple[Document, Document]:
     """Reserve original custody after cache CAS admission but before its writes."""
-    if not owner.workspace_generation_associations:
+    if not owner.workspace_generation_associations or owner.recorded_terminal_cache:
         raise ValueError("generation associations require explicit selection")
     _bound(owner, cache)
     scope = _scope(generation["scope"])
@@ -158,6 +167,10 @@ def publish(
             (item for item in state["records"] if item["generation_id"] == generation["id"]),
             None,
         )
+        if owner.native_generation_associations:
+            native.check(owner, document, scope, native_capture, row)
+        elif native_capture is not None:
+            raise ValueError("native generation capture requires its selected writer")
         journal = ConversationJournal(document["conversations"])
         record = journal._find(conversation_key(scope, owner.namespace))
         if row is not None and (
@@ -212,6 +225,10 @@ def publish(
                     "complete": original["current"]["complete"],
                     "state": original["current"]["state"],
                     "expected_current": expected_current, "publication": "pending",
+                    **(
+                        native.fields(native_capture)
+                        if owner.native_generation_associations and native_capture is not None else {}
+                    ),
                 }
                 state["records"].append(row)
                 commit()

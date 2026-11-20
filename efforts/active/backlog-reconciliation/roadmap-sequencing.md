@@ -145,6 +145,13 @@ ready work to schedule again. Release/installed evidence and later helper
 evolution remain separate; this research adopts no agenda or new execution
 assignment.
 
+The [current singleton-route correction](roadmap-current-qualification.md#2026-11-20-singleton-tracking-route-and-current-coverage)
+retains #5512's already accepted tracking retirement in the unchanged Draft
+singleton-correctness effort. Restart Phase 1 and replacement/cutover Phase 2,
+their sole owner and all validation remain. The table's local Phase 1 -> Phase 2
+precedence survives; a closed historical token is not that implementation
+merge, and this route adds no prerequisite relationship.
+
 | Selected contribution | What actually precedes it | What does not have to finish first |
 |---|---|---|
 | #3938 replacement/promotion design retained from #5453 | #5512 Phase 1 reviewed merge, in the same singleton-correctness effort | Every Manager, keeper or unrelated restart issue |
@@ -170,6 +177,30 @@ waves. A shared implementation seam is an interface to reconcile, not evidence
 that one whole effort blocks another. Preserve the registers' alternatives,
 parallel leaves, bootstrap-coupling questions and unresolved policy decisions.
 No whole-backlog acyclicity claim follows from these finite relationships.
+
+## Finite integration research queue
+
+The [current gate assessment](stabilization-roadmap.md#2026-11-20-integration-assessment)
+keeps six integration gates open and separates the 882-identity counting
+inventory from current technical qualification. Continue these bounded
+research lanes using existing campaign evidence before commissioning another
+source trace. They are agent-recommended research contributions, not newly
+authorized implementation waves or a requirement to exhaust one lane first.
+
+| Research lane | Entry and useful contribution | Finite exit and retained parent return |
+|---|---|---|
+| Current coverage reconciliation | Start from the exact 153 creator-eligible identities outside the historical assignments. Match each to already admitted later research, accepted receiving or an explicit unresolved gap; select coherent, disjoint changed groups rather than assume all are unresearched. | Account for every selected identity without losing source/copy stops or another owner's unfinished work. Return its coverage/evidence delta to the six-gate assessment; the 437 exclusions remain metadata-only and counted. This is not a proposed 153-issue retirement batch. |
+| Selected priority and receiver deltas | Use the twelve nominations' eight open originals and four current routes. Only new delivery, acceptance or owner/home information justifies revisiting an unchanged predicate. Prioritize substantiated consequence under the existing rubric; explicit uncertainty is a legitimate result. | Identify the selected useful fix, investigation or qualification slice, actual existing owner/home, literal alternatives and scope-appropriate exit, or retain the exact admission/design gap. A nomination, related effort or metadata OPEN state is not readiness. |
+| Scoped graph and execution proposal | Compose only selected qualified contributions with the existing 145 relationship rows, treating tracking transfers, satisfied source precedences and interfaces distinctly. Keep independent contributions parallel; resolve a cycle or policy question only where it affects the selected work. | Submit a finite execution-wave proposal naming original custody, actual entry conditions and source/release/installed/native/adoption evidence appropriate to each slice. Review precedes treating that proposal as an execution plan; this research grants no effects or appointments. |
+
+Use oldest-first order among equally consequential and equally ready research
+groups, not as evidence of priority or obsolescence. The 292 still-open
+historical assignments retain their existing research; refresh their changed
+acceptance or selected source only as needed rather than restart the four
+waves. Later receiving and source credit can satisfy a local question without
+claiming a whole parent done. No whole-harness readiness gate, new framework,
+source/resource custody transfer or technical completion follows from this
+queue.
 
 ## A bounded contribution's exit
 

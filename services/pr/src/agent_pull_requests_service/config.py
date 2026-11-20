@@ -39,6 +39,9 @@ class _TerminalOptions(TypedDict, total=False):
     retention_target_deadline: bool
     retention_target: Callable[..., ObservationTarget]
 
+class _GenerationOptions(TypedDict, total=False):
+    generation_native_target: tuple[str, str]
+
 
 def _mapping_store() -> Any:
     try:
@@ -108,6 +111,7 @@ class WorkspaceConfig:
     terminal_targets: tuple[WatchScopeBinding, ...] = ()
     terminal_mapping_reads: bool = False
     generation_associations: bool = False
+    generation_native_targets: tuple[WatchScopeBinding, ...] = ()
 
     def cache(self, store: ReplayStore) -> GenerationCache:
         return GenerationCache(
@@ -154,6 +158,12 @@ class WorkspaceConfig:
             for principal, target, config in self.preparations
             for p, t, reader in self.readers if (p, t) == (principal, target)
         }
+        generation_options: dict[tuple[str, str], _GenerationOptions] = {
+            (binding.principal, binding.target): {
+                "generation_native_target": (binding.scope.account, binding.scope.repo),
+            }
+            for binding in self.generation_native_targets
+        }
         return {
             (principal, target): (
                 terminal_operations if (principal, target) in terminal_options else WorkspaceOperations
@@ -166,6 +176,7 @@ class WorkspaceConfig:
                 **terminal_options.get((principal, target), {}),
                 selection_preparer=preparations.get((principal, target)),
                 selection_preparer_deadline=preparations.get((principal, target)) is not None,
+                **generation_options.get((principal, target), {}),
             )
             for principal, target, reader in self.readers
         }
@@ -195,6 +206,16 @@ class HostConfig:
         return self.root / "service-status.json"
 
     def store(self) -> ReplayStore:
+        association_options: dict[str, Any] = {}
+        if self.workspaces and self.workspaces.generation_associations:
+            from .generation_associations import core, recorded_core
+            core(native_targets=bool(self.workspaces.generation_native_targets))
+            association_options["workspace_generation_associations"] = True
+            if self.workspaces.generation_native_targets:
+                association_options["native_generation_associations"] = True
+            if self.workspaces.terminal_targets:
+                recorded_core(native_targets=bool(self.workspaces.generation_native_targets))
+                association_options["recorded_terminal_cache"] = True
         if self.workspaces and self.workspaces.terminal_targets:
             terminal.core()
             from .terminal_policy import TerminalReplayStore
@@ -208,13 +229,9 @@ class HostConfig:
                 self.root, self.namespace,
                 service_identity=ReplayServiceIdentity(self.fleet, self.gateway, self.slot),
                 terminal_retention=True, terminal_recovery=True, terminal_cache_retirement=True,
+                **association_options,
                 **mapping_options,
             )
-        association_options: dict[str, Any] = {}
-        if self.workspaces and self.workspaces.generation_associations:
-            from .generation_associations import core
-            core()
-            association_options["workspace_generation_associations"] = True
         return ReplayStore(
             self.root, self.namespace,
             service_identity=ReplayServiceIdentity(self.fleet, self.gateway, self.slot),
@@ -222,6 +239,10 @@ class HostConfig:
         )
 
     def provision(self) -> None:
+        if self.workspaces and (
+            self.workspaces.generation_associations and self.workspaces.terminal_targets
+        ):
+            raise ValueError("recorded terminal cache selection requires an existing retained volume")
         store = self.store()
         mappings = self.workspaces and (
             self.workspaces.comment_mappings or self.workspaces.terminal_mapping_reads
@@ -260,7 +281,7 @@ class HostConfig:
                         )
                 elif self.workspaces.generation_associations:
                     from .generation_associations import core
-                    core().provision(
+                    core(native_targets=bool(self.workspaces.generation_native_targets)).provision(
                         store, self.workspaces.cache(store), expires_at=expires_at,
                         checkpoint=lifecycle, lifecycle_checkpoint=lifecycle,
                     )
@@ -291,6 +312,7 @@ def _workspaces(value: object, bindings: list[WatchScopeBinding],
                 observations: list[NativeObservationBinding], seconds: int) -> WorkspaceConfig:
     selected = _fields(value, {"bindings", "cache_bytes", "cache_generations"}, {
         "terminal_reads", "terminal_mapping_reads", "generation_associations",
+        "native_generation_associations",
     })
     terminal_reads = selected.get("terminal_reads", False)
     if type(terminal_reads) is not bool:
@@ -301,11 +323,21 @@ def _workspaces(value: object, bindings: list[WatchScopeBinding],
     if terminal_mapping_reads and not terminal_reads:
         raise ValueError("terminal_mapping_reads requires terminal_reads")
     generation_associations = selected.get("generation_associations", False)
-    if type(generation_associations) is not bool or generation_associations and terminal_reads:
+    if type(generation_associations) is not bool:
         raise ValueError("generation_associations requires an explicit baseline selection")
+    native_associations = selected.get("native_generation_associations", False)
+    if type(native_associations) is not bool or native_associations and (
+        not generation_associations
+    ):
+        raise ValueError("native_generation_associations requires a selected fresh baseline")
     if generation_associations:
-        from .generation_associations import core
-        core()
+        from .generation_associations import core, recorded_core
+        if terminal_reads:
+            recorded_core(native_targets=native_associations)
+        else:
+            core(native_targets=native_associations)
+        if terminal_mapping_reads:
+            raise ValueError("recorded terminal cache cannot select comment mappings")
     cache_bytes, cache_generations = selected["cache_bytes"], selected["cache_generations"]
     if (
         type(cache_bytes) is not int or not 65536 <= cache_bytes <= 1024 * 1024 * 1024
@@ -368,6 +400,9 @@ def _workspaces(value: object, bindings: list[WatchScopeBinding],
         )) if terminal_reads else (),
         terminal_mapping_reads,
         generation_associations,
+        tuple(b for b in bindings if any(
+            (p, t) == (b.principal, b.target) for p, t, _ in readers
+        )) if native_associations else (),
     )
 
 

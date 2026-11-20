@@ -1339,3 +1339,53 @@ tracking judgments. Earlier proposals remain immutable history, not another
 pending receiving gate. All eighteen technical rows, OPEN #8729, R1-R4/P0
 and applicable owner/slice admission stay unchanged; no credential, cache,
 copy/overwrite, service, test/native or resource operation is inferred.
+
+## Proposed finite idle-steering receiving - 2026-11-20 UTC
+
+| Source | Disposition | Complete proposed owner and retained acceptance |
+|---|---|---|
+| #13734 | residual | Proposed idle/hint slice in existing Active [Queued Steering Phase 2](../bridge-queued-steering/README.md#finite-idle-transition-and-truthful-notification-from-13734), P13734-1..2/V13734-1..2/G13734: supported idle submission without unrelated tool/operator/scheduled turns, resume/re-registration, truthful conditional hints, multiple arrivals and exact identity/no duplicate or false consumption. Five technical rows unchecked. A later possibly separate resumed-headless carrier 503/hello-read observation stays unreceived at OPEN #13734 under existing carrier owners; these rows are not whole-source receiving. |
+
+The [complete case, eight current keepers and whole census](../backlog-reconciliation/journal/2026/11.20-idle-steering-and-existing-keepers.md)
+preserve the existing Driver and actual provider/registration/routing/
+compatibility/receipt/resource owners, broader #6394 gates and bounded claim,
+Goal/Request/Scope Approvals and existing notification credit. Normal complete
+reviewed Plan/local/actual global Validation, Coordination and dated Journal
+delivery receives this idle slice, not the separate carrier observation.
+The overall source remains `residual` and OPEN until that distinct observation
+has complete accepted handling as well. Permitted current whole source/
+receiving/custody readback and a separate source judgment remain before any
+retirement. No implementation, native/session/queue
+operation, prompt replay, assignment or resource transfer follows.
+
+## Portable fixture reviewed receiving and distinct outcomes - 2026-11-20 UTC
+
+| Source | Disposition | Accepted owner and distinct tracker outcome |
+|---|---|---|
+| #13082 | routed | #13733 delivered complete existing Portfolio Phase 4 Vault/shared-library receiving; separate audited acknowledgment and NOT_PLANNED retirement retain all five unchecked technical rows and actual custodians. |
+| #13369 | routed | Same reviewed Portfolio owner retains complete two-file distribution/profile acceptance. Source stays OPEN as the other contributor's unfinished request; all five technical rows remain unchecked. |
+| #13378 | routed | Same reviewed Portfolio owner retains all six caller/migration/PID cases and original pass OR justified-tier alternative. Source stays OPEN as the other contributor's unfinished request; all five technical rows remain unchecked. |
+
+The current [Portfolio Coordination](../test-portfolio-rationalization/README.md#coordination)
+and [additive dated receipt](../backlog-reconciliation/journal/2026/11.20-portable-fixture-and-runtime-resource-receiving.md#reviewed-receiving-and-distinct-source-outcomes)
+record complete current finite receiving/source/custody readback before three
+separate judgments. Earlier proposals remain immutable history, not another
+pending receiving gate. Preserve OPEN #1303, all fifteen technical rows,
+incumbent states/holds, unit-only CI, hosted-Windows quiescence and actual
+source/native/release/resource custody. Planned intake is not fulfillment,
+fixture correction, execution, claim release or deployment.
+
+### 2026-11-20 - Accepted idle slice and current roadmap gaps
+
+| Source | Class | Existing route and explicit limit |
+|---|---|---|
+| #13734 | partial receiving accepted; source remains OPEN | Reviewed #13740 accepted only P13734-1..2/V13734-1..2/G13734 in existing [Queued Steering](../bridge-queued-steering/README.md#coordination), all five technical rows unchecked. Complete source/discussion and finite receiving readback retain the distinct carrier 503/hello-read observation as unreceived under actual carrier owners. No whole-source retirement, acknowledgment, claim release or technical completion; [additive evidence](../backlog-reconciliation/journal/2026/11.20-idle-steering-and-existing-keepers.md#reviewed-idle-only-receiving-and-distinct-carrier-gap). |
+| #5512 | existing accepted route corrected; no new disposition | The historical shortlist now points through its already acknowledged NOT_PLANNED retirement to the unchanged Draft [singleton-correctness effort](../status-monitor-singleton-correctness/README.md). Sole owner/public successor handoff, restart Phase 1, sequential replacement/cutover Phase 2 and complete validation remain. No replay, implementation or new credit; [current route and coverage](../backlog-reconciliation/roadmap-current-qualification.md#2026-11-20-singleton-tracking-route-and-current-coverage). |
+
+The [current integration assessment](../backlog-reconciliation/stabilization-roadmap.md#2026-11-20-integration-assessment)
+keeps all six execution-plan gates unchecked. Complete 15:09 PT metadata
+counts 882 open: 292 retained historical assignments, 153 other creator-eligible
+identities and 437 excluded metadata-only, with 408 baseline and 474 inflow.
+There are no new dispositions in this assessment; 153 above fixed 729 is not
+a proposed closure cohort. Existing Goal, source/copy and ownership/resource
+limits remain.

@@ -410,6 +410,37 @@ the non-public approval conversation.
 
 ## Plan
 
+The [current roadmap integration assessment](stabilization-roadmap.md#2026-11-20-integration-assessment)
+separates all six unfinished execution-plan gates from the reviewed historical
+research. The complete 15:09 PT inventory has 882 open: 292 retained historical
+assignments, 153 other creator-eligible identities and 437 excluded metadata-only
+records. A [finite research queue](roadmap-sequencing.md#finite-integration-research-queue)
+reconciles existing later coverage before new studies, refreshes selected
+priority/receiver deltas and composes only actual scoped prerequisites.
+#5512's already accepted NOT_PLANNED route continues in the unchanged Draft
+singleton effort; eight original shortlist trackers and four receiving routes
+remain, without technical completion or new disposition credit.
+The [dated journal](journal/2026/11.20-roadmap-integration-gaps.md) also follows
+through reviewed #13740's accepted idle-only slice, five unchecked technical
+rows and OPEN #13734's unreceived carrier observation. The campaign remains
+Active, 153 above fixed 729; all Plan/Validation and source/custody gates remain.
+
+The [idle-steering and existing-keeper unit](journal/2026/11.20-idle-steering-and-existing-keepers.md)
+proposes the finite #13734 idle/hint slice in the existing Active Queued
+Steering owner: supported idle submission without another unrelated turn,
+resume/re-registration, truthful conditional hints and exact message identity.
+Five technical rows remain unchecked. A qualified later repeat also reports
+a possibly separate resumed-headless carrier handshake failure; it remains
+unreceived under existing carrier owners in OPEN #13734, not folded into the
+idle slice or waived by its review.
+Eight complete current original/discussion unions retain actual canonical,
+claim, incident, policy, source/native and explicit acceptance gates; #3507's
+literal accepted-transfer alternative resolves an older OPEN-placement
+statement without replay or a native-pass claim. The same record follows
+through reviewed #13733, #13082's separate NOT_PLANNED retirement and
+#13369/#13378's unfinished-other-party KEEP judgments. The complete 13:21 PT
+census is unchanged at 880 whole, 151 above fixed 729.
+
 The [portable fixture and runtime-resource unit](journal/2026/11.20-portable-fixture-and-runtime-resource-receiving.md)
 proposes complete #13082/#13369/#13378 receiving in existing Test Portfolio
 Phase 4 waves through Phase 7: portable peer handles, complete distribution/

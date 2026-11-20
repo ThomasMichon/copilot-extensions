@@ -25,9 +25,50 @@ Its current-head approval includes the corrected #4220 omitted-revert
 description below. This completes the selected qualification publication,
 not any implementation or campaign-wide acceptance.
 
+## 2026-11-20 singleton tracking route and current coverage
+
+The [complete integration partition](stabilization-roadmap.md#2026-11-20-integration-assessment)
+counts 882 current open issues, including 292 historical assignments, 153
+creator-eligible identities outside those assignments and 437 excluded
+metadata-only records. It refreshes counting and selected tracking routes,
+not the pinned product-source findings below.
+
+The twelve nominations now comprise **eight open original trackers and four
+continuing receiving routes**. The previously audited #9323 -> #9295,
+#3002 -> #2879 and #4220 -> #5768 routes remain open in that inventory.
+The additional route is #5512's already accepted
+[NOT_PLANNED disposition](https://github.com/ThomasMichon/copilot-extensions/issues/5512#issuecomment-6962659580),
+provider-confirmed since 2026-11-17 22:19:27 UTC (14:19:27 PST), into the
+existing [Status-monitor Singleton Correctness effort](../status-monitor-singleton-correctness/README.md).
+It is a tracking retirement, not a restart repair or a new campaign credit.
+
+Complete current author/editor/comment/event/source metadata and a stable
+fourteen-member roster qualify this route correction. The current receiver
+is exactly the previously accepted 275-line document; its entire governing
+contract was read. It remains Draft with the sole effort owner, explicit
+public successor-handoff rule, unchecked restart Phase 1, sequential
+replacement/cutover Phase 2 and complete global validation. Original
+identity-bound termination, bounded activation recovery, reader states and
+Windows/Linux/macOS proof **OR justified exemptions** remain.
+
+The receiver's historical instruction to retire #5512 after a future Phase 1
+merge is not evidence that that merge happened, nor a request to repeat the
+already audited tracking disposition. Source acceptance stays unchecked.
+Only that effort's Phase 1 reviewed merge precedes its Phase 2 design; the
+tracking retirement creates neither a new whole-parent barrier nor an
+implementation appointment. No new original, product source, native operation,
+acknowledgment, closure, reopening or resource transfer was performed.
+
+The other eleven nominations use the complete issue-only inventory and their
+already audited routes. This pass does not renew their nested qualification,
+read held sources or assert current implementation absence. All six
+[integration gates](stabilization-roadmap.md#integration-deliverables-and-exit)
+remain open.
+
 ## 2026-11-15 routing and completed-nomination correction
 
-The twelve selections still identify twelve unfinished contribution routes,
+At this historical observation, the twelve selections identify twelve
+unfinished contribution routes,
 not twelve open original tracking tokens. The complete **2026-11-16
 02:03:59 UTC (2026-11-15 18:03:59 PST)** metadata-only inventory contains
 nine original selections and the three receivers below. This refresh changes

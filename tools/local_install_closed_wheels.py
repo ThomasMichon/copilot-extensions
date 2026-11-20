@@ -71,8 +71,7 @@ def prepare(
         )
         payload, identity = payloads[component], identities[component]
         metadata = profiles.dependencies._toml(payload / "pyproject.toml")
-        if application_sources(metadata):
-            raise ProfileError("closed-wheel preparation requires separately prepared associated applications")
+        declared_sources = application_sources(metadata)
         name = canonicalize_name(metadata["project"]["name"])
         associated: dict[str, Any] | None = None
         for filename, archive in retained.archives.items():
@@ -113,6 +112,13 @@ def prepare(
         )
         if {row["filename"] for row in profile.record()["wheels"]} != set(retained.archives):
             raise ProfileError("closed-wheel inputs contain unselected distributions")
+        if declared_sources:
+            wheels = {row["name"]: row for row in profile.record()["wheels"]}
+            wheels[name] = {**wheels[name], "application_sources": declared_sources}
+            for root in roots:
+                profiles.registry_roots(
+                    wheels, root, target["environment"], deadline=deadline,
+                )
         inputs = profile_wheel_inputs(
             profile, retained, max_archive_bytes=512 << 20, max_unpacked_bytes=1 << 30,
             max_metadata_bytes=4 << 20, limits=profiles.wheel_limits(), deadline=deadline,

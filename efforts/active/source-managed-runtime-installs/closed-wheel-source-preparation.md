@@ -198,3 +198,37 @@ provider/lifecycle-helper pairs. This closes C3's source/release scope,
 not actual consumer preparation, construction, native protection or readiness.
 C4 is next through independently admitted consumer inputs and effect authority;
 the broader protected handoff and installation programs remain open.
+
+### Consumer-driven source corrections
+
+The protected-dispatch correction
+[13735](https://github.com/ThomasMichon/copilot-extensions/pull/13735) merged
+as `e9de67edd5fec67c882c8c74e0e40bcbef821dae` after fresh current-head Copilot
+approval and passing required checks. It carries the selected closed-wheel
+mode into the existing package-containment guard; ordinary discovery and
+snapshot-escape refusal remain unchanged. The narrowed source packet passed
+30 explicit controls and retained exact canonical provider copies.
+
+Merged-source CI passed. Automatic containing validation
+[44821705097](https://github.com/ThomasMichon/copilot-extensions/actions/runs/44821705097)
+then passed units/coverage, artifact construction and Windows Resume but
+correctly refused the native Manager TTY consumer before its quit dialog.
+The existing automatic tracker is
+[13744](https://github.com/ThomasMichon/copilot-extensions/issues/13744).
+That run did not publish a qualified containing release; this bounded provider
+slice does not take over Manager readiness or dispatch another native attempt.
+
+The separate optional-association correction
+[13743](https://github.com/ThomasMichon/copilot-extensions/pull/13743) merged
+as `a8c51397a8256104df1560c7b088f7f50460a2a8` after fresh current-head Copilot
+approval, no active findings and successful required/functional CI.
+It replaces the initial blanket association refusal with the existing
+root/extra/target traversal over the inspected exact profile.
+Unselected optional associations stay inert; selected missing or unassociated
+inputs still refuse before prepared snapshot/application emission.
+All 28 closed-wheel controls, strict typing and static gates pass.
+The ordinary Manager changefile carries this tooling correction.
+
+Containing release and actual consumer/native adoption remain separate
+unqualified gates. C4, protected P4 and the parent installation acceptance
+remain open; neither source correction authorizes installation or deployment.

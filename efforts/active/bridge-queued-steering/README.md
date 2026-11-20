@@ -32,6 +32,27 @@ second queue, observer service or prompt-per-message acknowledgement loop.
 
 ## Coordination
 
+The finite #13734 idle-transition and truthful-hint slice, accepted in #13740,
+belongs to
+this existing Driver delivery owner and Phase 2, not a second inbox or
+implementation appointment. Preserve the broader #6394 publisher decision,
+its bounded queued-steering claim, and the independent routing, registration,
+compatibility, receipt and resource custodians. This intake leaves #6394
+OPEN and does not expand the continuing campaign's execution authority.
+The source's later, possibly separate resumed-headless carrier handshake
+failure remains at OPEN #13734 under the existing carrier/client-routing
+owners; these five rows do not receive or complete that distinct observation.
+
+Reviewed #13740 delivered the five planned P13734/V13734/G13734 clauses and
+dated Journal/intake route. Current complete slice and source/discussion
+readback accepted only that idle/hint scope; the separate carrier observation
+remains unreceived. Keep the whole source OPEN while
+its separate carrier observation lacks complete accepted handling; an idle
+slice merge is not whole-source receiving. All five new technical rows remain
+unchecked. Existing Goal, Request, Scope Approvals, checked source-notification
+credit and provider-contract limits remain unchanged; no live prompt replay,
+session replacement, new native probe, rollout or resource transfer is granted.
+
 - **Topology:** one source writer; sequence providers before consumers.
 - **Host (owns PRs):** Driver delivery owner.
 - **Delegates:** none assigned.
@@ -105,6 +126,46 @@ not additional operator requirements.
 - [ ] Publish supported-runtime discovery and explicit refusal for unavailable
   semantics; preserve compatible prior operations and supported rollback.
 
+#### Finite idle transition and truthful notification from #13734
+
+Agent-recommended complete receiving within this same Phase 2.
+
+- [ ] **P13734-1:** Preserve the reported Windows interactive registered-session
+  case, including resume/re-registration: pending inbox work must reach the
+  supported SDK submission path promptly on idle without waiting for another
+  tool call, operator turn or scheduled prompt. Reconcile the actual idle/
+  registration/delivery owner rather than assuming an idle state or heartbeat
+  proves submission. The reported two-minute stall and later roughly
+  twenty-to-forty-minute batches are incident observations, not a new timeout
+  budget or proof of a shared cause with historical #12057. A later reported
+  repeat kept the same input pending through about twenty tools after the
+  next operator turn and delivered roughly thirty minutes after queuing;
+  preserve it as corroborating incident evidence, not a new reproduction.
+- [ ] **P13734-2:** Make the post-tool hint truthful about that selected runtime.
+  If ending the turn does not guarantee idle submission, do not instruct the
+  agent to end its turn while promising that queued steering will be submitted.
+  Keep the unsupported delivery gap explicit instead of treating a wording
+  correction as an actual delivery repair. Preserve bounded/coalesced/muted
+  notice behavior, original message IDs/order/sender provenance and the
+  distinctions between admission, SDK acceptance, model input and consumption.
+
+##### Local Validation for #13734
+
+- [ ] **V13734-1:** Reproduce and qualify the exact pending-hint -> end-turn ->
+  idle sequence through the actual supported owning hook/SDK boundary, for a
+  normal registration AND resume/re-registration. Withhold unrelated tool,
+  operator and scheduled turns; show the pending work progresses on the
+  supported idle path rather than arriving attached to a later unrelated turn.
+  Distinguish controlled source/API fixtures from actual selected Windows
+  interactive qualification and honestly retain unavailable provider evidence.
+- [ ] **V13734-2:** Cover messages already pending at idle and multiple arrivals
+  while idle, plus active-turn, intentional mute and unavailable/unsupported
+  submission controls. Verify the hint cannot promise an unsupported wake,
+  preserve ordering and exact receipt identity, and prevent duplicate or
+  falsely consumed messages if late SDK progress races existing recovery.
+  Retain original containment, deadlines and cleanup; no live inbox replay,
+  native session, service or process action is authorized by this plan.
+
 ### Phase 3 - Acceptance and closeout
 
 - [ ] Pass focused source, process/transport, fresh-state, lint and contract
@@ -114,6 +175,16 @@ not additional operator requirements.
   named tracked objective, then archive; source merge is not deployment.
 
 ## Validation Plan
+
+- [ ] **G13734:** Resolve every P13734/V13734 and continuing Coordination
+  clause at the original finite idle/registered/resumed interactive boundary:
+  no unrelated-turn dependency, truthful supported/unsupported hint behavior,
+  multiple pending arrivals, preserved ordering/identity and no false
+  consumption or duplicate delivery. Keep actual Driver/provider/registration/
+  receipt/native/resource owners, original bounds and broader #6394 gates.
+  Notification source credit, a send reply, idle metadata or a wording change
+  alone is not model-input or installed qualification; unavailable delivery
+  evidence remains unresolved.
 
 - [ ] Admitted/no-SDK and SDK-accepted/no-consumption controls fail before the
   relevant repair and progress afterward, including an idle receiver.
@@ -142,6 +213,8 @@ is too late. Keep unavailable semantics explicit rather than claim exactly-once
 delivery from an SDK promise or a timer.
 
 ## Journal
+
+### [2026-11-20 - Proposed finite idle-transition and truthful-hint receiving](../backlog-reconciliation/journal/2026/11.20-idle-steering-and-existing-keepers.md)
 
 ### 2026-11-13 - Bounded source repair captured
 

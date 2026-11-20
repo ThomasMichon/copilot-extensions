@@ -7,7 +7,7 @@
 - **Scope:** branch (a per-plugin vision under the
   [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-11-12
+- **Last revised:** 2026-11-20
 - **Reality docs:** [`docs/architecture.md`](../../../docs/architecture.md) ·
   the plugin's `plugins/agent-dispatch/` (skill `agent-dispatch`, `pick-and-claim`)
 
@@ -175,6 +175,13 @@ while an unaddressed task can be placed with any eligible pool. This lets an
 embodied task be joined back to the live session doing it — the delegation layer *derives* that
 liveness from the ground/coordination layers rather than keeping its own copy.
 
+The pool assigns a worktree to the task. Both relationships remain current
+and queryable even when the worker process stops and another task uses its
+slot. Suspension, resumption, workspace finalization and submission for
+evaluation do not unassign the worktree. Only completion, abandonment or an
+explicit release back to queued or claimed work permits unassignment. A
+resume that passes through claimed is not such a release.
+
 Once attached to its worktree, a task resolves **both ways** — a
 worktree enumerates the tasks it holds, and any task resolves back to the
 worktree that claimed it. This is the **inbound half** of a worktree's fabric
@@ -276,7 +283,7 @@ template leaves open: the target repo, the change-review technology, the issue
 backend, the actual machine and account names. Four archetypes are first-class:
 
 1. **reviewer** — a cooperative, verdict-bearing loop that carries one target
-   change to merge or deliberate abandonment. Its deeper contract lives in the
+   change to a reviewer-policy outcome. Its completion conditions live in the
    [reviewer-loop child vision](reviewer/README.md).
 2. **conflict-resolution** — for a change some *other* system opened but nobody is
    driving, take the last mile: check out the branch, rebase, resolve conflicts,
@@ -1009,9 +1016,10 @@ the worker that submitted it has finished its execution turn; only
 the *review* remains outstanding, and review is a caller act, not agent work.
 Its worktree still holds the task as an outstanding obligation, preserving
 the same workspace and conversation for a rejected submission. That durable
-claim is not an active execution slot and does not permit permanent finalization
-or cleanup before accepted completion or explicit unassignment to unbound
-queued work. See the [submission responsibility contract](task-outputs-and-review/README.md#submission-retains-worktree-responsibility).
+claim is not an active execution slot. It protects the assigned workspace
+from reclamation until completion, abandonment or explicit release for
+reassignment. Submission means the worktree could be cleaned on acceptance,
+not that it has been detached or deleted. See the [submission responsibility contract](task-outputs-and-review/README.md#submission-retains-worktree-responsibility).
 An arbitrary backlog of submissions may sit for as long as the
 caller needs before being accepted, re-queued, or abandoned, exactly the way
 a *queued*, not-yet-embodied task may sit before a worker binds to it — waiting

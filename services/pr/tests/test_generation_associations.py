@@ -9,7 +9,7 @@ from pathlib import Path
 import subprocess
 import sys
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -33,11 +33,14 @@ def command(*args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+@pytest.mark.parametrize("native_targets", [False, True])
 def test_actual_cli_provision_load_and_fresh_reader_preserve_original_generation(
-    configuration: Configuration, monkeypatch: pytest.MonkeyPatch,
+    configuration: Configuration, monkeypatch: pytest.MonkeyPatch, native_targets: bool,
 ) -> None:
     path, value = workspace_config(configuration)
     value["workspaces"]["generation_associations"] = True
+    if native_targets:
+        value["workspaces"]["native_generation_associations"] = True
     path.write_text(json.dumps(value))
     result = command("-m", "agent_pull_requests_service", "provision", "--config", str(path))
     assert result.returncode == 0, result.stderr
@@ -59,6 +62,12 @@ def test_actual_cli_provision_load_and_fresh_reader_preserve_original_generation
         "number": generation["scope"]["number"], "expected_current": None, "budget_seconds": 30,
     }, expires_at=int(time.time()) + 60, checkpoint=lambda: None)
     assert result_value["result"]["publication"]["status"] == "published"
+    synchronized = workspace.execute("sync", {
+        "number": generation["scope"]["number"], "expected_current": generation["id"],
+        "previous_id": generation["id"], "budget_seconds": 30,
+    }, expires_at=int(time.time()) + 60, checkpoint=lambda: None)
+    assert synchronized["result"]["publication"]["status"] == "published"
+    assert synchronized["result"]["conversation"]["status"] == "unchanged"
     original = config.store().path.read_bytes()
     program = """
 import base64, json, sys, time
@@ -85,9 +94,14 @@ print(json.dumps({"descriptor": d, "generation": json.loads(data)}))
     assert config.store().path.read_bytes() == original
     row = json.loads(original)["generation_associations"]["records"][0]
     assert row["generation_id"] == generation["id"] and row["publication"] == "confirmed"
+    if native_targets:
+        assert row["native_target"] == {
+            "account": "account-a", "repo": "example/repository", "number": generation["scope"]["number"],
+        }
     assert main(["provision", "--config", str(path)]) == 1
     assert config.store().path.read_bytes() == original
     value["workspaces"]["generation_associations"] = False
+    value["workspaces"].pop("native_generation_associations", None)
     path.write_text(json.dumps(value))
     old = load_config(path)
     assert old.workspaces is not None
@@ -96,6 +110,67 @@ print(json.dumps({"descriptor": d, "generation": json.loads(data)}))
             ("caller-a", "repository-a")
         ].validate_storage(expires_at=int(time.time()) + 60, checkpoint=lambda: None)
     assert config.store().path.read_bytes() == original
+
+
+def test_native_selection_refuses_existing_v1_and_old_core_without_adoption(
+    configuration: Configuration, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_pull_requests import generation_native_targets
+
+    path, value = workspace_config(configuration)
+    value["workspaces"]["generation_associations"] = True
+    path.write_text(json.dumps(value))
+    baseline = load_config(path)
+    baseline.provision()
+    before = baseline.store().path.read_bytes()
+    value["workspaces"]["native_generation_associations"] = True
+    path.write_text(json.dumps(value))
+    selected = load_config(path)
+    assert selected.workspaces is not None
+    with pytest.raises(ReplayStoreInvalid, match="reader unavailable"):
+        selected.workspaces.operations(selected.store(), lambda: None, 60)[
+            ("caller-a", "repository-a")
+        ].validate_storage(expires_at=int(time.time()) + 60, checkpoint=lambda: None)
+    assert main(["provision", "--config", str(path)]) == 1
+    assert baseline.store().path.read_bytes() == before
+    monkeypatch.setattr(generation_native_targets, "contract", lambda: {"protocol": "old"})
+    with pytest.raises(ValueError, match="core unsupported"):
+        load_config(path)
+    value["workspaces"].pop("native_generation_associations")
+    path.write_text(json.dumps(value))
+    assert load_config(path).workspaces is not None
+    assert baseline.store().path.read_bytes() == before
+
+
+@pytest.mark.parametrize("associations", [False, True])
+def test_unselected_native_feature_does_not_send_new_keywords_to_old_core(
+    configuration: Configuration, monkeypatch: pytest.MonkeyPatch, associations: bool,
+) -> None:
+    from agent_pull_requests_service import config as hosting
+    from agent_pull_requests.watch_replay_store import ReplayStore
+    from agent_pull_requests.workspace_operations import WorkspaceOperations
+
+    path, value = workspace_config(configuration)
+    if associations:
+        value["workspaces"]["generation_associations"] = True
+        path.write_text(json.dumps(value))
+
+    def old_store(*args: Any, **kwargs: Any) -> ReplayStore:
+        assert "native_generation_associations" not in kwargs
+        return ReplayStore(*args, **kwargs)
+
+    def old_workspace(*args: Any, **kwargs: Any) -> WorkspaceOperations:
+        assert "generation_native_target" not in kwargs
+        return WorkspaceOperations(*args, **kwargs)
+
+    monkeypatch.setattr(hosting, "ReplayStore", old_store)
+    monkeypatch.setattr(hosting, "WorkspaceOperations", old_workspace)
+    config = load_config(path)
+    config.provision()
+    assert config.workspaces is not None
+    config.workspaces.operations(config.store(), lambda: None, 60)[
+        ("caller-a", "repository-a")
+    ].validate_storage(expires_at=int(time.time()) + 60, checkpoint=lambda: None)
 
 
 def test_selection_never_adopts_an_existing_baseline_or_weakens_terminal_refusal(
@@ -117,8 +192,10 @@ def test_selection_never_adopts_an_existing_baseline_or_weakens_terminal_refusal
     assert baseline.store().path.read_bytes() == original
     value["workspaces"]["terminal_reads"] = True
     path.write_text(json.dumps(value))
-    with pytest.raises(ValueError, match="baseline selection"):
-        load_config(path)
+    combined = load_config(path)
+    with pytest.raises(ValueError, match="existing retained volume"):
+        combined.provision()
+    assert main(["adopt-terminal", "--config", str(path)]) == 1
     assert baseline.store().path.read_bytes() == original
 
 

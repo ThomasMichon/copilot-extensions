@@ -196,6 +196,69 @@ def test_closed_wheel_refusals_never_build_install_or_invoke(
     assert not (application["output"] / "snapshot" / "applications").exists()
 
 
+@pytest.mark.parametrize("selection", ["base", "missing", "foreign"])
+def test_closed_wheel_associations_follow_selected_extras(
+    application: dict[str, Any], monkeypatch: pytest.MonkeyPatch, selection: str,
+) -> None:
+    repository = application["repository"]
+    metadata = repository / "app/pyproject.toml"
+    content = metadata.read_text().replace(
+        'legacy=["helper==0.5"]',
+        'legacy=["helper==0.5"]\nfeature=["addon>=1"]',
+    ) + '\n[tool.copilot-extensions.application-sources]\naddon="addon"\n'
+    metadata.write_text(content)
+    git = source.preparation._git
+    git(repository, "add", ".")
+    git(
+        repository, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+        "commit", "--quiet", "-m", "Optional associated application",
+    )
+    application["commit"] = git(repository, "rev-parse", "HEAD")
+    app = application["archives"]["demo_app-1.0.0-py3-none-any.whl"]
+    with zipfile.ZipFile(app) as archive:
+        wheel_metadata = archive.read("demo_app-1.0.0.dist-info/METADATA")
+        body = archive.read("demo_app/__init__.py")
+        entry_points = archive.read("demo_app-1.0.0.dist-info/entry_points.txt")
+    app.write_bytes(wheel_bytes(
+        name="demo_app", prefix="demo_app-1.0.0.dist-info/",
+        metadata=wheel_metadata.replace(
+            b"Provides-Extra: legacy\n",
+            b'Provides-Extra: legacy\nProvides-Extra: feature\n'
+            b'Requires-Dist: addon>=1; extra == "feature"\n',
+        ),
+        extra={
+            "demo_app/__init__.py": body,
+            "demo_app-1.0.0.dist-info/entry_points.txt": entry_points,
+        },
+    ))
+    application["digests"][app.name] = "sha256:" + hashlib.sha256(app.read_bytes()).hexdigest()
+    if selection == "base":
+        prepared = closed.prepare(**application)
+        selected = profiles.source_inputs.select_project(prepared, "demo-app")
+        assert (selected.payload / "pyproject.toml").read_text() == content
+        emitted = prepared / selected.project["application"]
+        assert (emitted / "uv.lock").is_file()
+        assert "addon" not in profiles.dependencies._toml(emitted / "pyproject.toml")["tool"]["uv"]["sources"]
+        return
+    application["roots"] = ["demo-app[feature]==1.0.0"]
+    if selection == "foreign":
+        addon = app.parent / "addon-1.0.0-py3-none-any.whl"
+        addon.write_bytes(wheel_bytes(
+            name="addon", prefix="addon-1.0.0.dist-info/",
+            metadata=b"Metadata-Version: 2.3\nName: addon\nVersion: 1.0.0\n\n",
+        ))
+        application["archives"][addon.name] = addon
+        application["digests"][addon.name] = "sha256:" + hashlib.sha256(addon.read_bytes()).hexdigest()
+    monkeypatch.setattr(
+        profiles, "_write_snapshot",
+        lambda *_a, **_kw: pytest.fail("unassociated selected application reached snapshot emission"),
+    )
+    message = "incomplete|missing" if selection == "missing" else "associated application source is missing or different"
+    with pytest.raises(profiles.ProfileError, match=message):
+        closed.prepare(**application)
+    assert not (application["output"] / "snapshot").exists()
+
+
 def test_closed_source_mode_requires_complete_wheel_construction_before_root_creation(tmp_path: Path) -> None:
     root = tmp_path / "never-created"
     with pytest.raises(ValueError, match="immutable inspected wheels"):

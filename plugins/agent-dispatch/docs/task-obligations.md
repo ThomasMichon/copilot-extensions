@@ -33,11 +33,23 @@ The object contains:
 | `queue_identity` | Durable identity of the original queue, independent of endpoint configuration |
 | `assignment` | Exact event id and worker from a direct claim or protected allocator workspace attachment; otherwise null |
 | `relationship` | Original retained request for a protected assignment, when present |
+| `pool_placement` | On a current-incarnation lookup, null or `{assignment, workspace}`. Assignment identifies the pool by registration ID, machine and environment; workspace identifies the assigned machine/worktree, or is null when no matching workspace is recorded. |
 | `bindings` | Boolean presence of task owner, native owner, explicit target worktree, hard worktree requirement, unreleased pool assignment and unresolved spawn binding |
 | `held` | Any retained task hold field |
 | `unassignment` | Latest transition from claimed, started or suspended to queued, with its event id, separately recorded former worker id and prior state; otherwise null |
 | `closeout` | Optional, currently revalidated original-assignment readiness evidence; otherwise null or absent |
 | `release_outcome` | `completed`, `unassigned_queued`, `relevance_closeout_ready`, or null |
+
+`claimant TASK` reports that pool assignment through suspension and submission.
+`resolved_from: assignment` identifies the recorded workspace, even if its
+claim has closed for finalization and the execution `owner` has cleared.
+`claimed` and `worker_id` still describe execution ownership. Without matching
+workspace evidence the command keeps its owner/target fallback. A historical
+event lookup, queued task or terminal task does not advertise an active placement;
+the original pool and relationship records remain available for inspection.
+Older responses without `pool_placement` retain the owner/target lookup and
+omit `pool_assignment` rather than claiming the task has no pool.
+None of these display fields authorize wake, capacity reuse or finalization.
 
 `completed` reports the existing authoritative `COMPLETED` state. This preserves
 the current behavior of tasks without required verification, whose completion

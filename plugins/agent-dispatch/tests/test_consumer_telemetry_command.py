@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import runpy
 from collections.abc import Callable
 from pathlib import Path
 import sys
@@ -126,6 +127,88 @@ def test_provider_specific_capability_and_missing_old_metadata(tmp_path: Path) -
     assert not supports(tmp_path, source_schema="dispatch.lifecycle.v1")
     with pytest.raises(ValueError, match="unregistered"):
         SinkSlot().configure_commands(source="arbitrary")
+
+
+@pytest.mark.parametrize("change", [
+    {"schema_version": 2}, {"versions": [2]},
+    {"transports": ["future-transport"]}, {"source_schemas": ["bridge.lifecycle.v1"]},
+])
+def test_mixed_provider_capability_refuses_incompatible_reader(
+    tmp_path: Path, change: dict[str, Any],
+) -> None:
+    metadata = dict(consumer_telemetry.capability(), **change)
+    (tmp_path / "consumer-telemetry-contract.json").write_text(
+        json.dumps(metadata), encoding="utf-8",
+    )
+    assert not supports(tmp_path, source_schema="dispatch.lifecycle.v1")
+
+
+@pytest.mark.parametrize("mode", [
+    "legacy", "disabled", "reading", "slow", "failed", "nonreading", "bridge-only",
+])
+def test_ordinary_dispatch_create_wall_cpu_tail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str,
+    record_property: Callable[[str, object], None],
+) -> None:
+    from agent_dispatch import server
+
+    helper = runpy.run_path(str(
+        Path(__file__).resolve().parents[3] / "tools/performance/consumer_telemetry_probe.py"
+    ))
+    root = receiver(tmp_path / "approved root", helper["RECEIVER"])
+    declaration = root / ".agent-telemetry" / "config.json"
+    value = json.loads(declaration.read_text(encoding="utf-8"))
+    value["command"]["argv"][-1] = mode
+    declaration.write_text(json.dumps(
+        {"schema_version": 1, "mode": "disabled"} if mode == "disabled" else value
+    ), encoding="utf-8")
+    if mode != "legacy":
+        policy_file(tmp_path, {REPO_A: str(root)})
+    monkeypatch.setattr(server, "_owns_active_route", lambda: True)
+    app = build_app(Config(db_path=str(tmp_path / "tasks.db"), token="fixture-data"))
+    consumer = app.state.consumer_telemetry
+    with TestClient(app) as client:
+        def operation() -> None:
+            result = client.post("/tasks", headers=AUTH, json={
+                "title": "fixture", "repo": REPO_A,
+            })
+            assert result.status_code == 200 and result.json()["status"] == "queued"
+
+        cold = helper["measure"](operation, 1)
+        measured = helper["measure"](operation, 48)
+        if mode == "bridge-only":
+            wait_for(lambda: (root / "schema-rejection.json").exists())
+        teardown_start = time.perf_counter_ns()
+    shutdown_ns = time.perf_counter_ns() - teardown_start
+    owner = consumer.owner
+    if owner is not None:
+        assert owner.writer is None or owner.writer.join(0)
+        assert all(item.pipe is None or item.pipe.closed for item in owner.bindings)
+    rows = readback(root) if (root / "readback.jsonl").exists() else []
+    cost = root / "receiver-cost.json"
+    receiver_cost = json.loads(cost.read_text(encoding="utf-8")) if cost.exists() else None
+    if receiver_cost is not None:
+        assert receiver_cost["records"] == len(rows)
+    if mode == "reading":
+        assert len(rows) == 49
+        assert receiver_cost is not None
+    elif mode == "bridge-only":
+        assert not rows
+        assert json.loads((root / "schema-rejection.json").read_text(encoding="utf-8")) == {
+            "observed_source_schema": "dispatch.lifecycle.v1", "rejected": True,
+        }
+    record_property("consumer_telemetry_http_performance", json.dumps({
+        "version": 1, "source": "agent-dispatch", "mode": mode,
+        "boundary": "authenticated HTTP task creation; 49 distinct tasks",
+        "cold_operation": cold, "measurement": measured, "shutdown_wall_ns": shutdown_ns,
+        "readback_records": len(rows),
+        "fsync_confirmed_records": receiver_cost["records"] if receiver_cost is not None else None,
+        "producer_counters": owner.stats() if owner is not None else {},
+        "receiver_cost": receiver_cost,
+        "includes_http_database_and_timer": True,
+        "http_tail_sample_insufficient_for_tail_qualification": True,
+        "not_installed_service": True,
+    }, sort_keys=True))
 
 
 def test_admission_rejects_canonical_collisions_and_excess_routes(tmp_path: Path) -> None:

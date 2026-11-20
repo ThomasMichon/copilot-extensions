@@ -62,7 +62,7 @@ class WorkspaceRetention:
                 if "terminal_retention" not in document:
                     return None
                 if operation not in ("load", "sync"):
-                    return require_live(document, scope)
+                    return require_live(document, scope, recorded_body=operation in ("lookup", "chunk"))
                 record = ConversationJournal(document["conversations"])._find(
                     conversation_key(scope, owner.namespace),
                 )
@@ -88,7 +88,7 @@ class WorkspaceRetention:
             return operation()
 
         def guarded(document: Document) -> _T:
-            require_live(document, scope, epoch=epoch, generation_id=generation_id)
+            require_live(document, scope, epoch=epoch, generation_id=generation_id, recorded_body=True)
             return operation()
 
         return owner._review_transaction(
@@ -145,9 +145,9 @@ class WorkspaceRetention:
             return materialized(cache, scope, generation_id)
 
         def read(document: Document) -> tuple[Document, bytes]:
-            require_live(document, scope, epoch=epoch, generation_id=generation_id)
+            require_live(document, scope, epoch=epoch, generation_id=generation_id, recorded_body=True)
             descriptor, data = materialized(cache, scope, generation_id)
-            require_live(document, scope, epoch=epoch, generation_id=descriptor["id"])
+            require_live(document, scope, epoch=epoch, generation_id=descriptor["id"], recorded_body=True)
             return descriptor, data
 
         return owner._review_transaction(

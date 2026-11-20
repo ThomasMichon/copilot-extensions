@@ -346,8 +346,8 @@ The selected executing core must declare
 `agent-pull-requests.workspace-generation-associations/v1`; an absent or
 incompatible declaration refuses this selection before provisioning.
 Omitting the field retains the existing workspace behavior and wire contract.
-This profile cannot compose with terminal reads, preparation or comment
-mappings.
+This writer profile cannot compose with preparation or comment mappings.
+Terminal reads require the separate retained transition below.
 
 The existing cache owner rejects definite CAS conflicts and full-cache outcomes
 before recording an observation or reservation. After that guarded admission,
@@ -371,10 +371,92 @@ a terminal live admission or evidence of a fresh provider read.
 `serve` validates the selected existing storage, never adopts it. Adding this
 selection to a previously provisioned baseline refuses instead of backfilling
 associations. Removing it or selecting a strict older reader also refuses the
-expanded envelope without rewriting it. Retained terminal adoption remains
-unsupported for these populated volumes until the separate positive-transition
-slice is qualified. This profile authorizes no installed migration, native
+expanded envelope without rewriting it. This profile authorizes no installed migration, native
 watch reassignment, unknown-effect recovery, provider access or service stop.
+
+#### Original native-target capture
+
+A fresh baseline may additionally select
+`workspaces.native_generation_associations: true`. It requires
+`generation_associations: true` and the executing-core declaration
+`agent-pull-requests.workspace-native-generation-associations/v1`.
+The original v1 selection and default publication remain unchanged.
+
+The host captures its admitted native account/repository/PR, full workspace
+scope, service binding and journal epoch/absence before native discovery or
+acquisition. This request-local capture creates no observation or storage write.
+Publication rejects an intervening closure, reopen, newly created conversation
+or mismatched capture before recording a new observation or touching the cache.
+The existing guarded publication then reserves original target/epoch metadata
+in generation-association storage version 2, confirming it only after cache
+publication. Original pending CAS and uncertain-result reconciliation remain
+with the same owner.
+
+Only fresh provisioning selects this version; adding the flag to a v1 volume
+does not migrate it. Removing the flag or choosing an older strict reader
+refuses expanded storage unchanged. The retained transition below separately
+declares support for combining this profile with `terminal_reads`; the fresh
+writer alone is insufficient. It does not backfill targets, change watch
+receipts or deadlines, or create terminal admissions. Existing count/byte
+limits and pending/confirmed metadata custody remain intact.
+
+#### Recorded-generation terminal transition
+
+For an existing volume provisioned with the v1 association writer, retaining
+`generation_associations: true` and selecting `terminal_reads: true` enables
+the recorded-cache variant of the existing `adopt-terminal` command. The
+executing core must separately declare
+`agent-pull-requests.recorded-terminal-cache-adoption/v1`.
+Fresh provisioning with both selections refuses; `serve` only validates
+already-adopted state. Missing support never falls back to another transition.
+
+Preflight requires confirmed original associations for every current and
+noncurrent generation, complete open first-epoch conversations and unchanged
+cache limits. Any pending publication, unassociated object, closed/reopened
+history, active legacy native observation or unsupported recovery state
+refuses unchanged. The cache owner validates each object once. Adoption uses
+the existing writer lease, finite budget, replay-before-cache lock order and
+complete-envelope capacity reservation; interruption retains valid progress
+for explicit retry.
+
+The versioned `recorded_terminal_cache_version: 1` marker selects workspace-only
+generation/epoch bindings in the existing terminal ledger. It does not create
+native target admissions, replay observations, journal events or cache writes.
+Current/noncurrent lookup, chunks and sync comparisons retain the original
+bytes and cursors. Partial same-epoch refreshes do not withdraw those recorded
+body bindings; authoritative terminal/reopen evidence still fences them.
+Fresh validated acquisition establishes the actual native
+target through the existing terminal publication path, not the baseline
+association writer. Delayed native samples captured before that binding
+remain fenced. Retry of a complete adoption validates current terminal-owned
+generations without importing them into the old baseline association history.
+Removing either selection or rolling back to a strict older reader refuses
+the expanded envelope unchanged.
+
+For an existing volume originally provisioned with the native-target writer,
+also retain `native_generation_associations: true`. The executing core must
+declare `agent-pull-requests.recorded-native-cache-adoption/v1` independently of
+the writer and workspace-only reader. This selects
+`recorded_terminal_cache_version: 2`, not an upgrade of a v1 association volume.
+Fresh provisioning still refuses the combined selection.
+
+The same transition validates every historical target association, including
+noncurrent entries, against the selected full scopes and native targets.
+It imports generation bindings and native admissions together, using only
+confirmed complete open first-epoch associations with actual validated retained
+cache objects. The admission cursor is an original association cursor, not the
+current journal high-water mark. Every actually waiting coalesced native target
+must have such evidence. Unmatched old targets, pending publication, conflicting
+history, ambiguous scopes or changed configuration refuse before adoption;
+today's target B cannot justify an old wait for target A.
+
+Original watch receipts, predicates, deadlines, frozen events and ACK positions
+are unchanged. Native capture after adoption carries the imported epoch before
+IO; a sample captured without it, or across close/reopen, refuses unchanged.
+Fresh native observations keep their complete native snapshot and triggering
+head. No observation, successful watch event, cache rewrite or delivery
+settlement is created by importing admissions. Unknown-effect operation
+recovery and installed migration remain separate, unqualified outcomes.
 
 ## Optional preparation-only hosting
 

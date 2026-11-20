@@ -163,6 +163,7 @@ def validate(document: Document, namespace: str) -> None:
 def require_live(
     document: Document, scope: Document, *, operation_id: str | None = None,
     generation_id: str | None = None, epoch: int | None = None,
+    recorded_body: bool = False,
 ) -> int | None:
     """Called under replay custody at each content/effect mutation boundary."""
     state = document.get("terminal_retention")
@@ -175,12 +176,18 @@ def require_live(
     ):
         raise TerminalAdmissionClosed("historical compact operation is recovery-only")
     admission = next((row for row in state["admissions"] if row["scope"] == scope), None)
-    if admission is None or any(
-        row["scope"] == scope and row["cursor"]["epoch"] == admission["cursor"]["epoch"]
+    if admission is None:
+        from .recorded_terminal_cache import workspace_epoch
+        current_epoch = (
+            workspace_epoch(document, scope) if recorded_body and operation_id is None else None
+        )
+    else:
+        current_epoch = admission["cursor"]["epoch"]
+    if current_epoch is None or any(
+        row["scope"] == scope and row["cursor"]["epoch"] == current_epoch
         for row in state["records"]
     ):
         raise TerminalAdmissionClosed("live conversation epoch unavailable")
-    current_epoch = cast(int, admission["cursor"]["epoch"])
     if epoch is not None and epoch != current_epoch:
         raise TerminalAdmissionClosed("selected conversation epoch changed")
     if operation_id is not None and any(
@@ -201,8 +208,10 @@ def bind_generation(document: Document, generation: Document, cursor: Document) 
     if state is None:
         return
     epoch = require_live(document, generation["scope"], epoch=cursor["epoch"])
-    current = next(row for row in state["admissions"] if row["scope"] == generation["scope"])
-    if current["cursor"] != cursor:
+    current = next(
+        (row for row in state["admissions"] if row["scope"] == generation["scope"]), None,
+    )
+    if current is None or current["cursor"] != cursor:
         raise TerminalAdmissionClosed("publication observation is no longer current")
     row = {"scope": copy.deepcopy(generation["scope"]), "generation_id": generation["id"], "epoch": epoch}
     previous = next(
@@ -429,7 +438,13 @@ class TerminalRetentionStore:
                     max_bytes=original_cache.max_bytes, max_generations=original_cache.max_generations,
                     service_identity=self.owner.service_identity, checkpoint=current,
                 )
-                validate_metadata(document, request_cache, retained_targets, current)
+                validate_metadata(
+                    document, request_cache, retained_targets, current,
+                    recorded_generations=self.owner.recorded_terminal_cache,
+                    recorded_native_targets=(
+                        self.owner.recorded_terminal_cache and self.owner.native_generation_associations
+                    ),
+                )
                 from .terminal_recovery import PROTOCOL as RECOVERY
                 from .terminal_cache_retirement import PROTOCOL as CACHE
                 complete = copy.deepcopy(document)
