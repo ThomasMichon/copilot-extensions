@@ -307,7 +307,10 @@ class TaskQueue(
         return conn
 
     def _migrate(self) -> None:
+        from .ordinary_policy_upgrade import install_policy_boundary
+
         with self._connect() as conn:
+            install_policy_boundary(conn)
             run_queue_schema_migrations(conn, now_fn=self._now)
             self._ensure_handoff_fallback_schema(conn)
             self._migrate_producer_schema(conn)

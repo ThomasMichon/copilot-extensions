@@ -24,7 +24,7 @@ Do not maintain a second independently evolving registrar schema.
 | `URL`, `SHARED_URL` | URL; native local discovery / absent shared |
 | `SHARED_TOKEN`, `SHARED_CONTROL_TOKEN` | Secret string; absent; independent shared authority |
 | `TASK_AUTHORITY` | `central` / `local`; unset retains native routing; no cross-queue fallback for explicit authority |
-| `RELATIONSHIP_ADMISSION`, `RELATIONSHIP_AUTHORITY` | Trusted `module:factory` and explicit `local` / `central` queue authority, or native `local-ordinary` with `local`; both absent by default |
+| `RELATIONSHIP_ADMISSION`, `RELATIONSHIP_AUTHORITY` | Trusted `module:factory` and explicit `local` / `central` authority, or [native ordinary capture](#native-local-ordinary-admission) with `local`; both absent by default |
 | `PRODUCER_CAPABILITY`, `PRODUCER_CAPABILITY_COMMAND` | Capability/fetch selector; invocation-owned, never portable authority |
 | `NO_AUTOSTART` | Any nonempty value disables lazy start |
 | `RUN_DIR`, `ROUTING_DIR`, `ENDPOINT`, `OVERRIDES` | Owner runtime/discovery paths/selectors; native defaults; not preference tiers |
@@ -76,6 +76,79 @@ behavior. Health's version-1 `task_relationships` object reports the additive
 `scope: "local-ordinary"`; `enabled` describes available integration, not the
 readiness of any participant. Alternate global factories report `scope: "all"`.
 
+**Stage one instance.** On the local coordinator set `AGENT_DISPATCH_RELATIONSHIP_AUTHORITY=local`
+and set `AGENT_DISPATCH_RELATIONSHIP_ADMISSION` to this single literal value (shown without shell quoting):
+
+```text
+local-ordinary-instance={"registration_id":"worker","machine":"host-a","env":"linux"}
+```
+
+Placement still selects the global winner. Only an exact, case-sensitive match of
+all three fields on that winner enables capture for a new ordinary allocation.
+This setting does not select a pool, enable allocation, or qualify a writer.
+Duplicate or extra fields, missing values and wildcards are not supported.
+Check `task_relationships.scope` for `local-ordinary-instance` on the intended
+coordinator. A capable coordinator stores `task_relationship_required` in the
+reservation transaction; the unchanged receipt path must then bind the original
+workspace and retain its writer requirement before the first prompt. Changing
+the selector does not reclassify reservations or repair ungoverned history.
+Retrying an allocation keeps its original decision, even in all-pool mode;
+re-emitting work against an old ungoverned workspace does not retrofit it.
+A captured ordinary allocation cannot switch tasks, allocators or startup drivers on retry.
+An embedded general writer without a stable admission selection cannot reserve governed ordinary work.
+For a governed ordinary root the queue also retains the admission selection (native
+local, or a fingerprint of the configured factory and its queue authority). Changing between
+native rollout scopes is not a change of writer policy. A different or unknown
+selection, including a historical root without this evidence, cannot authorize
+a new same-allocation attempt or select a relationship writer for an existing reservation. A matching selection does not prove a writer's
+identity: the original workspace, writer and receipt checks still apply.
+
+**Before upgrading a coordinator that already captures ordinary work**, stop new placement
+and let its original coordinator finish the tasks, reconcile their claims and retire their natives.
+The new coordinator checks unattributed governed reservations before changing the queue schema.
+If retirement, terminal task status or claim settlement is unconfirmed, startup refuses and
+leaves the old schema intact. Keep the original coordinator and writer configuration for settlement,
+then retry the upgrade. Neither drain nor switching writers can infer a missing historical policy.
+Settled history remains unattributed; do not backfill policy or edit receipts.
+For a retried allocation, the closed claim must identify its preparing attempt and
+any continuation. The executing native's retained creation record must attest the
+original allocation stamp, workspace incarnation and writer. This can account for
+several earlier project-bound attempts, but each must independently prove retirement
+without a workspace, native, send or outstanding claim and match the later prepared
+workspace's allocator, project, revision, cohort and execution location. A project
+name or terminal task alone cannot: missing native creation evidence, conflicting
+receipts or unresolved sends still block the upgrade.
+
+After a confirmed worker decline, a *new* unselected allocation may proceed only once the old claim is
+closed and its native is retired. This remains true when the admission settings
+are removed. On a governed retry, the worker sends the executing reservation
+key to Dispatch. It finalizes its own workspace using the allocation root only
+after the settled readiness receipt confirms that root, native and workspace
+incarnation. Missing or conflicting evidence retains custody; it does not
+authorize trying either key speculatively. Earlier direct assignments need their own closed receipt and
+matching unassignment. If closed before bind acknowledgement, the canonical
+receipt must instead identify that same assignment in its version-2 recovery
+record. A pending claim or retirement still blocks replacement.
+A different task re-emitted under the same deduplication key can receive a new
+allocation revision for either the CLI or ordinary-Bridge pool driver if every
+attempt in the captured predecessor revision was retired before workspace preparation,
+or the entire same-origin revision has verified workspace disposal, settled claims and retired natives.
+A missing workspace receipt after project binding is not proof of absence. For a decline,
+retired project-bound attempts can instead be accounted for by their exact recovered workspace,
+closed relationship and retired native under the same creation key and revision. Unresolved sends or wakes still block placement.
+
+**Roll back prospectively.** With authority still `local`, change admission to
+`local-ordinary-drain`. This starts no new captures; it keeps the native writer
+available for existing obligations through closeout. Health reports that scope.
+Before removing both settings, reconcile governed work through its original owner.
+Before **downgrading**, finish tasks that still need
+reassignment or completion after a governed decline on the capable coordinator. Closing the old claim is not sufficient:
+older coordinators reinstall stricter execution and submission guards. They do
+not support unselected replacements for those tasks, even after retirement.
+The selective and drain values are distinct from `local-ordinary`: versions
+that only understand the all-pool opt-in reject them instead of broadening the
+rollout. Do not substitute `local-ordinary` to make an older version start.
+
 Before each relationship operation the assembly rechecks the exact original
 queue request and reservation, actual execution/creation machine, created
 workspace ownership, creation key and retained writer requirement. The exact
@@ -85,7 +158,18 @@ additional native participant. A null head never identifies a yielded session;
 the original native must still be the sole indexed identity. Missing identity
 projection from an older Worktrees provider refuses without falling back to a
 count. The owner's null/default-managed checkout representation is accepted;
-explicit unmanaged checkouts refuse. Carried/targeted workspaces, uncaptured natives
+explicit unmanaged checkouts refuse. A verified retry of the same task may
+supply the first workspace receipt after an empty attempt, or the first native
+after the workspace was bound. Its owner checks the original creation stamp,
+workspace incarnation and writer requirement against the audited assignment;
+the executing reservation supplies the native receipt, not a new writer choice.
+This retry path ends once the original native has been retired. Dispatch
+retirement does not authorize Bridge to create a different conversation under
+the same creation key. Do not retry that key, replace the writer receipt, or
+treat a stopped conversation as retired. A successor needs a separately
+admitted allocation revision; automatic same-workspace replacement after
+native retirement is not supported by this selector.
+Other carried/targeted workspaces, uncaptured natives
 and historical requests without the original evidence refuse; current labels
 or an idle process list cannot retrofit them.
 

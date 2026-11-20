@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from dataclasses import asdict
-from typing import TYPE_CHECKING
+from dataclasses import asdict, dataclass
+from typing import TYPE_CHECKING, Any
 
 from .assignment_workspace import AssignmentWorkspace
 from .queue_common import CompletionOutcome, StructuredResult, Task
@@ -17,10 +17,16 @@ if TYPE_CHECKING:
     from .queue import TaskQueue
 
 
+@dataclass(frozen=True)
+class _DetachedReplay:
+    generation: int
+    expected_status: str | None
+
+
 def original_request(
     conn: sqlite3.Connection, task: Task, worker_id: str, *,
     allowed: set[str], expected_status: str | None,
-) -> dict | None:
+) -> dict[str, Any] | _DetachedReplay | None:
     """Resolve requirement and retry identity under the completion owner's lock."""
     required = conn.execute(
         "SELECT " + submission_required_condition("t") + " FROM tasks t WHERE t.id=?",  # noqa: S608 -- fixed predicate
@@ -28,9 +34,18 @@ def original_request(
     ).fetchone()[0]
     if not required:
         return None
-    prepared = _latest(conn, task.id)
-    previous = json.loads(prepared["submission_preparation"]) if prepared is not None else None
+    if (task.status in {Status.SUBMITTED, Status.COMPLETED} and task.owner is None and task.owner_session_id is None
+            and conn.execute(
+                "SELECT 1 FROM spawn_reservations s JOIN task_pool_assignments a ON a.reservation_key=s.key"
+                " WHERE s.task_id=? AND a.task_id=s.task_id AND s.task_relationship_required=0"
+                " AND s.task_relationship_generation=a.task_generation AND a.task_generation=?",
+                (task.id, task.generation - 1),
+            ).fetchone() is not None):
+        # Classification is not admission. Only a read-only exact proof may return success.
+        return _DetachedReplay(task.generation, expected_status)
     if task.status in {Status.SUBMITTED, Status.COMPLETED}:
+        prepared = _latest(conn, task.id)
+        previous = json.loads(prepared["submission_preparation"]) if prepared is not None else None
         if previous is None:
             raise TaskError("protected historical submission has no retained preparation")
         request = previous["request"]
@@ -48,6 +63,9 @@ def original_request(
     relationship = latest_relationship(conn, task.id)
     if relationship is None:
         raise TaskError("protected submission requires its original workspace assignment")
+    from .queue_submission_preparation import previous_for_assignment
+    prepared = previous_for_assignment(conn, task.id, relationship["id"])
+    previous = json.loads(prepared["submission_preparation"]) if prepared is not None else None
     workspace = AssignmentWorkspace.from_dict(
         json.loads(relationship["task_relationship"])["request"]["workspace"],
     )
@@ -66,7 +84,7 @@ def original_request(
 
 
 def _exact_replay(
-    queue: TaskQueue, task_id: str, worker_id: str, arguments: dict,
+    queue: TaskQueue, task_id: str, worker_id: str, arguments: dict[str, Any],
 ) -> CompletionOutcome | None:
     from .queue_submission_advancement import _replay
 
@@ -92,10 +110,21 @@ def _exact_replay(
 
 
 def complete(
-    queue: TaskQueue, task_id: str, worker_id: str, arguments: dict, *,
+    queue: TaskQueue, task_id: str, worker_id: str, arguments: dict[str, Any] | _DetachedReplay, *,
     result: StructuredResult | None, result_ref: str | None, now: float,
 ) -> CompletionOutcome:
     """Retain before observing; a lost reply only permits an exact committed replay."""
+    if isinstance(arguments, _DetachedReplay):
+        from .completion_origins import exact_detached_completion
+        with queue._connect() as conn:
+            conn.execute("BEGIN")
+            task = queue._fetch(conn, task_id)
+            if task is not None and task.generation == arguments.generation and exact_detached_completion(
+                conn, task_id, worker_id=worker_id, encoded_result=queue._encode_result(result), result_ref=result_ref,
+                expected_status=arguments.expected_status,
+            ):
+                return CompletionOutcome(task, None)
+        raise TaskError("detached completion lacks its exact original submission evidence")
     arguments = {**arguments, "result": result, "result_ref": result_ref}
     prepared = False
     try:

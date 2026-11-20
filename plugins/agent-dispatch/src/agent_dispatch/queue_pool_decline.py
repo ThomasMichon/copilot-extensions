@@ -7,7 +7,7 @@ import json
 import math
 import sqlite3
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Protocol
 
 from .queue_common import Task
 from .queue_records import Status, TaskError
@@ -30,23 +30,23 @@ class PoolWorkerDecline:
 
 @dataclass(frozen=True)
 class PoolDeclineCloseout:
-    receipt: dict
+    receipt: dict[str, Any]
     applied: bool
-    relationship: dict | None = None
+    relationship: dict[str, Any] | None = None
 
 
 class _QueueOwner(Protocol):
     def _connect(self) -> sqlite3.Connection: ...
     def _fetch(self, conn: sqlite3.Connection, task_id: str) -> Task | None: ...
     def _now(self, now: float | None) -> float: ...
-    def task_relationship(self, task_id: str, *, event_id: int | None = None) -> dict | None: ...
+    def task_relationship(self, task_id: str, *, event_id: int | None = None) -> dict[str, Any] | None: ...
     def reconcile_task_relationship(
         self, task_id: str, *, event_id: int | None = None,
         authority_guard: Callable[[], None] | None = None,
-    ) -> dict: ...
+    ) -> dict[str, Any]: ...
     def _audit(
         self, conn: sqlite3.Connection, task_id: str, *, ts: float,
-        from_status: str, to_status: str, worker: str | None, note: str,
+        from_status: str, to_status: str, worker: str | None, note: str, unassigned_worker: str | None = None,
     ) -> None: ...
 
 

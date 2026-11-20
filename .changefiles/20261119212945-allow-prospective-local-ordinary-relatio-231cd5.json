@@ -1,0 +1,9 @@
+{
+  "comment": "Allow prospective local ordinary relationship capture for one exact pool instance, with a retained-only drain mode, assignment-scoped proposal checks and exact read-only completion replay before or after confirmation.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

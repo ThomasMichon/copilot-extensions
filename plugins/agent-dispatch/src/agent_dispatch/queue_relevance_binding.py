@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict, replace
 import json
 import sqlite3
+from typing import Any
 
 from .assignment_workspace import AssignmentWorkspace, same_assignment_worker
 from .queue_common import Task
@@ -12,7 +13,7 @@ from .queue_records import SpawnState, Status, TaskError
 from .queue_relevance_delivery import closeout_owner
 
 
-def closeout_detail(row: sqlite3.Row | None) -> dict | None:
+def closeout_detail(row: sqlite3.Row | None) -> dict[str, Any] | None:
     """Expose the captured binding without inventing one for a legacy closeout."""
     if row is None:
         return None
@@ -23,7 +24,7 @@ def closeout_detail(row: sqlite3.Row | None) -> dict | None:
     return result
 
 
-def capture_binding(conn: sqlite3.Connection, task: Task) -> dict:
+def capture_binding(conn: sqlite3.Connection, task: Task) -> dict[str, Any]:
     """Inspect only this acceptance transaction; never contact a ground owner."""
     if not closeout_owner(task) or not task.owner_session_id:
         return {"state": "unconfirmed", "reason": "owner_unavailable"}
@@ -34,7 +35,7 @@ def capture_binding(conn: sqlite3.Connection, task: Task) -> dict:
         return {"state": "unconfirmed", "reason": str(exc)}
 
 
-def capture_target(conn: sqlite3.Connection, task: Task) -> tuple[Task, dict]:
+def capture_target(conn: sqlite3.Connection, task: Task) -> tuple[Task, dict[str, Any]]:
     """Capture a currently proved pool body without assigning or starting its task."""
     if task.owner is not None or task.owner_session_id is not None or task.status != Status.CLAIMED:
         return task, capture_binding(conn, task)
@@ -52,7 +53,6 @@ def capture_target(conn: sqlite3.Connection, task: Task) -> tuple[Task, dict]:
         if (
             row is None or row["task_id"] != task.id
             or row["state"] != SpawnState.SPAWNED or not row["startup_complete"]
-            or row["worktree_ownership"] != "created"
             or row["conclusion_state"] not in (None, "")
             or assignment["assignment_released"] or assignment["exhausted_at"] is not None
         ):
@@ -64,6 +64,11 @@ def capture_target(conn: sqlite3.Connection, task: Task) -> tuple[Task, dict]:
         if event is None or event["task_relationship"] is None:
             raise TaskError("original_relationship_unavailable")
         relationship = json.loads(event["task_relationship"])
+        if row["worktree_ownership"] != "created":
+            if row["driver"] != "ordinary-bridge" or row["worktree_ownership"] != "reused":
+                raise TaskError("unaccepted_pool_body_unconfirmed")
+            from .ordinary_capture_proof import original_evidence
+            original_evidence(conn, relationship["request"])
         workspace = AssignmentWorkspace.from_dict(relationship["request"]["workspace"])
         native = reservation_native_identity(conn, row)
         if not require_pool_start(conn, task, workspace.worker_id, native, task.generation):
@@ -75,7 +80,7 @@ def capture_target(conn: sqlite3.Connection, task: Task) -> tuple[Task, dict]:
     return target, {**binding, "owner_phase": "before_start"}
 
 
-def _capture(conn: sqlite3.Connection, task: Task, *, before_start: bool = False) -> dict:
+def _capture(conn: sqlite3.Connection, task: Task, *, before_start: bool = False) -> dict[str, Any]:
     from .queue_relationship_continuation import current_binding
     from .queue_task_relationships import _matches_receipt, latest_relationship, require_relationship
 

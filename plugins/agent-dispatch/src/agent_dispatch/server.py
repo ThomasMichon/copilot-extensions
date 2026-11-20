@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from agent_procutil.daemon_instances import daemon_entrypoint
 
+import hashlib
 import logging
 import os
 import socket
@@ -12,6 +13,21 @@ import threading
 import time
 from dataclasses import replace
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, Callable, Protocol, TypeVar, cast
+
+from fastapi import FastAPI
+
+if TYPE_CHECKING:
+    from .coordinator_loops import DrainGate
+    from .federation_runner import FederationRunner
+    from .delegated_replay_consumer import ReplayConsumer
+
+    _Service = TypeVar("_Service", bound=Callable[..., Any])
+
+    class _DaemonDecorator(Protocol):
+        def __call__(self, function: _Service, /) -> _Service: ...
+
+    daemon_entrypoint = cast(Callable[..., _DaemonDecorator], daemon_entrypoint)
 
 from . import __version__, telemetry
 from .action_controls import require_worker_admission
@@ -86,14 +102,17 @@ def check_bind_safety(cfg: Config) -> None:
         )
 
 
-def build_app(cfg: Config | None = None, *, replay_consumer_factory=None):
+def build_app(
+    cfg: Config | None = None, *,
+    replay_consumer_factory: Callable[[TaskQueue, Callable[[], None]], ReplayConsumer] | None = None,
+) -> FastAPI:
     """Construct the coordinator; only a trusted embedding selects replay."""
     cfg = cfg or replace(load_config(), control_token=resolve_control_token())
     from .assignment_admission import configured_writer
 
-    ordinary_local = cfg.relationship_admission == "local-ordinary"
-    if ordinary_local and cfg.relationship_authority != "local":
-        raise ValueError("local ordinary relationship admission requires local queue authority")
+    from .ordinary_capture import configured_capture
+
+    ordinary_local = configured_capture(cfg.relationship_admission, cfg.relationship_authority)
     relationship_writer = (
         None if ordinary_local else configured_writer(
             cfg.relationship_admission, cfg.relationship_authority,
@@ -111,9 +130,13 @@ def build_app(cfg: Config | None = None, *, replay_consumer_factory=None):
         relationship_writer=relationship_writer,
         relationship_authority=cfg.relationship_authority,
     )
+    if relationship_writer is not None:
+        selection = f"{cfg.relationship_authority}:{cfg.relationship_admission}"
+        queue._ordinary_factory_policy = "factory:" + hashlib.sha256(selection.encode()).hexdigest()
     if ordinary_local:
         from .assignment_local_ordinary import LocalOrdinaryRelationshipWriter
 
+        queue._ordinary_capture = ordinary_local
         queue._ordinary_relationship_writer = LocalOrdinaryRelationshipWriter(queue)
     if ordinary_local or (
         cfg.relationship_admission is None and cfg.relationship_authority is None
@@ -217,7 +240,7 @@ def _owns_active_route() -> bool:
         return _wake_route_owned
 
 
-def advertise_endpoint(cfg: Config):
+def advertise_endpoint(cfg: Config) -> Path | None:
     """Write the rendezvous file advertising the coordinator's bound endpoint.
 
     Discovery: clients resolve the coordinator here (env override -> file ->
@@ -532,7 +555,7 @@ def serve(cfg: Config | None = None, *, passive: bool = False, force: bool = Fal
                     sock.close()
 
 
-def _settle_federation(runner, *, interrupted=None) -> None:
+def _settle_federation(runner: FederationRunner, *, interrupted: BaseException | None = None) -> None:
     """Keep the hosting admission until bounded local retirement confirms success."""
     retry = False
     while True:
@@ -552,7 +575,7 @@ def _settle_federation(runner, *, interrupted=None) -> None:
         raise interrupted
 
 
-def _maybe_start_federation(*, drain_gate=None):
+def _maybe_start_federation(*, drain_gate: DrainGate | None = None) -> FederationRunner | None:
     """Start the federation runner alongside the coordinator when a federation
     role is configured (``AGENT_DISPATCH_FEDERATION_ROLE``); return it (so
     :func:`serve` can stop it) or ``None``.

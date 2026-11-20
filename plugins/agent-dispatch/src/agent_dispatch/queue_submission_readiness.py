@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .assignment_workspace import AssignmentWorkspace
+from .managed_assignment_proof import creation_stamp, managed_allocation
 from .queue_pool_placement import require_pool_start
 from .queue_records import TaskError
 from .queue_relationship_continuation import current_binding
@@ -27,7 +28,7 @@ _TASK_BOOKKEEPING = {
 }
 
 
-def _state(queue: TaskQueue, conn: sqlite3.Connection, task_id: str, request_id: str) -> dict:
+def _state(queue: TaskQueue, conn: sqlite3.Connection, task_id: str, request_id: str) -> dict[str, Any]:
     prepared = _latest(conn, task_id)
     task = queue._fetch(conn, task_id)
     if prepared is None or task is None:
@@ -54,7 +55,10 @@ def _state(queue: TaskQueue, conn: sqlite3.Connection, task_id: str, request_id:
         or task.awaiting_steer
     ):
         raise TaskError("submission readiness preparation binding changed or is held")
-    relationship = json.loads(latest_relationship(conn, task_id)["task_relationship"])
+    event = latest_relationship(conn, task_id)
+    if event is None:
+        raise TaskError("submission readiness lacks its original relationship event")
+    relationship = json.loads(event["task_relationship"])
     if not _matches_receipt(relationship.get("receipt"), relationship["request"], phase="bound"):
         raise TaskError("submission readiness requires its original bound task claim")
     if not require_pool_start(
@@ -69,26 +73,9 @@ def _state(queue: TaskQueue, conn: sqlite3.Connection, task_id: str, request_id:
         "SELECT * FROM spawn_reservations WHERE key=?",
         (current_binding(relationship)["reservation_key"],),
     ).fetchone()
-    original_key = reservation["allocation_reservation_key"] or reservation["key"]
-    allocation = conn.execute(
-        "SELECT * FROM spawn_reservations WHERE key=?",
-        (original_key,),
-    ).fetchone()
-    if (
-        allocation is None
-        or relationship["request"]["reservation_key"] != original_key
-        or allocation["task_id"] != task_id
-        or allocation["worktree_ownership"] != "created"
-        or allocation["creation_nonce"] != workspace.creation_nonce
-        or allocation["worktree"] != workspace.worktree
-        or allocation["allocation_project"] != workspace.project
-        or allocation["worktree_path"] != workspace.path
-        or allocation["execution_machine"] != workspace.machine
-        or allocation["driver"] not in {"cli", "ordinary-bridge"}
-        or not isinstance(allocation["reserved_by"], str)
-        or not allocation["reserved_by"]
-    ):
+    if reservation is None:
         raise TaskError("submission readiness lost its original managed allocation")
+    allocation = managed_allocation(conn, task_id, reservation, relationship)
     return {
         "preparation": value,
         "relationship": relationship,
@@ -110,32 +97,24 @@ def _state(queue: TaskQueue, conn: sqlite3.Connection, task_id: str, request_id:
     }
 
 
-def read_preparation(queue: TaskQueue, task_id: str, request_id: str) -> dict:
+def read_preparation(queue: TaskQueue, task_id: str, request_id: str) -> dict[str, Any]:
     with queue._connect() as conn:
         conn.execute("BEGIN")
         return _state(queue, conn, task_id, request_id)
 
 
-def observe_owner_state(task_id: str, original: dict) -> dict:
+def observe_owner_state(task_id: str, original: dict[str, Any]) -> dict[str, Any]:
     from .submission_readiness_observation import observe as observe_owner
 
     allocation = original["allocation"]
     return observe_owner(
         original["preparation"]["request"],
-        {
-            "task_id": task_id,
-            "reservation_key": allocation["key"],
-            "attempt": allocation["attempt"],
-            "driver": allocation["driver"],
-            "supervisor": allocation["reserved_by"],
-            "creator_machine": allocation["execution_machine"],
-            "ownership": "created",
-        },
+        creation_stamp(allocation),
         original["relationship"]["receipt"]["ref"],
     )
 
 
-def observe(queue: TaskQueue, task_id: str, *, request_id: str) -> dict:
+def observe(queue: TaskQueue, task_id: str, *, request_id: str) -> dict[str, Any]:
     """Internal point-in-time read, not a persisted permission to submit later."""
     original = read_preparation(queue, task_id, request_id)
     observation = observe_owner_state(task_id, original)

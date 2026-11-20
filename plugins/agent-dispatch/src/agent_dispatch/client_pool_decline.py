@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from urllib.parse import quote
 from typing import TYPE_CHECKING, Any
 from collections.abc import Callable
 
@@ -21,7 +22,7 @@ class PoolDeclineClientMixin:
     if TYPE_CHECKING:
         _http: httpx.Client
         _unwrap: Callable[[httpx.Response], Any]
-        health: Callable[[], dict]
+        health: Callable[[], dict[str, Any]]
         _control_headers: Callable[[], dict[str, str]]
 
     def _owner_settlement_timeout(self) -> httpx.Timeout:
@@ -30,8 +31,8 @@ class PoolDeclineClientMixin:
             selected.read = max(selected.read, OWNER_SETTLEMENT_READ_SECONDS)
         return selected
 
-    def _pool_decline_request(self, task_id: str, body: dict, *, blocker: bool = False) -> dict:
-        binding = {
+    def _pool_decline_request(self, task_id: str, body: dict[str, Any], *, blocker: bool = False) -> dict[str, Any]:
+        binding: dict[str, Any] = {
             key: body.get(key) for key in
             ("worker_id", "native_id", "generation", "startup_revision", "reservation_key")
         }
@@ -80,7 +81,7 @@ class PoolDeclineClientMixin:
     def prepare_pool_decline(
         self, task_id: str, worker_id: str, *, native_id: str, generation: int,
         startup_revision: int, reservation_key: str, exclusions: list[str], note: str,
-    ) -> dict:
+    ) -> dict[str, Any]:
         if (
             not isinstance(note, str) or not note.strip() or len(note) > 4096
             or not isinstance(exclusions, list) or not 1 <= len(exclusions) <= 3
@@ -96,7 +97,7 @@ class PoolDeclineClientMixin:
     def record_pool_decline_blocker(
         self, task_id: str, worker_id: str, *, native_id: str, generation: int,
         startup_revision: int, reservation_key: str, detail: str,
-    ) -> dict:
+    ) -> dict[str, Any]:
         if not isinstance(detail, str) or not detail.strip() or len(detail) > 4096:
             raise DispatchError(400, "pool decline requires a meaningful closeout blocker")
         return self._pool_decline_request(task_id, {
@@ -105,13 +106,13 @@ class PoolDeclineClientMixin:
             "detail": detail.strip(),
         }, blocker=True)
 
-    def close_pool_decline(self, task_id: str, decline: dict) -> dict:
+    def close_pool_decline(self, task_id: str, decline: dict[str, Any]) -> dict[str, Any]:
         """Request the coordinator's own observation, never send finalizer JSON."""
         contract = _validate_contract(self.health().get("pool_placement"))
         versions = contract.get("worker_decline_local_closeout_versions")
         if not isinstance(versions, list) or not any(type(v) is int and v == 1 for v in versions):
             raise DispatchUpgradeRequired("running coordinator lacks local worker decline closeout")
-        binding = {key: decline.get(key) for key in (
+        binding: dict[str, Any] = {key: decline.get(key) for key in (
             "worker_id", "native_id", "generation", "startup_revision", "reservation_key",
         )}
         if (
@@ -141,7 +142,8 @@ class PoolDeclineClientMixin:
             raise DispatchError(502, "worker decline closeout response is unconfirmed; custody retained")
         return receipt
 
-    def pool_decline_relationship(self, task_id: str, reservation_key: str) -> dict | None:
+    def pool_decline_relationship(self, task_id: str, reservation_key: str, *,
+                                  reservation: dict[str, Any] | None = None, generation: int | None = None) -> dict[str, Any] | None:
         """Return this allocation's bound task claim when readiness ordering applies."""
         contract = _validate_contract(self.health().get("pool_placement"))
         versions = contract.get("worker_decline_readiness_closeout_versions")
@@ -149,34 +151,45 @@ class PoolDeclineClientMixin:
         try:
             value = self._unwrap(self._http.get(f"/tasks/{task_id}/relationship"))
         except DispatchError as exc:
-            if exc.status_code == 404 and not supported:
+            if exc.status_code == 404 and not supported and not (reservation and reservation.get("task_relationship_required")):
                 return None
             raise
         except ValueError as exc:
             raise DispatchError(502, "task relationship read is unconfirmed; custody retained") from exc
         request = value.get("request") if isinstance(value, dict) else None
-        if value is None:
+        required = bool(reservation and reservation.get("task_relationship_required"))
+        if value is None and not required:
             return None
-        if not isinstance(request, dict) or request.get("reservation_key") != reservation_key:
+        if isinstance(value, dict) and isinstance(request, dict) and value.get("state") == "bound" and "continuation" in value:
+            from .worker_decline_proof import require_continuation
+            prepared_key = request.get("reservation_key")
+            if not isinstance(prepared_key, str) or not prepared_key.startswith(f"dispatch-task:{task_id}:"):
+                raise DispatchError(409, "worker decline lacks its original task relationship; custody retained")
+            prepared = self._unwrap(self._http.get(f"/spawn-reservations/{quote(prepared_key, safe=':')}"))
+            require_continuation(task_id, reservation_key, generation, reservation, value, prepared)
+        elif not isinstance(request, dict) or request.get("reservation_key") != reservation_key:
             # Mirrors coordinator closeout: another allocation's unsettled claim retains custody.
-            if isinstance(value, dict) and value.get("state") in {"closed", "absent"}:
+            if not required and isinstance(value, dict) and value.get("state") in {"closed", "absent"}:
                 return None
             raise DispatchError(409, "worker decline lacks its original task relationship; custody retained")
         if not supported:
             raise DispatchUpgradeRequired("running coordinator lacks decline readiness ordering; custody retained")
-        if value.get("state") != "bound":
+        if not isinstance(value, dict) or value.get("state") != "bound":
             raise DispatchError(409, "worker decline task relationship is unresolved; custody retained")
+        if required and reservation is not None:
+            from .worker_decline_proof import require_bound_receipt
+            require_bound_receipt(value, task_id, reservation.get("task_relationship_event_id"))
         return value
 
     def recover_pool_decline(
         self, task_id: str, worker_id: str, native_id: str, generation: int,
-    ) -> tuple[dict, str] | None:
+    ) -> tuple[dict[str, Any], str] | None:
         """Recover this exact incarnation's settled decline after a replacement placement."""
         contract = _validate_contract(self.health().get("pool_placement"))
         versions = contract.get("worker_decline_binding_recovery_versions")
         if not isinstance(versions, list) or not any(type(v) is int and v == 1 for v in versions):
             raise DispatchUpgradeRequired("running coordinator lacks worker decline binding recovery")
-        expected = {"worker_id": worker_id, "native_id": native_id, "generation": generation}
+        expected: dict[str, str | int] = {"worker_id": worker_id, "native_id": native_id, "generation": generation}
         try:
             result = self._unwrap(self._http.get(
                 f"/tasks/{task_id}/pool-decline/recovery", params=expected,
@@ -201,13 +214,13 @@ class PoolDeclineClientMixin:
             raise DispatchError(502, "worker decline recovery response is unconfirmed; custody retained")
         return decline, worktree
 
-    def settle_pool_decline(self, task_id: str, decline: dict) -> dict:
+    def settle_pool_decline(self, task_id: str, decline: dict[str, Any]) -> dict[str, Any]:
         """Converge settlement behind the committed disposition; never requeue here."""
         contract = _validate_contract(self.health().get("pool_placement"))
         versions = contract.get("worker_decline_readiness_closeout_versions")
         if not isinstance(versions, list) or not any(type(v) is int and v == 1 for v in versions):
             raise DispatchUpgradeRequired("running coordinator lacks decline claim settlement")
-        binding = {key: decline.get(key) for key in (
+        binding: dict[str, Any] = {key: decline.get(key) for key in (
             "worker_id", "native_id", "generation", "startup_revision", "reservation_key",
         )}
         try:
@@ -227,9 +240,11 @@ class PoolDeclineClientMixin:
             or type(receipt.get("queued_generation")) is not int
             or receipt["queued_generation"] != binding["generation"] + 1
             or receipt.get("process_retirement") is not False
+            or any(type(receipt["binding"].get(key)) is not type(value) for key, value in binding.items())
             or (relationship is None) != (receipt.get("task_relationship_event_id") is None)
             or (relationship is not None and (
                 not isinstance(relationship, dict)
+                or type(relationship.get("event_id")) is not int
                 or relationship.get("event_id") != receipt["task_relationship_event_id"]
                 or not isinstance(relationship.get("state"), str)
             ))

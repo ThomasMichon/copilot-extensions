@@ -15,17 +15,23 @@ import pytest
 from fastapi.testclient import TestClient
 
 from agent_dispatch import bridge, identity, ordinary_bridge
-from agent_dispatch.client import DispatchClient, DispatchError, DispatchUpgradeRequired
+from agent_dispatch.client import DispatchClient
+from agent_dispatch.client_errors import DispatchError, DispatchUpgradeRequired
 from agent_dispatch.ordinary_agent_storage import reservation_native_facts
 from agent_dispatch.ordinary_assignment import current_task
 from agent_dispatch.ordinary_invocation import startup_seed
 from agent_dispatch.pool_startup_contract import pool_startup_contract
-from agent_dispatch.queue import Status, TaskError, TaskQueue
+from agent_dispatch.queue import TaskQueue
+from agent_dispatch.queue_common import Task
+from agent_dispatch.queue_records import Status, TaskError
+from agent_dispatch.supervisor import Supervisor
 from agent_dispatch.queue_pool_placement import pool_placement_contract
 from agent_dispatch.supervisor_pool_startup import supervise_pool_startup
 from tests import test_pool_placement_client as controls
 from tests._hosting_owner import admission_owner as admission_owner
-from tests.test_pool_placement import pool, publish, task
+from tests.test_pool_placement import current_task as task_for
+from tests.test_pool_placement import pool, publish, reservation_for, task
+from tests._ordinary_relationship_controls import relationship
 
 q = controls.q
 api = controls.api
@@ -42,17 +48,38 @@ def ordinary(
         from tests.test_assignment_relationships import GroundOwner
         relationship_owner = GroundOwner()
         relationship_owner.queue = q
-        q._relationship_writer = relationship_owner
+        # The local fixture supplies the native participant; select it before placement.
+        if governed == "scoped" or "local" in request.fixturenames:
+            from agent_dispatch.assignment_local_ordinary import LocalOrdinaryRelationshipWriter
+            from agent_dispatch.ordinary_capture import configured_capture
+
+            capture = configured_capture(
+                'local-ordinary-instance={"registration_id":"worker","machine":"host-a","env":"linux"}',
+                "local",
+            )
+            assert capture is not None
+            q._ordinary_capture = capture
+            q._ordinary_relationship_writer = LocalOrdinaryRelationshipWriter(q)
+        else:
+            q._ordinary_factory_policy = "factory:fixture"
+            q._relationship_writer = relationship_owner
         q._relationship_authority = "local"
     revision = publish(q, pool())
-    requested = task(q, **({"require_verification": True} if governed else {}))
-    requests, calls = [], []
+    requested = q.create(
+        "work", repo="example", require_verification=bool(governed),
+        dedup_key="recurring" if governed == "disposed" else None,
+        source="emitter" if governed == "scoped" else None,
+        origin_ref="review-source" if governed == "scoped" else None,
+    )
+    assert isinstance(requested, Task)
+    requests: list[httpx.Request] = []
+    calls: list[tuple[list[str], dict[str, Any]]] = []
     client = controls.connected(api, requests)
     placed = client.place_pool_task(
         requested.id, reserved_by="allocator", catalog_revision=revision, driver="ordinary-bridge",
-        **({"session_origin_transport": "prefer-origin-v1"} if getattr(request, "param", False) == "origin-v1" else {}),
+        session_origin_transport="prefer-origin-v1" if governed == "origin-v1" else None,
     )
-    snapshot = {**asdict(q.get(requested.id)), "spawn_reservation_key": placed["reservation"]["key"]}
+    snapshot = {**asdict(task_for(q, requested.id)), "spawn_reservation_key": placed["reservation"]["key"]}
     install_root = tmp_path / "dispatch-install"
     install_root.mkdir()
     monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(install_root))
@@ -62,8 +89,8 @@ def ordinary(
     from agent_dispatch import embody, ordinary_assignment
 
     allocations = []
-    creation_records = []
-    ground = {
+    creation_records: list[dict[str, Any]] = []
+    ground: dict[str, Any] = {
         "id": "worktree-a", "repo": "example", "path": str(admission_owner.workspace),
         "status": "active", "creation_nonce": "allocation-a", "session_count": 0,
         "last_session_id": None, "execution_leg": None, "execution_leg_opaque": False,
@@ -72,8 +99,8 @@ def ordinary(
         "dispatch_attempt": {"task_id": requested.id},
     }
 
-    def create_workspace(**kwargs: Any) -> dict:
-        assert q.get(requested.id).status == Status.CLAIMED
+    def create_workspace(**kwargs: Any) -> dict[str, Any]:
+        assert task_for(q, requested.id).status == Status.CLAIMED
         assert not any(argv[2] in {"create", "send"} for argv, _ in calls)
         allocations.append(kwargs)
         ground["dispatch_attempt"] = {
@@ -118,7 +145,7 @@ def ordinary(
             }
             if "--full" in argv:
                 from agent_dispatch.queue_task_relationships import WRITER
-                stored = q.get_reservation(placed["reservation"]["key"])
+                stored = reservation_for(q, placed["reservation"]["key"])
                 value = {
                     "session_id": "bridge-a", "acp_session_id": "native-a",
                     "durable_session_id": "native-a", "worktree_id": ground["id"],
@@ -138,13 +165,13 @@ def ordinary(
         if argv[2] == "create":
             assert "--prompt-file" not in argv
             if governed:
-                retained = q.get_reservation(placed["reservation"]["key"])
+                retained = reservation_for(q, placed["reservation"]["key"])
                 assert json.loads(kwargs["input"]) == retained.worktree_writer_requirement
                 assert argv[argv.index("--worktree-writer-file") + 1] == "-"
-                assert q.task_relationship(requested.id)["state"] == "bound"
+                assert relationship(q, requested.id)["state"] == "bound"
             else:
                 assert not kwargs.get("input")
-            assert q.get(requested.id).status == Status.CLAIMED
+            assert task_for(q, requested.id).status == Status.CLAIMED
             if not creation_records:
                 creation_records.append(dict(ground))
             ground.update(session_count=1, last_session_id="native-a", session_live=True)
@@ -161,16 +188,19 @@ def ordinary(
             }), "")
         assert argv[2] == "send" and "--native-invocation-file" in argv
         invocation = json.loads(kwargs["input"])
-        stored = q.get_reservation(placed["reservation"]["key"])
+        stored = reservation_for(q, placed["reservation"]["key"])
         assert stored.driver == "ordinary-bridge" and stored.execution_machine == "host-a"
         assert stored.session_handle == "local-body:bridge-a"
+        assert stored.agent_info is not None
         assert stored.agent_info["startup_invocation"]["prompt"] == invocation["prompt"]
+        budget = q.pool_startup(requested.id)
+        assert budget is not None
         if "--receipt-only" in argv:
-            assert q.get(requested.id).status == Status.STARTED
-            assert q.pool_startup(requested.id).startup_attempts == 0
+            assert task_for(q, requested.id).status == Status.STARTED
+            assert budget.startup_attempts == 0
         else:
-            assert q.get(requested.id).status == Status.CLAIMED and q.get(requested.id).owner is None
-            assert q.pool_startup(requested.id).startup_attempts == 1
+            assert task_for(q, requested.id).status == Status.CLAIMED and task_for(q, requested.id).owner is None
+            assert budget.startup_attempts == stored.attempt
         return subprocess.CompletedProcess(argv, 0, json.dumps({
             "version": 1, "session_id": "bridge-a", "native_session_id": "native-a",
             "invocation_key": invocation["invocation_key"], "outcome": "delivered",
@@ -190,7 +220,7 @@ def ordinary(
     client.close()
 
 
-def launch(ordinary: SimpleNamespace) -> dict:
+def launch(ordinary: SimpleNamespace) -> dict[str, Any]:
     seed = startup_seed(ordinary.task, ordinary.client, route=" --shared")
     return ordinary_bridge.start(
         ordinary.task, client=ordinary.client, agent="local", project="example", prompt=seed,
@@ -203,7 +233,7 @@ def test_before_start_source_closeout_targets_the_original_ordinary_native(
 ) -> None:
     from agent_dispatch import owner_wake_delivery
     from agent_dispatch.queue_relevance import RelevanceScope
-    from tests.test_task_relevance import report
+    from tests._ordinary_relationship_controls import report
 
     o = ordinary
     result = launch(o)
@@ -247,7 +277,7 @@ def test_before_start_source_closeout_targets_the_original_ordinary_native(
 
 
 @pytest.mark.parametrize("ordinary", ["origin-v1"], indirect=True)
-def test_governed_create_composes_sealed_origin_file_with_writer_stdin(ordinary, monkeypatch):
+def test_governed_create_composes_sealed_origin_file_with_writer_stdin(ordinary: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_dispatch import session_origin
 
     monkeypatch.setattr(session_origin, "retained_selection", lambda: ("bridge",))
@@ -255,7 +285,7 @@ def test_governed_create_composes_sealed_origin_file_with_writer_stdin(ordinary,
     original = ordinary_bridge.subprocess.run
     seen = []
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         if argv[2] == "create":
             path = Path(argv[argv.index("--dispatch-origin-file") + 1])
             origin = json.loads(path.read_text(encoding="utf-8"))
@@ -272,7 +302,7 @@ def test_governed_create_composes_sealed_origin_file_with_writer_stdin(ordinary,
     assert any(argv[2] == "send" for argv, _ in ordinary.calls)
 
 
-def test_original_cohort_receipt_reaches_ordinary_initial_prompt(ordinary, monkeypatch):
+def test_original_cohort_receipt_reaches_ordinary_initial_prompt(ordinary: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_dispatch import embody, worktree_cohort
 
     monkeypatch.setattr(embody, "_agent_worktrees_launch_prefix", lambda: ["/fixture/python", "-m", "agent_worktrees"])
@@ -285,7 +315,7 @@ def test_original_cohort_receipt_reaches_ordinary_initial_prompt(ordinary, monke
 
 
 @pytest.mark.parametrize("change", ["missing", "foreign", "ownership"])
-def test_cohort_receipt_keeps_original_allocation_checks(ordinary, monkeypatch, change):
+def test_cohort_receipt_keeps_original_allocation_checks(ordinary: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, change: str) -> None:
     from copy import deepcopy
     from agent_dispatch import embody, worktree_cohort
     from agent_dispatch.ordinary_pool_startup import created_workspace_record
@@ -321,7 +351,7 @@ def test_governed_start_retains_selected_writer_before_first_relationship(
     observed = []
     owner = o.q._relationship_writer
 
-    def admit(workspace: Any, operation: str, payload: dict) -> dict:
+    def admit(workspace: Any, operation: str, payload: dict[str, Any]) -> dict[str, Any]:
         retained = o.q.get_reservation(o.placed["reservation"]["key"])
         assert retained.worktree_writer_requirement == {
             "version": 1, "identity": o.writer, "creation_nonce": o.ground["creation_nonce"],
@@ -329,7 +359,8 @@ def test_governed_start_retains_selected_writer_before_first_relationship(
         assert retained.task_relationship_event_id is not None
         assert not any(argv[2] == "create" for argv, _ in o.calls)
         observed.append(operation)
-        return owner(workspace, operation, payload)
+        result: dict[str, Any] = owner(workspace, operation, payload)
+        return result
 
     monkeypatch.setattr(o.q, "_relationship_writer", admit)
     assert launch(o)["native_session_id"] == "native-a"
@@ -424,7 +455,7 @@ def test_governed_preparation_still_requires_independent_relationship_admission(
 ) -> None:
     o = ordinary
 
-    def unqualified(*args: Any) -> dict:
+    def unqualified(*args: Any) -> dict[str, Any]:
         raise TaskError("participating cohort is unconfirmed")
 
     monkeypatch.setattr(o.q, "_relationship_writer", unqualified)
@@ -443,7 +474,7 @@ def test_governed_selection_movement_during_preparation_refuses_first_native_cre
 ) -> None:
     o = ordinary
 
-    def moved(operation: str, result: dict) -> None:
+    def moved(operation: str, result: dict[str, Any]) -> None:
         if operation == "bind":
             o.writer.update(runtime_generation="b" * 32)
 
@@ -476,7 +507,8 @@ def test_governed_historical_workspace_is_not_retrospectively_pinned(ordinary: S
 
 def released_pool_seed(task_id: str, *, generation: int, route: str = "",
                        repo: str | None = None, all_repos: bool = False) -> str:
-    from agent_dispatch.embody_prompts import AUTOPILOT_CHARTER_NAME, _charter_read_step
+    from agent_dispatch.embody_prompts import _charter_read_step
+    from agent_dispatch.worker_charter import AUTOPILOT_CHARTER_NAME
 
     ad = "agent-dispatch" + route
     lane = " --all-repos" if all_repos else (f" --repo {repo}" if repo else "")
@@ -541,7 +573,8 @@ def test_real_ordinary_create_store_send_and_affirmative_worker_start(ordinary: 
     assert o.q.pool_startup(o.task["id"]).startup_attempts == 0
     assert len(o.q.attachment_history(o.task["id"])) == 1
     assert o.q.get_reservation(o.placed["reservation"]["key"]).driver == "ordinary-bridge"
-    assert "ordinary-bridge" in pool_startup_contract()["supported_drivers"]
+    drivers = pool_startup_contract()["supported_drivers"]
+    assert isinstance(drivers, list) and "ordinary-bridge" in drivers
 
 
 def test_pool_no_pair_is_applied_by_the_existing_allocation_owner(ordinary: SimpleNamespace) -> None:
@@ -561,7 +594,7 @@ def test_ambiguous_allocation_stops_before_bridge_without_another_key(
 
     o = ordinary
 
-    def unavailable(**kwargs: Any) -> dict:
+    def unavailable(**kwargs: Any) -> dict[str, Any]:
         assert kwargs["creation_key"] == o.placed["reservation"]["creation_key"]
         raise embody.EmbodyUnavailable("original keyed owner outcome is unconfirmed")
 
@@ -592,12 +625,13 @@ def test_owned_native_recovers_same_key_after_lost_reply_or_storage(
             raise subprocess.TimeoutExpired(argv, 180)
         return result
 
-    def storage(*args: Any, **kwargs: Any) -> dict:
+    def storage(*args: Any, **kwargs: Any) -> dict[str, Any]:
         nonlocal failed
         if failure == "uncommitted-storage" and not failed:
             failed = True
             raise DispatchError(502, "storage did not commit")
-        return store(*args, **kwargs)
+        result: dict[str, Any] = store(*args, **kwargs)
+        return result
 
     monkeypatch.setattr(ordinary_bridge.subprocess, "run", create)
     monkeypatch.setattr(o.client, "record_created_agent", storage)
@@ -786,7 +820,7 @@ def test_changed_incarnation_refuses_before_native_creation(ordinary: SimpleName
     {"supported_drivers": ["cli"]}, {"ordinary_initial_start_versions": []},
     {"ordinary_initial_start_versions": [True]}, {"ordinary_initial_start_versions": [2]},
 ])
-def test_old_partial_or_rolled_back_contract_never_issues_ordinary_placement(contract_change: dict) -> None:
+def test_old_partial_or_rolled_back_contract_never_issues_ordinary_placement(contract_change: dict[str, Any]) -> None:
     requests = []
 
     def send(request: httpx.Request) -> httpx.Response:
@@ -815,7 +849,7 @@ def test_rollback_between_seed_and_start_never_creates(
 def test_ordinary_pool_claim_is_retained_not_legacy_recovered(ordinary: SimpleNamespace) -> None:
     o = ordinary
     reservation = asdict(o.q.get_reservation(o.placed["reservation"]["key"]))
-    owner = SimpleNamespace(client=o.client)
+    owner = Supervisor(o.client, spawn_fn=lambda *_a, **_kw: pytest.fail("unexpected launch"))
     before = o.q.get(o.task["id"]), o.q.get_reservation(reservation["key"])
     assert supervise_pool_startup(owner, reservation, o.task, now=10000) is False
     assert (o.q.get(o.task["id"]), o.q.get_reservation(reservation["key"])) == before
@@ -892,7 +926,7 @@ def test_initial_receipt_recovery_preserves_released_prompt_across_versions(
     current = embody_prompts.pool_worker_prompt
     prepare = ordinary_invocation.prepare
 
-    def released_reader(task: dict, reservation: dict, info: dict, prompt: str, **kwargs: Any) -> dict:
+    def released_reader(task: dict[str, Any], reservation: dict[str, Any], info: dict[str, Any], prompt: str, **kwargs: Any) -> dict[str, Any]:
         # The pre-change reader regenerated and compared the full initial invocation.
         original = info.get("startup_invocation")
         generated = prepare(task, reservation, {k: v for k, v in info.items() if k != "startup_invocation"},
@@ -927,7 +961,7 @@ def test_committed_storage_unknown_retains_native_without_sending(
     o = ordinary
     original = o.client.record_created_agent
 
-    def lose_reply(*args: Any, **kwargs: Any) -> dict:
+    def lose_reply(*args: Any, **kwargs: Any) -> dict[str, Any]:
         original(*args, **kwargs)
         raise DispatchError(502, "committed response lost")
 
@@ -948,8 +982,9 @@ def test_storage_cannot_invent_the_assigned_host(
     o = ordinary
     original = o.client.record_created_agent
 
-    def wrong_host(*args: Any, **kwargs: Any) -> dict:
-        return original(*args, **{**kwargs, "execution_machine": machine})
+    def wrong_host(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        result: dict[str, Any] = original(*args, **{**kwargs, "execution_machine": machine})
+        return result
 
     monkeypatch.setattr(o.client, "record_created_agent", wrong_host)
     with pytest.raises(ordinary_bridge.CreatedAgentUnrecorded):
@@ -964,10 +999,11 @@ def test_storage_cannot_convert_a_cli_assignment(
     o = ordinary
     original = o.client.record_created_agent
 
-    def change_driver(*args: Any, **kwargs: Any) -> dict:
+    def change_driver(*args: Any, **kwargs: Any) -> dict[str, Any]:
         with o.q._connect() as conn:
             conn.execute("UPDATE spawn_reservations SET driver='cli' WHERE key=?", (args[0],))
-        return original(*args, **kwargs)
+        result: dict[str, Any] = original(*args, **kwargs)
+        return result
 
     monkeypatch.setattr(o.client, "record_created_agent", change_driver)
     with pytest.raises(ordinary_bridge.CreatedAgentUnrecorded, match="driver changed"):
@@ -982,9 +1018,10 @@ def test_storage_deadline_cannot_deliver_a_late_first_prompt(
     o = ordinary
     original = o.client.record_created_agent
 
-    def expired(*args: Any, **kwargs: Any) -> dict:
+    def expired(*args: Any, **kwargs: Any) -> dict[str, Any]:
         monkeypatch.setattr(o.q, "_now", lambda now=None: 700.0 if now is None else now)
-        return original(*args, **kwargs)
+        result: dict[str, Any] = original(*args, **kwargs)
+        return result
 
     monkeypatch.setattr(o.client, "record_created_agent", expired)
     with pytest.raises(ordinary_bridge.CreatedAgentUnrecorded, match="deadline expired"):

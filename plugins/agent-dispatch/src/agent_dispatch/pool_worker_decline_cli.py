@@ -7,6 +7,12 @@ import json
 import os
 import subprocess
 import time
+from typing import TYPE_CHECKING, Any, cast
+from collections.abc import Callable
+from types import ModuleType
+
+if TYPE_CHECKING:
+    from .client import DispatchClient
 
 import httpx
 
@@ -21,14 +27,16 @@ DISPOSITION_POLL_SECONDS = 5.0
 
 
 def _finalize(
-    binding: dict, worktree: str, *, expected_creation_nonce: str | None = None,
+    binding: dict[str, Any], worktree: str, *, expected_creation_nonce: str | None = None,
 ) -> None:
+    if expected_creation_nonce is None:
+        expected_creation_nonce = binding.get("creation_nonce")
     prefix = procutil.agent_worktrees_launch_prefix()
     if prefix is None:
         raise DispatchUpgradeRequired("selected Worktrees runtime is unavailable for own-worker closeout")
     environment = procutil.agent_worktrees_environment()
 
-    def run(arguments: list[str], timeout: float) -> dict:
+    def run(arguments: list[str], timeout: float) -> dict[str, Any]:
         result = procutil.run_background_capture(
             [*prefix, *arguments], timeout=timeout, env=environment,
         )
@@ -77,7 +85,7 @@ def _finalize(
         raise DispatchError(502, "own-workspace closeout outcome is unconfirmed; custody retained")
 
 
-def _retry_binding(task: dict, native: str, generation: int, worker: str, worktree: str) -> dict | None:
+def _retry_binding(task: dict[str, Any], native: str, generation: int, worker: str, worktree: str) -> dict[str, Any] | None:
     """Recognize this exact worker's already-recorded decline after Dispatch moved on."""
     decline = task.get("worker_decline")
     reservation = task.get("spawn_reservation")
@@ -96,10 +104,10 @@ def _retry_binding(task: dict, native: str, generation: int, worker: str, worktr
     return decline
 
 
-def _await_disposition(client, task_id: str, decline: dict) -> None:
+def _await_disposition(client: DispatchClient, task_id: str, decline: dict[str, Any]) -> None:
     """Dispatch alone commits exclusions, unassignment and unbound requeue."""
     deadline = time.monotonic() + DISPOSITION_WAIT_SECONDS
-    unobserved = None
+    unobserved: object = None
     while True:
         try:
             task = client.get(task_id)
@@ -126,9 +134,10 @@ def _await_disposition(client, task_id: str, decline: dict) -> None:
         time.sleep(DISPOSITION_POLL_SECONDS)
 
 
-def _settle(client, task_id: str, decline: dict) -> dict | None:
-    """Return the settled claim, or None for a disposition that never retained one."""
-    relationship = client.settle_pool_decline(task_id, decline)["task_relationship"]
+def _settle(client: DispatchClient, task_id: str, decline: dict[str, Any]) -> dict[str, Any] | None:
+    """Return the closeout receipt after claim settlement, or None for an ungoverned disposition."""
+    result = client.settle_pool_decline(task_id, decline)
+    relationship = result["task_relationship"]
     if relationship is None:
         return None
     if relationship.get("state") != "closed":
@@ -138,22 +147,29 @@ def _settle(client, task_id: str, decline: dict) -> dict | None:
             + (f" ({detail[:512]})" if isinstance(detail, str) else "")
             + "; workspace and claim retained; rerun decline to converge",
         )
-    return relationship
+    receipt = result.get("closeout")
+    if not isinstance(receipt, dict):
+        raise DispatchError(502, "worker decline settlement lacks a receipt; custody retained")
+    return receipt
 
 
-def _finish(client, task_id: str, decline: dict, worktree: str) -> bool:
-    if _settle(client, task_id, decline) is None:
-        # Legacy ordering finalized the workspace before Dispatch requeued it.
+def _finish(client: DispatchClient, task_id: str, decline: dict[str, Any], worktree: str) -> bool:
+    from .worker_decline_proof import finalize_binding
+    receipt = _settle(client, task_id, decline)
+    execution = client.get_reservation(decline["reservation_key"])
+    if not isinstance(execution, dict) or execution.get("key") != decline["reservation_key"] or execution.get("task_id") != task_id:
+        raise DispatchError(502, "worker decline execution reservation is unconfirmed; custody retained")
+    if receipt is None:
+        if execution.get("task_relationship_required"):
+            raise DispatchError(502, "worker decline disposition omitted its task claim; custody retained")
         return False
-    _finalize({
-        "task_id": task_id, "native_id": decline["native_id"], "generation": decline["generation"],
-        "startup_revision": decline["startup_revision"], "reservation_key": decline["reservation_key"],
-    }, worktree)
+    _finalize(finalize_binding(task_id, decline, worktree, receipt, execution), worktree)
     return True
 
 
 def cmd_decline(args: argparse.Namespace) -> int:
-    core = _resolve_cli_module()
+    core = cast(Callable[[], ModuleType], _resolve_cli_module)()
+    emit: Callable[[object], int] = core._emit
     native = args.owner_session_id
     if (
         type(args.pool_generation) is not int or args.pool_generation < 1
@@ -171,7 +187,7 @@ def cmd_decline(args: argparse.Namespace) -> int:
         if retry is not None:
             # A lost reply or unsettled claim converges without a second requeue.
             settled = _finish(client, args.task_id, retry, worktree)
-            return core._emit({
+            return emit({
                 "decline": retry, "workspace_closeout": "finalized", "task_release": False,
                 "process_retirement": False, "routing": "requeued",
                 **({"task_relationship": "closed"} if settled else {}),
@@ -185,7 +201,7 @@ def cmd_decline(args: argparse.Namespace) -> int:
                 if recovered_worktree != worktree:
                     raise DispatchError(409, "recovered worker decline names another workspace; custody retained")
                 settled = _finish(client, args.task_id, decline, worktree)
-                return core._emit({
+                return emit({
                     "decline": decline, "workspace_closeout": "finalized", "task_release": False,
                     "process_retirement": False, "routing": "requeued",
                     **({"task_relationship": "closed"} if settled else {}),
@@ -219,7 +235,9 @@ def cmd_decline(args: argparse.Namespace) -> int:
             "startup_revision": reservation.get("startup_revision"),
             "reservation_key": reservation.get("key"),
         }
-        relationship = client.pool_decline_relationship(args.task_id, reservation.get("key"))
+        relationship = client.pool_decline_relationship(
+            args.task_id, reservation.get("key"), reservation=reservation, generation=args.pool_generation,
+        )
         decline = client.prepare_pool_decline(
             args.task_id, worker, **binding, exclusions=exclusions, note=args.note,
         )
@@ -238,7 +256,7 @@ def cmd_decline(args: argparse.Namespace) -> int:
                 raise
             if not _finish(client, args.task_id, decline, worktree):
                 raise DispatchError(502, "worker decline disposition omitted its task claim; custody retained")
-            return core._emit({
+            return emit({
                 "decline": decline, "workspace_closeout": "finalized", "task_release": False,
                 "process_retirement": False, "routing": "requeued", "task_relationship": "closed",
             })
@@ -250,7 +268,7 @@ def cmd_decline(args: argparse.Namespace) -> int:
                 detail=f"Own-workspace closeout unconfirmed; retain custody: {exc}"[:4096],
             )
             raise
-    return core._emit({
+    return emit({
         "decline": decline, "workspace_closeout": "finalized",
         "task_release": False, "process_retirement": False,
     })

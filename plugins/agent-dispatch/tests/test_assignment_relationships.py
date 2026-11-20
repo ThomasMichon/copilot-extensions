@@ -9,7 +9,9 @@ import secrets
 import sqlite3
 import subprocess
 from dataclasses import asdict, replace
+from pathlib import Path
 from types import SimpleNamespace
+from collections.abc import Callable
 from typing import Any
 
 import httpx
@@ -17,21 +19,25 @@ import pytest
 from fastapi.testclient import TestClient
 
 from agent_dispatch.assignment_workspace import AssignmentWorkspace
-from agent_dispatch.client import DispatchClient, DispatchError
+from agent_dispatch.client import DispatchClient
+from agent_dispatch.client_errors import DispatchError
 from agent_dispatch.coordinator import create_app
-from agent_dispatch.queue import Status, TaskError, TaskQueue
+from agent_dispatch.queue import TaskQueue
+from agent_dispatch.queue_common import Task
+from agent_dispatch.queue_records import Status, TaskError, SpawnReservation
 from agent_dispatch.queue_spawn_conclusion import CLAIM_HELD_REARM_CAPABILITY
 from agent_dispatch.queue_task_relationships import WRITER
 from agent_dispatch.task_obligations import read_snapshot
 from agent_dispatch.task_relationships import AssignmentSubject
 from agent_dispatch.workspace_binding import parse_created_workspace
-from tests.test_pool_placement import place, pool, publish
+from tests.test_pool_placement import place, pool, publish, reservation_for, current_task
+from tests._ordinary_relationship_controls import relationship, snapshot_for
 
 
 class GroundOwner:
     def __init__(self) -> None:
-        self.claims: dict[str, dict] = {}
-        self.calls: list[tuple[str, dict]] = []
+        self.claims: dict[str, dict[str, Any]] = {}
+        self.calls: list[tuple[str, dict[str, Any]]] = []
         self.lose_reply: str | None = None
         self.before_reply: Any = None
         self.queue: TaskQueue | None = None
@@ -40,9 +46,10 @@ class GroundOwner:
     def standing_attachment_supported(self) -> bool:
         return self.standing_supported
 
-    def __call__(self, workspace: AssignmentWorkspace, operation: str, payload: dict) -> dict:
+    def __call__(self, workspace: AssignmentWorkspace, operation: str, payload: dict[str, Any]) -> dict[str, Any]:
         self.calls.append((operation, copy.deepcopy(payload)))
         assert payload["expected_creation_nonce"] == workspace.creation_nonce
+        metadata: dict[str, Any] | None
         if operation == "reserve":
             request_id = payload["request_id"]
             if request_id not in self.claims:
@@ -114,7 +121,7 @@ class GroundOwner:
         return result
 
     @staticmethod
-    def reference(metadata: dict) -> str:
+    def reference(metadata: dict[str, Any]) -> str:
         envelope = {
             key: metadata[key] for key in ("version", "token", "creator", "request_id", "recovery")
         }
@@ -122,7 +129,7 @@ class GroundOwner:
         if "identity" in metadata:
             envelope["identity"] = metadata["identity"]
         return (
-            metadata["namespace"]
+            str(metadata["namespace"])
             + ":l1."
             + base64.urlsafe_b64encode(
                 json.dumps(
@@ -137,32 +144,40 @@ class GroundOwner:
         )
 
 
+Assignment = tuple[TaskQueue, GroundOwner, AssignmentWorkspace, Task]
+RequestAssignment = tuple[TaskQueue, GroundOwner, AssignmentWorkspace, Task, SimpleNamespace]
+
+
 @pytest.fixture
-def assignment(tmp_path):
+def assignment(tmp_path: Path) -> Assignment:
     owner = GroundOwner()
     queue = TaskQueue(
         tmp_path / "queue.db", relationship_writer=owner, relationship_authority="local"
     )
     owner.queue = queue
+    queue._ordinary_factory_policy = "factory:fixture"
     workspace = AssignmentWorkspace(
         "host-a", "example", "worktree", str(tmp_path / "checkout"), "original"
     )
     task = queue.create("work", repo="example", require_verification=True)
+    assert isinstance(task, Task)
     return queue, owner, workspace, task
 
 
-def claim(queue, workspace, task):
-    return queue.claim_one(workspace.worker_id, task_id=task.id, assignment_workspace=workspace)
+def claim(queue: TaskQueue, workspace: AssignmentWorkspace, task: Task) -> Task:
+    claimed = queue.claim_one(workspace.worker_id, task_id=task.id, assignment_workspace=workspace)
+    assert isinstance(claimed, Task)
+    return claimed
 
 
 @pytest.fixture
-def independent_readiness(monkeypatch):
+def independent_readiness(monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_dispatch import queue_submission_advancement
 
     monkeypatch.setattr(queue_submission_advancement, "observe_owner_state", lambda *_: {})
 
 
-def start_managed(queue, workspace, task, *, native="native"):
+def start_managed(queue: TaskQueue, workspace: AssignmentWorkspace, task: Task, *, native: str="native") -> Task:
     publish(queue, pool())
     reservation, _ = place(queue, task)
     queue.record_spawn_worktree(
@@ -176,11 +191,11 @@ def start_managed(queue, workspace, task, *, native="native"):
     )
     return queue.start(
         task.id, workspace.worker_id, owner_session_id=native,
-        expected_generation=queue.get(task.id).generation,
+        expected_generation=current_task(queue, task.id).generation,
     )
 
 
-def test_prepared_writer_is_committed_before_first_relationship_and_survives_lost_reply(assignment):
+def test_prepared_writer_is_committed_before_first_relationship_and_survives_lost_reply(assignment: Assignment) -> None:
     from tests.test_pool_placement_client import connected
 
     queue, owner, workspace, task = assignment
@@ -188,14 +203,14 @@ def test_prepared_writer_is_committed_before_first_relationship_and_survives_los
     reservation, _ = queue.reserve_spawn(
         task.id, reserved_by="allocator", driver="ordinary-bridge", pool_catalog_revision=revision,
     )
-    requirement = {
+    requirement: dict[str, Any] = {
         "version": 1, "creation_nonce": workspace.creation_nonce,
         "identity": {"installation_root": "/writer", "runtime_generation": "a" * 32},
     }
     observed = []
 
-    def admitted(workspace, operation, payload):
-        stored = queue.get_reservation(reservation.key)
+    def admitted(workspace: AssignmentWorkspace, operation: str, payload: dict[str, Any]) -> dict[str, Any]:
+        stored = reservation_for(queue, reservation.key)
         assert stored.worktree_writer_requirement == requirement
         assert stored.creation_nonce == requirement["creation_nonce"]
         observed.append(stored.task_relationship_event_id)
@@ -204,8 +219,8 @@ def test_prepared_writer_is_committed_before_first_relationship_and_survives_los
     queue._relationship_writer = admitted
     api = TestClient(create_app(queue, token="data", control_token="control",
                                 enable_mcp=False, verification_interval=0))
-    requests = []
-    facts = {
+    requests: list[httpx.Request] = []
+    facts: dict[str, Any] = {
         "ownership": "created", "execution_machine": workspace.machine,
         "allocation_project": workspace.project, "worktree_path": workspace.path,
         "driver": "ordinary-bridge", "creation_nonce": workspace.creation_nonce,
@@ -217,17 +232,18 @@ def test_prepared_writer_is_committed_before_first_relationship_and_survives_los
                 reservation.key, workspace.worktree,
                 worktree_writer_requirement=requirement, **facts,
             )
-        original = queue.task_relationship(task.id)
+        original = relationship(queue, task.id)
     queue = TaskQueue(queue.db_path, relationship_writer=admitted, relationship_authority="local")
+    queue._ordinary_factory_policy = "factory:fixture"
     owner.queue = queue
-    assert queue.get_reservation(reservation.key).worktree_writer_requirement == requirement
+    assert reservation_for(queue, reservation.key).worktree_writer_requirement == requirement
     api = TestClient(create_app(queue, token="data", control_token="control",
                                 enable_mcp=False, verification_interval=0))
     with connected(api, requests) as client:
         result = client.record_spawn_worktree(reservation.key, workspace.worktree, **facts)
     assert result["worktree_writer_requirement"] == requirement and result["agent_info"] is None
-    assert queue.task_relationship(task.id)["state"] == "bound"
-    assert queue.task_relationship(task.id)["request"] == original["request"]
+    assert relationship(queue, task.id)["state"] == "bound"
+    assert relationship(queue, task.id)["request"] == original["request"]
     assert observed == [original["request"]["event_id"]] * 3
     posts = [json.loads(r.content) for r in requests if r.method == "POST"]
     assert posts[0]["worktree_writer_requirement"] == requirement
@@ -235,28 +251,28 @@ def test_prepared_writer_is_committed_before_first_relationship_and_survives_los
 
 
 @pytest.mark.parametrize("change", ["nonce", "identity", "historical", "driver"])
-def test_prepared_writer_rejects_replacement_or_historical_retrofit_atomically(assignment, change):
+def test_prepared_writer_rejects_replacement_or_historical_retrofit_atomically(assignment: Assignment, change: str) -> None:
     queue, owner, workspace, task = assignment
     revision = publish(queue, pool())
     driver = "cli" if change == "driver" else "ordinary-bridge"
     reservation, _ = queue.reserve_spawn(
         task.id, reserved_by="allocator", driver=driver, pool_catalog_revision=revision,
     )
-    facts = {
+    facts: dict[str, Any] = {
         "ownership": "created", "execution_machine": workspace.machine,
         "allocation_project": workspace.project, "worktree_path": workspace.path,
         "driver": driver, "creation_nonce": workspace.creation_nonce,
     }
-    requirement = {
+    requirement: dict[str, Any] = {
         "version": 1, "creation_nonce": workspace.creation_nonce,
         "identity": {"installation_root": "/writer", "runtime_generation": "a" * 32},
     }
     if change != "driver":
         queue.record_spawn_worktree(
             reservation.key, workspace.worktree, **facts,
-            **({"worktree_writer_requirement": requirement} if change != "historical" else {}),
+            worktree_writer_requirement=requirement if change != "historical" else None,
         )
-    before = asdict(queue.get_reservation(reservation.key))
+    before = asdict(reservation_for(queue, reservation.key))
     before_calls = copy.deepcopy(owner.calls)
     incoming = copy.deepcopy(requirement)
     if change == "nonce":
@@ -267,18 +283,18 @@ def test_prepared_writer_rejects_replacement_or_historical_retrofit_atomically(a
         queue.record_spawn_worktree(
             reservation.key, workspace.worktree, worktree_writer_requirement=incoming, **facts,
         )
-    assert asdict(queue.get_reservation(reservation.key)) == before
+    assert asdict(reservation_for(queue, reservation.key)) == before
     assert owner.calls == before_calls
     if change == "historical":
         with pytest.raises(TaskError, match="no original writer requirement"):
             queue.record_spawn_allocation(
                 reservation.key, workspace.project, worktree_writer_requirement=incoming,
             )
-        assert asdict(queue.get_reservation(reservation.key)) == before
+        assert asdict(reservation_for(queue, reservation.key)) == before
 
 
 @pytest.mark.parametrize("versions", [None, [], [True], ["1"]])
-def test_prepared_writer_client_refuses_older_provider_without_post(assignment, versions, monkeypatch):
+def test_prepared_writer_client_refuses_older_provider_without_post(assignment: Assignment, versions: object, monkeypatch: pytest.MonkeyPatch) -> None:
     from tests.test_pool_placement_client import connected
 
     queue, _, workspace, task = assignment
@@ -288,8 +304,8 @@ def test_prepared_writer_client_refuses_older_provider_without_post(assignment, 
     )
     api = TestClient(create_app(queue, token="data", control_token="control",
                                 enable_mcp=False, verification_interval=0))
-    requests = []
-    before = asdict(queue.get_reservation(reservation.key))
+    requests: list[httpx.Request] = []
+    before = asdict(reservation_for(queue, reservation.key))
     with connected(api, requests) as client:
         monkeypatch.setattr(client, "pool_placement_contract", lambda: {
             "ordinary_writer_requirement_versions": [1], "prepared_writer_requirement_versions": versions,
@@ -303,13 +319,13 @@ def test_prepared_writer_client_refuses_older_provider_without_post(assignment, 
                 },
             )
     assert not any(request.method == "POST" for request in requests)
-    assert asdict(queue.get_reservation(reservation.key)) == before
+    assert asdict(reservation_for(queue, reservation.key)) == before
 
 
-def test_direct_claim_journals_outbound_obligation_before_success_and_replays(assignment):
+def test_direct_claim_journals_outbound_obligation_before_success_and_replays(assignment: Assignment) -> None:
     queue, owner, workspace, task = assignment
     claimed = claim(queue, workspace, task)
-    value = queue.task_relationship(task.id)
+    value = relationship(queue, task.id)
     assert claimed.status == Status.CLAIMED and value["state"] == "bound"
     assert value["request"]["workspace"] == asdict(workspace)
     assert value["request"]["reservation_key"] is None
@@ -317,7 +333,7 @@ def test_direct_claim_journals_outbound_obligation_before_success_and_replays(as
     assert value["receipt"]["owner"] == workspace.owner_ref
     assert value["receipt"]["producer"]["identity"]["worker_id"] == workspace.worker_id
     assert claim(queue, workspace, task) == claimed
-    assert len(owner.claims) == 1 and queue.task_relationship(task.id) == value
+    assert len(owner.claims) == 1 and relationship(queue, task.id) == value
     with pytest.raises(TaskError, match="conflicts"):
         claim(queue, replace(workspace, creation_nonce="replacement"), task)
     from agent_dispatch.task_obligations import ASSIGNMENT_PREDICATE
@@ -334,14 +350,14 @@ def test_direct_claim_journals_outbound_obligation_before_success_and_replays(as
 
 @pytest.mark.parametrize("operation", ["reserve", "bind"])
 def test_lost_effect_response_retains_request_and_blocks_execution_until_reconciled(
-    assignment, operation
-):
+    assignment: Assignment, operation: str
+) -> None:
     queue, owner, workspace, task = assignment
     owner.lose_reply = operation
     with pytest.raises(TaskError, match="unresolved"):
         claim(queue, workspace, task)
-    value = queue.task_relationship(task.id)
-    assert value["state"] == "pending" and queue.get(task.id).owner == workspace.worker_id
+    value = relationship(queue, task.id)
+    assert value["state"] == "pending" and current_task(queue, task.id).owner == workspace.worker_id
     with pytest.raises(TaskError, match="unconfirmed"):
         queue.start(task.id, workspace.worker_id)
     restarted = TaskQueue(queue.db_path)
@@ -351,31 +367,31 @@ def test_lost_effect_response_retains_request_and_blocks_execution_until_reconci
         conn.execute("UPDATE tasks SET status='started' WHERE id=?", (task.id,))
     queue._relationship_writer = owner
     assert claim(queue, workspace, task).generation == value["request"]["generation"]
-    assert queue.task_relationship(task.id)["state"] == "bound" and len(owner.claims) == 1
+    assert relationship(queue, task.id)["state"] == "bound" and len(owner.claims) == 1
     queue.start(task.id, workspace.worker_id)
 
 
 @pytest.mark.parametrize("operation", ["reserve", "bind"])
 def test_cancelled_before_acknowledgement_settles_original_pending_or_bound_claim(
-    assignment, operation
-):
+    assignment: Assignment, operation: str
+) -> None:
     queue, owner, workspace, task = assignment
     owner.lose_reply = operation
     with pytest.raises(TaskError):
         claim(queue, workspace, task)
-    pending = queue.task_relationship(task.id)
+    pending = relationship(queue, task.id)
     queue.yield_task(task.id, workspace.worker_id)
     assert queue.reconcile_task_relationship(task.id)["state"] == "closed"
     assert len(owner.claims) == 1
     new = claim(queue, workspace, task)
     assert new.generation > pending["request"]["generation"]
     assert (
-        queue.task_relationship(task.id)["request"]["request_id"]
+        relationship(queue, task.id)["request"]["request_id"]
         != pending["request"]["request_id"]
     )
 
 
-def test_cancelled_unknown_reserve_is_tombstoned_not_released_from_absence_alone(assignment):
+def test_cancelled_unknown_reserve_is_tombstoned_not_released_from_absence_alone(assignment: Assignment) -> None:
     queue, owner, workspace, task = assignment
     queue._relationship_writer = lambda *a: (_ for _ in ()).throw(TimeoutError())
     with pytest.raises(TaskError):
@@ -389,8 +405,8 @@ def test_cancelled_unknown_reserve_is_tombstoned_not_released_from_absence_alone
 @pytest.mark.parametrize("operation", ["reserve", "inspect"])
 @pytest.mark.parametrize("change", ["queue", "authority", "event"])
 def test_original_queue_is_read_again_before_the_next_relationship_effect(
-    assignment, operation, change,
-):
+    assignment: Assignment, operation: str, change: str,
+) -> None:
     queue, owner, workspace, task = assignment
     if operation == "inspect":
         claim(queue, workspace, task)
@@ -398,7 +414,7 @@ def test_original_queue_is_read_again_before_the_next_relationship_effect(
     original_authority = queue._relationship_authority
     retained = {}
 
-    def change_original(boundary, result):
+    def change_original(boundary: str, result: dict[str, Any]) -> None:
         if boundary != operation:
             return
         with queue._connect() as conn:
@@ -449,12 +465,12 @@ def test_original_queue_is_read_again_before_the_next_relationship_effect(
 
 
 @pytest.mark.parametrize("field", ["request_id", "reservation_key", "generation", "queue_identity"])
-def test_caller_snapshot_cannot_substitute_the_original_queue_request(assignment, monkeypatch, field):
+def test_caller_snapshot_cannot_substitute_the_original_queue_request(assignment: Assignment, monkeypatch: pytest.MonkeyPatch, field: str) -> None:
     queue, owner, workspace, task = assignment
     queue._relationship_writer = lambda *a: (_ for _ in ()).throw(TimeoutError())
     with pytest.raises(TaskError):
         claim(queue, workspace, task)
-    original = queue.task_relationship(task.id)
+    original = relationship(queue, task.id)
     substituted = copy.deepcopy(original)
     if field == "generation":
         assert substituted["request"]["generation"] == 1
@@ -470,7 +486,7 @@ def test_caller_snapshot_cannot_substitute_the_original_queue_request(assignment
     assert owner.calls == [] and owner.claims == {}
     monkeypatch.undo()
     assert queue.reconcile_task_relationship(task.id)["state"] == "bound"
-    assert queue.task_relationship(task.id)["request"] == original["request"]
+    assert relationship(queue, task.id)["request"] == original["request"]
 
 
 @pytest.mark.parametrize("field,replacement", [
@@ -481,8 +497,8 @@ def test_caller_snapshot_cannot_substitute_the_original_queue_request(assignment
 ])
 @pytest.mark.parametrize("boundary", ["reserve", "bind", "close"])
 def test_original_prepared_reservation_is_read_before_each_relationship_effect(
-    assignment, field, replacement, boundary, independent_readiness,
-):
+    assignment: Assignment, field: str, replacement: object, boundary: str, independent_readiness: None,
+) -> None:
     queue, owner, workspace, task = assignment
     publish(queue, pool())
     reservation, _ = place(queue, task)
@@ -498,14 +514,14 @@ def test_original_prepared_reservation_is_read_before_each_relationship_effect(
         queue.record_spawn(reservation.key, session_handle="native", worktree=workspace.worktree)
         queue.start(
             task.id, workspace.worker_id, owner_session_id="native",
-            expected_generation=queue.get(task.id).generation,
+            expected_generation=current_task(queue, task.id).generation,
         )
         queue.complete(task.id, workspace.worker_id, result={"answer": "proposed"})
         queue.confirm(task.id)
-    original = copy.deepcopy(queue.task_relationship(task.id))
+    original = copy.deepcopy(relationship(queue, task.id))
     before = len(owner.calls)
 
-    def replace_preparation():
+    def replace_preparation() -> Any:
         with queue._connect() as conn:
             retained = conn.execute(
                 "SELECT * FROM spawn_reservations WHERE key=?", (reservation.key,),
@@ -520,7 +536,7 @@ def test_original_prepared_reservation_is_read_before_each_relationship_effect(
     if boundary == "reserve":
         retained.append(replace_preparation())
     else:
-        def after_observation(operation, result):
+        def after_observation(operation: str, result: dict[str, Any]) -> None:
             if operation == ("inspect" if boundary == "close" else "reserve"):
                 retained.append(replace_preparation())
         owner.before_reply = after_observation
@@ -529,7 +545,7 @@ def test_original_prepared_reservation_is_read_before_each_relationship_effect(
     assert [operation for operation, _ in owner.calls[before:]] == (
         [] if boundary == "reserve" else ["inspect" if boundary == "close" else "reserve"]
     )
-    assert queue.task_relationship(task.id) == original
+    assert relationship(queue, task.id) == original
     assert len(owner.claims) == 1
     with queue._connect() as conn:
         conn.execute(
@@ -544,12 +560,12 @@ def test_original_prepared_reservation_is_read_before_each_relationship_effect(
 
 
 def test_submission_and_abandonment_keep_responsibility_until_independent_completion(
-    assignment, independent_readiness,
-):
+    assignment: Assignment, independent_readiness: None,
+) -> None:
     queue, owner, workspace, task = assignment
     start_managed(queue, workspace, task)
     queue.complete(task.id, workspace.worker_id, result={"answer": "proposed"})
-    assert queue.task_relationship(task.id)["state"] == "bound"
+    assert relationship(queue, task.id)["state"] == "bound"
     assert queue.reconcile_task_relationship(task.id)["state"] == "bound"
     queue.confirm(task.id)
     assert queue.reconcile_task_relationship(task.id)["state"] == "closed"
@@ -557,35 +573,40 @@ def test_submission_and_abandonment_keep_responsibility_until_independent_comple
 
 
 def test_supervisor_settles_exact_relationship_only_after_independent_completion(
-    assignment, independent_readiness,
-):
+    assignment: Assignment, independent_readiness: None,
+) -> None:
     from agent_dispatch.supervisor_relationship_settlement import settle_completed_relationship
 
     queue, owner, workspace, task = assignment
     start_managed(queue, workspace, task)
-    (reservation,) = queue.list_reservations(task_id=task.id)
+    (reservation,) = _reservations(queue, task.id)
     supervisor = SimpleNamespace(client=queue)
     queue.complete(task.id, workspace.worker_id, result={"answer": "proposed"})
-    submitted = asdict(queue.get(task.id))
+    submitted = asdict(current_task(queue, task.id))
     assert settle_completed_relationship(supervisor, asdict(reservation), submitted)
-    assert queue.task_relationship(task.id)["state"] == "bound"
+    assert relationship(queue, task.id)["state"] == "bound"
     queue.confirm(task.id)
-    completed = asdict(queue.get(task.id))
+    completed = asdict(current_task(queue, task.id))
     assert settle_completed_relationship(supervisor, asdict(reservation), completed)
-    assert queue.task_relationship(task.id)["state"] == "closed"
+    assert relationship(queue, task.id)["state"] == "closed"
     claim_record = next(iter(owner.claims.values()))
     assert claim_record["closeout"]["relationship_verification"]["retired"]
     assert settle_completed_relationship(supervisor, asdict(reservation), completed)
     assert len(owner.claims) == 1
 
 
-def _settled_retired_attempt(queue, workspace, task, reason="outstanding-obligations"):
+def _reservations(queue: TaskQueue, task_id: str) -> list[SpawnReservation]:
+    reservations: list[SpawnReservation] = queue.list_reservations(task_id=task_id)
+    return reservations
+
+
+def _settled_retired_attempt(queue: TaskQueue, workspace: AssignmentWorkspace, task: Task, reason: str="outstanding-obligations") -> tuple[SpawnReservation,str]:
     start_managed(queue, workspace, task)
-    (reservation,) = queue.list_reservations(task_id=task.id)
+    (reservation,) = _reservations(queue, task.id)
     queue.complete(task.id, workspace.worker_id, result={"answer": "proposed"})
     queue.request_spawn_release(
         reservation.key, disposition="settled",
-        finished_startup_revision=queue.get_reservation(reservation.key).startup_revision,
+        finished_startup_revision=reservation_for(queue, reservation.key).startup_revision,
     )
     held_detail = json.dumps({
         "action": "preserved",
@@ -598,17 +619,17 @@ def _settled_retired_attempt(queue, workspace, task, reason="outstanding-obligat
     return reservation, held_detail
 
 
-def _rearm_supervisor(queue, task, health, get=None):
+def _rearm_supervisor(queue: TaskQueue, task: Task, health: dict[str, Any], get: Callable[..., object] | None=None) -> SimpleNamespace:
     from agent_dispatch.supervisor import Supervisor
 
     return SimpleNamespace(
         client=SimpleNamespace(
             health=lambda: health,
-            get=get or (lambda task_id: asdict(queue.get(task_id))),
+            get=get or (lambda task_id: asdict(current_task(queue, task_id))),
             reconcile_task_relationship=queue.reconcile_task_relationship,
         ),
         _pool_reservations=lambda **filters: [
-            asdict(r) for r in queue.list_reservations(task_id=task.id)
+            asdict(r) for r in _reservations(queue, task.id)
             if r.conclusion_state == filters["conclusion_state"]
         ],
         _conclusion_retry_payload=Supervisor._conclusion_retry_payload,
@@ -619,8 +640,8 @@ def _rearm_supervisor(queue, task, health, get=None):
 
 @pytest.mark.parametrize("claimed", [False, True])
 def test_claim_held_retired_cleanup_rearms_only_after_confirmation(
-    assignment, independent_readiness, claimed,
-):
+    assignment: Assignment, independent_readiness: None, claimed: bool,
+) -> None:
     from agent_dispatch.supervisor_relationship_settlement import rearm_claim_held_cleanup
 
     queue, owner, workspace, task = assignment
@@ -636,7 +657,7 @@ def test_claim_held_retired_cleanup_rearms_only_after_confirmation(
             reservation.key, conclusion_state="held", conclusion_detail=held_detail,
             claim_token=token,
         )
-        assert queue.get_reservation(reservation.key).cleanup_claim_token == token
+        assert reservation_for(queue, reservation.key).cleanup_claim_token == token
     else:
         queue.retire_spawn(
             reservation.key, exact_absence=True, conclusion_state="held",
@@ -645,13 +666,14 @@ def test_claim_held_retired_cleanup_rearms_only_after_confirmation(
     supervisor = _rearm_supervisor(queue, task, {CLAIM_HELD_REARM_CAPABILITY: 1})
 
     assert rearm_claim_held_cleanup(supervisor) == 0
-    assert queue.get_reservation(reservation.key).conclusion_state == "held"
-    assert queue.task_relationship(task.id)["state"] == "bound"
+    assert reservation_for(queue, reservation.key).conclusion_state == "held"
+    assert relationship(queue, task.id)["state"] == "bound"
 
     queue.confirm(task.id)
     assert rearm_claim_held_cleanup(supervisor) == 1
-    assert queue.task_relationship(task.id)["state"] == "closed"
-    rearmed = queue.get_reservation(reservation.key)
+    assert relationship(queue, task.id)["state"] == "closed"
+    rearmed = reservation_for(queue, reservation.key)
+    assert rearmed.conclusion_detail is not None
     cleanup = json.loads(rearmed.conclusion_detail)["worktree_cleanup"]
     assert rearmed.conclusion_state == "pending"
     assert (cleanup["state"], cleanup["attempts"], cleanup["next_attempt_at"]) == ("pending", 0, 0)
@@ -664,8 +686,8 @@ def test_claim_held_retired_cleanup_rearms_only_after_confirmation(
 
 @pytest.mark.parametrize("unsettled", ["other-hold", "relationship-bound"])
 def test_queue_rearm_derives_payload_and_refuses_unqualified_holds(
-    assignment, independent_readiness, unsettled,
-):
+    assignment: Assignment, independent_readiness: None, unsettled: str,
+) -> None:
     queue, owner, workspace, task = assignment
     reason = "dirty-worktree" if unsettled == "other-hold" else "outstanding-obligations"
     reservation, held_detail = _settled_retired_attempt(queue, workspace, task, reason)
@@ -678,16 +700,16 @@ def test_queue_rearm_derives_payload_and_refuses_unqualified_holds(
         assert queue.reconcile_task_relationship(task.id)["state"] == "closed"
         match = "not held only for a task claim"
     else:
-        assert queue.task_relationship(task.id)["state"] == "bound"
+        assert relationship(queue, task.id)["state"] == "bound"
         match = "task relationship is not settled"
 
     with pytest.raises(TaskError, match=match):
         queue.rearm_claim_held_conclusion(reservation.key, expected_detail=held_detail)
-    held = queue.get_reservation(reservation.key)
+    held = reservation_for(queue, reservation.key)
     assert (held.conclusion_state, held.conclusion_detail) == ("held", held_detail)
 
 
-def test_claim_held_rearm_waits_for_coordinator_capability(assignment, independent_readiness):
+def test_claim_held_rearm_waits_for_coordinator_capability(assignment: Assignment, independent_readiness: None) -> None:
     from agent_dispatch.supervisor_relationship_settlement import rearm_claim_held_cleanup
 
     queue, owner, workspace, task = assignment
@@ -698,22 +720,22 @@ def test_claim_held_rearm_waits_for_coordinator_capability(assignment, independe
     )
     queue.confirm(task.id)
 
-    def unexpected_get(_task_id):
+    def unexpected_get(_task_id: str) -> None:
         raise AssertionError("settled a relationship the coordinator cannot re-arm")
 
     legacy = _rearm_supervisor(queue, task, {"task_relationships": {"version": 1}}, unexpected_get)
     assert rearm_claim_held_cleanup(legacy) == 0
-    assert queue.get_reservation(reservation.key).conclusion_state == "held"
-    assert queue.task_relationship(task.id)["state"] == "bound"
+    assert reservation_for(queue, reservation.key).conclusion_state == "held"
+    assert relationship(queue, task.id)["state"] == "bound"
 
     upgraded = _rearm_supervisor(queue, task, {CLAIM_HELD_REARM_CAPABILITY: 1})
     assert rearm_claim_held_cleanup(upgraded) == 1
-    assert queue.get_reservation(reservation.key).conclusion_state == "pending"
+    assert reservation_for(queue, reservation.key).conclusion_state == "pending"
 
 
 def test_claim_held_rearm_tolerates_coordinator_transport_failures(
-    assignment, independent_readiness,
-):
+    assignment: Assignment, independent_readiness: None,
+) -> None:
     from agent_dispatch.supervisor_relationship_settlement import rearm_claim_held_cleanup
 
     queue, owner, workspace, task = assignment
@@ -724,18 +746,17 @@ def test_claim_held_rearm_tolerates_coordinator_transport_failures(
     )
     queue.confirm(task.id)
 
-    def timed_out(*_args, **_kwargs):
+    def timed_out(*_args: object, **_kwargs: object) -> None:
         raise httpx.ReadTimeout("coordinator timed out")
 
     supervisor = _rearm_supervisor(queue, task, {CLAIM_HELD_REARM_CAPABILITY: 1}, timed_out)
     assert rearm_claim_held_cleanup(supervisor) == 0
     supervisor.client.health = timed_out
     assert rearm_claim_held_cleanup(supervisor) == 0
-    assert queue.get_reservation(reservation.key).conclusion_state == "held"
+    assert reservation_for(queue, reservation.key).conclusion_state == "held"
 
 
-def test_claim_held_rearm_bounds_attempts_and_rotates_past_failures():
-    from agent_dispatch.client import DispatchError
+def test_claim_held_rearm_bounds_attempts_and_rotates_past_failures() -> None:
     from agent_dispatch.supervisor import Supervisor
     from agent_dispatch.supervisor_relationship_settlement import (
         _REARM_PER_CYCLE, rearm_claim_held_cleanup,
@@ -754,7 +775,7 @@ def test_claim_held_rearm_bounds_attempts_and_rotates_past_failures():
     ]
     reads = []
 
-    def failing_get(task_id):
+    def failing_get(task_id: str) -> None:
         reads.append(task_id)
         raise DispatchError(503, "coordinator unavailable")
 
@@ -772,23 +793,23 @@ def test_claim_held_rearm_bounds_attempts_and_rotates_past_failures():
     assert len(reads) == _REARM_PER_CYCLE
 
 
-def test_legacy_or_forged_writer_answer_never_admits_execution(assignment):
+def test_legacy_or_forged_writer_answer_never_admits_execution(assignment: Assignment) -> None:
     queue, owner, workspace, task = assignment
 
-    def old_reply(operation, result):
+    def old_reply(operation: str, result: dict[str, Any]) -> None:
         result.pop("writer_contract")
 
     owner.before_reply = old_reply
     with pytest.raises(TaskError, match="did not confirm"):
         claim(queue, workspace, task)
-    assert queue.task_relationship(task.id)["state"] == "pending"
+    assert relationship(queue, task.id)["state"] == "pending"
     with pytest.raises(TaskError):
         queue.start(task.id, workspace.worker_id)
 
 
 def test_allocator_attachment_not_pool_actor_owns_the_relationship_and_survives_rollback(
-    assignment,
-):
+    assignment: Assignment,
+) -> None:
     queue, owner, workspace, task = assignment
     publish(queue, pool())
     reservation, _ = place(queue, task)
@@ -815,11 +836,11 @@ def test_allocator_attachment_not_pool_actor_owns_the_relationship_and_survives_
             driver="cli",
             creation_nonce=workspace.creation_nonce,
         )
-    recorded = queue.get_reservation(reservation.key)
+    recorded = reservation_for(queue, reservation.key)
     assert (
         recorded.creation_nonce == workspace.creation_nonce and recorded.task_relationship_event_id
     )
-    snapshot = read_snapshot(queue, task.id)
+    snapshot = snapshot_for(queue, task.id)
     assert snapshot["assignment"]["worker_id"] == workspace.worker_id
     assert snapshot["assignment"]["worker_id"] != reservation.reserved_by
     restarted = TaskQueue(queue.db_path)
@@ -835,16 +856,16 @@ def test_allocator_attachment_not_pool_actor_owns_the_relationship_and_survives_
         driver="cli",
         creation_nonce=workspace.creation_nonce,
     )
-    assert queue.task_relationship(task.id)["state"] == "bound"
-    assert queue.get(task.id).owner is None and len(owner.claims) == 1
+    assert relationship(queue, task.id)["state"] == "bound"
+    assert current_task(queue, task.id).owner is None and len(owner.claims) == 1
 
 
-def test_current_api_and_client_negotiate_and_do_not_send_new_syntax_to_old_owner(assignment):
+def test_current_api_and_client_negotiate_and_do_not_send_new_syntax_to_old_owner(assignment: Assignment) -> None:
     queue, owner, workspace, task = assignment
-    requests = []
+    requests: list[tuple[str,str] | str] = []
     with TestClient(create_app(queue, enable_mcp=False)) as api:
 
-        def handle(request):
+        def handle(request: httpx.Request) -> httpx.Response:
             requests.append((request.method, request.url.path))
             result = api.request(
                 request.method,
@@ -861,11 +882,11 @@ def test_current_api_and_client_negotiate_and_do_not_send_new_syntax_to_old_owne
                 task_id=task.id,
                 assignment_workspace=asdict(workspace),
             )
-        assert result["status"] == Status.CLAIMED and len(owner.claims) == 1
+        assert result is not None and result["status"] == Status.CLAIMED and len(owner.claims) == 1
     assert requests == [("GET", "/health"), ("POST", "/claim")]
     requests.clear()
 
-    def old(request):
+    def old(request: httpx.Request) -> httpx.Response:
         requests.append(request.method)
         return httpx.Response(200, json={"status": "ok"})
 
@@ -875,7 +896,7 @@ def test_current_api_and_client_negotiate_and_do_not_send_new_syntax_to_old_owne
     assert requests == ["GET"]
 
 
-def test_original_creation_nonce_is_not_dropped():
+def test_original_creation_nonce_is_not_dropped() -> None:
     from subprocess import CompletedProcess
 
     value = parse_created_workspace(
@@ -901,7 +922,7 @@ def test_original_creation_nonce_is_not_dropped():
 
 
 @pytest.mark.parametrize("state", ["suspended", "abandoned", "dead_letter"])
-def test_other_dispositions_do_not_settle_pending_responsibility(assignment, state):
+def test_other_dispositions_do_not_settle_pending_responsibility(assignment: Assignment, state: str) -> None:
     queue, owner, workspace, task = assignment
     owner.lose_reply = "reserve"
     with pytest.raises(TaskError):
@@ -916,18 +937,18 @@ def test_other_dispositions_do_not_settle_pending_responsibility(assignment, sta
     assert not any(operation == "close" for operation, _ in owner.calls)
 
 
-def test_assignment_change_during_ground_write_never_publishes_admission(assignment):
+def test_assignment_change_during_ground_write_never_publishes_admission(assignment: Assignment) -> None:
     queue, owner, workspace, task = assignment
 
-    def unassign(operation, result):
+    def unassign(operation: str, result: dict[str, Any]) -> None:
         if operation == "bind":
             queue.yield_task(task.id, workspace.worker_id)
 
     owner.before_reply = unassign
     with pytest.raises(TaskError, match="changed during"):
         claim(queue, workspace, task)
-    assert queue.get(task.id).status == Status.QUEUED
-    assert queue.task_relationship(task.id)["state"] == "pending"
+    assert current_task(queue, task.id).status == Status.QUEUED
+    assert relationship(queue, task.id)["state"] == "pending"
     owner.before_reply = None
     assert queue.reconcile_task_relationship(task.id)["state"] == "closed"
 
@@ -936,14 +957,14 @@ def test_assignment_change_during_ground_write_never_publishes_admission(assignm
 @pytest.mark.parametrize("cancel", ["before", "after"])
 @pytest.mark.parametrize("with_outcome", [False, True])
 def test_cancelled_reconciliation_never_acknowledges_original_or_replayed_claim(
-    assignment, monkeypatch, replay, cancel, with_outcome,
-):
+    assignment: Assignment, monkeypatch: pytest.MonkeyPatch, replay: bool, cancel: str, with_outcome: bool,
+) -> None:
     queue, owner, workspace, task = assignment
     if replay:
         claim(queue, workspace, task)
     reconcile = queue.reconcile_task_relationship
 
-    def interrupted(task_id, *, event_id=None):
+    def interrupted(task_id: str, *, event_id: int|None=None) -> dict[str,Any]:
         if cancel == "before":
             queue.yield_task(task_id, workspace.worker_id)
         result = reconcile(task_id, event_id=event_id)
@@ -958,13 +979,13 @@ def test_cancelled_reconciliation_never_acknowledges_original_or_replayed_claim(
         operation(
             workspace.worker_id, task_id=task.id, assignment_workspace=workspace,
         )
-    assert queue.get(task.id).status == Status.QUEUED
-    assert queue.get(task.id).owner is None
-    assert queue.task_relationship(task.id)["state"] == "closed"
+    assert current_task(queue, task.id).status == Status.QUEUED
+    assert current_task(queue, task.id).owner is None
+    assert relationship(queue, task.id)["state"] == "closed"
     assert len(owner.claims) == 1
 
 
-def test_retained_requirement_cannot_be_omitted_or_cleared_after_requeue(assignment):
+def test_retained_requirement_cannot_be_omitted_or_cleared_after_requeue(assignment: Assignment) -> None:
     queue, _, workspace, task = assignment
     claim(queue, workspace, task)
     queue.yield_task(task.id, workspace.worker_id)
@@ -981,14 +1002,14 @@ def test_retained_requirement_cannot_be_omitted_or_cleared_after_requeue(assignm
         )
 
 
-def test_required_matching_workspace_still_reconciles_pending_owner_write(assignment):
+def test_required_matching_workspace_still_reconciles_pending_owner_write(assignment: Assignment) -> None:
     from agent_dispatch.workspace_binding import record_prepared
 
     queue, owner, workspace, task = assignment
     publish(queue, pool())
     reservation, _ = place(queue, task)
     owner.lose_reply = "bind"
-    facts = {
+    facts: dict[str, Any] = {
         "ownership": "created",
         "execution_machine": workspace.machine,
         "driver": "cli",
@@ -1001,10 +1022,10 @@ def test_required_matching_workspace_still_reconciles_pending_owner_write(assign
         queue.record_spawn_worktree(reservation.key, workspace.worktree, **facts)
 
     class Client:
-        def record_spawn_worktree(self, key, worktree, **kwargs):
+        def record_spawn_worktree(self, key: str, worktree: str, **kwargs: Any) -> dict[str,Any]:
             return asdict(queue.record_spawn_worktree(key, worktree, **kwargs))
 
-    current = asdict(queue.get_reservation(reservation.key))
+    current = asdict(reservation_for(queue, reservation.key))
     record_prepared(
         Client(),
         current,
@@ -1018,19 +1039,19 @@ def test_required_matching_workspace_still_reconciles_pending_owner_write(assign
         driver="cli",
         creating_host=workspace.machine,
     )
-    assert queue.task_relationship(task.id)["state"] == "bound" and len(owner.claims) == 1
+    assert relationship(queue, task.id)["state"] == "bound" and len(owner.claims) == 1
 
 
-def test_disposition_reconciliation_uses_control_authority_not_a_worker_receipt(assignment):
+def test_disposition_reconciliation_uses_control_authority_not_a_worker_receipt(assignment: Assignment) -> None:
     queue, owner, workspace, task = assignment
     owner.lose_reply = "reserve"
     with pytest.raises(TaskError):
         claim(queue, workspace, task)
     queue.yield_task(task.id, workspace.worker_id)
-    event_id = queue.task_relationship(task.id)["request"]["event_id"]
+    event_id = relationship(queue, task.id)["request"]["event_id"]
     with TestClient(create_app(queue, control_token="test-control", enable_mcp=False)) as api:
 
-        def handle(request):
+        def handle(request: httpx.Request) -> httpx.Response:
             result = api.request(
                 request.method,
                 str(request.url),
@@ -1056,14 +1077,14 @@ def test_disposition_reconciliation_uses_control_authority_not_a_worker_receipt(
 
 
 @pytest.fixture
-def request_assignment(assignment, monkeypatch):
+def request_assignment(assignment: Assignment, monkeypatch: pytest.MonkeyPatch) -> RequestAssignment:
     from agent_dispatch import assignment_relationship_owner as module
     from tests.test_assignment_relationship_owner import WRITER_IDENTITY, support
 
     queue, owner, workspace, task = assignment
     control = SimpleNamespace(refuse=False, admissions=[], captures=[])
 
-    def capture(argv, **kwargs):
+    def capture(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         control.captures.append(argv)
         if "capabilities" in argv:
             result = support()
@@ -1078,10 +1099,10 @@ def request_assignment(assignment, monkeypatch):
             result["writer_identity"] = dict(WRITER_IDENTITY)
         return subprocess.CompletedProcess(argv, 0, json.dumps(result), "")
 
-    def admit(selected, identity, request):
+    def admit(selected: AssignmentWorkspace, identity: dict[str,Any], request: dict[str,Any]) -> None:
         assert selected == workspace and identity == WRITER_IDENTITY
         retained = queue.task_relationship(task.id, event_id=request["event_id"])
-        assert retained["request"] == request
+        assert retained is not None and retained["request"] == request
         control.admissions.append(copy.deepcopy(request))
         if control.refuse:
             raise TaskError("original queue/cohort is unqualified")
@@ -1096,12 +1117,12 @@ def request_assignment(assignment, monkeypatch):
     return queue, owner, workspace, task, control
 
 
-def test_original_request_is_admitted_before_reserve_and_recovered_without_recapture(request_assignment):
+def test_original_request_is_admitted_before_reserve_and_recovered_without_recapture(request_assignment: RequestAssignment) -> None:
     queue, owner, workspace, task, control = request_assignment
     control.refuse = True
     with pytest.raises(TaskError, match="unresolved"):
         claim(queue, workspace, task)
-    original = queue.task_relationship(task.id)
+    original = relationship(queue, task.id)
     assert original["state"] == "pending" and owner.calls == []
     assert len(control.captures) == 1
     control.refuse = False
@@ -1110,19 +1131,19 @@ def test_original_request_is_admitted_before_reserve_and_recovered_without_recap
         relationship_authority="local",
     )
     claim(recovered, workspace, task)
-    assert recovered.task_relationship(task.id)["request"] == original["request"]
+    assert relationship(recovered, task.id)["request"] == original["request"]
     assert control.admissions == [original["request"]] * 3
     assert [operation for operation, _ in owner.calls] == ["reserve", "bind"]
 
 
 @pytest.mark.parametrize("operation", ["reserve", "bind"])
-def test_request_bound_unknown_response_replays_same_request_and_retires(request_assignment, operation):
+def test_request_bound_unknown_response_replays_same_request_and_retires(request_assignment: RequestAssignment, operation: str) -> None:
     queue, owner, workspace, task, control = request_assignment
     owner.lose_reply = operation
     with pytest.raises(TaskError, match="unresolved"):
         claim(queue, workspace, task)
-    original = queue.task_relationship(task.id)["request"]
-    assert queue.task_relationship(task.id)["state"] == "pending"
+    original = relationship(queue, task.id)["request"]
+    assert relationship(queue, task.id)["state"] == "pending"
     claim(queue, workspace, task)
     queue.yield_task(task.id, workspace.worker_id)
     assert queue.reconcile_task_relationship(task.id)["state"] == "closed"
@@ -1130,12 +1151,12 @@ def test_request_bound_unknown_response_replays_same_request_and_retires(request
     assert len(owner.claims) == 1
 
 
-def test_request_bound_retirement_tombstones_absence_under_original_admission(request_assignment):
+def test_request_bound_retirement_tombstones_absence_under_original_admission(request_assignment: RequestAssignment) -> None:
     queue, owner, workspace, task, control = request_assignment
     control.refuse = True
     with pytest.raises(TaskError):
         claim(queue, workspace, task)
-    original = queue.task_relationship(task.id)["request"]
+    original = relationship(queue, task.id)["request"]
     queue.yield_task(task.id, workspace.worker_id)
     control.refuse = False
     assert queue.reconcile_task_relationship(task.id)["state"] == "closed"
@@ -1145,14 +1166,14 @@ def test_request_bound_retirement_tombstones_absence_under_original_admission(re
 
 
 def test_request_bound_submission_rejection_resubmission_keeps_same_native_and_relationship(
-    request_assignment, independent_readiness,
-):
+    request_assignment: RequestAssignment, independent_readiness: None,
+) -> None:
     queue, owner, workspace, task, control = request_assignment
     start_managed(queue, workspace, task, native="original-native")
-    original = queue.task_relationship(task.id)["request"]
+    original = relationship(queue, task.id)["request"]
     for _ in range(2):
         queue.complete(task.id, workspace.worker_id, result={"answer": "proposed"})
-        submitted = queue.get(task.id)
+        submitted = current_task(queue, task.id)
         assert submitted.status == Status.SUBMITTED
         assert queue.reconcile_task_relationship(task.id)["state"] == "bound"
         queue.reject_submission(
@@ -1160,10 +1181,10 @@ def test_request_bound_submission_rejection_resubmission_keeps_same_native_and_r
             expected_owner_session_id=submitted.owner_session_id,
             expected_completed_by=submitted.completed_by, expected_updated_at=submitted.updated_at,
         )
-        current = queue.get(task.id)
+        current = current_task(queue, task.id)
         assert current.status == Status.STARTED
         assert current.owner == workspace.worker_id and current.owner_session_id == "original-native"
-        assert queue.task_relationship(task.id)["request"] == original
+        assert relationship(queue, task.id)["request"] == original
         queue.take_steer(task.id, workspace.worker_id, all_pending=True)
     queue.complete(task.id, workspace.worker_id, result={"answer": "accepted"})
     queue.confirm(task.id)
@@ -1173,29 +1194,31 @@ def test_request_bound_submission_rejection_resubmission_keeps_same_native_and_r
     assert len(owner.claims) == 1
 
 
-def test_request_admission_does_not_replace_post_io_assignment_checks(request_assignment):
+def test_request_admission_does_not_replace_post_io_assignment_checks(request_assignment: RequestAssignment) -> None:
     queue, owner, workspace, task, control = request_assignment
 
-    def unassign(operation, result):
+    def unassign(operation: str, result: dict[str, Any]) -> None:
         if operation == "bind":
             queue.yield_task(task.id, workspace.worker_id)
 
     owner.before_reply = unassign
     with pytest.raises(TaskError, match="changed during"):
         claim(queue, workspace, task)
-    original = queue.task_relationship(task.id)["request"]
-    assert queue.get(task.id).status == Status.QUEUED
-    assert queue.task_relationship(task.id)["state"] == "pending"
+    original = relationship(queue, task.id)["request"]
+    assert current_task(queue, task.id).status == Status.QUEUED
+    assert relationship(queue, task.id)["state"] == "pending"
     owner.before_reply = None
     assert queue.reconcile_task_relationship(task.id)["state"] == "closed"
     assert all(request == original for request in control.admissions)
 
 
 @pytest.mark.parametrize("operation", ["bind", "close"])
-def test_bound_request_refuses_another_token_after_exact_inspection(request_assignment, operation):
+def test_bound_request_refuses_another_token_after_exact_inspection(request_assignment: RequestAssignment, operation: str) -> None:
     queue, owner, workspace, task, control = request_assignment
     claim(queue, workspace, task)
-    original = queue.task_relationship(task.id)["request"]
+    original = relationship(queue, task.id)["request"]
+    from agent_dispatch.assignment_relationship_owner import WorktreeRelationshipWriter
+    assert isinstance(queue._relationship_writer, WorktreeRelationshipWriter)
     writer = queue._relationship_writer.bind_request(original)
     writer(workspace, "inspect", {"request_id": original["request_id"], "allow_missing": True})
     before = len(owner.calls), len(control.admissions)
@@ -1205,4 +1228,4 @@ def test_bound_request_refuses_another_token_after_exact_inspection(request_assi
     with pytest.raises(TaskError, match="conflicts"):
         writer(workspace, operation, payload)
     assert (len(owner.calls), len(control.admissions)) == before
-    assert queue.task_relationship(task.id)["state"] == "bound"
+    assert relationship(queue, task.id)["state"] == "bound"

@@ -6,11 +6,11 @@ import copy
 import json
 import subprocess
 from collections.abc import Callable
-from dataclasses import asdict
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .assignment_relationship_owner import WorktreeRelationshipWriter
 from .assignment_workspace import AssignmentWorkspace, RelationshipWriter, same_assignment_worker
+from .ordinary_capture_proof import original_evidence
 from .ordinary_agent_facts import identity, sessionless
 from .ordinary_pool_startup import local_execution_machine
 from .ordinary_writer_admission import OrdinaryWriterAdmission
@@ -27,7 +27,7 @@ class LocalOrdinaryRelationshipWriter:
     def __init__(self, queue: TaskQueue) -> None:
         self.queue = queue
 
-    def _original(self, request: dict) -> tuple[AssignmentWorkspace, dict]:
+    def _original(self, request: dict[str, Any]) -> tuple[AssignmentWorkspace, dict[str, Any]]:
         if not isinstance(request, dict):
             raise TaskError("ordinary admission requires its original queue request")
         workspace = AssignmentWorkspace.from_dict(request.get("workspace"))
@@ -40,34 +40,19 @@ class LocalOrdinaryRelationshipWriter:
         ):
             raise TaskError("ordinary admission requires its original host-local reservation")
         self.queue._admit_original_relationship_request(request)
-        reservation = self.queue.get_reservation(request["reservation_key"])
-        if reservation is None:
-            raise TaskError("ordinary admission lost its original reservation")
-        original = asdict(reservation)
-        if (
-            reservation.driver != "ordinary-bridge"
-            or reservation.worktree_ownership != "created"
-            or reservation.allocation_reservation_key != reservation.key
-            or not reservation.creation_key
-            or not reservation.reserved_by
-            or reservation.inherited_worktree is not None
-            or not same_assignment_worker(
-                f"{reservation.execution_machine}/{reservation.worktree}",
-                workspace.worker_id,
-            )
-            or not same_assignment_worker(
-                f"{reservation.creating_host}/{reservation.worktree}",
-                workspace.worker_id,
-            )
+        with self.queue._connect() as conn:
+            conn.execute("BEGIN")
+            original = original_evidence(conn, request)
+        if not original["reserved_by"] or any(
+            not same_assignment_worker(f"{original[k]}/{workspace.worktree}", workspace.worker_id)
+            for k in ("execution_machine", "creating_host")
         ):
-            raise TaskError(
-                "ordinary admission cannot adopt a carried, foreign or unknown workspace"
-            )
-        OrdinaryWriterAdmission(reservation.worktree_writer_requirement, original)
+            raise TaskError("ordinary admission cannot adopt a carried, foreign or unknown workspace")
+        OrdinaryWriterAdmission(original["worktree_writer_requirement"], original)
         return workspace, original
 
     @staticmethod
-    def _record(workspace: AssignmentWorkspace, reservation: dict, record: dict) -> None:
+    def _record(workspace: AssignmentWorkspace, reservation: dict[str, Any], record: dict[str, Any]) -> None:
         admission = OrdinaryWriterAdmission(
             reservation["worktree_writer_requirement"], reservation
         )
@@ -128,7 +113,7 @@ class LocalOrdinaryRelationshipWriter:
             ):
                 raise TaskError("ordinary workspace has an unaccounted native participant")
 
-    def _writer(self, request: dict) -> WorktreeRelationshipWriter:
+    def _writer(self, request: dict[str, Any]) -> WorktreeRelationshipWriter:
         original = copy.deepcopy(request)
         workspace, _ = self._original(original)
         bridge_prefix = agent_bridge_launch_prefix()
@@ -144,12 +129,12 @@ class LocalOrdinaryRelationshipWriter:
             value = selected._run(arguments, prefix=bridge_prefix, owner="Bridge")
             return subprocess.CompletedProcess(arguments, 0, json.dumps(value), "")
 
-        def admit_request(observed: AssignmentWorkspace, _identity: dict, audited: dict) -> None:
+        def admit_request(observed: AssignmentWorkspace, _identity: dict[str, Any], audited: dict[str, Any]) -> None:
             if observed != workspace or audited != original:
                 raise TaskError("ordinary admission differs from its original queue request")
             self._original(audited)
 
-        def admit_workspace(observed: AssignmentWorkspace, _identity: dict) -> None:
+        def admit_workspace(observed: AssignmentWorkspace, _identity: dict[str, Any]) -> None:
             if observed != workspace or selected is None:
                 raise TaskError("ordinary workspace changed during admission")
             _, reservation = self._original(original)
@@ -165,7 +150,10 @@ class LocalOrdinaryRelationshipWriter:
             )
             if result.get("ok") is not True:
                 raise TaskError("ordinary workspace owner observation is unavailable")
-            self._record(workspace, reservation, result.get("worktree"))
+            record = result.get("worktree")
+            if not isinstance(record, dict):
+                raise TaskError("ordinary workspace owner record is unavailable")
+            self._record(workspace, reservation, record)
             admission = OrdinaryWriterAdmission(
                 reservation["worktree_writer_requirement"],
                 reservation,
@@ -184,17 +172,17 @@ class LocalOrdinaryRelationshipWriter:
 
     def bind_request(
         self,
-        request: dict,
+        request: dict[str, Any],
         *,
         authority_guard: Callable[[], None] | None = None,
     ) -> RelationshipWriter:
         return self._writer(request).bind_request(request, authority_guard=authority_guard)
 
-    def inspect_head(self, request: dict, expected_head: dict) -> dict:
+    def inspect_head(self, request: dict[str, Any], expected_head: dict[str, Any]) -> dict[str, Any]:
         return self._writer(request).inspect_head(request, expected_head)
 
-    def inspect_conclusion(self, request: dict, expected_conclusion: dict) -> dict:
+    def inspect_conclusion(self, request: dict[str, Any], expected_conclusion: dict[str, Any]) -> dict[str, Any]:
         return self._writer(request).inspect_conclusion(request, expected_conclusion)
 
-    def __call__(self, workspace: AssignmentWorkspace, operation: str, payload: dict) -> dict:
+    def __call__(self, workspace: AssignmentWorkspace, operation: str, payload: dict[str, Any]) -> dict[str, Any]:
         raise TaskError("ordinary admission requires the bound original queue request")

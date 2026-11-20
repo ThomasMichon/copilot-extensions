@@ -42,13 +42,13 @@ from collections.abc import Callable
 from dataclasses import replace
 from typing import Any
 
-from .queue_allocation_revisions import revision_disposed
+from .queue_allocation_revisions import next_revision
 from .queue_records import ExclusiveKeyBusyError, SpawnReservation, SpawnState, Status, TaskError
 from .queue_spawn_deferral import SpawnDeferralMixin
 from .queue_spawn_completion import SpawnCompletionMixin
 from .queue_spawn_release import SpawnReleaseMixin
 from .queue_spawn_workspace import SpawnWorkspaceMixin
-from .queue_pool_placement import PoolAssignment, PoolPlacement, pool_assignment
+from .queue_pool_placement import PoolAssignment, PoolPlacement, pool_assignment, record_pool_claim
 from .queue_pool_startup import PoolStartupMixin, advance_pool_startup
 from .queue_spawn_cooling import validate_cooling_publication
 from .queue_standing_schema import require_finite_execution_admission
@@ -264,22 +264,17 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                 (creation_prefix + "%",),
             ).fetchall()
             latest_allocation = allocation_rows[0] if allocation_rows else (rows[-1] if rows else None)
-            previous_revision = latest_allocation["allocation_revision"] if latest_allocation else 1
-            revision = previous_revision if allocation_revision is None else allocation_revision
-            if revision < previous_revision or (latest_allocation is None and revision != 1):
-                raise TaskError("allocation revision must retain the current revision or advance it explicitly")
-            new_allocation = revision != previous_revision
+            revision, new_allocation = next_revision(
+                conn, latest_allocation, allocation_rows or rows, requested=allocation_revision,
+                successor=task_id, pool_successor=pool_catalog_revision is not None,
+                creation_prefix=creation_prefix,
+            )
             if (
                 latest_allocation is not None and latest_allocation["creation_key"] is None
                 and latest_allocation["worktree"] is None
                 and latest_allocation["state"] not in SpawnState.ACTIVE and not new_allocation
             ):
                 raise TaskError("legacy allocation intent is unknown; preserve it for reconciliation")
-            if new_allocation and not revision_disposed([
-                row for row in (allocation_rows or rows)
-                if row["allocation_revision"] == previous_revision
-            ]):
-                raise TaskError("new allocation revision requires proven disposal of the previous workspace")
             creation_key = creation_prefix + str(revision)
             if task.exclusive_key is not None:
                 active = conn.execute(
@@ -610,8 +605,8 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                     (key, creation_key, carried_worktree, carried_path, key),
                 )
             if selected_pool is not None:
-                self._retain_pool_relationship_requirement(conn, task, key, driver)
-                from .queue_pool_placement import record_pool_claim
+                self._retain_pool_relationship_requirement(
+                    conn, task, key, driver, selected_pool.identity, allocation_reservation_key)
                 assert pool_catalog_revision is not None and reserved_by is not None
                 record_pool_claim(
                     conn, task, selected_pool, key, pool_catalog_revision, ts=ts,
