@@ -1,0 +1,9 @@
+{
+  "comment": "Compose explicit typed-point native application and sealed publication recovery",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}
