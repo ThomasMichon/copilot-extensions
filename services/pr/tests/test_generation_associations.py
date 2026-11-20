@@ -117,8 +117,10 @@ def test_selection_never_adopts_an_existing_baseline_or_weakens_terminal_refusal
     assert baseline.store().path.read_bytes() == original
     value["workspaces"]["terminal_reads"] = True
     path.write_text(json.dumps(value))
-    with pytest.raises(ValueError, match="baseline selection"):
-        load_config(path)
+    combined = load_config(path)
+    with pytest.raises(ValueError, match="existing retained volume"):
+        combined.provision()
+    assert main(["adopt-terminal", "--config", str(path)]) == 1
     assert baseline.store().path.read_bytes() == original
 
 

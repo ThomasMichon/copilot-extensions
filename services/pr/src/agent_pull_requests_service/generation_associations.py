@@ -18,3 +18,18 @@ def core() -> Any:
         return generation_associations
     except (ImportError, AttributeError, TypeError, ValueError, RuntimeError):
         raise ValueError("selected generation association core unsupported") from None
+
+
+def recorded_core() -> None:
+    """Combined selection requires the executing transition reader, not its writer alone."""
+    core()
+    try:
+        from agent_pull_requests.recorded_terminal_cache import contract
+        if contract() != {
+            "protocol": "agent-pull-requests.recorded-terminal-cache-adoption/v1",
+            "storage_extension": "recorded_terminal_cache_version:1",
+            "bindings": "recorded_workspace_epochs_only", "native_targets": False,
+        }:
+            raise ValueError("unsupported recorded cache declaration")
+    except (ImportError, AttributeError, TypeError, ValueError, RuntimeError):
+        raise ValueError("selected recorded terminal cache core unsupported") from None
