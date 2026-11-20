@@ -55,6 +55,34 @@ release gates, or count unexecuted native coverage as passing.
 
 ## Coordination
 
+The proposed finite #9348 historical-workflow, #12968 publication-identity
+and #13164 session-command fixture families enter Phase 4's tools/workflow
+and Worktrees waves. The distinct #12973 finished-daemon cleanup
+qualification enters Phase 5's owning-runner lane. Each has one primary
+placement through Phase 7 migration-intake and domain review, not a common
+cause or a new implementer. Preserve the primary maintainer and actual
+fixture, publication, receiving-ledger, release/controller, daemon-instance,
+native, runner, source and resource custodians, OPEN #1303, all incumbent
+checks/holds, unit-only required CI and hosted-Windows quiescence.
+
+Credit #12968's correction reported in the existing open #13297 contribution
+without calling it merged delivery or repeating its implementation. That
+contribution's Draft status, older-publisher exclusion and review hold remain;
+this intake neither enables its recovery path nor makes unrelated #13279
+recovery completion a fixture requirement. #9348 retains coordination with
+#3336/#6237 and its existing adjacent-file claimant. #13164 remains distinct
+from #13300's twelve-file packet and #12879's seed fixtures. #12973 retains
+the original daemon evidence and cleanup owner; a finished record or reused
+PID is not settlement or permission to kill an occupant or discard artifacts.
+
+Normal review must deliver every applicable P/V/G clause, continuing
+Coordination, dated Journal and intake route. Keep all four source trackers
+OPEN during proposal; permitted current whole receiving/source/custody
+readback and separate source-specific judgments follow actual complete
+reviewed delivery. All twenty new technical rows remain unchecked.
+No execution, cleanup, claim/resource transfer, generic ACK or unrelated
+whole-portfolio completion prerequisite is introduced.
+
 The proposed finite #12156/#12193/#12194 fixture families enter the existing
 Phase 4 Vault, tools/workflow and SSH/installer waves. The distinct #12235
 native-profile admission family enters Phase 5. All four use existing Phase 7
@@ -619,6 +647,86 @@ Agent-recommended Phase 3 Worktrees-pilot receiving through Phase 7.
   observable features per process launch.
 - [ ] Keep each plugin's contract map, inventory, and TESTING coverage summary
   current as its wave lands.
+
+#### Finite historical workflow-fixture contracts from #9348
+
+Agent-recommended Phase 4 tools/workflow receiving through Phase 7.
+
+- [ ] **P9348-1:** Replace current-CI-derived historical fixtures in
+  `tools/test_qualify_promotion_candidate.py` with explicit bounded historical
+  recipes. Retain the `promotion-gate`, `smoke` and release-state-file
+  preparation signatures and the original three-file selection with
+  `test_promotion_release_evidence.py` and `test_promotion_artifact_readiness.py`.
+  The reported 65 failures/90 passes are historical, not a current release failure.
+- [ ] **P9348-2:** Preserve qualification, producer, source, effect, timing and
+  publication controls while current unit-profile tests use their real current
+  declarations. Retain the existing adjacent `test_verify_promotion_workflows.py`
+  claimant and its separate 19-failure/51-pass migration. Credit #12981 only at
+  its verified scope; neither it nor #9349's evidence-size correction proves
+  the original 65-case family repaired. Coordinate with #3336/#6237.
+
+##### Local Validation for #9348
+
+- [ ] **V9348-1:** Through the existing bounded development-test path, exercise
+  all three original files and their intended historical qualification/refusal
+  assertions after fixture preparation. Preserve every control; do not skip
+  failures, restore obsolete required release gates or widen permissions.
+- [ ] **V9348-2:** Independently exercise current unit-profile declarations and
+  the adjacent workflow-verifier selection. Attribute each actual packet and
+  result separately, preserving original containment, budgets and source/release
+  custody rather than treating required unit CI as the historical packet's pass.
+
+#### Finite publication execution-identity fixtures from #12968
+
+Agent-recommended Phase 4 Worktrees-wave receiving through Phase 7.
+
+- [ ] **P12968-1:** Make both `TestCreatePRAutoOpen` fixtures explicitly model
+  distinct host/persisted-machine and execution identities. The exact cases are
+  `test_auto_open_records_pr_and_embeds_marker` and
+  `test_codename_mode_embeds_codename_and_encrypted_identity`; assert intended
+  `record.execution_machine` attribution, not the configured host or `record.machine`.
+- [ ] **P12968-2:** Preserve raw/codename privacy and the current #13297
+  contributor's already-proposed correction, source and publication holds.
+  Its reported prior hosted qualification is not merged delivery or a new
+  campaign execution. No new implementation owner or broader legacy-recovery
+  requirement is appointed to this finite fixture family.
+
+##### Local Validation for #12968
+
+- [ ] **V12968-1:** Qualify both unchanged named cases with a portable fixture
+  whose host and execution identity differ independently of the test machine.
+  Prove the intended raw and codename/encrypted attribution while retaining
+  existing privacy exclusions and original test budgets.
+- [ ] **V12968-2:** Retain the original 459-pass/two-skip/two-assertion-failure
+  observation as a deterministic failed qualification, not a flake or CI waiver.
+  Credit the existing contribution only at its actual source and delivery state;
+  a different foreign-binding matrix does not satisfy these two cases.
+
+#### Finite session-command receiving-ledger fixtures from #13164
+
+Agent-recommended Phase 4 Worktrees-wave receiving through Phase 7.
+
+- [ ] **P13164-1:** Align `test_register_session.py` and `test_bind_session.py`
+  fixture inputs with one canonical receiving layout: the shared
+  `monkeypatch_config` tracking directory, project directory, synthetic
+  authority configuration and literal record subjects must agree. Preserve
+  project, workspace and physical/execution identity distinctions.
+- [ ] **P13164-2:** Retain intentional stale-record, foreign-project and
+  optional-stamp negatives. Correct fixture setup rather than blanket-patching
+  the production authority fence, suppressing failures or increasing budgets.
+  The original 65 failures/151 passes and downstream missing registration are
+  failed broader command qualification, not a result of #13162's focused controls.
+
+##### Local Validation for #13164
+
+- [ ] **V13164-1:** Re-run the unchanged two-module command selection and
+  independent receiving-authority negative controls through their existing
+  contained runner, demonstrating intended handoff/event behavior and meaningful
+  stale-record/foreign-project/optional-stamp refusals.
+- [ ] **V13164-2:** Keep #13300's twelve-file/prune packet, #12879's
+  seed-delivery/native seed-exec family, hosted activation, native hold,
+  registration transaction and request-budget selections separate. A pass of
+  those controls or required unit CI does not qualify this command packet.
 
 #### Finite Windows Vault cleanup and native-cache fixtures from #12156
 
@@ -1437,6 +1545,35 @@ a different selection. Any changed controlled selection must be named as changed
 - [ ] Add contribution guidance requiring new test families to declare their
   contract, tier, effects, and expected budget impact.
 
+#### Finite finished-daemon cleanup qualification from #12973
+
+Agent-recommended Phase 5 owning-runner receiving through Phase 7.
+
+- [ ] **P12973-1:** Retain the original daemon record, exact process-birth
+  identities, supervisor/settlement witness and cleanup result through their
+  current owner. Preserve the Windows observation: two selected real-installer
+  monitor-drain tests passed, then `process-reused state=finished` held the
+  sandbox and the runner exited nonzero with unsettled cleanup.
+- [ ] **P12973-2:** Diagnose whether the fixture failed to settle its instance
+  OR cleanup mishandles a proven-dead original identity. Keep both possibilities
+  unresolved until evidence discriminates them; a merged #7715 reference,
+  finished record or reused PID is not original descendant/artifact settlement.
+  Preserve actual daemon-instance, fixture, topology and cleanup custodians.
+
+##### Local Validation for #12973
+
+- [ ] **V12973-1:** Use a bounded Windows fixture or the retained CI artifact
+  for the original selection
+  `real_installer_returns_before_resident_owned_monitor_drain and not absent and not stale`
+  in `tests/test_python_runtime_install.py`. Bind the original
+  2-pass/151-deselected/258.79-second assertion result separately from its
+  failed final cleanup gate and establish the actual ownership transition.
+- [ ] **V12973-2:** Preserve refusal for unknown identity, unrelated PID
+  occupants, unconfirmed descendants and changed artifacts. Qualify actual
+  safe settlement and cleanup under original bounds; do not treat every reused
+  PID as safe, skip cleanup, raise budgets or blindly rerun the workflow.
+  This plan authorizes no native run, process action or artifact deletion.
+
 #### Finite Windows-native no-skip roster admission from #12235
 
 Agent-recommended Phase 5 profile/runner receiving through Phase 7.
@@ -1579,6 +1716,15 @@ an assertion that the historical source defect remains current._
   effort Done, and archive it.
 
 ### Phase 7 — Reconcile deferred backlog
+
+The proposed P9348/V9348/G9348, P12968/V12968/G12968 and
+P13164/V13164/G13164 families each have one primary Phase 4 placement;
+P12973/V12973/G12973 has one Phase 5 placement. The append-only
+migration-intake ledger records deduplication and unchanged custodians.
+This same planning unit supplies complete domain Plan, local/global
+Validation, Coordination and dated Journal for review. Existing sources
+remain their trackers during proposal; no new tracker, administrative
+checkbox, implementation appointment or execution grant is added.
 
 The proposed P12156/V12156/G12156, P12193/V12193/G12193 and
 P12194/V12194/G12194 families each have one primary Phase 4 placement;
@@ -2916,6 +3062,27 @@ independent of #10031's large-caller startup/cutover lane.
 
 ## Validation Plan
 
+- [ ] **G9348:** Resolve every P9348/V9348 and continuing Coordination clause:
+  the complete historical three-file recipe family, current unit-profile
+  declarations and separate adjacent workflow-verifier migration. Preserve all
+  qualification/source/effect/timing/publication controls, #3336/#6237 and
+  actual claimants; no obsolete gate, skip or wider permission is introduced.
+- [ ] **G12968:** Resolve every P12968/V12968 and continuing Coordination
+  clause for both exact publication cases with distinct portable execution
+  identity and unchanged raw/codename privacy. Preserve the existing #13297
+  correction and Draft/older-publisher/review hold; documentary consolidation
+  neither merges that contribution nor enables its recovery path.
+- [ ] **G13164:** Resolve every P13164/V13164 and continuing Coordination
+  clause for the unchanged two-module command packet AND independent
+  authority negatives. Preserve canonical receiving subjects and meaningful
+  stale/foreign/optional-stamp controls; different fixture families, a patched
+  guard or required unit success do not satisfy this finite qualification.
+- [ ] **G12973:** Resolve every P12973/V12973 and continuing Coordination
+  clause using original daemon/process-birth/settlement/artifact evidence.
+  Distinguish passed assertions from actual settled cleanup and the fixture
+  failure OR proven-dead-identity cleanup cause. Preserve unknown/reused
+  identity safety, descendants, artifacts, custodians and original bounds.
+
 - [ ] **G12156:** Resolve every P12156/V12156 and continuing Coordination
   clause for BOTH original Windows fixture families: all four stamp/unlock
   controls and all four actual native-profile cache consumers, original
@@ -3321,6 +3488,23 @@ with another unbounded full-suite run. Portfolio reductions follow only after
 the inventory and evidence gates are available.
 
 ## Journal
+
+### 2026-11-20 UTC - Proposed finite fixture-authority and cleanup receiving
+
+Four complete source contracts propose three Phase 4 fixture placements and
+one distinct Phase 5 cleanup-qualification placement through existing Phase 7
+migration-intake and domain review. Complete P/V/G clauses, local and actual
+global Validation, continuing Coordination and the append-only intake retain
+all twenty new technical rows unchecked and all incumbent states/history.
+The [source and ownership crosswalk](../backlog-reconciliation/journal/2026/11.20-fixture-authority-and-cleanup-receiving.md)
+preserves the historical packets, exact case identities, current #13297
+contribution and hold, unknown cleanup cause and distinct neighboring families.
+Sources stay OPEN during proposal; actual reviewed complete delivery and
+permitted current whole receiving/source/custody readback precede four
+separate tracking judgments. OPEN #1303, unit-only required CI, hosted-Windows
+quiescence and actual source/fixture/native/release/resource owners remain.
+No implementation, test, native run, guard/deadline change, cleanup,
+ownership appointment or resource release follows from this proposal.
 
 ### 2026-11-20 UTC - Windows fixture and no-skip receiving accepted
 
