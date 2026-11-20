@@ -122,41 +122,41 @@ def embed_and_store_pairs(
     counts = current_counts()
     chunks = coalesce_chunks(chunks)
     total = 0
-    for i in range(0, len(chunks), stream_batch_size):
-        sub = chunks[i : i + stream_batch_size]
-        if bounded:
-            _require_current_input(multi_store, sub, point_scope=point_scope)
+    domain = multi_store._source_domain if point_scope is not None else None
+    with domain._write(
+        multi_store.content_store.db, point_scope=point_scope,
+    ) if domain is not None else nullcontext():
+        for i in range(0, len(chunks), stream_batch_size):
+            sub = chunks[i : i + stream_batch_size]
+            if bounded:
+                _require_current_input(multi_store, sub, point_scope=point_scope)
 
-        for model_id, client in multi_clients.items():
-            profile = model_profiles.get(model_id) if model_profiles else None
-            model_chunks = routed_model_chunks(sub, model_id, model_profiles)
-            if not model_chunks:
-                continue
+            for model_id, client in multi_clients.items():
+                profile = model_profiles.get(model_id) if model_profiles else None
+                model_chunks = routed_model_chunks(sub, model_id, model_profiles)
+                if not model_chunks:
+                    continue
 
-            model_counts = counts.model(model_id) if counts is not None else None
-            candidates = len(model_chunks)
-            if model_counts is not None:
-                model_counts.candidate_chunks += candidates
-            table = multi_store.get_vector_table(model_id) if coverage else None
-            if coverage and table is not None and profile is not None and not force:
-                if point_scope is not None:
-                    model_chunks = coverage.missing(
-                        table, model_chunks, profile, bounded=True,
-                        point_scope=point_scope, wal_aware=True,
-                    )
-                elif bounded:
-                    model_chunks = coverage.missing(table, model_chunks, profile, bounded=True)
-                else:
-                    model_chunks = coverage.missing(table, model_chunks, profile)
-            if model_counts is not None:
-                model_counts.reused_chunks += candidates - len(model_chunks)
-            if not model_chunks:
-                continue
-            model_texts = [c.content for c in model_chunks]
-            domain = multi_store._source_domain if point_scope is not None else None
-            with domain._write(
-                multi_store.content_store.db, point_scope=point_scope,
-            ) if domain is not None else nullcontext():
+                model_counts = counts.model(model_id) if counts is not None else None
+                candidates = len(model_chunks)
+                if model_counts is not None:
+                    model_counts.candidate_chunks += candidates
+                table = multi_store.get_vector_table(model_id) if coverage else None
+                if coverage and table is not None and profile is not None and not force:
+                    if point_scope is not None:
+                        model_chunks = coverage.missing(
+                            table, model_chunks, profile, bounded=True,
+                            point_scope=point_scope, wal_aware=True,
+                        )
+                    elif bounded:
+                        model_chunks = coverage.missing(table, model_chunks, profile, bounded=True)
+                    else:
+                        model_chunks = coverage.missing(table, model_chunks, profile)
+                if model_counts is not None:
+                    model_counts.reused_chunks += candidates - len(model_chunks)
+                if not model_chunks:
+                    continue
+                model_texts = [c.content for c in model_chunks]
                 try:
                     if before_embed and prepared_vectors is None:
                         before_embed()

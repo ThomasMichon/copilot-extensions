@@ -7052,8 +7052,8 @@
         "plugins/agent-pull-requests/src/agent_pull_requests/watch_writer.py": "b58bec59f0919efbe941ee56ed3989e88d3bb028ba990d7735edd7c916ab4379",
         "tools/promotion_unit_tests/test_watch_sealing.py": "6b6e195f25605d825cf6601c8d016eee27b904dd31e3fa09e7a77f1f2b74543f",
         "libs/update-driver/src/update_driver/boot.py": "53ee1e189836e7ce586474884bcd3d435a6440c588dcef07440fccb13e47937d",
-        "tools/promotion_unit_tests/test_point_embedding_contract.py": "2d58a074f96e90b4fcb70880608809efba32ba8a1fb5785c26d1c46e7c5c786f",
-        "plugins/agent-index/src/agent_index/indexing/embedding_batch.py": "d2f96816e905c3b3aa9f0e704e3a1e64f42885b9119eaf5d062ef17153dc394c",
+        "tools/promotion_unit_tests/test_point_embedding_contract.py": "274ff71961cd9592c8d93b97958f76984f01c03a83e7b471c6a8387c7fc35a93",
+        "plugins/agent-index/src/agent_index/indexing/embedding_batch.py": "b6906fcdb1bc3040c19ee277a6e6ff970e35e00265bd6b5dc6e069d74e2653c4",
         "plugins/agent-index/src/agent_index/indexing/embedding_coverage.py": "fd7bf89c185ccad5b3538a59b775d81c9705707d5d8ac5cc26d68c1ba68def53"
     }
 }

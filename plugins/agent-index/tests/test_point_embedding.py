@@ -276,6 +276,42 @@ def test_selected_prepared_pairs_publish_then_reuse_without_inference_counts(
     assert len(receipts(coverage)) == 2
 
 
+@pytest.mark.parametrize("failure", ["later-batch", "later-model-selection"])
+def test_selected_later_selection_failure_latches_earlier_effects_even_when_caught(
+    selected: tuple[IndexConfig, MultiModelStore, list[Chunk]], tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch, failure: str,
+) -> None:
+    config, store, chunks = selected
+    owner = domain(store)
+    coverage = EmbeddingCoverage(PathIndex(tmp_path / "paths.db"))
+    clients = {key: Client(profile.dim) for key, profile in config.model_profiles.items()}
+    items = [chunks[0], replace(chunks[1], content="not stored input")] if failure == "later-batch" else chunks[:1]
+    missing = coverage.missing
+
+    def select(table: VectorTable, *args: Any, **kwargs: Any) -> list[Chunk]:
+        if table.table_name == "vectors_second":
+            raise SourceLayoutError("later selection refused")
+        return missing(table, *args, **kwargs)
+
+    if failure == "later-model-selection":
+        monkeypatch.setattr(coverage, "missing", select)
+    with pytest.raises(SourceLayoutError, match="failed nested effect"):
+        with owner._write(store.content_store.db, point_scope=SCOPE):
+            with pytest.raises(SourceLayoutError, match="canonical embedding input|canonical provenance|later selection"):
+                embed_and_store_pairs(
+                    items, store, cast(Any, clients), config.model_profiles,
+                    coverage=coverage, bounded=True, point_scope=SCOPE,
+                    stream_batch_size=1, after_store=prepare,
+                )
+            assert len(receipts(coverage)) == (2 if failure == "later-batch" else 1)
+    assert clients["first"].calls == [[chunks[0].content]]
+    assert clients["second"].calls == ([[chunks[0].content]] if failure == "later-batch" else [])
+    assert owner.receipt()["state"] == "dirty"
+    with pytest.raises(SourceLayoutError, match="incomplete or changed"):
+        with owner.read(store.content_store.db, point_scope=SCOPE):
+            pass
+
+
 @pytest.mark.parametrize("obstruction", ["unprepared", "mismatch", "profile", "family", "stale"])
 def test_selected_coverage_requires_actual_prepared_current_vectors_before_sqlite(
     selected: tuple[IndexConfig, MultiModelStore, list[Chunk]], tmp_path: Path,

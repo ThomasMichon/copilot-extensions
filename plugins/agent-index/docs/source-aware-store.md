@@ -198,7 +198,10 @@ budgeted index preparation and stored-vector verification. Selected
 and canonical input through the native owner, and compares actual indexed
 vectors before opening its SQLite receipt writer. Failed or incomplete reads
 cannot publish coverage. A caught post-effect pair/preparation/publication
-failure latches the enclosing native writer uncertain; there is no implicit
+failure anywhere after an earlier effect, including later batch-input or
+model-selection checks, latches the enclosing native writer uncertain. The
+nested writer covers the complete pair invocation, not only individual writes;
+there is no implicit
 retry or recovery. A successful reopen can reuse qualified unchanged pairs
 without inference or native row writes.
 

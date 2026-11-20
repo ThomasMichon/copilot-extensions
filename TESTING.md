@@ -7651,6 +7651,8 @@ Native coverage publication checks prepared actual vectors before SQLite
 receipts; wrong/missing vectors and stale input refuse. Caught post-write
 preparation failure latches the outer writer dirty instead of publishing
 coverage. `test_embedding_pair_reuse.py` retains the default pair/batch controls.
+Caught stale input in a later batch and failed selection of a later model also
+latch earlier effects; the entire invocation shares the nested writer boundary.
 The actor-free controls in
 `tools/promotion_unit_tests/test_point_embedding_contract.py` substitute native
 and SQLite boundaries while executing scope forwarding, no-op selection,

@@ -104,12 +104,12 @@ def test_selected_pairs_forward_scope_and_prepare_before_coverage(
     )
     assert module.embed_and_store_pairs(items, store, {"a": SimpleNamespace(embed_texts=embed)}, {"a": model}, **kwargs) == 1
     assert events == [
-        "qualify", "current", "missing", "writer", "ready", "embed", "write",
+        "qualify", "writer", "current", "missing", "ready", "embed", "write",
         "invalidate", "prepare", "record", "end",
     ]
     events.clear()
     assert module.embed_and_store_pairs(items, store, {"a": object()}, {"a": model}, **kwargs) == 0
-    assert events == ["qualify", "current", "missing"]
+    assert events == ["qualify", "writer", "current", "missing", "end"]
 
 
 def test_selected_coverage_checks_stored_vectors_before_opening_receipt_writer(
