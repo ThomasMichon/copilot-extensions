@@ -24,14 +24,12 @@ from acp import (
     PROTOCOL_VERSION,
     Agent,
     RequestError,
-    start_tool_call,
-    update_agent_message_text,
-    update_agent_thought_text,
-    update_tool_call,
 )
 from acp.agent.connection import AgentSideConnection
 from acp.schema import (
     AgentCapabilities,
+    AgentMessageChunk,
+    AgentThoughtChunk,
     AllowedOutcome,
     AudioContentBlock,
     ClientCapabilities,
@@ -54,6 +52,8 @@ from acp.schema import (
     SessionListCapabilities,
     SessionResumeCapabilities,
     TextContentBlock,
+    ToolCallProgress,
+    ToolCallStart,
     ToolCallUpdate,
     UsageUpdate,
 )
@@ -121,22 +121,30 @@ def _event_to_acp_update(event: SseEvent) -> Any | None:
     if etype == "agent_message":
         text = data.get("text", "")
         if text:
-            return update_agent_message_text(text)
+            return AgentMessageChunk(
+                session_update="agent_message_chunk",
+                content=TextContentBlock(type="text", text=text),
+            )
 
     elif etype == "agent_thought":
         text = data.get("text", "")
         if text:
-            return update_agent_thought_text(text)
+            return AgentThoughtChunk(
+                session_update="agent_thought_chunk",
+                content=TextContentBlock(type="text", text=text),
+            )
 
     elif etype == "tool_call_start":
-        return start_tool_call(
+        return ToolCallStart(
+            session_update="tool_call",
             tool_call_id=data.get("tool_call_id", ""),
             title=data.get("title", ""),
             kind=data.get("kind"),
         )
 
     elif etype == "tool_call_update":
-        return update_tool_call(
+        return ToolCallProgress(
+            session_update="tool_call_update",
             tool_call_id=data.get("tool_call_id", ""),
             status=data.get("status"),
         )

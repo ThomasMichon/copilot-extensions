@@ -107,12 +107,19 @@ class TestEventToAcpUpdate:
         update = _event_to_acp_update(event)
         assert update is not None
         assert isinstance(update, AgentMessageChunk)
+        assert update.model_dump(mode="json", by_alias=True, exclude_none=True) == {
+            "sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "Hi"},
+        }
 
     def test_agent_thought(self):
         event = SseEvent(id=2, event="agent_thought", data={"text": "Thinking"})
         update = _event_to_acp_update(event)
         assert update is not None
         assert isinstance(update, AgentThoughtChunk)
+        assert update.model_dump(mode="json", by_alias=True, exclude_none=True) == {
+            "sessionUpdate": "agent_thought_chunk",
+            "content": {"type": "text", "text": "Thinking"},
+        }
 
     def test_tool_call_start(self):
         event = SseEvent(
@@ -124,6 +131,9 @@ class TestEventToAcpUpdate:
         assert isinstance(update, ToolCallStart)
         assert update.tool_call_id == "tc1"
         assert update.title == "Read file"
+        assert update.model_dump(mode="json", by_alias=True, exclude_none=True) == {
+            "sessionUpdate": "tool_call", "toolCallId": "tc1", "title": "Read file", "kind": "read",
+        }
 
     def test_tool_call_update(self):
         event = SseEvent(
@@ -133,6 +143,9 @@ class TestEventToAcpUpdate:
         update = _event_to_acp_update(event)
         assert update is not None
         assert isinstance(update, ToolCallProgress)
+        assert update.model_dump(mode="json", by_alias=True, exclude_none=True) == {
+            "sessionUpdate": "tool_call_update", "toolCallId": "tc1", "status": "completed",
+        }
 
     def test_usage_update(self):
         event = SseEvent(

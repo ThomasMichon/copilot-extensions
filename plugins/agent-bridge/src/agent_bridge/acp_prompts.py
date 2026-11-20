@@ -6,7 +6,7 @@ import asyncio
 import contextlib
 from typing import TYPE_CHECKING, Any
 
-from acp import text_block
+from acp.schema import TextContentBlock
 
 from .acp_continuation import idle_operation
 from .runtime_custody import RuntimeCustodyError
@@ -61,7 +61,7 @@ class AcpPromptMixin:
         """Race the prompt against host transport loss without replaying it."""
         prompt_fut = asyncio.ensure_future(
             native_attempt.send(self, text) if native_attempt is not None else self._prompt_rpc(
-                session_id=self._acp_session_id, prompt=[text_block(text)],
+                session_id=self._acp_session_id, prompt=[TextContentBlock(type="text", text=text)],
             )
         )
         lost_fut = asyncio.ensure_future(self._transport_lost_event.wait())
