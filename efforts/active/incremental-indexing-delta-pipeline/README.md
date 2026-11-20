@@ -155,8 +155,8 @@ After the reviewed proposal, the operator admitted execution:
   An explicit prepared-journal binding requalifies and retains that exact complete
   application candidate without replacing the pending parent. Explicit
   `PreparedApplication` consumption now requalifies that complete binding before
-  chunking/embedding and uses scoped native vector reads; point-domain native
-  publication and current-claim completion coverage remain open.
+  chunking/embedding and uses scoped native vector reads; ordinary point-domain
+  execution and current-claim completion coverage remain open.
   A [retained component carrier](../../../plugins/agent-index/docs/architecture.md#component-recovery-carrier-application-unsupported)
   preserves ordering inputs behind pre-application refusal, including changed
   replacement and premature-completion refusal. Pure content/version comparison
@@ -183,9 +183,10 @@ After the reviewed proposal, the operator admitted execution:
   have bounded refusal qualification; broader consumer composition remains
   open. Exact-scope cold content/model schema and component-ledger bootstrap,
   plus explicitly budgeted point-index preparation, typed-claim application
-  and its exact sealed publication suffix, are available. V2 execution,
-  automatic partial-effect/restore reconciliation
-  and whole-claim completion remain unimplemented.
+  and its exact sealed publication suffix, are available. A separate explicit
+  whole-claim completion composes current queue/pending/native/checkpoint owners
+  with requalifying lost-return retries; ordinary v2 execution and automatic
+  partial-effect/restore reconciliation remain unimplemented.
 - [ ] Persist acquisition progress so retry/restart does not restart a
   corpus-wide listing.
 - [ ] Move authoritative full enumeration into separately budgeted, resumable

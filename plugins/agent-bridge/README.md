@@ -8,6 +8,16 @@ hydrate missing Bridge metadata from the authoritative head; dormant raw sends
 require explicit resume. See
 [target discovery and hydration](docs/retained-acquisition-writer.md#target-inventory-and-metadata-only-lookup).
 
+For a known local PSMux instance, `targets --discover-mux SESSION INCARNATION --json`
+adds `sources.pinned_mux` to the listing. Supply the session and `$id:created`
+from the workspace owner, not a Bridge registration. Set `PSMUX_DATA_DIR` to
+that owner's absolute data directory and `COPILOT_DRIVER_PSMUX_NAMESPACE` to
+the matching namespace. The CLI probes its own runtime's Driver for
+`psmux-observe-pinned` before reading. An older or unavailable reader yields
+unavailable evidence, never an unpinned query. A match observes only the mux:
+the agent route stays unresolved and no target handle is added. This local
+option cannot be combined with `--refresh`; the daemon API is unchanged.
+
 Exact-session `status/inspect --json` provides
 [layered read-only inspection](docs/transport-diagnostics.md#exact-session-inspection)
 through the standalone Core without attaching another controller or adding a

@@ -335,7 +335,12 @@ def register_session_maintenance_commands(sub: argparse._SubParsersAction[Any]) 
         "targets", help="List registered sessions and every discovered workspace",
         allow_abbrev=False,
     )
-    targets_p.add_argument("--refresh", action="store_true", help="Refresh workspace discovery")
+    target_mode = targets_p.add_mutually_exclusive_group()
+    target_mode.add_argument("--refresh", action="store_true", help="Refresh workspace discovery")
+    target_mode.add_argument(
+        "--discover-mux", nargs=2, metavar=("SESSION", "INCARNATION"),
+        help="Observe an independent mux pin in the explicitly selected native scope",
+    )
     targets_p.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
     targets_p.set_defaults(func=targets_command)
 
